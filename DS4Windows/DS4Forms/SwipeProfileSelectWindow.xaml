@@ -1,0 +1,41 @@
+<Window x:Class="DS4WinWPF.DS4Forms.SwipeProfileSelectWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:DS4WinWPF.DS4Forms"
+        mc:Ignorable="d"
+        Title="Swipe Profile Selection" Height="400" Width="420"
+        Style="{DynamicResource WindowStyle}"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize">
+    <DockPanel Margin="12">
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+            <Button x:Name="selectAllBtn" Content="Select All" Width="80" Click="SelectAllBtn_Click" Margin="0,0,8,0" />
+            <Button x:Name="clearAllBtn" Content="Clear All" Width="80" Click="ClearAllBtn_Click" Margin="0,0,20,0" />
+            <Button x:Name="cancelBtn" Content="Cancel" Width="70" Click="CancelBtn_Click" Margin="0,0,8,0" />
+            <Button x:Name="confirmBtn" Content="OK" Width="70" Click="ConfirmBtn_Click" IsDefault="True" />
+        </StackPanel>
+
+        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+            <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource ForegroundColor}">
+                Check the profiles to include in the touchpad swipe cycle.
+                If none are checked, all profiles will be cycled.
+            </TextBlock>
+        </StackPanel>
+
+        <Border BorderBrush="{DynamicResource ListBoxBorderBrush}" BorderThickness="1">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <ItemsControl x:Name="profileItemsControl" Margin="4">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <CheckBox Content="{Binding Name}" IsChecked="{Binding IsSelected}"
+                                      Foreground="{DynamicResource ForegroundColor}"
+                                      Margin="2,3,2,3" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Border>
+    </DockPanel>
+</Window>

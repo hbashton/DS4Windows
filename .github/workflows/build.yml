@@ -1,0 +1,39 @@
+name: Build DS4Windows
+
+on:
+  push:
+    branches: [ "**" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore DS4Windows/DS4WinWPF.csproj
+
+      - name: Publish (self-contained, win-x64)
+        run: >
+          dotnet publish DS4Windows/DS4WinWPF.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -o publish/win-x64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DS4Windows-win-x64
+          path: publish/win-x64/
+          retention-days: 30

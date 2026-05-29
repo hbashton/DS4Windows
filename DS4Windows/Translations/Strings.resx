@@ -1,0 +1,1481 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!-- 
+    Microsoft ResX Schema 
+    
+    Version 2.0
+    
+    The primary goals of this format is to allow a simple XML format 
+    that is mostly human readable. The generation and parsing of the 
+    various data types are done through the TypeConverter classes 
+    associated with the data types.
+    
+    Example:
+    
+    ... ado.net/XML headers & schema ...
+    <resheader name="resmimetype">text/microsoft-resx</resheader>
+    <resheader name="version">2.0</resheader>
+    <resheader name="reader">System.Resources.ResXResourceReader, System.Windows.Forms, ...</resheader>
+    <resheader name="writer">System.Resources.ResXResourceWriter, System.Windows.Forms, ...</resheader>
+    <data name="Name1"><value>this is my long string</value><comment>this is a comment</comment></data>
+    <data name="Color1" type="System.Drawing.Color, System.Drawing">Blue</data>
+    <data name="Bitmap1" mimetype="application/x-microsoft.net.object.binary.base64">
+        <value>[base64 mime encoded serialized .NET Framework object]</value>
+    </data>
+    <data name="Icon1" type="System.Drawing.Icon, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">
+        <value>[base64 mime encoded string representing a byte array form of the .NET Framework object]</value>
+        <comment>This is a comment</comment>
+    </data>
+                
+    There are any number of "resheader" rows that contain simple 
+    name/value pairs.
+    
+    Each data row contains a name, and value. The row also contains a 
+    type or mimetype. Type corresponds to a .NET class that support 
+    text/value conversion through the TypeConverter architecture. 
+    Classes that don't support this are serialized and stored with the 
+    mimetype set.
+    
+    The mimetype is used for serialized objects, and tells the 
+    ResXResourceReader how to depersist the object. This is currently not 
+    extensible. For a given mimetype the value must be set accordingly:
+    
+    Note - application/x-microsoft.net.object.binary.base64 is the format 
+    that the ResXResourceWriter will generate, however the reader can 
+    read any of the formats listed below.
+    
+    mimetype: application/x-microsoft.net.object.binary.base64
+    value   : The object must be serialized with 
+            : System.Runtime.Serialization.Formatters.Binary.BinaryFormatter
+            : and then encoded with base64 encoding.
+    
+    mimetype: application/x-microsoft.net.object.soap.base64
+    value   : The object must be serialized with 
+            : System.Runtime.Serialization.Formatters.Soap.SoapFormatter
+            : and then encoded with base64 encoding.
+
+    mimetype: application/x-microsoft.net.object.bytearray.base64
+    value   : The object must be serialized into a byte array 
+            : using a System.ComponentModel.TypeConverter
+            : and then encoded with base64 encoding.
+    -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="Accel" xml:space="preserve">
+    <value>Accel</value>
+  </data>
+  <data name="Action" xml:space="preserve">
+    <value>Action</value>
+  </data>
+  <data name="AddDirectory" xml:space="preserve">
+    <value>Add Directory</value>
+  </data>
+  <data name="AddPrograms" xml:space="preserve">
+    <value>Add Programs</value>
+  </data>
+  <data name="AddStartMenuPrograms" xml:space="preserve">
+    <value>Add Start Menu Programs</value>
+  </data>
+  <data name="AddSteamGames" xml:space="preserve">
+    <value>Add Steam Games</value>
+  </data>
+  <data name="All" xml:space="preserve">
+    <value>All</value>
+  </data>
+  <data name="AutoProfiles" xml:space="preserve">
+    <value>Auto Profiles</value>
+  </data>
+  <data name="Battery" xml:space="preserve">
+    <value>Battery</value>
+  </data>
+  <data name="Browse" xml:space="preserve">
+    <value>Browse</value>
+  </data>
+  <data name="BrowseOtherPrograms" xml:space="preserve">
+    <value>Browse for Other Programs</value>
+  </data>
+  <data name="Cancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="CheckUpdateNow" xml:space="preserve">
+    <value>Check For Update Now</value>
+  </data>
+  <data name="CheckUpdateStartup" xml:space="preserve">
+    <value>Check for updates at DS4Windows startup</value>
+  </data>
+  <data name="Clear" xml:space="preserve">
+    <value>Clear</value>
+  </data>
+  <data name="CloseMinimizes" xml:space="preserve">
+    <value>Close Minimizes</value>
+  </data>
+  <data name="Color" xml:space="preserve">
+    <value>Color</value>
+  </data>
+  <data name="Controller1Text" xml:space="preserve">
+    <value>Controller 1</value>
+  </data>
+  <data name="Controller2Text" xml:space="preserve">
+    <value>Controller 2</value>
+  </data>
+  <data name="Controller3Text" xml:space="preserve">
+    <value>Controller 3</value>
+  </data>
+  <data name="Controller4Text" xml:space="preserve">
+    <value>Controller 4</value>
+  </data>
+  <data name="Controllers" xml:space="preserve">
+    <value>Controllers</value>
+  </data>
+  <data name="ControlPanel" xml:space="preserve">
+    <value>Control Panel</value>
+  </data>
+  <data name="Delete" xml:space="preserve">
+    <value>Delete</value>
+  </data>
+  <data name="DriverSetup" xml:space="preserve">
+    <value>Controller/Driver Setup</value>
+  </data>
+  <data name="Duplicate" xml:space="preserve">
+    <value>Duplicate</value>
+  </data>
+  <data name="Edit" xml:space="preserve">
+    <value>Edit</value>
+  </data>
+  <data name="EditAction" xml:space="preserve">
+    <value>Edit Action</value>
+  </data>
+  <data name="Export" xml:space="preserve">
+    <value>Export</value>
+  </data>
+  <data name="Full" xml:space="preserve">
+    <value>Full</value>
+  </data>
+  <data name="Gyro" xml:space="preserve">
+    <value>Gyro</value>
+  </data>
+  <data name="HideUnchecked" xml:space="preserve">
+    <value>Hide Unchecked</value>
+  </data>
+  <data name="Import" xml:space="preserve">
+    <value>Import</value>
+  </data>
+  <data name="LeftStick" xml:space="preserve">
+    <value>Left Stick</value>
+  </data>
+  <data name="Log" xml:space="preserve">
+    <value>Log</value>
+  </data>
+  <data name="Name" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="New" xml:space="preserve">
+    <value>New</value>
+  </data>
+  <data name="NewAction" xml:space="preserve">
+    <value>New Action</value>
+  </data>
+  <data name="NewProfile" xml:space="preserve">
+    <value>New Profile</value>
+  </data>
+  <data name="None" xml:space="preserve">
+    <value>None</value>
+  </data>
+  <data name="Path" xml:space="preserve">
+    <value>Path</value>
+  </data>
+  <data name="Profile" xml:space="preserve">
+    <value>Profile</value>
+  </data>
+  <data name="ProfileFolder" xml:space="preserve">
+    <value>Profile Folder</value>
+  </data>
+  <data name="QuickCharge" xml:space="preserve">
+    <value>Quick Charge</value>
+  </data>
+  <data name="RecordText" xml:space="preserve">
+    <value>Record</value>
+  </data>
+  <data name="Remove" xml:space="preserve">
+    <value>Remove</value>
+  </data>
+  <data name="RemoveAction" xml:space="preserve">
+    <value>Remove Action</value>
+  </data>
+  <data name="RightStick" xml:space="preserve">
+    <value>Right Stick</value>
+  </data>
+  <data name="Rumble" xml:space="preserve">
+    <value>Rumble</value>
+  </data>
+  <data name="RunAtStartup" xml:space="preserve">
+    <value>Run At Startup</value>
+  </data>
+  <data name="Save" xml:space="preserve">
+    <value>Save</value>
+  </data>
+  <data name="SaveProfile" xml:space="preserve">
+    <value>Save</value>
+  </data>
+  <data name="Settings" xml:space="preserve">
+    <value>Settings</value>
+  </data>
+  <data name="ShowNotifications" xml:space="preserve">
+    <value>Show Notifications</value>
+  </data>
+  <data name="StartMinimized" xml:space="preserve">
+    <value>Start Minimized</value>
+  </data>
+  <data name="StartText" xml:space="preserve">
+    <value>Start</value>
+  </data>
+  <data name="Status" xml:space="preserve">
+    <value>Status</value>
+  </data>
+  <data name="StopText" xml:space="preserve">
+    <value>Stop</value>
+  </data>
+  <data name="TouchScroll" xml:space="preserve">
+    <value>Scroll</value>
+  </data>
+  <data name="TouchSlide" xml:space="preserve">
+    <value>Slide</value>
+  </data>
+  <data name="TouchTap" xml:space="preserve">
+    <value>Tap</value>
+  </data>
+  <data name="Trigger" xml:space="preserve">
+    <value>Trigger</value>
+  </data>
+  <data name="WarningsOnly" xml:space="preserve">
+    <value>Warnings only</value>
+  </data>
+  <data name="RumbleMaxSecs" xml:space="preserve">
+    <value>sec</value>
+  </data>
+  <data name="RumbleMaxSecsTip" xml:space="preserve">
+    <value>Auto stop rumble in secs (0=auto stop disabled)</value>
+  </data>
+  <data name="WindowTitle" xml:space="preserve">
+    <value>Window Title</value>
+  </data>
+  <data name="MoveUp" xml:space="preserve">
+    <value>Move Up</value>
+  </data>
+  <data name="MoveDown" xml:space="preserve">
+    <value>Move Down</value>
+  </data>
+  <data name="AutoProfPathTip" xml:space="preserve">
+    <value>Process path. ^ABC = Match at the beginning of string (^) | ABC$ = Match at the end of string ($) | *ABC =Contains a string (*)</value>
+  </data>
+  <data name="AutoProfTitleTip" xml:space="preserve">
+    <value>Window title. ^ABC = Match at the beginning of string (^) | ABC$ = Match at the end of string ($) | *ABC =Contains a string (*)</value>
+  </data>
+  <data name="GamepadTest" xml:space="preserve">
+    <value>Gamepad Test</value>
+  </data>
+  <data name="EnableOutputDataToDS4" xml:space="preserve">
+    <value>Enable Output data to DS4</value>
+  </data>
+  <data name="EnableOutputDataToDS4Tip" xml:space="preserve">
+    <value>Output lightbar and rumble data periodically to DS4 gamepad. Untick if the gamepad doesn't support data receiving.
+Changes to this option takes effect at the gamepad connection time.</value>
+    <comment>To enter a line break into a string resource value in VisualStudio resource editor press Shift+Enter.</comment>
+  </data>
+  <data name="Apply" xml:space="preserve">
+    <value>Apply</value>
+  </data>
+  <data name="HidNinja" xml:space="preserve">
+    <value>HidNinja</value>
+  </data>
+  <data name="CustomExeName" xml:space="preserve">
+    <value>Custom Exe Name</value>
+  </data>
+  <data name="CustomExeNameInfo" xml:space="preserve">
+    <value>Some games implement a block that causes DS4 input to be ignored if a game detects either DS4Windows.exe or InputMapper.exe running at the time. A workaround to the block is to rename DS4Windows.exe so the check in the game fails. Specifying a custom exe name here allows DS4Updater to automatically update a custom copy of DS4Windows to the desired file name. Make sure to omit the extension.
+
+Example: whyme_DS4Windows</value>
+  </data>
+  <data name="XInputChecker" xml:space="preserve">
+    <value>XInputChecker</value>
+  </data>
+  <data name="Controller5Text" xml:space="preserve">
+    <value>Controller 5</value>
+  </data>
+  <data name="Controller6Text" xml:space="preserve">
+    <value>Controller 6</value>
+  </data>
+  <data name="Controller7Text" xml:space="preserve">
+    <value>Controller 7</value>
+  </data>
+  <data name="Controller8Text" xml:space="preserve">
+    <value>Controller 8</value>
+  </data>
+  <data name="GamepadGyroCameraDescription" xml:space="preserve">
+    <value>Maps the controller output to a standard XInput gamepad or DS4 pad. Gyro is mapped to a Mouse-like Joystick.</value>
+  </data>
+  <data name="GamepadGyroCameraName" xml:space="preserve">
+    <value>Gamepad with Mouse-like Joystick</value>
+  </data>
+  <data name="GamepadPresetDescription" xml:space="preserve">
+    <value>Maps the controller output to a standard gamepad</value>
+  </data>
+  <data name="GamepadPresetName" xml:space="preserve">
+    <value>Gamepad</value>
+  </data>
+  <data name="KBMGyroMouseDescription" xml:space="preserve">
+    <value>Maps the controller output to virtual KB+M controls. Useful for playing FPS games with no gamepad support. Gyro is mapped to a virtual Mouse.</value>
+  </data>
+  <data name="KBMGyroMouseName" xml:space="preserve">
+    <value>KB+M Controls with Gyro Mouse</value>
+  </data>
+  <data name="KBMPresetDescription" xml:space="preserve">
+    <value>Maps the controller output to virtual KB+M controls. Useful for playing FPS games with no gamepad support.</value>
+  </data>
+  <data name="KBMPresetName" xml:space="preserve">
+    <value>KB+M Controls</value>
+  </data>
+  <data name="MixedGyroMousePresetDescription" xml:space="preserve">
+    <value>Maps the buttons and axes to a standard gamepad. Maps the Gyro to a virtual mouse</value>
+  </data>
+  <data name="MixedGyroMousePresetName" xml:space="preserve">
+    <value>Gamepad with Gyro Mouse</value>
+  </data>
+  <data name="MixedPresetDescription" xml:space="preserve">
+    <value>Maps the controller output to mixed XInput gamepad + RS mouse.</value>
+  </data>
+  <data name="MixedPresetName" xml:space="preserve">
+    <value>Gamepad with High Precision Camera</value>
+  </data>
+  <data name="Description" xml:space="preserve">
+    <value>Description</value>
+  </data>
+  <data name="PresetIntroText" xml:space="preserve">
+    <value>Do you want to use a preset option? Choosing No will cause the Profile Editor to use an empty Gamepad profile.</value>
+  </data>
+  <data name="Presets" xml:space="preserve">
+    <value>Presets</value>
+  </data>
+  <data name="Changelog" xml:space="preserve">
+    <value>Changelog</value>
+  </data>
+  <data name="Close" xml:space="preserve">
+    <value>Close</value>
+  </data>
+  <data name="Profiles" xml:space="preserve">
+    <value>Profiles</value>
+  </data>
+  <data name="NoControllersConnected" xml:space="preserve">
+    <value>No Controllers Connected (Max {0})</value>
+  </data>
+  <data name="FlickThreshold" xml:space="preserve">
+    <value>Flick Threshold</value>
+  </data>
+  <data name="FlickTime" xml:space="preserve">
+    <value>Flick Time</value>
+  </data>
+  <data name="MinAngleThreshold" xml:space="preserve">
+    <value>Min Angle Threshold</value>
+  </data>
+  <data name="RealWorldCalibration" xml:space="preserve">
+    <value>Real World Calibration</value>
+  </data>
+  <data name="ViGEmPluginFailure" xml:space="preserve">
+    <value>ViGEm Device Plugin Failed. Error Code {0}. Likely an internal ViGEmBus problem. Closing connection. If the issue persists, please close DS4Windows and then reboot Windows.</value>
+  </data>
+  <data name="CRC32Fail" xml:space="preserve">
+    <value>Data integrity checks failed for wireless device. Closing device.</value>
+  </data>
+  <data name="FutureNetNotInstalled" xml:space="preserve">
+    <value>.NET 5 Runtime was not detected on your system. Please download and install .NET 5 Runtime to ensure compatibility with future DS4Windows builds. You will be redirected to the .NET 5 Runtime download page upon closing this window.</value>
+  </data>
+  <data name="UpgradeNetCaption" xml:space="preserve">
+    <value>Please update .NET Runtime</value>
+  </data>
+  <data name="HidHide" xml:space="preserve">
+    <value>HidHide</value>
+  </data>
+  <data name="HidHideConfigClient" xml:space="preserve">
+    <value>HidHide Configuration Client</value>
+  </data>
+  <data name="ExclusiveAccess" xml:space="preserve">
+    <value>Exclusive Access</value>
+  </data>
+  <data name="HidGuardianAccess" xml:space="preserve">
+    <value>HidGuardian Access</value>
+  </data>
+  <data name="HidHideAccess" xml:space="preserve">
+    <value>HidHide Access</value>
+  </data>
+  <data name="SharedAccess" xml:space="preserve">
+    <value>Shared Access</value>
+  </data>
+  <data name="RenameProfile" xml:space="preserve">
+    <value>Rename</value>
+  </data>
+  <data name="DisableVirtualController" xml:space="preserve">
+    <value>Disable virtual controller</value>
+  </data>
+  <data name="DisableVirtualControllerTip" xml:space="preserve">
+    <value>Do not spawn/associate virtual controllers for connected controllers using this profile (Applies on profile save)</value>
+  </data>
+  <data name="EmulatedController" xml:space="preserve">
+    <value>Emulated Controller</value>
+  </data>
+  <data name="OutContNotice" xml:space="preserve">
+    <value>Choose the type of output virtual controller (Applies on profile save)</value>
+  </data>
+  <data name="VirtualControllerSettings" xml:space="preserve">
+    <value>Virtual Controller Settings</value>
+  </data>
+  <data name="ChangeOnNewDeviceConn" xml:space="preserve">
+    <value>Changes take effect on new device connection</value>
+  </data>
+  <data name="StickFuzzTooltip" xml:space="preserve">
+    <value>Fuzz specifies the minimum number of units the analog stick moves, in active zone, before the output is registered as changed in the mapper. This setting can be useful for worn sticks that cannot maintain a constant position. The value is expressed in raw stick units.</value>
+  </data>
+  <data name="StickMaxOutputForceTooltip" xml:space="preserve">
+    <value>Always enforce max output setting. Useful for 100% Max Output and confining value to a circular output value</value>
+  </data>
+  <data name="StickMaxOutputTooltip" xml:space="preserve">
+    <value>In some situations, it might be useful to limit the maximum value that is output by the output analog stick. Max Output allows throttling the final output value of the analog stick.</value>
+  </data>
+  <data name="AntiDeadzoneTooltip" xml:space="preserve">
+    <value>An anti-deadzone acts as an offset for use with an axis to denote the minimum output value generated after an axis has left its assigned deadzone. This is mainly meant to help with mapping an axis to the assigned deadzone value used for an axis in a video game. For example, the typical assigned deadzone for XInput LS in a video game is around 8000 (25%). With no anti-deadzone assigned, an axis would have to move past the assigned deadzone in DS4Windows along with the game's assigned axis deadzone.</value>
+  </data>
+  <data name="StickInputCurveTooltip" xml:space="preserve">
+    <value>OLD OBSOLETE SETTING. Attempt to apply a curve based on raw input coordinates before any dead zone info is applied. Wonky</value>
+  </data>
+  <data name="TouchpadMinThresholdTooltip" xml:space="preserve">
+    <value>Minimum calculated output travel before a Mouse event is sent to the system</value>
+  </data>
+  <data name="TouchpadRotationTooltip" xml:space="preserve">
+    <value>Adjusts a touchpad swipe by a given rotation angle. Useful when a normal touchpad swipe is not a straight line across. Values allows range from -180 to 180. Default is 0.</value>
+  </data>
+  <data name="TouchpadSlideTooltip" xml:space="preserve">
+    <value>Sensitivity used to engage a multi-touch Mouse Wheel Scroll action</value>
+  </data>
+  <data name="TouchpadTapTooltip" xml:space="preserve">
+    <value>Activate Mouse Left click with a Touchpad Tap. Max time interval is set at (value * 2) ms.</value>
+  </data>
+  <data name="TouchpadTrackballEnableTooltip" xml:space="preserve">
+    <value>Adds momentum to a Touchpad swipe once a finger is lifted. Adds extra Mouse cursor travel than would be possible with the confined space on the Touchpad</value>
+  </data>
+  <data name="TouchpadTrackballFrictionTooltip" xml:space="preserve">
+    <value>Add friction to virtual Trackball. Decreased friction will increase final mouse cursor travel time</value>
+  </data>
+  <data name="StickOuterBindDeadTooltip" xml:space="preserve">
+    <value>Threshold for when an action will fire</value>
+  </data>
+  <data name="StickOuterBindInvertTooltip" xml:space="preserve">
+    <value>Have outer bind fire before reaching a threshold. Action releases once the threshold has been exceeded</value>
+  </data>
+  <data name="StickOuterBindTooltip" xml:space="preserve">
+    <value>Action to execute when stick travel reaches past a treshold. Useful for mapping keys for Walk or Sprint actions. Invert casues the action to fire up until the threshold</value>
+  </data>
+  <data name="SASteeringWheelFuzzTooltip" xml:space="preserve">
+    <value>Fuzz specifies the minimum number of device units, in active zone, that the Accel has to be rotated before the output is registered as changed in the mapper. The value is expressed in raw Accel units.</value>
+  </data>
+  <data name="StickRotationTooltip" xml:space="preserve">
+    <value>+ = Clockwise. - = Counter-clockwise.
+
+The rotation setting is meant to help correct the orientation of an analog stick if your thumb is slightly shifted when moving an analog stick. For example, your thumb might be slightly shifted from center when the analog stick is moved fully north. My thumbs shift slightly to the right when moving an analog stick fully north due to the way my hands grip the DS4. The value used denotes the number of degrees used to adjust the final axis output value. Values allows range from -180 to 180. Default is 0.</value>
+  </data>
+  <data name="TouchpadJitterCompTooltip" xml:space="preserve">
+    <value>Throttle low end of Touchpad movement. Reduces accidental mouse cursor movement when holding a mostly fixed position on the Touchpad</value>
+  </data>
+  <data name="DS4BTPollRate" xml:space="preserve">
+    <value>DS4 BT Poll Rate</value>
+  </data>
+  <data name="DS4LightbarPassthruDisabled" xml:space="preserve">
+    <value>Feature currently disabled in app due to driver issues. Hopefully issues get fixed in a future update.</value>
+  </data>
+  <data name="DualSRumbleForceGenericRescale" xml:space="preserve">
+    <value>Force usage of both % strength levels (General and DualSense specifc)</value>
+  </data>
+  <data name="DualSRumbleModeDisabled" xml:space="preserve">
+    <value>Disabled</value>
+  </data>
+  <data name="DualSRumbleModeAccurate" xml:space="preserve">
+    <value>Accurate</value>
+  </data>
+  <data name="DualSRumbleModeLegacy" xml:space="preserve">
+    <value>Legacy</value>
+  </data>
+  <data name="DualSRumbleModeNPowerLevelTxt" xml:space="preserve">
+    <value>Rumble mode and strength level:</value>
+  </data>
+  <data name="DualSRumbleModePassthru" xml:space="preserve">
+    <value>Passthru</value>
+  </data>
+  <data name="DualSRumbleSpecificSettings" xml:space="preserve">
+    <value>DualSense specific rumble settings</value>
+  </data>
+  <data name="DualSRumbleForceGenericRescale_Tip" xml:space="preserve">
+    <value>Recommended to be left DISABLED.
+
+- Disabled: rumble will be rescaled natively by the controller accordingly to the defined power level (better quality)
+
+- Enabled: both DS4Windows generic rumble rescale and DualSense's native control will be active</value>
+  </data>
+  <data name="DualSRumbleModes_Tip" xml:space="preserve">
+    <value>Accurate Mode (recommended):
+- Better replicates the DualShock 4/Xbox 360 controller rumble feeling
+- More accurately executes game's intended rumble effects
+- Rumble has more depth. Within the same power level there is a greater difference between min and max in-game rumble activation,
+varying from real low up to the max strength of the defined power level
+
+Legacy Mode:
+- Overral stronger, but lacks depth
+- Has a "sharper" feeling
+- The min and max activation in-game will be, respectively, only slightly below and slight above the chosen power level strength
+
+Disabled:
+- Fully disables rumble</value>
+  </data>
+  <data name="DualSRumblePowerLevel_Tip" xml:space="preserve">
+    <value>DualSense's native rumble Power Level rescaler.
+
+- When in Accurate Mode, rumble's [ min // max ] will be [ 1% /// Chosen Power Level ]
+    - Example (62%): [ min = 1% /// max = 62% ]
+
+- When in Legacy Mode, rumble's [min /// max ] will be roughly [ Power Level - 12% /// Power Level + 12% ]
+    - Example (62%): [ min = 50% /// max = 74% ]</value>
+  </data>
+  <data name="Accept" xml:space="preserve">
+    <value>Accept</value>
+  </data>
+  <data name="Black" xml:space="preserve">
+    <value>Black</value>
+  </data>
+  <data name="Colored" xml:space="preserve">
+    <value>Colored</value>
+  </data>
+  <data name="Default" xml:space="preserve">
+    <value>Default</value>
+  </data>
+  <data name="DeviceType" xml:space="preserve">
+    <value>Device type</value>
+  </data>
+  <data name="DisconnectFromBtWhenStopping" xml:space="preserve">
+    <value>Disconnect from BT when Stopping</value>
+  </data>
+  <data name="Dynamic" xml:space="preserve">
+    <value>Dynamic</value>
+  </data>
+  <data name="FlashLightbarAtHighLatency" xml:space="preserve">
+    <value>Flash Lightbar at High Latency</value>
+  </data>
+  <data name="HideDS4Controller" xml:space="preserve">
+    <value>Hide DS4 Controller</value>
+  </data>
+  <data name="HotkeysAbout" xml:space="preserve">
+    <value>Hotkeys/About</value>
+  </data>
+  <data name="IconChoice" xml:space="preserve">
+    <value>Icon Choice</value>
+  </data>
+  <data name="MinimizeToTaskbar" xml:space="preserve">
+    <value>Minimize to Taskbar</value>
+  </data>
+  <data name="MinimizeToTaskbarTip" xml:space="preserve">
+    <value>Minimize to Taskbar instead of System Tray</value>
+  </data>
+  <data name="OutputSlots" xml:space="preserve">
+    <value>Output Slots</value>
+  </data>
+  <data name="Permanent" xml:space="preserve">
+    <value>Permanent</value>
+  </data>
+  <data name="Plug" xml:space="preserve">
+    <value>Plug</value>
+  </data>
+  <data name="RevertToDefaultProfileOnUnknown" xml:space="preserve">
+    <value>Revert to default profile on unknown</value>
+  </data>
+  <data name="ShowAutoProfileDebugMessages" xml:space="preserve">
+    <value>Show auto-profile debug messages</value>
+  </data>
+  <data name="SwipeTouchpadToSwitchProfiles" xml:space="preserve">
+    <value>Swipe Touchpad To Switch Profiles</value>
+  </data>
+  <data name="TurnOffDS4WindowsTemporarily" xml:space="preserve">
+    <value>Turn Off DS4Windows Temporarily</value>
+  </data>
+  <data name="Unplug" xml:space="preserve">
+    <value>Unplug</value>
+  </data>
+  <data name="White" xml:space="preserve">
+    <value>White</value>
+  </data>
+  <data name="AppTheme" xml:space="preserve">
+    <value>App Theme</value>
+  </data>
+  <data name="CheckEvery" xml:space="preserve">
+    <value>Check every</value>
+  </data>
+  <data name="OscServerHeading" xml:space="preserve">
+    <value>External OSC Control &amp; Monitoring</value>
+  </data>
+  <data name="EnableOscServer" xml:space="preserve">
+    <value>Enable Control Server</value>
+  </data>
+  <data name="EnableInterpretingOscMonitoring" xml:space="preserve">
+    <value>Interpret Monitoring Messages</value>
+  </data>
+  <data name="EnableOscSender" xml:space="preserve">
+    <value>Enable Monitoring Service</value>
+  </data>
+  <data name="ControllerSupportDS4" xml:space="preserve">
+    <value>DS4 Controller Support</value>
+  </data>
+  <data name="ControllerSupportDualSense" xml:space="preserve">
+    <value>DualSense Controller Support</value>
+  </data>
+  <data name="ControllerSupportJoyCon" xml:space="preserve">
+    <value>JoyCon Controller Support</value>
+  </data>
+  <data name="ControllerSupportSwitchPro" xml:space="preserve">
+    <value>Switch Pro Controller Support</value>
+  </data>
+  <data name="Copycat" xml:space="preserve">
+    <value>Copycat</value>
+  </data>
+  <data name="CopycatTip" xml:space="preserve">
+    <value>Change some flags used for a non-Sony DS4 controller. It might fix rumble and lightbar support for some third party DS4 clones</value>
+  </data>
+  <data name="Dark" xml:space="preserve">
+    <value>Dark</value>
+  </data>
+  <data name="Days" xml:space="preserve">
+    <value>Days</value>
+  </data>
+  <data name="DetectedControllers" xml:space="preserve">
+    <value>Detected Controllers</value>
+  </data>
+  <data name="DeviceOptions" xml:space="preserve">
+    <value>Device Options</value>
+  </data>
+  <data name="EnableVerboseLog" xml:space="preserve">
+    <value>Enable verbose log</value>
+  </data>
+  <data name="EnableVerboseLogTip" xml:space="preserve">
+    <value>Show additional log messages when a gamepad is connected</value>
+  </data>
+  <data name="Hours" xml:space="preserve">
+    <value>Hours</value>
+  </data>
+  <data name="UseCustomSteamFolder" xml:space="preserve">
+    <value>Use custom Steam Folder</value>
+  </data>
+  <data name="Utils" xml:space="preserve">
+    <value>Utils</value>
+  </data>
+  <data name="Program" xml:space="preserve">
+    <value>Program</value>
+  </data>
+  <data name="RunAs" xml:space="preserve">
+    <value>Run As</value>
+  </data>
+  <data name="Task" xml:space="preserve">
+    <value>Task</value>
+  </data>
+  <data name="GyroTriggerJitterCompensationTooltip" xml:space="preserve">
+    <value>Add additional throttling at low end of curve to account for device shaking</value>
+  </data>
+  <data name="WakeupFromSuspend" xml:space="preserve">
+    <value>Waking Up From Suspend</value>
+  </data>
+  <data name="ControllerSupportDS3" xml:space="preserve">
+    <value>DS3 Controller Support</value>
+  </data>
+  <data name="FirstLaunch.DeviceIntroText" xml:space="preserve">
+    <value>Due to other mappers enabling support for multiple device types by default (Steam Input), DS4Windows only enables support for reading from DS4 controllers by default. You can specify mapper support for other supported device types here. Be careful when using DS4Windows with other possible mappers running at the same time.</value>
+  </data>
+  <data name="FirstLaunch.DS3EnableCkbLabel" xml:space="preserve">
+    <value>DS3 Device Support</value>
+  </data>
+  <data name="FirstLaunch.DS3EnableText" xml:space="preserve">
+    <value>Support for DualShock 3 (PS3) controllers. Requires the use of the DsHidMini driver from the ViGEm project (nefarius).</value>
+  </data>
+  <data name="FirstLaunch.DS4EnableCkbLabel" xml:space="preserve">
+    <value>DS4 Device Support</value>
+  </data>
+  <data name="FirstLaunch.DS4EnableText" xml:space="preserve">
+    <value>Support for known DualShock 4 controllers</value>
+  </data>
+  <data name="FirstLaunch.DSEnableCkbLabel" xml:space="preserve">
+    <value>DualSense Device Support</value>
+  </data>
+  <data name="FirstLaunch.DSEnableText" xml:space="preserve">
+    <value>Support for DualSense (PS5) controllers. Base model and DS Edge</value>
+  </data>
+  <data name="FirstLaunch.Header" xml:space="preserve">
+    <value>Enabled Devices Mapper Support</value>
+  </data>
+  <data name="FirstLaunch.JoyConEnableCkbLabel" xml:space="preserve">
+    <value>JoyCon Device Support</value>
+  </data>
+  <data name="FirstLaunch.JoyConEnableText" xml:space="preserve">
+    <value>Support for JoyCon (Nintendo Switch) controllers</value>
+  </data>
+  <data name="FirstLaunch.SwitchProEnableCkbLabel" xml:space="preserve">
+    <value>Switch Pro Device Support</value>
+  </data>
+  <data name="FirstLaunch.SwitchProEnableText" xml:space="preserve">
+    <value>Support for Switch Pro (Nintendo Switch) controllers</value>
+  </data>
+  <data name="FirstLaunch.WinTitle" xml:space="preserve">
+    <value>First Launch</value>
+  </data>
+  <data name="AutoProfiles.DisplaySwitchVia" xml:space="preserve">
+    <value>Display Profile Switch via</value>
+  </data>
+  <data name="AutoProfiles.LogAndNotification" xml:space="preserve">
+    <value>Log + Notification</value>
+  </data>
+  <data name="Notification" xml:space="preserve">
+    <value>Notification</value>
+  </data>
+  <data name="Light" xml:space="preserve">
+    <value>Light</value>
+  </data>
+  <data name="ProfileEditor.VirtualDS4TrigOutput" xml:space="preserve">
+    <value>DS4 Trigger Output Mode</value>
+  </data>
+  <data name="Analog" xml:space="preserve">
+    <value>Analog</value>
+  </data>
+  <data name="Buttons" xml:space="preserve">
+    <value>Buttons</value>
+  </data>
+  <data name="DS4OutputTriggersDefault" xml:space="preserve">
+    <value>Default (Analog + Buttons)</value>
+  </data>
+  <data name="DeadZone" xml:space="preserve">
+    <value>Dead Zone</value>
+  </data>
+  <data name="MaxZone" xml:space="preserve">
+    <value>Max Zone</value>
+  </data>
+  <data name="AntiDeadZone" xml:space="preserve">
+    <value>Anti-dead Zone</value>
+  </data>
+  <data name="Axial" xml:space="preserve">
+    <value>Axial</value>
+  </data>
+  <data name="AxisConfig" xml:space="preserve">
+    <value>Axis Config</value>
+  </data>
+  <data name="Controls" xml:space="preserve">
+    <value>Controls</value>
+  </data>
+  <data name="Cubic" xml:space="preserve">
+    <value>Cubic</value>
+  </data>
+  <data name="DeadZone X" xml:space="preserve">
+    <value>DeadZone X</value>
+  </data>
+  <data name="DeadZone Y" xml:space="preserve">
+    <value>DeadZone Y</value>
+  </data>
+  <data name="DeadZoneType" xml:space="preserve">
+    <value>Dead Zone Type</value>
+  </data>
+  <data name="EaseoutCubic" xml:space="preserve">
+    <value>Easeout Cubic</value>
+  </data>
+  <data name="EaseoutQuad" xml:space="preserve">
+    <value>Easeout Quad</value>
+  </data>
+  <data name="EnhancedPrecision" xml:space="preserve">
+    <value>Enhanced Precision</value>
+  </data>
+  <data name="FlickStick" xml:space="preserve">
+    <value>Flick Stick</value>
+  </data>
+  <data name="Linear" xml:space="preserve">
+    <value>Linear</value>
+  </data>
+  <data name="MaxOutput" xml:space="preserve">
+    <value>Max Output</value>
+  </data>
+  <data name="MouseOffset" xml:space="preserve">
+    <value>Mouse Offset</value>
+  </data>
+  <data name="MouseVerticalScale" xml:space="preserve">
+    <value>Mouse Vertical Scale</value>
+  </data>
+  <data name="OutputCurve" xml:space="preserve">
+    <value>Output Curve</value>
+  </data>
+  <data name="OutputMode" xml:space="preserve">
+    <value>Output Mode</value>
+  </data>
+  <data name="Quadratic" xml:space="preserve">
+    <value>Quadratic</value>
+  </data>
+  <data name="Radial" xml:space="preserve">
+    <value>Radial</value>
+  </data>
+  <data name="Sensitivity" xml:space="preserve">
+    <value>Sensitivity</value>
+  </data>
+  <data name="SixAxisAccel" xml:space="preserve">
+    <value>Six Axis (Accel)</value>
+  </data>
+  <data name="SquareStick" xml:space="preserve">
+    <value>Square Stick</value>
+  </data>
+  <data name="VerticalScale" xml:space="preserve">
+    <value>Vertical Scale</value>
+  </data>
+  <data name="AntiSnapback" xml:space="preserve">
+    <value>Anti Snapback</value>
+  </data>
+  <data name="AntiSnapbackTiming" xml:space="preserve">
+    <value>Anti Snapback timing</value>
+  </data>
+  <data name="Touchpad" xml:space="preserve">
+    <value>Touchpad</value>
+  </data>
+  <data name="ViGEm117MinNeeded" xml:space="preserve">
+    <value>Only works with ViGEmBus 1.17.333.0 and newer</value>
+  </data>
+  <data name="AbsoluteMouse" xml:space="preserve">
+    <value>Absolute Mouse</value>
+  </data>
+  <data name="AbsoluteMouseOptions" xml:space="preserve">
+    <value>Absolute Mouse Options</value>
+  </data>
+  <data name="AntiRadius" xml:space="preserve">
+    <value>Anti Radius</value>
+  </data>
+  <data name="BindingWin.AbsMouse" xml:space="preserve">
+    <value>Abs Mouse</value>
+  </data>
+  <data name="BindingWin.AbsMouseDown" xml:space="preserve">
+    <value>Abs Mouse Down</value>
+  </data>
+  <data name="BindingWin.AbsMouseLeft" xml:space="preserve">
+    <value>Abs Mouse Left</value>
+  </data>
+  <data name="BindingWin.AbsMouseRight" xml:space="preserve">
+    <value>Abs Mouse Right</value>
+  </data>
+  <data name="BindingWin.AbsMouseUp" xml:space="preserve">
+    <value>Abs Mouse Up</value>
+  </data>
+  <data name="BindingWin.ChangeLight" xml:space="preserve">
+    <value>Change Light</value>
+  </data>
+  <data name="BindingWin.ChangeMouseSensitivity" xml:space="preserve">
+    <value>Change Mouse Sensitivity</value>
+  </data>
+  <data name="BindingWin.KeyAndRelMouse" xml:space="preserve">
+    <value>KB &amp; Rel Mouse</value>
+  </data>
+  <data name="BindingWin.KeyboardAndMouse" xml:space="preserve">
+    <value>Keyboard &amp; Mouse</value>
+  </data>
+  <data name="BindingWin.MacroOn" xml:space="preserve">
+    <value>Macro On, Choose a key to disable, else close this window to save</value>
+  </data>
+  <data name="BindingWin.RecordAMacro" xml:space="preserve">
+    <value>Record A Macro</value>
+  </data>
+  <data name="BindingWin.SelectShiftTrigger" xml:space="preserve">
+    <value>Select Shift Trigger</value>
+  </data>
+  <data name="Confirm" xml:space="preserve">
+    <value>Confirm</value>
+  </data>
+  <data name="ControllerRegOptWin.EnableHomeLED" xml:space="preserve">
+    <value>Enable Home LED</value>
+  </data>
+  <data name="ControllerRegOptWin.JoinedGyroProvider" xml:space="preserve">
+    <value>Joined Gyro Provider</value>
+  </data>
+  <data name="ControllerRegOptWin.LinkMode" xml:space="preserve">
+    <value>Link Mode</value>
+  </data>
+  <data name="ControllerRegOptWin.MuteLEDMode" xml:space="preserve">
+    <value>Mute LED Mode</value>
+  </data>
+  <data name="ControllerRegOptWin.PlayerLEDMode" xml:space="preserve">
+    <value>Player LED Mode</value>
+  </data>
+  <data name="ControllerRegOptWin.WinTitle" xml:space="preserve">
+    <value>Controller Type Options</value>
+  </data>
+  <data name="DeltaAcceleration" xml:space="preserve">
+    <value>Delta Acceleration</value>
+  </data>
+  <data name="DirectionalSwipe" xml:space="preserve">
+    <value>Directional Swipe</value>
+  </data>
+  <data name="EasingDuration" xml:space="preserve">
+    <value>Easing Duration</value>
+  </data>
+  <data name="Enabled" xml:space="preserve">
+    <value>Enabled</value>
+  </data>
+  <data name="EnableTouchpadToggle" xml:space="preserve">
+    <value>Enable Touchpad Toggle</value>
+  </data>
+  <data name="Extra" xml:space="preserve">
+    <value>Extra</value>
+  </data>
+  <data name="FirstLaunch.DeviceSupport" xml:space="preserve">
+    <value>Device Support</value>
+  </data>
+  <data name="FlashRate" xml:space="preserve">
+    <value>Flash Rate</value>
+  </data>
+  <data name="FullBtnPull" xml:space="preserve">
+    <value>Full Btn Pull</value>
+  </data>
+  <data name="Fuzz" xml:space="preserve">
+    <value>Fuzz</value>
+  </data>
+  <data name="GyroControlsAccel" xml:space="preserve">
+    <value>Controls (Accel)</value>
+  </data>
+  <data name="Heavy" xml:space="preserve">
+    <value>Heavy</value>
+  </data>
+  <data name="Height" xml:space="preserve">
+    <value>Height</value>
+  </data>
+  <data name="HipFireDelay" xml:space="preserve">
+    <value>Hip Fire Delay</value>
+  </data>
+  <data name="ID" xml:space="preserve">
+    <value>ID</value>
+  </data>
+  <data name="IdleDisconnect" xml:space="preserve">
+    <value>Idle Disconnect</value>
+  </data>
+  <data name="LangPackControl.UseLangPack" xml:space="preserve">
+    <value>Use language pack</value>
+  </data>
+  <data name="LaunchProgramWithProfile" xml:space="preserve">
+    <value>Launch program with profile</value>
+  </data>
+  <data name="Lightbar" xml:space="preserve">
+    <value>Lightbar</value>
+  </data>
+  <data name="LinkProfileId" xml:space="preserve">
+    <value>Link Profile/ID</value>
+  </data>
+  <data name="MainWin.AbsDisplayMonitor" xml:space="preserve">
+    <value>Abs Display Monitor</value>
+  </data>
+  <data name="MainWin.EnableServer" xml:space="preserve">
+    <value>Enable Server</value>
+  </data>
+  <data name="MainWin.OneEuroBeta" xml:space="preserve">
+    <value>1€ Beta</value>
+  </data>
+  <data name="MainWin.OneEuroMinCutoff" xml:space="preserve">
+    <value>1€ MinCutoff</value>
+  </data>
+  <data name="MaxTravel" xml:space="preserve">
+    <value>Max Travel</value>
+  </data>
+  <data name="MinFactor" xml:space="preserve">
+    <value>Min Factor</value>
+  </data>
+  <data name="MinTravel" xml:space="preserve">
+    <value>Min Travel</value>
+  </data>
+  <data name="Mode" xml:space="preserve">
+    <value>Mode</value>
+  </data>
+  <data name="Mouse" xml:space="preserve">
+    <value>Mouse</value>
+  </data>
+  <data name="MouseAcceleration" xml:space="preserve">
+    <value>Mouse Acceleration</value>
+  </data>
+  <data name="MouseJoystick" xml:space="preserve">
+    <value>Mouse Joystick</value>
+  </data>
+  <data name="MouseSensitivity" xml:space="preserve">
+    <value>Mouse Sensitivity</value>
+  </data>
+  <data name="Multiplier" xml:space="preserve">
+    <value>Multiplier</value>
+  </data>
+  <data name="No" xml:space="preserve">
+    <value>No</value>
+  </data>
+  <data name="Normal" xml:space="preserve">
+    <value>Normal</value>
+  </data>
+  <data name="Other" xml:space="preserve">
+    <value>Other</value>
+  </data>
+  <data name="OuterBind" xml:space="preserve">
+    <value>Outer Bind</value>
+  </data>
+  <data name="OuterBtn" xml:space="preserve">
+    <value>Outer Btn</value>
+  </data>
+  <data name="OuterBtnDead" xml:space="preserve">
+    <value>Outer Btn Dead</value>
+  </data>
+  <data name="Passthru" xml:space="preserve">
+    <value>Passthru</value>
+  </data>
+  <data name="Port" xml:space="preserve">
+    <value>Port</value>
+  </data>
+  <data name="RecordBox.AddRumble" xml:space="preserve">
+    <value>Add Rumble</value>
+  </data>
+  <data name="RecordBox.ChangeLightbarColor" xml:space="preserve">
+    <value>Change Lightbar Color</value>
+  </data>
+  <data name="RecordBox.DoubleClickWaitEdit" xml:space="preserve">
+    <value>Double click on a wait to edit the time</value>
+  </data>
+  <data name="RecordBox.FifthMB" xml:space="preserve">
+    <value>5th Mouse Button</value>
+  </data>
+  <data name="RecordBox.FourthMB" xml:space="preserve">
+    <value>4th Mouse Button</value>
+  </data>
+  <data name="RecordBox.InsertWait" xml:space="preserve">
+    <value>Insert Wait</value>
+  </data>
+  <data name="RecordBox.LoadPreset" xml:space="preserve">
+    <value>Load Preset</value>
+  </data>
+  <data name="RecordBox.MacroOrder" xml:space="preserve">
+    <value>Macro Order</value>
+  </data>
+  <data name="RecordBox.PlayOnce" xml:space="preserve">
+    <value>Play Once</value>
+  </data>
+  <data name="RecordBox.RecordDelays" xml:space="preserve">
+    <value>Record Delays</value>
+  </data>
+  <data name="RecordBox.RepeatWhileHeld" xml:space="preserve">
+    <value>Repeat While Held</value>
+  </data>
+  <data name="RecordBox.SavePreset" xml:space="preserve">
+    <value>Save Preset</value>
+  </data>
+  <data name="RecordBox.UseActionToRecord" xml:space="preserve">
+    <value>Use Keyboard/Mouse + Controller 1 to record</value>
+  </data>
+  <data name="RecordBoxWin.WinTitle" xml:space="preserve">
+    <value>Edit Macro</value>
+  </data>
+  <data name="Regular" xml:space="preserve">
+    <value>Regular</value>
+  </data>
+  <data name="RenameProfileWin.TypeNewProfileName" xml:space="preserve">
+    <value>Please type the new name to use for the selected profile XML file.</value>
+  </data>
+  <data name="RenameProfileWin.WinTitle" xml:space="preserve">
+    <value>Rename Profile</value>
+  </data>
+  <data name="Rotation" xml:space="preserve">
+    <value>Rotation</value>
+  </data>
+  <data name="ScanCode" xml:space="preserve">
+    <value>Scan Code</value>
+  </data>
+  <data name="SelectedProfile" xml:space="preserve">
+    <value>Selected Profile</value>
+  </data>
+  <data name="ShiftModifier" xml:space="preserve">
+    <value>Shift Modifier</value>
+  </data>
+  <data name="SkipVersion" xml:space="preserve">
+    <value>Skip Version</value>
+  </data>
+  <data name="SnapToCenter" xml:space="preserve">
+    <value>Snap To Center</value>
+  </data>
+  <data name="Test" xml:space="preserve">
+    <value>Test</value>
+  </data>
+  <data name="TestHeavy" xml:space="preserve">
+    <value>Test Heavy</value>
+  </data>
+  <data name="TestLight" xml:space="preserve">
+    <value>Test Light</value>
+  </data>
+  <data name="Toggle" xml:space="preserve">
+    <value>Toggle</value>
+  </data>
+  <data name="TriggerEffect" xml:space="preserve">
+    <value>Trigger Effect</value>
+  </data>
+  <data name="TwoStageMode" xml:space="preserve">
+    <value>Two Stage Mode</value>
+  </data>
+  <data name="UDPServer" xml:space="preserve">
+    <value>UDP Server</value>
+  </data>
+  <data name="Unbound" xml:space="preserve">
+    <value>Unbound</value>
+  </data>
+  <data name="UpdaterWin.WinTitle" xml:space="preserve">
+    <value>Update Window</value>
+  </data>
+  <data name="UseController" xml:space="preserve">
+    <value>Use Controller</value>
+  </data>
+  <data name="UseSmoothing" xml:space="preserve">
+    <value>Use Smoothing</value>
+  </data>
+  <data name="Width" xml:space="preserve">
+    <value>Width</value>
+  </data>
+  <data name="XCenter" xml:space="preserve">
+    <value>X Center</value>
+  </data>
+  <data name="YCenter" xml:space="preserve">
+    <value>Y Center</value>
+  </data>
+  <data name="Yes" xml:space="preserve">
+    <value>Yes</value>
+  </data>
+  <data name="Active" xml:space="preserve">
+    <value>Active</value>
+  </data>
+  <data name="Current" xml:space="preserve">
+    <value>Current</value>
+  </data>
+  <data name="Intro" xml:space="preserve">
+    <value>Intro</value>
+  </data>
+  <data name="OutputSlotMan.InputNum" xml:space="preserve">
+    <value>Input #</value>
+  </data>
+  <data name="OutputSlotMan.XInputNum" xml:space="preserve">
+    <value>XInput #</value>
+  </data>
+  <data name="Pitch" xml:space="preserve">
+    <value>Pitch</value>
+  </data>
+  <data name="PresetOptWin.OutputController" xml:space="preserve">
+    <value>Output Controller</value>
+  </data>
+  <data name="PresetOptWin.PresetMenu" xml:space="preserve">
+    <value>Preset Menu</value>
+  </data>
+  <data name="ReadingsControl.BatteryZero" xml:space="preserve">
+    <value>Battery: 0%</value>
+  </data>
+  <data name="ReadingsControl.InputDelayNA" xml:space="preserve">
+    <value>Input Delay: N/A</value>
+  </data>
+  <data name="ReadingsControl.SixAxisXText" xml:space="preserve">
+    <value>SixAxis: X Axis is flipped so it is easier to read</value>
+  </data>
+  <data name="Requested" xml:space="preserve">
+    <value>Requested</value>
+  </data>
+  <data name="Roll" xml:space="preserve">
+    <value>Roll</value>
+  </data>
+  <data name="Yaw" xml:space="preserve">
+    <value>Yaw</value>
+  </data>
+  <data name="Appdata" xml:space="preserve">
+    <value>Appdata</value>
+  </data>
+  <data name="ProgramFolder" xml:space="preserve">
+    <value>Program Folder</value>
+  </data>
+  <data name="SaveWhere.AppDataDescText" xml:space="preserve">
+    <value>For those who prefer a regular install. Settings saved at %appdata%\DS4Windows</value>
+  </data>
+  <data name="SaveWhere.DontDelete" xml:space="preserve">
+    <value>Don't Delete the other settings yet</value>
+  </data>
+  <data name="SaveWhere.MultipleSaves" xml:space="preserve">
+    <value>Multiple save locations detected</value>
+  </data>
+  <data name="SaveWhere.PickWhere" xml:space="preserve">
+    <value>Pick where you want profiles and settings to be saved</value>
+  </data>
+  <data name="SaveWhere.ProgramFolderDescText" xml:space="preserve">
+    <value>For those who prefer a portable program.
+Note: this option does not work if in an admin folder w/o UAC</value>
+  </data>
+  <data name="SaveWhere.WinTitle" xml:space="preserve">
+    <value>Save Where</value>
+  </data>
+  <data name="Welcome.BluetoothSettings" xml:space="preserve">
+    <value>Bluetooth Settings</value>
+  </data>
+  <data name="Welcome.Step1HelpText" xml:space="preserve">
+    <value>If this window reappears after installing, you may need to reboot your PC.</value>
+  </data>
+  <data name="Welcome.Step1Text" xml:space="preserve">
+    <value>Step 1: Install ViGEmBus Driver</value>
+  </data>
+  <data name="Welcome.Step2HelpText" xml:space="preserve">
+    <value>If you've used a 360 controller on this PC, you can skip this step.</value>
+  </data>
+  <data name="Welcome.Step2Text" xml:space="preserve">
+    <value>Step 2: If on Windows 7, Install 360 Driver</value>
+  </data>
+  <data name="Welcome.Step3BluetoothHelpText" xml:space="preserve">
+    <value>Once flashing go to your Bluetooth Settings and connect to "Wireless Controller". If asked, enter pair code 0000. Once paired, you're ready. Have fun!</value>
+  </data>
+  <data name="Welcome.Step3HelpText" xml:space="preserve">
+    <value>Step 3: Connecting the DualShock 4 controller.
+To setup wired/USB:
+Simply plug a micro-USB into your PC and DualShock 4.
+
+To setup Bluetooth (optional): Hold the PS Button and Share for 3 seconds. The lightbar will begin to double flash.</value>
+    <comment>To enter a line break into a string resource value in VisualStudio resource editor press Shift+Enter.</comment>
+  </data>
+  <data name="Welcome.Step4HelpText" xml:space="preserve">
+    <value>Use HidHide to configure and hide any input controllers from other apps running on your system. Some games require only one controller to be present or double input will cause problems in game.</value>
+  </data>
+  <data name="Welcome.Step4Text" xml:space="preserve">
+    <value>(Optional) Step 4: Install HidHide Driver</value>
+  </data>
+  <data name="Welcome.Step5HelpText" xml:space="preserve">
+    <value>Use FakerInput driver to expose system-wide virtual keyboard, relative mouse, and absolute mouse. Allows virtual KB+M events to be usable in some situations when SendInput fails. Such situations are elevated process and games, UAC prompts, and anti-cheat systems that block SendInput events. Use of FakerInput is necessary to allow DS4Windows to work with some games with anti-cheat protection like Valorant.</value>
+  </data>
+  <data name="Welcome.Step5Text" xml:space="preserve">
+    <value>(Optional) Step 5: Install FakerInput Driver</value>
+  </data>
+  <data name="Welcome.WinTitle" xml:space="preserve">
+    <value>Welcome to DS4Windows</value>
+  </data>
+  <data name="SpecialActionEdit.CheckBattery" xml:space="preserve">
+    <value>Check Battery Life</value>
+  </data>
+  <data name="SpecialActionEdit.DisconnectBT" xml:space="preserve">
+    <value>Disconnect from Bluetooth</value>
+  </data>
+  <data name="SpecialActionEdit.DoubleTapTrigger" xml:space="preserve">
+    <value>Double Tap Trigger</value>
+  </data>
+  <data name="SpecialActionEdit.HoldFor" xml:space="preserve">
+    <value>Hold for</value>
+  </data>
+  <data name="SpecialActionEdit.HoldTrigger" xml:space="preserve">
+    <value>Hold Trigger</value>
+  </data>
+  <data name="SpecialActionEdit.KeepKeyState" xml:space="preserve">
+    <value>Keep key state</value>
+  </data>
+  <data name="SpecialActionEdit.LaunchProgram" xml:space="preserve">
+    <value>Launch a program</value>
+  </data>
+  <data name="SpecialActionEdit.LoadProfile" xml:space="preserve">
+    <value>Load a profile</value>
+  </data>
+  <data name="SpecialActionEdit.MacroRecorded" xml:space="preserve">
+    <value>Macro Recorded</value>
+  </data>
+  <data name="SpecialActionEdit.MultiAction" xml:space="preserve">
+    <value>Multi-action Button</value>
+  </data>
+  <data name="SpecialActionEdit.PressingUnloadTrigger" xml:space="preserve">
+    <value>pressing unload trigger</value>
+  </data>
+  <data name="SpecialActionEdit.PressKey" xml:space="preserve">
+    <value>Press/Toggle key</value>
+  </data>
+  <data name="SpecialActionEdit.RecordMacro" xml:space="preserve">
+    <value>Record a macro</value>
+  </data>
+  <data name="SpecialActionEdit.ReleasingUnloadTrigger" xml:space="preserve">
+    <value>releasing unload trigger</value>
+  </data>
+  <data name="SpecialActionEdit.RepeatWhileHeld" xml:space="preserve">
+    <value>Repeat while held</value>
+  </data>
+  <data name="SpecialActionEdit.RunTriggerRelease" xml:space="preserve">
+    <value>Run on Trigger Release</value>
+  </data>
+  <data name="SpecialActionEdit.SelectAction" xml:space="preserve">
+    <value>-Select an Action-</value>
+  </data>
+  <data name="SpecialActionEdit.SelectKey" xml:space="preserve">
+    <value>Select a Key</value>
+  </data>
+  <data name="SpecialActionEdit.SelectMacro" xml:space="preserve">
+    <value>Select a macro</value>
+  </data>
+  <data name="SpecialActionEdit.SetUnloadTrigger" xml:space="preserve">
+    <value>Set Unload Trigger</value>
+  </data>
+  <data name="SpecialActionEdit.SixAxisWheelCalib" xml:space="preserve">
+    <value>Calibration of sixaxis wheel calibration</value>
+  </data>
+  <data name="SpecialActionEdit.SyncRun" xml:space="preserve">
+    <value>Synchronized Run</value>
+  </data>
+  <data name="SpecialActionEdit.TapTrigger" xml:space="preserve">
+    <value>Tap Trigger</value>
+  </data>
+  <data name="SpecialActionEdit.UnloadTriggerRelease" xml:space="preserve">
+    <value>Unload on trigger release</value>
+  </data>
+  <data name="SpecialActionEdit.UntoggleKeyBy" xml:space="preserve">
+    <value>Untoggle key by</value>
+  </data>
+  <data name="SpecialActionEdit.ViaLightbar" xml:space="preserve">
+    <value>via lightbar</value>
+  </data>
+  <data name="SpecialActionEdit.ViaNotification" xml:space="preserve">
+    <value>via notification</value>
+  </data>
+  <data name="UnloadTrigger" xml:space="preserve">
+    <value>Unload Trigger</value>
+  </data>
+  <data name="Net8NoticeWin.WinTitle" xml:space="preserve">
+    <value>.NET 8 Not Found</value>
+  </data>
+  <data name="Net8NotInstalledWinNotice" xml:space="preserve">
+    <value>DS4Windows version 3.3 will require the installation of the .NET 8 Desktop Runtime on your system  
+[https://dotnet.microsoft.com/en-us/download/dotnet/thank-you/runtime-desktop-8.0.0-windows-{0}-installer](https://dotnet.microsoft.com/en-us/download/dotnet/thank-you/runtime-desktop-8.0.0-windows-{0}-installer)  
+
+Please click OK to confirm that you have read the message. Press Cancel to be reminded again on the next application launch.</value>
+    <comment>Can use Markdown syntax</comment>
+  </data>
+  <data name="OK" xml:space="preserve">
+    <value>OK</value>
+  </data>
+  <data name="Custom" xml:space="preserve">
+    <value>Custom</value>
+  </data>
+  <data name="ControllerSupportMoonlight" xml:space="preserve">
+    <value>Virtual Controller Support</value>
+  </data>
+  <data name="AdvancedSupport" xml:space="preserve">
+    <value>Advanced Support</value>
+  </data>
+  <data name="UseDs3PitchRollSim" xml:space="preserve">
+    <value>[EXPERIMENTAL] Use DS3 gyro simulation</value>
+  </data>
+  <data name="StickCalibration" xml:space="preserve">
+    <value>Stick Calibration</value>
+  </data>
+  <data name="XAxisOffset" xml:space="preserve">
+    <value>X Axis Offset</value>
+  </data>
+  <data name="YAxisOffset" xml:space="preserve">
+    <value>Y Axis Offset</value>
+  </data>
+  <data name="AutomaticallyRecalibrateStick" xml:space="preserve">
+    <value>Automatically recalibrate stick</value>
+  </data>
+  <data name="ProcessPriority" xml:space="preserve">
+    <value>Process priority</value>
+  </data>
+  <data name="RealTimeNoAdmin" xml:space="preserve">
+    <value>Selecting real-time priority requires running the application in admin mode.</value>
+  </data>
+  <data name="ProfileSwitchNotification" xml:space="preserve">
+    <value>Display profile switch notification</value>
+  </data>
+  <data name="CreateLightbarMacro" xml:space="preserve">
+    <value>Create lightbar macro</value>
+  </data>
+  <data name="LightbarMode" xml:space="preserve">
+    <value>Lightbar Mode</value>
+  </data>
+  <data name="SolidColor" xml:space="preserve">
+    <value>Solid Colour</value>
+  </data>
+  <data name="Macro" xml:space="preserve">
+    <value>Macro</value>
+  </data>
+  <data name="Add" xml:space="preserve">
+    <value>Add</value>
+  </data>
+  <data name="ColorAndLength" xml:space="preserve">
+    <value>Colour and length</value>
+  </data>
+  <data name="SpecialActionEdit.CalibrateGyro" xml:space="preserve">
+    <value>Calibrate gyro</value>
+  </data>
+  <data name="HoldFor" xml:space="preserve">
+    <value>Hold for</value>
+  </data>
+  <data name="FailedToRetrieveLatestVersion" xml:space="preserve">
+    <value>Failed to retrieve latest version</value>
+  </data>
+  <data name="CancelCurrentMacro" xml:space="preserve">
+    <value>Cancel current macro</value>
+  </data>
+  <data name="CancelCurrentMacroTooltip" xml:space="preserve">
+    <value>Indicates whether running this macro should stop a currently running one</value>
+  </data>
+  <data name="ExportSpecialActions" xml:space="preserve">
+    <value>Export actions</value>
+  </data>
+  <data name="InverseMotors" xml:space="preserve">
+    <value>Inverse motors</value>
+  </data>
+</root>

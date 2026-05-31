@@ -703,9 +703,31 @@ Suspend support not enabled.", true);
             int pos = allowedIndices.IndexOf(current);
             if (pos < 0)
             {
-                // Currently selected profile is not part of the allow-list; jump to the
-                // first (forward) or last (backward) allowed profile.
-                return forward ? allowedIndices[0] : allowedIndices[allowedIndices.Count - 1];
+                // Currently selected profile is not part of the allow-list. Move to
+                // the nearest allowed profile in the swipe direction, wrapping around
+                // if there is none further along. allowedIndices is in ascending order.
+                if (forward)
+                {
+                    foreach (int idx in allowedIndices)
+                    {
+                        if (idx > current)
+                        {
+                            return idx;
+                        }
+                    }
+                    return allowedIndices[0];
+                }
+                else
+                {
+                    for (int k = allowedIndices.Count - 1; k >= 0; k--)
+                    {
+                        if (allowedIndices[k] < current)
+                        {
+                            return allowedIndices[k];
+                        }
+                    }
+                    return allowedIndices[allowedIndices.Count - 1];
+                }
             }
 
             if (forward)

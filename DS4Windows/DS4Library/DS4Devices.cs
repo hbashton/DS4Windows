@@ -199,8 +199,94 @@ namespace DS4Windows
                 detectNewControllers = value;
             }
         }
+        // Registry of device paths for virtual DS4 controllers that DS4Windows itself
+        // created as OUTPUT (via ViGEmBus). These must never be ingested as INPUT, even
+        // when "Virtual Controller Support" (Moonlight) is enabled, otherwise DS4Windows
+        // detects its own DS4 output as a new controller, spawns another virtual DS4 for
+        // it, detects that one too, and cascades until every output slot is filled.
+        private static readonly object ownVirtualLock = new object();
+        private static readonly HashSet<string> ownVirtualDS4Paths =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // ViGEm-created DS4 controllers report the Sony VID with one of these PIDs.
+        private static readonly int[] VirtualDS4Pids = { 0x05C4, 0x09CC };
+
+        private static HashSet<string> SnapshotVirtualDS4Paths()
+        {
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                foreach (HidDevice d in HidDevices.Enumerate(SONY_VID, VirtualDS4Pids))
+                {
+                    if (Global.CheckIfVirtualDevice(d.DevicePath))
+                    {
+                        set.Add(d.DevicePath);
+                    }
+                }
+            }
+            catch { /* enumeration best-effort; never throw into the plug path */ }
+            return set;
+        }
+
+        // Capture the set of virtual DS4 controllers present immediately BEFORE we plug
+        // in one of our own. Call RegisterOwnVirtualDS4 with this snapshot right after.
+        public static HashSet<string> SnapshotBeforeOwnVirtualDS4()
+        {
+            return SnapshotVirtualDS4Paths();
+        }
+
+        // Any virtual DS4 that appears after our Connect() call, and was not present in
+        // beforePaths, is one we just created -> record it so input detection skips it.
+        public static void RegisterOwnVirtualDS4(HashSet<string> beforePaths)
+        {
+            HashSet<string> after = null;
+            bool foundNew = false;
+            // The HID device can take a moment to enumerate after ViGEm Connect().
+            for (int attempt = 0; attempt < 10 && !foundNew; attempt++)
+            {
+                after = SnapshotVirtualDS4Paths();
+                foreach (string p in after)
+                {
+                    if (beforePaths == null || !beforePaths.Contains(p))
+                    {
+                        foundNew = true;
+                        break;
+                    }
+                }
+                if (!foundNew) System.Threading.Thread.Sleep(30);
+            }
+
+            if (after == null) return;
+
+            lock (ownVirtualLock)
+            {
+                foreach (string p in after)
+                {
+                    if (beforePaths == null || !beforePaths.Contains(p))
+                    {
+                        ownVirtualDS4Paths.Add(p);
+                    }
+                }
+                // Drop entries for devices that are no longer present (unplugged outputs).
+                ownVirtualDS4Paths.RemoveWhere(p => !after.Contains(p));
+            }
+        }
+
+        // True if devicePath is a virtual DS4 that DS4Windows created as output.
+        public static bool IsOwnVirtualDevice(string devicePath)
+        {
+            lock (ownVirtualLock)
+            {
+                return ownVirtualDS4Paths.Count > 0 && ownVirtualDS4Paths.Contains(devicePath);
+            }
+        }
+
         private static bool IsRealDS4(HidDevice hDevice)
         {
+            // Our own virtual output controllers are never valid input, regardless of
+            // mode. This is what breaks the Moonlight + DS4-output feedback loop.
+            if (IsOwnVirtualDevice(hDevice.DevicePath)) return false;
+
             if (!Global.UseMoonlight) return !Global.CheckIfVirtualDevice(hDevice.DevicePath);
             if (!Global.UseAdvancedMoonlight)
             {

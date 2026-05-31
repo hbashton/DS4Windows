@@ -164,6 +164,15 @@ namespace DS4Windows
                 int slot = FindEmptySlot();
                 if (slot != -1)
                 {
+                    // Only relevant when Virtual Controller (Moonlight) support is on and
+                    // we are about to create a virtual DS4. Record the device so it is not
+                    // later re-ingested as input (which would cascade into more devices).
+                    HashSet<string> beforeVirtualDS4 = null;
+                    if (contType == OutContType.DS4 && Global.UseMoonlight)
+                    {
+                        beforeVirtualDS4 = DS4Devices.SnapshotBeforeOwnVirtualDS4();
+                    }
+
                     try
                     {
                         outputDevice.Connect();
@@ -174,6 +183,11 @@ namespace DS4Windows
                         //queuedTasks--;
                         ViGEmFailure?.Invoke(this, e.ErrorCode);
                         return;
+                    }
+
+                    if (beforeVirtualDS4 != null)
+                    {
+                        DS4Devices.RegisterOwnVirtualDS4(beforeVirtualDS4);
                     }
 
                     if (contType == OutContType.X360)

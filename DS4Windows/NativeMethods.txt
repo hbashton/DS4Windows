@@ -1,0 +1,15 @@
+GetWindowText
+GetWindowTextLength
+CreateFile
+ReadFile
+WriteFile
+CreateEvent
+WaitForSingleObject
+GetOverlappedResult
+GetOverlappedResultEx
+
+WIN32_ERROR
+FILE_CREATION_DISPOSITION
+FILE_FLAGS_AND_ATTRIBUTES
+FILE_ACCESS_RIGHTS
+FILE_SHARE_MODE

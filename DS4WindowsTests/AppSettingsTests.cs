@@ -62,6 +62,7 @@ namespace DS4WindowsTests
   <Notifications>2</Notifications>
   <DisconnectBTAtStop>False</DisconnectBTAtStop>
   <SwipeProfiles>True</SwipeProfiles>
+  <SwipeProfileList />
   <QuickCharge>False</QuickCharge>
   <CloseMinimizes>False</CloseMinimizes>
   <UseLang />

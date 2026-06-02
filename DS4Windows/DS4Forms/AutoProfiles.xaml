@@ -12,7 +12,7 @@
              mc:Ignorable="d" 
              d:DesignHeight="380" d:DesignWidth="800">
     <DockPanel>
-            <ScrollViewer x:Name="sidebarScrollViewer" DockPanel.Dock="Right" Width="Auto" Margin="8" VerticalScrollBarVisibility="Auto">
+            <ScrollViewer x:Name="sidebarScrollViewer" DockPanel.Dock="Right" Width="320" Margin="8" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <ScrollViewer.Resources>
                     <Thickness x:Key="spaceMargin" Bottom="8" />
                 </ScrollViewer.Resources>
@@ -228,7 +228,8 @@
                                       DisplayMemberPath="DisplayName" SelectedValuePath="ChoiceValue"
                                       SelectedValue="{Binding DeviceOption}" />
                         </Grid>
-                        <TextBox Text="{Binding Path, UpdateSourceTrigger=PropertyChanged}" Margin="{StaticResource spaceMargin}" ToolTip="{lex:Loc AutoProfPathTip}"/>
+                        <TextBox Text="{Binding Path, UpdateSourceTrigger=PropertyChanged}" Margin="{StaticResource spaceMargin}" ToolTip="{lex:Loc AutoProfPathTip}"
+                                 TextWrapping="Wrap" AcceptsReturn="False" VerticalScrollBarVisibility="Auto" MaxHeight="90"/>
 
                         <Grid>
                             <TextBox x:Name="mainTxtBox" Text="{Binding Title, UpdateSourceTrigger=PropertyChanged}" Margin="{StaticResource spaceMargin}" ToolTip="{lex:Loc AutoProfTitleTip}" />
@@ -294,7 +295,13 @@
                                 </DataTemplate>
                             </GridViewColumn.CellTemplate>
                         </GridViewColumn>
-                        <GridViewColumn Header="{lex:Loc Path}" Width="600" DisplayMemberBinding="{Binding Path}"/>
+                        <GridViewColumn Header="{lex:Loc Path}" Width="360">
+                            <GridViewColumn.CellTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Path}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Path}" Width="350" />
+                                </DataTemplate>
+                            </GridViewColumn.CellTemplate>
+                        </GridViewColumn>
                         <GridViewColumn Header="Device" Width="90" DisplayMemberBinding="{Binding DeviceOption}"/>
                         <GridViewColumn Header="{lex:Loc WindowTitle}" Width="Auto" DisplayMemberBinding="{Binding Title}"/>
                     </GridView>

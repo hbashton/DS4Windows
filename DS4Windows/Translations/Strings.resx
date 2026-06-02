@@ -129,6 +129,9 @@
   <data name="AddPrograms" xml:space="preserve">
     <value>Add Programs</value>
   </data>
+  <data name="AddWindowTitleRule" xml:space="preserve">
+    <value>Add Window Title Rule</value>
+  </data>
   <data name="AddStartMenuPrograms" xml:space="preserve">
     <value>Add Start Menu Programs</value>
   </data>
@@ -314,6 +317,9 @@
   </data>
   <data name="WindowTitle" xml:space="preserve">
     <value>Window Title</value>
+  </data>
+  <data name="WindowTitleRule" xml:space="preserve">
+    <value>Window title rule</value>
   </data>
   <data name="MoveUp" xml:space="preserve">
     <value>Move Up</value>

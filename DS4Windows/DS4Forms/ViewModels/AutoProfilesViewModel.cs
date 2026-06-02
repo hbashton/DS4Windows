@@ -177,6 +177,14 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             AutoProfileSystemChange?.Invoke(this, true);
         }
 
+        public void AddWindowTitleRule()
+        {
+            ProgramItem item = new ProgramItem(string.Empty);
+            programColl.Add(item);
+            SelectedItem = item;
+            SelectedIndex = programColl.IndexOf(item);
+        }
+
         private void AddFromStartMenu(string path)
         {
             List<string> lnkpaths = new List<string>();
@@ -431,7 +439,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         
         public void AddExeToHIDHideWhenSaving(ProgramItem autoProf, bool addExe)
         {
-            if (autoProf.Path.Substring((autoProf.Path.Length) - 4, 4) == ".exe") //Filter out autoprofiles that do not lead to EXEs.
+            if (Path.GetExtension(autoProf.Path).Equals(".exe", StringComparison.OrdinalIgnoreCase)) //Filter out autoprofiles that do not lead to EXEs.
             {
                 App.rootHub.CheckHidHidePresence(autoProf.Path, autoProf.Filename, addExe);
             }
@@ -494,7 +502,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public event EventHandler MatchedAutoProfileChanged;
         //public delegate void AutoProfileHandler(ProgramItem sender, bool added);
         //public event AutoProfileHandler AutoProfileAction;
-        public string Filename { get => filename;  }
+        public string Filename { get => string.IsNullOrEmpty(filename) ? Translations.Strings.WindowTitleRule : filename;  }
         public ImageSource Exeicon { get => exeicon; }
 
         public bool Turnoff

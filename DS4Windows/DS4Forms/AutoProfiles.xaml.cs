@@ -378,6 +378,13 @@ namespace DS4WinWPF.DS4Forms
             }
         }
 
+        private void WindowTitleRuleMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            autoProfVM.AddWindowTitleRule();
+            programListLV.SelectedItem = autoProfVM.SelectedItem;
+            programListLV.ScrollIntoView(autoProfVM.SelectedItem);
+        }
+
         private void MoveUpDownAutoBtn_Click(object sender, RoutedEventArgs e)
         {
             if (autoProfVM.SelectedItem != null && sender != null)

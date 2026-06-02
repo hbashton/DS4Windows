@@ -252,6 +252,8 @@
                             <MenuItem x:Name="startMenuItem" Header="{lex:Loc AddStartMenuPrograms}" Click="StartMenuItem_Click" />
                             <MenuItem x:Name="browseProgsMenuItem" Header="{lex:Loc AddDirectory}" Click="BrowseProgsMenuItem_Click" />
                             <MenuItem x:Name="browseAddProgMenuItem" Header="{lex:Loc BrowseOtherPrograms}" Click="BrowseAddProgMenuItem_Click" />
+                            <Separator />
+                            <MenuItem x:Name="windowTitleRuleMenuItem" Header="{lex:Loc AddWindowTitleRule}" Click="WindowTitleRuleMenuItem_Click" />
                         </ContextMenu>
                     </Button.ContextMenu>
                 </Button>

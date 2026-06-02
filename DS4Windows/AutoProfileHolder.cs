@@ -150,6 +150,11 @@ namespace DS4WinWPF
 
         public bool IsMatch(string searchPath, string searchTitle)
         {
+            if (string.IsNullOrEmpty(path_lowercase) && string.IsNullOrEmpty(title_lowercase))
+            {
+                return false;
+            }
+
             bool bPathMatched = true;
             bool bTitleMwatched = true;
 

@@ -139,6 +139,15 @@ namespace DS4WinWPF.Translations {
                 return ResourceManager.GetString("AddPrograms", resourceCulture);
             }
         }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Add Window Title Rule.
+        /// </summary>
+        public static string AddWindowTitleRule {
+            get {
+                return ResourceManager.GetString("AddWindowTitleRule", resourceCulture);
+            }
+        }
         
         /// <summary>
         ///   Looks up a localized string similar to Add Start Menu Programs.
@@ -3994,6 +4003,15 @@ namespace DS4WinWPF.Translations {
         public static string WindowTitle {
             get {
                 return ResourceManager.GetString("WindowTitle", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Window title rule.
+        /// </summary>
+        public static string WindowTitleRule {
+            get {
+                return ResourceManager.GetString("WindowTitleRule", resourceCulture);
             }
         }
         

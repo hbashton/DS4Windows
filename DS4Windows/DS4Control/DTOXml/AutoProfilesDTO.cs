@@ -43,6 +43,8 @@ namespace DS4WinWPF.DS4Control.DTOXml
                 {
                     Path = entity.Path,
                     Title = entity.Title,
+                    Device = entity.DeviceOption,
+                    ApplyToAllControllers = entity.ApplyToAllControllers,
                     Controller1 = entity.ProfileNames[0],
                     Controller2 = entity.ProfileNames[1],
                     Controller3 = entity.ProfileNames[2],
@@ -67,6 +69,8 @@ namespace DS4WinWPF.DS4Control.DTOXml
             foreach(AutoProfileEntrySerializer serializier in programEntries)
             {
                 AutoProfileEntity autoprof = new AutoProfileEntity(serializier.Path, serializier.Title);
+                autoprof.DeviceOption = serializier.Device;
+                autoprof.ApplyToAllControllers = serializier.ApplyToAllControllers;
 
                 autoprof.ProfileNames[0] = serializier.Controller1;
                 autoprof.ProfileNames[1] = serializier.Controller2;
@@ -101,6 +105,28 @@ namespace DS4WinWPF.DS4Control.DTOXml
         {
             get; set;
         } = string.Empty;
+
+        [XmlAttribute("device")]
+        public AutoProfileDeviceOption Device
+        {
+            get; set;
+        } = AutoProfileDeviceOption.Any;
+
+        public bool ShouldSerializeDevice()
+        {
+            return Device != AutoProfileDeviceOption.Any;
+        }
+
+        [XmlAttribute("applyToAllControllers")]
+        public bool ApplyToAllControllers
+        {
+            get; set;
+        }
+
+        public bool ShouldSerializeApplyToAllControllers()
+        {
+            return ApplyToAllControllers;
+        }
 
         [XmlElement("Controller1")]
         public string Controller1

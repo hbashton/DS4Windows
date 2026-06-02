@@ -31,6 +31,16 @@ using DS4WinWPF.DS4Control.DTOXml;
 
 namespace DS4WinWPF
 {
+    public enum AutoProfileDeviceOption
+    {
+        Any,
+        DualSense,
+        DS4,
+        DS3,
+        SwitchPro,
+        JoyCons,
+    }
+
     public class AutoProfileHolder
     {
         private object _colLockobj = new object();
@@ -131,6 +141,8 @@ namespace DS4WinWPF
         private string path_lowercase;
         private string title_lowercase;
         private bool turnoff;
+        private AutoProfileDeviceOption deviceOption = AutoProfileDeviceOption.Any;
+        private bool applyToAllControllers;
         private string[] profileNames = new string[DS4Windows.Global.MAX_DS4_CONTROLLER_COUNT] { string.Empty, string.Empty,
             string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty };
         public const string NONE_STRING = "(none)";
@@ -138,6 +150,8 @@ namespace DS4WinWPF
         public string Path { get => path; set => SetSearchPath(value); }
         public string Title { get => title; set => SetSearchTitle(value); }
         public bool Turnoff { get => turnoff; set => turnoff = value; }
+        public AutoProfileDeviceOption DeviceOption { get => deviceOption; set => deviceOption = value; }
+        public bool ApplyToAllControllers { get => applyToAllControllers; set => applyToAllControllers = value; }
         public string[] ProfileNames { get => profileNames; set => profileNames = value; }
 
         public AutoProfileEntity(string pathStr, string titleStr)
@@ -181,6 +195,29 @@ namespace DS4WinWPF
 
             // If both path and title defined in autoprofile entry then do AND condition (ie. both path and title should match)
             return bPathMatched && bTitleMwatched;
+        }
+
+        public bool IsDeviceMatch(DS4Windows.InputDevices.InputDeviceType deviceType)
+        {
+            switch (deviceOption)
+            {
+                case AutoProfileDeviceOption.Any:
+                    return true;
+                case AutoProfileDeviceOption.DualSense:
+                    return deviceType == DS4Windows.InputDevices.InputDeviceType.DualSense;
+                case AutoProfileDeviceOption.DS4:
+                    return deviceType == DS4Windows.InputDevices.InputDeviceType.DS4;
+                case AutoProfileDeviceOption.DS3:
+                    return deviceType == DS4Windows.InputDevices.InputDeviceType.DS3;
+                case AutoProfileDeviceOption.SwitchPro:
+                    return deviceType == DS4Windows.InputDevices.InputDeviceType.SwitchPro;
+                case AutoProfileDeviceOption.JoyCons:
+                    return deviceType == DS4Windows.InputDevices.InputDeviceType.JoyConL ||
+                        deviceType == DS4Windows.InputDevices.InputDeviceType.JoyConR ||
+                        deviceType == DS4Windows.InputDevices.InputDeviceType.JoyConGrip;
+                default:
+                    return false;
+            }
         }
 
         private void SetSearchPath(string pathStr)

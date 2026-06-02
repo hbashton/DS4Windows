@@ -62,6 +62,8 @@ namespace DS4WinWPF
             string topProcessName, topWindowTitle;
             bool turnOffDS4WinApp = false;
             AutoProfileEntity matchedProfileEntity = null;
+            AutoProfileEntity[] matchedControllerProfileEntities = new AutoProfileEntity[ControlService.CURRENT_DS4_CONTROLLER_LIMIT];
+            List<AutoProfileEntity> matchedProfileEntities = new List<AutoProfileEntity>();
 
             if (GetTopWindowName(out topProcessName, out topWindowTitle))
             {
@@ -73,12 +75,24 @@ namespace DS4WinWPF
                     if (tempEntity.IsMatch(topProcessName, topWindowTitle))
                     {
                         if (autoProfileDebugLogLevel > 0)
-                            DS4Windows.AppLogger.LogToGui($"DEBUG: Auto-Profile. Rule#{i + 1}  Path={tempEntity.path}  Title={tempEntity.title}", false, true);
+                            DS4Windows.AppLogger.LogToGui($"DEBUG: Auto-Profile. Rule#{i + 1}  Path={tempEntity.path}  Title={tempEntity.title}  Device={tempEntity.DeviceOption}", false, true);
 
-                        // Matching autoprofile rule found
-                        turnOffDS4WinApp = tempEntity.Turnoff;
-                        matchedProfileEntity = tempEntity;
-                        break;
+                        matchedProfileEntities.Add(tempEntity);
+                    }
+                }
+
+                if (matchedProfileEntities.Count > 0)
+                {
+                    for (int j = 0; j < ControlService.CURRENT_DS4_CONTROLLER_LIMIT; j++)
+                    {
+                        DS4Device device = Program.rootHub.DS4Controllers[j];
+                        AutoProfileEntity tempEntity = SelectProfileEntityForController(matchedProfileEntities, device);
+                        matchedControllerProfileEntities[j] = tempEntity;
+                        if (tempEntity != null)
+                        {
+                            matchedProfileEntity = matchedProfileEntity ?? tempEntity;
+                            turnOffDS4WinApp = turnOffDS4WinApp || tempEntity.Turnoff;
+                        }
                     }
                 }
 
@@ -98,7 +112,14 @@ namespace DS4WinWPF
                     // Program match found. Check if the new profile is different than current profile of the controller. Load the new profile only if it is not already loaded.
                     for (int j = 0; j < ControlService.CURRENT_DS4_CONTROLLER_LIMIT; j++)
                     {
-                        string tempname = matchedProfileEntity.ProfileNames[j];
+                        AutoProfileEntity controllerProfileEntity = matchedControllerProfileEntities[j];
+                        if (controllerProfileEntity == null)
+                        {
+                            continue;
+                        }
+
+                        string tempname = controllerProfileEntity.ApplyToAllControllers ?
+                            controllerProfileEntity.ProfileNames[0] : controllerProfileEntity.ProfileNames[j];
                         if (tempname != string.Empty && tempname != "(none)")
                         {
                             if ((Global.useTempProfile[j] && tempname != Global.tempprofilename[j]) ||
@@ -106,7 +127,7 @@ namespace DS4WinWPF
                                 forceLoadProfile)
                             {
                                 if (autoProfileDebugLogLevel > 0)
-                                    DS4Windows.AppLogger.LogToGui($"DEBUG: Auto-Profile. LoadProfile Controller {j + 1}={tempname}", false, true);
+                                    DS4Windows.AppLogger.LogToGui($"DEBUG: Auto-Profile. LoadProfile Controller {j + 1}={tempname}  DeviceRule={controllerProfileEntity.DeviceOption}", false, true);
 
                                 if (Global.autoProfileSwitchNotifyChoice !=
                                     AutoProfileDisplayProfileSwitchChoices.None)
@@ -207,6 +228,26 @@ namespace DS4WinWPF
                     }
                 }
             }
+        }
+
+        private AutoProfileEntity SelectProfileEntityForController(List<AutoProfileEntity> matchedProfileEntities, DS4Device device)
+        {
+            AutoProfileEntity fallbackEntity = matchedProfileEntities.FirstOrDefault(entity =>
+                entity.DeviceOption == AutoProfileDeviceOption.Any);
+
+            if (device != null)
+            {
+                AutoProfileEntity deviceEntity = matchedProfileEntities.FirstOrDefault(entity =>
+                    entity.DeviceOption != AutoProfileDeviceOption.Any &&
+                    entity.IsDeviceMatch(device.DeviceType));
+
+                if (deviceEntity != null)
+                {
+                    return deviceEntity;
+                }
+            }
+
+            return fallbackEntity;
         }
 
         private bool GetTopWindowName(out string topProcessName, out string topWndTitleName)

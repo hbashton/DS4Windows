@@ -92,6 +92,19 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public List<EnumChoiceSelection<AutoProfileDisplayProfileSwitchChoices>> DisplayProfileSwitchList => displayProfileSwitchList;
 
+        private List<EnumChoiceSelection<AutoProfileDeviceOption>> deviceOptionList =
+            new List<EnumChoiceSelection<AutoProfileDeviceOption>>()
+            {
+                new EnumChoiceSelection<AutoProfileDeviceOption>("Any", AutoProfileDeviceOption.Any),
+                new EnumChoiceSelection<AutoProfileDeviceOption>("DualSense", AutoProfileDeviceOption.DualSense),
+                new EnumChoiceSelection<AutoProfileDeviceOption>("DS4", AutoProfileDeviceOption.DS4),
+                new EnumChoiceSelection<AutoProfileDeviceOption>("DS3", AutoProfileDeviceOption.DS3),
+                new EnumChoiceSelection<AutoProfileDeviceOption>("Switch Pro", AutoProfileDeviceOption.SwitchPro),
+                new EnumChoiceSelection<AutoProfileDeviceOption>("JoyCons", AutoProfileDeviceOption.JoyCons),
+            };
+
+        public List<EnumChoiceSelection<AutoProfileDeviceOption>> DeviceOptionList => deviceOptionList;
+
         public AutoProfileDisplayProfileSwitchChoices ProfileSwitchChoice
         {
             get => Global.autoProfileSwitchNotifyChoice;
@@ -244,6 +257,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             {
                 AutoProfileEntity tempEntry = new AutoProfileEntity(item.Path, item.Title);
                 tempEntry.Turnoff = item.Turnoff;
+                tempEntry.DeviceOption = item.DeviceOption;
+                tempEntry.ApplyToAllControllers = item.ApplyToAllControllers;
                 int tempindex = item.SelectedIndexCon1;
                 tempEntry.ProfileNames[0] = tempindex > 0 ? profileList.ProfileListCol[tempindex - 1].Name :
                     AutoProfileEntity.NONE_STRING;
@@ -289,6 +304,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             if (item.MatchedAutoProfile != null)
             {
                 AutoProfileEntity tempEntry = item.MatchedAutoProfile;
+                tempEntry.DeviceOption = item.DeviceOption;
+                tempEntry.ApplyToAllControllers = item.ApplyToAllControllers;
                 int tempindex = item.SelectedIndexCon1;
                 tempEntry.ProfileNames[0] = tempindex > 0 ? profileList.ProfileListCol[tempindex - 1].Name :
                     AutoProfileEntity.NONE_STRING;
@@ -324,6 +341,49 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                         AutoProfileEntity.NONE_STRING;
                 }
             }
+        }
+
+        public ProgramItem DuplicateAutoProfileEntry(ProgramItem item)
+        {
+            if (item == null)
+            {
+                return null;
+            }
+
+            if (item.MatchedAutoProfile == null)
+            {
+                CreateAutoProfileEntry(item);
+            }
+            else
+            {
+                PersistAutoProfileEntry(item);
+            }
+
+            AutoProfileEntity source = item.MatchedAutoProfile;
+            AutoProfileEntity duplicate = new AutoProfileEntity(source.Path, source.Title)
+            {
+                Turnoff = source.Turnoff,
+                DeviceOption = source.DeviceOption,
+                ApplyToAllControllers = source.ApplyToAllControllers,
+            };
+            Array.Copy(source.ProfileNames, duplicate.ProfileNames, source.ProfileNames.Length);
+
+            ProgramItem duplicateItem = new ProgramItem(duplicate.Path, duplicate);
+            autoProfileHolder.AutoProfileColl.Add(duplicate);
+
+            int insertIndex = programColl.IndexOf(item) + 1;
+            if (insertIndex > 0 && insertIndex <= programColl.Count)
+            {
+                programColl.Insert(insertIndex, duplicateItem);
+            }
+            else
+            {
+                programColl.Add(duplicateItem);
+            }
+
+            SelectedItem = duplicateItem;
+            SelectedIndex = programColl.IndexOf(duplicateItem);
+            return duplicateItem;
         }
 
         public void RemoveAutoProfileEntry(ProgramItem item)
@@ -456,6 +516,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         private AutoProfileEntity matchedAutoProfile;
         private ImageSource exeicon;
         private bool turnoff;
+        private AutoProfileDeviceOption deviceOption = AutoProfileDeviceOption.Any;
+        private bool applyToAllControllers;
 
         public string Path { get => path;
             set
@@ -495,6 +557,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 {
                     title = matchedAutoProfile.Title ?? string.Empty;
                     title_lowercase = title.ToLower();
+                    deviceOption = matchedAutoProfile.DeviceOption;
+                    applyToAllControllers = matchedAutoProfile.ApplyToAllControllers;
                 }
 
                 MatchedAutoProfileChanged?.Invoke(this, EventArgs.Empty);
@@ -542,6 +606,78 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             }
         }
         public event EventHandler TurnoffChanged;
+
+        public AutoProfileDeviceOption DeviceOption
+        {
+            get
+            {
+                AutoProfileDeviceOption result = deviceOption;
+                if (matchedAutoProfile != null)
+                {
+                    result = matchedAutoProfile.DeviceOption;
+                }
+
+                return result;
+            }
+            set
+            {
+                deviceOption = value;
+                if (matchedAutoProfile != null)
+                {
+                    matchedAutoProfile.DeviceOption = value;
+                }
+
+                DeviceOptionChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        public event EventHandler DeviceOptionChanged;
+
+        public bool ApplyToAllControllers
+        {
+            get
+            {
+                bool result = applyToAllControllers;
+                if (matchedAutoProfile != null)
+                {
+                    result = matchedAutoProfile.ApplyToAllControllers;
+                }
+
+                return result;
+            }
+            set
+            {
+                applyToAllControllers = value;
+                if (matchedAutoProfile != null)
+                {
+                    matchedAutoProfile.ApplyToAllControllers = value;
+                }
+
+                ApplyToAllControllersChanged?.Invoke(this, EventArgs.Empty);
+                ControllerSpecificProfilesVisibleChanged?.Invoke(this, EventArgs.Empty);
+                ExpandedControllerSpecificProfilesVisibleChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        public event EventHandler ApplyToAllControllersChanged;
+
+        public Visibility ControllerSpecificProfilesVisible
+        {
+            get => ApplyToAllControllers ? Visibility.Collapsed : Visibility.Visible;
+        }
+        public event EventHandler ControllerSpecificProfilesVisibleChanged;
+
+        public Visibility ExpandedControllerSpecificProfilesVisible
+        {
+            get
+            {
+                if (!ControlService.USING_MAX_CONTROLLERS || ApplyToAllControllers)
+                {
+                    return Visibility.Collapsed;
+                }
+
+                return Visibility.Visible;
+            }
+        }
+        public event EventHandler ExpandedControllerSpecificProfilesVisibleChanged;
 
         public bool Exists
         {
@@ -661,6 +797,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 title = autoProfileEntity.Title;
                 title_lowercase = title.ToLower();
                 turnoff = autoProfileEntity.Turnoff;
+                deviceOption = autoProfileEntity.DeviceOption;
+                applyToAllControllers = autoProfileEntity.ApplyToAllControllers;
             }
 
             if (File.Exists(path))

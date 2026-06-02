@@ -25,6 +25,7 @@
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Height="30">
                             <Button x:Name="removeAutoBtn" Content="{lex:Loc Remove}" Height="20" Padding="1" Width="80"
                         IsEnabled="{Binding Exists}" Click="RemoveAutoBtn_Click" />
+                            <Button x:Name="duplicateAutoBtn" Content="Duplicate" Margin="20,0,0,0" Height="20" Width="80" Click="DuplicateAutoBtn_Click" />
                             <Button x:Name="saveAutoBtn" Content="{lex:Loc Save}" Margin="20,0,0,0" Height="20" Width="80" Click="SaveAutoBtn_Click" />
                         </StackPanel>
                         <Grid x:Name="autoProfilesGrid" Margin="0,8">
@@ -43,7 +44,11 @@
                                 <ColumnDefinition/>
                             </Grid.ColumnDefinitions>
 
-                            <Label Content="{lex:Loc Controller1Text}" Margin="{StaticResource spaceMargin}" />
+                            <StackPanel Orientation="Horizontal" Margin="{StaticResource spaceMargin}">
+                                <Label Content="{lex:Loc Controller1Text}" Padding="0" VerticalAlignment="Center" />
+                                <CheckBox Content="All" Margin="10,0,0,0" VerticalAlignment="Center"
+                                          IsChecked="{Binding ApplyToAllControllers}" />
+                            </StackPanel>
                             <ComboBox x:Name="cont1AutoProf" Grid.Column="1" Margin="{StaticResource spaceMargin}"
                               SelectedIndex="{Binding SelectedIndexCon1}">
                                 <ComboBox.Resources>
@@ -63,8 +68,10 @@
                                 </ComboBox.ItemsSource>
                             </ComboBox>
 
-                            <Label Content="{lex:Loc Controller2Text}" Grid.Row="1" Margin="{StaticResource spaceMargin}" />
+                            <Label Content="{lex:Loc Controller2Text}" Grid.Row="1" Margin="{StaticResource spaceMargin}"
+                                   Visibility="{Binding ControllerSpecificProfilesVisible}" />
                             <ComboBox x:Name="cont2AutoProf" Grid.Row="1" Grid.Column="1" Margin="{StaticResource spaceMargin}"
+                              Visibility="{Binding ControllerSpecificProfilesVisible}"
                               SelectedIndex="{Binding SelectedIndexCon2}">
                                 <ComboBox.Resources>
                                     <DataTemplate DataType="{x:Type ComboBoxItem}">
@@ -83,8 +90,10 @@
                                 </ComboBox.ItemsSource>
                             </ComboBox>
 
-                            <Label Content="{lex:Loc Controller3Text}" Grid.Row="2" Margin="{StaticResource spaceMargin}" />
+                            <Label Content="{lex:Loc Controller3Text}" Grid.Row="2" Margin="{StaticResource spaceMargin}"
+                                   Visibility="{Binding ControllerSpecificProfilesVisible}" />
                             <ComboBox x:Name="cont3AutoProf" Grid.Row="2" Grid.Column="1" Margin="{StaticResource spaceMargin}"
+                              Visibility="{Binding ControllerSpecificProfilesVisible}"
                               SelectedIndex="{Binding SelectedIndexCon3}">
                                 <ComboBox.Resources>
                                     <DataTemplate DataType="{x:Type ComboBoxItem}">
@@ -103,8 +112,10 @@
                                 </ComboBox.ItemsSource>
                             </ComboBox>
 
-                            <Label Content="{lex:Loc Controller4Text}" Grid.Row="3" Margin="{StaticResource spaceMargin}" />
+                            <Label Content="{lex:Loc Controller4Text}" Grid.Row="3" Margin="{StaticResource spaceMargin}"
+                                   Visibility="{Binding ControllerSpecificProfilesVisible}" />
                             <ComboBox x:Name="cont4AutoProf" Grid.Row="3" Grid.Column="1" Margin="{StaticResource spaceMargin}"
+                              Visibility="{Binding ControllerSpecificProfilesVisible}"
                               SelectedIndex="{Binding SelectedIndexCon4}">
                                 <ComboBox.Resources>
                                     <DataTemplate DataType="{x:Type ComboBoxItem}">
@@ -123,8 +134,8 @@
                                 </ComboBox.ItemsSource>
                             </ComboBox>
 
-                        <Label Content="{lex:Loc Controller5Text}" Grid.Row="4" Visibility="{Binding ExpandedControllersVisible, Mode=OneWay}" Margin="{StaticResource spaceMargin}" />
-                        <ComboBox x:Name="cont5AutoProf" Grid.Row="4" Grid.Column="1" Visibility="{Binding ExpandedControllersVisible, Mode=OneWay}" Margin="{StaticResource spaceMargin}"
+                        <Label Content="{lex:Loc Controller5Text}" Grid.Row="4" Visibility="{Binding ExpandedControllerSpecificProfilesVisible}" Margin="{StaticResource spaceMargin}" />
+                        <ComboBox x:Name="cont5AutoProf" Grid.Row="4" Grid.Column="1" Visibility="{Binding ExpandedControllerSpecificProfilesVisible}" Margin="{StaticResource spaceMargin}"
                               SelectedIndex="{Binding SelectedIndexCon5}">
                                 <ComboBox.Resources>
                                     <DataTemplate DataType="{x:Type ComboBoxItem}">
@@ -143,8 +154,8 @@
                                 </ComboBox.ItemsSource>
                             </ComboBox>
 
-                        <Label Content="{lex:Loc Controller6Text}" Grid.Row="5" Visibility="{Binding ExpandedControllersVisible, Mode=OneWay}" Margin="{StaticResource spaceMargin}" />
-                        <ComboBox x:Name="cont6AutoProf" Grid.Row="5" Grid.Column="1" Visibility="{Binding ExpandedControllersVisible, Mode=OneWay}" Margin="{StaticResource spaceMargin}"
+                        <Label Content="{lex:Loc Controller6Text}" Grid.Row="5" Visibility="{Binding ExpandedControllerSpecificProfilesVisible}" Margin="{StaticResource spaceMargin}" />
+                        <ComboBox x:Name="cont6AutoProf" Grid.Row="5" Grid.Column="1" Visibility="{Binding ExpandedControllerSpecificProfilesVisible}" Margin="{StaticResource spaceMargin}"
                               SelectedIndex="{Binding SelectedIndexCon6}">
                                 <ComboBox.Resources>
                                     <DataTemplate DataType="{x:Type ComboBoxItem}">
@@ -164,8 +175,8 @@
                             </ComboBox>
 
 
-                        <Label Content="{lex:Loc Controller7Text}" Grid.Row="6" Visibility="{Binding ExpandedControllersVisible, Mode=OneWay}" Margin="{StaticResource spaceMargin}" />
-                        <ComboBox x:Name="cont7AutoProf" Grid.Row="6" Grid.Column="1" Visibility="{Binding ExpandedControllersVisible, Mode=OneWay}" Margin="{StaticResource spaceMargin}"
+                        <Label Content="{lex:Loc Controller7Text}" Grid.Row="6" Visibility="{Binding ExpandedControllerSpecificProfilesVisible}" Margin="{StaticResource spaceMargin}" />
+                        <ComboBox x:Name="cont7AutoProf" Grid.Row="6" Grid.Column="1" Visibility="{Binding ExpandedControllerSpecificProfilesVisible}" Margin="{StaticResource spaceMargin}"
                               SelectedIndex="{Binding SelectedIndexCon7}">
                                 <ComboBox.Resources>
                                     <DataTemplate DataType="{x:Type ComboBoxItem}">
@@ -184,8 +195,8 @@
                                 </ComboBox.ItemsSource>
                             </ComboBox>
 
-                        <Label Content="{lex:Loc Controller8Text}" Grid.Row="7" Visibility="{Binding ExpandedControllersVisible, Mode=OneWay}" Margin="{StaticResource spaceMargin}" />
-                        <ComboBox x:Name="cont8AutoProf" Grid.Row="7" Grid.Column="1" Visibility="{Binding ExpandedControllersVisible, Mode=OneWay}" Margin="{StaticResource spaceMargin}"
+                        <Label Content="{lex:Loc Controller8Text}" Grid.Row="7" Visibility="{Binding ExpandedControllerSpecificProfilesVisible}" Margin="{StaticResource spaceMargin}" />
+                        <ComboBox x:Name="cont8AutoProf" Grid.Row="7" Grid.Column="1" Visibility="{Binding ExpandedControllerSpecificProfilesVisible}" Margin="{StaticResource spaceMargin}"
                               SelectedIndex="{Binding SelectedIndexCon8}">
                                 <ComboBox.Resources>
                                     <DataTemplate DataType="{x:Type ComboBoxItem}">
@@ -207,6 +218,16 @@
 
                     <CheckBox Content="{lex:Loc TurnOffDS4WindowsTemporarily}" Margin="{StaticResource spaceMargin}"
                           IsChecked="{Binding Turnoff}" />
+                        <Grid Margin="{StaticResource spaceMargin}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition/>
+                                <ColumnDefinition/>
+                            </Grid.ColumnDefinitions>
+                            <Label Content="Device" Padding="0" VerticalAlignment="Center" />
+                            <ComboBox Grid.Column="1" ItemsSource="{Binding DataContext.DeviceOptionList, ElementName=outerEditControlsPanel}"
+                                      DisplayMemberPath="DisplayName" SelectedValuePath="ChoiceValue"
+                                      SelectedValue="{Binding DeviceOption}" />
+                        </Grid>
                         <TextBox Text="{Binding Path, UpdateSourceTrigger=PropertyChanged}" Margin="{StaticResource spaceMargin}" ToolTip="{lex:Loc AutoProfPathTip}"/>
 
                         <Grid>
@@ -274,6 +295,7 @@
                             </GridViewColumn.CellTemplate>
                         </GridViewColumn>
                         <GridViewColumn Header="{lex:Loc Path}" Width="600" DisplayMemberBinding="{Binding Path}"/>
+                        <GridViewColumn Header="Device" Width="90" DisplayMemberBinding="{Binding DeviceOption}"/>
                         <GridViewColumn Header="{lex:Loc WindowTitle}" Width="Auto" DisplayMemberBinding="{Binding Title}"/>
                     </GridView>
                 </ListView.View>

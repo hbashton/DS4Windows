@@ -355,6 +355,21 @@ namespace DS4WinWPF.DS4Forms
             }
         }
 
+        private void DuplicateAutoBtn_Click(object sender, RoutedEventArgs e)
+        {
+            if (autoProfVM.SelectedItem != null)
+            {
+                ProgramItem duplicateItem = autoProfVM.DuplicateAutoProfileEntry(autoProfVM.SelectedItem);
+                autoProfVM.AutoProfileHolder.Save(DS4Windows.Global.appdatapath + @"\Auto Profiles.xml");
+
+                if (duplicateItem != null)
+                {
+                    programListLV.SelectedItem = duplicateItem;
+                    programListLV.ScrollIntoView(duplicateItem);
+                }
+            }
+        }
+
         private void BrowseAddProgMenuItem_Click(object sender, RoutedEventArgs e)
         {
             this.IsEnabled = false;

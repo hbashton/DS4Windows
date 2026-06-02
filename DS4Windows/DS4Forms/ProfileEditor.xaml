@@ -2141,6 +2141,10 @@
                                                     <RowDefinition Height="30" />
                                                     <RowDefinition Height="30" />
                                                     <RowDefinition Height="30" />
+                                                    <RowDefinition Height="30" />
+                                                    <RowDefinition Height="30" />
+                                                    <RowDefinition Height="30" />
+                                                    <RowDefinition Height="30" />
                                                 </Grid.RowDefinitions>
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto" />
@@ -2150,22 +2154,40 @@
                                                 <CheckBox Content="Audio passthrough to internal speaker" IsChecked="{Binding DualSenseEnableSpeakerOutput}"
                                                           Grid.Row="0" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}" />
 
-                                                <Label Content="Capture source:" Grid.Row="1" Grid.Column="0" />
-                                                <ComboBox ItemsSource="{Binding AudioCaptureEndpointChoices}" DisplayMemberPath="Name" SelectedValuePath="EndpointId"
-                                                          SelectedValue="{Binding DualSenseAudioCaptureEndpointId}" Grid.Row="1" Grid.Column="1"
+                                                <Label Content="Speaker endpoint:" Grid.Row="1" Grid.Column="0" />
+                                                <ComboBox ItemsSource="{Binding AudioSpeakerEndpointChoices}" DisplayMemberPath="Name" SelectedValuePath="EndpointId"
+                                                          SelectedValue="{Binding DualSenseAudioSpeakerEndpointId}" Grid.Row="1" Grid.Column="1"
                                                           Margin="{StaticResource spaceMargin}" />
 
-                                                <Label Content="Speaker:" Grid.Row="2" Grid.Column="0" />
-                                                <xctk:IntegerUpDown d:IsHidden="True" Value="{Binding DualSenseSpeakerVolume}" Minimum="0" Maximum="255" Increment="1"
-                                                                 Grid.Row="2" Grid.Column="1" Margin="{StaticResource spaceMargin}" />
+                                                <Label Content="Capture source:" Grid.Row="2" Grid.Column="0" />
+                                                <ComboBox ItemsSource="{Binding AudioCaptureEndpointChoices}" DisplayMemberPath="Name" SelectedValuePath="EndpointId"
+                                                          SelectedValue="{Binding DualSenseAudioCaptureEndpointId}" Grid.Row="2" Grid.Column="1"
+                                                          Margin="{StaticResource spaceMargin}" />
 
-                                                <Label Content="Headphones:" Grid.Row="3" Grid.Column="0" />
-                                                <xctk:IntegerUpDown d:IsHidden="True" Value="{Binding DualSenseHeadphoneVolume}" Minimum="0" Maximum="255" Increment="1"
+                                                <Label Content="Speaker:" Grid.Row="3" Grid.Column="0" />
+                                                <xctk:IntegerUpDown d:IsHidden="True" Value="{Binding DualSenseSpeakerVolume}" Minimum="0" Maximum="255" Increment="1"
                                                                  Grid.Row="3" Grid.Column="1" Margin="{StaticResource spaceMargin}" />
 
-                                                <Label Content="Microphone:" Grid.Row="4" Grid.Column="0" />
-                                                <xctk:IntegerUpDown d:IsHidden="True" Value="{Binding DualSenseMicrophoneVolume}" Minimum="0" Maximum="255" Increment="1"
+                                                <Label Content="Headphones:" Grid.Row="4" Grid.Column="0" />
+                                                <xctk:IntegerUpDown d:IsHidden="True" Value="{Binding DualSenseHeadphoneVolume}" Minimum="0" Maximum="255" Increment="1"
                                                                  Grid.Row="4" Grid.Column="1" Margin="{StaticResource spaceMargin}" />
+
+                                                <Label Content="Microphone:" Grid.Row="5" Grid.Column="0" />
+                                                <xctk:IntegerUpDown d:IsHidden="True" Value="{Binding DualSenseMicrophoneVolume}" Minimum="0" Maximum="255" Increment="1"
+                                                                 Grid.Row="5" Grid.Column="1" Margin="{StaticResource spaceMargin}" />
+
+                                                <CheckBox Content="Microphone passthrough to virtual audio device" IsChecked="{Binding DualSenseEnableMicrophonePassthrough}"
+                                                          Grid.Row="6" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}" />
+
+                                                <Label Content="Controller mic:" Grid.Row="7" Grid.Column="0" />
+                                                <ComboBox ItemsSource="{Binding MicrophoneCaptureEndpointChoices}" DisplayMemberPath="Name" SelectedValuePath="EndpointId"
+                                                          SelectedValue="{Binding DualSenseMicrophoneCaptureEndpointId}" Grid.Row="7" Grid.Column="1"
+                                                          Margin="{StaticResource spaceMargin}" />
+
+                                                <Label Content="Virtual output:" Grid.Row="8" Grid.Column="0" />
+                                                <ComboBox ItemsSource="{Binding MicrophoneOutputEndpointChoices}" DisplayMemberPath="Name" SelectedValuePath="EndpointId"
+                                                          SelectedValue="{Binding DualSenseMicrophoneOutputEndpointId}" Grid.Row="8" Grid.Column="1"
+                                                          Margin="{StaticResource spaceMargin}" />
                                             </Grid>
                                         </GroupBox>
 

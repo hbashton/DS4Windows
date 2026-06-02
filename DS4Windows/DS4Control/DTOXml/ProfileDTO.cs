@@ -1757,6 +1757,10 @@ namespace DS4WinWPF.DS4Control.DTOXml
                     HeadphoneVolume = source.dualSenseHeadphoneVolume[deviceIndex],
                     MicrophoneVolume = source.dualSenseMicrophoneVolume[deviceIndex],
                     CaptureEndpointId = source.dualSenseAudioCaptureEndpointId[deviceIndex],
+                    SpeakerEndpointId = source.dualSenseAudioSpeakerEndpointId[deviceIndex],
+                    EnableMicrophonePassthrough = source.dualSenseEnableMicrophonePassthrough[deviceIndex],
+                    MicrophoneCaptureEndpointId = source.dualSenseMicrophoneCaptureEndpointId[deviceIndex],
+                    MicrophoneOutputEndpointId = source.dualSenseMicrophoneOutputEndpointId[deviceIndex],
                 },
             };
 
@@ -2380,6 +2384,10 @@ namespace DS4WinWPF.DS4Control.DTOXml
                     destination.dualSenseHeadphoneVolume[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.HeadphoneVolume;
                     destination.dualSenseMicrophoneVolume[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.MicrophoneVolume;
                     destination.dualSenseAudioCaptureEndpointId[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.CaptureEndpointId ?? string.Empty;
+                    destination.dualSenseAudioSpeakerEndpointId[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.SpeakerEndpointId ?? string.Empty;
+                    destination.dualSenseEnableMicrophonePassthrough[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.EnableMicrophonePassthrough;
+                    destination.dualSenseMicrophoneCaptureEndpointId[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.MicrophoneCaptureEndpointId ?? string.Empty;
+                    destination.dualSenseMicrophoneOutputEndpointId[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.MicrophoneOutputEndpointId ?? string.Empty;
                 }
             }
 
@@ -3186,6 +3194,30 @@ namespace DS4WinWPF.DS4Control.DTOXml
 
             [XmlElement("CaptureEndpointId")]
             public string CaptureEndpointId
+            {
+                get; set;
+            } = string.Empty;
+
+            [XmlElement("SpeakerEndpointId")]
+            public string SpeakerEndpointId
+            {
+                get; set;
+            } = string.Empty;
+
+            [XmlElement("EnableMicrophonePassthrough")]
+            public bool EnableMicrophonePassthrough
+            {
+                get; set;
+            }
+
+            [XmlElement("MicrophoneCaptureEndpointId")]
+            public string MicrophoneCaptureEndpointId
+            {
+                get; set;
+            } = string.Empty;
+
+            [XmlElement("MicrophoneOutputEndpointId")]
+            public string MicrophoneOutputEndpointId
             {
                 get; set;
             } = string.Empty;

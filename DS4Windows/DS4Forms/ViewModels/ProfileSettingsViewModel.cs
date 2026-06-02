@@ -3055,6 +3055,11 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     using var enumerator = new MMDeviceEnumerator();
                     foreach (MMDevice endpoint in enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active))
                     {
+                        if (DualSenseAudioPassthrough.IsDualSenseEndpoint(endpoint))
+                        {
+                            continue;
+                        }
+
                         choices.Add(new AudioEndpointChoice(endpoint.FriendlyName, endpoint.ID));
                     }
                 }
@@ -3074,6 +3079,126 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         {
             get => Global.DualSenseAudioCaptureEndpointId[device];
             set => Global.DualSenseAudioCaptureEndpointId[device] = value ?? string.Empty;
+        }
+
+        public List<AudioEndpointChoice> AudioSpeakerEndpointChoices
+        {
+            get
+            {
+                var choices = new List<AudioEndpointChoice>()
+                {
+                    new AudioEndpointChoice("Auto-detect DualSense speaker", string.Empty),
+                };
+
+                try
+                {
+                    using var enumerator = new MMDeviceEnumerator();
+                    foreach (MMDevice endpoint in enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active))
+                    {
+                        if (DualSenseAudioPassthrough.IsDualSenseEndpoint(endpoint))
+                        {
+                            choices.Add(new AudioEndpointChoice(endpoint.FriendlyName, endpoint.ID));
+                        }
+                    }
+                }
+                catch { }
+
+                string savedEndpointId = DualSenseAudioSpeakerEndpointId;
+                if (!string.IsNullOrEmpty(savedEndpointId) && !choices.Exists(item => item.EndpointId == savedEndpointId))
+                {
+                    choices.Add(new AudioEndpointChoice("Saved speaker endpoint (not currently available)", savedEndpointId));
+                }
+
+                return choices;
+            }
+        }
+
+        public string DualSenseAudioSpeakerEndpointId
+        {
+            get => Global.DualSenseAudioSpeakerEndpointId[device];
+            set => Global.DualSenseAudioSpeakerEndpointId[device] = value ?? string.Empty;
+        }
+
+        public bool DualSenseEnableMicrophonePassthrough
+        {
+            get => Global.DualSenseEnableMicrophonePassthrough[device];
+            set => Global.DualSenseEnableMicrophonePassthrough[device] = value;
+        }
+
+        public List<AudioEndpointChoice> MicrophoneCaptureEndpointChoices
+        {
+            get
+            {
+                var choices = new List<AudioEndpointChoice>()
+                {
+                    new AudioEndpointChoice("Auto-detect DualSense microphone", string.Empty),
+                };
+
+                try
+                {
+                    using var enumerator = new MMDeviceEnumerator();
+                    foreach (MMDevice endpoint in enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active))
+                    {
+                        if (DualSenseAudioPassthrough.IsDualSenseEndpoint(endpoint))
+                        {
+                            choices.Add(new AudioEndpointChoice(endpoint.FriendlyName, endpoint.ID));
+                        }
+                    }
+                }
+                catch { }
+
+                string savedEndpointId = DualSenseMicrophoneCaptureEndpointId;
+                if (!string.IsNullOrEmpty(savedEndpointId) && !choices.Exists(item => item.EndpointId == savedEndpointId))
+                {
+                    choices.Add(new AudioEndpointChoice("Saved microphone endpoint (not currently available)", savedEndpointId));
+                }
+
+                return choices;
+            }
+        }
+
+        public string DualSenseMicrophoneCaptureEndpointId
+        {
+            get => Global.DualSenseMicrophoneCaptureEndpointId[device];
+            set => Global.DualSenseMicrophoneCaptureEndpointId[device] = value ?? string.Empty;
+        }
+
+        public List<AudioEndpointChoice> MicrophoneOutputEndpointChoices
+        {
+            get
+            {
+                var choices = new List<AudioEndpointChoice>()
+                {
+                    new AudioEndpointChoice("Select virtual audio device", string.Empty),
+                };
+
+                try
+                {
+                    using var enumerator = new MMDeviceEnumerator();
+                    foreach (MMDevice endpoint in enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active))
+                    {
+                        if (!DualSenseAudioPassthrough.IsDualSenseEndpoint(endpoint))
+                        {
+                            choices.Add(new AudioEndpointChoice(endpoint.FriendlyName, endpoint.ID));
+                        }
+                    }
+                }
+                catch { }
+
+                string savedEndpointId = DualSenseMicrophoneOutputEndpointId;
+                if (!string.IsNullOrEmpty(savedEndpointId) && !choices.Exists(item => item.EndpointId == savedEndpointId))
+                {
+                    choices.Add(new AudioEndpointChoice("Saved virtual audio device (not currently available)", savedEndpointId));
+                }
+
+                return choices;
+            }
+        }
+
+        public string DualSenseMicrophoneOutputEndpointId
+        {
+            get => Global.DualSenseMicrophoneOutputEndpointId[device];
+            set => Global.DualSenseMicrophoneOutputEndpointId[device] = value ?? string.Empty;
         }
 
         public int DualSenseSpeakerVolume

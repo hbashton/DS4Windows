@@ -2559,6 +2559,30 @@ namespace DS4Windows
             get => m_Config.dualSenseAudioCaptureEndpointId;
             set => m_Config.dualSenseAudioCaptureEndpointId = value;
         }
+
+        public static string[] DualSenseAudioSpeakerEndpointId
+        {
+            get => m_Config.dualSenseAudioSpeakerEndpointId;
+            set => m_Config.dualSenseAudioSpeakerEndpointId = value;
+        }
+
+        public static bool[] DualSenseEnableMicrophonePassthrough
+        {
+            get => m_Config.dualSenseEnableMicrophonePassthrough;
+            set => m_Config.dualSenseEnableMicrophonePassthrough = value;
+        }
+
+        public static string[] DualSenseMicrophoneCaptureEndpointId
+        {
+            get => m_Config.dualSenseMicrophoneCaptureEndpointId;
+            set => m_Config.dualSenseMicrophoneCaptureEndpointId = value;
+        }
+
+        public static string[] DualSenseMicrophoneOutputEndpointId
+        {
+            get => m_Config.dualSenseMicrophoneOutputEndpointId;
+            set => m_Config.dualSenseMicrophoneOutputEndpointId = value;
+        }
         //
         // End of DualSense specific profile settings
 
@@ -3690,6 +3714,10 @@ namespace DS4Windows
         public byte[] dualSenseHeadphoneVolume = new byte[Global.TEST_PROFILE_ITEM_COUNT] { 128, 128, 128, 128, 128, 128, 128, 128, 128 };
         public byte[] dualSenseMicrophoneVolume = new byte[Global.TEST_PROFILE_ITEM_COUNT] { 128, 128, 128, 128, 128, 128, 128, 128, 128 };
         public string[] dualSenseAudioCaptureEndpointId = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
+        public string[] dualSenseAudioSpeakerEndpointId = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
+        public bool[] dualSenseEnableMicrophonePassthrough = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
+        public string[] dualSenseMicrophoneCaptureEndpointId = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
+        public string[] dualSenseMicrophoneOutputEndpointId = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
         //
         // End of DualSense specific profile options
 
@@ -4844,6 +4872,10 @@ namespace DS4Windows
                 XmlNode xmlDSHeadphoneVolumeElement = m_Xdoc.CreateNode(XmlNodeType.Element, "HeadphoneVolume", null); xmlDSHeadphoneVolumeElement.InnerText = dualSenseHeadphoneVolume[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSHeadphoneVolumeElement);
                 XmlNode xmlDSMicrophoneVolumeElement = m_Xdoc.CreateNode(XmlNodeType.Element, "MicrophoneVolume", null); xmlDSMicrophoneVolumeElement.InnerText = dualSenseMicrophoneVolume[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSMicrophoneVolumeElement);
                 XmlNode xmlDSAudioCaptureEndpointElement = m_Xdoc.CreateNode(XmlNodeType.Element, "CaptureEndpointId", null); xmlDSAudioCaptureEndpointElement.InnerText = dualSenseAudioCaptureEndpointId[device]; xmlDSAudioGroupElement.AppendChild(xmlDSAudioCaptureEndpointElement);
+                XmlNode xmlDSAudioSpeakerEndpointElement = m_Xdoc.CreateNode(XmlNodeType.Element, "SpeakerEndpointId", null); xmlDSAudioSpeakerEndpointElement.InnerText = dualSenseAudioSpeakerEndpointId[device]; xmlDSAudioGroupElement.AppendChild(xmlDSAudioSpeakerEndpointElement);
+                XmlNode xmlDSEnableMicPassthroughElement = m_Xdoc.CreateNode(XmlNodeType.Element, "EnableMicrophonePassthrough", null); xmlDSEnableMicPassthroughElement.InnerText = dualSenseEnableMicrophonePassthrough[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSEnableMicPassthroughElement);
+                XmlNode xmlDSMicCaptureEndpointElement = m_Xdoc.CreateNode(XmlNodeType.Element, "MicrophoneCaptureEndpointId", null); xmlDSMicCaptureEndpointElement.InnerText = dualSenseMicrophoneCaptureEndpointId[device]; xmlDSAudioGroupElement.AppendChild(xmlDSMicCaptureEndpointElement);
+                XmlNode xmlDSMicOutputEndpointElement = m_Xdoc.CreateNode(XmlNodeType.Element, "MicrophoneOutputEndpointId", null); xmlDSMicOutputEndpointElement.InnerText = dualSenseMicrophoneOutputEndpointId[device]; xmlDSAudioGroupElement.AppendChild(xmlDSMicOutputEndpointElement);
                 rootElement.AppendChild(xmlDualSenseControllerSettingsElement);
                 //
                 // End of DualSense specific settings
@@ -7226,6 +7258,35 @@ namespace DS4Windows
                         {
                             Item = xmlDSAudioGroupElement.SelectSingleNode("CaptureEndpointId");
                             dualSenseAudioCaptureEndpointId[device] = Item?.InnerText ?? string.Empty;
+                        }
+                        catch { missingSetting = true; }
+
+                        try
+                        {
+                            Item = xmlDSAudioGroupElement.SelectSingleNode("SpeakerEndpointId");
+                            dualSenseAudioSpeakerEndpointId[device] = Item?.InnerText ?? string.Empty;
+                        }
+                        catch { missingSetting = true; }
+
+                        try
+                        {
+                            Item = xmlDSAudioGroupElement.SelectSingleNode("EnableMicrophonePassthrough");
+                            bool.TryParse(Item?.InnerText, out bool temp);
+                            dualSenseEnableMicrophonePassthrough[device] = temp;
+                        }
+                        catch { missingSetting = true; }
+
+                        try
+                        {
+                            Item = xmlDSAudioGroupElement.SelectSingleNode("MicrophoneCaptureEndpointId");
+                            dualSenseMicrophoneCaptureEndpointId[device] = Item?.InnerText ?? string.Empty;
+                        }
+                        catch { missingSetting = true; }
+
+                        try
+                        {
+                            Item = xmlDSAudioGroupElement.SelectSingleNode("MicrophoneOutputEndpointId");
+                            dualSenseMicrophoneOutputEndpointId[device] = Item?.InnerText ?? string.Empty;
                         }
                         catch { missingSetting = true; }
                     }

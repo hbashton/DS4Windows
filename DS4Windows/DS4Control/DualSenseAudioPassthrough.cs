@@ -15,7 +15,8 @@ namespace DS4Windows
         private WaveFormat captureFormat;
         private string captureEndpointId = string.Empty;
 
-        public void Start(int slot, byte speakerVolume, string requestedCaptureEndpointId)
+        public void Start(int slot, byte speakerVolume, string requestedCaptureEndpointId,
+            string requestedSpeakerEndpointId)
         {
             if (slot < 0 || slot >= slots.Length)
             {
@@ -25,7 +26,8 @@ namespace DS4Windows
             lock (syncRoot)
             {
                 requestedCaptureEndpointId ??= string.Empty;
-                MMDevice endpoint = FindControllerEndpoint(slot);
+                requestedSpeakerEndpointId ??= string.Empty;
+                MMDevice endpoint = FindControllerEndpoint(slot, requestedSpeakerEndpointId);
                 if (endpoint == null)
                 {
                     AppLogger.LogToGui("DualSense audio passthrough could not find a controller speaker endpoint.", true);
@@ -36,7 +38,7 @@ namespace DS4Windows
                 if (slots[slot] != null && string.Equals(slots[slot].EndpointId, endpoint.ID, StringComparison.Ordinal))
                 {
                     slots[slot].SpeakerVolume = speakerVolume;
-                    EnsureCaptureStarted(requestedCaptureEndpointId);
+                    EnsureCaptureStarted(requestedCaptureEndpointId, endpoint.ID);
                     return;
                 }
 
@@ -56,7 +58,7 @@ namespace DS4Windows
                     output.Play();
 
                     slots[slot] = new SlotPlayback(endpoint.ID, output, provider, outputFormat, speakerVolume);
-                    EnsureCaptureStarted(requestedCaptureEndpointId);
+                    EnsureCaptureStarted(requestedCaptureEndpointId, endpoint.ID);
                     AppLogger.LogToGui($"DualSense audio passthrough started for controller {slot + 1}: {endpoint.FriendlyName}", false);
                 }
                 catch (Exception ex)
@@ -101,9 +103,10 @@ namespace DS4Windows
             }
         }
 
-        private void EnsureCaptureStarted(string requestedCaptureEndpointId)
+        private void EnsureCaptureStarted(string requestedCaptureEndpointId, string speakerEndpointId)
         {
             requestedCaptureEndpointId ??= string.Empty;
+            speakerEndpointId ??= string.Empty;
 
             if (capture != null && string.Equals(captureEndpointId, requestedCaptureEndpointId, StringComparison.Ordinal))
             {
@@ -112,7 +115,13 @@ namespace DS4Windows
 
             StopCapture();
 
-            MMDevice sourceEndpoint = FindCaptureEndpoint(requestedCaptureEndpointId);
+            MMDevice sourceEndpoint = FindCaptureEndpoint(requestedCaptureEndpointId, speakerEndpointId);
+            if (sourceEndpoint == null && string.IsNullOrEmpty(requestedCaptureEndpointId) && DefaultEndpointMatches(speakerEndpointId))
+            {
+                AppLogger.LogToGui("DualSense audio passthrough cannot capture from the same endpoint it is playing to.", true);
+                return;
+            }
+
             capture = sourceEndpoint != null ? new WasapiLoopbackCapture(sourceEndpoint) : new WasapiLoopbackCapture();
             captureEndpointId = requestedCaptureEndpointId;
             captureFormat = capture.WaveFormat;
@@ -160,13 +169,12 @@ namespace DS4Windows
         {
             lock (syncRoot)
             {
-                if (captureFormat == null || captureFormat.Encoding != WaveFormatEncoding.IeeeFloat ||
-                    captureFormat.BitsPerSample != 32 || captureFormat.Channels < 1)
+                if (captureFormat == null || captureFormat.Channels < 1)
                 {
                     return;
                 }
 
-                int frames = e.BytesRecorded / (sizeof(float) * captureFormat.Channels);
+                int frames = e.BytesRecorded / captureFormat.BlockAlign;
                 if (frames <= 0)
                 {
                     return;
@@ -179,7 +187,7 @@ namespace DS4Windows
             }
         }
 
-        private MMDevice FindControllerEndpoint(int slot)
+        private MMDevice FindControllerEndpoint(int slot, string requestedSpeakerEndpointId)
         {
             HashSet<string> usedIds = slots
                 .Where((item, index) => item != null && index != slot)
@@ -187,12 +195,28 @@ namespace DS4Windows
                 .ToHashSet(StringComparer.Ordinal);
 
             using var enumerator = new MMDeviceEnumerator();
+            if (!string.IsNullOrEmpty(requestedSpeakerEndpointId))
+            {
+                try
+                {
+                    MMDevice requested = enumerator.GetDevice(requestedSpeakerEndpointId);
+                    if (requested.State == DeviceState.Active && !usedIds.Contains(requested.ID))
+                    {
+                        return requested;
+                    }
+                }
+                catch
+                {
+                    AppLogger.LogToGui("Selected DualSense speaker endpoint was not found. Falling back to auto-detect.", true);
+                }
+            }
+
             return enumerator
                 .EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active)
                 .FirstOrDefault(device => !usedIds.Contains(device.ID) && IsDualSenseEndpoint(device));
         }
 
-        private static MMDevice FindCaptureEndpoint(string endpointId)
+        private static MMDevice FindCaptureEndpoint(string endpointId, string speakerEndpointId)
         {
             if (string.IsNullOrEmpty(endpointId))
             {
@@ -203,7 +227,18 @@ namespace DS4Windows
             {
                 using var enumerator = new MMDeviceEnumerator();
                 MMDevice endpoint = enumerator.GetDevice(endpointId);
-                return endpoint?.State == DeviceState.Active ? endpoint : null;
+                if (endpoint?.State != DeviceState.Active)
+                {
+                    return null;
+                }
+
+                if (string.Equals(endpoint.ID, speakerEndpointId, StringComparison.Ordinal))
+                {
+                    AppLogger.LogToGui("DualSense audio passthrough capture source cannot be the same as the speaker endpoint. Falling back to default audio endpoint.", true);
+                    return null;
+                }
+
+                return endpoint;
             }
             catch
             {
@@ -212,7 +247,26 @@ namespace DS4Windows
             }
         }
 
-        private static bool IsDualSenseEndpoint(MMDevice device)
+        private static bool DefaultEndpointMatches(string endpointId)
+        {
+            if (string.IsNullOrEmpty(endpointId))
+            {
+                return false;
+            }
+
+            try
+            {
+                using var enumerator = new MMDeviceEnumerator();
+                MMDevice endpoint = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+                return string.Equals(endpoint?.ID, endpointId, StringComparison.Ordinal);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public static bool IsDualSenseEndpoint(MMDevice device)
         {
             string friendly = device.FriendlyName ?? string.Empty;
             string deviceFriendly = device.DeviceFriendlyName ?? string.Empty;
@@ -253,28 +307,99 @@ namespace DS4Windows
                 for (int frame = 0; frame < framesToWrite; frame++)
                 {
                     int captureOffset = frame * captureFormat.BlockAlign;
-                    float left = BitConverter.ToSingle(captureBuffer, captureOffset);
+                    float left = ReadSample(captureBuffer, captureOffset, captureFormat);
                     float right = captureFormat.Channels > 1 ?
-                        BitConverter.ToSingle(captureBuffer, captureOffset + sizeof(float)) : left;
+                        ReadSample(captureBuffer, captureOffset + BytesPerSample(captureFormat), captureFormat) : left;
                     float mono = Math.Clamp((left + right) * 0.5f * volume, -1.0f, 1.0f);
 
                     int outputOffset = frame * outputFormat.BlockAlign;
-                    if (outputFormat.Encoding == WaveFormatEncoding.IeeeFloat && outputFormat.BitsPerSample == 32)
-                    {
-                        int speakerChannel = outputFormat.Channels >= 4 ? 1 : 0;
-                        Buffer.BlockCopy(BitConverter.GetBytes(mono), 0,
-                            outputBuffer, outputOffset + speakerChannel * sizeof(float), sizeof(float));
-                    }
-                    else if (outputFormat.Encoding == WaveFormatEncoding.Pcm && outputFormat.BitsPerSample == 16)
-                    {
-                        short sample = (short)Math.Clamp(mono * short.MaxValue, short.MinValue, short.MaxValue);
-                        int speakerChannel = outputFormat.Channels >= 4 ? 1 : 0;
-                        Buffer.BlockCopy(BitConverter.GetBytes(sample), 0,
-                            outputBuffer, outputOffset + speakerChannel * sizeof(short), sizeof(short));
-                    }
+                    int speakerChannel = outputFormat.Channels >= 4 ? 1 : 0;
+                    WriteSample(outputBuffer, outputOffset + speakerChannel * BytesPerSample(outputFormat),
+                        outputFormat, mono);
                 }
 
                 provider.AddSamples(outputBuffer, 0, framesToWrite * outputFormat.BlockAlign);
+            }
+
+            private static int BytesPerSample(WaveFormat format)
+            {
+                return Math.Max(1, format.BitsPerSample / 8);
+            }
+
+            private static float ReadSample(byte[] buffer, int offset, WaveFormat format)
+            {
+                if (offset < 0 || offset + BytesPerSample(format) > buffer.Length)
+                {
+                    return 0.0f;
+                }
+
+                if (format.Encoding == WaveFormatEncoding.IeeeFloat)
+                {
+                    if (format.BitsPerSample == 32)
+                    {
+                        return Math.Clamp(BitConverter.ToSingle(buffer, offset), -1.0f, 1.0f);
+                    }
+
+                    if (format.BitsPerSample == 64)
+                    {
+                        return Math.Clamp((float)BitConverter.ToDouble(buffer, offset), -1.0f, 1.0f);
+                    }
+                }
+
+                if (format.Encoding != WaveFormatEncoding.Pcm)
+                {
+                    return 0.0f;
+                }
+
+                return format.BitsPerSample switch
+                {
+                    16 => BitConverter.ToInt16(buffer, offset) / 32768.0f,
+                    24 => ReadInt24(buffer, offset) / 8388608.0f,
+                    32 => BitConverter.ToInt32(buffer, offset) / 2147483648.0f,
+                    _ => 0.0f,
+                };
+            }
+
+            private static int ReadInt24(byte[] buffer, int offset)
+            {
+                int sample = buffer[offset] | (buffer[offset + 1] << 8) | (buffer[offset + 2] << 16);
+                if ((sample & 0x800000) != 0)
+                {
+                    sample |= unchecked((int)0xFF000000);
+                }
+
+                return sample;
+            }
+
+            private static void WriteSample(byte[] buffer, int offset, WaveFormat format, float value)
+            {
+                if (offset < 0 || offset + BytesPerSample(format) > buffer.Length)
+                {
+                    return;
+                }
+
+                value = Math.Clamp(value, -1.0f, 1.0f);
+                if (format.Encoding == WaveFormatEncoding.IeeeFloat && format.BitsPerSample == 32)
+                {
+                    Buffer.BlockCopy(BitConverter.GetBytes(value), 0, buffer, offset, sizeof(float));
+                }
+                else if (format.Encoding == WaveFormatEncoding.Pcm && format.BitsPerSample == 16)
+                {
+                    short sample = (short)Math.Clamp(value * short.MaxValue, (float)short.MinValue, short.MaxValue);
+                    Buffer.BlockCopy(BitConverter.GetBytes(sample), 0, buffer, offset, sizeof(short));
+                }
+                else if (format.Encoding == WaveFormatEncoding.Pcm && format.BitsPerSample == 24)
+                {
+                    int sample = (int)Math.Clamp(value * 8388607.0f, -8388608.0f, 8388607.0f);
+                    buffer[offset] = (byte)(sample & 0xFF);
+                    buffer[offset + 1] = (byte)((sample >> 8) & 0xFF);
+                    buffer[offset + 2] = (byte)((sample >> 16) & 0xFF);
+                }
+                else if (format.Encoding == WaveFormatEncoding.Pcm && format.BitsPerSample == 32)
+                {
+                    int sample = (int)Math.Clamp(value * int.MaxValue, (float)int.MinValue, int.MaxValue);
+                    Buffer.BlockCopy(BitConverter.GetBytes(sample), 0, buffer, offset, sizeof(int));
+                }
             }
 
             public void Dispose()

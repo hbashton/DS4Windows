@@ -2553,6 +2553,12 @@ namespace DS4Windows
             get => m_Config.dualSenseMicrophoneVolume;
             set => m_Config.dualSenseMicrophoneVolume = value;
         }
+
+        public static string[] DualSenseAudioCaptureEndpointId
+        {
+            get => m_Config.dualSenseAudioCaptureEndpointId;
+            set => m_Config.dualSenseAudioCaptureEndpointId = value;
+        }
         //
         // End of DualSense specific profile settings
 
@@ -3683,6 +3689,7 @@ namespace DS4Windows
         public byte[] dualSenseSpeakerVolume = new byte[Global.TEST_PROFILE_ITEM_COUNT] { 128, 128, 128, 128, 128, 128, 128, 128, 128 };
         public byte[] dualSenseHeadphoneVolume = new byte[Global.TEST_PROFILE_ITEM_COUNT] { 128, 128, 128, 128, 128, 128, 128, 128, 128 };
         public byte[] dualSenseMicrophoneVolume = new byte[Global.TEST_PROFILE_ITEM_COUNT] { 128, 128, 128, 128, 128, 128, 128, 128, 128 };
+        public string[] dualSenseAudioCaptureEndpointId = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
         //
         // End of DualSense specific profile options
 
@@ -4836,6 +4843,7 @@ namespace DS4Windows
                 XmlNode xmlDSSpeakerVolumeElement = m_Xdoc.CreateNode(XmlNodeType.Element, "SpeakerVolume", null); xmlDSSpeakerVolumeElement.InnerText = dualSenseSpeakerVolume[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSSpeakerVolumeElement);
                 XmlNode xmlDSHeadphoneVolumeElement = m_Xdoc.CreateNode(XmlNodeType.Element, "HeadphoneVolume", null); xmlDSHeadphoneVolumeElement.InnerText = dualSenseHeadphoneVolume[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSHeadphoneVolumeElement);
                 XmlNode xmlDSMicrophoneVolumeElement = m_Xdoc.CreateNode(XmlNodeType.Element, "MicrophoneVolume", null); xmlDSMicrophoneVolumeElement.InnerText = dualSenseMicrophoneVolume[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSMicrophoneVolumeElement);
+                XmlNode xmlDSAudioCaptureEndpointElement = m_Xdoc.CreateNode(XmlNodeType.Element, "CaptureEndpointId", null); xmlDSAudioCaptureEndpointElement.InnerText = dualSenseAudioCaptureEndpointId[device]; xmlDSAudioGroupElement.AppendChild(xmlDSAudioCaptureEndpointElement);
                 rootElement.AppendChild(xmlDualSenseControllerSettingsElement);
                 //
                 // End of DualSense specific settings
@@ -7211,6 +7219,13 @@ namespace DS4Windows
                             Item = xmlDSAudioGroupElement.SelectSingleNode("MicrophoneVolume");
                             byte.TryParse(Item.InnerText, out byte temp);
                             dualSenseMicrophoneVolume[device] = temp;
+                        }
+                        catch { missingSetting = true; }
+
+                        try
+                        {
+                            Item = xmlDSAudioGroupElement.SelectSingleNode("CaptureEndpointId");
+                            dualSenseAudioCaptureEndpointId[device] = Item?.InnerText ?? string.Empty;
                         }
                         catch { missingSetting = true; }
                     }

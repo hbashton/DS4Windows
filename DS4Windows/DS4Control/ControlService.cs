@@ -39,6 +39,7 @@ namespace DS4Windows
     public class ControlService
     {
         public ViGEmClient vigemTestClient = null;
+        private readonly DualSenseAudioPassthrough dualSenseAudioPassthrough = new DualSenseAudioPassthrough();
         // Might be useful for ScpVBus build
         public const int EXPANDED_CONTROLLER_COUNT = 8;
         public const int MAX_DS4_CONTROLLER_COUNT = Global.MAX_DS4_CONTROLLER_COUNT;
@@ -1866,6 +1867,7 @@ namespace DS4Windows
                 if (showlog)
                     LogDebug(DS4WinWPF.Properties.Resources.StoppingDS4);
 
+                dualSenseAudioPassthrough.Dispose();
                 DS4Devices.stopControllers();
                 slotManager.ClearControllerList();
 
@@ -2247,6 +2249,20 @@ namespace DS4Windows
                 dualsense.SpeakerVolume = DualSenseSpeakerVolume[ind];
                 dualsense.HeadphoneVolume = DualSenseHeadphoneVolume[ind];
                 dualsense.MicrophoneVolume = DualSenseMicrophoneVolume[ind];
+
+                if (DualSenseEnableSpeakerOutput[ind])
+                {
+                    dualSenseAudioPassthrough.Start(ind, DualSenseSpeakerVolume[ind],
+                        DualSenseAudioCaptureEndpointId[ind]);
+                }
+                else
+                {
+                    dualSenseAudioPassthrough.Stop(ind);
+                }
+            }
+            else
+            {
+                dualSenseAudioPassthrough.Stop(ind);
             }
 
             if (!startUp)
@@ -2558,6 +2574,7 @@ namespace DS4Windows
 
                     LogDebug(removed);
                     AppLogger.LogToTray(removed);
+                    dualSenseAudioPassthrough.Stop(ind);
                     /*Stopwatch sw = new Stopwatch();
                     sw.Start();
                     while (sw.ElapsedMilliseconds < XINPUT_UNPLUG_SETTLE_TIME)

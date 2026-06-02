@@ -31,6 +31,7 @@ using DS4Windows;
 using DS4Windows.StickModifiers;
 using DS4WinWPF.DS4Forms.ViewModels.Util;
 using DS4Windows.InputDevices;
+using NAudio.CoreAudioApi;
 
 namespace DS4WinWPF.DS4Forms.ViewModels
 {
@@ -3040,6 +3041,41 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             set => Global.DualSenseEnableSpeakerOutput[device] = value;
         }
 
+        public List<AudioEndpointChoice> AudioCaptureEndpointChoices
+        {
+            get
+            {
+                var choices = new List<AudioEndpointChoice>()
+                {
+                    new AudioEndpointChoice("Default audio endpoint", string.Empty),
+                };
+
+                try
+                {
+                    using var enumerator = new MMDeviceEnumerator();
+                    foreach (MMDevice endpoint in enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active))
+                    {
+                        choices.Add(new AudioEndpointChoice(endpoint.FriendlyName, endpoint.ID));
+                    }
+                }
+                catch { }
+
+                string savedEndpointId = DualSenseAudioCaptureEndpointId;
+                if (!string.IsNullOrEmpty(savedEndpointId) && !choices.Exists(item => item.EndpointId == savedEndpointId))
+                {
+                    choices.Add(new AudioEndpointChoice("Saved endpoint (not currently available)", savedEndpointId));
+                }
+
+                return choices;
+            }
+        }
+
+        public string DualSenseAudioCaptureEndpointId
+        {
+            get => Global.DualSenseAudioCaptureEndpointId[device];
+            set => Global.DualSenseAudioCaptureEndpointId[device] = value ?? string.Empty;
+        }
+
         public int DualSenseSpeakerVolume
         {
             get => Global.DualSenseSpeakerVolume[device];
@@ -4318,6 +4354,18 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         {
             this.displayName = name;
             this.mode = mode;
+        }
+    }
+
+    public class AudioEndpointChoice
+    {
+        public string Name { get; }
+        public string EndpointId { get; }
+
+        public AudioEndpointChoice(string name, string endpointId)
+        {
+            Name = name;
+            EndpointId = endpointId;
         }
     }
 }

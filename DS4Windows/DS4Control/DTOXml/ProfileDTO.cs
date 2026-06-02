@@ -1756,6 +1756,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
                     SpeakerVolume = source.dualSenseSpeakerVolume[deviceIndex],
                     HeadphoneVolume = source.dualSenseHeadphoneVolume[deviceIndex],
                     MicrophoneVolume = source.dualSenseMicrophoneVolume[deviceIndex],
+                    CaptureEndpointId = source.dualSenseAudioCaptureEndpointId[deviceIndex],
                 },
             };
 
@@ -2378,6 +2379,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
                     destination.dualSenseSpeakerVolume[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.SpeakerVolume;
                     destination.dualSenseHeadphoneVolume[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.HeadphoneVolume;
                     destination.dualSenseMicrophoneVolume[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.MicrophoneVolume;
+                    destination.dualSenseAudioCaptureEndpointId[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.CaptureEndpointId ?? string.Empty;
                 }
             }
 
@@ -3181,6 +3183,12 @@ namespace DS4WinWPF.DS4Control.DTOXml
             {
                 get; set;
             } = 128;
+
+            [XmlElement("CaptureEndpointId")]
+            public string CaptureEndpointId
+            {
+                get; set;
+            } = string.Empty;
         }
 
         [XmlElement("AudioSettings")]

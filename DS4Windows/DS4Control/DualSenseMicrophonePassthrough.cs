@@ -159,9 +159,24 @@ namespace DS4Windows
                 }
             }
 
-            return enumerator
+            MMDevice autoEndpoint = enumerator
                 .EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active)
                 .FirstOrDefault(DualSenseAudioPassthrough.IsDualSenseEndpoint);
+
+            if (autoEndpoint == null)
+            {
+                string endpointNames = string.Join(", ", enumerator
+                    .EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active)
+                    .Select(endpoint => endpoint.FriendlyName));
+
+                AppLogger.LogToGui(
+                    string.IsNullOrEmpty(endpointNames) ?
+                        "No active Windows recording endpoints were found for DualSense microphone passthrough." :
+                        $"DualSense microphone auto-detect failed. Active recording endpoints: {endpointNames}",
+                    true);
+            }
+
+            return autoEndpoint;
         }
 
         private static MMDevice FindRenderEndpoint(string endpointId)

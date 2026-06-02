@@ -3095,10 +3095,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     using var enumerator = new MMDeviceEnumerator();
                     foreach (MMDevice endpoint in enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active))
                     {
-                        if (DualSenseAudioPassthrough.IsDualSenseEndpoint(endpoint))
-                        {
-                            choices.Add(new AudioEndpointChoice(endpoint.FriendlyName, endpoint.ID));
-                        }
+                        choices.Add(new AudioEndpointChoice(endpoint.FriendlyName, endpoint.ID));
                     }
                 }
                 catch { }
@@ -3139,10 +3136,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     using var enumerator = new MMDeviceEnumerator();
                     foreach (MMDevice endpoint in enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active))
                     {
-                        if (DualSenseAudioPassthrough.IsDualSenseEndpoint(endpoint))
-                        {
-                            choices.Add(new AudioEndpointChoice(endpoint.FriendlyName, endpoint.ID));
-                        }
+                        choices.Add(new AudioEndpointChoice(endpoint.FriendlyName, endpoint.ID));
                     }
                 }
                 catch { }

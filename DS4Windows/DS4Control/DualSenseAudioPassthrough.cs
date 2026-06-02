@@ -211,9 +211,25 @@ namespace DS4Windows
                 }
             }
 
-            return enumerator
+            MMDevice autoEndpoint = enumerator
                 .EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active)
                 .FirstOrDefault(device => !usedIds.Contains(device.ID) && IsDualSenseEndpoint(device));
+
+            if (autoEndpoint == null)
+            {
+                string endpointNames = string.Join(", ", enumerator
+                    .EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active)
+                    .Where(device => !usedIds.Contains(device.ID))
+                    .Select(endpoint => endpoint.FriendlyName));
+
+                AppLogger.LogToGui(
+                    string.IsNullOrEmpty(endpointNames) ?
+                        "No active Windows playback endpoints were found for DualSense speaker passthrough." :
+                        $"DualSense speaker auto-detect failed. Active playback endpoints: {endpointNames}",
+                    true);
+            }
+
+            return autoEndpoint;
         }
 
         private static MMDevice FindCaptureEndpoint(string endpointId, string speakerEndpointId)

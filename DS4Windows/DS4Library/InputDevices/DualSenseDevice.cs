@@ -215,14 +215,14 @@ namespace DS4Windows.InputDevices
 
             private byte BuildTwoPositionMask(byte start, int maxEnd)
             {
-                int startPos = Math.Min(start, 8);
+                int startPos = Math.Min((int)start, 8);
                 int endPos = Math.Min(startPos + 2, maxEnd);
                 return (byte)((1 << startPos) | (1 << endPos));
             }
 
             private byte BuildGunPositionMask(byte start)
             {
-                int startPos = Math.Max(2, Math.Min(start, 7));
+                int startPos = Math.Max(2, Math.Min((int)start, 7));
                 int endPos = Math.Max(startPos + 1, Math.Min(startPos + 1, 8));
                 return (byte)((1 << startPos) | (1 << endPos));
             }

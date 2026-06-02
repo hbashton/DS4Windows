@@ -7263,7 +7263,7 @@ namespace DS4Windows
                     Item = m_Xdoc.SelectSingleNode("/" + rootname + "/L2TriggerEffectStart");
                     if (byte.TryParse(Item?.InnerText, out byte temp))
                     {
-                        l2OutputSettings[device].effectSettings.startValue = (byte)Math.Clamp(temp, 0, 9);
+                        l2OutputSettings[device].effectSettings.startValue = (byte)Math.Clamp((int)temp, 0, 9);
                     }
                 }
                 catch { }
@@ -7298,7 +7298,7 @@ namespace DS4Windows
                     Item = m_Xdoc.SelectSingleNode("/" + rootname + "/R2TriggerEffectStart");
                     if (byte.TryParse(Item?.InnerText, out byte temp))
                     {
-                        r2OutputSettings[device].effectSettings.startValue = (byte)Math.Clamp(temp, 0, 9);
+                        r2OutputSettings[device].effectSettings.startValue = (byte)Math.Clamp((int)temp, 0, 9);
                     }
                 }
                 catch { }

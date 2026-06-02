@@ -85,7 +85,7 @@
 		<PackageReference Include="NLog" Version="5.1.1" />
 		<!--<PackageReference Include="Nefarius.ViGEm.Client" Version="1.21.230" />-->
 		<PackageReference Include="Ookii.Dialogs.Wpf" Version="5.0.1" />
-		<PackageReference Include="System.Management" Version="7.0.2" />
+		<PackageReference Include="System.Management" Version="10.0.8" />
 		<PackageReference Include="System.Memory" Version="4.5.5" />
 		<PackageReference Include="TaskScheduler" Version="2.10.1" />
 		<PackageReference Include="WPFLocalizeExtension" Version="3.9.4" />

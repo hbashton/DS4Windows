@@ -1,0 +1,203 @@
+﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:local="clr-namespace:DS4WinWPF.DS4Forms.Themes" xmlns:system="clr-namespace:System;assembly=mscorlib">
+    <!-- Brushes -->
+    <SolidColorBrush x:Key="ForegroundColor" Color="{x:Static SystemColors.ActiveCaptionTextColor}" />
+    <SolidColorBrush x:Key="SecondaryColor" Color="{x:Static SystemColors.ControlColor}"  />
+    <SolidColorBrush x:Key="AccentColor" Color="#FF0066CC" />
+    <SolidColorBrush x:Key="BorderColor" Color="#FFC8C8C8" />
+    <SolidColorBrush x:Key="BackgroundColor" Color="{x:Static SystemColors.WindowColor}"/>
+
+    <system:String x:Key="KeyImageImg">key-solid.png</system:String>
+    <system:String x:Key="CancelImg">cancel.png</system:String>
+    <system:String x:Key="CheckedImg">checked.png</system:String>
+    <system:String x:Key="BtImg">BT.png</system:String>
+    <system:String x:Key="UsbImg">USB.png</system:String>
+    <system:String x:Key="KeyUpImg">keyup.png</system:String>
+    <system:String x:Key="KeyDownImg">keydown.png</system:String>
+    <system:String x:Key="ClockImg">clock.png</system:String>
+    <system:String x:Key="DS4ConfigImg">DS4 Config.png</system:String>
+
+    <system:String x:Key="CopyImg">copy.png</system:String>
+    <system:String x:Key="DeleteImg">delete.png</system:String>
+    <system:String x:Key="EditImg">edit.png</system:String>
+    <system:String x:Key="ExportImg">export.png</system:String>
+    <system:String x:Key="ImportImg">import.png</system:String>
+    <system:String x:Key="NewProfileImg">newprofile.png</system:String>
+
+    <system:String x:Key="GitHubImg">GitHub-Mark-64px.png</system:String>
+
+    <Style TargetType="FlowDocument" x:Key="DocumentStyleGithubLike">
+        <Setter Property="FontFamily"    Value="Calibri" />
+        <Setter Property="TextAlignment" Value="Left" />
+        <Setter Property="PagePadding"   Value="0"/>
+        <Setter Property="FontSize"      Value="14"/>
+
+        <Style.Resources>
+            <Style TargetType="Section">
+                <Style.Triggers>
+                    <Trigger Property="Tag" Value="Blockquote">
+                        <Setter Property="Padding"         Value="10, 5"/>
+                        <Setter Property="BorderBrush"     Value="#DEDEDE"/>
+                        <Setter Property="BorderThickness" Value="5,0,0,0"/>
+                    </Trigger>
+                </Style.Triggers>
+            </Style>
+
+            <Style TargetType="avalonEdit:TextEditor" xmlns:avalonEdit="http://icsharpcode.net/sharpdevelop/avalonedit">
+                <Setter Property="Background"                    Value="#EEEEEE"/>
+                <Setter Property="HorizontalScrollBarVisibility" Value="Auto"/>
+                <Setter Property="VerticalScrollBarVisibility"   Value="Auto"/>
+                <Setter Property="Margin"                        Value="2,0,2,0"/>
+                <Setter Property="Padding"                       Value="3"/>
+            </Style>
+
+            <Style TargetType="Paragraph">
+                <Setter Property="Margin" Value="0, 7, 0, 0"/>
+
+                <Style.Triggers>
+                    <Trigger Property="Tag" Value="Heading1">
+                        <Setter Property="Margin" Value="0, 0, 15, 0"/>
+
+                        <Setter Property="Foreground"  Value="#ff000000" />
+                        <Setter Property="FontSize"    Value="28"/>
+                        <Setter Property="FontWeight"  Value="UltraBold" />
+                    </Trigger>
+
+                    <Trigger Property="Tag" Value="Heading2">
+                        <Setter Property="Margin" Value="0, 0, 15, 0"/>
+
+                        <Setter Property="Foreground"  Value="#ff000000" />
+                        <Setter Property="FontSize"    Value="21"/>
+                        <Setter Property="FontWeight"  Value="Bold" />
+                    </Trigger>
+
+                    <Trigger Property="Tag" Value="Heading3">
+                        <Setter Property="Margin" Value="0, 0, 10, 0"/>
+
+                        <Setter Property="Foreground"  Value="#ff000000" />
+                        <Setter Property="FontSize"    Value="17.5" />
+                        <Setter Property="FontWeight"  Value="Bold" />
+                    </Trigger>
+
+                    <Trigger Property="Tag" Value="Heading4">
+                        <Setter Property="Margin" Value="0, 0, 5, 0"/>
+
+                        <Setter Property="Foreground"  Value="#ff000000" />
+                        <Setter Property="FontSize"    Value="14"/>
+                        <Setter Property="FontWeight"  Value="Bold" />
+                    </Trigger>
+
+                    <Trigger Property="Tag" Value="CodeBlock">
+                        <Setter Property="FontFamily" Value="Courier New"/>
+                        <Setter Property="FontSize"   Value="11.9"/>
+                        <Setter Property="Background" Value="#12181F25"/>
+                        <Setter Property="Padding"     Value="20, 10"/>
+                    </Trigger>
+
+                    <Trigger Property="Tag" Value="Note">
+                        <Setter Property="Margin"      Value="5,0,5,0"/>
+                        <Setter Property="Padding"     Value="10, 5"/>
+                        <Setter Property="BorderBrush" Value="#DEDEDE"/>
+                        <Setter Property="BorderThickness" Value="3,3,3,3"/>
+                        <Setter Property="Background"  Value="#FAFAFA"/>
+                    </Trigger>
+
+                </Style.Triggers>
+            </Style>
+
+            <Style TargetType="Run">
+                <Style.Triggers>
+                    <Trigger Property="Tag" Value="CodeSpan">
+                        <Setter Property="FontFamily" Value="Courier New"/>
+                        <Setter Property="FontSize"   Value="11.9"/>
+                        <Setter Property="Background" Value="#12181F25"/>
+                    </Trigger>
+                </Style.Triggers>
+            </Style>
+            <Style TargetType="Span">
+                <Style.Triggers>
+                    <Trigger Property="Tag" Value="CodeSpan">
+                        <Setter Property="FontFamily" Value="Courier New"/>
+                        <Setter Property="FontSize"   Value="11.9"/>
+                        <Setter Property="Background" Value="#12181F25"/>
+                    </Trigger>
+                </Style.Triggers>
+            </Style>
+
+            <Style TargetType="Hyperlink">
+                <Setter Property="TextDecorations"    Value="None" />
+            </Style>
+
+            <Style TargetType="Image">
+                <Setter Property="RenderOptions.BitmapScalingMode" Value="NearestNeighbor" />
+                <Style.Triggers>
+                    <Trigger Property="Tag" Value="imageright">
+                        <Setter Property="Margin"  Value="20,0,0,0" />
+                    </Trigger>
+                </Style.Triggers>
+            </Style>
+
+            <!--
+		    The Table's style don't seem to support border-collapse.
+		    By making the ruled line width 0.5 and applying it to cell and table,
+		    it looks like the ruled lines are not doubled.
+		    -->
+            <Style TargetType="Table">
+                <Setter Property="CellSpacing" Value="0"/>
+                <Setter Property="BorderThickness" Value="0.5"/>
+                <Setter Property="BorderBrush" Value="#DFE2E5"/>
+                <Style.Resources>
+                    <Style TargetType="TableCell">
+                        <Setter Property="BorderThickness" Value="0.5"/>
+                        <Setter Property="BorderBrush" Value="#DFE2E5"/>
+                        <Setter Property="Padding" Value="13, 6"/>
+                    </Style>
+                </Style.Resources>
+            </Style>
+
+            <Style TargetType="TableRowGroup">
+                <Style.Triggers>
+                    <Trigger Property="Tag" Value="TableHeader">
+                        <Setter Property="FontWeight" Value="DemiBold"/>
+                        <Setter Property="FontWeight" Value="Bold"/>
+                        <Setter Property="Background" Value="#FFFFFF"/>
+                    </Trigger>
+                </Style.Triggers>
+            </Style>
+
+            <Style TargetType="TableRow">
+                <Style.Triggers>
+                    <Trigger Property="Tag" Value="EvenTableRow">
+                        <Setter Property="Background" Value="#F6F8FA"/>
+                    </Trigger>
+                </Style.Triggers>
+            </Style>
+
+            <Style TargetType="BlockUIContainer">
+                <Style.Triggers>
+                    <Trigger Property="Tag"  Value="RuleSingle">
+                        <Setter Property="Margin" Value="0,3"/>
+                    </Trigger>
+
+                    <Trigger Property="Tag"  Value="RuleDouble">
+                        <Setter Property="Margin" Value="0,3"/>
+                    </Trigger>
+
+                    <Trigger Property="Tag"  Value="RuleBold">
+                        <Setter Property="Margin" Value="0,3"/>
+                    </Trigger>
+
+                    <Trigger Property="Tag"  Value="RuleBoldWithSingle">
+                        <Setter Property="Margin" Value="0,3"/>
+                    </Trigger>
+                </Style.Triggers>
+            </Style>
+        </Style.Resources>
+    </Style>
+
+
+    <!-- based on https://github.com/whistyun/MdXaml/blob/787605545ace5b7cd7d02ff19e80b1c7a019b0d3/MdXaml/Markdown.Style.xaml#L338
+    need to use it here because I had to modify it to accomodate for dark theme too -->
+    <Style x:Key="WindowStyle" TargetType="{x:Type Window}" />
+</ResourceDictionary>

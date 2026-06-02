@@ -480,6 +480,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 }
 
                 TitleChanged?.Invoke(this, EventArgs.Empty);
+                FilenameChanged?.Invoke(this, EventArgs.Empty);
             }
         }
 
@@ -502,7 +503,19 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public event EventHandler MatchedAutoProfileChanged;
         //public delegate void AutoProfileHandler(ProgramItem sender, bool added);
         //public event AutoProfileHandler AutoProfileAction;
-        public string Filename { get => string.IsNullOrEmpty(filename) ? Translations.Strings.WindowTitleRule : filename;  }
+        public string Filename
+        {
+            get
+            {
+                if (!string.IsNullOrEmpty(filename))
+                {
+                    return filename;
+                }
+
+                return string.IsNullOrEmpty(title) ? Translations.Strings.WindowTitleRule : title;
+            }
+        }
+        public event EventHandler FilenameChanged;
         public ImageSource Exeicon { get => exeicon; }
 
         public bool Turnoff

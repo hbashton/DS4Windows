@@ -232,7 +232,8 @@ namespace DS4WinWPF
             //
             if (hWnd == prevForegroundWnd)
             {
-                // checking if current window title has changed, otherwise return cached values
+                // Use cached process data, but still let the matcher run. Auto-profile
+                // rules can be added or edited while the foreground window is unchanged.
                 topProcessName = prevForegroundProcessName;
                 var title = GetWindowTitle((HWND)hWnd).ToLower();
                 if (title != prevForegroundWndTitleName)
@@ -241,7 +242,7 @@ namespace DS4WinWPF
                     return true;
                 }
                 topWndTitleName = prevForegroundWndTitleName;
-                return false;
+                return true;
             }
 
             prevForegroundWnd = hWnd;

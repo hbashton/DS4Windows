@@ -182,6 +182,8 @@ namespace DS4WinWPF
 
         private void SetSearchPath(string pathStr)
         {
+            pathStr = pathStr?.Trim();
+
             if (!string.IsNullOrEmpty(pathStr))
             {
                 path = pathStr;
@@ -199,6 +201,8 @@ namespace DS4WinWPF
 
         private void SetSearchTitle(string titleStr)
         {
+            titleStr = titleStr?.Trim();
+
             if (!string.IsNullOrEmpty(titleStr))
             {
                 title = titleStr;

@@ -207,10 +207,10 @@
 
                     <CheckBox Content="{lex:Loc TurnOffDS4WindowsTemporarily}" Margin="{StaticResource spaceMargin}"
                           IsChecked="{Binding Turnoff}" />
-                        <TextBox Text="{Binding Path}" Margin="{StaticResource spaceMargin}" ToolTip="{lex:Loc AutoProfPathTip}"/>
+                        <TextBox Text="{Binding Path, UpdateSourceTrigger=PropertyChanged}" Margin="{StaticResource spaceMargin}" ToolTip="{lex:Loc AutoProfPathTip}"/>
 
                         <Grid>
-                            <TextBox x:Name="mainTxtBox" Text="{Binding Title, UpdateSourceTrigger=LostFocus}" Margin="{StaticResource spaceMargin}" ToolTip="{lex:Loc AutoProfTitleTip}" />
+                            <TextBox x:Name="mainTxtBox" Text="{Binding Title, UpdateSourceTrigger=PropertyChanged}" Margin="{StaticResource spaceMargin}" ToolTip="{lex:Loc AutoProfTitleTip}" />
 
                             <TextBlock Margin="5,2" MinWidth="50" Text="Window title..." Foreground="{DynamicResource ForegroundColor}" Opacity="0.7" IsHitTestVisible="False">
                                 <TextBlock.Style>

@@ -1474,6 +1474,35 @@ namespace DS4Windows.InputDevices
             return result;
         }
 
+        public bool WriteBluetoothHapticsAudioReport(byte[] samples, byte sequence)
+        {
+            if (conType != ConnectionType.BT || samples == null || samples.Length < 64)
+            {
+                return false;
+            }
+
+            byte[] report = new byte[142];
+            report[0] = 0x32;
+
+            report[2] = 0x91;
+            report[3] = 7;
+            report[4] = 0xFE;
+            report[9] = 0xFF;
+            report[10] = sequence;
+            report[11] = 0x92;
+            report[12] = 64;
+            Array.Copy(samples, 0, report, 13, 64);
+
+            uint calcCrc32 = ~Crc32Algorithm.Compute(new byte[] { 0xA2 });
+            calcCrc32 = ~Crc32Algorithm.CalculateBasicHash(ref calcCrc32, ref report, 0, report.Length - 4);
+            report[138] = (byte)calcCrc32;
+            report[139] = (byte)(calcCrc32 >> 8);
+            report[140] = (byte)(calcCrc32 >> 16);
+            report[141] = (byte)(calcCrc32 >> 24);
+
+            return hDevice.WriteOutputReportViaInterrupt(report, READ_STREAM_TIMEOUT);
+        }
+
         private void Detach()
         {
             SendEmptyOutputReport();

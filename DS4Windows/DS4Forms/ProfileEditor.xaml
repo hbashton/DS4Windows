@@ -2152,6 +2152,7 @@
                                                 </Grid.ColumnDefinitions>
 
                                                 <CheckBox Content="Audio passthrough to internal speaker" IsChecked="{Binding DualSenseEnableSpeakerOutput}"
+                                                          ToolTip="USB uses the selected speaker endpoint. Bluetooth streams over the controller haptics path."
                                                           Grid.Row="0" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}" />
 
                                                 <Label Content="Speaker endpoint:" Grid.Row="1" Grid.Column="0" />
@@ -2177,6 +2178,7 @@
                                                                  Grid.Row="5" Grid.Column="1" Margin="{StaticResource spaceMargin}" />
 
                                                 <CheckBox Content="Microphone passthrough to virtual audio device" IsChecked="{Binding DualSenseEnableMicrophonePassthrough}"
+                                                          ToolTip="Requires an existing virtual audio device. Select its render endpoint here, then choose the paired recording endpoint in Windows or the target app."
                                                           Grid.Row="6" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}" />
 
                                                 <Label Content="Controller mic:" Grid.Row="7" Grid.Column="0" />

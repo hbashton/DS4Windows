@@ -3,6 +3,7 @@ using NAudio.Wave;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using DS4Windows.InputDevices;
 
 namespace DS4Windows
 {
@@ -10,12 +11,13 @@ namespace DS4Windows
     {
         private const int ControllerCount = ControlService.MAX_DS4_CONTROLLER_COUNT;
         private readonly object syncRoot = new object();
-        private readonly SlotPlayback[] slots = new SlotPlayback[ControllerCount];
+        private readonly IAudioPassthroughSlot[] slots = new IAudioPassthroughSlot[ControllerCount];
         private WasapiLoopbackCapture capture;
         private WaveFormat captureFormat;
         private string captureEndpointId = string.Empty;
+        private string captureSpeakerEndpointId = string.Empty;
 
-        public void Start(int slot, byte speakerVolume, string requestedCaptureEndpointId,
+        public void Start(int slot, DualSenseDevice device, byte speakerVolume, string requestedCaptureEndpointId,
             string requestedSpeakerEndpointId)
         {
             if (slot < 0 || slot >= slots.Length)
@@ -27,6 +29,23 @@ namespace DS4Windows
             {
                 requestedCaptureEndpointId ??= string.Empty;
                 requestedSpeakerEndpointId ??= string.Empty;
+
+                if (device?.getConnectionType() == ConnectionType.BT)
+                {
+                    if (slots[slot] is BluetoothHapticsSlot bluetoothSlot && ReferenceEquals(bluetoothSlot.Device, device))
+                    {
+                        bluetoothSlot.SpeakerVolume = speakerVolume;
+                        EnsureCaptureStarted(requestedCaptureEndpointId, string.Empty);
+                        return;
+                    }
+
+                    Stop(slot);
+                    slots[slot] = new BluetoothHapticsSlot(device, speakerVolume);
+                    EnsureCaptureStarted(requestedCaptureEndpointId, string.Empty);
+                    AppLogger.LogToGui($"DualSense Bluetooth audio passthrough started for controller {slot + 1}", false);
+                    return;
+                }
+
                 MMDevice endpoint = FindControllerEndpoint(slot, requestedSpeakerEndpointId);
                 if (endpoint == null)
                 {
@@ -35,9 +54,10 @@ namespace DS4Windows
                     return;
                 }
 
-                if (slots[slot] != null && string.Equals(slots[slot].EndpointId, endpoint.ID, StringComparison.Ordinal))
+                if (slots[slot] is EndpointPlaybackSlot endpointSlot &&
+                    string.Equals(endpointSlot.EndpointId, endpoint.ID, StringComparison.Ordinal))
                 {
-                    slots[slot].SpeakerVolume = speakerVolume;
+                    endpointSlot.SpeakerVolume = speakerVolume;
                     EnsureCaptureStarted(requestedCaptureEndpointId, endpoint.ID);
                     return;
                 }
@@ -57,7 +77,7 @@ namespace DS4Windows
                     output.Init(provider);
                     output.Play();
 
-                    slots[slot] = new SlotPlayback(endpoint.ID, output, provider, outputFormat, speakerVolume);
+                    slots[slot] = new EndpointPlaybackSlot(endpoint.ID, output, provider, outputFormat, speakerVolume);
                     EnsureCaptureStarted(requestedCaptureEndpointId, endpoint.ID);
                     AppLogger.LogToGui($"DualSense audio passthrough started for controller {slot + 1}: {endpoint.FriendlyName}", false);
                 }
@@ -78,7 +98,7 @@ namespace DS4Windows
 
             lock (syncRoot)
             {
-                SlotPlayback playback = slots[slot];
+                IAudioPassthroughSlot playback = slots[slot];
                 slots[slot] = null;
                 playback?.Dispose();
 
@@ -108,7 +128,9 @@ namespace DS4Windows
             requestedCaptureEndpointId ??= string.Empty;
             speakerEndpointId ??= string.Empty;
 
-            if (capture != null && string.Equals(captureEndpointId, requestedCaptureEndpointId, StringComparison.Ordinal))
+            if (capture != null &&
+                string.Equals(captureEndpointId, requestedCaptureEndpointId, StringComparison.Ordinal) &&
+                string.Equals(captureSpeakerEndpointId, speakerEndpointId, StringComparison.Ordinal))
             {
                 return;
             }
@@ -116,21 +138,30 @@ namespace DS4Windows
             StopCapture();
 
             MMDevice sourceEndpoint = FindCaptureEndpoint(requestedCaptureEndpointId, speakerEndpointId);
-            if (sourceEndpoint == null && string.IsNullOrEmpty(requestedCaptureEndpointId) && DefaultEndpointMatches(speakerEndpointId))
+            if (sourceEndpoint == null && DefaultEndpointMatches(speakerEndpointId))
             {
                 AppLogger.LogToGui("DualSense audio passthrough cannot capture from the same endpoint it is playing to.", true);
                 return;
             }
 
-            capture = sourceEndpoint != null ? new WasapiLoopbackCapture(sourceEndpoint) : new WasapiLoopbackCapture();
-            captureEndpointId = requestedCaptureEndpointId;
-            captureFormat = capture.WaveFormat;
-            capture.DataAvailable += Capture_DataAvailable;
-            capture.RecordingStopped += Capture_RecordingStopped;
-            capture.StartRecording();
+            try
+            {
+                capture = sourceEndpoint != null ? new WasapiLoopbackCapture(sourceEndpoint) : new WasapiLoopbackCapture();
+                captureEndpointId = requestedCaptureEndpointId;
+                captureSpeakerEndpointId = speakerEndpointId;
+                captureFormat = capture.WaveFormat;
+                capture.DataAvailable += Capture_DataAvailable;
+                capture.RecordingStopped += Capture_RecordingStopped;
+                capture.StartRecording();
 
-            string sourceName = sourceEndpoint?.FriendlyName ?? "Default";
-            AppLogger.LogToGui($"DualSense audio passthrough capture source: {sourceName}", false);
+                string sourceName = sourceEndpoint?.FriendlyName ?? "Default";
+                AppLogger.LogToGui($"DualSense audio passthrough capture source: {sourceName}", false);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogToGui($"DualSense audio passthrough capture failed to start: {ex.Message}", true);
+                StopCapture();
+            }
         }
 
         private void StopCapture()
@@ -139,6 +170,7 @@ namespace DS4Windows
             capture = null;
             captureFormat = null;
             captureEndpointId = string.Empty;
+            captureSpeakerEndpointId = string.Empty;
 
             if (oldCapture == null)
             {
@@ -163,6 +195,17 @@ namespace DS4Windows
             {
                 AppLogger.LogToGui($"DualSense audio passthrough capture stopped: {e.Exception.Message}", true);
             }
+
+            lock (syncRoot)
+            {
+                if (ReferenceEquals(sender, capture))
+                {
+                    capture = null;
+                    captureFormat = null;
+                    captureEndpointId = string.Empty;
+                    captureSpeakerEndpointId = string.Empty;
+                }
+            }
         }
 
         private void Capture_DataAvailable(object sender, WaveInEventArgs e)
@@ -180,7 +223,7 @@ namespace DS4Windows
                     return;
                 }
 
-                foreach (SlotPlayback slot in slots)
+                foreach (IAudioPassthroughSlot slot in slots)
                 {
                     slot?.WriteFromCapture(e.Buffer, frames, captureFormat);
                 }
@@ -293,17 +336,25 @@ namespace DS4Windows
                 text.IndexOf("PS5", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
-        private sealed class SlotPlayback : IDisposable
+        private interface IAudioPassthroughSlot : IDisposable
+        {
+            string EndpointId { get; }
+            byte SpeakerVolume { get; set; }
+            void WriteFromCapture(byte[] captureBuffer, int frames, WaveFormat captureFormat);
+        }
+
+        private sealed class EndpointPlaybackSlot : IAudioPassthroughSlot
         {
             private readonly WasapiOut output;
             private readonly BufferedWaveProvider provider;
             private readonly WaveFormat outputFormat;
             private readonly byte[] outputBuffer;
+            private double sourceFramePosition;
 
             public string EndpointId { get; }
             public byte SpeakerVolume { get; set; }
 
-            public SlotPlayback(string endpointId, WasapiOut output, BufferedWaveProvider provider,
+            public EndpointPlaybackSlot(string endpointId, WasapiOut output, BufferedWaveProvider provider,
                 WaveFormat outputFormat, byte speakerVolume)
             {
                 EndpointId = endpointId;
@@ -316,25 +367,41 @@ namespace DS4Windows
 
             public void WriteFromCapture(byte[] captureBuffer, int frames, WaveFormat captureFormat)
             {
-                int framesToWrite = Math.Min(frames, outputBuffer.Length / outputFormat.BlockAlign);
-                float volume = SpeakerVolume / 255.0f;
-                Array.Clear(outputBuffer, 0, framesToWrite * outputFormat.BlockAlign);
-
-                for (int frame = 0; frame < framesToWrite; frame++)
+                if (captureFormat.SampleRate <= 0 || outputFormat.SampleRate <= 0)
                 {
+                    return;
+                }
+
+                int maxFramesToWrite = outputBuffer.Length / outputFormat.BlockAlign;
+                int framesToWrite = 0;
+                double step = captureFormat.SampleRate / (double)outputFormat.SampleRate;
+                float volume = SpeakerVolume / 255.0f;
+                Array.Clear(outputBuffer, 0, outputBuffer.Length);
+
+                while (sourceFramePosition < frames && framesToWrite < maxFramesToWrite)
+                {
+                    int frame = (int)sourceFramePosition;
                     int captureOffset = frame * captureFormat.BlockAlign;
                     float left = ReadSample(captureBuffer, captureOffset, captureFormat);
                     float right = captureFormat.Channels > 1 ?
                         ReadSample(captureBuffer, captureOffset + BytesPerSample(captureFormat), captureFormat) : left;
                     float mono = Math.Clamp((left + right) * 0.5f * volume, -1.0f, 1.0f);
 
-                    int outputOffset = frame * outputFormat.BlockAlign;
+                    int outputOffset = framesToWrite * outputFormat.BlockAlign;
                     int speakerChannel = outputFormat.Channels >= 4 ? 1 : 0;
                     WriteSample(outputBuffer, outputOffset + speakerChannel * BytesPerSample(outputFormat),
                         outputFormat, mono);
+
+                    framesToWrite++;
+                    sourceFramePosition += step;
                 }
 
-                provider.AddSamples(outputBuffer, 0, framesToWrite * outputFormat.BlockAlign);
+                sourceFramePosition = sourceFramePosition >= frames ? sourceFramePosition - frames : 0.0;
+
+                if (framesToWrite > 0)
+                {
+                    provider.AddSamples(outputBuffer, 0, framesToWrite * outputFormat.BlockAlign);
+                }
             }
 
             private static int BytesPerSample(WaveFormat format)
@@ -427,6 +494,146 @@ namespace DS4Windows
                 catch { }
 
                 output.Dispose();
+            }
+        }
+
+        private sealed class BluetoothHapticsSlot : IAudioPassthroughSlot
+        {
+            private const int OutputSampleRate = 3000;
+            private const int PacketSampleCount = 64;
+            private const int MaxPendingSamples = OutputSampleRate / 2;
+            private const int MaxReportsPerCaptureEvent = 8;
+            private const int MaxConsecutiveWriteFailures = 10;
+            private readonly List<byte> pendingSamples = new List<byte>(PacketSampleCount * 2);
+            private double sourceFramePosition;
+            private byte sequence;
+            private int consecutiveWriteFailures;
+            private bool disabled;
+
+            public DualSenseDevice Device { get; }
+            public string EndpointId => string.Empty;
+            public byte SpeakerVolume { get; set; }
+
+            public BluetoothHapticsSlot(DualSenseDevice device, byte speakerVolume)
+            {
+                Device = device;
+                SpeakerVolume = speakerVolume;
+            }
+
+            public void WriteFromCapture(byte[] captureBuffer, int frames, WaveFormat captureFormat)
+            {
+                if (disabled || Device == null || Device.IsRemoved || Device.getConnectionType() != ConnectionType.BT ||
+                    captureFormat.SampleRate <= 0)
+                {
+                    return;
+                }
+
+                double step = captureFormat.SampleRate / (double)OutputSampleRate;
+                float volume = SpeakerVolume / 255.0f;
+
+                while (sourceFramePosition < frames)
+                {
+                    int frame = (int)sourceFramePosition;
+                    int captureOffset = frame * captureFormat.BlockAlign;
+                    float left = ReadSample(captureBuffer, captureOffset, captureFormat);
+                    float right = captureFormat.Channels > 1 ?
+                        ReadSample(captureBuffer, captureOffset + BytesPerSample(captureFormat), captureFormat) : left;
+                    float mono = Math.Clamp((left + right) * 0.5f * volume, -1.0f, 1.0f);
+                    sbyte sample = (sbyte)Math.Clamp(mono * 127.0f, -128.0f, 127.0f);
+                    pendingSamples.Add(unchecked((byte)sample));
+
+                    if (pendingSamples.Count > MaxPendingSamples)
+                    {
+                        int samplesToDrop = pendingSamples.Count - PacketSampleCount;
+                        pendingSamples.RemoveRange(0, samplesToDrop);
+                    }
+
+                    sourceFramePosition += step;
+                }
+
+                sourceFramePosition -= frames;
+
+                int reportsWritten = 0;
+                while (pendingSamples.Count >= PacketSampleCount && reportsWritten < MaxReportsPerCaptureEvent)
+                {
+                    byte[] packetSamples = new byte[PacketSampleCount];
+                    pendingSamples.CopyTo(0, packetSamples, 0, PacketSampleCount);
+                    pendingSamples.RemoveRange(0, PacketSampleCount);
+
+                    if (Device.WriteBluetoothHapticsAudioReport(packetSamples, ++sequence))
+                    {
+                        consecutiveWriteFailures = 0;
+                    }
+                    else if (++consecutiveWriteFailures >= MaxConsecutiveWriteFailures)
+                    {
+                        disabled = true;
+                        pendingSamples.Clear();
+                        AppLogger.LogToGui("DualSense Bluetooth audio passthrough stopped after repeated HID write failures.", true);
+                        return;
+                    }
+
+                    reportsWritten++;
+                }
+
+                if (reportsWritten >= MaxReportsPerCaptureEvent && pendingSamples.Count > PacketSampleCount)
+                {
+                    pendingSamples.RemoveRange(0, pendingSamples.Count - PacketSampleCount);
+                }
+            }
+
+            public void Dispose()
+            {
+                pendingSamples.Clear();
+            }
+
+            private static int BytesPerSample(WaveFormat format)
+            {
+                return Math.Max(1, format.BitsPerSample / 8);
+            }
+
+            private static float ReadSample(byte[] buffer, int offset, WaveFormat format)
+            {
+                if (offset < 0 || offset + BytesPerSample(format) > buffer.Length)
+                {
+                    return 0.0f;
+                }
+
+                if (format.Encoding == WaveFormatEncoding.IeeeFloat)
+                {
+                    if (format.BitsPerSample == 32)
+                    {
+                        return Math.Clamp(BitConverter.ToSingle(buffer, offset), -1.0f, 1.0f);
+                    }
+
+                    if (format.BitsPerSample == 64)
+                    {
+                        return Math.Clamp((float)BitConverter.ToDouble(buffer, offset), -1.0f, 1.0f);
+                    }
+                }
+
+                if (format.Encoding != WaveFormatEncoding.Pcm)
+                {
+                    return 0.0f;
+                }
+
+                return format.BitsPerSample switch
+                {
+                    16 => BitConverter.ToInt16(buffer, offset) / 32768.0f,
+                    24 => ReadInt24(buffer, offset) / 8388608.0f,
+                    32 => BitConverter.ToInt32(buffer, offset) / 2147483648.0f,
+                    _ => 0.0f,
+                };
+            }
+
+            private static int ReadInt24(byte[] buffer, int offset)
+            {
+                int sample = buffer[offset] | (buffer[offset + 1] << 8) | (buffer[offset + 2] << 16);
+                if ((sample & 0x800000) != 0)
+                {
+                    sample |= unchecked((int)0xFF000000);
+                }
+
+                return sample;
             }
         }
     }

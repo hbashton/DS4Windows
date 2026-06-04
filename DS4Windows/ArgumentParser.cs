@@ -16,6 +16,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+using System;
 using System.Collections.Generic;
 using DS4Windows.DS4Control;
 
@@ -31,6 +32,12 @@ namespace DS4WinWPF
         private bool runtask;
         private bool command;
         private string commandArgs;
+        private bool audioDiag;
+        private int audioDiagSeconds = 30;
+        private bool audioDiagShutdown = true;
+        private bool audioDiagForceSpeaker = true;
+        private string audioDiagCaptureEndpointId = string.Empty;
+        private string audioDiagSpeakerEndpointId = string.Empty;
         private string virtualkbmHandler = VirtualKBMFactory.DEFAULT_IDENTIFIER;
 
         private Dictionary<string, string> errors =
@@ -42,8 +49,14 @@ namespace DS4WinWPF
         public bool ReenableDevice { get => reenableDevice; }
         public bool Runtask { get => runtask; }
         public bool Command { get => command; }
+        public bool AudioDiag { get => audioDiag; }
+        public int AudioDiagSeconds { get => audioDiagSeconds; }
+        public bool AudioDiagShutdown { get => audioDiagShutdown; }
+        public bool AudioDiagForceSpeaker { get => audioDiagForceSpeaker; }
         public string DeviceInstanceId { get => deviceInstanceId; }
         public string CommandArgs { get => commandArgs; }
+        public string AudioDiagCaptureEndpointId { get => audioDiagCaptureEndpointId; }
+        public string AudioDiagSpeakerEndpointId { get => audioDiagSpeakerEndpointId; }
         public string VirtualkbmHandler { get => virtualkbmHandler; }
         public Dictionary<string, string> Errors { get => errors; }
 
@@ -84,6 +97,41 @@ namespace DS4WinWPF
 
                     case "-m":
                         mini = true;
+                        break;
+
+                    case "audiodiag":
+                    case "-audiodiag":
+                        audioDiag = true;
+                        if (i + 1 < args.Length && int.TryParse(args[i + 1], out int seconds))
+                        {
+                            i++;
+                            audioDiagSeconds = Math.Clamp(seconds, 5, 300);
+                        }
+
+                        break;
+
+                    case "-audiodiag-noshutdown":
+                        audioDiagShutdown = false;
+                        break;
+
+                    case "-audiodiag-noforce":
+                        audioDiagForceSpeaker = false;
+                        break;
+
+                    case "-audiodiag-capture":
+                        if (i + 1 < args.Length)
+                        {
+                            audioDiagCaptureEndpointId = args[++i];
+                        }
+
+                        break;
+
+                    case "-audiodiag-speaker":
+                        if (i + 1 < args.Length)
+                        {
+                            audioDiagSpeakerEndpointId = args[++i];
+                        }
+
                         break;
 
                     case "command":

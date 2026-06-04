@@ -1,4 +1,4 @@
-﻿/*
+/*
 DS4Windows
 Copyright (C) 2023  Travis Nickles
 
@@ -257,6 +257,119 @@ namespace DS4WinWPF
 
             rootHub.LoadPermanentSlotsConfig();
             window.LateChecks(parser);
+
+            if (parser.AudioDiag)
+            {
+                StartAudioDiagnosticRun(parser);
+            }
+        }
+
+        private void StartAudioDiagnosticRun(ArgumentParser parser)
+        {
+            Task diagTask = Task.Run(() =>
+            {
+                bool[] forcedSlots = new bool[DS4Windows.ControlService.MAX_DS4_CONTROLLER_COUNT];
+                DateTime startTime = DateTime.Now;
+                DateTime endTime = startTime.AddSeconds(parser.AudioDiagSeconds);
+
+                try
+                {
+                    DS4Windows.AppLogger.LogToGui(
+                        $"TEST BUILD AUDIO DIAG: launch diagnostic requested durationSeconds={parser.AudioDiagSeconds} shutdown={parser.AudioDiagShutdown} forceSpeaker={parser.AudioDiagForceSpeaker} captureEndpoint='{parser.AudioDiagCaptureEndpointId}' speakerEndpoint='{parser.AudioDiagSpeakerEndpointId}' exe='{DS4Windows.Global.exeFileName}' appData='{DS4Windows.Global.appdatapath}'",
+                        false);
+
+                    while (DateTime.Now < endTime)
+                    {
+                        DS4Windows.ControlService hub = rootHub;
+                        string summary = BuildAudioDiagnosticControllerSummary(hub);
+                        DS4Windows.AppLogger.LogToGui(
+                            $"TEST BUILD AUDIO DIAG: launch poll elapsedSeconds={(int)(DateTime.Now - startTime).TotalSeconds} serviceRunning={hub?.running} controllers={summary}",
+                            false);
+
+                        if (parser.AudioDiagForceSpeaker && hub != null)
+                        {
+                            for (int i = 0; i < forcedSlots.Length; i++)
+                            {
+                                if (!forcedSlots[i] && hub.DS4Controllers[i] is DS4Windows.InputDevices.DualSenseDevice dualSense)
+                                {
+                                    DS4Windows.Global.DualSenseEnableSpeakerOutput[i] = true;
+                                    DS4Windows.Global.DualSenseSpeakerVolume[i] = byte.MaxValue;
+                                    DS4Windows.Global.DualSenseAudioCaptureEndpointId[i] = parser.AudioDiagCaptureEndpointId ?? string.Empty;
+                                    DS4Windows.Global.DualSenseAudioSpeakerEndpointId[i] = parser.AudioDiagSpeakerEndpointId ?? string.Empty;
+
+                                    DS4Windows.AppLogger.LogToGui(
+                                        $"TEST BUILD AUDIO DIAG: forcing speaker passthrough slot={i + 1} display='{dualSense.DisplayName}' connection={dualSense.getConnectionType()} captureEndpoint='{DS4Windows.Global.DualSenseAudioCaptureEndpointId[i]}' speakerEndpoint='{DS4Windows.Global.DualSenseAudioSpeakerEndpointId[i]}'",
+                                        false);
+
+                                    bool loaded = DS4Windows.Global.LoadProfile(i, false, hub);
+                                    forcedSlots[i] = true;
+                                    DS4Windows.AppLogger.LogToGui($"TEST BUILD AUDIO DIAG: forced profile reload slot={i + 1} loaded={loaded}", !loaded);
+                                }
+                            }
+                        }
+
+                        Thread.Sleep(1000);
+                    }
+
+                    DS4Windows.AppLogger.LogToGui($"TEST BUILD AUDIO DIAG: launch diagnostic finished durationSeconds={(int)(DateTime.Now - startTime).TotalSeconds}", false);
+                }
+                catch (Exception ex)
+                {
+                    DS4Windows.AppLogger.LogToGui($"TEST BUILD AUDIO DIAG: launch diagnostic failed: {ex}", true);
+                }
+                finally
+                {
+                    if (parser.AudioDiagShutdown)
+                    {
+                        Dispatcher.BeginInvoke((Action)(() =>
+                        {
+                            try
+                            {
+                                DS4Windows.AppLogger.LogToGui("TEST BUILD AUDIO DIAG: launch diagnostic requesting shutdown", false);
+                                if (rootHub?.running == true)
+                                {
+                                    rootHub.Stop();
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                DS4Windows.AppLogger.LogToGui($"TEST BUILD AUDIO DIAG: shutdown stop failed: {ex.Message}", true);
+                            }
+
+                            Current.Shutdown();
+                        }));
+                    }
+                }
+            });
+
+            DS4Windows.Util.LogAssistBackgroundTask(diagTask);
+        }
+
+        private string BuildAudioDiagnosticControllerSummary(DS4Windows.ControlService hub)
+        {
+            if (hub == null)
+            {
+                return "<no-service>";
+            }
+
+            StringBuilder builder = new StringBuilder();
+            for (int i = 0; i < hub.DS4Controllers.Length; i++)
+            {
+                DS4Windows.DS4Device device = hub.DS4Controllers[i];
+                if (device == null)
+                {
+                    continue;
+                }
+
+                if (builder.Length > 0)
+                {
+                    builder.Append(" | ");
+                }
+
+                builder.Append($"slot={i + 1},type={device.DeviceType},display='{device.DisplayName}',connection={device.getConnectionType()},removed={device.IsRemoved},synced={device.isSynced()}");
+            }
+
+            return builder.Length > 0 ? builder.ToString() : "<none>";
         }
 
         private void CurrentDomain_UnhandledException(object sender, UnhandledExceptionEventArgs e)

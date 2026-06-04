@@ -1,5 +1,7 @@
 param(
+    [string]$Repo = "hbashton/DS4Windows",
     [string]$Branch = "triggertest",
+    [string]$HeadSha = "",
     [string]$ArtifactName = "DS4Windows-x64",
     [int]$DurationSeconds = 45,
     [string]$CaptureEndpointId = "",
@@ -21,17 +23,76 @@ function Require-Command($Name) {
     }
 }
 
-Require-Command gh
+function Get-GitHubHeaders {
+    $headers = @{
+        Accept = "application/vnd.github+json"
+        "X-GitHub-Api-Version" = "2022-11-28"
+    }
+
+    if ($env:GITHUB_TOKEN) {
+        $headers.Authorization = "Bearer $env:GITHUB_TOKEN"
+    }
+
+    return $headers
+}
+
+function Invoke-GitHubJson($Uri) {
+    Invoke-RestMethod -Uri $Uri -Headers (Get-GitHubHeaders)
+}
+
+function Get-LatestSuccessfulRun($Repo, $Branch) {
+    $encodedBranch = [System.Uri]::EscapeDataString($Branch)
+    $uri = "https://api.github.com/repos/$Repo/actions/workflows/ci-build.yml/runs?branch=$encodedBranch&per_page=10"
+    $runs = (Invoke-GitHubJson $uri).workflow_runs
+    $completed = $runs | Where-Object { $_.status -eq "completed" } | Select-Object -First 1
+    return $completed
+}
+
+function Download-Artifact($Repo, $RunId, $ArtifactName, $DownloadRoot) {
+    $gh = Get-Command gh -ErrorAction SilentlyContinue
+    if ($gh) {
+        gh run download $RunId --repo $Repo --name $ArtifactName --dir $DownloadRoot
+        return
+    }
+
+    $artifacts = (Invoke-GitHubJson "https://api.github.com/repos/$Repo/actions/runs/$RunId/artifacts").artifacts
+    $artifact = $artifacts | Where-Object { $_.name -eq $ArtifactName } | Select-Object -First 1
+    if ($artifact -eq $null) {
+        throw "Artifact '$ArtifactName' was not found in run $RunId."
+    }
+
+    $containerZip = Join-Path $DownloadRoot "$ArtifactName-container.zip"
+    Invoke-WebRequest -Uri $artifact.archive_download_url -Headers (Get-GitHubHeaders) -OutFile $containerZip
+
+    $artifactDir = Join-Path $DownloadRoot "$ArtifactName-container"
+    New-Item -ItemType Directory -Path $artifactDir | Out-Null
+    Expand-Archive -LiteralPath $containerZip -DestinationPath $artifactDir -Force
+}
 
 $repoRoot = Resolve-Path "$PSScriptRoot\.."
 Set-Location $repoRoot
+if ($HeadSha.Length -eq 0) {
+    $HeadSha = (git rev-parse HEAD).Trim()
+}
 
-Write-Step "waiting for latest successful CI Build on branch '$Branch'"
+Write-Step "waiting for successful CI Build on repo '$Repo' branch '$Branch' sha '$HeadSha'"
 $run = $null
 for ($attempt = 0; $attempt -lt 60 -and $run -eq $null; $attempt++) {
-    $runsJson = gh run list --workflow "CI Build" --branch $Branch --limit 10 --json databaseId,status,conclusion,headSha,createdAt
-    $runs = $runsJson | ConvertFrom-Json
-    $completed = $runs | Where-Object { $_.status -eq "completed" } | Select-Object -First 1
+    if (Get-Command gh -ErrorAction SilentlyContinue) {
+        $runsJson = gh run list --repo $Repo --workflow "CI Build" --branch $Branch --limit 10 --json databaseId,status,conclusion,headSha,createdAt
+        $runs = $runsJson | ConvertFrom-Json
+        $completed = $runs | Where-Object { $_.status -eq "completed" } | Select-Object -First 1
+    }
+    else {
+        $completed = Get-LatestSuccessfulRun $Repo $Branch
+    }
+
+    $completedSha = if ($completed.headSha) { $completed.headSha } else { $completed.head_sha }
+    if ($completed -and $completedSha -ne $HeadSha) {
+        Write-Step "latest completed run is for sha '$completedSha'; waiting for '$HeadSha'"
+        Start-Sleep -Seconds 15
+        continue
+    }
 
     if ($completed -and $completed.conclusion -eq "success") {
         $run = $completed
@@ -52,16 +113,20 @@ if ($run -eq $null) {
     throw "Timed out waiting for a successful CI Build run on branch '$Branch'."
 }
 
-Write-Step "using run $($run.databaseId) sha=$($run.headSha)"
+$runId = if ($run.databaseId) { $run.databaseId } else { $run.id }
+$runSha = if ($run.headSha) { $run.headSha } else { $run.head_sha }
+Write-Step "using run $runId sha=$runSha"
 
 if (Test-Path $DownloadRoot) {
     Remove-Item -LiteralPath $DownloadRoot -Recurse -Force
 }
 
 New-Item -ItemType Directory -Path $DownloadRoot | Out-Null
-gh run download $run.databaseId --name $ArtifactName --dir $DownloadRoot
+Download-Artifact $Repo $runId $ArtifactName $DownloadRoot
 
-$artifactZip = Get-ChildItem -Path $DownloadRoot -Filter *.zip -Recurse | Select-Object -First 1
+$artifactZip = Get-ChildItem -Path $DownloadRoot -Filter *.zip -Recurse |
+    Where-Object { $_.Name -like "DS4Windows_*.zip" } |
+    Select-Object -First 1
 if ($artifactZip -eq $null) {
     throw "Downloaded artifact '$ArtifactName' did not contain a zip file."
 }

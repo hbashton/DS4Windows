@@ -10,12 +10,15 @@ namespace DS4Windows
     public sealed class DualSenseAudioPassthrough : IDisposable
     {
         private const int ControllerCount = ControlService.MAX_DS4_CONTROLLER_COUNT;
+        private const string DiagPrefix = "TEST BUILD AUDIO DIAG:";
         private readonly object syncRoot = new object();
         private readonly IAudioPassthroughSlot[] slots = new IAudioPassthroughSlot[ControllerCount];
         private WasapiLoopbackCapture capture;
         private WaveFormat captureFormat;
         private string captureEndpointId = string.Empty;
         private string captureSpeakerEndpointId = string.Empty;
+        private long captureCallbackCount;
+        private long captureFrameCount;
 
         public void Start(int slot, DualSenseDevice device, byte speakerVolume, string requestedCaptureEndpointId,
             string requestedSpeakerEndpointId)
@@ -30,6 +33,10 @@ namespace DS4Windows
                 requestedCaptureEndpointId ??= string.Empty;
                 requestedSpeakerEndpointId ??= string.Empty;
 
+                AppLogger.LogToGui(
+                    $"{DiagPrefix} Start slot={slot + 1} deviceNull={device == null} removed={device?.IsRemoved} connection={device?.getConnectionType()} speakerVolume={speakerVolume} requestedCapture='{requestedCaptureEndpointId}' requestedSpeaker='{requestedSpeakerEndpointId}'",
+                    false);
+
                 if (device?.getConnectionType() == ConnectionType.BT)
                 {
                     if (slots[slot] is BluetoothHapticsSlot bluetoothSlot && ReferenceEquals(bluetoothSlot.Device, device))
@@ -43,6 +50,7 @@ namespace DS4Windows
                     slots[slot] = new BluetoothHapticsSlot(device, speakerVolume);
                     EnsureCaptureStarted(requestedCaptureEndpointId, string.Empty);
                     AppLogger.LogToGui($"DualSense Bluetooth audio passthrough started for controller {slot + 1}", false);
+                    AppLogger.LogToGui($"{DiagPrefix} BT path active for slot={slot + 1}; speaker endpoint is intentionally ignored on Bluetooth", false);
                     return;
                 }
 
@@ -80,6 +88,9 @@ namespace DS4Windows
                     slots[slot] = new EndpointPlaybackSlot(endpoint.ID, output, provider, outputFormat, speakerVolume);
                     EnsureCaptureStarted(requestedCaptureEndpointId, endpoint.ID);
                     AppLogger.LogToGui($"DualSense audio passthrough started for controller {slot + 1}: {endpoint.FriendlyName}", false);
+                    AppLogger.LogToGui(
+                        $"{DiagPrefix} USB endpoint playback active slot={slot + 1} endpoint='{endpoint.FriendlyName}' id='{endpoint.ID}' outputFormat={FormatSummary(outputFormat)}",
+                        false);
                 }
                 catch (Exception ex)
                 {
@@ -156,6 +167,9 @@ namespace DS4Windows
 
                 string sourceName = sourceEndpoint?.FriendlyName ?? "Default";
                 AppLogger.LogToGui($"DualSense audio passthrough capture source: {sourceName}", false);
+                AppLogger.LogToGui(
+                    $"{DiagPrefix} capture started source='{sourceName}' requestedCapture='{requestedCaptureEndpointId}' speakerEndpoint='{speakerEndpointId}' captureFormat={FormatSummary(captureFormat)}",
+                    false);
             }
             catch (Exception ex)
             {
@@ -171,6 +185,8 @@ namespace DS4Windows
             captureFormat = null;
             captureEndpointId = string.Empty;
             captureSpeakerEndpointId = string.Empty;
+            captureCallbackCount = 0;
+            captureFrameCount = 0;
 
             if (oldCapture == null)
             {
@@ -204,6 +220,8 @@ namespace DS4Windows
                     captureFormat = null;
                     captureEndpointId = string.Empty;
                     captureSpeakerEndpointId = string.Empty;
+                    captureCallbackCount = 0;
+                    captureFrameCount = 0;
                 }
             }
         }
@@ -223,6 +241,15 @@ namespace DS4Windows
                     return;
                 }
 
+                captureCallbackCount++;
+                captureFrameCount += frames;
+                if (captureCallbackCount <= 5 || captureCallbackCount % 50 == 0)
+                {
+                    AppLogger.LogToGui(
+                        $"{DiagPrefix} capture callback count={captureCallbackCount} bytes={e.BytesRecorded} frames={frames} totalFrames={captureFrameCount} format={FormatSummary(captureFormat)} activeSlots={slots.Count(item => item != null)}",
+                        false);
+                }
+
                 foreach (IAudioPassthroughSlot slot in slots)
                 {
                     slot?.WriteFromCapture(e.Buffer, frames, captureFormat);
@@ -238,6 +265,7 @@ namespace DS4Windows
                 .ToHashSet(StringComparer.Ordinal);
 
             using var enumerator = new MMDeviceEnumerator();
+            LogEndpointList(enumerator, DataFlow.Render, $"speaker lookup slot={slot + 1}");
             if (!string.IsNullOrEmpty(requestedSpeakerEndpointId))
             {
                 try
@@ -316,6 +344,7 @@ namespace DS4Windows
             try
             {
                 using var enumerator = new MMDeviceEnumerator();
+                LogEndpointList(enumerator, DataFlow.Render, "default endpoint compare");
                 MMDevice endpoint = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
                 return string.Equals(endpoint?.ID, endpointId, StringComparison.Ordinal);
             }
@@ -336,6 +365,36 @@ namespace DS4Windows
                 text.IndexOf("PS5", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
+        private static string FormatSummary(WaveFormat format)
+        {
+            if (format == null)
+            {
+                return "<null>";
+            }
+
+            return $"{format.Encoding}/{format.SampleRate}Hz/{format.Channels}ch/{format.BitsPerSample}bit/block{format.BlockAlign}";
+        }
+
+        private static void LogEndpointList(MMDeviceEnumerator enumerator, DataFlow flow, string reason)
+        {
+            try
+            {
+                string endpoints = string.Join(" || ", enumerator
+                    .EnumerateAudioEndPoints(flow, DeviceState.Active)
+                    .Select(endpoint => $"name='{endpoint.FriendlyName}' device='{endpoint.DeviceFriendlyName}' id='{endpoint.ID}' dualsense={IsDualSenseEndpoint(endpoint)}"));
+
+                AppLogger.LogToGui(
+                    string.IsNullOrEmpty(endpoints)
+                        ? $"{DiagPrefix} {reason}: no active {flow} endpoints"
+                        : $"{DiagPrefix} {reason}: active {flow} endpoints: {endpoints}",
+                    false);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogToGui($"{DiagPrefix} {reason}: endpoint enumeration failed: {ex.Message}", true);
+            }
+        }
+
         private interface IAudioPassthroughSlot : IDisposable
         {
             string EndpointId { get; }
@@ -350,6 +409,8 @@ namespace DS4Windows
             private readonly WaveFormat outputFormat;
             private readonly byte[] outputBuffer;
             private double sourceFramePosition;
+            private long writeCallCount;
+            private long framesWrittenTotal;
 
             public string EndpointId { get; }
             public byte SpeakerVolume { get; set; }
@@ -376,6 +437,7 @@ namespace DS4Windows
                 int framesToWrite = 0;
                 double step = captureFormat.SampleRate / (double)outputFormat.SampleRate;
                 float volume = SpeakerVolume / 255.0f;
+                float peak = 0.0f;
                 Array.Clear(outputBuffer, 0, outputBuffer.Length);
 
                 while (sourceFramePosition < frames && framesToWrite < maxFramesToWrite)
@@ -386,6 +448,7 @@ namespace DS4Windows
                     float right = captureFormat.Channels > 1 ?
                         ReadSample(captureBuffer, captureOffset + BytesPerSample(captureFormat), captureFormat) : left;
                     float mono = Math.Clamp((left + right) * 0.5f * volume, -1.0f, 1.0f);
+                    peak = Math.Max(peak, Math.Abs(mono));
 
                     int outputOffset = framesToWrite * outputFormat.BlockAlign;
                     int speakerChannel = outputFormat.Channels >= 4 ? 1 : 0;
@@ -401,6 +464,14 @@ namespace DS4Windows
                 if (framesToWrite > 0)
                 {
                     provider.AddSamples(outputBuffer, 0, framesToWrite * outputFormat.BlockAlign);
+                    writeCallCount++;
+                    framesWrittenTotal += framesToWrite;
+                    if (writeCallCount <= 5 || writeCallCount % 50 == 0)
+                    {
+                        AppLogger.LogToGui(
+                            $"{DiagPrefix} USB write endpointId='{EndpointId}' call={writeCallCount} inputFrames={frames} outputFrames={framesToWrite} totalOutputFrames={framesWrittenTotal} peak={peak:0.0000} captureFormat={FormatSummary(captureFormat)} outputFormat={FormatSummary(outputFormat)} providerBuffered={provider.BufferedBytes}",
+                            false);
+                    }
                 }
             }
 
@@ -509,6 +580,10 @@ namespace DS4Windows
             private byte sequence;
             private int consecutiveWriteFailures;
             private bool disabled;
+            private long writeCallCount;
+            private long reportsAttempted;
+            private long reportsSucceeded;
+            private long reportsFailed;
 
             public DualSenseDevice Device { get; }
             public string EndpointId => string.Empty;
@@ -530,6 +605,7 @@ namespace DS4Windows
 
                 double step = captureFormat.SampleRate / (double)OutputSampleRate;
                 float volume = SpeakerVolume / 255.0f;
+                float peak = 0.0f;
 
                 while (sourceFramePosition < frames)
                 {
@@ -539,6 +615,7 @@ namespace DS4Windows
                     float right = captureFormat.Channels > 1 ?
                         ReadSample(captureBuffer, captureOffset + BytesPerSample(captureFormat), captureFormat) : left;
                     float mono = Math.Clamp((left + right) * 0.5f * volume, -1.0f, 1.0f);
+                    peak = Math.Max(peak, Math.Abs(mono));
                     sbyte sample = (sbyte)Math.Clamp(mono * 127.0f, -128.0f, 127.0f);
                     pendingSamples.Add(unchecked((byte)sample));
 
@@ -552,6 +629,7 @@ namespace DS4Windows
                 }
 
                 sourceFramePosition -= frames;
+                writeCallCount++;
 
                 int reportsWritten = 0;
                 while (pendingSamples.Count >= PacketSampleCount && reportsWritten < MaxReportsPerCaptureEvent)
@@ -560,16 +638,24 @@ namespace DS4Windows
                     pendingSamples.CopyTo(0, packetSamples, 0, PacketSampleCount);
                     pendingSamples.RemoveRange(0, PacketSampleCount);
 
+                    reportsAttempted++;
                     if (Device.WriteBluetoothHapticsAudioReport(packetSamples, ++sequence))
                     {
+                        reportsSucceeded++;
                         consecutiveWriteFailures = 0;
                     }
                     else if (++consecutiveWriteFailures >= MaxConsecutiveWriteFailures)
                     {
+                        reportsFailed++;
                         disabled = true;
                         pendingSamples.Clear();
+                        AppLogger.LogToGui($"{DiagPrefix} BT write disabled after repeated HID failures attempted={reportsAttempted} succeeded={reportsSucceeded} failed={reportsFailed}", true);
                         AppLogger.LogToGui("DualSense Bluetooth audio passthrough stopped after repeated HID write failures.", true);
                         return;
+                    }
+                    else
+                    {
+                        reportsFailed++;
                     }
 
                     reportsWritten++;
@@ -578,6 +664,13 @@ namespace DS4Windows
                 if (reportsWritten >= MaxReportsPerCaptureEvent && pendingSamples.Count > PacketSampleCount)
                 {
                     pendingSamples.RemoveRange(0, pendingSamples.Count - PacketSampleCount);
+                }
+
+                if (writeCallCount <= 5 || writeCallCount % 50 == 0 || reportsFailed > 0)
+                {
+                    AppLogger.LogToGui(
+                        $"{DiagPrefix} BT sample path call={writeCallCount} inputFrames={frames} pending={pendingSamples.Count} reportsThisCall={reportsWritten} attempted={reportsAttempted} succeeded={reportsSucceeded} failed={reportsFailed} consecutiveFailures={consecutiveWriteFailures} peak={peak:0.0000} captureFormat={FormatSummary(captureFormat)}",
+                        reportsFailed > 0);
                 }
             }
 

@@ -2254,12 +2254,16 @@ namespace DS4Windows
 
                 if (DualSenseEnableSpeakerOutput[ind])
                 {
+                    AppLogger.LogToGui(
+                        $"TEST BUILD AUDIO DIAG: profile apply controller={ind + 1} connection={dualsense.getConnectionType()} speakerEnabled=True speakerVolume={DualSenseSpeakerVolume[ind]} captureEndpoint='{DualSenseAudioCaptureEndpointId[ind]}' speakerEndpoint='{DualSenseAudioSpeakerEndpointId[ind]}'",
+                        false);
                     dualSenseAudioPassthrough.Start(ind, dualsense, DualSenseSpeakerVolume[ind],
                         DualSenseAudioCaptureEndpointId[ind],
                         DualSenseAudioSpeakerEndpointId[ind]);
                 }
                 else
                 {
+                    AppLogger.LogToGui($"TEST BUILD AUDIO DIAG: profile apply controller={ind + 1} speakerEnabled=False stopping speaker passthrough", false);
                     dualSenseAudioPassthrough.Stop(ind);
                 }
 

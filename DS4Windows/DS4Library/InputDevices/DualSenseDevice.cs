@@ -1478,6 +1478,7 @@ namespace DS4Windows.InputDevices
         {
             if (conType != ConnectionType.BT || samples == null || samples.Length < 64)
             {
+                AppLogger.LogToGui($"TEST BUILD AUDIO DIAG: BT HID audio write skipped connection={conType} sampleLength={samples?.Length ?? -1}", true);
                 return false;
             }
 
@@ -1500,8 +1501,30 @@ namespace DS4Windows.InputDevices
             report[140] = (byte)(calcCrc32 >> 16);
             report[141] = (byte)(calcCrc32 >> 24);
 
-            return hDevice.WriteOutputReportViaInterrupt(report, READ_STREAM_TIMEOUT);
+            bool result = hDevice.WriteOutputReportViaInterrupt(report, READ_STREAM_TIMEOUT);
+            bluetoothAudioDiagWriteAttempts++;
+            if (result)
+            {
+                bluetoothAudioDiagWriteSuccesses++;
+            }
+            else
+            {
+                bluetoothAudioDiagWriteFailures++;
+            }
+
+            if (!result || bluetoothAudioDiagWriteAttempts <= 5 || bluetoothAudioDiagWriteAttempts % 50 == 0)
+            {
+                AppLogger.LogToGui(
+                    $"TEST BUILD AUDIO DIAG: BT HID audio report attempt={bluetoothAudioDiagWriteAttempts} ok={result} success={bluetoothAudioDiagWriteSuccesses} fail={bluetoothAudioDiagWriteFailures} reportLen={report.Length} reportId=0x{report[0]:X2} seq={sequence} tag=0x{report[2]:X2} audioMarker=0x{report[11]:X2} sampleCount={report[12]} crc={calcCrc32:X8} firstSamples={samples[0]},{samples[1]},{samples[2]},{samples[3]}",
+                    !result);
+            }
+
+            return result;
         }
+
+        private long bluetoothAudioDiagWriteAttempts;
+        private long bluetoothAudioDiagWriteSuccesses;
+        private long bluetoothAudioDiagWriteFailures;
 
         private void Detach()
         {

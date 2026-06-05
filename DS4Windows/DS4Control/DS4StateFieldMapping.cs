@@ -22,6 +22,7 @@ namespace DS4Windows
     {
         public enum ControlType : int { Unknown = 0, Button, AxisDir, Trigger, Touch, GyroDir, SwipeDir }
         public const byte LAST_DS4_ACTION = (byte)DS4Controls.TouchEnded;
+        public const byte TRIGGER_FULL_PULL_THRESHOLD = 250;
 
         public bool[] buttons = new bool[(int)LAST_DS4_ACTION + 1];
         public byte[] axisdirs = new byte[(int)LAST_DS4_ACTION + 1];
@@ -121,10 +122,10 @@ namespace DS4Windows
                 triggers[(int)DS4Controls.R2] = cState.R2;
 
                 buttons[(int)DS4Controls.L1] = cState.L1;
-                buttons[(int)DS4Controls.L2FullPull] = cState.L2Raw == 255;
+                buttons[(int)DS4Controls.L2FullPull] = IsTriggerFullPull(cState.L2Raw);
                 buttons[(int)DS4Controls.L3] = cState.L3;
                 buttons[(int)DS4Controls.R1] = cState.R1;
-                buttons[(int)DS4Controls.R2FullPull] = cState.R2Raw == 255;
+                buttons[(int)DS4Controls.R2FullPull] = IsTriggerFullPull(cState.R2Raw);
                 buttons[(int)DS4Controls.R3] = cState.R3;
 
                 buttons[(int)DS4Controls.Cross] = cState.Cross;
@@ -181,6 +182,11 @@ namespace DS4Windows
                 touchButton = cState.TouchButton;
                 outputTouchButton = cState.OutputTouchButton;
             }
+        }
+
+        public static bool IsTriggerFullPull(byte rawTriggerValue)
+        {
+            return rawTriggerValue >= TRIGGER_FULL_PULL_THRESHOLD;
         }
 
         public void PopulateState(DS4State state)

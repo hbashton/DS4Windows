@@ -30,6 +30,20 @@ namespace DS4Windows.InputDevices
         Rigid,
         Pulse,
         FullClick,
+        Gamecube,
+        Soft,
+        Hard,
+        VeryHard,
+        Hardest,
+        Vibrate,
+        Choppy,
+        Medium,
+        Resistance,
+        Bow,
+        Galloping,
+        SemiAutomaticGun,
+        AutomaticGun,
+        Machine,
     }
 
     public enum TriggerId : ushort

@@ -1291,8 +1291,32 @@ namespace DS4WinWPF.DS4Control.DTOXml
             get; set;
         }
 
+        [XmlElement("L2TriggerEffectStart")]
+        public byte L2TriggerEffectStart
+        {
+            get; set;
+        }
+
+        [XmlElement("L2TriggerEffectStrength")]
+        public byte L2TriggerEffectStrength
+        {
+            get; set;
+        }
+
         [XmlElement("R2TriggerEffect")]
         public DS4Windows.InputDevices.TriggerEffects R2TriggerEffect
+        {
+            get; set;
+        }
+
+        [XmlElement("R2TriggerEffectStart")]
+        public byte R2TriggerEffectStart
+        {
+            get; set;
+        }
+
+        [XmlElement("R2TriggerEffectStrength")]
+        public byte R2TriggerEffectStrength
         {
             get; set;
         }
@@ -1725,7 +1749,19 @@ namespace DS4WinWPF.DS4Control.DTOXml
                     EmulationMode = source.dualSenseRumbleEmulationMode[deviceIndex],
                     EnableGenericRumbleRescale = source.useGenericRumbleRescaleForDualSenses[deviceIndex],
                     HapticPowerLevel = source.dualSenseHapticPowerLevel[deviceIndex],
-                }
+                },
+                AudioSettingsGroup = new DualSenseControllerSettings.AudioSettings()
+                {
+                    EnableSpeakerOutput = source.dualSenseEnableSpeakerOutput[deviceIndex],
+                    SpeakerVolume = source.dualSenseSpeakerVolume[deviceIndex],
+                    HeadphoneVolume = source.dualSenseHeadphoneVolume[deviceIndex],
+                    MicrophoneVolume = source.dualSenseMicrophoneVolume[deviceIndex],
+                    CaptureEndpointId = source.dualSenseAudioCaptureEndpointId[deviceIndex],
+                    SpeakerEndpointId = source.dualSenseAudioSpeakerEndpointId[deviceIndex],
+                    EnableMicrophonePassthrough = source.dualSenseEnableMicrophonePassthrough[deviceIndex],
+                    MicrophoneCaptureEndpointId = source.dualSenseMicrophoneCaptureEndpointId[deviceIndex],
+                    MicrophoneOutputEndpointId = source.dualSenseMicrophoneOutputEndpointId[deviceIndex],
+                },
             };
 
             L2OutputCurveCustom = source.l2OutBezierCurveObj[deviceIndex].CustomDefinition;
@@ -1733,12 +1769,16 @@ namespace DS4WinWPF.DS4Control.DTOXml
             L2TwoStageMode = source.l2OutputSettings[deviceIndex].twoStageMode;
             L2HipFireTime = source.l2OutputSettings[deviceIndex].hipFireMS;
             L2TriggerEffect = source.l2OutputSettings[deviceIndex].triggerEffect;
+            L2TriggerEffectStart = source.l2OutputSettings[deviceIndex].effectSettings.startValue;
+            L2TriggerEffectStrength = source.l2OutputSettings[deviceIndex].effectSettings.maxValue;
 
             R2OutputCurveCustom = source.r2OutBezierCurveObj[deviceIndex].CustomDefinition;
             R2OutputCurveMode = source.stickOutputCurveString(source.getR2OutCurveMode(deviceIndex));
             R2TwoStageMode = source.r2OutputSettings[deviceIndex].twoStageMode;
             R2HipFireTime = source.r2OutputSettings[deviceIndex].hipFireMS;
             R2TriggerEffect = source.r2OutputSettings[deviceIndex].triggerEffect;
+            R2TriggerEffectStart = source.r2OutputSettings[deviceIndex].effectSettings.startValue;
+            R2TriggerEffectStrength = source.r2OutputSettings[deviceIndex].effectSettings.maxValue;
 
             SXOutputCurveCustom = source.sxOutBezierCurveObj[deviceIndex].CustomDefinition;
             SXOutputCurveMode = source.stickOutputCurveString(source.getSXOutCurveMode(deviceIndex));
@@ -2336,6 +2376,19 @@ namespace DS4WinWPF.DS4Control.DTOXml
                     destination.useGenericRumbleRescaleForDualSenses[deviceIndex] = DualSenseControllerSettings.RumbleSettingsGroup.EnableGenericRumbleRescale;
                     destination.dualSenseHapticPowerLevel[deviceIndex] = DualSenseControllerSettings.RumbleSettingsGroup.HapticPowerLevel;
                 }
+
+                if (DualSenseControllerSettings.AudioSettingsGroup != null)
+                {
+                    destination.dualSenseEnableSpeakerOutput[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.EnableSpeakerOutput;
+                    destination.dualSenseSpeakerVolume[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.SpeakerVolume;
+                    destination.dualSenseHeadphoneVolume[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.HeadphoneVolume;
+                    destination.dualSenseMicrophoneVolume[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.MicrophoneVolume;
+                    destination.dualSenseAudioCaptureEndpointId[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.CaptureEndpointId ?? string.Empty;
+                    destination.dualSenseAudioSpeakerEndpointId[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.SpeakerEndpointId ?? string.Empty;
+                    destination.dualSenseEnableMicrophonePassthrough[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.EnableMicrophonePassthrough;
+                    destination.dualSenseMicrophoneCaptureEndpointId[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.MicrophoneCaptureEndpointId ?? string.Empty;
+                    destination.dualSenseMicrophoneOutputEndpointId[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.MicrophoneOutputEndpointId ?? string.Empty;
+                }
             }
 
             destination.l2OutBezierCurveObj[deviceIndex].CustomDefinition = L2OutputCurveCustom;
@@ -2343,12 +2396,16 @@ namespace DS4WinWPF.DS4Control.DTOXml
             destination.l2OutputSettings[deviceIndex].twoStageMode = L2TwoStageMode;
             destination.l2OutputSettings[deviceIndex].hipFireMS = L2HipFireTime;
             destination.l2OutputSettings[deviceIndex].triggerEffect = L2TriggerEffect;
+            destination.l2OutputSettings[deviceIndex].effectSettings.startValue = L2TriggerEffectStart;
+            destination.l2OutputSettings[deviceIndex].effectSettings.maxValue = L2TriggerEffectStrength;
 
             destination.r2OutBezierCurveObj[deviceIndex].CustomDefinition = R2OutputCurveCustom;
             destination.setR2OutCurveMode(deviceIndex, destination.stickOutputCurveId(R2OutputCurveMode));
             destination.r2OutputSettings[deviceIndex].twoStageMode = R2TwoStageMode;
             destination.r2OutputSettings[deviceIndex].hipFireMS = R2HipFireTime;
             destination.r2OutputSettings[deviceIndex].triggerEffect = R2TriggerEffect;
+            destination.r2OutputSettings[deviceIndex].effectSettings.startValue = R2TriggerEffectStart;
+            destination.r2OutputSettings[deviceIndex].effectSettings.maxValue = R2TriggerEffectStrength;
 
             destination.sxOutBezierCurveObj[deviceIndex].CustomDefinition = SXOutputCurveCustom;
             destination.setSXOutCurveMode(deviceIndex, destination.stickOutputCurveId(SXOutputCurveMode));
@@ -3109,9 +3166,73 @@ namespace DS4WinWPF.DS4Control.DTOXml
             get; set;
         }
 
+        public class AudioSettings
+        {
+            [XmlElement("EnableSpeakerOutput")]
+            public bool EnableSpeakerOutput
+            {
+                get; set;
+            }
+
+            [XmlElement("SpeakerVolume")]
+            public byte SpeakerVolume
+            {
+                get; set;
+            } = 128;
+
+            [XmlElement("HeadphoneVolume")]
+            public byte HeadphoneVolume
+            {
+                get; set;
+            } = 128;
+
+            [XmlElement("MicrophoneVolume")]
+            public byte MicrophoneVolume
+            {
+                get; set;
+            } = 128;
+
+            [XmlElement("CaptureEndpointId")]
+            public string CaptureEndpointId
+            {
+                get; set;
+            } = string.Empty;
+
+            [XmlElement("SpeakerEndpointId")]
+            public string SpeakerEndpointId
+            {
+                get; set;
+            } = string.Empty;
+
+            [XmlElement("EnableMicrophonePassthrough")]
+            public bool EnableMicrophonePassthrough
+            {
+                get; set;
+            }
+
+            [XmlElement("MicrophoneCaptureEndpointId")]
+            public string MicrophoneCaptureEndpointId
+            {
+                get; set;
+            } = string.Empty;
+
+            [XmlElement("MicrophoneOutputEndpointId")]
+            public string MicrophoneOutputEndpointId
+            {
+                get; set;
+            } = string.Empty;
+        }
+
+        [XmlElement("AudioSettings")]
+        public AudioSettings AudioSettingsGroup
+        {
+            get; set;
+        }
+
         public DualSenseControllerSettings()
         {
             RumbleSettingsGroup = new RumbleSettings();
+            AudioSettingsGroup = new AudioSettings();
         }
     }
 

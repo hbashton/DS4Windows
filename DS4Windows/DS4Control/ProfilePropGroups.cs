@@ -1203,6 +1203,11 @@ namespace DS4Windows
             get => ref effectSettings;
         }
 
+        public void NotifyTriggerEffectSettingsChanged()
+        {
+            TriggerEffectChanged?.Invoke(this, EventArgs.Empty);
+        }
+
         public void ResetSettings()
         {
             //mode = TriggerMode.Normal;

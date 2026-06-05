@@ -39,6 +39,8 @@ namespace DS4Windows
     public class ControlService
     {
         public ViGEmClient vigemTestClient = null;
+        private readonly DualSenseAudioPassthrough dualSenseAudioPassthrough = new DualSenseAudioPassthrough();
+        private readonly DualSenseMicrophonePassthrough dualSenseMicrophonePassthrough = new DualSenseMicrophonePassthrough();
         // Might be useful for ScpVBus build
         public const int EXPANDED_CONTROLLER_COUNT = 8;
         public const int MAX_DS4_CONTROLLER_COUNT = Global.MAX_DS4_CONTROLLER_COUNT;
@@ -1866,6 +1868,8 @@ namespace DS4Windows
                 if (showlog)
                     LogDebug(DS4WinWPF.Properties.Resources.StoppingDS4);
 
+                dualSenseAudioPassthrough.Dispose();
+                dualSenseMicrophonePassthrough.Dispose();
                 DS4Devices.stopControllers();
                 slotManager.ClearControllerList();
 
@@ -2204,8 +2208,15 @@ namespace DS4Windows
             //Global.TouchOutMode[ind] = TouchpadOutMode.MouseJoystick;
             touchPad[ind].PostSetup();
 
-            Global.L2OutputSettings[ind].TrigEffectSettings.maxValue = (byte)(Math.Max(Global.L2ModInfo[ind].maxOutput, Global.L2ModInfo[ind].maxZone) / 100.0 * 255);
-            Global.R2OutputSettings[ind].TrigEffectSettings.maxValue = (byte)(Math.Max(Global.R2ModInfo[ind].maxOutput, Global.R2ModInfo[ind].maxZone) / 100.0 * 255);
+            if (Global.L2OutputSettings[ind].TrigEffectSettings.maxValue == 0)
+            {
+                Global.L2OutputSettings[ind].TrigEffectSettings.maxValue = (byte)(Math.Max(Global.L2ModInfo[ind].maxOutput, Global.L2ModInfo[ind].maxZone) / 100.0 * 255);
+            }
+
+            if (Global.R2OutputSettings[ind].TrigEffectSettings.maxValue == 0)
+            {
+                Global.R2OutputSettings[ind].TrigEffectSettings.maxValue = (byte)(Math.Max(Global.R2ModInfo[ind].maxOutput, Global.R2ModInfo[ind].maxZone) / 100.0 * 255);
+            }
 
             device.PrepareTriggerEffect(InputDevices.TriggerId.LeftTrigger, Global.L2OutputSettings[ind].TriggerEffect,
                 Global.L2OutputSettings[ind].TrigEffectSettings);
@@ -2236,6 +2247,37 @@ namespace DS4Windows
                         break;
                 }
                 dualsense.HapticPowerLevel = DualSenseHapticPowerLevel[ind];
+                dualsense.EnableSpeakerOutput = DualSenseEnableSpeakerOutput[ind];
+                dualsense.SpeakerVolume = DualSenseSpeakerVolume[ind];
+                dualsense.HeadphoneVolume = DualSenseHeadphoneVolume[ind];
+                dualsense.MicrophoneVolume = DualSenseMicrophoneVolume[ind];
+
+                if (DualSenseEnableSpeakerOutput[ind])
+                {
+                    dualSenseAudioPassthrough.Start(ind, DualSenseSpeakerVolume[ind],
+                        DualSenseAudioCaptureEndpointId[ind],
+                        DualSenseAudioSpeakerEndpointId[ind]);
+                }
+                else
+                {
+                    dualSenseAudioPassthrough.Stop(ind);
+                }
+
+                if (DualSenseEnableMicrophonePassthrough[ind])
+                {
+                    dualSenseMicrophonePassthrough.Start(DualSenseMicrophoneVolume[ind],
+                        DualSenseMicrophoneCaptureEndpointId[ind],
+                        DualSenseMicrophoneOutputEndpointId[ind]);
+                }
+                else
+                {
+                    dualSenseMicrophonePassthrough.Stop();
+                }
+            }
+            else
+            {
+                dualSenseAudioPassthrough.Stop(ind);
+                dualSenseMicrophonePassthrough.Stop();
             }
 
             if (!startUp)
@@ -2547,6 +2589,8 @@ namespace DS4Windows
 
                     LogDebug(removed);
                     AppLogger.LogToTray(removed);
+                    dualSenseAudioPassthrough.Stop(ind);
+                    dualSenseMicrophonePassthrough.Stop();
                     /*Stopwatch sw = new Stopwatch();
                     sw.Start();
                     while (sw.ElapsedMilliseconds < XINPUT_UNPLUG_SETTLE_TIME)

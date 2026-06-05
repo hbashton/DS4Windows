@@ -2529,6 +2529,72 @@ namespace DS4Windows
             get => m_Config.dualSenseHapticPowerLevel;
             set => m_Config.dualSenseHapticPowerLevel = value;
         }
+
+        public static bool[] DualSenseEnableSpeakerOutput
+        {
+            get => m_Config.dualSenseEnableSpeakerOutput;
+            set => m_Config.dualSenseEnableSpeakerOutput = value;
+        }
+
+        public static byte[] DualSenseSpeakerVolume
+        {
+            get => m_Config.dualSenseSpeakerVolume;
+            set => m_Config.dualSenseSpeakerVolume = value;
+        }
+
+        public static byte[] DualSenseHeadphoneVolume
+        {
+            get => m_Config.dualSenseHeadphoneVolume;
+            set => m_Config.dualSenseHeadphoneVolume = value;
+        }
+
+        public static byte[] DualSenseMicrophoneVolume
+        {
+            get => m_Config.dualSenseMicrophoneVolume;
+            set => m_Config.dualSenseMicrophoneVolume = value;
+        }
+
+        public static string[] DualSenseAudioCaptureEndpointId
+        {
+            get => m_Config.dualSenseAudioCaptureEndpointId;
+            set => m_Config.dualSenseAudioCaptureEndpointId = value;
+        }
+
+        public static string[] DualSenseAudioSpeakerEndpointId
+        {
+            get => m_Config.dualSenseAudioSpeakerEndpointId;
+            set => m_Config.dualSenseAudioSpeakerEndpointId = value;
+        }
+
+        public static bool[] DualSenseEnableMicrophonePassthrough
+        {
+            get => m_Config.dualSenseEnableMicrophonePassthrough;
+            set => m_Config.dualSenseEnableMicrophonePassthrough = value;
+        }
+
+        public static string[] DualSenseMicrophoneCaptureEndpointId
+        {
+            get => m_Config.dualSenseMicrophoneCaptureEndpointId;
+            set => m_Config.dualSenseMicrophoneCaptureEndpointId = value;
+        }
+
+        public static string[] DualSenseMicrophoneOutputEndpointId
+        {
+            get => m_Config.dualSenseMicrophoneOutputEndpointId;
+            set => m_Config.dualSenseMicrophoneOutputEndpointId = value;
+        }
+
+        public static bool[] GameBarHomeButtonSupport
+        {
+            get => m_Config.gameBarHomeButtonSupport;
+            set => m_Config.gameBarHomeButtonSupport = value;
+        }
+
+        public static string[] GameBarProfileName
+        {
+            get => m_Config.gameBarProfileName;
+            set => m_Config.gameBarProfileName = value;
+        }
         //
         // End of DualSense specific profile settings
 
@@ -3655,6 +3721,17 @@ namespace DS4Windows
         {
             0,0,0,0,0,0,0,0,0
         };
+        public bool[] dualSenseEnableSpeakerOutput = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
+        public byte[] dualSenseSpeakerVolume = new byte[Global.TEST_PROFILE_ITEM_COUNT] { 128, 128, 128, 128, 128, 128, 128, 128, 128 };
+        public byte[] dualSenseHeadphoneVolume = new byte[Global.TEST_PROFILE_ITEM_COUNT] { 128, 128, 128, 128, 128, 128, 128, 128, 128 };
+        public byte[] dualSenseMicrophoneVolume = new byte[Global.TEST_PROFILE_ITEM_COUNT] { 128, 128, 128, 128, 128, 128, 128, 128, 128 };
+        public string[] dualSenseAudioCaptureEndpointId = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
+        public string[] dualSenseAudioSpeakerEndpointId = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
+        public bool[] dualSenseEnableMicrophonePassthrough = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
+        public string[] dualSenseMicrophoneCaptureEndpointId = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
+        public string[] dualSenseMicrophoneOutputEndpointId = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
+        public bool[] gameBarHomeButtonSupport = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
+        public string[] gameBarProfileName = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
         //
         // End of DualSense specific profile options
 
@@ -4584,6 +4661,8 @@ namespace DS4Windows
                 XmlNode xmlMouseVerticalScale = m_Xdoc.CreateNode(XmlNodeType.Element, "ButtonMouseVerticalScale", null); xmlMouseVerticalScale.InnerText = Convert.ToInt32(buttonMouseInfos[device].buttonVerticalScale * 100).ToString(); rootElement.AppendChild(xmlMouseVerticalScale);
                 //XmlNode xmlShiftMod = m_Xdoc.CreateNode(XmlNodeType.Element, "ShiftModifier", null); xmlShiftMod.InnerText = shiftModifier[device].ToString(); rootElement.AppendChild(xmlShiftMod);
                 XmlNode xmlLaunchProgram = m_Xdoc.CreateNode(XmlNodeType.Element, "LaunchProgram", null); xmlLaunchProgram.InnerText = launchProgram[device].ToString(); rootElement.AppendChild(xmlLaunchProgram);
+                XmlNode xmlGameBarHomeButtonSupport = m_Xdoc.CreateNode(XmlNodeType.Element, "GameBarHomeButtonSupport", null); xmlGameBarHomeButtonSupport.InnerText = gameBarHomeButtonSupport[device].ToString(); rootElement.AppendChild(xmlGameBarHomeButtonSupport);
+                XmlNode xmlGameBarProfileName = m_Xdoc.CreateNode(XmlNodeType.Element, "GameBarProfileName", null); xmlGameBarProfileName.InnerText = gameBarProfileName[device]; rootElement.AppendChild(xmlGameBarProfileName);
                 XmlNode xmlDinput = m_Xdoc.CreateNode(XmlNodeType.Element, "DinputOnly", null); xmlDinput.InnerText = dinputOnly[device].ToString(); rootElement.AppendChild(xmlDinput);
                 XmlNode xmlStartTouchpadOff = m_Xdoc.CreateNode(XmlNodeType.Element, "StartTouchpadOff", null); xmlStartTouchpadOff.InnerText = startTouchpadOff[device].ToString(); rootElement.AppendChild(xmlStartTouchpadOff);
                 XmlNode xmlTouchOutMode = m_Xdoc.CreateNode(XmlNodeType.Element, "TouchpadOutputMode", null); xmlTouchOutMode.InnerText = touchOutMode[device].ToString(); rootElement.AppendChild(xmlTouchOutMode);
@@ -4728,7 +4807,11 @@ namespace DS4Windows
                 XmlNode xmlR2HipFireTime = m_Xdoc.CreateNode(XmlNodeType.Element, "R2HipFireTime", null); xmlR2HipFireTime.InnerText = r2OutputSettings[device].hipFireMS.ToString(); rootElement.AppendChild(xmlR2HipFireTime);
 
                 XmlNode xmlL2TriggerEffect = m_Xdoc.CreateNode(XmlNodeType.Element, "L2TriggerEffect", null); xmlL2TriggerEffect.InnerText = l2OutputSettings[device].triggerEffect.ToString(); rootElement.AppendChild(xmlL2TriggerEffect);
+                XmlNode xmlL2TriggerEffectStart = m_Xdoc.CreateNode(XmlNodeType.Element, "L2TriggerEffectStart", null); xmlL2TriggerEffectStart.InnerText = l2OutputSettings[device].effectSettings.startValue.ToString(); rootElement.AppendChild(xmlL2TriggerEffectStart);
+                XmlNode xmlL2TriggerEffectStrength = m_Xdoc.CreateNode(XmlNodeType.Element, "L2TriggerEffectStrength", null); xmlL2TriggerEffectStrength.InnerText = l2OutputSettings[device].effectSettings.maxValue.ToString(); rootElement.AppendChild(xmlL2TriggerEffectStrength);
                 XmlNode xmlR2TriggerEffect = m_Xdoc.CreateNode(XmlNodeType.Element, "R2TriggerEffect", null); xmlR2TriggerEffect.InnerText = r2OutputSettings[device].triggerEffect.ToString(); rootElement.AppendChild(xmlR2TriggerEffect);
+                XmlNode xmlR2TriggerEffectStart = m_Xdoc.CreateNode(XmlNodeType.Element, "R2TriggerEffectStart", null); xmlR2TriggerEffectStart.InnerText = r2OutputSettings[device].effectSettings.startValue.ToString(); rootElement.AppendChild(xmlR2TriggerEffectStart);
+                XmlNode xmlR2TriggerEffectStrength = m_Xdoc.CreateNode(XmlNodeType.Element, "R2TriggerEffectStrength", null); xmlR2TriggerEffectStrength.InnerText = r2OutputSettings[device].effectSettings.maxValue.ToString(); rootElement.AppendChild(xmlR2TriggerEffectStrength);
 
                 XmlNode xmlR2OutputCurveMode = m_Xdoc.CreateNode(XmlNodeType.Element, "R2OutputCurveMode", null); xmlR2OutputCurveMode.InnerText = axisOutputCurveString(getR2OutCurveMode(device)); rootElement.AppendChild(xmlR2OutputCurveMode);
                 XmlNode xmlR2OutputCurveCustom = m_Xdoc.CreateNode(XmlNodeType.Element, "R2OutputCurveCustom", null); xmlR2OutputCurveCustom.InnerText = r2OutBezierCurveObj[device].ToString(); rootElement.AppendChild(xmlR2OutputCurveCustom);
@@ -4798,6 +4881,17 @@ namespace DS4Windows
                 XmlNode xmlDSREmulationModeElement = m_Xdoc.CreateNode(XmlNodeType.Element, "EmulationMode", null); xmlDSREmulationModeElement.InnerText = dualSenseRumbleEmulationMode[device].ToString(); xmlDSRumbleGroupElement.AppendChild(xmlDSREmulationModeElement);
                 XmlNode xmlDSREnableGenericRumbleRescaleElement = m_Xdoc.CreateNode(XmlNodeType.Element, "EnableGenericRumbleRescale", null); xmlDSREnableGenericRumbleRescaleElement.InnerText = useGenericRumbleRescaleForDualSenses[device].ToString(); xmlDSRumbleGroupElement.AppendChild(xmlDSREnableGenericRumbleRescaleElement);
                 XmlNode xmlDSRHapticPowerLevelElement = m_Xdoc.CreateNode(XmlNodeType.Element, "HapticPowerLevel", null); xmlDSRHapticPowerLevelElement.InnerText = dualSenseHapticPowerLevel[device].ToString(); xmlDSRumbleGroupElement.AppendChild(xmlDSRHapticPowerLevelElement);
+
+                XmlElement xmlDSAudioGroupElement = m_Xdoc.CreateElement("AudioSettings"); xmlDualSenseControllerSettingsElement.AppendChild(xmlDSAudioGroupElement);
+                XmlNode xmlDSEnableSpeakerOutputElement = m_Xdoc.CreateNode(XmlNodeType.Element, "EnableSpeakerOutput", null); xmlDSEnableSpeakerOutputElement.InnerText = dualSenseEnableSpeakerOutput[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSEnableSpeakerOutputElement);
+                XmlNode xmlDSSpeakerVolumeElement = m_Xdoc.CreateNode(XmlNodeType.Element, "SpeakerVolume", null); xmlDSSpeakerVolumeElement.InnerText = dualSenseSpeakerVolume[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSSpeakerVolumeElement);
+                XmlNode xmlDSHeadphoneVolumeElement = m_Xdoc.CreateNode(XmlNodeType.Element, "HeadphoneVolume", null); xmlDSHeadphoneVolumeElement.InnerText = dualSenseHeadphoneVolume[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSHeadphoneVolumeElement);
+                XmlNode xmlDSMicrophoneVolumeElement = m_Xdoc.CreateNode(XmlNodeType.Element, "MicrophoneVolume", null); xmlDSMicrophoneVolumeElement.InnerText = dualSenseMicrophoneVolume[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSMicrophoneVolumeElement);
+                XmlNode xmlDSAudioCaptureEndpointElement = m_Xdoc.CreateNode(XmlNodeType.Element, "CaptureEndpointId", null); xmlDSAudioCaptureEndpointElement.InnerText = dualSenseAudioCaptureEndpointId[device]; xmlDSAudioGroupElement.AppendChild(xmlDSAudioCaptureEndpointElement);
+                XmlNode xmlDSAudioSpeakerEndpointElement = m_Xdoc.CreateNode(XmlNodeType.Element, "SpeakerEndpointId", null); xmlDSAudioSpeakerEndpointElement.InnerText = dualSenseAudioSpeakerEndpointId[device]; xmlDSAudioGroupElement.AppendChild(xmlDSAudioSpeakerEndpointElement);
+                XmlNode xmlDSEnableMicPassthroughElement = m_Xdoc.CreateNode(XmlNodeType.Element, "EnableMicrophonePassthrough", null); xmlDSEnableMicPassthroughElement.InnerText = dualSenseEnableMicrophonePassthrough[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSEnableMicPassthroughElement);
+                XmlNode xmlDSMicCaptureEndpointElement = m_Xdoc.CreateNode(XmlNodeType.Element, "MicrophoneCaptureEndpointId", null); xmlDSMicCaptureEndpointElement.InnerText = dualSenseMicrophoneCaptureEndpointId[device]; xmlDSAudioGroupElement.AppendChild(xmlDSMicCaptureEndpointElement);
+                XmlNode xmlDSMicOutputEndpointElement = m_Xdoc.CreateNode(XmlNodeType.Element, "MicrophoneOutputEndpointId", null); xmlDSMicOutputEndpointElement.InnerText = dualSenseMicrophoneOutputEndpointId[device]; xmlDSAudioGroupElement.AppendChild(xmlDSMicOutputEndpointElement);
                 rootElement.AppendChild(xmlDualSenseControllerSettingsElement);
                 //
                 // End of DualSense specific settings
@@ -6390,6 +6484,20 @@ namespace DS4Windows
                 }
                 catch { launchProgram[device] = string.Empty; missingSetting = true; }
 
+                try
+                {
+                    Item = m_Xdoc.SelectSingleNode("/" + rootname + "/GameBarHomeButtonSupport");
+                    bool.TryParse(Item.InnerText, out gameBarHomeButtonSupport[device]);
+                }
+                catch { gameBarHomeButtonSupport[device] = false; missingSetting = true; }
+
+                try
+                {
+                    Item = m_Xdoc.SelectSingleNode("/" + rootname + "/GameBarProfileName");
+                    gameBarProfileName[device] = Item.InnerText;
+                }
+                catch { gameBarProfileName[device] = string.Empty; missingSetting = true; }
+
                 if (launchprogram == true && launchProgram[device] != string.Empty)
                 {
                     string programPath = launchProgram[device];
@@ -7035,6 +7143,7 @@ namespace DS4Windows
                     {
                         missingSetting = true;
                     }
+
                 }
                 else
                 {
@@ -7138,6 +7247,79 @@ namespace DS4Windows
                     {
                         missingSetting = true;
                     }
+
+                    XmlNode xmlDSAudioGroupElement =
+                        xmlDualSenseControllerSettingsElement.SelectSingleNode("AudioSettings");
+                    if (xmlDSAudioGroupElement != null)
+                    {
+                        try
+                        {
+                            Item = xmlDSAudioGroupElement.SelectSingleNode("EnableSpeakerOutput");
+                            bool.TryParse(Item.InnerText, out bool temp);
+                            dualSenseEnableSpeakerOutput[device] = temp;
+                        }
+                        catch { missingSetting = true; }
+
+                        try
+                        {
+                            Item = xmlDSAudioGroupElement.SelectSingleNode("SpeakerVolume");
+                            byte.TryParse(Item.InnerText, out byte temp);
+                            dualSenseSpeakerVolume[device] = temp;
+                        }
+                        catch { missingSetting = true; }
+
+                        try
+                        {
+                            Item = xmlDSAudioGroupElement.SelectSingleNode("HeadphoneVolume");
+                            byte.TryParse(Item.InnerText, out byte temp);
+                            dualSenseHeadphoneVolume[device] = temp;
+                        }
+                        catch { missingSetting = true; }
+
+                        try
+                        {
+                            Item = xmlDSAudioGroupElement.SelectSingleNode("MicrophoneVolume");
+                            byte.TryParse(Item.InnerText, out byte temp);
+                            dualSenseMicrophoneVolume[device] = temp;
+                        }
+                        catch { missingSetting = true; }
+
+                        try
+                        {
+                            Item = xmlDSAudioGroupElement.SelectSingleNode("CaptureEndpointId");
+                            dualSenseAudioCaptureEndpointId[device] = Item?.InnerText ?? string.Empty;
+                        }
+                        catch { missingSetting = true; }
+
+                        try
+                        {
+                            Item = xmlDSAudioGroupElement.SelectSingleNode("SpeakerEndpointId");
+                            dualSenseAudioSpeakerEndpointId[device] = Item?.InnerText ?? string.Empty;
+                        }
+                        catch { missingSetting = true; }
+
+                        try
+                        {
+                            Item = xmlDSAudioGroupElement.SelectSingleNode("EnableMicrophonePassthrough");
+                            bool.TryParse(Item?.InnerText, out bool temp);
+                            dualSenseEnableMicrophonePassthrough[device] = temp;
+                        }
+                        catch { missingSetting = true; }
+
+                        try
+                        {
+                            Item = xmlDSAudioGroupElement.SelectSingleNode("MicrophoneCaptureEndpointId");
+                            dualSenseMicrophoneCaptureEndpointId[device] = Item?.InnerText ?? string.Empty;
+                        }
+                        catch { missingSetting = true; }
+
+                        try
+                        {
+                            Item = xmlDSAudioGroupElement.SelectSingleNode("MicrophoneOutputEndpointId");
+                            dualSenseMicrophoneOutputEndpointId[device] = Item?.InnerText ?? string.Empty;
+                        }
+                        catch { missingSetting = true; }
+                    }
                 }
                 else
                 {
@@ -7182,6 +7364,26 @@ namespace DS4Windows
                 }
                 catch { }
 
+                try
+                {
+                    Item = m_Xdoc.SelectSingleNode("/" + rootname + "/L2TriggerEffectStart");
+                    if (byte.TryParse(Item?.InnerText, out byte temp))
+                    {
+                        l2OutputSettings[device].effectSettings.startValue = (byte)Math.Clamp((int)temp, 0, 9);
+                    }
+                }
+                catch { }
+
+                try
+                {
+                    Item = m_Xdoc.SelectSingleNode("/" + rootname + "/L2TriggerEffectStrength");
+                    if (byte.TryParse(Item?.InnerText, out byte temp))
+                    {
+                        l2OutputSettings[device].effectSettings.maxValue = temp;
+                    }
+                }
+                catch { }
+
                 try { Item = m_Xdoc.SelectSingleNode("/" + rootname + "/R2OutputCurveCustom"); r2OutBezierCurveObj[device].CustomDefinition = Item.InnerText; }
                 catch { missingSetting = true; }
                 try { Item = m_Xdoc.SelectSingleNode("/" + rootname + "/R2OutputCurveMode"); setR2OutCurveMode(device, axisOutputCurveId(Item.InnerText)); }
@@ -7193,6 +7395,26 @@ namespace DS4Windows
                     if (Enum.TryParse(Item?.InnerText, out TwoStageTriggerMode tempMode))
                     {
                         r2OutputSettings[device].TwoStageMode = tempMode;
+                    }
+                }
+                catch { }
+
+                try
+                {
+                    Item = m_Xdoc.SelectSingleNode("/" + rootname + "/R2TriggerEffectStart");
+                    if (byte.TryParse(Item?.InnerText, out byte temp))
+                    {
+                        r2OutputSettings[device].effectSettings.startValue = (byte)Math.Clamp((int)temp, 0, 9);
+                    }
+                }
+                catch { }
+
+                try
+                {
+                    Item = m_Xdoc.SelectSingleNode("/" + rootname + "/R2TriggerEffectStrength");
+                    if (byte.TryParse(Item?.InnerText, out byte temp))
+                    {
+                        r2OutputSettings[device].effectSettings.maxValue = temp;
                     }
                 }
                 catch { }

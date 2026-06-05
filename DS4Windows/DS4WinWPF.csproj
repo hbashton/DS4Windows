@@ -2,7 +2,7 @@
 
 	<PropertyGroup>
 		<OutputType>WinExe</OutputType>
-		<TargetFramework>net8.0-windows</TargetFramework>
+		<TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
 		<UseWPF>true</UseWPF>
 		<Platforms>x64;x86</Platforms>
 		<RuntimeIdentifiers>win-x64;win-x86</RuntimeIdentifiers>
@@ -82,6 +82,7 @@
 		  <PrivateAssets>all</PrivateAssets>
 		  <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 		</PackageReference>
+		<PackageReference Include="NAudio" Version="2.2.1" />
 		<PackageReference Include="NLog" Version="5.1.1" />
 		<!--<PackageReference Include="Nefarius.ViGEm.Client" Version="1.21.230" />-->
 		<PackageReference Include="Ookii.Dialogs.Wpf" Version="5.0.1" />

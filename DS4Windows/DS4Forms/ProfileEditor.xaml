@@ -888,6 +888,8 @@
                                     <RowDefinition></RowDefinition>
                                     <RowDefinition Style="{StaticResource gridRowHeight}"></RowDefinition>
                                     <RowDefinition Style="{StaticResource gridRowHeight}"></RowDefinition>
+                                    <RowDefinition Style="{StaticResource gridRowHeight}"></RowDefinition>
+                                    <RowDefinition Style="{StaticResource gridRowHeight}"></RowDefinition>
                                 </Grid.RowDefinitions>
 
                                 <Grid.ColumnDefinitions>
@@ -1060,6 +1062,18 @@
                                           DisplayMemberPath="DisplayName" SelectedValuePath="Mode" SelectedValue="{Binding L2TriggerEffect}" Margin="{StaticResource spaceMargin}" />
                                 <ComboBox Grid.Row="11" Grid.Column="2" ItemsSource="{Binding Path=TriggerEffectChoices}"
                                           DisplayMemberPath="DisplayName" SelectedValuePath="Mode" SelectedValue="{Binding R2TriggerEffect}" Margin="{StaticResource spaceMargin}" />
+
+                                <Label Content="Trigger Start:" Grid.Row="12" Grid.Column="0" />
+                                <xctk:IntegerUpDown d:IsHidden="True" Value="{Binding L2TriggerEffectStart}" Minimum="0" Maximum="9" Increment="1"
+                                                 Grid.Row="12" Grid.Column="1" Margin="{StaticResource spaceMargin}" />
+                                <xctk:IntegerUpDown d:IsHidden="True" Value="{Binding R2TriggerEffectStart}" Minimum="0" Maximum="9" Increment="1"
+                                                 Grid.Row="12" Grid.Column="2" Margin="{StaticResource spaceMargin}" />
+
+                                <Label Content="Trigger Strength:" Grid.Row="13" Grid.Column="0" />
+                                <xctk:IntegerUpDown d:IsHidden="True" Value="{Binding L2TriggerEffectStrength}" Minimum="0" Maximum="255" Increment="1"
+                                                 Grid.Row="13" Grid.Column="1" Margin="{StaticResource spaceMargin}" />
+                                <xctk:IntegerUpDown d:IsHidden="True" Value="{Binding R2TriggerEffectStrength}" Minimum="0" Maximum="255" Increment="1"
+                                                 Grid.Row="13" Grid.Column="2" Margin="{StaticResource spaceMargin}" />
                             </Grid>
                         </GroupBox>
 
@@ -2119,6 +2133,64 @@
 
                                         <CheckBox x:Name="dualSForceGenRumbleRescale" IsChecked="{Binding EnableGenericRumbleStrRescaleForDualSenseDevices}" Content="{lex:Loc DualSRumbleForceGenericRescale}" ToolTip="{lex:Loc DualSRumbleForceGenericRescale_Tip}" Margin="3,8,0,0" HorizontalAlignment="Left" />
 
+                                        <GroupBox Header="DualSense Audio" Margin="0,10,0,0" Padding="2,4">
+                                            <Grid>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="30" />
+                                                    <RowDefinition Height="30" />
+                                                    <RowDefinition Height="30" />
+                                                    <RowDefinition Height="30" />
+                                                    <RowDefinition Height="30" />
+                                                    <RowDefinition Height="30" />
+                                                    <RowDefinition Height="30" />
+                                                    <RowDefinition Height="30" />
+                                                    <RowDefinition Height="30" />
+                                                </Grid.RowDefinitions>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition />
+                                                </Grid.ColumnDefinitions>
+
+                                                <CheckBox Content="Audio passthrough to internal speaker" IsChecked="{Binding DualSenseEnableSpeakerOutput}"
+                                                          Grid.Row="0" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}" />
+
+                                                <Label Content="Speaker endpoint:" Grid.Row="1" Grid.Column="0" />
+                                                <ComboBox ItemsSource="{Binding AudioSpeakerEndpointChoices}" DisplayMemberPath="Name" SelectedValuePath="EndpointId"
+                                                          SelectedValue="{Binding DualSenseAudioSpeakerEndpointId}" Grid.Row="1" Grid.Column="1"
+                                                          Margin="{StaticResource spaceMargin}" />
+
+                                                <Label Content="Capture source:" Grid.Row="2" Grid.Column="0" />
+                                                <ComboBox ItemsSource="{Binding AudioCaptureEndpointChoices}" DisplayMemberPath="Name" SelectedValuePath="EndpointId"
+                                                          SelectedValue="{Binding DualSenseAudioCaptureEndpointId}" Grid.Row="2" Grid.Column="1"
+                                                          Margin="{StaticResource spaceMargin}" />
+
+                                                <Label Content="Speaker:" Grid.Row="3" Grid.Column="0" />
+                                                <xctk:IntegerUpDown d:IsHidden="True" Value="{Binding DualSenseSpeakerVolume}" Minimum="0" Maximum="255" Increment="1"
+                                                                 Grid.Row="3" Grid.Column="1" Margin="{StaticResource spaceMargin}" />
+
+                                                <Label Content="Headphones:" Grid.Row="4" Grid.Column="0" />
+                                                <xctk:IntegerUpDown d:IsHidden="True" Value="{Binding DualSenseHeadphoneVolume}" Minimum="0" Maximum="255" Increment="1"
+                                                                 Grid.Row="4" Grid.Column="1" Margin="{StaticResource spaceMargin}" />
+
+                                                <Label Content="Microphone:" Grid.Row="5" Grid.Column="0" />
+                                                <xctk:IntegerUpDown d:IsHidden="True" Value="{Binding DualSenseMicrophoneVolume}" Minimum="0" Maximum="255" Increment="1"
+                                                                 Grid.Row="5" Grid.Column="1" Margin="{StaticResource spaceMargin}" />
+
+                                                <CheckBox Content="Microphone passthrough to virtual audio device" IsChecked="{Binding DualSenseEnableMicrophonePassthrough}"
+                                                          Grid.Row="6" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}" />
+
+                                                <Label Content="Controller mic:" Grid.Row="7" Grid.Column="0" />
+                                                <ComboBox ItemsSource="{Binding MicrophoneCaptureEndpointChoices}" DisplayMemberPath="Name" SelectedValuePath="EndpointId"
+                                                          SelectedValue="{Binding DualSenseMicrophoneCaptureEndpointId}" Grid.Row="7" Grid.Column="1"
+                                                          Margin="{StaticResource spaceMargin}" />
+
+                                                <Label Content="Virtual output:" Grid.Row="8" Grid.Column="0" />
+                                                <ComboBox ItemsSource="{Binding MicrophoneOutputEndpointChoices}" DisplayMemberPath="Name" SelectedValuePath="EndpointId"
+                                                          SelectedValue="{Binding DualSenseMicrophoneOutputEndpointId}" Grid.Row="8" Grid.Column="1"
+                                                          Margin="{StaticResource spaceMargin}" />
+                                            </Grid>
+                                        </GroupBox>
+
                                     </StackPanel>
 
                                 </GroupBox>
@@ -2167,6 +2239,25 @@
                         <CheckBox Content="{lex:Loc EnableTouchpadToggle}" IsChecked="{Binding EnableTouchpadToggle}" Margin="0,6,0,0"
                               ToolTip="{lex:Loc Resources:EnableTouchToggle}" />
                         <CheckBox Content="{lex:Loc EnableOutputDataToDS4}" IsChecked="{Binding EnableOutputDataToDS4}" Margin="0,6,0,0" ToolTip="{lex:Loc EnableOutputDataToDS4Tip}" />
+                        <GroupBox Header="Game Bar" Margin="0,8,0,0" Padding="2,4">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="30" />
+                                    <RowDefinition Height="30" />
+                                </Grid.RowDefinitions>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition />
+                                </Grid.ColumnDefinitions>
+
+                                <CheckBox Content="Enable Game Bar support with controller Home button" IsChecked="{Binding GameBarHomeButtonSupport}"
+                                          Grid.Row="0" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}"
+                                          ToolTip="Pressing Home opens Xbox Game Bar and switches this controller to the selected profile while Game Bar is visible." />
+                                <Label Content="Profile:" Grid.Row="1" Grid.Column="0" />
+                                <ComboBox ItemsSource="{Binding GameBarProfileChoices}" SelectedItem="{Binding GameBarProfileName}"
+                                          Grid.Row="1" Grid.Column="1" Margin="{StaticResource spaceMargin}" />
+                            </Grid>
+                        </GroupBox>
                         <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
                             <CheckBox x:Name="launchProgCk" Content="{lex:Loc LaunchProgramWithProfile}" IsChecked="{Binding LaunchProgramExists}" IsEnabled="{Binding LaunchProgramExists}" />
                             <Button x:Name="launchProgBrowseBtn" Click="LaunchProgBrowseBtn_Click" Width="80" Height="30" Margin="20,0,0,0">

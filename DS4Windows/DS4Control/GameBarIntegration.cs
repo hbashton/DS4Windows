@@ -33,6 +33,9 @@ namespace DS4Windows
         private const byte VK_G = 0x47;
         private const int KEYEVENTF_KEYUP = 0x0002;
         private const int DWMWA_CLOAKED = 14;
+        private const int MaxAutomationDiagnosticRows = 80;
+        private const int MaxAutomationVisitCount = 500;
+        private const int MaxAutomationDepth = 5;
 
         private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
@@ -159,14 +162,8 @@ namespace DS4Windows
         {
             try
             {
-                AutomationElementCollection elements = AutomationElement.RootElement.FindAll(TreeScope.Children, System.Windows.Automation.Condition.TrueCondition);
-                foreach (AutomationElement element in elements)
-                {
-                    if (LooksLikeVisibleGameBarAutomationElement(element))
-                    {
-                        return true;
-                    }
-                }
+                int visited = 0;
+                return FindVisibleGameBarAutomationElement(AutomationElement.RootElement, 0, ref visited);
             }
             catch
             {
@@ -177,25 +174,21 @@ namespace DS4Windows
 
         private static void AppendAutomationDiagnostics(StringBuilder output)
         {
+            AppendGameBarProcessDiagnostics(output);
+
             try
             {
                 List<string> rows = new List<string>();
-                AutomationElementCollection elements = AutomationElement.RootElement.FindAll(TreeScope.Children, System.Windows.Automation.Condition.TrueCondition);
-                foreach (AutomationElement element in elements)
-                {
-                    AddAutomationDiagnosticRow(rows, element, "uia-top");
-
-                    if (rows.Count >= 40)
-                    {
-                        break;
-                    }
-                }
+                int visited = 0;
+                AddAutomationDiagnosticRows(rows, AutomationElement.RootElement, "uia", 0, ref visited);
 
                 if (rows.Count == 0)
                 {
-                    output.AppendLine("No Game Bar-like UI Automation elements were found.");
+                    output.AppendLine($"No Game Bar-like UI Automation elements were found. UIAVisited={visited}");
                     return;
                 }
+
+                output.AppendLine($"UIAVisited={visited}");
 
                 foreach (string row in rows)
                 {
@@ -205,6 +198,112 @@ namespace DS4Windows
             catch (Exception ex)
             {
                 output.AppendLine($"UI Automation diagnostics failed: {ex.Message}");
+            }
+        }
+
+        private static bool FindVisibleGameBarAutomationElement(AutomationElement parent, int depth, ref int visited)
+        {
+            if (depth > MaxAutomationDepth || visited >= MaxAutomationVisitCount)
+            {
+                return false;
+            }
+
+            AutomationElementCollection children;
+            try
+            {
+                children = parent.FindAll(TreeScope.Children, System.Windows.Automation.Condition.TrueCondition);
+            }
+            catch
+            {
+                return false;
+            }
+
+            foreach (AutomationElement child in children)
+            {
+                visited++;
+                if (LooksLikeVisibleGameBarAutomationElement(child))
+                {
+                    return true;
+                }
+
+                if (FindVisibleGameBarAutomationElement(child, depth + 1, ref visited))
+                {
+                    return true;
+                }
+
+                if (visited >= MaxAutomationVisitCount)
+                {
+                    break;
+                }
+            }
+
+            return false;
+        }
+
+        private static void AddAutomationDiagnosticRows(List<string> rows, AutomationElement parent, string scope, int depth, ref int visited)
+        {
+            if (depth > MaxAutomationDepth || rows.Count >= MaxAutomationDiagnosticRows || visited >= MaxAutomationVisitCount)
+            {
+                return;
+            }
+
+            AutomationElementCollection children;
+            try
+            {
+                children = parent.FindAll(TreeScope.Children, System.Windows.Automation.Condition.TrueCondition);
+            }
+            catch
+            {
+                return;
+            }
+
+            foreach (AutomationElement child in children)
+            {
+                visited++;
+                AddAutomationDiagnosticRow(rows, child, $"{scope}-{depth}");
+
+                if (rows.Count >= MaxAutomationDiagnosticRows || visited >= MaxAutomationVisitCount)
+                {
+                    return;
+                }
+
+                AddAutomationDiagnosticRows(rows, child, scope, depth + 1, ref visited);
+            }
+        }
+
+        private static void AppendGameBarProcessDiagnostics(StringBuilder output)
+        {
+            List<string> rows = new List<string>();
+            foreach (Process process in Process.GetProcesses())
+            {
+                try
+                {
+                    string processName = process.ProcessName ?? string.Empty;
+                    if (!IsGameBarRelatedProcessName(processName))
+                    {
+                        continue;
+                    }
+
+                    rows.Add($"[proc] name='{processName}' id={process.Id} mainWindowHandle=0x{process.MainWindowHandle.ToInt64():X} mainWindowTitle='{process.MainWindowTitle}' responding={SafeGetResponding(process)}");
+                }
+                catch
+                {
+                }
+                finally
+                {
+                    process.Dispose();
+                }
+            }
+
+            if (rows.Count == 0)
+            {
+                output.AppendLine("No Game Bar/Xbox related processes were found.");
+                return;
+            }
+
+            foreach (string row in rows)
+            {
+                output.AppendLine(row);
             }
         }
 
@@ -248,12 +347,7 @@ namespace DS4Windows
             string automationId = GetAutomationId(element);
             string processName = GetAutomationProcessName(element);
 
-            bool processLooksRight =
-                processName.Equals("GameBar", StringComparison.OrdinalIgnoreCase) ||
-                processName.Equals("XboxGameBar", StringComparison.OrdinalIgnoreCase) ||
-                processName.Equals("GameBarFTServer", StringComparison.OrdinalIgnoreCase) ||
-                processName.Equals("GameBarWidgets", StringComparison.OrdinalIgnoreCase) ||
-                processName.Equals("GameBarElevatedFT_Alias", StringComparison.OrdinalIgnoreCase);
+            bool processLooksRight = IsGameBarRelatedProcessName(processName);
 
             bool textLooksRight =
                 name.IndexOf("Xbox Game Bar", StringComparison.OrdinalIgnoreCase) >= 0 ||
@@ -263,21 +357,53 @@ namespace DS4Windows
                 className.IndexOf("GameBar", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 className.IndexOf("Xbox", StringComparison.OrdinalIgnoreCase) >= 0;
 
-            return processLooksRight || textLooksRight;
+            return processLooksRight || (textLooksRight && !IsKnownNoisyProcessName(processName));
         }
 
         private static bool IsAutomationDiagnosticCandidate(string processName, string name, string className, string automationId)
         {
-            return processName.IndexOf("GameBar", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                processName.IndexOf("Xbox", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            return IsGameBarRelatedProcessName(processName) ||
                 processName.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase) ||
                 processName.Equals("ShellExperienceHost", StringComparison.OrdinalIgnoreCase) ||
-                name.IndexOf("Game Bar", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                name.IndexOf("Xbox", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                (!IsKnownNoisyProcessName(processName) && name.IndexOf("Game Bar", StringComparison.OrdinalIgnoreCase) >= 0) ||
+                (!IsKnownNoisyProcessName(processName) && name.IndexOf("Xbox", StringComparison.OrdinalIgnoreCase) >= 0) ||
                 className.IndexOf("GameBar", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 className.IndexOf("Xbox", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 automationId.IndexOf("GameBar", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 automationId.IndexOf("Xbox", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool IsGameBarRelatedProcessName(string processName)
+        {
+            return processName.Equals("GameBar", StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("XboxGameBar", StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("GameBarFTServer", StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("GameBarWidgets", StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("GameBarElevatedFT_Alias", StringComparison.OrdinalIgnoreCase) ||
+                processName.IndexOf("GameBar", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                processName.IndexOf("Xbox", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool IsKnownNoisyProcessName(string processName)
+        {
+            return processName.Equals("chrome", StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("msedge", StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("firefox", StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("brave", StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("Code", StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("Codex", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool SafeGetResponding(Process process)
+        {
+            try
+            {
+                return process.Responding;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static bool HasGameBarChildWindow(IntPtr parentWindow)

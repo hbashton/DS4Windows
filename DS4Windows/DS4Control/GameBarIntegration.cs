@@ -22,8 +22,8 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text;
-using System.Windows;
 using System.Windows.Automation;
+using WinRect = System.Windows.Rect;
 
 namespace DS4Windows
 {
@@ -159,7 +159,7 @@ namespace DS4Windows
         {
             try
             {
-                AutomationElementCollection elements = AutomationElement.RootElement.FindAll(TreeScope.Children, Condition.TrueCondition);
+                AutomationElementCollection elements = AutomationElement.RootElement.FindAll(TreeScope.Children, System.Windows.Automation.Condition.TrueCondition);
                 foreach (AutomationElement element in elements)
                 {
                     if (LooksLikeVisibleGameBarAutomationElement(element))
@@ -180,7 +180,7 @@ namespace DS4Windows
             try
             {
                 List<string> rows = new List<string>();
-                AutomationElementCollection elements = AutomationElement.RootElement.FindAll(TreeScope.Children, Condition.TrueCondition);
+                AutomationElementCollection elements = AutomationElement.RootElement.FindAll(TreeScope.Children, System.Windows.Automation.Condition.TrueCondition);
                 foreach (AutomationElement element in elements)
                 {
                     AddAutomationDiagnosticRow(rows, element, "uia-top");
@@ -221,7 +221,7 @@ namespace DS4Windows
                 return;
             }
 
-            Rect rect = GetAutomationBoundingRectangle(element);
+            WinRect rect = GetAutomationBoundingRectangle(element);
             bool offscreen = GetAutomationIsOffscreen(element);
             bool hasSize = rect.Width > 1 && rect.Height > 1;
             bool inspectable = !offscreen && hasSize;
@@ -237,7 +237,7 @@ namespace DS4Windows
                 return false;
             }
 
-            Rect rect = GetAutomationBoundingRectangle(element);
+            WinRect rect = GetAutomationBoundingRectangle(element);
             return !GetAutomationIsOffscreen(element) && rect.Width > 1 && rect.Height > 1;
         }
 
@@ -524,7 +524,7 @@ namespace DS4Windows
             }
         }
 
-        private static Rect GetAutomationBoundingRectangle(AutomationElement element)
+        private static WinRect GetAutomationBoundingRectangle(AutomationElement element)
         {
             try
             {
@@ -532,7 +532,7 @@ namespace DS4Windows
             }
             catch
             {
-                return Rect.Empty;
+                return WinRect.Empty;
             }
         }
 

@@ -103,9 +103,6 @@
 		<Reference Include="Nefarius.ViGEm.Client">
 			<HintPath>..\libs\$(Platform)\Nefarius.ViGEm.Client\Nefarius.ViGEm.Client.dll</HintPath>
 		</Reference>
-
-		<Reference Include="UIAutomationClient" />
-		<Reference Include="UIAutomationTypes" />
 	</ItemGroup>
 
 	<!-- Apparently the None tags are needed as well as the Resource tags.

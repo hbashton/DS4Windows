@@ -2648,6 +2648,9 @@ namespace DS4Windows
         private DateTime gameBarLastVisibleUtc = DateTime.MinValue;
         private DateTime gameBarInvisibleSinceUtc = DateTime.MinValue;
         private DateTime gameBarLastVisibilityCheckUtc = DateTime.MinValue;
+        private DateTime gameBarLastDiagnosticLogUtc = DateTime.MinValue;
+        private bool gameBarLastDiagnosticVisible = false;
+        private bool gameBarHasDiagnosticVisibleState = false;
         private bool gameBarAdminWarningLogged = false;
 
         private void CheckGameBarHomeButton(int ind, DS4State cState, DS4State tempControlState, DS4State pState)
@@ -2715,6 +2718,7 @@ namespace DS4Windows
             gameBarProfileRequestedUtc[ind] = now;
             gameBarProfilePending[ind] = true;
             LogDebug($"Controller {ind + 1} requested Game Bar profile '{profileName}'. Waiting for Game Bar to become visible.");
+            LogGameBarDiagnostics("Home button request");
         }
 
         private void UpdateGameBarProfileState()
@@ -2742,6 +2746,7 @@ namespace DS4Windows
 
             gameBarLastVisibilityCheckUtc = now;
             bool gameBarVisible = gameBarIntegration.IsGameBarVisible();
+            MaybeLogGameBarDiagnostics(now, gameBarVisible);
             if (gameBarVisible)
             {
                 gameBarLastVisibleUtc = now;
@@ -2810,6 +2815,27 @@ namespace DS4Windows
 
                 ClearPendingGameBarProfile(i);
             }
+        }
+
+        private void MaybeLogGameBarDiagnostics(DateTime now, bool gameBarVisible)
+        {
+            bool changed = !gameBarHasDiagnosticVisibleState || gameBarLastDiagnosticVisible != gameBarVisible;
+            bool intervalElapsed = now - gameBarLastDiagnosticLogUtc > TimeSpan.FromSeconds(2);
+
+            if (!changed && !intervalElapsed)
+            {
+                return;
+            }
+
+            gameBarLastDiagnosticVisible = gameBarVisible;
+            gameBarHasDiagnosticVisibleState = true;
+            gameBarLastDiagnosticLogUtc = now;
+            LogGameBarDiagnostics(changed ? $"Visibility changed to {gameBarVisible}" : $"Visibility still {gameBarVisible}");
+        }
+
+        private void LogGameBarDiagnostics(string reason)
+        {
+            LogDebug($"Game Bar diagnostics ({reason}):\n{gameBarIntegration.GetGameBarWindowDiagnostics()}");
         }
 
         private void ClearPendingGameBarProfile(int ind)

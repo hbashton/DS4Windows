@@ -17,6 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
@@ -115,6 +116,40 @@ namespace DS4Windows
             return visible;
         }
 
+        public string GetGameBarWindowDiagnostics()
+        {
+            StringBuilder output = new StringBuilder();
+            output.AppendLine($"GameBarVisible={IsGameBarVisible()} Elevated={IsRunningElevated()}");
+
+            List<string> rows = new List<string>();
+            EnumWindows((hWnd, lParam) =>
+            {
+                AddDiagnosticRow(rows, hWnd, "top");
+
+                EnumChildWindows(hWnd, (childHWnd, childParam) =>
+                {
+                    AddDiagnosticRow(rows, childHWnd, "child");
+                    return rows.Count < 40;
+                }, IntPtr.Zero);
+
+                return rows.Count < 40;
+            }, IntPtr.Zero);
+
+            if (rows.Count == 0)
+            {
+                output.AppendLine("No Game Bar-like windows were found.");
+            }
+            else
+            {
+                foreach (string row in rows)
+                {
+                    output.AppendLine(row);
+                }
+            }
+
+            return output.ToString().TrimEnd();
+        }
+
         private static bool HasGameBarChildWindow(IntPtr parentWindow)
         {
             bool found = false;
@@ -167,6 +202,42 @@ namespace DS4Windows
         private static bool IsInspectableWindow(IntPtr hWnd)
         {
             return IsWindowVisible(hWnd) && !IsIconic(hWnd) && !IsWindowCloaked(hWnd) && HasVisibleSize(hWnd);
+        }
+
+        private static void AddDiagnosticRow(List<string> rows, IntPtr hWnd, string scope)
+        {
+            string processName = GetProcessName(hWnd);
+            string title = GetWindowTitle(hWnd);
+            string className = GetWindowClassName(hWnd);
+
+            if (!IsDiagnosticCandidate(processName, title, className))
+            {
+                return;
+            }
+
+            RECT rect = GetWindowRect(hWnd, out RECT tempRect) ? tempRect : new RECT();
+            int width = rect.Right - rect.Left;
+            int height = rect.Bottom - rect.Top;
+            bool isVisible = IsWindowVisible(hWnd);
+            bool isMinimized = IsIconic(hWnd);
+            bool isCloaked = IsWindowCloaked(hWnd);
+            bool hasSize = width > 1 && height > 1;
+            bool inspectable = isVisible && !isMinimized && !isCloaked && hasSize;
+            bool match = inspectable && LooksLikeGameBarWindow(hWnd);
+
+            rows.Add($"[{scope}] match={match} inspectable={inspectable} visible={isVisible} minimized={isMinimized} cloaked={isCloaked} size={width}x{height} pos={rect.Left},{rect.Top} proc='{processName}' class='{className}' title='{title}'");
+        }
+
+        private static bool IsDiagnosticCandidate(string processName, string title, string className)
+        {
+            return processName.IndexOf("GameBar", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                processName.IndexOf("Xbox", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                processName.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase) ||
+                title.IndexOf("Game Bar", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                title.IndexOf("Xbox", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                className.IndexOf("GameBar", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                className.IndexOf("Xbox", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                className.IndexOf("Xaml", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private static bool IsWindowCloaked(IntPtr hWnd)

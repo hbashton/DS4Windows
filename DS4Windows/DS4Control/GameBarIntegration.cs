@@ -23,6 +23,8 @@ using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text;
 using System.Windows.Automation;
+using Windows.Foundation.Metadata;
+using Windows.Gaming.UI;
 using WinRect = System.Windows.Rect;
 
 namespace DS4Windows
@@ -102,6 +104,11 @@ namespace DS4Windows
 
         public bool IsGameBarVisible()
         {
+            if (TryGetGameBarApiState(out bool apiVisible, out bool apiInputRedirected, out _))
+            {
+                return apiVisible || apiInputRedirected;
+            }
+
             bool visible = false;
 
             EnumWindows((hWnd, lParam) =>
@@ -127,6 +134,7 @@ namespace DS4Windows
         {
             StringBuilder output = new StringBuilder();
             output.AppendLine($"GameBarVisible={IsGameBarVisible()} Elevated={IsRunningElevated()}");
+            output.AppendLine(GetGameBarApiDiagnostics());
 
             List<string> rows = new List<string>();
             EnumWindows((hWnd, lParam) =>
@@ -157,6 +165,37 @@ namespace DS4Windows
             AppendAutomationDiagnostics(output);
 
             return output.ToString().TrimEnd();
+        }
+
+        private static bool TryGetGameBarApiState(out bool visible, out bool inputRedirected, out string status)
+        {
+            visible = false;
+            inputRedirected = false;
+
+            try
+            {
+                if (!ApiInformation.IsTypePresent("Windows.Gaming.UI.GameBar"))
+                {
+                    status = "not present";
+                    return false;
+                }
+
+                visible = GameBar.Visible;
+                inputRedirected = GameBar.IsInputRedirected;
+                status = "ok";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                status = ex.GetType().Name + ": " + ex.Message;
+                return false;
+            }
+        }
+
+        private static string GetGameBarApiDiagnostics()
+        {
+            bool supported = TryGetGameBarApiState(out bool visible, out bool inputRedirected, out string status);
+            return $"GameBarApi supported={supported} visible={visible} inputRedirected={inputRedirected} status='{TruncateDiagnosticText(status)}'";
         }
 
         private static bool IsGameBarVisibleByAutomation()

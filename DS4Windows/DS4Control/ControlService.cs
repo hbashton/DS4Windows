@@ -2640,6 +2640,7 @@ namespace DS4Windows
         private DateTime[] gameBarProfileActivatedUtc = new DateTime[MAX_DS4_CONTROLLER_COUNT];
         private bool[] gameBarPreviousUseTempProfile = new bool[MAX_DS4_CONTROLLER_COUNT] { false, false, false, false, false, false, false, false };
         private string[] gameBarPreviousTempProfileName = new string[MAX_DS4_CONTROLLER_COUNT] { string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty };
+        private string[] gameBarPreviousProfileName = new string[MAX_DS4_CONTROLLER_COUNT] { string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty };
         private DateTime[] gameBarHomeButtonIgnoreUntilUtc = new DateTime[MAX_DS4_CONTROLLER_COUNT];
         private DateTime gameBarLastVisibleUtc = DateTime.MinValue;
         private DateTime gameBarLastVisibilityCheckUtc = DateTime.MinValue;
@@ -2707,6 +2708,7 @@ namespace DS4Windows
             gameBarIntegration.OpenGameBar();
             gameBarPreviousUseTempProfile[ind] = Global.useTempProfile[ind];
             gameBarPreviousTempProfileName[ind] = Global.tempprofilename[ind];
+            gameBarPreviousProfileName[ind] = Global.ProfilePath[ind];
             if (Global.LoadTempProfile(ind, profileName, false, this))
             {
                 gameBarProfileActive[ind] = true;
@@ -2765,19 +2767,33 @@ namespace DS4Windows
 
                 if (activationGraceElapsed && visibilityGraceElapsed)
                 {
-                    if (!gameBarPreviousUseTempProfile[i] ||
-                        string.IsNullOrEmpty(gameBarPreviousTempProfileName[i]) ||
-                        !Global.LoadTempProfile(i, gameBarPreviousTempProfileName[i], false, this))
-                    {
-                        Global.LoadProfile(i, false, this);
-                    }
-
+                    RestorePreviousGameBarProfile(i);
                     gameBarProfileActive[i] = false;
                     gameBarPreviousUseTempProfile[i] = false;
                     gameBarPreviousTempProfileName[i] = string.Empty;
+                    gameBarPreviousProfileName[i] = string.Empty;
                     LogDebug($"Controller {i + 1} reverted from Game Bar profile.");
                 }
             }
+        }
+
+        private void RestorePreviousGameBarProfile(int ind)
+        {
+            if (gameBarPreviousUseTempProfile[ind] &&
+                !string.IsNullOrEmpty(gameBarPreviousTempProfileName[ind]) &&
+                Global.LoadTempProfile(ind, gameBarPreviousTempProfileName[ind], false, this))
+            {
+                return;
+            }
+
+            string previousProfileName = gameBarPreviousProfileName[ind];
+            if (!string.IsNullOrEmpty(previousProfileName))
+            {
+                Global.ProfilePath[ind] = previousProfileName;
+                Global.OlderProfilePath[ind] = previousProfileName;
+            }
+
+            Global.LoadProfile(ind, false, this);
         }
 
         // Called every time a new input report has arrived

@@ -42,6 +42,12 @@ namespace DS4Windows
         [DllImport("user32.dll")]
         private static extern bool IsWindowVisible(IntPtr hWnd);
 
+        [DllImport("user32.dll")]
+        private static extern bool IsIconic(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
         [DllImport("user32.dll", SetLastError = true)]
         private static extern int GetWindowTextLength(IntPtr hWnd);
 
@@ -59,6 +65,15 @@ namespace DS4Windows
 
         [DllImport("dwmapi.dll")]
         private static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct RECT
+        {
+            public int Left;
+            public int Top;
+            public int Right;
+            public int Bottom;
+        }
 
         public bool IsRunningElevated()
         {
@@ -145,13 +160,13 @@ namespace DS4Windows
                 className.IndexOf("Xbox", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 className.IndexOf("Xaml", StringComparison.OrdinalIgnoreCase) >= 0;
 
-            return (processLooksRight && (titleLooksRight || classLooksRight || string.IsNullOrEmpty(title))) ||
+            return (processLooksRight && (titleLooksRight || classLooksRight)) ||
                 titleLooksRight;
         }
 
         private static bool IsInspectableWindow(IntPtr hWnd)
         {
-            return IsWindowVisible(hWnd) && !IsWindowCloaked(hWnd);
+            return IsWindowVisible(hWnd) && !IsIconic(hWnd) && !IsWindowCloaked(hWnd) && HasVisibleSize(hWnd);
         }
 
         private static bool IsWindowCloaked(IntPtr hWnd)
@@ -164,6 +179,16 @@ namespace DS4Windows
             {
                 return false;
             }
+        }
+
+        private static bool HasVisibleSize(IntPtr hWnd)
+        {
+            if (!GetWindowRect(hWnd, out RECT rect))
+            {
+                return false;
+            }
+
+            return rect.Right - rect.Left > 1 && rect.Bottom - rect.Top > 1;
         }
 
         private static string GetWindowTitle(IntPtr hWnd)

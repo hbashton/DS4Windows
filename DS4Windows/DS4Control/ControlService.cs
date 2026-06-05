@@ -2820,7 +2820,7 @@ namespace DS4Windows
         private void MaybeLogGameBarDiagnostics(DateTime now, bool gameBarVisible)
         {
             bool changed = !gameBarHasDiagnosticVisibleState || gameBarLastDiagnosticVisible != gameBarVisible;
-            bool intervalElapsed = now - gameBarLastDiagnosticLogUtc > TimeSpan.FromSeconds(2);
+            bool intervalElapsed = now - gameBarLastDiagnosticLogUtc > TimeSpan.FromSeconds(10);
 
             if (!changed && !intervalElapsed)
             {
@@ -2835,7 +2835,7 @@ namespace DS4Windows
 
         private void LogGameBarDiagnostics(string reason)
         {
-            LogDebug($"Game Bar diagnostics ({reason}):\n{gameBarIntegration.GetGameBarWindowDiagnostics()}");
+            LogDebug($"Game Bar diagnostics ({reason}):\n{gameBarIntegration.GetGameBarStateDiagnostics()}");
         }
 
         private void ClearPendingGameBarProfile(int ind)

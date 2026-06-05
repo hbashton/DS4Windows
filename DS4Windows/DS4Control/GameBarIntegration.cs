@@ -39,6 +39,7 @@ namespace DS4Windows
         private const int MaxAutomationVisitCount = 500;
         private const int MaxAutomationDepth = 5;
         private const int MaxDiagnosticTextLength = 160;
+        private static bool? gameBarApiPresent;
 
         private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
@@ -133,8 +134,7 @@ namespace DS4Windows
         public string GetGameBarWindowDiagnostics()
         {
             StringBuilder output = new StringBuilder();
-            output.AppendLine($"GameBarVisible={IsGameBarVisible()} Elevated={IsRunningElevated()}");
-            output.AppendLine(GetGameBarApiDiagnostics());
+            output.AppendLine(GetGameBarStateDiagnostics());
 
             List<string> rows = new List<string>();
             EnumWindows((hWnd, lParam) =>
@@ -167,6 +167,11 @@ namespace DS4Windows
             return output.ToString().TrimEnd();
         }
 
+        public string GetGameBarStateDiagnostics()
+        {
+            return $"GameBarVisible={IsGameBarVisible()} Elevated={IsRunningElevated()}\n{GetGameBarApiDiagnostics()}";
+        }
+
         private static bool TryGetGameBarApiState(out bool visible, out bool inputRedirected, out string status)
         {
             visible = false;
@@ -174,7 +179,8 @@ namespace DS4Windows
 
             try
             {
-                if (!ApiInformation.IsTypePresent("Windows.Gaming.UI.GameBar"))
+                gameBarApiPresent ??= ApiInformation.IsTypePresent("Windows.Gaming.UI.GameBar");
+                if (!gameBarApiPresent.Value)
                 {
                     status = "not present";
                     return false;

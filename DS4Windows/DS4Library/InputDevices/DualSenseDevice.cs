@@ -1474,6 +1474,27 @@ namespace DS4Windows.InputDevices
             return result;
         }
 
+        public bool TryWriteBtAudioReport(byte[] report)
+        {
+            if (conType != ConnectionType.BT || report == null || report.Length == 0)
+            {
+                return false;
+            }
+
+            lock (outputReport)
+            {
+                bool result = hDevice.WriteOutputReportViaInterrupt(report, READ_STREAM_TIMEOUT);
+                if (result || hDevice.Capabilities.OutputReportByteLength <= report.Length)
+                {
+                    return result;
+                }
+
+                byte[] paddedReport = new byte[hDevice.Capabilities.OutputReportByteLength];
+                Buffer.BlockCopy(report, 0, paddedReport, 0, report.Length);
+                return hDevice.WriteOutputReportViaInterrupt(paddedReport, READ_STREAM_TIMEOUT);
+            }
+        }
+
         private void Detach()
         {
             SendEmptyOutputReport();

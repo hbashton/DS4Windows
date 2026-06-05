@@ -3,6 +3,7 @@ using NAudio.Wave;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using DS4Windows.InputDevices;
 
 namespace DS4Windows
 {
@@ -11,9 +12,22 @@ namespace DS4Windows
         private const int ControllerCount = ControlService.MAX_DS4_CONTROLLER_COUNT;
         private readonly object syncRoot = new object();
         private readonly SlotPlayback[] slots = new SlotPlayback[ControllerCount];
+        private readonly SlotBtPlayback[] btSlots = new SlotBtPlayback[ControllerCount];
         private WasapiLoopbackCapture capture;
         private WaveFormat captureFormat;
         private string captureEndpointId = string.Empty;
+
+        public void Start(int slot, DualSenseDevice device, byte speakerVolume, string requestedCaptureEndpointId,
+            string requestedSpeakerEndpointId)
+        {
+            if (device != null && device.ConnectionType == ConnectionType.BT)
+            {
+                StartBluetooth(slot, device, speakerVolume, requestedCaptureEndpointId);
+                return;
+            }
+
+            Start(slot, speakerVolume, requestedCaptureEndpointId, requestedSpeakerEndpointId);
+        }
 
         public void Start(int slot, byte speakerVolume, string requestedCaptureEndpointId,
             string requestedSpeakerEndpointId)
@@ -25,6 +39,7 @@ namespace DS4Windows
 
             lock (syncRoot)
             {
+                StopBluetooth(slot);
                 requestedCaptureEndpointId ??= string.Empty;
                 requestedSpeakerEndpointId ??= string.Empty;
                 MMDevice endpoint = FindControllerEndpoint(slot, requestedSpeakerEndpointId);
@@ -69,6 +84,41 @@ namespace DS4Windows
             }
         }
 
+        private void StartBluetooth(int slot, DualSenseDevice device, byte speakerVolume, string requestedCaptureEndpointId)
+        {
+            if (slot < 0 || slot >= btSlots.Length)
+            {
+                return;
+            }
+
+            lock (syncRoot)
+            {
+                StopWindowsEndpoint(slot);
+                requestedCaptureEndpointId ??= string.Empty;
+
+                if (btSlots[slot] != null && ReferenceEquals(btSlots[slot].Device, device))
+                {
+                    btSlots[slot].SpeakerVolume = speakerVolume;
+                    EnsureCaptureStarted(requestedCaptureEndpointId, string.Empty);
+                    return;
+                }
+
+                StopBluetooth(slot);
+
+                try
+                {
+                    btSlots[slot] = new SlotBtPlayback(device, speakerVolume);
+                    EnsureCaptureStarted(requestedCaptureEndpointId, string.Empty);
+                    AppLogger.LogToGui($"DualSense BT audio passthrough started for controller {slot + 1}.", false);
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.LogToGui($"DualSense BT audio passthrough failed to start: {ex.Message}", true);
+                    StopBluetooth(slot);
+                }
+            }
+        }
+
         public void Stop(int slot)
         {
             if (slot < 0 || slot >= slots.Length)
@@ -78,11 +128,10 @@ namespace DS4Windows
 
             lock (syncRoot)
             {
-                SlotPlayback playback = slots[slot];
-                slots[slot] = null;
-                playback?.Dispose();
+                StopWindowsEndpoint(slot);
+                StopBluetooth(slot);
 
-                if (!slots.Any(item => item != null))
+                if (!HasActivePlayback())
                 {
                     StopCapture();
                 }
@@ -97,10 +146,31 @@ namespace DS4Windows
                 {
                     slots[i]?.Dispose();
                     slots[i] = null;
+                    btSlots[i]?.Dispose();
+                    btSlots[i] = null;
                 }
 
                 StopCapture();
             }
+        }
+
+        private void StopWindowsEndpoint(int slot)
+        {
+            SlotPlayback playback = slots[slot];
+            slots[slot] = null;
+            playback?.Dispose();
+        }
+
+        private void StopBluetooth(int slot)
+        {
+            SlotBtPlayback playback = btSlots[slot];
+            btSlots[slot] = null;
+            playback?.Dispose();
+        }
+
+        private bool HasActivePlayback()
+        {
+            return slots.Any(item => item != null) || btSlots.Any(item => item != null);
         }
 
         private void EnsureCaptureStarted(string requestedCaptureEndpointId, string speakerEndpointId)
@@ -181,6 +251,11 @@ namespace DS4Windows
                 }
 
                 foreach (SlotPlayback slot in slots)
+                {
+                    slot?.WriteFromCapture(e.Buffer, frames, captureFormat);
+                }
+
+                foreach (SlotBtPlayback slot in btSlots)
                 {
                     slot?.WriteFromCapture(e.Buffer, frames, captureFormat);
                 }
@@ -337,6 +412,16 @@ namespace DS4Windows
                 provider.AddSamples(outputBuffer, 0, framesToWrite * outputFormat.BlockAlign);
             }
 
+            public static int BytesPerSampleForBt(WaveFormat format)
+            {
+                return BytesPerSample(format);
+            }
+
+            public static float ReadSampleForBt(byte[] buffer, int offset, WaveFormat format)
+            {
+                return ReadSample(buffer, offset, format);
+            }
+
             private static int BytesPerSample(WaveFormat format)
             {
                 return Math.Max(1, format.BitsPerSample / 8);
@@ -427,6 +512,72 @@ namespace DS4Windows
                 catch { }
 
                 output.Dispose();
+            }
+        }
+
+        private sealed class SlotBtPlayback : IDisposable
+        {
+            private readonly DualSenseBtAudioTransport transport;
+            private readonly byte[] sampleBuffer = new byte[1024];
+            private double sourceFramePosition;
+
+            public DualSenseDevice Device { get; }
+            public byte SpeakerVolume { get; set; }
+
+            public SlotBtPlayback(DualSenseDevice device, byte speakerVolume)
+            {
+                Device = device;
+                SpeakerVolume = speakerVolume;
+                transport = new DualSenseBtAudioTransport(device);
+            }
+
+            public void WriteFromCapture(byte[] captureBuffer, int frames, WaveFormat captureFormat)
+            {
+                if (captureFormat.SampleRate <= 0 || captureFormat.Channels < 1)
+                {
+                    return;
+                }
+
+                double step = captureFormat.SampleRate / (double)DualSenseBtAudioTransport.TargetSampleRate;
+                int outIndex = 0;
+                float volume = SpeakerVolume / 255.0f;
+
+                while ((int)sourceFramePosition < frames && outIndex + 1 < sampleBuffer.Length)
+                {
+                    int frame = (int)sourceFramePosition;
+                    int captureOffset = frame * captureFormat.BlockAlign;
+                    float left = SlotPlayback.ReadSampleForBt(captureBuffer, captureOffset, captureFormat) * volume;
+                    float right = captureFormat.Channels > 1 ?
+                        SlotPlayback.ReadSampleForBt(captureBuffer,
+                            captureOffset + SlotPlayback.BytesPerSampleForBt(captureFormat), captureFormat) * volume :
+                        left;
+
+                    sampleBuffer[outIndex++] = FloatToSignedByte(left);
+                    sampleBuffer[outIndex++] = FloatToSignedByte(right);
+                    sourceFramePosition += step;
+                }
+
+                sourceFramePosition -= frames;
+                if (sourceFramePosition < 0)
+                {
+                    sourceFramePosition = 0;
+                }
+
+                if (outIndex > 0)
+                {
+                    transport.AddSamples(sampleBuffer, 0, outIndex);
+                }
+            }
+
+            private static byte FloatToSignedByte(float value)
+            {
+                sbyte sample = (sbyte)Math.Clamp(value * sbyte.MaxValue, sbyte.MinValue, sbyte.MaxValue);
+                return unchecked((byte)sample);
+            }
+
+            public void Dispose()
+            {
+                transport.Dispose();
             }
         }
     }

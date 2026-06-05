@@ -79,6 +79,11 @@ namespace DS4Windows.InputDevices
 
             public void ChangeData(TriggerEffects effect, TriggerEffectSettings effectSettings)
             {
+                byte start = effectSettings.startValue;
+                byte force = effectSettings.maxValue == 0 ? (byte)255 : effectSettings.maxValue;
+                byte smallForce = (byte)Math.Max(1, Math.Min(8, (force / 32) + 1));
+                byte freq = (byte)Math.Max(1, Math.Min(40, force / 6));
+
                 switch (effect)
                 {
                     case TriggerEffects.None:
@@ -121,9 +126,105 @@ namespace DS4Windows.InputDevices
                         triggerPressedStrength = 0x00;
                         triggerActuationFrequency = 0x00;
                         break;
+                    case TriggerEffects.Gamecube:
+                        SetRaw(0x02, 144, 160, 255, 0, 0, 0, 0);
+                        break;
+                    case TriggerEffects.Soft:
+                        SetRaw(0x21, 69, 160, 255, 0, 0, 0, 0);
+                        break;
+                    case TriggerEffects.Hard:
+                        SetRaw(0x21, 32, 160, 255, 255, 255, 255, 0);
+                        break;
+                    case TriggerEffects.VeryHard:
+                        SetRaw(0x21, 16, 160, 255, 255, 255, 255, 0);
+                        break;
+                    case TriggerEffects.Hardest:
+                        SetRaw(0x02, start, 255, 255, 255, 255, 255, 0);
+                        break;
+                    case TriggerEffects.Vibrate:
+                        SetRaw(0x26, start, force, freq, 0, 0, 0, 0);
+                        break;
+                    case TriggerEffects.Choppy:
+                        SetRaw(0x21, 2, 39, 33, 39, 38, 2, 0);
+                        break;
+                    case TriggerEffects.Medium:
+                        SetRaw(0x22, 2, 35, 1, 6, 6, 1, 33);
+                        break;
+                    case TriggerEffects.Resistance:
+                        SetResistance(start, smallForce);
+                        break;
+                    case TriggerEffects.Bow:
+                        SetRaw(0x22, BuildTwoPositionMask(start, 8), 0, smallForce, 0, 0, 0, 0);
+                        break;
+                    case TriggerEffects.Galloping:
+                        SetRaw(35, BuildTwoPositionMask(start, 9), 0, 0x08, freq, 0, 0, 0);
+                        break;
+                    case TriggerEffects.SemiAutomaticGun:
+                        SetRaw(0x25, BuildGunPositionMask(start), 0, smallForce, 0, 0, 0, 0);
+                        break;
+                    case TriggerEffects.AutomaticGun:
+                        SetResistance(start, smallForce);
+                        triggerMotorMode = 38;
+                        triggerActuationFrequency = freq;
+                        break;
+                    case TriggerEffects.Machine:
+                        SetRaw(39, BuildTwoPositionMask(start, 9), 0, smallForce, freq, 0, 0, 0);
+                        break;
                     default:
                         break;
                 }
+            }
+
+            private void SetRaw(byte mode, byte startResistance, byte effectForce, byte rangeForce,
+                byte nearReleaseStrength, byte nearMiddleStrength, byte pressedStrength, byte frequency)
+            {
+                triggerMotorMode = mode;
+                triggerStartResistance = startResistance;
+                triggerEffectForce = effectForce;
+                triggerRangeForce = rangeForce;
+                triggerNearReleaseStrength = nearReleaseStrength;
+                triggerNearMiddleStrength = nearMiddleStrength;
+                triggerPressedStrength = pressedStrength;
+                triggerActuationFrequency = frequency;
+            }
+
+            private void SetResistance(byte start, byte force)
+            {
+                if (start > 9) start = 9;
+                if (force > 8) force = 8;
+                if (force == 0) force = 1;
+
+                byte b = (byte)((force - 1) & 7);
+                uint num = 0;
+                ushort num2 = 0;
+                for (int i = start; i < 10; i++)
+                {
+                    num |= (uint)(b << (3 * i));
+                    num2 |= (ushort)(1 << i);
+                }
+
+                triggerMotorMode = 0x21;
+                triggerStartResistance = (byte)(num2 & 0xFF);
+                triggerEffectForce = (byte)((num2 >> 8) & 0xFF);
+                triggerRangeForce = (byte)(num & 0xFF);
+                triggerNearReleaseStrength = (byte)((num >> 8) & 0xFF);
+                triggerNearMiddleStrength = (byte)((num >> 16) & 0xFF);
+                triggerPressedStrength = (byte)((num >> 24) & 0xFF);
+                triggerActuationFrequency = 0;
+            }
+
+            private byte BuildTwoPositionMask(byte start, int maxEnd)
+            {
+                int startPos = Math.Min((int)start, 8);
+                int endPos = Math.Min(startPos + 2, maxEnd);
+                return (byte)((1 << startPos) | (1 << endPos));
+            }
+
+            private byte BuildGunPositionMask(byte start)
+            {
+                int startPos = Math.Max(2, Math.Min((int)start, 7));
+                int endPos = Math.Max(startPos + 1, Math.Min(startPos + 1, 8));
+                return (byte)((1 << startPos) | (1 << endPos));
             }
         }
 
@@ -195,6 +296,18 @@ namespace DS4Windows.InputDevices
         // Accurate rumble emulation mode requires 2.24 firmware or newer. On official hardware it takes priority over normal/legacy rumble
         protected bool useAccurateRumble = true; 
         public bool UseAccurateRumble { get => useAccurateRumble; set => useAccurateRumble = value; }
+
+        private byte headphoneVolume = 128;
+        public byte HeadphoneVolume { get => headphoneVolume; set { headphoneVolume = value; outputDirty = true; } }
+
+        private byte speakerVolume = 128;
+        public byte SpeakerVolume { get => speakerVolume; set { speakerVolume = value; outputDirty = true; } }
+
+        private byte microphoneVolume = 128;
+        public byte MicrophoneVolume { get => microphoneVolume; set { microphoneVolume = value; outputDirty = true; } }
+
+        private bool enableSpeakerOutput;
+        public bool EnableSpeakerOutput { get => enableSpeakerOutput; set { enableSpeakerOutput = value; outputDirty = true; } }
 
         private TriggerEffectData l2EffectData;
         private TriggerEffectData r2EffectData;
@@ -1055,7 +1168,7 @@ namespace DS4Windows.InputDevices
                 // 0x20 Enable internal speaker (even while headset is connected)
                 // 0x40 Enable modification of microphone volume
                 // 0x80 Enable internal mic (even while headset is connected)
-                outputReport[1] = useRumble ? (byte)0x0F : (byte)0x0C; // 0x02 | 0x01 | 0x04 | 0x08;
+                outputReport[1] = (byte)((useRumble ? 0x0F : 0x0C) | 0x10 | 0x40 | (enableSpeakerOutput ? 0x20 : 0x00)); // 0x02 | 0x01 | 0x04 | 0x08;
 
                 // 0x01 Toggling microphone LED, 0x02 Toggling Audio/Mic Mute
                 // 0x04 Toggling LED strips on the sides of the Touchpad, 0x08 Turn off all LED lights
@@ -1071,19 +1184,15 @@ namespace DS4Windows.InputDevices
                     outputReport[4] = currentHap.rumbleState.RumbleMotorStrengthLeftHeavySlow;
                 }
 
-                /*
                 // Headphone volume
-                outputReport[5] = 0x00;
-                outputReport[5] = Convert.ToByte(audio.getVolume()); // Left and Right
+                outputReport[5] = headphoneVolume; // Left and Right
                 // Internal speaker volume
-                outputReport[6] = 0x00;
+                outputReport[6] = speakerVolume;
                 // Internal microphone volume
-                outputReport[7] = 0x00;
-                outputReport[7] = Convert.ToByte(micAudio.getVolume());
+                outputReport[7] = microphoneVolume;
                 // 0x01 Enable internal microphone, 0x10 Disable attached headphones (must set 0x20 as well)
                 // 0x20 Enable internal speaker
-                outputReport[8] = 0x00;
-                //*/
+                outputReport[8] = enableSpeakerOutput ? (byte)0x20 : (byte)0x00;
 
                 // Mute button LED. 0x01 = Solid. 0x02 = Pulsating
                 outputReport[9] = muteLEDByte;
@@ -1122,7 +1231,7 @@ namespace DS4Windows.InputDevices
                 // (lower nibble: main motor; upper nibble trigger effects) 0x00 to 0x07 - reduce overall power of the respective motors/effects by 12.5% per increment (this does not affect the regular trigger motor settings, just the automatically repeating trigger effects)
                 outputReport[37] = hapticPowerLevel;
                 // Volume of internal speaker (0-7; ties in with index 6. The PS5 default appears to be set a 4)
-                //outputReport[38] = 0x00;
+                outputReport[38] = (byte)Math.Min(7, speakerVolume / 32);
 
                 /* Player LED section (and improved rumble flag) */
                 // 0x01 Enabled LED brightness (value in index 43)
@@ -1192,7 +1301,7 @@ namespace DS4Windows.InputDevices
                 // 0x20 Enable internal speaker (even while headset is connected)
                 // 0x40 Enable modification of microphone volume
                 // 0x80 Enable internal mic (even while headset is connected)
-                outputReport[2] = useRumble ? (byte)0x0F : (byte)0x0C; // 0x02 | 0x01 | 0x04 | 0x08;
+                outputReport[2] = (byte)((useRumble ? 0x0F : 0x0C) | 0x10 | 0x40 | (enableSpeakerOutput ? 0x20 : 0x00)); // 0x02 | 0x01 | 0x04 | 0x08;
 
                 // 0x01 Toggling microphone LED, 0x02 Toggling Audio/Mic Mute
                 // 0x04 Toggling LED strips on the sides of the Touchpad, 0x08 Turn off all LED lights
@@ -1208,19 +1317,15 @@ namespace DS4Windows.InputDevices
                     outputReport[5] = currentHap.rumbleState.RumbleMotorStrengthLeftHeavySlow;
                 }
 
-                /*
                 // Headphone volume
-                outputReport[6] = 0x00;
-                outputReport[6] = Convert.ToByte(audio.getVolume()); // Left and Right
+                outputReport[6] = headphoneVolume; // Left and Right
                 // Internal speaker volume
-                outputReport[7] = 0x00;
+                outputReport[7] = speakerVolume;
                 // Internal microphone volume
-                outputReport[8] = 0x00;
-                outputReport[8] = Convert.ToByte(micAudio.getVolume());
+                outputReport[8] = microphoneVolume;
                 // 0x01 Enable internal microphone, 0x10 Disable attached headphones (must set 0x20 as well)
                 // 0x20 Enable internal speaker
-                outputReport[9] = 0x00;
-                //*/
+                outputReport[9] = enableSpeakerOutput ? (byte)0x20 : (byte)0x00;
 
                 // Mute button LED. 0x01 = Solid. 0x02 = Pulsating
                 outputReport[10] = muteLEDByte;
@@ -1259,7 +1364,7 @@ namespace DS4Windows.InputDevices
                 // (lower nibble: main motor; upper nibble trigger effects) 0x00 to 0x07 - reduce overall power of the respective motors/effects by 12.5% per increment (this does not affect the regular trigger motor settings, just the automatically repeating trigger effects)
                 outputReport[38] = hapticPowerLevel;
                 // Volume of internal speaker (0-7; ties in with index 6. The PS5 default appears to be set a 4)
-                //outputReport[39] = 0x00;
+                outputReport[39] = (byte)Math.Min(7, speakerVolume / 32);
 
                 /* Player LED section (and improved rumble  flag) */
                 // 0x01 Enabled LED brightness (value in index 43)

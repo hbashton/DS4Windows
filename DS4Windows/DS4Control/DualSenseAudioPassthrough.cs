@@ -109,11 +109,13 @@ namespace DS4Windows
                 {
                     btSlots[slot] = new SlotBtPlayback(device, speakerVolume);
                     EnsureCaptureStarted(requestedCaptureEndpointId, string.Empty);
-                    AppLogger.LogToGui($"DualSense BT audio passthrough started for controller {slot + 1}.", false);
+                    AppLogger.LogToGui(
+                        $"DualSense BT haptics passthrough started for controller {slot + 1}. Audible speaker audio over Bluetooth is not implemented by this SAxense-based path yet.",
+                        true);
                 }
                 catch (Exception ex)
                 {
-                    AppLogger.LogToGui($"DualSense BT audio passthrough failed to start: {ex.Message}", true);
+                    AppLogger.LogToGui($"DualSense BT haptics passthrough failed to start: {ex.Message}", true);
                     StopBluetooth(slot);
                 }
             }

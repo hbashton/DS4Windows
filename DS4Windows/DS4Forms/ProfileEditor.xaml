@@ -2151,7 +2151,7 @@
                                                     <ColumnDefinition />
                                                 </Grid.ColumnDefinitions>
 
-                                                <CheckBox Content="Audio passthrough to internal speaker" IsChecked="{Binding DualSenseEnableSpeakerOutput}"
+                                                <CheckBox Content="Audio passthrough to internal speaker / Bluetooth haptics" IsChecked="{Binding DualSenseEnableSpeakerOutput}"
                                                           Grid.Row="0" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}" />
 
                                                 <Label Content="Speaker endpoint:" Grid.Row="1" Grid.Column="0" />

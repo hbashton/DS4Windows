@@ -28,6 +28,7 @@ namespace DS4Windows
         private int successfulReports;
         private int failedReports;
         private DateTime lastFailureLog = DateTime.MinValue;
+        private DateTime lastSuccessLog = DateTime.MinValue;
 
         public DualSenseBtAudioTransport(DualSenseDevice device)
         {
@@ -148,6 +149,7 @@ namespace DS4Windows
             if (success)
             {
                 successfulReports++;
+                LogSuccessIfNeeded();
                 return;
             }
 
@@ -159,6 +161,26 @@ namespace DS4Windows
                 AppLogger.LogToGui(
                     $"DualSense BT audio HID write failed. Success={successfulReports} Fail={failedReports} ReportLength={ReportLength}",
                     true);
+            }
+        }
+
+        private void LogSuccessIfNeeded()
+        {
+            DateTime now = DateTime.UtcNow;
+            if (successfulReports == 1 || (now - lastSuccessLog).TotalSeconds >= 10)
+            {
+                lastSuccessLog = now;
+                AppLogger.LogToGui(
+                    $"DualSense BT haptics HID packets flowing. Success={successfulReports} Fail={failedReports} QueuedBytes={GetQueuedByteCount()}",
+                    false);
+            }
+        }
+
+        private int GetQueuedByteCount()
+        {
+            lock (syncRoot)
+            {
+                return pendingSamples.Count;
             }
         }
 

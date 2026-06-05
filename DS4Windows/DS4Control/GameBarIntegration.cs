@@ -19,6 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Security.Principal;
 using System.Text;
 
 namespace DS4Windows
@@ -28,11 +29,15 @@ namespace DS4Windows
         private const byte VK_LWIN = 0x5B;
         private const byte VK_G = 0x47;
         private const int KEYEVENTF_KEYUP = 0x0002;
+        private const int DWMWA_CLOAKED = 14;
 
         private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
         [DllImport("user32.dll")]
         private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        private static extern bool EnumChildWindows(IntPtr hWndParent, EnumWindowsProc lpEnumFunc, IntPtr lParam);
 
         [DllImport("user32.dll")]
         private static extern bool IsWindowVisible(IntPtr hWnd);
@@ -52,6 +57,18 @@ namespace DS4Windows
         [DllImport("user32.dll")]
         private static extern void keybd_event(byte bVk, byte bScan, int dwFlags, UIntPtr dwExtraInfo);
 
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
+
+        public bool IsRunningElevated()
+        {
+            using (WindowsIdentity identity = WindowsIdentity.GetCurrent())
+            {
+                WindowsPrincipal principal = new WindowsPrincipal(identity);
+                return principal.IsInRole(WindowsBuiltInRole.Administrator);
+            }
+        }
+
         public void OpenGameBar()
         {
             keybd_event(VK_LWIN, 0, 0, UIntPtr.Zero);
@@ -66,16 +83,12 @@ namespace DS4Windows
 
             EnumWindows((hWnd, lParam) =>
             {
-                if (!IsWindowVisible(hWnd))
+                if (!IsInspectableWindow(hWnd))
                 {
                     return true;
                 }
 
-                string title = GetWindowTitle(hWnd);
-                string className = GetWindowClassName(hWnd);
-                string processName = GetProcessName(hWnd);
-
-                if (LooksLikeGameBarWindow(title, className, processName))
+                if (LooksLikeGameBarWindow(hWnd) || HasGameBarChildWindow(hWnd))
                 {
                     visible = true;
                     return false;
@@ -87,13 +100,41 @@ namespace DS4Windows
             return visible;
         }
 
-        private static bool LooksLikeGameBarWindow(string title, string className, string processName)
+        private static bool HasGameBarChildWindow(IntPtr parentWindow)
         {
+            bool found = false;
+
+            EnumChildWindows(parentWindow, (hWnd, lParam) =>
+            {
+                if (!IsInspectableWindow(hWnd))
+                {
+                    return true;
+                }
+
+                if (LooksLikeGameBarWindow(hWnd))
+                {
+                    found = true;
+                    return false;
+                }
+
+                return true;
+            }, IntPtr.Zero);
+
+            return found;
+        }
+
+        private static bool LooksLikeGameBarWindow(IntPtr hWnd)
+        {
+            string title = GetWindowTitle(hWnd);
+            string className = GetWindowClassName(hWnd);
+            string processName = GetProcessName(hWnd);
+
             bool processLooksRight =
                 processName.Equals("GameBar", StringComparison.OrdinalIgnoreCase) ||
                 processName.Equals("XboxGameBar", StringComparison.OrdinalIgnoreCase) ||
                 processName.Equals("GameBarFTServer", StringComparison.OrdinalIgnoreCase) ||
-                processName.Equals("GameBarWidgets", StringComparison.OrdinalIgnoreCase);
+                processName.Equals("GameBarWidgets", StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("GameBarElevatedFT_Alias", StringComparison.OrdinalIgnoreCase);
 
             bool titleLooksRight =
                 title.IndexOf("Xbox Game Bar", StringComparison.OrdinalIgnoreCase) >= 0 ||
@@ -101,9 +142,28 @@ namespace DS4Windows
 
             bool classLooksRight =
                 className.IndexOf("GameBar", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                className.IndexOf("Xbox", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 className.IndexOf("Xaml", StringComparison.OrdinalIgnoreCase) >= 0;
 
-            return (processLooksRight && (titleLooksRight || classLooksRight)) || titleLooksRight;
+            return (processLooksRight && (titleLooksRight || classLooksRight || string.IsNullOrEmpty(title))) ||
+                titleLooksRight;
+        }
+
+        private static bool IsInspectableWindow(IntPtr hWnd)
+        {
+            return IsWindowVisible(hWnd) && !IsWindowCloaked(hWnd);
+        }
+
+        private static bool IsWindowCloaked(IntPtr hWnd)
+        {
+            try
+            {
+                return DwmGetWindowAttribute(hWnd, DWMWA_CLOAKED, out int cloaked, sizeof(int)) == 0 && cloaked != 0;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static string GetWindowTitle(IntPtr hWnd)

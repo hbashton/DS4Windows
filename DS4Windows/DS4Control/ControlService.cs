@@ -2640,21 +2640,39 @@ namespace DS4Windows
         private DateTime[] gameBarProfileActivatedUtc = new DateTime[MAX_DS4_CONTROLLER_COUNT];
         private bool[] gameBarPreviousUseTempProfile = new bool[MAX_DS4_CONTROLLER_COUNT] { false, false, false, false, false, false, false, false };
         private string[] gameBarPreviousTempProfileName = new string[MAX_DS4_CONTROLLER_COUNT] { string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty };
+        private DateTime[] gameBarHomeButtonIgnoreUntilUtc = new DateTime[MAX_DS4_CONTROLLER_COUNT];
         private DateTime gameBarLastVisibleUtc = DateTime.MinValue;
         private DateTime gameBarLastVisibilityCheckUtc = DateTime.MinValue;
+        private bool gameBarAdminWarningLogged = false;
 
         private void CheckGameBarHomeButton(int ind, DS4State cState, DS4State tempControlState, DS4State pState)
         {
-            if (!cState.PS || pState.PS)
+            if (!cState.PS)
             {
                 return;
             }
 
-            if (gameBarProfileActive[ind])
+            DateTime now = DateTime.UtcNow;
+            if (now < gameBarHomeButtonIgnoreUntilUtc[ind])
             {
-                gameBarIntegration.OpenGameBar();
                 cState.PS = false;
                 tempControlState.PS = false;
+                return;
+            }
+
+            if (pState.PS)
+            {
+                return;
+            }
+
+            bool handled = false;
+
+            if (gameBarProfileActive[ind])
+            {
+                cState.PS = false;
+                tempControlState.PS = false;
+                gameBarIntegration.OpenGameBar();
+                gameBarHomeButtonIgnoreUntilUtc[ind] = now + TimeSpan.FromSeconds(1);
                 return;
             }
 
@@ -2677,18 +2695,30 @@ namespace DS4Windows
                 return;
             }
 
+            if (!gameBarIntegration.IsRunningElevated() && !gameBarAdminWarningLogged)
+            {
+                LogDebug("Game Bar support needs DS4Windows to be run as administrator to reliably detect Game Bar overlay windows.", true);
+                gameBarAdminWarningLogged = true;
+            }
+
+            cState.PS = false;
+            tempControlState.PS = false;
+            gameBarHomeButtonIgnoreUntilUtc[ind] = now + TimeSpan.FromSeconds(1);
             gameBarIntegration.OpenGameBar();
             gameBarPreviousUseTempProfile[ind] = Global.useTempProfile[ind];
             gameBarPreviousTempProfileName[ind] = Global.tempprofilename[ind];
             if (Global.LoadTempProfile(ind, profileName, false, this))
             {
                 gameBarProfileActive[ind] = true;
-                gameBarProfileActivatedUtc[ind] = DateTime.UtcNow;
+                gameBarProfileActivatedUtc[ind] = now;
                 LogDebug($"Controller {ind + 1} switched to Game Bar profile '{profileName}'.");
+                handled = true;
             }
 
-            cState.PS = false;
-            tempControlState.PS = false;
+            if (!handled)
+            {
+                gameBarHomeButtonIgnoreUntilUtc[ind] = DateTime.MinValue;
+            }
         }
 
         private void UpdateGameBarProfileState()

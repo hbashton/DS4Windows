@@ -85,12 +85,13 @@ namespace DS4Windows
             }
         }
 
-        public void OpenGameBar()
+        public string OpenGameBar()
         {
             keybd_event(VK_LWIN, 0, 0, UIntPtr.Zero);
             keybd_event(VK_G, 0, 0, UIntPtr.Zero);
             keybd_event(VK_G, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
             keybd_event(VK_LWIN, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+            return "keybd_event Win+G sent";
         }
 
         public bool IsGameBarVisible()
@@ -132,7 +133,7 @@ namespace DS4Windows
                     return rows.Count < 40;
                 }, IntPtr.Zero);
 
-                return rows.Count < 40;
+                return rows.Count < 80;
             }, IntPtr.Zero);
 
             if (rows.Count == 0)
@@ -233,11 +234,26 @@ namespace DS4Windows
             return processName.IndexOf("GameBar", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 processName.IndexOf("Xbox", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 processName.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("ShellExperienceHost", StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("TextInputHost", StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("StartMenuExperienceHost", StringComparison.OrdinalIgnoreCase) ||
                 title.IndexOf("Game Bar", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 title.IndexOf("Xbox", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 className.IndexOf("GameBar", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 className.IndexOf("Xbox", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                className.IndexOf("Xaml", StringComparison.OrdinalIgnoreCase) >= 0;
+                className.IndexOf("Xaml", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                className.IndexOf("CoreWindow", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                className.IndexOf("ApplicationFrame", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                className.IndexOf("Windows.UI", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                IsDiagnosticVisibleTopLevel(processName, title, className);
+        }
+
+        private static bool IsDiagnosticVisibleTopLevel(string processName, string title, string className)
+        {
+            return !string.IsNullOrEmpty(processName) &&
+                (!string.IsNullOrEmpty(title) ||
+                 className.IndexOf("Window", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                 className.IndexOf("Host", StringComparison.OrdinalIgnoreCase) >= 0);
         }
 
         private static bool IsWindowCloaked(IntPtr hWnd)

@@ -2677,7 +2677,7 @@ namespace DS4Windows
             {
                 cState.PS = false;
                 tempControlState.PS = false;
-                gameBarIntegration.OpenGameBar();
+                LogDebug($"Game Bar open request: {gameBarIntegration.OpenGameBar()}");
                 gameBarHomeButtonIgnoreUntilUtc[ind] = now + TimeSpan.FromSeconds(1);
                 return;
             }
@@ -2710,7 +2710,7 @@ namespace DS4Windows
             cState.PS = false;
             tempControlState.PS = false;
             gameBarHomeButtonIgnoreUntilUtc[ind] = now + TimeSpan.FromSeconds(1);
-            gameBarIntegration.OpenGameBar();
+            LogDebug($"Game Bar open request: {gameBarIntegration.OpenGameBar()}");
             gameBarPreviousUseTempProfile[ind] = Global.useTempProfile[ind];
             gameBarPreviousTempProfileName[ind] = Global.tempprofilename[ind];
             gameBarPreviousProfileName[ind] = Global.ProfilePath[ind];

@@ -757,6 +757,20 @@ namespace DS4WinWPF.DS4Control.DTOXml
             get; set;
         } = string.Empty;
 
+        private bool _gameBarHomeButtonSupport;
+        [XmlElement("GameBarHomeButtonSupport")]
+        public string GameBarHomeButtonSupportString
+        {
+            get => _gameBarHomeButtonSupport.ToString();
+            set => _gameBarHomeButtonSupport = XmlDataUtilities.StrToBool(value);
+        }
+
+        [XmlElement("GameBarProfileName")]
+        public string GameBarProfileName
+        {
+            get; set;
+        } = string.Empty;
+
         private bool _dinputOnly;
         [XmlElement("DinputOnly")]
         public string DinputOnlyString
@@ -1625,6 +1639,8 @@ namespace DS4WinWPF.DS4Control.DTOXml
             _mouseAcceleration = source.buttonMouseInfos[deviceIndex].mouseAccel;
             //ShiftModifier = source.
             LaunchProgram = source.launchProgram[deviceIndex];
+            _gameBarHomeButtonSupport = source.gameBarHomeButtonSupport[deviceIndex];
+            GameBarProfileName = source.gameBarProfileName[deviceIndex];
             _dinputOnly = source.dinputOnly[deviceIndex];
             _startTouchpadOff = source.startTouchpadOff[deviceIndex];
             _useTPforControls = source.touchOutMode[deviceIndex] == TouchpadOutMode.Controls;
@@ -2227,6 +2243,8 @@ namespace DS4WinWPF.DS4Control.DTOXml
             destination.buttonMouseInfos[deviceIndex].mouseAccel = _mouseAcceleration;
             //destination. = ShiftModifier 
             destination.launchProgram[deviceIndex] = LaunchProgram;
+            destination.gameBarHomeButtonSupport[deviceIndex] = _gameBarHomeButtonSupport;
+            destination.gameBarProfileName[deviceIndex] = GameBarProfileName ?? string.Empty;
             destination.dinputOnly[deviceIndex] = _dinputOnly;
             destination.startTouchpadOff[deviceIndex] = _startTouchpadOff;
             destination.sATriggers[deviceIndex] = SATriggers;

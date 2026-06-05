@@ -41,6 +41,7 @@ namespace DS4Windows
         public ViGEmClient vigemTestClient = null;
         private readonly DualSenseAudioPassthrough dualSenseAudioPassthrough = new DualSenseAudioPassthrough();
         private readonly DualSenseMicrophonePassthrough dualSenseMicrophonePassthrough = new DualSenseMicrophonePassthrough();
+        private readonly GameBarIntegration gameBarIntegration = new GameBarIntegration();
         // Might be useful for ScpVBus build
         public const int EXPANDED_CONTROLLER_COUNT = 8;
         public const int MAX_DS4_CONTROLLER_COUNT = Global.MAX_DS4_CONTROLLER_COUNT;
@@ -2635,6 +2636,119 @@ namespace DS4Windows
         private byte[] currentBattery = new byte[MAX_DS4_CONTROLLER_COUNT] { 0, 0, 0, 0, 0, 0, 0, 0 };
         private bool[] charging = new bool[MAX_DS4_CONTROLLER_COUNT] { false, false, false, false, false, false, false, false };
         private string[] tempStrings = new string[MAX_DS4_CONTROLLER_COUNT] { string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty };
+        private bool[] gameBarProfileActive = new bool[MAX_DS4_CONTROLLER_COUNT] { false, false, false, false, false, false, false, false };
+        private DateTime[] gameBarProfileActivatedUtc = new DateTime[MAX_DS4_CONTROLLER_COUNT];
+        private bool[] gameBarPreviousUseTempProfile = new bool[MAX_DS4_CONTROLLER_COUNT] { false, false, false, false, false, false, false, false };
+        private string[] gameBarPreviousTempProfileName = new string[MAX_DS4_CONTROLLER_COUNT] { string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty };
+        private DateTime gameBarLastVisibleUtc = DateTime.MinValue;
+        private DateTime gameBarLastVisibilityCheckUtc = DateTime.MinValue;
+
+        private void CheckGameBarHomeButton(int ind, DS4State cState, DS4State tempControlState, DS4State pState)
+        {
+            if (!cState.PS || pState.PS)
+            {
+                return;
+            }
+
+            if (gameBarProfileActive[ind])
+            {
+                gameBarIntegration.OpenGameBar();
+                cState.PS = false;
+                tempControlState.PS = false;
+                return;
+            }
+
+            if (!Global.GameBarHomeButtonSupport[ind])
+            {
+                return;
+            }
+
+            string profileName = Global.GameBarProfileName[ind];
+            if (string.IsNullOrEmpty(profileName))
+            {
+                LogDebug($"Game Bar Home button support is enabled for controller {ind + 1}, but no Game Bar profile is selected.", true);
+                return;
+            }
+
+            string profilePath = Path.Combine(appdatapath, "Profiles", $"{profileName}.xml");
+            if (!File.Exists(profilePath))
+            {
+                LogDebug($"Game Bar profile '{profileName}' does not exist for controller {ind + 1}.", true);
+                return;
+            }
+
+            gameBarIntegration.OpenGameBar();
+            gameBarPreviousUseTempProfile[ind] = Global.useTempProfile[ind];
+            gameBarPreviousTempProfileName[ind] = Global.tempprofilename[ind];
+            if (Global.LoadTempProfile(ind, profileName, false, this))
+            {
+                gameBarProfileActive[ind] = true;
+                gameBarProfileActivatedUtc[ind] = DateTime.UtcNow;
+                LogDebug($"Controller {ind + 1} switched to Game Bar profile '{profileName}'.");
+            }
+
+            cState.PS = false;
+            tempControlState.PS = false;
+        }
+
+        private void UpdateGameBarProfileState()
+        {
+            bool anyActive = false;
+            for (int i = 0; i < MAX_DS4_CONTROLLER_COUNT; i++)
+            {
+                if (gameBarProfileActive[i])
+                {
+                    anyActive = true;
+                    break;
+                }
+            }
+
+            if (!anyActive)
+            {
+                return;
+            }
+
+            DateTime now = DateTime.UtcNow;
+            if (now - gameBarLastVisibilityCheckUtc < TimeSpan.FromMilliseconds(350))
+            {
+                return;
+            }
+
+            gameBarLastVisibilityCheckUtc = now;
+            bool gameBarVisible = gameBarIntegration.IsGameBarVisible();
+            if (gameBarVisible)
+            {
+                gameBarLastVisibleUtc = now;
+                return;
+            }
+
+            for (int i = 0; i < MAX_DS4_CONTROLLER_COUNT; i++)
+            {
+                if (!gameBarProfileActive[i])
+                {
+                    continue;
+                }
+
+                bool activationGraceElapsed = now - gameBarProfileActivatedUtc[i] > TimeSpan.FromSeconds(2);
+                bool visibilityGraceElapsed = gameBarLastVisibleUtc == DateTime.MinValue ||
+                    now - gameBarLastVisibleUtc > TimeSpan.FromMilliseconds(750);
+
+                if (activationGraceElapsed && visibilityGraceElapsed)
+                {
+                    if (!gameBarPreviousUseTempProfile[i] ||
+                        string.IsNullOrEmpty(gameBarPreviousTempProfileName[i]) ||
+                        !Global.LoadTempProfile(i, gameBarPreviousTempProfileName[i], false, this))
+                    {
+                        Global.LoadProfile(i, false, this);
+                    }
+
+                    gameBarProfileActive[i] = false;
+                    gameBarPreviousUseTempProfile[i] = false;
+                    gameBarPreviousTempProfileName[i] = string.Empty;
+                    LogDebug($"Controller {i + 1} reverted from Game Bar profile.");
+                }
+            }
+        }
 
         // Called every time a new input report has arrived
         protected void On_Report(DS4Device device, EventArgs e, int ind)
@@ -2689,6 +2803,7 @@ namespace DS4Windows
                 //device.getPreviousState(PreviousState[ind]);
                 //DS4State pState = PreviousState[ind];
 
+                UpdateGameBarProfileState();
 
                 if (device.firstReport && device.isSynced())
                 {
@@ -2754,6 +2869,8 @@ namespace DS4Windows
                     // Skip mapping routine if part of a joined device
                     return;
                 }
+
+                CheckGameBarHomeButton(ind, cState, tempControlState, pState);
 
                 if (getEnableTouchToggle(ind))
                 {

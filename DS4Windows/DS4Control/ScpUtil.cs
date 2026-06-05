@@ -2583,6 +2583,18 @@ namespace DS4Windows
             get => m_Config.dualSenseMicrophoneOutputEndpointId;
             set => m_Config.dualSenseMicrophoneOutputEndpointId = value;
         }
+
+        public static bool[] GameBarHomeButtonSupport
+        {
+            get => m_Config.gameBarHomeButtonSupport;
+            set => m_Config.gameBarHomeButtonSupport = value;
+        }
+
+        public static string[] GameBarProfileName
+        {
+            get => m_Config.gameBarProfileName;
+            set => m_Config.gameBarProfileName = value;
+        }
         //
         // End of DualSense specific profile settings
 
@@ -3718,6 +3730,8 @@ namespace DS4Windows
         public bool[] dualSenseEnableMicrophonePassthrough = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
         public string[] dualSenseMicrophoneCaptureEndpointId = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
         public string[] dualSenseMicrophoneOutputEndpointId = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
+        public bool[] gameBarHomeButtonSupport = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
+        public string[] gameBarProfileName = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
         //
         // End of DualSense specific profile options
 
@@ -4647,6 +4661,8 @@ namespace DS4Windows
                 XmlNode xmlMouseVerticalScale = m_Xdoc.CreateNode(XmlNodeType.Element, "ButtonMouseVerticalScale", null); xmlMouseVerticalScale.InnerText = Convert.ToInt32(buttonMouseInfos[device].buttonVerticalScale * 100).ToString(); rootElement.AppendChild(xmlMouseVerticalScale);
                 //XmlNode xmlShiftMod = m_Xdoc.CreateNode(XmlNodeType.Element, "ShiftModifier", null); xmlShiftMod.InnerText = shiftModifier[device].ToString(); rootElement.AppendChild(xmlShiftMod);
                 XmlNode xmlLaunchProgram = m_Xdoc.CreateNode(XmlNodeType.Element, "LaunchProgram", null); xmlLaunchProgram.InnerText = launchProgram[device].ToString(); rootElement.AppendChild(xmlLaunchProgram);
+                XmlNode xmlGameBarHomeButtonSupport = m_Xdoc.CreateNode(XmlNodeType.Element, "GameBarHomeButtonSupport", null); xmlGameBarHomeButtonSupport.InnerText = gameBarHomeButtonSupport[device].ToString(); rootElement.AppendChild(xmlGameBarHomeButtonSupport);
+                XmlNode xmlGameBarProfileName = m_Xdoc.CreateNode(XmlNodeType.Element, "GameBarProfileName", null); xmlGameBarProfileName.InnerText = gameBarProfileName[device]; rootElement.AppendChild(xmlGameBarProfileName);
                 XmlNode xmlDinput = m_Xdoc.CreateNode(XmlNodeType.Element, "DinputOnly", null); xmlDinput.InnerText = dinputOnly[device].ToString(); rootElement.AppendChild(xmlDinput);
                 XmlNode xmlStartTouchpadOff = m_Xdoc.CreateNode(XmlNodeType.Element, "StartTouchpadOff", null); xmlStartTouchpadOff.InnerText = startTouchpadOff[device].ToString(); rootElement.AppendChild(xmlStartTouchpadOff);
                 XmlNode xmlTouchOutMode = m_Xdoc.CreateNode(XmlNodeType.Element, "TouchpadOutputMode", null); xmlTouchOutMode.InnerText = touchOutMode[device].ToString(); rootElement.AppendChild(xmlTouchOutMode);
@@ -6467,6 +6483,20 @@ namespace DS4Windows
                     launchProgram[device] = Item.InnerText;
                 }
                 catch { launchProgram[device] = string.Empty; missingSetting = true; }
+
+                try
+                {
+                    Item = m_Xdoc.SelectSingleNode("/" + rootname + "/GameBarHomeButtonSupport");
+                    bool.TryParse(Item.InnerText, out gameBarHomeButtonSupport[device]);
+                }
+                catch { gameBarHomeButtonSupport[device] = false; missingSetting = true; }
+
+                try
+                {
+                    Item = m_Xdoc.SelectSingleNode("/" + rootname + "/GameBarProfileName");
+                    gameBarProfileName[device] = Item.InnerText;
+                }
+                catch { gameBarProfileName[device] = string.Empty; missingSetting = true; }
 
                 if (launchprogram == true && launchProgram[device] != string.Empty)
                 {

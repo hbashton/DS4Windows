@@ -702,6 +702,37 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             set => Global.EnableOutputDataToDS4[device] = value;
         }
 
+        public bool GameBarHomeButtonSupport
+        {
+            get => Global.GameBarHomeButtonSupport[device];
+            set => Global.GameBarHomeButtonSupport[device] = value;
+        }
+
+        public string GameBarProfileName
+        {
+            get => Global.GameBarProfileName[device];
+            set => Global.GameBarProfileName[device] = value ?? string.Empty;
+        }
+
+        public List<string> GameBarProfileChoices
+        {
+            get
+            {
+                List<string> choices = new List<string>();
+                string profilesDir = Path.Combine(Global.appdatapath, "Profiles");
+                if (Directory.Exists(profilesDir))
+                {
+                    foreach (string file in Directory.GetFiles(profilesDir, "*.xml"))
+                    {
+                        choices.Add(Path.GetFileNameWithoutExtension(file));
+                    }
+                }
+
+                choices.Sort(StringComparer.CurrentCultureIgnoreCase);
+                return choices;
+            }
+        }
+
         public bool LaunchProgramExists
         {
             get => !string.IsNullOrEmpty(Global.LaunchProgram[device]);

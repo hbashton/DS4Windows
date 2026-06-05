@@ -2,6 +2,7 @@ using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using DS4Windows.InputDevices;
 
@@ -96,28 +97,9 @@ namespace DS4Windows
                 StopWindowsEndpoint(slot);
                 requestedCaptureEndpointId ??= string.Empty;
 
-                if (btSlots[slot] != null && ReferenceEquals(btSlots[slot].Device, device))
-                {
-                    btSlots[slot].SpeakerVolume = speakerVolume;
-                    EnsureCaptureStarted(requestedCaptureEndpointId, string.Empty);
-                    return;
-                }
-
                 StopBluetooth(slot);
-
-                try
-                {
-                    btSlots[slot] = new SlotBtPlayback(device, speakerVolume);
-                    EnsureCaptureStarted(requestedCaptureEndpointId, string.Empty);
-                    AppLogger.LogToGui(
-                        $"DualSense BT haptics passthrough started for controller {slot + 1}. Audible speaker audio over Bluetooth is not implemented by this SAxense-based path yet.",
-                        true);
-                }
-                catch (Exception ex)
-                {
-                    AppLogger.LogToGui($"DualSense BT haptics passthrough failed to start: {ex.Message}", true);
-                    StopBluetooth(slot);
-                }
+                StopCapture();
+                LogBluetoothAudioDiagnostics(slot, requestedCaptureEndpointId);
             }
         }
 
@@ -367,7 +349,125 @@ namespace DS4Windows
 
             return text.IndexOf("DualSense", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 text.IndexOf("Wireless Controller", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                text.IndexOf("PS5", StringComparison.OrdinalIgnoreCase) >= 0;
+                text.IndexOf("PS5", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                text.IndexOf("VirtualPad", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                text.IndexOf("Virtual DualSense", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool LooksLikeDualSenseAudioEndpoint(MMDevice device)
+        {
+            if (!IsDualSenseEndpoint(device))
+            {
+                return false;
+            }
+
+            try
+            {
+                WaveFormat format = device.AudioClient.MixFormat;
+                return format != null && format.SampleRate == 48000 && format.Channels >= 4;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void LogBluetoothAudioDiagnostics(int slot, string requestedCaptureEndpointId)
+        {
+            AppLogger.LogToGui(
+                $"DualSense Bluetooth speaker passthrough was requested for controller {slot + 1}, but the direct HID path only carries haptics packets. Audible Bluetooth speaker audio requires a Windows/Nefarius audio endpoint path.",
+                true);
+
+            LogVirtualPadRuntimeDiagnostics();
+            LogAudioEndpointDiagnostics(requestedCaptureEndpointId);
+        }
+
+        private static void LogVirtualPadRuntimeDiagnostics()
+        {
+            try
+            {
+                string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                string runtimeDll = Path.Combine(baseDir, "Nefarius.VirtualPad.Runtime.dll");
+                string abstractionsDll = Path.Combine(baseDir, "Nefarius.VirtualPad.Runtime.Abstractions.dll");
+
+                AppLogger.LogToGui(
+                    $"DualSense BT audio diagnostics: VirtualPad runtime DLL present={File.Exists(runtimeDll)}, abstractions DLL present={File.Exists(abstractionsDll)}, baseDir={baseDir}",
+                    false);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogToGui($"DualSense BT audio diagnostics: VirtualPad runtime probe failed: {ex.Message}", true);
+            }
+        }
+
+        private static void LogAudioEndpointDiagnostics(string requestedCaptureEndpointId)
+        {
+            try
+            {
+                using var enumerator = new MMDeviceEnumerator();
+                MMDevice defaultRender = null;
+                try
+                {
+                    defaultRender = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+                }
+                catch { }
+
+                AppLogger.LogToGui(
+                    $"DualSense BT audio diagnostics: default render endpoint={(defaultRender == null ? "<none>" : EndpointSummary(defaultRender))}",
+                    false);
+
+                if (!string.IsNullOrEmpty(requestedCaptureEndpointId))
+                {
+                    try
+                    {
+                        MMDevice requestedCapture = enumerator.GetDevice(requestedCaptureEndpointId);
+                        AppLogger.LogToGui(
+                            $"DualSense BT audio diagnostics: selected capture/source render endpoint={EndpointSummary(requestedCapture)}",
+                            false);
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLogger.LogToGui($"DualSense BT audio diagnostics: selected capture/source endpoint missing: {ex.Message}", true);
+                    }
+                }
+
+                var renderEndpoints = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active).ToList();
+                AppLogger.LogToGui($"DualSense BT audio diagnostics: active render endpoint count={renderEndpoints.Count}", false);
+
+                foreach (MMDevice endpoint in renderEndpoints)
+                {
+                    AppLogger.LogToGui(
+                        $"DualSense BT audio diagnostics: render endpoint: {EndpointSummary(endpoint)}, dualsenseLike={IsDualSenseEndpoint(endpoint)}, dsAudioFormatLike={LooksLikeDualSenseAudioEndpoint(endpoint)}",
+                        false);
+                }
+
+                if (!renderEndpoints.Any(LooksLikeDualSenseAudioEndpoint))
+                {
+                    AppLogger.LogToGui(
+                        "DualSense BT audio diagnostics: no active 48 kHz 4-channel DualSense/VirtualPad render endpoint was found. This is the endpoint DSX-style Bluetooth speaker/haptics routing depends on.",
+                        true);
+                }
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogToGui($"DualSense BT audio diagnostics failed while enumerating endpoints: {ex.Message}", true);
+            }
+        }
+
+        private static string EndpointSummary(MMDevice endpoint)
+        {
+            string formatText = "<format unavailable>";
+            try
+            {
+                WaveFormat format = endpoint.AudioClient.MixFormat;
+                if (format != null)
+                {
+                    formatText = $"{format.SampleRate} Hz, {format.BitsPerSample}-bit, {format.Channels} channel, {format.Encoding}";
+                }
+            }
+            catch { }
+
+            return $"Name=\"{endpoint.FriendlyName}\", Device=\"{endpoint.DeviceFriendlyName}\", State={endpoint.State}, Format={formatText}, Id=\"{endpoint.ID}\"";
         }
 
         private sealed class SlotPlayback : IDisposable

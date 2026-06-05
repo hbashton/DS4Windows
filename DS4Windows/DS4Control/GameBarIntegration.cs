@@ -22,6 +22,8 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text;
+using System.Windows;
+using System.Windows.Automation;
 
 namespace DS4Windows
 {
@@ -114,7 +116,7 @@ namespace DS4Windows
                 return true;
             }, IntPtr.Zero);
 
-            return visible;
+            return visible || IsGameBarVisibleByAutomation();
         }
 
         public string GetGameBarWindowDiagnostics()
@@ -148,7 +150,134 @@ namespace DS4Windows
                 }
             }
 
+            AppendAutomationDiagnostics(output);
+
             return output.ToString().TrimEnd();
+        }
+
+        private static bool IsGameBarVisibleByAutomation()
+        {
+            try
+            {
+                AutomationElementCollection elements = AutomationElement.RootElement.FindAll(TreeScope.Children, Condition.TrueCondition);
+                foreach (AutomationElement element in elements)
+                {
+                    if (LooksLikeVisibleGameBarAutomationElement(element))
+                    {
+                        return true;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return false;
+        }
+
+        private static void AppendAutomationDiagnostics(StringBuilder output)
+        {
+            try
+            {
+                List<string> rows = new List<string>();
+                AutomationElementCollection elements = AutomationElement.RootElement.FindAll(TreeScope.Children, Condition.TrueCondition);
+                foreach (AutomationElement element in elements)
+                {
+                    AddAutomationDiagnosticRow(rows, element, "uia-top");
+
+                    if (rows.Count >= 40)
+                    {
+                        break;
+                    }
+                }
+
+                if (rows.Count == 0)
+                {
+                    output.AppendLine("No Game Bar-like UI Automation elements were found.");
+                    return;
+                }
+
+                foreach (string row in rows)
+                {
+                    output.AppendLine(row);
+                }
+            }
+            catch (Exception ex)
+            {
+                output.AppendLine($"UI Automation diagnostics failed: {ex.Message}");
+            }
+        }
+
+        private static void AddAutomationDiagnosticRow(List<string> rows, AutomationElement element, string scope)
+        {
+            string name = GetAutomationName(element);
+            string className = GetAutomationClassName(element);
+            string automationId = GetAutomationId(element);
+            string controlType = GetAutomationControlTypeName(element);
+            string processName = GetAutomationProcessName(element);
+
+            if (!IsAutomationDiagnosticCandidate(processName, name, className, automationId))
+            {
+                return;
+            }
+
+            Rect rect = GetAutomationBoundingRectangle(element);
+            bool offscreen = GetAutomationIsOffscreen(element);
+            bool hasSize = rect.Width > 1 && rect.Height > 1;
+            bool inspectable = !offscreen && hasSize;
+            bool match = inspectable && LooksLikeGameBarAutomationElement(element);
+
+            rows.Add($"[{scope}] match={match} inspectable={inspectable} offscreen={offscreen} size={(int)rect.Width}x{(int)rect.Height} pos={(int)rect.X},{(int)rect.Y} proc='{processName}' class='{className}' control='{controlType}' automationId='{automationId}' name='{name}'");
+        }
+
+        private static bool LooksLikeVisibleGameBarAutomationElement(AutomationElement element)
+        {
+            if (!LooksLikeGameBarAutomationElement(element))
+            {
+                return false;
+            }
+
+            Rect rect = GetAutomationBoundingRectangle(element);
+            return !GetAutomationIsOffscreen(element) && rect.Width > 1 && rect.Height > 1;
+        }
+
+        private static bool LooksLikeGameBarAutomationElement(AutomationElement element)
+        {
+            string name = GetAutomationName(element);
+            string className = GetAutomationClassName(element);
+            string automationId = GetAutomationId(element);
+            string processName = GetAutomationProcessName(element);
+
+            bool processLooksRight =
+                processName.Equals("GameBar", StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("XboxGameBar", StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("GameBarFTServer", StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("GameBarWidgets", StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("GameBarElevatedFT_Alias", StringComparison.OrdinalIgnoreCase);
+
+            bool textLooksRight =
+                name.IndexOf("Xbox Game Bar", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                name.IndexOf("Game Bar", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                automationId.IndexOf("GameBar", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                automationId.IndexOf("Xbox", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                className.IndexOf("GameBar", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                className.IndexOf("Xbox", StringComparison.OrdinalIgnoreCase) >= 0;
+
+            return processLooksRight || textLooksRight;
+        }
+
+        private static bool IsAutomationDiagnosticCandidate(string processName, string name, string className, string automationId)
+        {
+            return processName.IndexOf("GameBar", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                processName.IndexOf("Xbox", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                processName.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("ShellExperienceHost", StringComparison.OrdinalIgnoreCase) ||
+                name.IndexOf("Game Bar", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                name.IndexOf("Xbox", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                className.IndexOf("GameBar", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                className.IndexOf("Xbox", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                automationId.IndexOf("GameBar", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                automationId.IndexOf("Xbox", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private static bool HasGameBarChildWindow(IntPtr parentWindow)
@@ -314,6 +443,108 @@ namespace DS4Windows
             catch
             {
                 return string.Empty;
+            }
+        }
+
+        private static string GetAutomationName(AutomationElement element)
+        {
+            try
+            {
+                return element.Current.Name ?? string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private static string GetAutomationClassName(AutomationElement element)
+        {
+            try
+            {
+                return element.Current.ClassName ?? string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private static string GetAutomationId(AutomationElement element)
+        {
+            try
+            {
+                return element.Current.AutomationId ?? string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private static string GetAutomationControlTypeName(AutomationElement element)
+        {
+            try
+            {
+                return element.Current.ControlType?.ProgrammaticName ?? string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private static string GetAutomationProcessName(AutomationElement element)
+        {
+            int processId;
+            try
+            {
+                processId = element.Current.ProcessId;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+
+            if (processId <= 0)
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                using (Process process = Process.GetProcessById(processId))
+                {
+                    return process.ProcessName;
+                }
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private static Rect GetAutomationBoundingRectangle(AutomationElement element)
+        {
+            try
+            {
+                return element.Current.BoundingRectangle;
+            }
+            catch
+            {
+                return Rect.Empty;
+            }
+        }
+
+        private static bool GetAutomationIsOffscreen(AutomationElement element)
+        {
+            try
+            {
+                return element.Current.IsOffscreen;
+            }
+            catch
+            {
+                return true;
             }
         }
     }

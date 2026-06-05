@@ -33,9 +33,10 @@ namespace DS4Windows
         private const byte VK_G = 0x47;
         private const int KEYEVENTF_KEYUP = 0x0002;
         private const int DWMWA_CLOAKED = 14;
-        private const int MaxAutomationDiagnosticRows = 80;
+        private const int MaxAutomationDiagnosticRows = 20;
         private const int MaxAutomationVisitCount = 500;
         private const int MaxAutomationDepth = 5;
+        private const int MaxDiagnosticTextLength = 160;
 
         private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
@@ -284,7 +285,7 @@ namespace DS4Windows
                         continue;
                     }
 
-                    rows.Add($"[proc] name='{processName}' id={process.Id} mainWindowHandle=0x{process.MainWindowHandle.ToInt64():X} mainWindowTitle='{process.MainWindowTitle}' responding={SafeGetResponding(process)}");
+                    rows.Add($"[proc] name='{TruncateDiagnosticText(processName)}' id={process.Id} mainWindowHandle=0x{process.MainWindowHandle.ToInt64():X} mainWindowTitle='{TruncateDiagnosticText(process.MainWindowTitle)}' responding={SafeGetResponding(process)}");
                 }
                 catch
                 {
@@ -315,6 +316,11 @@ namespace DS4Windows
             string controlType = GetAutomationControlTypeName(element);
             string processName = GetAutomationProcessName(element);
 
+            if (IsKnownNoisyProcessName(processName))
+            {
+                return;
+            }
+
             if (!IsAutomationDiagnosticCandidate(processName, name, className, automationId))
             {
                 return;
@@ -326,7 +332,7 @@ namespace DS4Windows
             bool inspectable = !offscreen && hasSize;
             bool match = inspectable && LooksLikeGameBarAutomationElement(element);
 
-            rows.Add($"[{scope}] match={match} inspectable={inspectable} offscreen={offscreen} size={(int)rect.Width}x{(int)rect.Height} pos={(int)rect.X},{(int)rect.Y} proc='{processName}' class='{className}' control='{controlType}' automationId='{automationId}' name='{name}'");
+            rows.Add($"[{scope}] match={match} inspectable={inspectable} offscreen={offscreen} size={(int)rect.Width}x{(int)rect.Height} pos={(int)rect.X},{(int)rect.Y} proc='{TruncateDiagnosticText(processName)}' class='{TruncateDiagnosticText(className)}' control='{TruncateDiagnosticText(controlType)}' automationId='{TruncateDiagnosticText(automationId)}' name='{TruncateDiagnosticText(name)}'");
         }
 
         private static bool LooksLikeVisibleGameBarAutomationElement(AutomationElement element)
@@ -346,6 +352,11 @@ namespace DS4Windows
             string className = GetAutomationClassName(element);
             string automationId = GetAutomationId(element);
             string processName = GetAutomationProcessName(element);
+
+            if (IsKnownNoisyProcessName(processName))
+            {
+                return false;
+            }
 
             bool processLooksRight = IsGameBarRelatedProcessName(processName);
 
@@ -391,7 +402,19 @@ namespace DS4Windows
                 processName.Equals("firefox", StringComparison.OrdinalIgnoreCase) ||
                 processName.Equals("brave", StringComparison.OrdinalIgnoreCase) ||
                 processName.Equals("Code", StringComparison.OrdinalIgnoreCase) ||
-                processName.Equals("Codex", StringComparison.OrdinalIgnoreCase);
+                processName.Equals("Codex", StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("DS4Windows", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string TruncateDiagnosticText(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return string.Empty;
+            }
+
+            text = text.Replace('\r', ' ').Replace('\n', ' ');
+            return text.Length <= MaxDiagnosticTextLength ? text : text.Substring(0, MaxDiagnosticTextLength) + "...";
         }
 
         private static bool SafeGetResponding(Process process)

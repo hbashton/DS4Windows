@@ -103,8 +103,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public void DownloadUpstreamVersionInfo()
         {
-            // Sorry other devs, gonna have to find your own server
-            Uri url = new Uri("https://api.github.com/repos/schmaldeo/DS4Windows/releases/latest");
+            Uri url = new Uri("https://api.github.com/repos/hbashton/DS4Windows/releases/latest");
             string filename = Global.appdatapath + "\\version.txt";
             bool success = false;
             using (StreamWriter streamWriter = new(filename, false))
@@ -117,9 +116,11 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     {
                         var gitHubReleaseTask = requestTask.Result.Content.ReadFromJsonAsync<GithubRelease>();
                         gitHubReleaseTask.Wait();
-                        if (!gitHubReleaseTask.IsFaulted)
+                        if (!gitHubReleaseTask.IsFaulted &&
+                            gitHubReleaseTask.Result is not null &&
+                            Changelog.TryParseReleaseVersion(gitHubReleaseTask.Result.TagName, out var releaseVersion))
                         {
-                            streamWriter.Write(gitHubReleaseTask.Result.TagName.Substring(1));
+                            streamWriter.Write(releaseVersion);
                             success = true;
                         }
                     }

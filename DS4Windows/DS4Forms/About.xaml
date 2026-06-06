@@ -9,7 +9,7 @@
         Title="{lex:LocExtension HotkeysAbout}" Height="450" Width="800"
         Style="{DynamicResource WindowStyle}">
     <DockPanel>
-        <Label x:Name="headerLb" Content="DS4Windows - schmaldeo Build (Version " DockPanel.Dock="Top" HorizontalAlignment="Center" />
+        <Label x:Name="headerLb" Content="DS4Windows - hbashton Build (Version " DockPanel.Dock="Top" HorizontalAlignment="Center" />
 
         <TabControl>
             <TabItem Header="Hotkeys">

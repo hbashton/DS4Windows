@@ -1,29 +1,8 @@
-# DISCONTINUATION
-
-**I'm sad to announce that I will be discontinuing any further work on this project.**
-
-I initially wanted to take a short break and come back to the project, 
-however with 1) lack of time for development due to both work and personal life and 2) the development of machine learning technologies I'm just not willing
-to put any more work into it. Especially the 2nd point made me completely lose interest in it. 
-
-Open source software, something I once valued way more than
-proprietary software, has now become a clown show due to so-called _vibe coders_. People's contributions to OSS were once a great learning experience, GitHub 
-used to be a place where you could exchange knowledge and build a nice resume as well as find many fantastic hobby projects you could make use of. 
-I've learnt that myself. Now, seeing many OSS projects receive many completely trash and meaningless pull requests and GitHub being flooded with very 
-low quality or straight up vulnerable on all fronts code, I lost my faith in it. 
-
-My goal with this project was producing good (for obvious reasons not perfect, but still goot) quality code and delivering what people wanted. 
-**To learn and become a better software engineer.** All the motivation I had to do that is completely gone now.
-
-Thank you for all the contributors, people who helped me develop it and people who reported bugs and feature requests.
-
-It was a good ride.
-
-Maybe one day we will come back to the way the things were before.
-
-## DS4Windows
+# DS4Windows
 
 Like those other DS4 tools, but sexier.
+
+This fork is an alternative to Schmaldeo's DS4Windows now that his work on that project has been discontinued.
 
 DS4Windows is an extract anywhere program that allows you to get the best
 DualShock 4 experience on your PC. By emulating an Xbox 360 controller, many
@@ -38,12 +17,9 @@ for DS3 based on accelerometer value (which is a work of [sunnyqeen](https://git
 
 ## About this fork
 
-I've made this fork because some of the buttons on my controller started bouncing. Normally I would just add a
-feature that would fix my problem, make a pull request to the original repo and forget about the project. 
-The issue here is that Ryochan7 stopped maintaining the original project, so I decided to make slight 
-modifications to the code that detects if the installed version is up-to-date, so it now pulls version info from my 
-repo. This way if you install my version, you don't get the annoying popup saying your version is outdated. If there 
-are any feature requests, I'm more than happy to at least look at them and assess whether I could add them.
+This repository continues DS4Windows as a user-focused alternative to Schmaldeo's discontinued fork. It builds on
+the work of Jays2Kings, Ryochan7, Schmaldeo, and other contributors while keeping release checks and downloads tied
+to this maintained branch.
 
 ## License
 
@@ -54,15 +30,15 @@ available in this source code from the COPYING file.
 
 ## Downloads
 
-- **[Main builds of DS4Windows](https://github.com/schmaldeo/DS4Windows/releases)**
+- **[Main builds of DS4Windows](https://github.com/hbashton/DS4Windows/releases)**
 
 ## Install
 
-You can install DS4Windows by downloading it from [releases](https://github.com/schmaldeo/DS4Windows/releases) and place it to your preferred place.
+You can install DS4Windows by downloading it from [releases](https://github.com/hbashton/DS4Windows/releases) and place it to your preferred place.
 
 Alternatively, you can install [`ds4windows`](https://scoop.sh/#/apps?q=ds4windows&o=true&id=c8b519fcb06da6bb014569fd0a07521839ec5425) via [Scoop](https://scoop.sh/).
 
-Alternatively, you can download [`ds4w.bat`](https://raw.githubusercontent.com/schmaldeo/DS4Windows/refs/heads/master/ds4w.bat) file and execute it. It will open a window that downloads and places the program in `%LOCALAPPDATA%\DS4Windows` and creates a desktop shortcut to the executable.
+Alternatively, you can download [`ds4w.bat`](https://raw.githubusercontent.com/hbashton/DS4Windows/refs/heads/main/ds4w.bat) file and execute it. It will open a window that downloads and places the program in `%LOCALAPPDATA%\DS4Windows` and creates a desktop shortcut to the executable.
 
 ## Requirements
 

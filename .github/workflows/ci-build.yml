@@ -77,12 +77,19 @@ jobs:
       - name: Package ${{ matrix.platform }}
         run: python .\utils\post-build.py .\bin\${{ matrix.platform }}\Release\output . ${{ env.VERSION }}
 
+      - name: Stage ${{ matrix.platform }} artifact folder
+        shell: pwsh
+        run: |
+          $artifactRoot = ".\bin\${{ matrix.platform }}\Release\artifact"
+          New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
+          Copy-Item -Path ".\bin\${{ matrix.platform }}\Release\DS4Windows" -Destination $artifactRoot -Recurse -Force
+
       - name: Upload ${{ matrix.platform }} artifact
         id: upload
         uses: actions/upload-artifact@v4
         with:
-          name: DS4Windows-${{ matrix.platform }}
-          path: .\bin\${{ matrix.platform }}\Release\DS4Windows_${{ env.VERSION }}_${{ matrix.platform }}.zip
+          name: DS4Windows_${{ env.VERSION }}_${{ matrix.platform }}
+          path: .\bin\${{ matrix.platform }}\Release\artifact
           if-no-files-found: error
 
       - name: Publish artifact link to run summary
@@ -92,5 +99,5 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Version: \`${{ env.VERSION }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "[Download DS4Windows-${{ matrix.platform }} (zip)](${{ steps.upload.outputs.artifact-url }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "[Download DS4Windows_${{ env.VERSION }}_${{ matrix.platform }} (contains DS4Windows folder)](${{ steps.upload.outputs.artifact-url }})" >> "$GITHUB_STEP_SUMMARY"
 

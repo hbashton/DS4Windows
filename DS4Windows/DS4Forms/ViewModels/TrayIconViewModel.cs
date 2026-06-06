@@ -32,7 +32,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         private string tooltipText = "DS4Windows";
         private string iconSource;
         public const string ballonTitle = "DS4Windows";
-        public static string trayTitle = $"DS4Windows v{Global.exeDisplayVersion}";
+        public const string trayTitle = "DS4Windows";
         private ContextMenu contextMenu;
         private MenuItem changeServiceItem;
         private MenuItem openItem;
@@ -325,21 +325,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         private void PopulateToolText()
         {
-            List<string> items = new List<string>();
-            items.Add(trayTitle);
-            //IEnumerable<DS4Device> devices = DS4Devices.getDS4Controllers();
-            int idx = 1;
-            //foreach (DS4Device currentDev in devices)
-            _colLocker.EnterReadLock();
-            foreach (ControllerHolder holder in controllerList)
-            {
-                DS4Device currentDev = holder.Device;
-                items.Add($"{idx}: {currentDev.ConnectionType} {currentDev.Battery}%{(currentDev.Charging ? "+" : "")}");
-                idx++;
-            }
-            _colLocker.ExitReadLock();
-
-            TooltipText = string.Join("\n", items);
+            TooltipText = trayTitle;
         }
 
         private void SetupEvents()
@@ -416,7 +402,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         {
             Application.Current.Dispatcher.BeginInvoke(() =>
             {
-                TooltipText = "DS4Windows";
+                TooltipText = trayTitle;
             });
             //contextMenu.Items.Clear();
         }

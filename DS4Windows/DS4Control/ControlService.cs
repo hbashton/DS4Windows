@@ -2653,6 +2653,139 @@ namespace DS4Windows
         private bool gameBarHasDiagnosticVisibleState = false;
         private bool gameBarAdminWarningLogged = false;
 
+        public bool IsGameBarProfilePriorityActive(int ind)
+        {
+            return ind >= 0 && ind < MAX_DS4_CONTROLLER_COUNT &&
+                (gameBarProfileActive[ind] || gameBarProfilePending[ind]);
+        }
+
+        public bool IsAnyGameBarProfilePriorityActive()
+        {
+            for (int i = 0; i < MAX_DS4_CONTROLLER_COUNT; i++)
+            {
+                if (IsGameBarProfilePriorityActive(i))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        public bool TryDeferAutoProfileForGameBar(int ind, string profileName)
+        {
+            if (!IsGameBarProfilePriorityActive(ind))
+            {
+                return false;
+            }
+
+            bool changed = !gameBarPreviousUseTempProfile[ind] ||
+                gameBarPreviousTempProfileName[ind] != profileName;
+
+            gameBarPreviousUseTempProfile[ind] = true;
+            gameBarPreviousTempProfileName[ind] = profileName;
+            if (!string.IsNullOrEmpty(Global.ProfilePath[ind]))
+            {
+                gameBarPreviousProfileName[ind] = Global.ProfilePath[ind];
+            }
+
+            if (changed)
+            {
+                LogDebug($"Controller {ind + 1} deferred auto-profile '{profileName}' while Game Bar has priority.");
+            }
+
+            return true;
+        }
+
+        public bool TryDeferAutoProfileDefaultForGameBar(int ind)
+        {
+            if (!IsGameBarProfilePriorityActive(ind))
+            {
+                return false;
+            }
+
+            bool changed = gameBarPreviousUseTempProfile[ind] ||
+                !string.IsNullOrEmpty(gameBarPreviousTempProfileName[ind]);
+
+            gameBarPreviousUseTempProfile[ind] = false;
+            gameBarPreviousTempProfileName[ind] = string.Empty;
+            if (!string.IsNullOrEmpty(Global.ProfilePath[ind]))
+            {
+                gameBarPreviousProfileName[ind] = Global.ProfilePath[ind];
+            }
+
+            if (changed)
+            {
+                LogDebug($"Controller {ind + 1} deferred auto-profile default restore while Game Bar has priority.");
+            }
+
+            return true;
+        }
+
+        private bool HasAnyConfiguredGameBarProfile()
+        {
+            for (int i = 0; i < MAX_DS4_CONTROLLER_COUNT; i++)
+            {
+                if (DS4Controllers[i] != null &&
+                    Global.GameBarHomeButtonSupport[i] &&
+                    !string.IsNullOrEmpty(Global.GameBarProfileName[i]))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool TryGetConfiguredGameBarProfileName(int ind, out string profileName, bool logInvalid)
+        {
+            profileName = string.Empty;
+            if (!Global.GameBarHomeButtonSupport[ind])
+            {
+                return false;
+            }
+
+            profileName = Global.GameBarProfileName[ind];
+            if (string.IsNullOrEmpty(profileName))
+            {
+                if (logInvalid)
+                {
+                    LogDebug($"Game Bar Home button support is enabled for controller {ind + 1}, but no Game Bar profile is selected.", true);
+                }
+
+                return false;
+            }
+
+            string profilePath = Path.Combine(appdatapath, "Profiles", $"{profileName}.xml");
+            if (!File.Exists(profilePath))
+            {
+                if (logInvalid)
+                {
+                    LogDebug($"Game Bar profile '{profileName}' does not exist for controller {ind + 1}.", true);
+                }
+
+                return false;
+            }
+
+            return true;
+        }
+
+        private void RequestGameBarProfilePriority(int ind, string profileName, DateTime now, string reason)
+        {
+            if (IsGameBarProfilePriorityActive(ind))
+            {
+                return;
+            }
+
+            gameBarPreviousUseTempProfile[ind] = Global.useTempProfile[ind];
+            gameBarPreviousTempProfileName[ind] = Global.tempprofilename[ind];
+            gameBarPreviousProfileName[ind] = Global.ProfilePath[ind];
+            gameBarRequestedProfileName[ind] = profileName;
+            gameBarProfileRequestedUtc[ind] = now;
+            gameBarProfilePending[ind] = true;
+            LogDebug($"Controller {ind + 1} requested Game Bar profile '{profileName}' ({reason}). Waiting for Game Bar to become visible.");
+        }
+
         private void CheckGameBarHomeButton(int ind, DS4State cState, DS4State tempControlState, DS4State pState)
         {
             if (!cState.PS)
@@ -2682,22 +2815,8 @@ namespace DS4Windows
                 return;
             }
 
-            if (!Global.GameBarHomeButtonSupport[ind])
+            if (!TryGetConfiguredGameBarProfileName(ind, out string profileName, true))
             {
-                return;
-            }
-
-            string profileName = Global.GameBarProfileName[ind];
-            if (string.IsNullOrEmpty(profileName))
-            {
-                LogDebug($"Game Bar Home button support is enabled for controller {ind + 1}, but no Game Bar profile is selected.", true);
-                return;
-            }
-
-            string profilePath = Path.Combine(appdatapath, "Profiles", $"{profileName}.xml");
-            if (!File.Exists(profilePath))
-            {
-                LogDebug($"Game Bar profile '{profileName}' does not exist for controller {ind + 1}.", true);
                 return;
             }
 
@@ -2710,30 +2829,17 @@ namespace DS4Windows
             cState.PS = false;
             tempControlState.PS = false;
             gameBarHomeButtonIgnoreUntilUtc[ind] = now + TimeSpan.FromSeconds(1);
+            RequestGameBarProfilePriority(ind, profileName, now, "Home button request");
             LogDebug($"Game Bar open request: {gameBarIntegration.OpenGameBar()}");
-            gameBarPreviousUseTempProfile[ind] = Global.useTempProfile[ind];
-            gameBarPreviousTempProfileName[ind] = Global.tempprofilename[ind];
-            gameBarPreviousProfileName[ind] = Global.ProfilePath[ind];
-            gameBarRequestedProfileName[ind] = profileName;
-            gameBarProfileRequestedUtc[ind] = now;
-            gameBarProfilePending[ind] = true;
-            LogDebug($"Controller {ind + 1} requested Game Bar profile '{profileName}'. Waiting for Game Bar to become visible.");
             LogGameBarDiagnostics("Home button request");
         }
 
-        private void UpdateGameBarProfileState()
+        public void UpdateGameBarProfileState()
         {
-            bool anyActiveOrPending = false;
-            for (int i = 0; i < MAX_DS4_CONTROLLER_COUNT; i++)
-            {
-                if (gameBarProfileActive[i] || gameBarProfilePending[i])
-                {
-                    anyActiveOrPending = true;
-                    break;
-                }
-            }
+            bool anyActiveOrPending = IsAnyGameBarProfilePriorityActive();
+            bool anyConfigured = HasAnyConfiguredGameBarProfile();
 
-            if (!anyActiveOrPending)
+            if (!anyActiveOrPending && !anyConfigured)
             {
                 return;
             }
@@ -2751,6 +2857,7 @@ namespace DS4Windows
             {
                 gameBarLastVisibleUtc = now;
                 gameBarInvisibleSinceUtc = DateTime.MinValue;
+                RequestVisibleGameBarProfiles(now);
                 ActivatePendingGameBarProfiles(now);
                 return;
             }
@@ -2788,6 +2895,22 @@ namespace DS4Windows
                     gameBarPreviousProfileName[i] = string.Empty;
                     gameBarRequestedProfileName[i] = string.Empty;
                     LogDebug($"Controller {i + 1} reverted from Game Bar profile.");
+                }
+            }
+        }
+
+        private void RequestVisibleGameBarProfiles(DateTime now)
+        {
+            for (int i = 0; i < MAX_DS4_CONTROLLER_COUNT; i++)
+            {
+                if (DS4Controllers[i] == null || IsGameBarProfilePriorityActive(i))
+                {
+                    continue;
+                }
+
+                if (TryGetConfiguredGameBarProfileName(i, out string profileName, false))
+                {
+                    RequestGameBarProfilePriority(i, profileName, now, "Game Bar visible");
                 }
             }
         }

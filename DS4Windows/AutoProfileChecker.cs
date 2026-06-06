@@ -70,9 +70,6 @@ namespace DS4WinWPF
                 if (Program.rootHub.IsAnyGameBarProfilePriorityActive() &&
                     IsGameBarForegroundWindow(topProcessName, topWindowTitle))
                 {
-                    if (autoProfileDebugLogLevel > 0)
-                        DS4Windows.AppLogger.LogToGui($"DEBUG: Auto-Profile. Game Bar has priority; preserving underlying auto-profile while Game Bar is foreground", false, true);
-
                     return;
                 }
 
@@ -174,23 +171,15 @@ namespace DS4WinWPF
                         }
                     }
 
-                    if (turnOffDS4WinApp)
+                    if (turnOffDS4WinApp && !Program.rootHub.IsAnyGameBarProfilePriorityActive())
                     {
-                        if (Program.rootHub.IsAnyGameBarProfilePriorityActive())
+                        turnOffTemp = true;
+                        if (App.rootHub.running)
                         {
                             if (autoProfileDebugLogLevel > 0)
-                                DS4Windows.AppLogger.LogToGui($"DEBUG: Auto-Profile. Turnoff rule deferred while Game Bar has priority", false, true);
-                        }
-                        else
-                        {
-                            turnOffTemp = true;
-                            if (App.rootHub.running)
-                            {
-                                if (autoProfileDebugLogLevel > 0)
-                                    DS4Windows.AppLogger.LogToGui($"DEBUG: Auto-Profile. Turning DS4Windows temporarily off", false, true);
+                                DS4Windows.AppLogger.LogToGui($"DEBUG: Auto-Profile. Turning DS4Windows temporarily off", false, true);
 
-                                SetAndWaitServiceStatus(false);
-                            }
+                            SetAndWaitServiceStatus(false);
                         }
                     }
 

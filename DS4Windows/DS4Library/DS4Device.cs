@@ -927,11 +927,10 @@ namespace DS4Windows
         {
             if (conType == ConnectionType.BT)
             {
-                //if ((this.featureSet & VidPidFeatureSet.OnlyOutputData0x05) == 0)
-                //    return hDevice.WriteOutputReportViaControl(outputReport);
+                if (nativeOptionsStore != null && nativeOptionsStore.IsCopyCat)
+                    return hDevice.WriteOutputReportViaInterrupt(outputBuffer, READ_STREAM_TIMEOUT);
 
-                // Use Interrupt endpoint for BT DS4 connected devices now
-                return hDevice.WriteOutputReportViaInterrupt(outputBuffer, READ_STREAM_TIMEOUT);
+                return hDevice.WriteOutputReportViaControl(outputBuffer);
             }
             else
             {
@@ -943,11 +942,10 @@ namespace DS4Windows
         {
             if (conType == ConnectionType.BT)
             {
-                //if ((this.featureSet & VidPidFeatureSet.OnlyOutputData0x05) == 0)
-                //    return hDevice.WriteOutputReportViaControl(outputReport);
+                if (nativeOptionsStore != null && nativeOptionsStore.IsCopyCat)
+                    return hDevice.WriteOutputReportViaInterrupt(outputReport, READ_STREAM_TIMEOUT);
 
-                // Use Interrupt endpoint for almost BT DS4 connected devices now
-                return hDevice.WriteOutputReportViaInterrupt(outputReport, READ_STREAM_TIMEOUT);
+                return hDevice.WriteOutputReportViaControl(outputReport);
             }
             else
             {

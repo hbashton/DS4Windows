@@ -47,8 +47,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         private string DownloadUpstreamUpdaterVersion()
         {
-            // Sorry other devs, gonna have to find your own server
-            Uri url = new Uri("https://api.github.com/repos/schmaldeo/DS4Updater/releases/latest");
+            Uri url = new Uri("https://api.github.com/repos/hbashton/DS4Updater/releases/latest");
 
             Task<System.Net.Http.HttpResponseMessage> requestTask = App.requestClient.GetAsync(url.ToString());
             requestTask.Wait();
@@ -56,9 +55,11 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             {
                 var gitHubReleaseTask = requestTask.Result.Content.ReadFromJsonAsync<GithubRelease>();
                 gitHubReleaseTask.Wait();
-                if (!gitHubReleaseTask.IsFaulted)
+                if (!gitHubReleaseTask.IsFaulted &&
+                    gitHubReleaseTask.Result is not null &&
+                    Changelog.TryParseReleaseVersion(gitHubReleaseTask.Result.TagName, out var updaterVersion))
                 {
-                    return gitHubReleaseTask.Result.TagName.Substring(1);
+                    return updaterVersion.ToString();
                 }
             }
             return string.Empty;
@@ -69,11 +70,13 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             string destPath = Path.Combine(Global.exedirpath, "DS4Updater.exe");
             bool updaterExists = File.Exists(destPath);
             upstreamVersion = DownloadUpstreamUpdaterVersion();
+            if (string.IsNullOrEmpty(upstreamVersion)) return false;
+
             if (!updaterExists ||
                 (!string.IsNullOrEmpty(upstreamVersion) && FileVersionInfo.GetVersionInfo(destPath).FileVersion.CompareTo(upstreamVersion) != 0))
             {
                 launch = false;
-                Uri url2 = new Uri($"https://github.com/schmaldeo/DS4Updater/releases/download/v{upstreamVersion}/{updaterExe}");
+                Uri url2 = new Uri($"https://github.com/hbashton/DS4Updater/releases/download/v{upstreamVersion}/{updaterExe}");
                 string filename = Path.Combine(Path.GetTempPath(), "DS4Updater.exe");
                 using (var downloadStream = new FileStream(filename, FileMode.Create))
                 {

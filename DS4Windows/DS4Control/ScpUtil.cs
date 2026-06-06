@@ -4589,6 +4589,10 @@ namespace DS4Windows
                 XmlNode xmlRSMaxOutput = m_Xdoc.CreateNode(XmlNodeType.Element, "RSMaxOutput", null); xmlRSMaxOutput.InnerText = rsModInfo[device].maxOutput.ToString(); rootElement.AppendChild(xmlRSMaxOutput);
                 XmlNode xmlLSMaxOutputForce = m_Xdoc.CreateNode(XmlNodeType.Element, "LSMaxOutputForce", null); xmlLSMaxOutputForce.InnerText = lsModInfo[device].maxOutputForce.ToString(); rootElement.AppendChild(xmlLSMaxOutputForce);
                 XmlNode xmlRSMaxOutputForce = m_Xdoc.CreateNode(XmlNodeType.Element, "RSMaxOutputForce", null); xmlRSMaxOutputForce.InnerText = rsModInfo[device].maxOutputForce.ToString(); rootElement.AppendChild(xmlRSMaxOutputForce);
+                XmlNode xmlLSInvertX = m_Xdoc.CreateNode(XmlNodeType.Element, "LSInvertX", null); xmlLSInvertX.InnerText = lsModInfo[device].invertX.ToString(); rootElement.AppendChild(xmlLSInvertX);
+                XmlNode xmlLSInvertY = m_Xdoc.CreateNode(XmlNodeType.Element, "LSInvertY", null); xmlLSInvertY.InnerText = lsModInfo[device].invertY.ToString(); rootElement.AppendChild(xmlLSInvertY);
+                XmlNode xmlRSInvertX = m_Xdoc.CreateNode(XmlNodeType.Element, "RSInvertX", null); xmlRSInvertX.InnerText = rsModInfo[device].invertX.ToString(); rootElement.AppendChild(xmlRSInvertX);
+                XmlNode xmlRSInvertY = m_Xdoc.CreateNode(XmlNodeType.Element, "RSInvertY", null); xmlRSInvertY.InnerText = rsModInfo[device].invertY.ToString(); rootElement.AppendChild(xmlRSInvertY);
                 XmlNode xmlLSDeadZoneType = m_Xdoc.CreateNode(XmlNodeType.Element, "LSDeadZoneType", null); xmlLSDeadZoneType.InnerText = lsModInfo[device].deadzoneType.ToString(); rootElement.AppendChild(xmlLSDeadZoneType);
                 XmlNode xmlRSDeadZoneType = m_Xdoc.CreateNode(XmlNodeType.Element, "RSDeadZoneType", null); xmlRSDeadZoneType.InnerText = rsModInfo[device].deadzoneType.ToString(); rootElement.AppendChild(xmlRSDeadZoneType);
 
@@ -5992,6 +5996,62 @@ namespace DS4Windows
                     }
                 }
                 catch { rsModInfo[device].maxOutputForce = StickDeadZoneInfo.DEFAULT_MAXOUTPUT_FORCE; missingSetting = true; }
+
+                try
+                {
+                    Item = m_Xdoc.SelectSingleNode("/" + rootname + "/LSInvertX");
+                    if (bool.TryParse(Item?.InnerText ?? "", out bool temp))
+                    {
+                        lsModInfo[device].invertX = temp;
+                    }
+                    else
+                    {
+                        lsModInfo[device].invertX = StickDeadZoneInfo.DEFAULT_INVERT_X;
+                    }
+                }
+                catch { lsModInfo[device].invertX = StickDeadZoneInfo.DEFAULT_INVERT_X; missingSetting = true; }
+
+                try
+                {
+                    Item = m_Xdoc.SelectSingleNode("/" + rootname + "/LSInvertY");
+                    if (bool.TryParse(Item?.InnerText ?? "", out bool temp))
+                    {
+                        lsModInfo[device].invertY = temp;
+                    }
+                    else
+                    {
+                        lsModInfo[device].invertY = StickDeadZoneInfo.DEFAULT_INVERT_Y;
+                    }
+                }
+                catch { lsModInfo[device].invertY = StickDeadZoneInfo.DEFAULT_INVERT_Y; missingSetting = true; }
+
+                try
+                {
+                    Item = m_Xdoc.SelectSingleNode("/" + rootname + "/RSInvertX");
+                    if (bool.TryParse(Item?.InnerText ?? "", out bool temp))
+                    {
+                        rsModInfo[device].invertX = temp;
+                    }
+                    else
+                    {
+                        rsModInfo[device].invertX = StickDeadZoneInfo.DEFAULT_INVERT_X;
+                    }
+                }
+                catch { rsModInfo[device].invertX = StickDeadZoneInfo.DEFAULT_INVERT_X; missingSetting = true; }
+
+                try
+                {
+                    Item = m_Xdoc.SelectSingleNode("/" + rootname + "/RSInvertY");
+                    if (bool.TryParse(Item?.InnerText ?? "", out bool temp))
+                    {
+                        rsModInfo[device].invertY = temp;
+                    }
+                    else
+                    {
+                        rsModInfo[device].invertY = StickDeadZoneInfo.DEFAULT_INVERT_Y;
+                    }
+                }
+                catch { rsModInfo[device].invertY = StickDeadZoneInfo.DEFAULT_INVERT_Y; missingSetting = true; }
 
                 try
                 {

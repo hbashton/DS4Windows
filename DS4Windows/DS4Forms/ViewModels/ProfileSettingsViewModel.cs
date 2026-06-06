@@ -1159,6 +1159,30 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             set => Global.RSModInfo[device].maxOutputForce = value;
         }
 
+        public bool LSInvertX
+        {
+            get => Global.LSModInfo[device].invertX;
+            set => Global.LSModInfo[device].invertX = value;
+        }
+
+        public bool LSInvertY
+        {
+            get => Global.LSModInfo[device].invertY;
+            set => Global.LSModInfo[device].invertY = value;
+        }
+
+        public bool RSInvertX
+        {
+            get => Global.RSModInfo[device].invertX;
+            set => Global.RSModInfo[device].invertX = value;
+        }
+
+        public bool RSInvertY
+        {
+            get => Global.RSModInfo[device].invertY;
+            set => Global.RSModInfo[device].invertY = value;
+        }
+
         public int LSDeadTypeIndex
         {
             get

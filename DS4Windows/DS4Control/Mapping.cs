@@ -1098,6 +1098,29 @@ namespace DS4Windows
             return (value < min) ? min : (value > max) ? max : value;
         }
 
+        public static byte InvertStickAxis(byte axisValue)
+        {
+            if (axisValue == 128)
+            {
+                return 128;
+            }
+
+            return (byte)Math.Clamp(256 - axisValue, 0, 255);
+        }
+
+        private static void ApplyStickAxisInversion(StickDeadZoneInfo stickInfo, ref byte x, ref byte y)
+        {
+            if (stickInfo.invertX)
+            {
+                x = InvertStickAxis(x);
+            }
+
+            if (stickInfo.invertY)
+            {
+                y = InvertStickAxis(y);
+            }
+        }
+
         public static DS4State SetCurveAndDeadzone(int device, DS4State cState, DS4State dState)
         {
             double rotation = /*tempDoubleArray[device] =*/  getLSRotation(device);
@@ -2041,6 +2064,9 @@ namespace DS4Windows
                     }
                 }
             }
+
+            ApplyStickAxisInversion(lsMod, ref dState.LX, ref dState.LY);
+            ApplyStickAxisInversion(rsMod, ref dState.RX, ref dState.RY);
 
             int l2OutCurveMode = getL2OutCurveMode(device);
             if (l2OutCurveMode > 0 && dState.L2 != 0)

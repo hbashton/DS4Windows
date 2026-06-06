@@ -59,6 +59,8 @@ namespace DS4Windows
         public const double DEFAULT_VERTICAL_SCALE = 100.0;
         public const double DEFAULT_OUTER_BIND_DEAD = 75.0;
         public const bool DEFAULT_OUTER_BIND_INVERT = false;
+        public const bool DEFAULT_INVERT_X = false;
+        public const bool DEFAULT_INVERT_Y = false;
 
         public class AxisDeadZoneInfo
         {
@@ -88,6 +90,8 @@ namespace DS4Windows
         public DeadZoneType deadzoneType = DEFAULT_DEADZONE_TYPE;
         public double outerBindDeadZone = DEFAULT_OUTER_BIND_DEAD;
         public bool outerBindInvert = DEFAULT_OUTER_BIND_INVERT;
+        public bool invertX = DEFAULT_INVERT_X;
+        public bool invertY = DEFAULT_INVERT_Y;
         public AxisDeadZoneInfo xAxisDeadInfo = new AxisDeadZoneInfo();
         public AxisDeadZoneInfo yAxisDeadInfo = new AxisDeadZoneInfo();
 
@@ -104,6 +108,8 @@ namespace DS4Windows
             deadzoneType = DEFAULT_DEADZONE_TYPE;
             outerBindDeadZone = DEFAULT_OUTER_BIND_DEAD;
             outerBindInvert = DEFAULT_OUTER_BIND_INVERT;
+            invertX = DEFAULT_INVERT_X;
+            invertY = DEFAULT_INVERT_Y;
             xAxisDeadInfo.Reset();
             yAxisDeadInfo.Reset();
         }

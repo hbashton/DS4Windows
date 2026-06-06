@@ -546,6 +546,38 @@ namespace DS4WinWPF.DS4Control.DTOXml
             set => _rsMaxOutputForce = XmlDataUtilities.StrToBool(value);
         }
 
+        private bool _lsInvertX = StickDeadZoneInfo.DEFAULT_INVERT_X;
+        [XmlElement("LSInvertX")]
+        public string LSInvertXString
+        {
+            get => _lsInvertX.ToString();
+            set => _lsInvertX = XmlDataUtilities.StrToBool(value);
+        }
+
+        private bool _lsInvertY = StickDeadZoneInfo.DEFAULT_INVERT_Y;
+        [XmlElement("LSInvertY")]
+        public string LSInvertYString
+        {
+            get => _lsInvertY.ToString();
+            set => _lsInvertY = XmlDataUtilities.StrToBool(value);
+        }
+
+        private bool _rsInvertX = StickDeadZoneInfo.DEFAULT_INVERT_X;
+        [XmlElement("RSInvertX")]
+        public string RSInvertXString
+        {
+            get => _rsInvertX.ToString();
+            set => _rsInvertX = XmlDataUtilities.StrToBool(value);
+        }
+
+        private bool _rsInvertY = StickDeadZoneInfo.DEFAULT_INVERT_Y;
+        [XmlElement("RSInvertY")]
+        public string RSInvertYString
+        {
+            get => _rsInvertY.ToString();
+            set => _rsInvertY = XmlDataUtilities.StrToBool(value);
+        }
+
         [XmlElement("LSDeadZoneType")]
         public StickDeadZoneInfo.DeadZoneType LSDeadZoneType
         {
@@ -1571,10 +1603,14 @@ namespace DS4WinWPF.DS4Control.DTOXml
             LSVerticalScale = source.lsModInfo[deviceIndex].verticalScale;
             LSMaxOutput = source.lsModInfo[deviceIndex].maxOutput;
             _lsMaxOutputForce = source.lsModInfo[deviceIndex].maxOutputForce;
+            _lsInvertX = source.lsModInfo[deviceIndex].invertX;
+            _lsInvertY = source.lsModInfo[deviceIndex].invertY;
 
             RSVerticalScale = source.rsModInfo[deviceIndex].verticalScale;
             RSMaxOutput = source.rsModInfo[deviceIndex].maxOutput;
             _rsMaxOutputForce = source.rsModInfo[deviceIndex].maxOutputForce;
+            _rsInvertX = source.rsModInfo[deviceIndex].invertX;
+            _rsInvertY = source.rsModInfo[deviceIndex].invertY;
 
             _lSOuterBindDead = source.lsModInfo[deviceIndex].outerBindDeadZone;
             _rSOuterBindDead = source.rsModInfo[deviceIndex].outerBindDeadZone;
@@ -2109,10 +2145,14 @@ namespace DS4WinWPF.DS4Control.DTOXml
             destination.lsModInfo[deviceIndex].verticalScale = LSVerticalScale;
             destination.lsModInfo[deviceIndex].maxOutput = LSMaxOutput;
             destination.lsModInfo[deviceIndex].maxOutputForce = _lsMaxOutputForce;
+            destination.lsModInfo[deviceIndex].invertX = _lsInvertX;
+            destination.lsModInfo[deviceIndex].invertY = _lsInvertY;
 
             destination.rsModInfo[deviceIndex].verticalScale = RSVerticalScale;
             destination.rsModInfo[deviceIndex].maxOutput = RSMaxOutput;
             destination.rsModInfo[deviceIndex].maxOutputForce = _rsMaxOutputForce;
+            destination.rsModInfo[deviceIndex].invertX = _rsInvertX;
+            destination.rsModInfo[deviceIndex].invertY = _rsInvertY;
 
             destination.lsModInfo[deviceIndex].outerBindDeadZone = _lSOuterBindDead;
             destination.rsModInfo[deviceIndex].outerBindDeadZone = _rSOuterBindDead;

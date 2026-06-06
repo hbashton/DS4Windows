@@ -83,6 +83,10 @@ namespace DS4WindowsTests
   <RSMaxOutput>100</RSMaxOutput>
   <LSMaxOutputForce>False</LSMaxOutputForce>
   <RSMaxOutputForce>False</RSMaxOutputForce>
+  <LSInvertX>False</LSInvertX>
+  <LSInvertY>False</LSInvertY>
+  <RSInvertX>False</RSInvertX>
+  <RSInvertY>False</RSInvertY>
   <LSDeadZoneType>Radial</LSDeadZoneType>
   <RSDeadZoneType>Radial</RSDeadZoneType>
   <LSAxialDeadOptions>

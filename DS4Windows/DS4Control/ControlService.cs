@@ -2648,10 +2648,6 @@ namespace DS4Windows
         private DateTime gameBarLastVisibleUtc = DateTime.MinValue;
         private DateTime gameBarInvisibleSinceUtc = DateTime.MinValue;
         private DateTime gameBarLastVisibilityCheckUtc = DateTime.MinValue;
-        private DateTime gameBarLastDiagnosticLogUtc = DateTime.MinValue;
-        private bool gameBarLastDiagnosticVisible = false;
-        private bool gameBarHasDiagnosticVisibleState = false;
-        private bool gameBarAdminWarningLogged = false;
 
         public bool IsGameBarProfilePriorityActive(int ind)
         {
@@ -2679,19 +2675,11 @@ namespace DS4Windows
                 return false;
             }
 
-            bool changed = !gameBarPreviousUseTempProfile[ind] ||
-                gameBarPreviousTempProfileName[ind] != profileName;
-
             gameBarPreviousUseTempProfile[ind] = true;
             gameBarPreviousTempProfileName[ind] = profileName;
             if (!string.IsNullOrEmpty(Global.ProfilePath[ind]))
             {
                 gameBarPreviousProfileName[ind] = Global.ProfilePath[ind];
-            }
-
-            if (changed)
-            {
-                LogDebug($"Controller {ind + 1} deferred auto-profile '{profileName}' while Game Bar has priority.");
             }
 
             return true;
@@ -2704,19 +2692,11 @@ namespace DS4Windows
                 return false;
             }
 
-            bool changed = gameBarPreviousUseTempProfile[ind] ||
-                !string.IsNullOrEmpty(gameBarPreviousTempProfileName[ind]);
-
             gameBarPreviousUseTempProfile[ind] = false;
             gameBarPreviousTempProfileName[ind] = string.Empty;
             if (!string.IsNullOrEmpty(Global.ProfilePath[ind]))
             {
                 gameBarPreviousProfileName[ind] = Global.ProfilePath[ind];
-            }
-
-            if (changed)
-            {
-                LogDebug($"Controller {ind + 1} deferred auto-profile default restore while Game Bar has priority.");
             }
 
             return true;
@@ -2737,7 +2717,7 @@ namespace DS4Windows
             return false;
         }
 
-        private bool TryGetConfiguredGameBarProfileName(int ind, out string profileName, bool logInvalid)
+        private bool TryGetConfiguredGameBarProfileName(int ind, out string profileName)
         {
             profileName = string.Empty;
             if (!Global.GameBarHomeButtonSupport[ind])
@@ -2748,29 +2728,19 @@ namespace DS4Windows
             profileName = Global.GameBarProfileName[ind];
             if (string.IsNullOrEmpty(profileName))
             {
-                if (logInvalid)
-                {
-                    LogDebug($"Game Bar Home button support is enabled for controller {ind + 1}, but no Game Bar profile is selected.", true);
-                }
-
                 return false;
             }
 
             string profilePath = Path.Combine(appdatapath, "Profiles", $"{profileName}.xml");
             if (!File.Exists(profilePath))
             {
-                if (logInvalid)
-                {
-                    LogDebug($"Game Bar profile '{profileName}' does not exist for controller {ind + 1}.", true);
-                }
-
                 return false;
             }
 
             return true;
         }
 
-        private void RequestGameBarProfilePriority(int ind, string profileName, DateTime now, string reason)
+        private void RequestGameBarProfilePriority(int ind, string profileName, DateTime now)
         {
             if (IsGameBarProfilePriorityActive(ind))
             {
@@ -2783,7 +2753,6 @@ namespace DS4Windows
             gameBarRequestedProfileName[ind] = profileName;
             gameBarProfileRequestedUtc[ind] = now;
             gameBarProfilePending[ind] = true;
-            LogDebug($"Controller {ind + 1} requested Game Bar profile '{profileName}' ({reason}). Waiting for Game Bar to become visible.");
         }
 
         private void CheckGameBarHomeButton(int ind, DS4State cState, DS4State tempControlState, DS4State pState)
@@ -2810,28 +2779,21 @@ namespace DS4Windows
             {
                 cState.PS = false;
                 tempControlState.PS = false;
-                LogDebug($"Game Bar open request: {gameBarIntegration.OpenGameBar()}");
+                gameBarIntegration.OpenGameBar();
                 gameBarHomeButtonIgnoreUntilUtc[ind] = now + TimeSpan.FromSeconds(1);
                 return;
             }
 
-            if (!TryGetConfiguredGameBarProfileName(ind, out string profileName, true))
+            if (!TryGetConfiguredGameBarProfileName(ind, out string profileName))
             {
                 return;
-            }
-
-            if (!gameBarIntegration.IsRunningElevated() && !gameBarAdminWarningLogged)
-            {
-                LogDebug("Game Bar support needs DS4Windows to be run as administrator to reliably detect Game Bar overlay windows.", true);
-                gameBarAdminWarningLogged = true;
             }
 
             cState.PS = false;
             tempControlState.PS = false;
             gameBarHomeButtonIgnoreUntilUtc[ind] = now + TimeSpan.FromSeconds(1);
-            RequestGameBarProfilePriority(ind, profileName, now, "Home button request");
-            LogDebug($"Game Bar open request: {gameBarIntegration.OpenGameBar()}");
-            LogGameBarDiagnostics("Home button request");
+            RequestGameBarProfilePriority(ind, profileName, now);
+            gameBarIntegration.OpenGameBar();
         }
 
         public void UpdateGameBarProfileState()
@@ -2852,7 +2814,6 @@ namespace DS4Windows
 
             gameBarLastVisibilityCheckUtc = now;
             bool gameBarVisible = gameBarIntegration.IsGameBarVisible();
-            MaybeLogGameBarDiagnostics(now, gameBarVisible);
             if (gameBarVisible)
             {
                 gameBarLastVisibleUtc = now;
@@ -2872,7 +2833,6 @@ namespace DS4Windows
                 if (gameBarProfilePending[i] && now - gameBarProfileRequestedUtc[i] > TimeSpan.FromSeconds(6))
                 {
                     ClearPendingGameBarProfile(i);
-                    LogDebug($"Controller {i + 1} did not switch to Game Bar profile because Game Bar was not detected.", true);
                 }
 
                 if (!gameBarProfileActive[i])
@@ -2894,7 +2854,6 @@ namespace DS4Windows
                     gameBarPreviousTempProfileName[i] = string.Empty;
                     gameBarPreviousProfileName[i] = string.Empty;
                     gameBarRequestedProfileName[i] = string.Empty;
-                    LogDebug($"Controller {i + 1} reverted from Game Bar profile.");
                 }
             }
         }
@@ -2908,9 +2867,9 @@ namespace DS4Windows
                     continue;
                 }
 
-                if (TryGetConfiguredGameBarProfileName(i, out string profileName, false))
+                if (TryGetConfiguredGameBarProfileName(i, out string profileName))
                 {
-                    RequestGameBarProfilePriority(i, profileName, now, "Game Bar visible");
+                    RequestGameBarProfilePriority(i, profileName, now);
                 }
             }
         }
@@ -2929,36 +2888,10 @@ namespace DS4Windows
                 {
                     gameBarProfileActive[i] = true;
                     gameBarProfileActivatedUtc[i] = now;
-                    LogDebug($"Controller {i + 1} switched to Game Bar profile '{profileName}'.");
-                }
-                else
-                {
-                    LogDebug($"Controller {i + 1} could not load Game Bar profile '{profileName}'.", true);
                 }
 
                 ClearPendingGameBarProfile(i);
             }
-        }
-
-        private void MaybeLogGameBarDiagnostics(DateTime now, bool gameBarVisible)
-        {
-            bool changed = !gameBarHasDiagnosticVisibleState || gameBarLastDiagnosticVisible != gameBarVisible;
-            bool intervalElapsed = now - gameBarLastDiagnosticLogUtc > TimeSpan.FromSeconds(10);
-
-            if (!changed && !intervalElapsed)
-            {
-                return;
-            }
-
-            gameBarLastDiagnosticVisible = gameBarVisible;
-            gameBarHasDiagnosticVisibleState = true;
-            gameBarLastDiagnosticLogUtc = now;
-            LogGameBarDiagnostics(changed ? $"Visibility changed to {gameBarVisible}" : $"Visibility still {gameBarVisible}");
-        }
-
-        private void LogGameBarDiagnostics(string reason)
-        {
-            LogDebug($"Game Bar diagnostics ({reason}):\n{gameBarIntegration.GetGameBarStateDiagnostics()}");
         }
 
         private void ClearPendingGameBarProfile(int ind)

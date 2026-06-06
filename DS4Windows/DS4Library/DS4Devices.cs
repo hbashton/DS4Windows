@@ -363,7 +363,18 @@ namespace DS4Windows
                         hDevice.Capabilities.UsagePage >= 0xFF00)
                         continue; // Ignore devices using Vendor-Defined HID Usage Pages (expected to ignore the Nacon Revolution Pro programming interface)
                     else if (DevicePaths.Contains(hDevice.DevicePath))
-                        continue; // BT/USB endpoint already open once
+                    {
+                        if (Devices.TryGetValue(hDevice.DevicePath, out DS4Device existingDev) &&
+                            IsStaleDevice(existingDev))
+                        {
+                            existingDev.Removal -= On_Removal;
+                            InnerRemoveDevice(existingDev);
+                        }
+                        else
+                        {
+                            continue; // BT/USB endpoint already open once
+                        }
+                    }
 
                     if (!hDevice.IsOpen)
                     {
@@ -430,8 +441,17 @@ namespace DS4Windows
                         bool newdev = true;
                         if (validSerial && deviceSerials.Contains(serial))
                         {
+                            if (!serialDevices.TryGetValue(serial, out DS4Device tempDev))
+                            {
+                                deviceSerials.Remove(serial);
+                            }
+                            else if (IsStaleDevice(tempDev))
+                            {
+                                tempDev.Removal -= On_Removal;
+                                InnerRemoveDevice(tempDev);
+                            }
                             // Check if Quick Charge flag is engaged
-                            if (serialDevices.TryGetValue(serial, out DS4Device tempDev) && tempDev.ReadyQuickChargeDisconnect)
+                            else if (tempDev.ReadyQuickChargeDisconnect)
                             {
                                 // Need to disconnect callback here to avoid deadlock
                                 tempDev.Removal -= On_Removal;
@@ -543,9 +563,36 @@ namespace DS4Windows
                 device.HidDevice.CloseDevice();
                 Devices.Remove(device.HidDevice.DevicePath);
                 DevicePaths.Remove(device.HidDevice.DevicePath);
-                deviceSerials.Remove(device.MacAddress);
-                serialDevices.Remove(device.MacAddress);
+                RemoveSerialDevice(device);
                 //purgeHiddenExclusiveDevices();
+            }
+        }
+
+        private static bool IsStaleDevice(DS4Device device)
+        {
+            return device == null || device.IsRemoved || device.isDisconnectingStatus() ||
+                !device.HidDevice.IsConnected;
+        }
+
+        private static void RemoveSerialDevice(DS4Device device)
+        {
+            string serial = device.MacAddress;
+            if (string.IsNullOrEmpty(serial) || !DS4Device.isValidSerial(serial))
+            {
+                return;
+            }
+
+            if (serialDevices.TryGetValue(serial, out DS4Device mappedDevice))
+            {
+                if (ReferenceEquals(mappedDevice, device))
+                {
+                    serialDevices.Remove(serial);
+                    deviceSerials.Remove(serial);
+                }
+            }
+            else
+            {
+                deviceSerials.Remove(serial);
             }
         }
 
@@ -560,14 +607,17 @@ namespace DS4Windows
                     string serial = device.getMacAddress();
                     if (Devices.ContainsKey(devPath))
                     {
-                        deviceSerials.Remove(serial);
-                        serialDevices.Remove(serial);
+                        RemoveSerialDevice(device);
                         device.updateSerial();
                         serial = device.getMacAddress();
-                        if (DS4Device.isValidSerial(serial))
+                        if (!string.IsNullOrEmpty(serial) && DS4Device.isValidSerial(serial))
                         {
-                            deviceSerials.Add(serial);
-                            serialDevices.Add(serial, device);
+                            if (!serialDevices.TryGetValue(serial, out DS4Device mappedDevice) ||
+                                ReferenceEquals(mappedDevice, device))
+                            {
+                                deviceSerials.Add(serial);
+                                serialDevices[serial] = device;
+                            }
                         }
 
                         if (device.ShouldRunCalib())

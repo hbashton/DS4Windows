@@ -1958,9 +1958,26 @@ namespace DS4Windows
                     {
                         for (int Index = 0, arlength = DS4Controllers.Length; Index < arlength; Index++)
                         {
-                            if (DS4Controllers[Index] != null &&
-                                DS4Controllers[Index].getMacAddress() == device.getMacAddress())
+                            DS4Device existing = DS4Controllers[Index];
+                            if (existing == null)
                             {
+                                continue;
+                            }
+
+                            if (ReferenceEquals(existing, device))
+                            {
+                                device.CheckControllerNumDeviceSettings(numControllers);
+                                return true;
+                            }
+
+                            if (existing.getMacAddress() == device.getMacAddress())
+                            {
+                                if (IsStaleController(existing))
+                                {
+                                    On_DS4Removal(existing, EventArgs.Empty);
+                                    return false;
+                                }
+
                                 device.CheckControllerNumDeviceSettings(numControllers);
                                 return true;
                             }
@@ -2046,6 +2063,12 @@ namespace DS4Windows
             }
 
             return true;
+        }
+
+        private static bool IsStaleController(DS4Device device)
+        {
+            return device == null || device.IsRemoved || device.isDisconnectingStatus() ||
+                !device.HidDevice.IsConnected;
         }
 
         private void PrepareConnectedInputControllerSettingEvents(int numControllers, DS4Device device, int index)
@@ -2542,8 +2565,10 @@ namespace DS4Windows
             int ind = -1;
             for (int i = 0, arlength = DS4Controllers.Length; ind == -1 && i < arlength; i++)
             {
-                if (DS4Controllers[i] != null && device.getMacAddress() == DS4Controllers[i].getMacAddress())
+                if (ReferenceEquals(DS4Controllers[i], device))
+                {
                     ind = i;
+                }
             }
 
             if (ind != -1)

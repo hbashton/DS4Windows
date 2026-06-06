@@ -18,15 +18,16 @@
 		<AssemblyVersion>3.9.9</AssemblyVersion>
 		<FileVersion>3.9.9</FileVersion>
 		<Version>3.9.9</Version>
+		<InformationalVersion>3.9.9Beta</InformationalVersion>
 		<Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
 		<Platform Condition=" '$(Platform)' == '' ">x64</Platform>
 		<Copyright>Copyright © Scarlet.Crush Productions 2012, 2013; InhexSTER, HecticSeptic, electrobrains 2013, 2014; Jays2Kings 2013, 2014, 2015, 2016; Ryochan7 2017-2023, schmaldeo 2024</Copyright>
 		<Description>Sony DualShock 4 to Microsoft Xinput controller mapper</Description>
-		<Authors>schmaldeo</Authors>
-		<Company>schmaldeo</Company>
-		<PackageProjectUrl>https://schmaldeo.github.io/DS4WindowsDocs</PackageProjectUrl>
+		<Authors>hbashton</Authors>
+		<Company>hbashton</Company>
+		<PackageProjectUrl>https://github.com/hbashton/DS4Windows</PackageProjectUrl>
 		<PackageLicenseUrl>https://www.gnu.org/licenses/gpl-3.0.txt</PackageLicenseUrl>
-		<RepositoryUrl>https://github.com/schmaldeo/DS4Windows</RepositoryUrl>
+		<RepositoryUrl>https://github.com/hbashton/DS4Windows</RepositoryUrl>
 	</PropertyGroup>
 
 	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">

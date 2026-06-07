@@ -106,6 +106,28 @@ namespace DS4Windows
             new Queue<ControlToXInput>(), new Queue<ControlToXInput>(),
         };
 
+        private class ProfileSwitchRequest
+        {
+            public bool Pending;
+            public bool Running;
+            public bool TempProfile;
+            public bool LaunchProgram;
+            public string ProfileName = string.Empty;
+            public Action<bool> AfterLoad;
+        }
+
+        private static readonly object[] profileSwitchRequestLocks = new object[Global.MAX_DS4_CONTROLLER_COUNT]
+        {
+            new object(), new object(), new object(), new object(),
+            new object(), new object(), new object(), new object(),
+        };
+
+        private static readonly ProfileSwitchRequest[] profileSwitchRequests = new ProfileSwitchRequest[Global.MAX_DS4_CONTROLLER_COUNT]
+        {
+            new ProfileSwitchRequest(), new ProfileSwitchRequest(), new ProfileSwitchRequest(), new ProfileSwitchRequest(),
+            new ProfileSwitchRequest(), new ProfileSwitchRequest(), new ProfileSwitchRequest(), new ProfileSwitchRequest(),
+        };
+
         struct DS4Vector2
         {
             public double x;
@@ -830,6 +852,83 @@ namespace DS4Windows
         private const double MOUSESTICKANTIOFFSET = 0.0128;
         private const double MOUSESTICKMINVELOCITY = 67.5;
         //private const double MOUSESTICKMINVELOCITY = 40.0;
+
+        private static void RequestProfileSwitch(int device, string profileName, bool tempProfile,
+            bool launchProgram, ControlService ctrl, Action<bool> afterLoad = null)
+        {
+            if (device < 0 || device >= Global.MAX_DS4_CONTROLLER_COUNT)
+            {
+                return;
+            }
+
+            lock (profileSwitchRequestLocks[device])
+            {
+                ProfileSwitchRequest request = profileSwitchRequests[device];
+                request.Pending = true;
+                request.TempProfile = tempProfile;
+                request.LaunchProgram = launchProgram;
+                request.ProfileName = profileName ?? string.Empty;
+                request.AfterLoad = afterLoad;
+
+                if (request.Running)
+                {
+                    return;
+                }
+
+                request.Running = true;
+            }
+
+            Task.Run(() => RunProfileSwitchRequests(device, ctrl));
+        }
+
+        private static void RunProfileSwitchRequests(int device, ControlService ctrl)
+        {
+            while (true)
+            {
+                bool tempProfile;
+                bool launchProgram;
+                string profileName;
+                Action<bool> afterLoad;
+
+                lock (profileSwitchRequestLocks[device])
+                {
+                    ProfileSwitchRequest request = profileSwitchRequests[device];
+                    if (!request.Pending)
+                    {
+                        request.Running = false;
+                        return;
+                    }
+
+                    request.Pending = false;
+                    tempProfile = request.TempProfile;
+                    launchProgram = request.LaunchProgram;
+                    profileName = request.ProfileName;
+                    afterLoad = request.AfterLoad;
+                    request.AfterLoad = null;
+                }
+
+                bool loaded = false;
+                try
+                {
+                    loaded = tempProfile ?
+                        LoadTempProfile(device, profileName, launchProgram, ctrl) :
+                        LoadProfile(device, launchProgram, ctrl);
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.LogToGui($"Profile switch action failed: {ex.Message}", false);
+                }
+
+                try
+                {
+                    afterLoad?.Invoke(loaded);
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.LogToGui($"Profile switch post-load action failed: {ex.Message}", false);
+                }
+            }
+        }
 
         public static void Commit(int device)
         {
@@ -4213,29 +4312,23 @@ namespace DS4Windows
 
                                     AppLogger.LogToGui(prolog, false);
                                     if (Global.ProfileChangedNotification) AppLogger.LogToTray(prolog);
-                                    Task.Run(() =>
+                                    RequestProfileSwitch(device, action.details, true, true, ctrl, loaded =>
                                     {
-                                        d.HaltReportingRunAction(() =>
+                                        if (loaded && action.uTrigger.Count == 0 && !action.automaticUntrigger)
                                         {
-                                            LoadTempProfile(device, action.details, true, ctrl);
-
-                                            //LoadProfile(device, false, ctrl);
-
-                                            if (action.uTrigger.Count == 0 && !action.automaticUntrigger)
+                                            // If the new profile has any actions with the same action key (controls) than this action
+                                            // then set status of those actions to wait for the release of the existing action key.
+                                            List<string> profileActionsNext = getProfileActions(device);
+                                            for (int actionIndexNext = 0, profileListLenNext = profileActionsNext.Count; actionIndexNext < profileListLenNext; actionIndexNext++)
                                             {
-                                                // If the new profile has any actions with the same action key (controls) than this action (which doesn't have untrigger keys) then set status of those actions to wait for the release of the existing action key. 
-                                                List<string> profileActionsNext = getProfileActions(device);
-                                                for (int actionIndexNext = 0, profileListLenNext = profileActionsNext.Count; actionIndexNext < profileListLenNext; actionIndexNext++)
-                                                {
-                                                    string actionnameNext = profileActionsNext[actionIndexNext];
-                                                    SpecialAction actionNext = GetProfileAction(device, actionnameNext);
-                                                    int indexNext = GetProfileActionIndexOf(device, actionnameNext);
+                                                string actionnameNext = profileActionsNext[actionIndexNext];
+                                                SpecialAction actionNext = GetProfileAction(device, actionnameNext);
+                                                int indexNext = GetProfileActionIndexOf(device, actionnameNext);
 
-                                                    if (actionNext.controls == action.controls)
-                                                        actionDone[indexNext].dev[device] = true;
-                                                }
+                                                if (indexNext >= 0 && actionNext.controls == action.controls)
+                                                    actionDone[indexNext].dev[device] = true;
                                             }
-                                        });
+                                        }
                                     });
 
                                     return;
@@ -4706,9 +4799,9 @@ namespace DS4Windows
                             untriggeraction[device] = null;
 
                             if (profileName == string.Empty)
-                                LoadProfile(device, false, ctrl); // Previous profile was a regular default profile of a controller
+                                RequestProfileSwitch(device, string.Empty, false, false, ctrl); // Previous profile was a regular default profile of a controller
                             else
-                                LoadTempProfile(device, profileName, true, ctrl); // Previous profile was a temporary profile, so re-load it as a temp profile
+                                RequestProfileSwitch(device, profileName, true, true, ctrl); // Previous profile was a temporary profile, so re-load it as a temp profile
                         }
                     }
                 }

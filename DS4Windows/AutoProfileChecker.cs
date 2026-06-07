@@ -124,8 +124,7 @@ namespace DS4WinWPF
                             continue;
                         }
 
-                        string tempname = controllerProfileEntity.ApplyToAllControllers ?
-                            controllerProfileEntity.ProfileNames[0] : controllerProfileEntity.ProfileNames[j];
+                        string tempname = controllerProfileEntity.GetProfileNameForController(j);
                         if (tempname != string.Empty && tempname != "(none)")
                         {
                             if (Program.rootHub.TryDeferAutoProfileForGameBar(j, tempname))

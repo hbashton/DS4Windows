@@ -152,7 +152,15 @@ namespace DS4WinWPF
         public bool Turnoff { get => turnoff; set => turnoff = value; }
         public AutoProfileDeviceOption DeviceOption { get => deviceOption; set => deviceOption = value; }
         public bool ApplyToAllControllers { get => applyToAllControllers; set => applyToAllControllers = value; }
-        public string[] ProfileNames { get => profileNames; set => profileNames = value; }
+        public string[] ProfileNames
+        {
+            get
+            {
+                EnsureProfileNames();
+                return profileNames;
+            }
+            set => profileNames = NormalizeProfileNames(value);
+        }
 
         public AutoProfileEntity(string pathStr, string titleStr)
         {
@@ -195,6 +203,40 @@ namespace DS4WinWPF
 
             // If both path and title defined in autoprofile entry then do AND condition (ie. both path and title should match)
             return bPathMatched && bTitleMwatched;
+        }
+
+        public string GetProfileNameForController(int controllerIndex)
+        {
+            EnsureProfileNames();
+            int profileIndex = ApplyToAllControllers ? 0 : controllerIndex;
+            if (profileIndex < 0 || profileIndex >= profileNames.Length)
+            {
+                return NONE_STRING;
+            }
+
+            return NormalizeProfileName(profileNames[profileIndex]);
+        }
+
+        public void EnsureProfileNames()
+        {
+            profileNames = NormalizeProfileNames(profileNames);
+        }
+
+        private static string[] NormalizeProfileNames(string[] source)
+        {
+            string[] result = new string[DS4Windows.Global.MAX_DS4_CONTROLLER_COUNT];
+            for (int i = 0; i < result.Length; i++)
+            {
+                result[i] = i < (source?.Length ?? 0) ?
+                    NormalizeProfileName(source[i]) : string.Empty;
+            }
+
+            return result;
+        }
+
+        private static string NormalizeProfileName(string profileName)
+        {
+            return profileName ?? string.Empty;
         }
 
         public bool IsDeviceMatch(DS4Windows.InputDevices.InputDeviceType deviceType)

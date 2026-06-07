@@ -39,6 +39,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
         {
             foreach(AutoProfileEntity entity in source.AutoProfileColl)
             {
+                entity.EnsureProfileNames();
                 AutoProfileEntrySerializer temp = new AutoProfileEntrySerializer()
                 {
                     Path = entity.Path,

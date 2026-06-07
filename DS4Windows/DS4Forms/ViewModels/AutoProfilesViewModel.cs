@@ -366,10 +366,22 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 DeviceOption = source.DeviceOption,
                 ApplyToAllControllers = source.ApplyToAllControllers,
             };
-            Array.Copy(source.ProfileNames, duplicate.ProfileNames, source.ProfileNames.Length);
+            source.EnsureProfileNames();
+            duplicate.EnsureProfileNames();
+            Array.Copy(source.ProfileNames, duplicate.ProfileNames,
+                Math.Min(source.ProfileNames.Length, duplicate.ProfileNames.Length));
 
             ProgramItem duplicateItem = new ProgramItem(duplicate.Path, duplicate);
-            autoProfileHolder.AutoProfileColl.Add(duplicate);
+            int sourceProfileIndex = autoProfileHolder.AutoProfileColl.IndexOf(source);
+            int duplicateProfileIndex = sourceProfileIndex + 1;
+            if (duplicateProfileIndex > 0 && duplicateProfileIndex <= autoProfileHolder.AutoProfileColl.Count)
+            {
+                autoProfileHolder.AutoProfileColl.Insert(duplicateProfileIndex, duplicate);
+            }
+            else
+            {
+                autoProfileHolder.AutoProfileColl.Add(duplicate);
+            }
 
             int insertIndex = programColl.IndexOf(item) + 1;
             if (insertIndex > 0 && insertIndex <= programColl.Count)
@@ -388,8 +400,11 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public void RemoveAutoProfileEntry(ProgramItem item)
         {
-            autoProfileHolder.AutoProfileColl.Remove(item.MatchedAutoProfile);
-            item.MatchedAutoProfile = null;
+            if (item?.MatchedAutoProfile != null)
+            {
+                autoProfileHolder.AutoProfileColl.Remove(item.MatchedAutoProfile);
+                item.MatchedAutoProfile = null;
+            }
         }
 
         private string GetTargetPath(string filePath)
@@ -480,16 +495,19 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             // Move autoprofile item up (-1) or down (1) both in listView (programColl) and in autoProfileHolder data structure (will be written into AutoProfiles.xml file)
             bool itemMoved = true;
             int oldIdx = programColl.IndexOf(item);
+            int oldProfileIdx = item?.MatchedAutoProfile != null ?
+                autoProfileHolder.AutoProfileColl.IndexOf(item.MatchedAutoProfile) : -1;
 
-            if (moveDirection == -1 && oldIdx > 0 && oldIdx < autoProfileHolder.AutoProfileColl.Count)
+            if (moveDirection == -1 && oldIdx > 0 && oldProfileIdx > 0)
             {
                 programColl.Move(oldIdx, oldIdx - 1);
-                autoProfileHolder.AutoProfileColl.Move(oldIdx, oldIdx - 1);
+                autoProfileHolder.AutoProfileColl.Move(oldProfileIdx, oldProfileIdx - 1);
             }
-            else if (moveDirection == 1 && oldIdx >= 0 && oldIdx < programColl.Count - 1 && oldIdx < autoProfileHolder.AutoProfileColl.Count - 1)
+            else if (moveDirection == 1 && oldIdx >= 0 && oldIdx < programColl.Count - 1 &&
+                oldProfileIdx >= 0 && oldProfileIdx < autoProfileHolder.AutoProfileColl.Count - 1)
             {    
                 programColl.Move(oldIdx, oldIdx + 1);
-                autoProfileHolder.AutoProfileColl.Move(oldIdx, oldIdx + 1);
+                autoProfileHolder.AutoProfileColl.Move(oldProfileIdx, oldProfileIdx + 1);
             }
             else
                 itemMoved = false;

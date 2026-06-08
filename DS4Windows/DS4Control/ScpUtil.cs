@@ -3465,10 +3465,19 @@ namespace DS4Windows
             StringBuilder sb = new();
             foreach (var version in versions)
             {
+                var parsedChangelog = ParseChangelogString(version.Value);
+                if (string.IsNullOrWhiteSpace(parsedChangelog)) continue;
+
+                if (sb.Length > 0)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine();
+                }
+
                 sb.Append("## Version ");
                 sb.Append(version.Key);
-                sb.Append(Environment.NewLine);
-                var parsedChangelog = ParseChangelogString(version.Value);
+                sb.AppendLine();
+                sb.AppendLine();
                 sb.Append(parsedChangelog);
             }
 
@@ -3477,9 +3486,17 @@ namespace DS4Windows
 
         private static string ParseChangelogString(string changelog)
         {
-            var split = changelog.Split("\n").ToList();
+            if (string.IsNullOrWhiteSpace(changelog)) return string.Empty;
+
+            var split = changelog
+                .Replace("\r\n", "\n")
+                .Replace("\r", "\n")
+                .Split("\n")
+                .Select(x => x.TrimEnd())
+                .ToList();
+
             split.RemoveAll(x => x.StartsWith("**Full Changelog**"));
-            return string.Join(Environment.NewLine, split);
+            return string.Join(Environment.NewLine, split).Trim();
         }
     }
 

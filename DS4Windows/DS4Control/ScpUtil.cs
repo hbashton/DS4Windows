@@ -5390,6 +5390,9 @@ namespace DS4Windows
             else
                 profilepath = propath;
 
+            DS4Device diagDevice = device < ControlService.CURRENT_DS4_CONTROLLER_LIMIT ? control.DS4Controllers[device] : null;
+            AppLogger.LogToGui($"VCrashDiag: LoadProfileNew enter. Controller={device + 1} ProfileName={profilePath[device]} ProfilePath={profilepath} Exists={File.Exists(profilepath)} LaunchProgram={launchprogram} XInputChange={xinputChange} PostLoad={postLoad} CurrentOut={Global.activeOutDevType[device]} DesiredOut={outputDevType[device]} DInputOnly={dinputOnly[device]} DeviceNull={diagDevice == null} Device={(diagDevice?.DisplayName ?? "<none>")} Type={(diagDevice?.DeviceType.ToString() ?? "<none>")} Serial={(diagDevice?.MacAddress ?? "<none>")} Synced={(diagDevice?.isSynced().ToString() ?? "<none>")} Alive={(diagDevice?.IsAlive().ToString() ?? "<none>")} Path={(diagDevice?.HidDevice?.DevicePath ?? "<none>")}", false, true);
+
             if (File.Exists(profilepath))
             {
                 string profileXml = string.Empty;
@@ -5440,6 +5443,7 @@ namespace DS4Windows
                 // Reset some Mapping properties before attempting to load different
                 // profile
                 control.PreLoadReset(device);
+                AppLogger.LogToGui($"VCrashDiag: LoadProfileNew reset complete. Controller={device + 1} OldOut={oldContType}", false, true);
 
                 profileActions[device].Clear();
                 foreach (DS4ControlSettings dcs in ds4settings[device])
@@ -5454,15 +5458,18 @@ namespace DS4Windows
                     ProfileDTO dto = serializer.Deserialize(sr) as ProfileDTO;
                     dto.DeviceIndex = device;
                     dto.MapTo(this);
+                    AppLogger.LogToGui($"VCrashDiag: LoadProfileNew DTO mapped. Controller={device + 1} ProfileName={profilePath[device]} DesiredOut={outputDevType[device]} DInputOnly={dinputOnly[device]} EnableOutputData={enableOutputDataToDS4[device]} Actions={profileActions[device].Count}", false, true);
                 }
                 catch (InvalidOperationException e)
                 {
-                    AppLogger.LogToGui($"Failed to load {profilepath}. {e.InnerException.Message}", false);
+                    AppLogger.LogToGui($"Failed to load {profilepath}. {e.InnerException?.Message ?? e.Message}", false);
+                    AppLogger.LogToGui($"VCrashDiag: LoadProfileNew deserialize failure. Controller={device + 1} Exception={e}", true, true);
                     loaded = false;
                 }
                 catch (XmlException e)
                 {
-                    AppLogger.LogToGui($"Failed to load {profilepath}. Invalid XML. {e.InnerException.Message}", false);
+                    AppLogger.LogToGui($"Failed to load {profilepath}. Invalid XML. {e.InnerException?.Message ?? e.Message}", false);
+                    AppLogger.LogToGui($"VCrashDiag: LoadProfileNew XML failure. Controller={device + 1} Exception={e}", true, true);
                     loaded = false;
                 }
 
@@ -5488,6 +5495,7 @@ namespace DS4Windows
                 {
                     CheckOldDevicestatus(device, control, oldContType,
                         out xinputPlug, out xinputStatus);
+                    AppLogger.LogToGui($"VCrashDiag: LoadProfileNew output status check. Controller={device + 1} OldOut={oldContType} NewOut={outputDevType[device]} XInputStatus={xinputStatus} XInputPlug={xinputPlug} OldDInputOnly={Global.useDInputOnly[device]} NewDInputOnly={dinputOnly[device]}", false, true);
                 }
 
                 CacheProfileCustomsFlags(device);
@@ -5559,7 +5567,9 @@ namespace DS4Windows
                 // options to device instance
                 if (postLoad && device < Global.MAX_DS4_CONTROLLER_COUNT)
                 {
+                    AppLogger.LogToGui($"VCrashDiag: LoadProfileNew before PostLoadSnippet. Controller={device + 1} XInputStatus={xinputStatus} XInputPlug={xinputPlug}", false, true);
                     PostLoadSnippet(device, control, xinputStatus, xinputPlug);
+                    AppLogger.LogToGui($"VCrashDiag: LoadProfileNew after PostLoadSnippet. Controller={device + 1}", false, true);
                 }
 
                 // Migration was performed. Save new XML schema in file
@@ -5571,6 +5581,7 @@ namespace DS4Windows
             }
             else
             {
+                AppLogger.LogToGui($"VCrashDiag: LoadProfileNew missing profile path. Controller={device + 1} ProfilePath={profilepath}", true, true);
                 loaded = false;
                 ResetProfile(device);
                 ResetMouseProperties(device, control);
@@ -5606,6 +5617,7 @@ namespace DS4Windows
                 }
             }
 
+            AppLogger.LogToGui($"VCrashDiag: LoadProfileNew exit. Controller={device + 1} Loaded={loaded} ProfileName={profilePath[device]} DesiredOut={outputDevType[device]} DInputOnly={dinputOnly[device]}", false, true);
             return loaded;
         }
 
@@ -10519,6 +10531,7 @@ namespace DS4Windows
                 bool exists = tempBool = (tempDevice != null);
                 bool synced = tempBool = exists ? tempDevice.isSynced() : false;
                 bool isAlive = tempBool = exists ? tempDevice.IsAlive() : false;
+                AppLogger.LogToGui($"VCrashDiag: CheckOldDevicestatus. Controller={device + 1} Exists={exists} Synced={synced} Alive={isAlive} OldOut={oldContType} NewOut={outputDevType[device]} OldDInputOnly={oldUseDInputOnly} NewDInputOnly={dinputOnly[device]}", false, true);
                 if (dinputOnly[device] != oldUseDInputOnly)
                 {
                     if (dinputOnly[device] == true)
@@ -10544,10 +10557,12 @@ namespace DS4Windows
         private void PostLoadSnippet(int device, ControlService control, bool xinputStatus, bool xinputPlug)
         {
             DS4Device tempDev = control.DS4Controllers[device];
+            AppLogger.LogToGui($"VCrashDiag: PostLoadSnippet enter. Controller={device + 1} DeviceNull={tempDev == null} XInputStatus={xinputStatus} XInputPlug={xinputPlug} DesiredOut={outputDevType[device]} DInputOnly={dinputOnly[device]} ExistingOut={(control.outputDevices[device]?.GetDeviceType() ?? "<none>")}", false, true);
             if (tempDev != null && tempDev.isSynced())
             {
                 tempDev.queueEvent(() =>
                 {
+                    AppLogger.LogToGui($"VCrashDiag: PostLoad queued action start. Controller={device + 1} Device={tempDev.DisplayName} Type={tempDev.DeviceType} Serial={tempDev.MacAddress} Synced={tempDev.isSynced()} Alive={tempDev.IsAlive()} XInputStatus={xinputStatus} XInputPlug={xinputPlug} ExistingOut={(control.outputDevices[device]?.GetDeviceType() ?? "<none>")}", false, true);
                     //tempDev.setIdleTimeout(idleDisconnectTimeout[device]);
                     //tempDev.setBTPollRate(btPollRate[device]);
                     if (xinputStatus && tempDev.PrimaryDevice)
@@ -10557,18 +10572,21 @@ namespace DS4Windows
                             OutputDevice tempOutDev = control.outputDevices[device];
                             if (tempOutDev != null)
                             {
+                                AppLogger.LogToGui($"VCrashDiag: PostLoad queued action unplug before replug. Controller={device + 1} Output={tempOutDev.GetDeviceType()}", false, true);
                                 tempOutDev = null;
                                 //Global.activeOutDevType[device] = OutContType.None;
                                 control.UnplugOutDev(device, tempDev);
                             }
 
                             OutContType tempContType = outputDevType[device];
+                            AppLogger.LogToGui($"VCrashDiag: PostLoad queued action plugin after profile change. Controller={device + 1} DesiredOut={tempContType}", false, true);
                             control.PluginOutDev(device, tempDev);
                             //Global.useDInputOnly[device] = false;
                         }
                         else
                         {
                             //Global.activeOutDevType[device] = OutContType.None;
+                            AppLogger.LogToGui($"VCrashDiag: PostLoad queued action unplug only after profile change. Controller={device + 1}", false, true);
                             control.UnplugOutDev(device, tempDev);
                         }
                     }
@@ -10576,10 +10594,16 @@ namespace DS4Windows
                     //tempDev.RumbleAutostopTime = rumbleAutostopTime[device];
                     //tempDev.setRumble(0, 0);
                     //tempDev.LightBarColor = Global.getMainColor(device);
+                    AppLogger.LogToGui($"VCrashDiag: PostLoad queued action before CheckProfileOptions. Controller={device + 1}", false, true);
                     control.CheckProfileOptions(device, tempDev, true);
+                    AppLogger.LogToGui($"VCrashDiag: PostLoad queued action end. Controller={device + 1} ExistingOut={(control.outputDevices[device]?.GetDeviceType() ?? "<none>")}", false, true);
                 });
 
                 //Program.rootHub.touchPad[device]?.ResetTrackAccel(trackballFriction[device]);
+            }
+            else
+            {
+                AppLogger.LogToGui($"VCrashDiag: PostLoadSnippet skipped because controller is null or not synced. Controller={device + 1}", false, true);
             }
         }
     }

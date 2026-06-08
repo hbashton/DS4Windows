@@ -113,7 +113,7 @@ namespace DS4Windows
         public OutputDevice AllocateController(OutContType contType, ViGEmClient client)
         {
             OutputDevice outputDevice = null;
-            AppLogger.LogToGui($"VCrashDiag: AllocateController enter. RequestedType={contType} ViGEmVersion={Global.vigemBusVersion} SupportedViGEm={Global.IsRunningSupportedViGEmBus()}", false, true);
+            AppLogger.LogToGui($"VCrashDiag: AllocateController enter. RequestedType={contType} ViGEmVersion={Global.vigembusVersion} SupportedViGEm={Global.IsRunningSupportedViGEmBus()}", false, true);
             switch (contType)
             {
                 case OutContType.X360:

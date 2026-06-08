@@ -232,7 +232,9 @@ namespace DS4Windows
         // in one of our own. Call RegisterOwnVirtualDS4 with this snapshot right after.
         public static HashSet<string> SnapshotBeforeOwnVirtualDS4()
         {
-            return SnapshotVirtualDS4Paths();
+            HashSet<string> before = SnapshotVirtualDS4Paths();
+            AppLogger.LogToGui($"VCrashDiag: Own virtual DS4 snapshot before connect. Count={before.Count} Paths={string.Join(" || ", before)}", false);
+            return before;
         }
 
         // Any virtual DS4 that appears after our Connect() call, and was not present in
@@ -245,6 +247,7 @@ namespace DS4Windows
             for (int attempt = 0; attempt < 10 && !foundNew; attempt++)
             {
                 after = SnapshotVirtualDS4Paths();
+                AppLogger.LogToGui($"VCrashDiag: Own virtual DS4 register attempt {attempt + 1}. BeforeCount={(beforePaths?.Count ?? 0)} AfterCount={after.Count} Paths={string.Join(" || ", after)}", false);
                 foreach (string p in after)
                 {
                     if (beforePaths == null || !beforePaths.Contains(p))
@@ -265,10 +268,12 @@ namespace DS4Windows
                     if (beforePaths == null || !beforePaths.Contains(p))
                     {
                         ownVirtualDS4Paths.Add(p);
+                        AppLogger.LogToGui($"VCrashDiag: Registered own virtual DS4 path. Path={p}", false);
                     }
                 }
                 // Drop entries for devices that are no longer present (unplugged outputs).
                 ownVirtualDS4Paths.RemoveWhere(p => !after.Contains(p));
+                AppLogger.LogToGui($"VCrashDiag: Own virtual DS4 registry now. Count={ownVirtualDS4Paths.Count} Paths={string.Join(" || ", ownVirtualDS4Paths)}", false);
             }
         }
 
@@ -287,20 +292,25 @@ namespace DS4Windows
             // mode. This is what breaks the Moonlight + DS4-output feedback loop.
             if (IsOwnVirtualDevice(hDevice.DevicePath))
             {
-                AppLogger.LogToGui($"VCrashDiag: Rejecting own virtual DS4 output as input. VID={hDevice.Attributes.VendorHexId} PID={hDevice.Attributes.ProductHexId} Path={hDevice.DevicePath}", false, true);
+                AppLogger.LogToGui($"VCrashDiag: IsRealDS4 decision=False Reason=OwnVirtualOutput VID={hDevice.Attributes.VendorHexId} PID={hDevice.Attributes.ProductHexId} Path={hDevice.DevicePath}", false);
                 return false;
             }
 
             bool isVirtualDevice = Global.CheckIfVirtualDevice(hDevice.DevicePath);
-            AppLogger.LogToGui($"VCrashDiag: Evaluating possible DS4 input. UseMoonlight={Global.UseMoonlight} AdvancedMoonlight={Global.UseAdvancedMoonlight} IsVirtual={isVirtualDevice} VID={hDevice.Attributes.VendorHexId} PID={hDevice.Attributes.ProductHexId} UsagePage=0x{hDevice.Capabilities.UsagePage:X} Usage=0x{hDevice.Capabilities.Usage:X} Path={hDevice.DevicePath}", false, true);
+            AppLogger.LogToGui($"VCrashDiag: IsRealDS4 evaluate. UseMoonlight={Global.UseMoonlight} AdvancedMoonlight={Global.UseAdvancedMoonlight} IsVirtual={isVirtualDevice} OwnVirtual={IsOwnVirtualDevice(hDevice.DevicePath)} VID={hDevice.Attributes.VendorHexId} PID={hDevice.Attributes.ProductHexId} UsagePage=0x{hDevice.Capabilities.UsagePage:X} Usage=0x{hDevice.Capabilities.Usage:X} Path={hDevice.DevicePath}", false);
 
-            if (!Global.UseMoonlight) return !isVirtualDevice;
+            if (!Global.UseMoonlight)
+            {
+                bool decision = !isVirtualDevice;
+                AppLogger.LogToGui($"VCrashDiag: IsRealDS4 decision={decision} Reason=MoonlightDisabled IsVirtual={isVirtualDevice} Path={hDevice.DevicePath}", false);
+                return decision;
+            }
             if (!Global.UseAdvancedMoonlight)
             {
                 // this approach should work on most devices, but not on my pc for some reason
                 if (hDevice.Attributes.VendorId == 1356 && hDevice.Attributes.ProductId == 1476)
                 {
-                    AppLogger.LogToGui("VCrashDiag: Accepting Moonlight virtual DS4 by VID/PID with basic Moonlight support.", false, true);
+                    AppLogger.LogToGui($"VCrashDiag: IsRealDS4 decision=True Reason=BasicMoonlightKnownVidPid Path={hDevice.DevicePath}", false);
                     return true;
                 }
             }
@@ -320,15 +330,16 @@ namespace DS4Windows
                     if (DetectNewControllers)
                     {
                         DetectNewControllers = false;
-                        AppLogger.LogToGui("VCrashDiag: Accepting Moonlight virtual DS4 by VID/PID with advanced Moonlight cooldown.", false, true);
+                        AppLogger.LogToGui($"VCrashDiag: IsRealDS4 decision=True Reason=AdvancedMoonlightKnownVidPidCooldownOpen Path={hDevice.DevicePath}", false);
                         return true;
                     }
-                    AppLogger.LogToGui($"VCrashDiag: Rejecting Moonlight virtual DS4 during advanced Moonlight cooldown. DetectNewControllers={DetectNewControllers}", false, true);
+                    AppLogger.LogToGui($"VCrashDiag: IsRealDS4 decision={DetectNewControllers} Reason=AdvancedMoonlightKnownVidPidCooldownClosed DetectNewControllers={DetectNewControllers} Path={hDevice.DevicePath}", false);
                     return DetectNewControllers;
                 }
             }
-            AppLogger.LogToGui($"VCrashDiag: Default DS4 input decision={!isVirtualDevice} for VID={hDevice.Attributes.VendorHexId} PID={hDevice.Attributes.ProductHexId}", false, true);
-            return !isVirtualDevice;
+            bool defaultDecision = !isVirtualDevice;
+            AppLogger.LogToGui($"VCrashDiag: IsRealDS4 decision={defaultDecision} Reason=DefaultVirtualFilter IsVirtual={isVirtualDevice} VID={hDevice.Attributes.VendorHexId} PID={hDevice.Attributes.ProductHexId} Path={hDevice.DevicePath}", false);
+            return defaultDecision;
         }
 
         // Enumerates ds4 controllers in the system

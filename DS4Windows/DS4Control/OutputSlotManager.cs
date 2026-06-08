@@ -113,6 +113,7 @@ namespace DS4Windows
         public OutputDevice AllocateController(OutContType contType, ViGEmClient client)
         {
             OutputDevice outputDevice = null;
+            AppLogger.LogToGui($"VCrashDiag: AllocateController enter. RequestedType={contType} ViGEmVersion={Global.vigemBusVersion} SupportedViGEm={Global.IsRunningSupportedViGEmBus()}", false, true);
             switch (contType)
             {
                 case OutContType.X360:
@@ -135,6 +136,7 @@ namespace DS4Windows
                     break;
             }
 
+            AppLogger.LogToGui($"VCrashDiag: AllocateController exit. RequestedType={contType} OutputNull={outputDevice == null} OutputType={(outputDevice?.GetDeviceType() ?? "<none>")}", false, true);
             return outputDevice;
         }
 
@@ -162,6 +164,7 @@ namespace DS4Windows
             //Action tempAction = new Action(() =>
             {
                 int slot = FindEmptySlot();
+                AppLogger.LogToGui($"VCrashDiag: DeferredPlugin enter. InputIndex={inIdx} Display={inDisplayString} RequestedType={contType} OutputNull={outputDevice == null} EmptySlot={(slot != -1 ? (slot + 1).ToString() : "<none>")} UseMoonlight={Global.UseMoonlight}", false, true);
                 if (slot != -1)
                 {
                     // Only relevant when Virtual Controller (Moonlight) support is on and
@@ -175,10 +178,12 @@ namespace DS4Windows
 
                     try
                     {
+                        AppLogger.LogToGui($"VCrashDiag: Connecting virtual output. Slot={slot + 1} Type={contType} OutputType={(outputDevice?.GetDeviceType() ?? "<none>")}", false, true);
                         outputDevice.Connect();
                     }
                     catch (Win32Exception e)
                     {
+                        AppLogger.LogToGui($"VCrashDiag: Virtual output connect failed. Slot={slot + 1} Type={contType} ErrorCode={e.ErrorCode} NativeErrorCode={e.NativeErrorCode} Message={e.Message}", true, true);
                         // Leave task immediately if connect call failed
                         //queuedTasks--;
                         ViGEmFailure?.Invoke(this, e.ErrorCode);
@@ -188,6 +193,7 @@ namespace DS4Windows
                     if (beforeVirtualDS4 != null)
                     {
                         DS4Devices.RegisterOwnVirtualDS4(beforeVirtualDS4);
+                        AppLogger.LogToGui($"VCrashDiag: Registered own virtual DS4 after connect. Slot={slot + 1} Type={contType}", false, true);
                     }
 
                     if (contType == OutContType.X360)
@@ -210,6 +216,11 @@ namespace DS4Windows
                         outputSlots[slot].CurrentInputBound = OutSlotDevice.InputBound.Bound;
                     }
                     SlotAssigned?.Invoke(this, slot, outputSlots[slot]);
+                    AppLogger.LogToGui($"VCrashDiag: DeferredPlugin exit. Slot={slot + 1} InputIndex={inIdx} Attach={outputSlots[slot].CurrentAttachedStatus} Bound={outputSlots[slot].CurrentInputBound} Reserve={outputSlots[slot].CurrentReserveStatus}", false, true);
+                }
+                else
+                {
+                    AppLogger.LogToGui($"VCrashDiag: DeferredPlugin found no empty slot. InputIndex={inIdx} RequestedType={contType}", false, true);
                 }
             };
 
@@ -226,13 +237,16 @@ namespace DS4Windows
             //queuedTasks++;
 
             {
+                AppLogger.LogToGui($"VCrashDiag: DeferredRemoval enter. InputIndex={inIdx} OutputNull={outputDevice == null} OutputType={(outputDevice?.GetDeviceType() ?? "<none>")} Immediate={immediate}", false, true);
                 if (revDeviceDict.TryGetValue(outputDevice, out int slot))
                 {
+                    AppLogger.LogToGui($"VCrashDiag: DeferredRemoval slot found. Slot={slot + 1} OutputType={outputDevice.GetDeviceType()} Attach={outputSlots[slot].CurrentAttachedStatus} Bound={outputSlots[slot].CurrentInputBound} Reserve={outputSlots[slot].CurrentReserveStatus}", false, true);
                     //int slot = revDeviceDict[outputDevice];
                     outputDevices[slot] = null;
                     deviceDict.Remove(slot);
                     revDeviceDict.Remove(outputDevice);
 
+                    AppLogger.LogToGui($"VCrashDiag: Removing feedback and disconnecting output. Slot={slot + 1} OutputType={outputDevice.GetDeviceType()}", false, true);
                     outputDevice.RemoveFeedbacks();
                     outputDevice.Disconnect();
 
@@ -244,11 +258,16 @@ namespace DS4Windows
                     outputSlots[slot].DetachDevice();
                     SlotUnassigned?.Invoke(this, slot, outputSlots[slot]);
                     AppLogger.LogToGui($"Unplugging virtual {outputDevice.GetDeviceType()} Controller from output slot #{slot + 1}",false);
+                    AppLogger.LogToGui($"VCrashDiag: DeferredRemoval exit. Slot={slot + 1} InputIndex={inIdx}", false, true);
 
                     //if (!immediate)
                     //{
-                    //    Task.Delay(DELAY_TIME).Wait();
+                        //    Task.Delay(DELAY_TIME).Wait();
                     //}
+                }
+                else
+                {
+                    AppLogger.LogToGui($"VCrashDiag: DeferredRemoval could not find output in reverse dictionary. InputIndex={inIdx} OutputType={(outputDevice?.GetDeviceType() ?? "<none>")}", false, true);
                 }
             };
 

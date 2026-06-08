@@ -285,13 +285,24 @@ namespace DS4Windows
         {
             // Our own virtual output controllers are never valid input, regardless of
             // mode. This is what breaks the Moonlight + DS4-output feedback loop.
-            if (IsOwnVirtualDevice(hDevice.DevicePath)) return false;
+            if (IsOwnVirtualDevice(hDevice.DevicePath))
+            {
+                AppLogger.LogToGui($"VCrashDiag: Rejecting own virtual DS4 output as input. VID={hDevice.Attributes.VendorHexId} PID={hDevice.Attributes.ProductHexId} Path={hDevice.DevicePath}", false, true);
+                return false;
+            }
 
-            if (!Global.UseMoonlight) return !Global.CheckIfVirtualDevice(hDevice.DevicePath);
+            bool isVirtualDevice = Global.CheckIfVirtualDevice(hDevice.DevicePath);
+            AppLogger.LogToGui($"VCrashDiag: Evaluating possible DS4 input. UseMoonlight={Global.UseMoonlight} AdvancedMoonlight={Global.UseAdvancedMoonlight} IsVirtual={isVirtualDevice} VID={hDevice.Attributes.VendorHexId} PID={hDevice.Attributes.ProductHexId} UsagePage=0x{hDevice.Capabilities.UsagePage:X} Usage=0x{hDevice.Capabilities.Usage:X} Path={hDevice.DevicePath}", false, true);
+
+            if (!Global.UseMoonlight) return !isVirtualDevice;
             if (!Global.UseAdvancedMoonlight)
             {
                 // this approach should work on most devices, but not on my pc for some reason
-                if (hDevice.Attributes.VendorId == 1356 && hDevice.Attributes.ProductId == 1476) return true;
+                if (hDevice.Attributes.VendorId == 1356 && hDevice.Attributes.ProductId == 1476)
+                {
+                    AppLogger.LogToGui("VCrashDiag: Accepting Moonlight virtual DS4 by VID/PID with basic Moonlight support.", false, true);
+                    return true;
+                }
             }
             else
             {
@@ -309,12 +320,15 @@ namespace DS4Windows
                     if (DetectNewControllers)
                     {
                         DetectNewControllers = false;
+                        AppLogger.LogToGui("VCrashDiag: Accepting Moonlight virtual DS4 by VID/PID with advanced Moonlight cooldown.", false, true);
                         return true;
                     }
+                    AppLogger.LogToGui($"VCrashDiag: Rejecting Moonlight virtual DS4 during advanced Moonlight cooldown. DetectNewControllers={DetectNewControllers}", false, true);
                     return DetectNewControllers;
                 }
             }
-            return !Global.CheckIfVirtualDevice(hDevice.DevicePath);
+            AppLogger.LogToGui($"VCrashDiag: Default DS4 input decision={!isVirtualDevice} for VID={hDevice.Attributes.VendorHexId} PID={hDevice.Attributes.ProductHexId}", false, true);
+            return !isVirtualDevice;
         }
 
         // Enumerates ds4 controllers in the system
@@ -358,12 +372,19 @@ namespace DS4Windows
                     HidDevice hDevice = tempList[i];
                     VidPidInfo metainfo = knownDevices.Single(x => x.vid == hDevice.Attributes.VendorId &&
                         x.pid == hDevice.Attributes.ProductId);
+                    AppLogger.LogToGui($"VCrashDiag: Inspecting candidate #{i + 1}/{devCount}. MetaName={metainfo.name} MetaType={metainfo.inputDevType} FeatureSet={metainfo.featureSet:F} Open={hDevice.IsOpen} Exclusive={hDevice.IsExclusive} VID={hDevice.Attributes.VendorHexId} PID={hDevice.Attributes.ProductHexId} Path={hDevice.DevicePath}", false, true);
 
                     if (!metainfo.featureSet.HasFlag(VidPidFeatureSet.VendorDefinedDevice) &&
                         hDevice.Capabilities.UsagePage >= 0xFF00)
+                    {
+                        AppLogger.LogToGui($"VCrashDiag: Skipping candidate due to vendor-defined usage page. UsagePage=0x{hDevice.Capabilities.UsagePage:X} Path={hDevice.DevicePath}", false, true);
                         continue; // Ignore devices using Vendor-Defined HID Usage Pages (expected to ignore the Nacon Revolution Pro programming interface)
+                    }
                     else if (DevicePaths.Contains(hDevice.DevicePath))
+                    {
+                        AppLogger.LogToGui($"VCrashDiag: Skipping candidate because path is already open. Path={hDevice.DevicePath}", false, true);
                         continue; // BT/USB endpoint already open once
+                    }
 
                     if (!hDevice.IsOpen)
                     {
@@ -427,6 +448,7 @@ namespace DS4Windows
                         }
 
                         bool validSerial = !serial.Equals(DS4Device.BLANK_SERIAL);
+                        AppLogger.LogToGui($"VCrashDiag: Candidate serial read. ValidSerial={validSerial} Serial={serial} MetaType={metainfo.inputDevType} Connection={metainfo.checkConnection(hDevice)} Path={hDevice.DevicePath}", false, true);
                         bool newdev = true;
                         if (validSerial && deviceSerials.Contains(serial))
                         {
@@ -453,17 +475,20 @@ namespace DS4Windows
                             else
                             {
                                 // Using shared mode. Serial already exists. Ignore device
+                                AppLogger.LogToGui($"VCrashDiag: Skipping candidate because serial already exists. Serial={serial} Path={hDevice.DevicePath}", false, true);
                                 newdev = false;
                             }
                         }
 
                         if (newdev && validSerial)
                         {
+                            AppLogger.LogToGui($"VCrashDiag: Creating input device. Type={metainfo.inputDevType} Name={metainfo.name} Serial={serial} Path={hDevice.DevicePath}", false, true);
                             DS4Device ds4Device = InputDeviceFactory.CreateDevice(metainfo.inputDevType, hDevice, metainfo.name, metainfo.featureSet);
                             //DS4Device ds4Device = new DS4Device(hDevice, metainfo.name, metainfo.featureSet);
                             if (ds4Device == null)
                             {
                                 // No compatible device type was found. Skip
+                                AppLogger.LogToGui($"VCrashDiag: InputDeviceFactory returned null. Type={metainfo.inputDevType} Name={metainfo.name} Path={hDevice.DevicePath}", false, true);
                                 continue;
                             }
 

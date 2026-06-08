@@ -1370,12 +1370,19 @@ namespace DS4Windows
         {
             bool result = false;
             bool excludeMatchFound = false;
+            List<string> traceParts = null;
+            if (devicePath != null &&
+                devicePath.IndexOf("vid_054c&pid_05c4", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                traceParts = new List<string>();
+            }
 
             var instanceId = GetInstanceIdFromDevicePath(devicePath);
             var testInstanceId = instanceId;
             while (!string.IsNullOrEmpty(testInstanceId))
             {
                 var hardwareIds = GetStringArrayDeviceProperty(testInstanceId, NativeMethods.DEVPKEY_Device_HardwareIds);
+                traceParts?.Add($"{testInstanceId} [{(hardwareIds != null ? string.Join(",", hardwareIds) : "<no-hwids>")}]");
                 if (hardwareIds != null)
                 {
                     // hardware IDs of root hubs/controllers that emit supported virtual devices as sources
@@ -1410,6 +1417,11 @@ namespace DS4Windows
                 || testInstanceId.StartsWith(@"ROOT\USB", StringComparison.OrdinalIgnoreCase)))
             {
                 result = true;
+            }
+
+            if (traceParts != null)
+            {
+                AppLogger.LogToGui($"VCrashDiag: CheckIfVirtualDevice result={result} Excluded={excludeMatchFound} TerminalInstance={testInstanceId} Path={devicePath} Trace={string.Join(" -> ", traceParts)}", false);
             }
 
             return result;

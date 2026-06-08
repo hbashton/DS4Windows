@@ -92,6 +92,9 @@ namespace DS4Windows
         private HashSet<string> hidDeviceHidingExemptedDevs = new HashSet<string>();
         private bool hidDeviceHidingForced = false;
         private bool hidDeviceHidingEnabled = false;
+        private bool stickMouseFakerInputNoticeShown = false;
+        private bool stickMouseFakerInputMissingNoticeShown = false;
+        private readonly object outputKbmHandlerLock = new object();
 
         private ControlServiceDeviceOptions deviceOptions;
         public ControlServiceDeviceOptions DeviceOptions { get => deviceOptions; }
@@ -461,23 +464,31 @@ namespace DS4Windows
 
         public void RefreshOutputKBMHandler()
         {
-            if (Global.outputKBMHandler != null)
+            lock (outputKbmHandlerLock)
             {
-                Global.outputKBMHandler.Disconnect();
-                Global.outputKBMHandler = null;
-            }
+                if (Global.outputKBMHandler != null)
+                {
+                    Global.outputKBMHandler.Disconnect();
+                    Global.outputKBMHandler = null;
+                }
 
-            if (Global.outputKBMMapping != null)
-            {
-                Global.outputKBMMapping = null;
-            }
+                if (Global.outputKBMMapping != null)
+                {
+                    Global.outputKBMMapping = null;
+                }
 
-            InitOutputKBMHandler();
+                InitOutputKBMHandler();
+            }
         }
 
         private void InitOutputKBMHandler()
         {
             string attemptVirtualkbmHandler = cmdParser.VirtualkbmHandler;
+            InitOutputKBMHandler(attemptVirtualkbmHandler);
+        }
+
+        private void InitOutputKBMHandler(string attemptVirtualkbmHandler)
+        {
             Global.InitOutputKBMHandler(attemptVirtualkbmHandler);
 
             bool handlerConnected = false;
@@ -504,6 +515,120 @@ namespace DS4Windows
             Global.InitOutputKBMMapping(Global.outputKBMHandler.GetIdentifier());
             Global.outputKBMMapping.PopulateConstants();
             Global.outputKBMMapping.PopulateMappings();
+        }
+
+        private bool SwitchOutputKBMHandler(string identifier)
+        {
+            lock (outputKbmHandlerLock)
+            {
+                if (Global.outputKBMHandler != null &&
+                    Global.outputKBMHandler.GetIdentifier() == identifier)
+                {
+                    return true;
+                }
+
+                VirtualKBMBase oldHandler = Global.outputKBMHandler;
+                VirtualKBMMapping oldMapping = Global.outputKBMMapping;
+
+                try
+                {
+                    InitOutputKBMHandler(identifier);
+                    if (Global.outputKBMHandler?.GetIdentifier() == identifier)
+                    {
+                        RefreshLoadedActionAliases();
+                        oldHandler?.Disconnect();
+                        return true;
+                    }
+                }
+                catch { }
+
+                Global.outputKBMHandler?.Disconnect();
+                Global.outputKBMHandler = oldHandler;
+                Global.outputKBMMapping = oldMapping;
+                return false;
+            }
+        }
+
+        private void EnsureVirtualMouseForStickMouseProfile(int ind)
+        {
+            if (!ProfileUsesStickMouse(ind))
+            {
+                return;
+            }
+
+            if (Global.outputKBMHandler?.GetIdentifier() == FakerInputHandler.IDENTIFIER)
+            {
+                return;
+            }
+
+            Global.RefreshFakerInputInfo();
+            if (Global.fakerInputInstalled)
+            {
+                bool switched = SwitchOutputKBMHandler(FakerInputHandler.IDENTIFIER);
+                if (switched && !stickMouseFakerInputNoticeShown)
+                {
+                    stickMouseFakerInputNoticeShown = true;
+                    LogDebug("Stick mouse profile detected. Using FakerInput virtual mouse so Windows keeps a real pointer device available.");
+                }
+                else if (!switched && !stickMouseFakerInputMissingNoticeShown)
+                {
+                    stickMouseFakerInputMissingNoticeShown = true;
+                    LogDebug("Stick mouse profile detected, but DS4Windows could not connect to FakerInput. SendInput will remain active.");
+                }
+
+                return;
+            }
+
+            if (!stickMouseFakerInputMissingNoticeShown)
+            {
+                stickMouseFakerInputMissingNoticeShown = true;
+                string helpURL = "https://github.com/Ryochan7/FakerInput/";
+                LogDebug($"Stick mouse profile detected, but FakerInput is not installed. Install FakerInput to expose a persistent virtual mouse and avoid hidden cursor behavior on couch/TV setups: {helpURL}");
+                AppLogger.LogToTray("Stick mouse works best with FakerInput installed for a persistent virtual mouse.");
+            }
+        }
+
+        private static bool ProfileUsesStickMouse(int ind)
+        {
+            return StickDirectionMapsToMouse(ind, DS4Controls.LXNeg) ||
+                StickDirectionMapsToMouse(ind, DS4Controls.LXPos) ||
+                StickDirectionMapsToMouse(ind, DS4Controls.LYNeg) ||
+                StickDirectionMapsToMouse(ind, DS4Controls.LYPos) ||
+                StickDirectionMapsToMouse(ind, DS4Controls.RXNeg) ||
+                StickDirectionMapsToMouse(ind, DS4Controls.RXPos) ||
+                StickDirectionMapsToMouse(ind, DS4Controls.RYNeg) ||
+                StickDirectionMapsToMouse(ind, DS4Controls.RYPos);
+        }
+
+        private static bool StickDirectionMapsToMouse(int ind, DS4Controls control)
+        {
+            DS4ControlSettings setting = GetDS4CSetting(ind, control);
+            return ActionMapsToMouse(setting.actionType, setting.action.actionBtn) ||
+                ActionMapsToMouse(setting.shiftActionType, setting.shiftAction.actionBtn);
+        }
+
+        private static bool ActionMapsToMouse(DS4ControlSettings.ActionType actionType, X360Controls outputControl)
+        {
+            if (actionType != DS4ControlSettings.ActionType.Button)
+            {
+                return false;
+            }
+
+            return outputControl >= X360Controls.MouseUp &&
+                outputControl <= X360Controls.AbsMouseRight;
+        }
+
+        private static void RefreshLoadedActionAliases()
+        {
+            for (int device = 0; device < Global.MAX_DS4_CONTROLLER_COUNT; device++)
+            {
+                foreach (DS4Controls control in Enum.GetValues(typeof(DS4Controls)))
+                {
+                    DS4ControlSettings setting = GetDS4CSetting(device, control);
+                    Global.RefreshActionAlias(setting, false);
+                    Global.RefreshActionAlias(setting, true);
+                }
+            }
         }
 
         private void OutputslotMan_ViGEmFailure(object sender, int errorCode)
@@ -2196,6 +2321,8 @@ namespace DS4Windows
 
         public void CheckProfileOptions(int ind, DS4Device device, bool startUp = false)
         {
+            EnsureVirtualMouseForStickMouseProfile(ind);
+
             device.ModifyFeatureSetFlag(VidPidFeatureSet.NoOutputData, !getEnableOutputDataToDS4(ind));
             if (!getEnableOutputDataToDS4(ind))
                 LogDebug("Output data to DS4 disabled. Lightbar and rumble events are not written to DS4 gamepad. If the gamepad is connected over BT then IdleDisconnect option is recommended to let DS4Windows to close the connection after long period of idling.");

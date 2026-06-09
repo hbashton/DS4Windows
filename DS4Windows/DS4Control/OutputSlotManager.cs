@@ -190,6 +190,16 @@ namespace DS4Windows
 
                         return;
                     }
+                    catch (Exception e)
+                    {
+                        AppLogger.LogToGui($"Failed to plug in virtual {contType} Controller in output slot #{slot + 1}: {e.Message}", true);
+                        if (beforeVirtualDS4 != null)
+                        {
+                            DS4Devices.EndOwnVirtualDS4Connect();
+                        }
+
+                        return;
+                    }
 
                     if (beforeVirtualDS4 != null)
                     {
@@ -214,8 +224,8 @@ namespace DS4Windows
                     }
 
                     outputDevices[slot] = outputDevice;
-                    deviceDict.Add(slot, outputDevice);
-                    revDeviceDict.Add(outputDevice, slot);
+                    deviceDict[slot] = outputDevice;
+                    revDeviceDict[outputDevice] = slot;
                     outputSlots[slot].AttachedDevice(outputDevice, contType, inIdx, inDisplayString);
                     if (inIdx != -1)
                     {

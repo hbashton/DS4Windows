@@ -261,12 +261,24 @@ namespace DS4WinWPF
 
         private void CurrentDomain_UnhandledException(object sender, UnhandledExceptionEventArgs e)
         {
+            string message;
+            string details;
+            if (e.ExceptionObject is Exception exp)
+            {
+                message = exp.Message;
+                details = exp.ToString();
+            }
+            else
+            {
+                message = e.ExceptionObject?.ToString() ?? "Unknown unmanaged exception";
+                details = message;
+            }
+
             if (!Current.Dispatcher.CheckAccess())
             {
                 Logger logger = logHolder.Logger;
-                Exception exp = e.ExceptionObject as Exception;
-                logger.Error($"Thread App Crashed with message {exp.Message}");
-                logger.Error(exp.ToString());
+                logger.Error($"Thread App Crashed with message {message}");
+                logger.Error(details);
                 //LogManager.Flush();
                 //LogManager.Shutdown();
                 if (e.IsTerminating)
@@ -281,11 +293,10 @@ namespace DS4WinWPF
             else
             {
                 Logger logger = logHolder.Logger;
-                Exception exp = e.ExceptionObject as Exception;
                 if (e.IsTerminating)
                 {
-                    logger.Error($"Thread Crashed with message {exp.Message}");
-                    logger.Error(exp.ToString());
+                    logger.Error($"Thread Crashed with message {message}");
+                    logger.Error(details);
 
                     rootHub?.PrepareAbort();
                     CleanShutdown();

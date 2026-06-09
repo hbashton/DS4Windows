@@ -409,6 +409,12 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 return;
             }
 
+            if (device == null)
+            {
+                DS4Windows.AppLogger.LogToGui($"Could not switch controller {devIndex + 1} profile: input controller is not available.", true);
+                return;
+            }
+
             if (this.selectedEntity != null)
             {
                 HookEvents(false);
@@ -427,17 +433,61 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
             //Global.Save();
             // Run profile loading in Task. Need to still wait for Task to finish
-            Task.Run(() =>
+            bool loadedProfile = false;
+            bool profileLoadRan = false;
+            try
             {
-                if (device != null)
+                Task.Run(() =>
                 {
                     device.HaltReportingRunAction(() =>
                     {
-                        Global.LoadProfile(devIndex, true, App.rootHub);
+                        profileLoadRan = true;
+                        loadedProfile = Global.LoadProfile(devIndex, true, App.rootHub);
                     });
+                }).Wait();
+
+                if (!profileLoadRan)
+                {
+                    loadedProfile = Global.LoadProfile(devIndex, true, App.rootHub);
+                }
+            }
+            catch (AggregateException ex)
+            {
+                foreach (Exception inner in ex.Flatten().InnerExceptions)
+                {
+                    DS4Windows.AppLogger.LogToGui($"Could not switch controller {devIndex + 1} to profile \"{prof}\". {inner.Message}", true);
+                    DS4Windows.AppLogger.LogToGui(inner.ToString(), true);
                 }
 
-            }).Wait();
+                if (this.selectedEntity != null)
+                {
+                    HookEvents(true);
+                }
+
+                return;
+            }
+            catch (Exception ex)
+            {
+                DS4Windows.AppLogger.LogToGui($"Could not switch controller {devIndex + 1} to profile \"{prof}\". {ex.Message}", true);
+                DS4Windows.AppLogger.LogToGui(ex.ToString(), true);
+                if (this.selectedEntity != null)
+                {
+                    HookEvents(true);
+                }
+
+                return;
+            }
+
+            if (!loadedProfile)
+            {
+                DS4Windows.AppLogger.LogToGui($"Could not switch controller {devIndex + 1} to profile \"{prof}\".", true);
+                if (this.selectedEntity != null)
+                {
+                    HookEvents(true);
+                }
+
+                return;
+            }
 
             string prolog = string.Format(Properties.Resources.UsingProfile, (devIndex + 1).ToString(), prof, $"{device.Battery}");
             DS4Windows.AppLogger.LogToGui(prolog, false);

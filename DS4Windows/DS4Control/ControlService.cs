@@ -724,8 +724,6 @@ namespace DS4Windows
                     break;
             }
 
-            bool isVirtual = Global.CheckIfVirtualDevice(device.DevicePath);
-            LogDebug($"VCrashDiag: Support filter result. Supported={result} Type={metaInfo.inputDevType} Name={metaInfo.name} FeatureSet={metaInfo.featureSet:F} IsVirtual={isVirtual} UseMoonlight={Global.UseMoonlight} AdvancedMoonlight={Global.UseAdvancedMoonlight} VID={device.Attributes.VendorHexId} PID={device.Attributes.ProductHexId} UsagePage=0x{device.Capabilities.UsagePage:X} Usage=0x{device.Capabilities.Usage:X} Path={device.DevicePath}");
             return result;
         }
 
@@ -1497,13 +1495,11 @@ namespace DS4Windows
         public void PluginOutDev(int index, DS4Device device)
         {
             OutContType contType = Global.OutContType[index];
-            LogDebug($"VCrashDiag: PluginOutDev enter. Controller={index + 1} DesiredOut={contType} UseDInputOnly={useDInputOnly[index]} GlobalDInputOnly={getDInputOnly(index)} ActiveOut={activeOutDevType[index]} ExistingOut={(outputDevices[index]?.GetDeviceType() ?? "<none>")} Device={device.DisplayName} Type={device.DeviceType} Serial={device.MacAddress} Synced={device.isSynced()} Alive={device.IsAlive()} Path={device.HidDevice?.DevicePath}");
 
             OutSlotDevice slotDevice = null;
             if (!getDInputOnly(index))
             {
                 slotDevice = outputslotMan.FindExistUnboundSlotType(contType);
-                LogDebug($"VCrashDiag: Existing unbound slot lookup. Controller={index + 1} DesiredOut={contType} FoundSlot={(slotDevice != null ? (slotDevice.Index + 1).ToString() : "<none>")}");
             }
 
             if (useDInputOnly[index])
@@ -1516,12 +1512,10 @@ namespace DS4Windows
                     if (slotDevice == null)
                     {
                         slotDevice = outputslotMan.FindOpenSlot();
-                        LogDebug($"VCrashDiag: X360 open slot lookup. Controller={index + 1} FoundSlot={(slotDevice != null ? (slotDevice.Index + 1).ToString() : "<none>")}");
                         if (slotDevice != null)
                         {
                             Xbox360OutDevice tempXbox = EstablishOutDevice(index, OutContType.X360)
                             as Xbox360OutDevice;
-                            LogDebug($"VCrashDiag: Established X360 output device. Controller={index + 1} OutputNull={tempXbox == null}");
                             //outputDevices[index] = tempXbox;
 
                             // Enable ViGem feedback callback handler only if lightbar/rumble data output is enabled (if those are disabled then no point enabling ViGem callback handler call)
@@ -1553,7 +1547,6 @@ namespace DS4Windows
                     {
                         slotDevice.CurrentInputBound = OutSlotDevice.InputBound.Bound;
                         Xbox360OutDevice tempXbox = slotDevice.OutputDevice as Xbox360OutDevice;
-                        LogDebug($"VCrashDiag: Reusing unbound X360 output slot. Controller={index + 1} Slot={slotDevice.Index + 1} OutputNull={tempXbox == null}");
 
                         // Enable ViGem feedback callback handler only if lightbar/rumble data output is enabled (if those are disabled then no point enabling ViGem callback handler call)
                         if (Global.EnableOutputDataToDS4[index])
@@ -1584,12 +1577,10 @@ namespace DS4Windows
                     if (slotDevice == null)
                     {
                         slotDevice = outputslotMan.FindOpenSlot();
-                        LogDebug($"VCrashDiag: DS4 open slot lookup. Controller={index + 1} FoundSlot={(slotDevice != null ? (slotDevice.Index + 1).ToString() : "<none>")}");
                         if (slotDevice != null)
                         {
                             DS4OutDevice tempDS4 = EstablishOutDevice(index, OutContType.DS4)
                             as DS4OutDevice;
-                            LogDebug($"VCrashDiag: Established DS4 output device. Controller={index + 1} OutputNull={tempDS4 == null} UseMoonlight={Global.UseMoonlight}");
 
                             // Enable ViGem feedback callback handler only if DS4 lightbar/rumble data output is enabled (if those are disabled then no point enabling ViGem callback handler call)
                             if (Global.EnableOutputDataToDS4[index])
@@ -1620,7 +1611,6 @@ namespace DS4Windows
                     {
                         slotDevice.CurrentInputBound = OutSlotDevice.InputBound.Bound;
                         DS4OutDevice tempDS4 = slotDevice.OutputDevice as DS4OutDevice;
-                        LogDebug($"VCrashDiag: Reusing unbound DS4 output slot. Controller={index + 1} Slot={slotDevice.Index + 1} OutputNull={tempDS4 == null}");
 
                         // Enable ViGem feedback callback handler only if lightbar/rumble data output is enabled (if those are disabled then no point enabling ViGem callback handler call)
                         if (Global.EnableOutputDataToDS4[index])
@@ -1655,23 +1645,17 @@ namespace DS4Windows
                 if (success && slotDevice.OutputDevice != null)
                 {
                     LogDebug($"Associated input controller #{index + 1} ({device.DisplayName}) to virtual {slotDevice.OutputDevice.GetDeviceType()} Controller in{(slotDevice.PermanentType != OutContType.None ? " permanent" : "")} output slot #{slotDevice.Index + 1}");
-                    LogDebug($"VCrashDiag: PluginOutDev success. Controller={index + 1} Slot={slotDevice.Index + 1} Output={slotDevice.OutputDevice.GetDeviceType()} Reserve={slotDevice.CurrentReserveStatus} Attach={slotDevice.CurrentAttachedStatus} InputBound={slotDevice.CurrentInputBound}");
                     useDInputOnly[index] = false;
                 }
                 else
                 {
-                    LogDebug($"VCrashDiag: PluginOutDev did not associate output. Controller={index + 1} Success={success} SlotNull={slotDevice == null} SlotOutputNull={slotDevice?.OutputDevice == null}");
+                    LogDebug("Failed. No output device was associated");
                 }
-            }
-            else
-            {
-                LogDebug($"VCrashDiag: PluginOutDev skipped because useDInputOnly is false. Controller={index + 1} ExistingOut={(outputDevices[index]?.GetDeviceType() ?? "<none>")}");
             }
         }
 
         public void UnplugOutDev(int index, DS4Device device, bool immediate = false, bool force = false)
         {
-            LogDebug($"VCrashDiag: UnplugOutDev enter. Controller={index + 1} Immediate={immediate} Force={force} UseDInputOnly={useDInputOnly[index]} ActiveOut={activeOutDevType[index]} ExistingOut={(outputDevices[index]?.GetDeviceType() ?? "<none>")} Device={device.DisplayName} Type={device.DeviceType} Serial={device.MacAddress} Synced={device.isSynced()} Alive={device.IsAlive()} Path={device.HidDevice?.DevicePath}");
             if (!useDInputOnly[index])
             {
                 //OutContType contType = Global.OutContType[index];
@@ -1681,7 +1665,6 @@ namespace DS4Windows
                 {
                     string tempType = dev.GetDeviceType();
                     LogDebug($"Disassociated virtual {tempType} Controller in{(slotDevice.CurrentReserveStatus == OutSlotDevice.ReserveStatus.Permanent ? " permanent" : "")} output slot #{slotDevice.Index + 1} from input controller #{index + 1} ({device.DisplayName})", false);
-                    LogDebug($"VCrashDiag: UnplugOutDev slot state. Controller={index + 1} Slot={slotDevice.Index + 1} Output={tempType} Reserve={slotDevice.CurrentReserveStatus} Attach={slotDevice.CurrentAttachedStatus} InputBound={slotDevice.CurrentInputBound}");
 
                     OutContType currentType = activeOutDevType[index];
                     outputDevices[index] = null;

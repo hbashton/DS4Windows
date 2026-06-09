@@ -207,9 +207,12 @@ namespace DS4Windows
         private static readonly object ownVirtualLock = new object();
         private static readonly HashSet<string> ownVirtualDS4Paths =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private static int pendingOwnVirtualDS4Connects;
+        private static long pendingOwnVirtualDS4Timestamp;
 
         // ViGEm-created DS4 controllers report the Sony VID with one of these PIDs.
         private static readonly int[] VirtualDS4Pids = { 0x05C4, 0x09CC };
+        private static readonly TimeSpan OwnVirtualDS4PendingTimeout = TimeSpan.FromSeconds(2);
 
         private static HashSet<string> SnapshotVirtualDS4Paths()
         {
@@ -235,6 +238,41 @@ namespace DS4Windows
             HashSet<string> before = SnapshotVirtualDS4Paths();
             AppLogger.LogToGui($"VCrashDiag: Own virtual DS4 snapshot before connect. Count={before.Count} Paths={string.Join(" || ", before)}", false);
             return before;
+        }
+
+        public static void BeginOwnVirtualDS4Connect()
+        {
+            lock (ownVirtualLock)
+            {
+                pendingOwnVirtualDS4Connects++;
+                pendingOwnVirtualDS4Timestamp = Stopwatch.GetTimestamp();
+            }
+        }
+
+        public static void EndOwnVirtualDS4Connect()
+        {
+            lock (ownVirtualLock)
+            {
+                if (pendingOwnVirtualDS4Connects > 0)
+                {
+                    pendingOwnVirtualDS4Connects--;
+                }
+            }
+        }
+
+        private static bool IsOwnVirtualDS4ConnectPending()
+        {
+            lock (ownVirtualLock)
+            {
+                if (pendingOwnVirtualDS4Connects <= 0)
+                {
+                    return false;
+                }
+
+                long elapsed = Stopwatch.GetTimestamp() - pendingOwnVirtualDS4Timestamp;
+                long timeoutTicks = (long)(OwnVirtualDS4PendingTimeout.TotalSeconds * Stopwatch.Frequency);
+                return elapsed < timeoutTicks;
+            }
         }
 
         // Any virtual DS4 that appears after our Connect() call, and was not present in
@@ -298,6 +336,14 @@ namespace DS4Windows
 
             bool isVirtualDevice = Global.CheckIfVirtualDevice(hDevice.DevicePath);
             AppLogger.LogToGui($"VCrashDiag: IsRealDS4 evaluate. UseMoonlight={Global.UseMoonlight} AdvancedMoonlight={Global.UseAdvancedMoonlight} IsVirtual={isVirtualDevice} OwnVirtual={IsOwnVirtualDevice(hDevice.DevicePath)} VID={hDevice.Attributes.VendorHexId} PID={hDevice.Attributes.ProductHexId} UsagePage=0x{hDevice.Capabilities.UsagePage:X} Usage=0x{hDevice.Capabilities.Usage:X} Path={hDevice.DevicePath}", false);
+
+            if (isVirtualDevice && hDevice.Attributes.VendorId == SONY_VID &&
+                VirtualDS4Pids.Contains(hDevice.Attributes.ProductId) &&
+                IsOwnVirtualDS4ConnectPending())
+            {
+                AppLogger.LogToGui($"VCrashDiag: IsRealDS4 decision=False Reason=OwnVirtualOutputPendingRegistration VID={hDevice.Attributes.VendorHexId} PID={hDevice.Attributes.ProductHexId} Path={hDevice.DevicePath}", false);
+                return false;
+            }
 
             if (!Global.UseMoonlight)
             {

@@ -41,7 +41,11 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public bool HideDS4Controller
         {
             get => DS4Windows.Global.UseExclusiveMode;
-            set => DS4Windows.Global.UseExclusiveMode = value;
+            set
+            {
+                DS4Windows.Global.UseExclusiveMode = value;
+                App.rootHub?.ApplyHidHideSettingsToConnectedControllers();
+            }
         }
 
         public bool SwipeTouchSwitchProfile { get => DS4Windows.Global.SwipeProfiles;

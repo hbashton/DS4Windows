@@ -2060,6 +2060,12 @@ namespace DS4Windows
             return m_Config.dinputOnly[index];
         }
 
+        public static bool[] DisableHidHide => m_Config.disableHidHide;
+        public static bool getDisableHidHide(int index)
+        {
+            return m_Config.disableHidHide[index];
+        }
+
         public static int ProcessPriority
         {
             get => m_Config.processPriority;
@@ -3857,6 +3863,8 @@ namespace DS4Windows
         { DEFAULT_DINPUT_ONLY, DEFAULT_DINPUT_ONLY, DEFAULT_DINPUT_ONLY,
           DEFAULT_DINPUT_ONLY, DEFAULT_DINPUT_ONLY, DEFAULT_DINPUT_ONLY,
           DEFAULT_DINPUT_ONLY, DEFAULT_DINPUT_ONLY, DEFAULT_DINPUT_ONLY };
+        public bool[] disableHidHide = new bool[Global.TEST_PROFILE_ITEM_COUNT]
+        { false, false, false, false, false, false, false, false, false };
         public bool[] startTouchpadOff = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
         public TouchpadOutMode[] touchOutMode = new TouchpadOutMode[Global.TEST_PROFILE_ITEM_COUNT]
         { DEFAULT_TOUCH_OUT_MODE, DEFAULT_TOUCH_OUT_MODE, DEFAULT_TOUCH_OUT_MODE,
@@ -4700,6 +4708,7 @@ namespace DS4Windows
                 XmlNode xmlGameBarHomeButtonSupport = m_Xdoc.CreateNode(XmlNodeType.Element, "GameBarHomeButtonSupport", null); xmlGameBarHomeButtonSupport.InnerText = gameBarHomeButtonSupport[device].ToString(); rootElement.AppendChild(xmlGameBarHomeButtonSupport);
                 XmlNode xmlGameBarProfileName = m_Xdoc.CreateNode(XmlNodeType.Element, "GameBarProfileName", null); xmlGameBarProfileName.InnerText = gameBarProfileName[device]; rootElement.AppendChild(xmlGameBarProfileName);
                 XmlNode xmlDinput = m_Xdoc.CreateNode(XmlNodeType.Element, "DinputOnly", null); xmlDinput.InnerText = dinputOnly[device].ToString(); rootElement.AppendChild(xmlDinput);
+                XmlNode xmlDisableHidHide = m_Xdoc.CreateNode(XmlNodeType.Element, "DisableHidHide", null); xmlDisableHidHide.InnerText = disableHidHide[device].ToString(); rootElement.AppendChild(xmlDisableHidHide);
                 XmlNode xmlStartTouchpadOff = m_Xdoc.CreateNode(XmlNodeType.Element, "StartTouchpadOff", null); xmlStartTouchpadOff.InnerText = startTouchpadOff[device].ToString(); rootElement.AppendChild(xmlStartTouchpadOff);
                 XmlNode xmlTouchOutMode = m_Xdoc.CreateNode(XmlNodeType.Element, "TouchpadOutputMode", null); xmlTouchOutMode.InnerText = touchOutMode[device].ToString(); rootElement.AppendChild(xmlTouchOutMode);
                 XmlNode xmlSATriggers = m_Xdoc.CreateNode(XmlNodeType.Element, "SATriggers", null); xmlSATriggers.InnerText = sATriggers[device].ToString(); rootElement.AppendChild(xmlSATriggers);
@@ -6577,6 +6586,13 @@ namespace DS4Windows
                     bool.TryParse(Item.InnerText, out dinputOnly[device]);
                 }
                 catch { dinputOnly[device] = false; missingSetting = true; }
+
+                try
+                {
+                    Item = m_Xdoc.SelectSingleNode("/" + rootname + "/DisableHidHide");
+                    bool.TryParse(Item.InnerText, out disableHidHide[device]);
+                }
+                catch { disableHidHide[device] = false; }
 
                 bool oldUseDInputOnly = Global.useDInputOnly[device];
 
@@ -9897,6 +9913,7 @@ namespace DS4Windows
 
             launchProgram[device] = string.Empty;
             dinputOnly[device] = DEFAULT_DINPUT_ONLY;
+            disableHidHide[device] = false;
             startTouchpadOff[device] = false;
             touchOutMode[device] = DEFAULT_TOUCH_OUT_MODE;
             sATriggers[device] = BackingStore.DEFAULT_SA_TRIGGERS;

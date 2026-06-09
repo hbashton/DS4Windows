@@ -779,6 +779,14 @@ namespace DS4WinWPF.DS4Control.DTOXml
             set => _dinputOnly = XmlDataUtilities.StrToBool(value);
         }
 
+        private bool _disableHidHide;
+        [XmlElement("DisableHidHide")]
+        public string DisableHidHideString
+        {
+            get => _disableHidHide.ToString();
+            set => _disableHidHide = XmlDataUtilities.StrToBool(value);
+        }
+
         private bool _startTouchpadOff;
         [XmlElement("StartTouchpadOff")]
         public string StartTouchpadOffString
@@ -1642,6 +1650,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
             _gameBarHomeButtonSupport = source.gameBarHomeButtonSupport[deviceIndex];
             GameBarProfileName = source.gameBarProfileName[deviceIndex];
             _dinputOnly = source.dinputOnly[deviceIndex];
+            _disableHidHide = source.disableHidHide[deviceIndex];
             _startTouchpadOff = source.startTouchpadOff[deviceIndex];
             _useTPforControls = source.touchOutMode[deviceIndex] == TouchpadOutMode.Controls;
             _useSAforMouse = source.gyroOutMode[deviceIndex] == GyroOutMode.Mouse;
@@ -2246,6 +2255,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
             destination.gameBarHomeButtonSupport[deviceIndex] = _gameBarHomeButtonSupport;
             destination.gameBarProfileName[deviceIndex] = GameBarProfileName ?? string.Empty;
             destination.dinputOnly[deviceIndex] = _dinputOnly;
+            destination.disableHidHide[deviceIndex] = _disableHidHide;
             destination.startTouchpadOff[deviceIndex] = _startTouchpadOff;
             destination.sATriggers[deviceIndex] = SATriggers;
             destination.sATriggerCond[deviceIndex] = _sATriggerCond;

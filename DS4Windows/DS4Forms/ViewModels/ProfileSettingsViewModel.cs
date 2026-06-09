@@ -803,6 +803,20 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         }
         public EventHandler DInputOnlyChanged;
 
+        public bool DisableHidHide
+        {
+            get => Global.DisableHidHide[device];
+            set
+            {
+                bool temp = Global.DisableHidHide[device];
+                if (temp == value) return;
+
+                Global.DisableHidHide[device] = value;
+                DisableHidHideChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        public EventHandler DisableHidHideChanged;
+
         public bool VirtualTriggerButtons
         {
             get => Global.OutputVirtualTriggerButton[device];

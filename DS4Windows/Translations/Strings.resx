@@ -481,6 +481,12 @@ Example: whyme_DS4Windows</value>
   <data name="DisableVirtualControllerTip" xml:space="preserve">
     <value>Do not spawn/associate virtual controllers for connected controllers using this profile (Applies on profile save)</value>
   </data>
+  <data name="DisableHidHide" xml:space="preserve">
+    <value>Disable HidHide</value>
+  </data>
+  <data name="DisableHidHideTip" xml:space="preserve">
+    <value>Remove this controller from HidHide's hidden devices list while this profile is active (Applies on profile save)</value>
+  </data>
   <data name="EmulatedController" xml:space="preserve">
     <value>Emulated Controller</value>
   </data>

@@ -2067,6 +2067,8 @@
                                 </StackPanel>
                                 <CheckBox Content="{lex:Loc DisableVirtualController}" IsChecked="{Binding DInputOnly}"
                                   ToolTip="{lex:Loc DisableVirtualControllerTip}" />
+                                <CheckBox Content="{lex:Loc DisableHidHide}" IsChecked="{Binding DisableHidHide}"
+                                  ToolTip="{lex:Loc DisableHidHideTip}" />
                                 <StackPanel Orientation="Horizontal" Margin="{StaticResource spaceMargin}">
                                     <Label Content="{lex:Loc ProfileEditor.VirtualDS4TrigOutput}" ContentStringFormat="{}{0}:" Margin="0,0,8,0" />
                                     <ComboBox ItemsSource="{Binding Path=OutputDS4TriggerModeOptions}"

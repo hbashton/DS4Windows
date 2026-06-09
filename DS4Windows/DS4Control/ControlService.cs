@@ -92,6 +92,7 @@ namespace DS4Windows
         private HashSet<string> hidDeviceHidingExemptedDevs = new HashSet<string>();
         private bool hidDeviceHidingForced = false;
         private bool hidDeviceHidingEnabled = false;
+        private readonly object hidHideProfileOverrideLock = new object();
         private bool stickMouseFakerInputNoticeShown = false;
         private bool stickMouseFakerInputMissingNoticeShown = false;
         private readonly object outputKbmHandlerLock = new object();
@@ -879,6 +880,85 @@ namespace DS4Windows
             if (Global.hidHideInstalled)
             {
                 UpdateHidHideAttributes();
+            }
+        }
+
+        public void ApplyHidHideSettingsToConnectedControllers()
+        {
+            for (int i = 0; i < DS4Controllers.Length; i++)
+            {
+                DS4Device device = DS4Controllers[i];
+                if (device != null)
+                {
+                    ApplyProfileHidHideOption(i, device);
+                }
+            }
+        }
+
+        private void ApplyProfileHidHideOption(int ind, DS4Device device)
+        {
+            if (device == null || !Global.hidHideInstalled)
+            {
+                return;
+            }
+
+            string deviceInstanceId = Global.GetInstanceIdFromDevicePath(device.HidDevice.DevicePath);
+            if (string.IsNullOrEmpty(deviceInstanceId))
+            {
+                return;
+            }
+
+            bool shouldHide = getUseExclusiveMode() && !getDisableHidHide(ind);
+
+            lock (hidHideProfileOverrideLock)
+            {
+                using HidHideAPIDevice hidHideDevice = new HidHideAPIDevice();
+                if (!hidHideDevice.IsOpen())
+                {
+                    return;
+                }
+
+                List<string> blacklist = hidHideDevice.GetBlacklist();
+                bool isListed = blacklist.Any(item =>
+                    item.Equals(deviceInstanceId, StringComparison.OrdinalIgnoreCase));
+                bool changed = false;
+
+                if (shouldHide)
+                {
+                    if (!hidHideDevice.GetActiveState())
+                    {
+                        hidHideDevice.SetActiveState(true);
+                    }
+
+                    if (!isListed)
+                    {
+                        blacklist.Add(deviceInstanceId);
+                        changed = true;
+                    }
+                }
+                else if (isListed)
+                {
+                    blacklist.RemoveAll(item =>
+                        item.Equals(deviceInstanceId, StringComparison.OrdinalIgnoreCase));
+                    changed = true;
+                }
+
+                if (changed)
+                {
+                    hidHideDevice.SetBlacklist(blacklist);
+                }
+            }
+
+            UpdateHidHideAttributes();
+
+            if (shouldHide && CheckAffected(device))
+            {
+                ChangeExclusiveStatus(device);
+            }
+            else if (!shouldHide &&
+                device.CurrentExclusiveStatus == DS4Device.ExclusiveStatus.HidHideAffected)
+            {
+                device.CurrentExclusiveStatus = DS4Device.ExclusiveStatus.Shared;
             }
         }
 
@@ -2325,6 +2405,8 @@ namespace DS4Windows
 
         public void CheckProfileOptions(int ind, DS4Device device, bool startUp = false)
         {
+            ApplyProfileHidHideOption(ind, device);
+
             EnsureVirtualMouseForStickMouseProfile(ind);
 
             device.ModifyFeatureSetFlag(VidPidFeatureSet.NoOutputData, !getEnableOutputDataToDS4(ind));

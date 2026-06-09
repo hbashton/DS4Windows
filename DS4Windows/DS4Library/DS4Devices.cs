@@ -1,4 +1,4 @@
-/*
+﻿/*
 DS4Windows
 Copyright (C) 2023  Travis Nickles
 
@@ -207,9 +207,12 @@ namespace DS4Windows
         private static readonly object ownVirtualLock = new object();
         private static readonly HashSet<string> ownVirtualDS4Paths =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private static int pendingOwnVirtualDS4Connects;
+        private static long pendingOwnVirtualDS4Timestamp;
 
         // ViGEm-created DS4 controllers report the Sony VID with one of these PIDs.
         private static readonly int[] VirtualDS4Pids = { 0x05C4, 0x09CC };
+        private static readonly TimeSpan OwnVirtualDS4PendingTimeout = TimeSpan.FromSeconds(2);
 
         private static HashSet<string> SnapshotVirtualDS4Paths()
         {
@@ -232,7 +235,43 @@ namespace DS4Windows
         // in one of our own. Call RegisterOwnVirtualDS4 with this snapshot right after.
         public static HashSet<string> SnapshotBeforeOwnVirtualDS4()
         {
-            return SnapshotVirtualDS4Paths();
+            HashSet<string> before = SnapshotVirtualDS4Paths();
+            return before;
+        }
+
+        public static void BeginOwnVirtualDS4Connect()
+        {
+            lock (ownVirtualLock)
+            {
+                pendingOwnVirtualDS4Connects++;
+                pendingOwnVirtualDS4Timestamp = Stopwatch.GetTimestamp();
+            }
+        }
+
+        public static void EndOwnVirtualDS4Connect()
+        {
+            lock (ownVirtualLock)
+            {
+                if (pendingOwnVirtualDS4Connects > 0)
+                {
+                    pendingOwnVirtualDS4Connects--;
+                }
+            }
+        }
+
+        private static bool IsOwnVirtualDS4ConnectPending()
+        {
+            lock (ownVirtualLock)
+            {
+                if (pendingOwnVirtualDS4Connects <= 0)
+                {
+                    return false;
+                }
+
+                long elapsed = Stopwatch.GetTimestamp() - pendingOwnVirtualDS4Timestamp;
+                long timeoutTicks = (long)(OwnVirtualDS4PendingTimeout.TotalSeconds * Stopwatch.Frequency);
+                return elapsed < timeoutTicks;
+            }
         }
 
         // Any virtual DS4 that appears after our Connect() call, and was not present in
@@ -285,13 +324,32 @@ namespace DS4Windows
         {
             // Our own virtual output controllers are never valid input, regardless of
             // mode. This is what breaks the Moonlight + DS4-output feedback loop.
-            if (IsOwnVirtualDevice(hDevice.DevicePath)) return false;
+            if (IsOwnVirtualDevice(hDevice.DevicePath))
+            {
+                return false;
+            }
 
-            if (!Global.UseMoonlight) return !Global.CheckIfVirtualDevice(hDevice.DevicePath);
+            bool isVirtualDevice = Global.CheckIfVirtualDevice(hDevice.DevicePath);
+
+            if (isVirtualDevice && hDevice.Attributes.VendorId == SONY_VID &&
+                VirtualDS4Pids.Contains(hDevice.Attributes.ProductId) &&
+                IsOwnVirtualDS4ConnectPending())
+            {
+                return false;
+            }
+
+            if (!Global.UseMoonlight)
+            {
+                bool decision = !isVirtualDevice;
+                return decision;
+            }
             if (!Global.UseAdvancedMoonlight)
             {
                 // this approach should work on most devices, but not on my pc for some reason
-                if (hDevice.Attributes.VendorId == 1356 && hDevice.Attributes.ProductId == 1476) return true;
+                if (hDevice.Attributes.VendorId == 1356 && hDevice.Attributes.ProductId == 1476)
+                {
+                    return true;
+                }
             }
             else
             {
@@ -314,7 +372,8 @@ namespace DS4Windows
                     return DetectNewControllers;
                 }
             }
-            return !Global.CheckIfVirtualDevice(hDevice.DevicePath);
+            bool defaultDecision = !isVirtualDevice;
+            return defaultDecision;
         }
 
         // Enumerates ds4 controllers in the system
@@ -361,9 +420,13 @@ namespace DS4Windows
 
                     if (!metainfo.featureSet.HasFlag(VidPidFeatureSet.VendorDefinedDevice) &&
                         hDevice.Capabilities.UsagePage >= 0xFF00)
+                    {
                         continue; // Ignore devices using Vendor-Defined HID Usage Pages (expected to ignore the Nacon Revolution Pro programming interface)
+                    }
                     else if (DevicePaths.Contains(hDevice.DevicePath))
+                    {
                         continue; // BT/USB endpoint already open once
+                    }
 
                     if (!hDevice.IsOpen)
                     {

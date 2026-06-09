@@ -1719,6 +1719,15 @@ namespace DS4Windows
 
                 UpdateHidHiddenAttributes();
 
+                if (Global.openRGBSyncEnabled)
+                {
+                    bool openRGBStarted = OpenRGBServer.Instance.Start(Global.openRGBServerPort);
+                    if (showlog)
+                        LogDebug(openRGBStarted
+                            ? $"OpenRGB server listening on port {Global.openRGBServerPort}"
+                            : $"OpenRGB server could not bind to port {Global.openRGBServerPort} - lightbar will use profile colour");
+                }
+
                 if (showlog)
                 {
                     LogDebug(DS4WinWPF.Properties.Resources.SearchingController);
@@ -1929,6 +1938,9 @@ namespace DS4Windows
         {
             if (running)
             {
+                if (OpenRGBServer.Instance.IsRunning)
+                    OpenRGBServer.Instance.Stop();
+
                 running = false;
                 runHotPlug = false;
                 inServiceTask = true;

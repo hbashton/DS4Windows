@@ -629,6 +629,10 @@ namespace DS4Windows
                 BLANK_VIGEMBUS_VERSION);
         public static Version minSupportedViGEmBusVersionInfo = new Version(MIN_SUPPORTED_VIGEMBUS_VERSION);
         public static bool hidHideInstalled = IsHidHideInstalled();
+
+        public static bool openRGBSyncEnabled = false;
+        public static int openRGBServerPort   = 6743;
+
         public static bool fakerInputInstalled = IsFakerInputInstalled();
         public const string BLANK_FAKERINPUT_VERSION = "0.0.0.0";
         public static string fakerInputVersion = FakerInputVersion();

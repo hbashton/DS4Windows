@@ -21,6 +21,7 @@ using System.Drawing;
 using static System.Math;
 using static DS4Windows.Global;
 using System.Diagnostics;
+using DS4WinWPF.DS4Control;
 
 namespace DS4Windows
 {
@@ -324,6 +325,12 @@ namespace DS4Windows
                     LightBarColor = color
                 };
                 */
+                if (Global.openRGBSyncEnabled &&
+                    OpenRGBServer.Instance.TryGetColor(deviceNum, out DS4Color openRGBColor))
+                {
+                    color = openRGBColor;
+                }
+
                 DS4LightbarState lightState = new DS4LightbarState
                 {
                     LightBarColor = color,

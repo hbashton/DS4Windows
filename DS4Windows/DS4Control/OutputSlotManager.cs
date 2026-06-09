@@ -171,6 +171,7 @@ namespace DS4Windows
                     if (contType == OutContType.DS4 && Global.UseMoonlight)
                     {
                         beforeVirtualDS4 = DS4Devices.SnapshotBeforeOwnVirtualDS4();
+                        DS4Devices.BeginOwnVirtualDS4Connect();
                     }
 
                     try
@@ -182,12 +183,24 @@ namespace DS4Windows
                         // Leave task immediately if connect call failed
                         //queuedTasks--;
                         ViGEmFailure?.Invoke(this, e.ErrorCode);
+                        if (beforeVirtualDS4 != null)
+                        {
+                            DS4Devices.EndOwnVirtualDS4Connect();
+                        }
+
                         return;
                     }
 
                     if (beforeVirtualDS4 != null)
                     {
-                        DS4Devices.RegisterOwnVirtualDS4(beforeVirtualDS4);
+                        try
+                        {
+                            DS4Devices.RegisterOwnVirtualDS4(beforeVirtualDS4);
+                        }
+                        finally
+                        {
+                            DS4Devices.EndOwnVirtualDS4Connect();
+                        }
                     }
 
                     if (contType == OutContType.X360)
@@ -247,7 +260,7 @@ namespace DS4Windows
 
                     //if (!immediate)
                     //{
-                    //    Task.Delay(DELAY_TIME).Wait();
+                        //    Task.Delay(DELAY_TIME).Wait();
                     //}
                 }
             };

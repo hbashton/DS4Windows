@@ -1647,6 +1647,10 @@ namespace DS4Windows
                     LogDebug($"Associated input controller #{index + 1} ({device.DisplayName}) to virtual {slotDevice.OutputDevice.GetDeviceType()} Controller in{(slotDevice.PermanentType != OutContType.None ? " permanent" : "")} output slot #{slotDevice.Index + 1}");
                     useDInputOnly[index] = false;
                 }
+                else
+                {
+                    LogDebug("Failed. No output device was associated");
+                }
             }
         }
 

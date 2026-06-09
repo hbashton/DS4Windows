@@ -1370,7 +1370,6 @@ namespace DS4Windows
         {
             bool result = false;
             bool excludeMatchFound = false;
-
             var instanceId = GetInstanceIdFromDevicePath(devicePath);
             var testInstanceId = instanceId;
             while (!string.IsNullOrEmpty(testInstanceId))
@@ -5457,12 +5456,12 @@ namespace DS4Windows
                 }
                 catch (InvalidOperationException e)
                 {
-                    AppLogger.LogToGui($"Failed to load {profilepath}. {e.InnerException.Message}", false);
+                    AppLogger.LogToGui($"Failed to load {profilepath}. {e.InnerException?.Message ?? e.Message}", false);
                     loaded = false;
                 }
                 catch (XmlException e)
                 {
-                    AppLogger.LogToGui($"Failed to load {profilepath}. Invalid XML. {e.InnerException.Message}", false);
+                    AppLogger.LogToGui($"Failed to load {profilepath}. Invalid XML. {e.InnerException?.Message ?? e.Message}", false);
                     loaded = false;
                 }
 
@@ -10580,6 +10579,9 @@ namespace DS4Windows
                 });
 
                 //Program.rootHub.touchPad[device]?.ResetTrackAccel(trackballFriction[device]);
+            }
+            else
+            {
             }
         }
     }

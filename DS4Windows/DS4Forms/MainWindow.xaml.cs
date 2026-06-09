@@ -1163,7 +1163,8 @@ Suspend support not enabled.", true);
                     if (Global.runHotPlug)
                     {
                         Int32 Type = wParam.ToInt32();
-                        if (Type == DBT_DEVICEARRIVAL ||
+                        if (Type == DBT_DEVNODES_CHANGED ||
+                            Type == DBT_DEVICEARRIVAL ||
                             Type == DBT_DEVICEREMOVECOMPLETE)
                         {
                             lock (hotplugCounterLock)

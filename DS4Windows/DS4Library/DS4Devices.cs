@@ -358,7 +358,7 @@ namespace DS4Windows
                 if (!DetectNewControllers)
                 {
                     var curTimestamp = Stopwatch.GetTimestamp();
-                    if (curTimestamp - timestamp > 5 * TimeSpan.TicksPerSecond) DetectNewControllers = true;
+                    if (curTimestamp - timestamp > 5 * Stopwatch.Frequency) DetectNewControllers = true;
                 }
 
                 // Moonlight detection

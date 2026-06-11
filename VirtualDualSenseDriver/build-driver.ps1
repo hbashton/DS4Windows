@@ -32,22 +32,34 @@ function Get-NuGetExe {
 $nugetExe = Get-NuGetExe
 & $nugetExe restore $packagesConfig -PackagesDirectory $packagesDir -Source "https://api.nuget.org/v3/index.json" -NonInteractive
 
-$msbuild = Get-Command msbuild.exe -ErrorAction SilentlyContinue
-if (-not $msbuild) {
+function Get-MSBuildExe {
     $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
     if (Test-Path $vswhere) {
         $installPath = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
         if ($installPath) {
+            $amd64Candidate = Join-Path $installPath "MSBuild\Current\Bin\amd64\MSBuild.exe"
+            if (Test-Path $amd64Candidate) {
+                return $amd64Candidate
+            }
+
             $candidate = Join-Path $installPath "MSBuild\Current\Bin\MSBuild.exe"
             if (Test-Path $candidate) {
-                $msbuild = Get-Item $candidate
+                return $candidate
             }
         }
     }
+
+    $msbuild = Get-Command msbuild.exe -ErrorAction SilentlyContinue
+    if ($msbuild) {
+        return $msbuild.Source
+    }
+
+    return $null
 }
 
+$msbuild = Get-MSBuildExe
 if (-not $msbuild) {
     throw "MSBuild was not found. Install Visual Studio with the Windows Driver Kit and KMDF tools."
 }
 
-& $msbuild.Source $project /m /p:Configuration=$Configuration /p:Platform=$Platform
+& $msbuild $project /m /p:Configuration=$Configuration /p:Platform=$Platform

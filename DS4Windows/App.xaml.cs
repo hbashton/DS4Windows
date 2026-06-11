@@ -792,7 +792,7 @@ namespace DS4WinWPF
                     {
                         if (rootHub.running)
                         {
-                            rootHub.Stop(immediateUnplug: true);
+                            rootHub.Stop(immediateUnplug: true, disposeViGEm: false);
                             rootHub.ShutDown();
                         }
                     }).Wait();

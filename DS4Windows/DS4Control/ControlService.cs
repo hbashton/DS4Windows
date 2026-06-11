@@ -1960,7 +1960,7 @@ namespace DS4Windows
             }
         }
 
-        public bool Stop(bool showlog = true, bool immediateUnplug = false)
+        public bool Stop(bool showlog = true, bool immediateUnplug = false, bool disposeViGEm = true)
         {
             if (running)
             {
@@ -2070,7 +2070,14 @@ namespace DS4Windows
                     Thread.Sleep(OutputSlotManager.DELAY_TIME);
                 }
 
-                StopViGEm();
+                if (disposeViGEm)
+                {
+                    StopViGEm();
+                }
+                else
+                {
+                    vigemTestClient = null;
+                }
 
                 // Disconnect from KBM system when stopping ControlService
                 LogDebug($"Closing connection to output handler {outputKBMHandler.GetDisplayName()}");

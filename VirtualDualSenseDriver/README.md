@@ -8,16 +8,20 @@ The intended backend is a KMDF HID source driver using Microsoft VHF. The
 driver exposes `GUID_DEVINTERFACE_HBASHTON_VIRTUAL_DUALSENSE` and the
 compatibility symlink `\\.\HBashtonVirtualDualSense`; DS4Windows opens that
 device and sends IOCTLs to create virtual pads and submit DualSense-shaped USB
-input reports.
+or Bluetooth input reports.
 
 Current contract:
 
 - `IOCTL_HBASHTON_VDS_CREATE_PAD`
-  Creates one VHF child HID device and returns a `PadId`.
+  Creates one VHF child HID device and returns a `PadId`. New callers may pass
+  `HBASHTON_VDS_CREATE_PAD_IN` to request either USB mode or Bluetooth mode.
+  Old callers that pass no create input still receive USB mode.
 - `IOCTL_HBASHTON_VDS_DESTROY_PAD`
   Destroys the VHF child HID device for a `PadId`.
 - `IOCTL_HBASHTON_VDS_SUBMIT_INPUT_REPORT`
-  Sends one 64-byte report ID `0x01` DualSense USB input report for a `PadId`.
+  Sends one input report for a `PadId`. USB pads accept the 64-byte report ID
+  `0x01` layout. Bluetooth pads accept the 10-byte report ID `0x01` basic
+  Bluetooth layout.
 - `IOCTL_HBASHTON_VDS_READ_OUTPUT_REPORT`
   Returns the latest HID output report written by a host application to the
   virtual DualSense. DS4Windows can use this for future rumble, lightbar,
@@ -25,10 +29,14 @@ Current contract:
 
 The HID identity should present as Sony VID `054C`, DualSense PID `0CE6`, and
 product string `Wireless Controller`. The initial DS4Windows client reports
-buttons, d-pad, sticks, triggers, touchpad contacts, gyro, accelerometer, packet
-counters, and battery. Output reports for advanced haptics, adaptive triggers,
-lightbar, player LEDs, microphone mute LED, and speaker/audio are intentionally
-not part of this first contract yet.
+buttons, d-pad, sticks, and triggers in Bluetooth mode. USB mode still has code
+for touchpad contacts, gyro, accelerometer, packet counters, and battery. Output
+reports for ordinary rumble, adaptive triggers, lightbar, player LEDs, and the
+microphone mute LED are captured from both USB report `0x02` and Bluetooth
+report `0x31`/data `0x10`; DS4Windows normalizes the Bluetooth report back to
+the existing USB parser before applying it to a real DualSense. Speaker/audio
+transport and advanced Sony haptic audio are intentionally outside this VHF
+path.
 
 Backend implementation:
 
@@ -41,7 +49,8 @@ Backend implementation:
   Host write reports are captured by `EvtVhfAsyncOperationWriteReport` and
   exposed back to DS4Windows through `IOCTL_HBASHTON_VDS_READ_OUTPUT_REPORT`.
 - `driver/DualSenseDescriptor.h`
-  Contains the USB DualSense HID report descriptor used by each VHF child.
+  Contains the USB and Bluetooth DualSense HID report descriptors used by VHF
+  children.
 - `HBashtonVirtualDualSense.inf`
   Installs the root-enumerated KMDF device and configures `vhf` as the lower
   filter required by the Windows Virtual HID Framework.
@@ -79,8 +88,12 @@ Useful references:
   driver:
   https://learn.microsoft.com/en-us/windows-hardware/drivers/hid/virtual-hid-framework--vhf-
 - The public DualSense HID descriptor/report maps in `nondebug/dualsense` are
-  used as the compatibility target for the USB input report layout:
+  used as the compatibility target for the USB and Bluetooth report layouts:
   https://github.com/nondebug/dualsense
+- SDL's DualSense Bluetooth work documents the important mode split: Bluetooth
+  starts in basic report mode, while enhanced reports are needed for sensor,
+  touchpad, advanced LED, and rumble paths:
+  https://github.com/libsdl-org/SDL/issues/10086
 - The current Windows controller tooling ecosystem is moving toward
   profile-defined HID identities for DualSense-class virtual pads, which matches
   this split between DS4Windows mapping code and a dedicated HID backend:

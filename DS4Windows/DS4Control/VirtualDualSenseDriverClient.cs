@@ -18,6 +18,12 @@ using System.Text;
 
 namespace DS4Windows
 {
+    public enum VirtualDualSenseBusMode : uint
+    {
+        Usb = 0,
+        Bluetooth = 1
+    }
+
     public sealed class VirtualDualSenseDriverClient : IDisposable
     {
         public const string DevicePath = @"\\.\HBashtonVirtualDualSense";
@@ -25,6 +31,8 @@ namespace DS4Windows
         public const uint IoctlDeviceType = 0x00000022;
         public const uint IoctlMethodBuffered = 0;
         public const uint IoctlFileAnyAccess = 0;
+        public const uint CreatePadVersion = 1;
+        public const int CreatePadRequestLength = 16;
         public const int MaxOutputReportLength = 1024;
         public static readonly uint IoctlCreatePad = CtlCode(IoctlDeviceType, 0x901, IoctlMethodBuffered, IoctlFileAnyAccess);
         public static readonly uint IoctlDestroyPad = CtlCode(IoctlDeviceType, 0x902, IoctlMethodBuffered, IoctlFileAnyAccess);
@@ -48,7 +56,7 @@ namespace DS4Windows
 
         public bool IsConnected => handle != null && !handle.IsInvalid && !handle.IsClosed;
 
-        public void Connect()
+        public void Connect(VirtualDualSenseBusMode busMode = VirtualDualSenseBusMode.Usb)
         {
             List<string> attemptedPaths = new List<string>();
             int lastError = ErrorFileNotFound;
@@ -77,8 +85,13 @@ namespace DS4Windows
 
             try
             {
+                Span<byte> createRequest = stackalloc byte[CreatePadRequestLength];
                 Span<byte> createBuffer = stackalloc byte[4];
-                DeviceIoControlChecked(IoctlCreatePad, ReadOnlySpan<byte>.Empty, createBuffer);
+                BitConverter.TryWriteBytes(createRequest.Slice(0, sizeof(uint)), CreatePadRequestLength);
+                BitConverter.TryWriteBytes(createRequest.Slice(sizeof(uint), sizeof(uint)), CreatePadVersion);
+                BitConverter.TryWriteBytes(createRequest.Slice(sizeof(uint) * 2, sizeof(uint)), (uint)busMode);
+                BitConverter.TryWriteBytes(createRequest.Slice(sizeof(uint) * 3, sizeof(uint)), 0U);
+                DeviceIoControlChecked(IoctlCreatePad, createRequest, createBuffer);
                 padId = BitConverter.ToUInt32(createBuffer);
             }
             catch

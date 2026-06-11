@@ -69,7 +69,6 @@ jobs:
 
       - name: Build experimental Virtual DualSense driver
         if: matrix.platform == 'x64'
-        continue-on-error: true
         shell: pwsh
         run: .\VirtualDualSenseDriver\build-driver.ps1 -Configuration Release -Platform x64
 

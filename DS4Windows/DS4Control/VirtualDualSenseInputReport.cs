@@ -16,6 +16,8 @@ namespace DS4Windows
     {
         public const byte UsbInputReportId = 0x01;
         public const int UsbInputReportLength = 64;
+        public const byte BluetoothInputReportId = 0x01;
+        public const int BluetoothInputReportLength = 10;
         public const int SonyVendorId = 0x054C;
         public const int DualSenseProductId = 0x0CE6;
         public const string ProductString = "Wireless Controller";
@@ -72,6 +74,36 @@ namespace DS4Windows
 
             byte battery = (byte)Math.Clamp(state.Battery / 10, 0, 10);
             report[53] = battery;
+            return report;
+        }
+
+        public static byte[] BuildBluetoothReport(DS4State state)
+        {
+            byte[] report = new byte[BluetoothInputReportLength];
+            report[0] = BluetoothInputReportId;
+            report[1] = state.LX;
+            report[2] = state.LY;
+            report[3] = state.RX;
+            report[4] = state.RY;
+            report[5] = (byte)(HatValue(state) |
+                (state.Square ? 0x10 : 0) |
+                (state.Cross ? 0x20 : 0) |
+                (state.Circle ? 0x40 : 0) |
+                (state.Triangle ? 0x80 : 0));
+            report[6] = (byte)(
+                (state.L1 ? 0x01 : 0) |
+                (state.R1 ? 0x02 : 0) |
+                (state.L2Btn || state.L2 > 0 ? 0x04 : 0) |
+                (state.R2Btn || state.R2 > 0 ? 0x08 : 0) |
+                (state.Share ? 0x10 : 0) |
+                (state.Options ? 0x20 : 0) |
+                (state.L3 ? 0x40 : 0) |
+                (state.R3 ? 0x80 : 0));
+            report[7] = (byte)(
+                (state.PS ? 0x01 : 0) |
+                ((state.OutputTouchButton || state.TouchButton) ? 0x02 : 0));
+            report[8] = state.L2;
+            report[9] = state.R2;
             return report;
         }
 

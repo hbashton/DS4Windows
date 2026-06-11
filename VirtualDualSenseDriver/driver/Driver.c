@@ -117,13 +117,36 @@ HBashtonVdsEvtIoDeviceControl(
     WDFDEVICE device = WdfIoQueueGetDevice(Queue);
 
     UNREFERENCED_PARAMETER(OutputBufferLength);
-    UNREFERENCED_PARAMETER(InputBufferLength);
 
     switch (IoControlCode)
     {
         case IOCTL_HBASHTON_VDS_CREATE_PAD:
         {
+            ULONG busMode = HBASHTON_VDS_BUS_MODE_USB;
+            PHBASHTON_VDS_CREATE_PAD_IN input;
             PHBASHTON_VDS_CREATE_PAD_OUT output;
+
+            if (InputBufferLength != 0)
+            {
+                status = WdfRequestRetrieveInputBuffer(
+                    Request,
+                    sizeof(HBASHTON_VDS_CREATE_PAD_IN),
+                    (PVOID*)&input,
+                    NULL);
+                if (!NT_SUCCESS(status))
+                {
+                    break;
+                }
+
+                if (input->Size < sizeof(HBASHTON_VDS_CREATE_PAD_IN) ||
+                    input->Version != HBASHTON_VDS_CREATE_PAD_VERSION)
+                {
+                    status = STATUS_REVISION_MISMATCH;
+                    break;
+                }
+
+                busMode = input->BusMode;
+            }
 
             status = WdfRequestRetrieveOutputBuffer(
                 Request,
@@ -132,7 +155,7 @@ HBashtonVdsEvtIoDeviceControl(
                 NULL);
             if (NT_SUCCESS(status))
             {
-                status = HBashtonVdsCreatePad(device, &output->PadId);
+                status = HBashtonVdsCreatePad(device, busMode, &output->PadId);
                 if (NT_SUCCESS(status))
                 {
                     bytesReturned = sizeof(HBASHTON_VDS_CREATE_PAD_OUT);
@@ -162,15 +185,28 @@ HBashtonVdsEvtIoDeviceControl(
         case IOCTL_HBASHTON_VDS_SUBMIT_INPUT_REPORT:
         {
             PHBASHTON_VDS_SUBMIT_INPUT_REPORT_IN input;
+            ULONG reportLength;
 
             status = WdfRequestRetrieveInputBuffer(
                 Request,
-                sizeof(HBASHTON_VDS_SUBMIT_INPUT_REPORT_IN),
+                HBASHTON_VDS_SUBMIT_INPUT_REPORT_MIN_SIZE,
                 (PVOID*)&input,
                 NULL);
             if (NT_SUCCESS(status))
             {
-                status = HBashtonVdsSubmitInputReport(device, input->PadId, input->Report);
+                if (InputBufferLength <= FIELD_OFFSET(HBASHTON_VDS_SUBMIT_INPUT_REPORT_IN, Report))
+                {
+                    status = STATUS_BUFFER_TOO_SMALL;
+                    break;
+                }
+
+                reportLength = (ULONG)(InputBufferLength -
+                    FIELD_OFFSET(HBASHTON_VDS_SUBMIT_INPUT_REPORT_IN, Report));
+                status = HBashtonVdsSubmitInputReport(
+                    device,
+                    input->PadId,
+                    input->Report,
+                    reportLength);
             }
 
             break;

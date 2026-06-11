@@ -7,6 +7,42 @@ target_dir = Path(sys.argv[1])
 project_dir = Path(sys.argv[2])
 version = sys.argv[3]
 
+
+def copy_virtual_dualsense_driver(repo_dir: Path, package_dir: Path):
+    driver_dir = repo_dir / "VirtualDualSenseDriver"
+    if not driver_dir.exists():
+        return
+
+    package_driver_dir = package_dir / "VirtualDualSenseDriver"
+    if package_driver_dir.exists():
+        shutil.rmtree(package_driver_dir)
+
+    package_driver_dir.mkdir()
+
+    for file_name in [
+        "README.md",
+        "FOLLOW_UP.md",
+        "HBashtonVirtualDualSense.inf",
+        "install-driver.ps1",
+        "check-driver.ps1",
+    ]:
+        source_file = driver_dir / file_name
+        if source_file.exists():
+            shutil.copy2(source_file, package_driver_dir / file_name)
+
+    for pattern in [
+        "HBashtonVirtualDualSense.sys",
+        "HBashtonVirtualDualSense.cat",
+        "HBashtonVirtualDualSense.cer",
+        "HBashtonVirtualDualSense.pdb",
+    ]:
+        for source_file in driver_dir.rglob(pattern):
+            if any(part.lower() in ("obj", "ipch") for part in source_file.parts):
+                continue
+
+            shutil.copy2(source_file, package_driver_dir / source_file.name)
+            break
+
 # move l18n assemblies to a separate directory
 lang_dir = target_dir / "Lang"
 if not lang_dir.exists():
@@ -45,6 +81,7 @@ if renamed_dir.exists():
     shutil.rmtree(renamed_dir)
 
 os.rename(target_dir, renamed_dir)
+copy_virtual_dualsense_driver(project_dir.resolve(), renamed_dir)
 
 # create a zip
 arch = target_dir.parents[1].name

@@ -34,6 +34,12 @@ jobs:
         echo "VERSION=$VERSION" >> $GITHUB_ENV
         echo "SHORT_VERSION=${VERSION%-*}" >> $GITHUB_ENV
       shell: bash
+    - name: Add MSBuild to PATH
+      uses: microsoft/setup-msbuild@v2
+    - name: Build experimental Virtual DualSense driver
+      continue-on-error: true
+      shell: pwsh
+      run: .\VirtualDualSenseDriver\build-driver.ps1 -Configuration Release -Platform x64
     - name: Build X64
       run: dotnet publish .\DS4Windows\DS4WinWPF.csproj -c Release  /p:platform=x64 /p:AssemblyVersion=${{ env.SHORT_VERSION }} /p:FileVersion=${{ env.SHORT_VERSION }} /p:Version=${{ env.VERSION }} /p:InformationalVersion=${{ env.VERSION }} -o .\bin\x64\Release\output
     - name: Post-Build script X64

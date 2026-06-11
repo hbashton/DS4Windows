@@ -63,6 +63,16 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore
 
+      - name: Add MSBuild to PATH
+        if: matrix.platform == 'x64'
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build experimental Virtual DualSense driver
+        if: matrix.platform == 'x64'
+        continue-on-error: true
+        shell: pwsh
+        run: .\VirtualDualSenseDriver\build-driver.ps1 -Configuration Release -Platform x64
+
       - name: Compute version
         id: ver
         shell: bash

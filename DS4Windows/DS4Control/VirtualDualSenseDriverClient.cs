@@ -10,9 +10,11 @@ the Free Software Foundation, either version 3 of the License, or
 
 using Microsoft.Win32.SafeHandles;
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
-using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace DS4Windows
 {
@@ -29,6 +31,18 @@ namespace DS4Windows
         public static readonly uint IoctlSubmitInputReport = CtlCode(IoctlDeviceType, 0x903, IoctlMethodBuffered, IoctlFileAnyAccess);
         public static readonly uint IoctlReadOutputReport = CtlCode(IoctlDeviceType, 0x904, IoctlMethodBuffered, IoctlFileAnyAccess);
 
+        private const int ErrorFileNotFound = 2;
+        private const int ErrorPathNotFound = 3;
+        private const int ErrorAccessDenied = 5;
+        private const uint GenericRead = 0x80000000;
+        private const uint GenericWrite = 0x40000000;
+        private const int FileShareRead = 0x00000001;
+        private const int FileShareWrite = 0x00000002;
+        private const int OpenExisting = 3;
+        private const uint FileAttributeNormal = 0x00000080;
+        private static readonly Guid DriverInterfaceGuid = new Guid(DeviceInterfaceGuid);
+        private static readonly IntPtr InvalidHandleValue = new IntPtr(-1);
+
         private SafeFileHandle handle;
         private uint padId;
 
@@ -36,13 +50,29 @@ namespace DS4Windows
 
         public void Connect()
         {
-            handle = CreateFile(DevicePath, FileAccess.ReadWrite, FileShare.ReadWrite, IntPtr.Zero,
-                FileMode.Open, FileAttributes.Normal, IntPtr.Zero);
+            List<string> attemptedPaths = new List<string>();
+            int lastError = ErrorFileNotFound;
 
-            if (handle.IsInvalid)
+            foreach (string candidatePath in EnumerateCandidateDevicePaths())
             {
-                throw new Win32Exception(Marshal.GetLastWin32Error(),
-                    "Virtual DualSense driver is not installed or its device interface is unavailable.");
+                attemptedPaths.Add(candidatePath);
+                handle = CreateFile(candidatePath, GenericRead | GenericWrite,
+                    FileShareRead | FileShareWrite, IntPtr.Zero, OpenExisting,
+                    FileAttributeNormal, IntPtr.Zero);
+
+                if (handle != null && !handle.IsInvalid)
+                {
+                    break;
+                }
+
+                lastError = Marshal.GetLastWin32Error();
+                handle?.Dispose();
+                handle = null;
+            }
+
+            if (handle == null || handle.IsInvalid)
+            {
+                throw new Win32Exception(lastError, BuildUnavailableMessage(lastError, attemptedPaths));
             }
 
             try
@@ -135,6 +165,118 @@ namespace DS4Windows
             return (deviceType << 16) | (access << 14) | (function << 2) | method;
         }
 
+        private static IEnumerable<string> EnumerateCandidateDevicePaths()
+        {
+            foreach (string devicePath in EnumerateDeviceInterfacePaths())
+            {
+                yield return devicePath;
+            }
+
+            yield return DevicePath;
+        }
+
+        private static IEnumerable<string> EnumerateDeviceInterfacePaths()
+        {
+            List<string> devicePaths = new List<string>();
+            Guid interfaceGuid = DriverInterfaceGuid;
+            IntPtr deviceInfoSet = SetupDiGetClassDevs(ref interfaceGuid, null, IntPtr.Zero,
+                NativeMethods.DIGCF_PRESENT | NativeMethods.DIGCF_DEVICEINTERFACE);
+
+            if (deviceInfoSet == InvalidHandleValue)
+            {
+                return devicePaths;
+            }
+
+            try
+            {
+                for (int memberIndex = 0; ; memberIndex++)
+                {
+                    SP_DEVICE_INTERFACE_DATA interfaceData = new SP_DEVICE_INTERFACE_DATA
+                    {
+                        cbSize = Marshal.SizeOf<SP_DEVICE_INTERFACE_DATA>()
+                    };
+
+                    if (!SetupDiEnumDeviceInterfaces(deviceInfoSet, IntPtr.Zero, ref interfaceGuid,
+                            memberIndex, ref interfaceData))
+                    {
+                        break;
+                    }
+
+                    string devicePath = GetDeviceInterfacePath(deviceInfoSet, ref interfaceData);
+                    if (!string.IsNullOrWhiteSpace(devicePath))
+                    {
+                        devicePaths.Add(devicePath);
+                    }
+                }
+            }
+            finally
+            {
+                SetupDiDestroyDeviceInfoList(deviceInfoSet);
+            }
+
+            return devicePaths;
+        }
+
+        private static string GetDeviceInterfacePath(IntPtr deviceInfoSet, ref SP_DEVICE_INTERFACE_DATA interfaceData)
+        {
+            int requiredSize = 0;
+            SetupDiGetDeviceInterfaceDetail(deviceInfoSet, ref interfaceData, IntPtr.Zero, 0,
+                ref requiredSize, IntPtr.Zero);
+            if (requiredSize <= 0)
+            {
+                return null;
+            }
+
+            IntPtr detailBuffer = Marshal.AllocHGlobal(requiredSize);
+            try
+            {
+                Marshal.WriteInt32(detailBuffer, IntPtr.Size == 8 ? 8 : 4 + Marshal.SystemDefaultCharSize);
+                if (!SetupDiGetDeviceInterfaceDetail(deviceInfoSet, ref interfaceData, detailBuffer,
+                        requiredSize, ref requiredSize, IntPtr.Zero))
+                {
+                    return null;
+                }
+
+                return Marshal.PtrToStringAuto(IntPtr.Add(detailBuffer, 4));
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(detailBuffer);
+            }
+        }
+
+        private static string BuildUnavailableMessage(int lastError, List<string> attemptedPaths)
+        {
+            bool looksMissing = lastError == ErrorFileNotFound || lastError == ErrorPathNotFound;
+            bool accessDenied = lastError == ErrorAccessDenied;
+            string systemMessage = new Win32Exception(lastError).Message;
+            string pathList = attemptedPaths.Count > 0 ?
+                string.Join(", ", attemptedPaths.Distinct()) :
+                DevicePath;
+
+            StringBuilder builder = new StringBuilder();
+            if (looksMissing)
+            {
+                builder.Append("Virtual DualSense driver was not found. ");
+                builder.Append("Install the bundled HBashton Virtual DualSense driver package as Administrator, ");
+                builder.Append("then restart DS4Windows.");
+            }
+            else if (accessDenied)
+            {
+                builder.Append("Virtual DualSense driver is installed but DS4Windows could not open it. ");
+                builder.Append("Run DS4Windows as Administrator or reinstall the driver package.");
+            }
+            else
+            {
+                builder.Append("Virtual DualSense driver is installed or partially installed, but DS4Windows could not open it. ");
+                builder.Append("Restart DS4Windows, reconnect the virtual output, or reinstall the driver package.");
+            }
+
+            builder.Append($" Last CreateFile error {lastError}: {systemMessage}. ");
+            builder.Append($"Tried: {pathList}.");
+            return builder.ToString();
+        }
+
         private void DeviceIoControlChecked(uint ioctl, ReadOnlySpan<byte> input, Span<byte> output)
         {
             unsafe
@@ -156,13 +298,38 @@ namespace DS4Windows
         }
 
         [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        private static extern SafeFileHandle CreateFile(string fileName, FileAccess desiredAccess,
-            FileShare shareMode, IntPtr securityAttributes, FileMode creationDisposition,
-            FileAttributes flagsAndAttributes, IntPtr templateFile);
+        private static extern SafeFileHandle CreateFile(string fileName, uint desiredAccess,
+            int shareMode, IntPtr securityAttributes, int creationDisposition,
+            uint flagsAndAttributes, IntPtr templateFile);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool DeviceIoControl(SafeFileHandle deviceHandle, uint ioControlCode,
             IntPtr inBuffer, int inBufferSize, IntPtr outBuffer, int outBufferSize,
             out int bytesReturned, IntPtr overlapped);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct SP_DEVICE_INTERFACE_DATA
+        {
+            public int cbSize;
+            public Guid InterfaceClassGuid;
+            public int Flags;
+            public IntPtr Reserved;
+        }
+
+        [DllImport("setupapi.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        private static extern IntPtr SetupDiGetClassDevs(ref Guid classGuid, string enumerator,
+            IntPtr hwndParent, int flags);
+
+        [DllImport("setupapi.dll", SetLastError = true)]
+        private static extern bool SetupDiEnumDeviceInterfaces(IntPtr deviceInfoSet, IntPtr deviceInfoData,
+            ref Guid interfaceClassGuid, int memberIndex, ref SP_DEVICE_INTERFACE_DATA deviceInterfaceData);
+
+        [DllImport("setupapi.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        private static extern bool SetupDiGetDeviceInterfaceDetail(IntPtr deviceInfoSet,
+            ref SP_DEVICE_INTERFACE_DATA deviceInterfaceData, IntPtr deviceInterfaceDetailData,
+            int deviceInterfaceDetailDataSize, ref int requiredSize, IntPtr deviceInfoData);
+
+        [DllImport("setupapi.dll", SetLastError = true)]
+        private static extern bool SetupDiDestroyDeviceInfoList(IntPtr deviceInfoSet);
     }
 }

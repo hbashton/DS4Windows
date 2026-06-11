@@ -10,7 +10,9 @@ HBashtonVdsFindPadById(
 {
     for (ULONG i = 0; i < HBASHTON_VDS_MAX_PADS; i++)
     {
-        if (DeviceContext->Pads[i].Active && DeviceContext->Pads[i].PadId == PadId)
+        if (DeviceContext->Pads[i].Active &&
+            !DeviceContext->Pads[i].Destroying &&
+            DeviceContext->Pads[i].PadId == PadId)
         {
             return &DeviceContext->Pads[i];
         }
@@ -107,7 +109,7 @@ HBashtonVdsDestroyPad(
     if (pad != NULL)
     {
         vhfHandle = pad->VhfHandle;
-        pad->Active = FALSE;
+        pad->Destroying = TRUE;
         pad->VhfHandle = NULL;
     }
     WdfWaitLockRelease(deviceContext->PadLock);
@@ -119,12 +121,14 @@ HBashtonVdsDestroyPad(
 
     VhfDelete(vhfHandle, TRUE);
 
+    WdfWaitLockAcquire(deviceContext->PadLock, NULL);
     WdfSpinLockAcquire(deviceContext->OutputReportLock);
     if (pad != NULL)
     {
         RtlZeroMemory(pad, sizeof(*pad));
     }
     WdfSpinLockRelease(deviceContext->OutputReportLock);
+    WdfWaitLockRelease(deviceContext->PadLock);
 
     return STATUS_SUCCESS;
 }
@@ -139,7 +143,6 @@ HBashtonVdsSubmitInputReport(
     NTSTATUS status;
     PDEVICE_CONTEXT deviceContext = DeviceGetContext(Device);
     PVDS_PAD_CONTEXT pad;
-    VHFHANDLE vhfHandle;
     HID_XFER_PACKET transferPacket;
 
     if (Report[0] != HBASHTON_DUALSENSE_USB_INPUT_REPORT_ID)
@@ -149,11 +152,9 @@ HBashtonVdsSubmitInputReport(
 
     WdfWaitLockAcquire(deviceContext->PadLock, NULL);
     pad = HBashtonVdsFindPadById(deviceContext, PadId);
-    vhfHandle = pad != NULL ? pad->VhfHandle : NULL;
-    WdfWaitLockRelease(deviceContext->PadLock);
-
-    if (vhfHandle == NULL)
+    if (pad == NULL || pad->VhfHandle == NULL)
     {
+        WdfWaitLockRelease(deviceContext->PadLock);
         return STATUS_NOT_FOUND;
     }
 
@@ -162,7 +163,8 @@ HBashtonVdsSubmitInputReport(
     transferPacket.reportBuffer = Report;
     transferPacket.reportBufferLen = HBASHTON_DUALSENSE_USB_INPUT_REPORT_SIZE;
 
-    status = VhfReadReportSubmit(vhfHandle, &transferPacket);
+    status = VhfReadReportSubmit(pad->VhfHandle, &transferPacket);
+    WdfWaitLockRelease(deviceContext->PadLock);
     return status;
 }
 
@@ -179,8 +181,13 @@ HBashtonVdsReadOutputReport(
 
     RtlZeroMemory(OutputReport, sizeof(*OutputReport));
 
-    WdfSpinLockAcquire(deviceContext->OutputReportLock);
+    WdfWaitLockAcquire(deviceContext->PadLock, NULL);
     pad = HBashtonVdsFindPadById(deviceContext, PadId);
+    if (pad != NULL)
+    {
+        WdfSpinLockAcquire(deviceContext->OutputReportLock);
+    }
+
     if (pad == NULL)
     {
         status = STATUS_NOT_FOUND;
@@ -194,8 +201,10 @@ HBashtonVdsReadOutputReport(
         {
             RtlCopyMemory(OutputReport->Report, pad->LastOutputReport, pad->LastOutputReportLength);
         }
+
+        WdfSpinLockRelease(deviceContext->OutputReportLock);
     }
-    WdfSpinLockRelease(deviceContext->OutputReportLock);
+    WdfWaitLockRelease(deviceContext->PadLock);
 
     return status;
 }
@@ -210,6 +219,7 @@ HBashtonVdsEvtVhfWriteReport(
 {
     PVDS_PAD_CONTEXT pad = (PVDS_PAD_CONTEXT)VhfClientContext;
     ULONG length;
+    ULONG normalizedPayloadLength;
 
     UNREFERENCED_PARAMETER(VhfOperationContext);
 
@@ -222,17 +232,22 @@ HBashtonVdsEvtVhfWriteReport(
 
     length = HidTransferPacket->reportBufferLen;
     if (HidTransferPacket->reportId != 0 &&
-        (length == 0 || HidTransferPacket->reportBuffer[0] != HidTransferPacket->reportId) &&
-        length < HBASHTON_DUALSENSE_MAX_OUTPUT_REPORT_SIZE)
+        (length == 0 || HidTransferPacket->reportBuffer[0] != HidTransferPacket->reportId))
     {
-        WdfSpinLockAcquire(pad->ParentContext->OutputReportLock);
-        pad->LastOutputReport[0] = HidTransferPacket->reportId;
-        if (length != 0)
+        normalizedPayloadLength = length;
+        if (normalizedPayloadLength > HBASHTON_DUALSENSE_MAX_OUTPUT_REPORT_SIZE - 1)
         {
-            RtlCopyMemory(&pad->LastOutputReport[1], HidTransferPacket->reportBuffer, length);
+            normalizedPayloadLength = HBASHTON_DUALSENSE_MAX_OUTPUT_REPORT_SIZE - 1;
         }
 
-        pad->LastOutputReportLength = length + 1;
+        WdfSpinLockAcquire(pad->ParentContext->OutputReportLock);
+        pad->LastOutputReport[0] = HidTransferPacket->reportId;
+        if (normalizedPayloadLength != 0)
+        {
+            RtlCopyMemory(&pad->LastOutputReport[1], HidTransferPacket->reportBuffer, normalizedPayloadLength);
+        }
+
+        pad->LastOutputReportLength = normalizedPayloadLength + 1;
         pad->OutputSequence++;
         WdfSpinLockRelease(pad->ParentContext->OutputReportLock);
 

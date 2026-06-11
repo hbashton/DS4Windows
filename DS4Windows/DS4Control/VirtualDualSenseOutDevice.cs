@@ -27,7 +27,7 @@ namespace DS4Windows
         private int outputPollInProgress;
         private int lastInputDeviceIndex = -1;
         private uint lastOutputReportSequence;
-        private bool submitFailureLogged;
+        private int submitFailureLogged;
 
         public VirtualDualSenseOutDevice()
         {
@@ -37,6 +37,8 @@ namespace DS4Windows
         public override void Connect()
         {
             driverClient.Connect();
+            Volatile.Write(ref submitFailureLogged, 0);
+            Volatile.Write(ref lastInputDeviceIndex, -1);
             connected = true;
             StartOutputReportPolling();
         }
@@ -78,9 +80,17 @@ namespace DS4Windows
                 {
                     driverClient.SubmitInputReport(VirtualDualSenseInputReport.BuildUsbReport(new DS4State()));
                 }
-                catch
+                catch (Win32Exception ex)
                 {
-                    connected = false;
+                    LogSubmitFailure(ex.Message);
+                }
+                catch (IOException ex)
+                {
+                    LogSubmitFailure(ex.Message);
+                }
+                catch (ObjectDisposedException ex)
+                {
+                    LogSubmitFailure(ex.Message);
                 }
             }
         }
@@ -146,6 +156,7 @@ namespace DS4Windows
             catch (ObjectDisposedException)
             {
                 connected = false;
+                StopOutputReportPolling();
             }
             finally
             {
@@ -182,12 +193,11 @@ namespace DS4Windows
             StopOutputReportPolling();
             driverClient.Disconnect();
 
-            if (submitFailureLogged)
+            if (Interlocked.Exchange(ref submitFailureLogged, 1) == 1)
             {
                 return;
             }
 
-            submitFailureLogged = true;
             AppLogger.LogToGui($"Virtual DualSense output stopped: {message}", true);
         }
     }

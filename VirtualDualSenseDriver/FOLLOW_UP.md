@@ -19,6 +19,37 @@ first-pass KMDF/VHF backend. The next work should be done in this order.
 4. Confirm `\\.\HBashtonVirtualDualSense` opens from a simple userspace test
    before launching DS4Windows.
 
+## Bug Audit Notes
+
+Fixed after the first backend pass:
+
+1. Pad destruction no longer marks a slot reusable before `VhfDelete(TRUE)`
+   returns. The pad now enters a destroying state, preventing create/submit/read
+   paths from reusing or touching the context while VHF drains callbacks.
+2. Input report submission now keeps the pad lock held until
+   `VhfReadReportSubmit` returns, so destroy cannot invalidate the VHF handle
+   between lookup and submit.
+3. Output report reads now take the pad lock before copying the latest report,
+   preventing a read from racing against slot teardown.
+4. The WDF device requests passive-level callbacks because the IOCTL path uses a
+   wait lock. VHF write-report callbacks remain spin-lock-only and suitable for
+   higher IRQL.
+5. DS4Windows now stops the output-report polling timer on reset/polling
+   failures, reconnects clear the previous one-time failure log state, and the
+   failure log guard is thread-safe across mapper/polling threads.
+
+Still needs validation on a WDK machine:
+
+1. Confirm `WdfExecutionLevelPassive` is accepted at the device object level for
+   this project configuration. If not, move the passive execution constraint to
+   the IO queue object attributes.
+2. Confirm holding `PadLock` across `VhfReadReportSubmit` does not introduce
+   unexpected callback reentrancy. Microsoft documents that without
+   `EvtVhfReadyForNextReadReport`, VHF uses default buffering and the report
+   buffer can be reused after `VhfReadReportSubmit` returns.
+3. Run Driver Verifier with create/destroy spam while DS4Windows submits reports
+   to catch lifetime issues around `VhfDelete(TRUE)`.
+
 ## HID Identity Validation
 
 1. Confirm Device Manager and HID tools report Sony VID `054C`, DualSense PID
@@ -72,7 +103,10 @@ Next validation:
 
 1. Confirm VHF write callbacks deliver output report `0x02` with the report ID
    in byte `0`. The driver now normalizes this when VHF supplies the report ID
-   separately from the report buffer.
+   separately from the report buffer. If VHF ever supplies a max-sized buffer
+   without the report ID included, the driver preserves the ID and truncates one
+   byte from the payload; validate this never affects a real DualSense output
+   report.
 2. Use a DualSense-aware game or HID test app to write rumble/lightbar/trigger
    output reports to the virtual controller and confirm the physical DualSense
    receives matching effects.

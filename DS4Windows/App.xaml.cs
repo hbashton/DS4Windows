@@ -25,6 +25,8 @@ using System.IO;
 using System.IO.MemoryMappedFiles;
 using System.Net.Http;
 using System.Runtime.InteropServices;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -119,8 +121,8 @@ namespace DS4WinWPF
             try
             {
                 if (EventWaitHandleAcl.TryOpenExisting(SingleAppComEventName,
-                System.Security.AccessControl.EventWaitHandleRights.Synchronize |
-                System.Security.AccessControl.EventWaitHandleRights.Modify,
+                EventWaitHandleRights.Synchronize |
+                EventWaitHandleRights.Modify,
                 out EventWaitHandle tempComEvent))
                 {
                     tempComEvent.Set();  // signal the other instance.
@@ -133,7 +135,11 @@ namespace DS4WinWPF
             }
             catch (System.UnauthorizedAccessException)
             {
-                // Ignore exception
+                // An existing elevated instance can deny this process access if it was
+                // started by an older build. Do not continue into a second mapper.
+                runShutdown = false;
+                Current.Shutdown();
+                return;
             }
 
             // Allow sleep time durations less than 16 ms
@@ -143,7 +149,18 @@ namespace DS4WinWPF
             DS4Windows.Global.RefreshViGEmBusInfo();
 
             // Create the Event handle
-            threadComEvent = new EventWaitHandle(false, EventResetMode.ManualReset, SingleAppComEventName);
+            try
+            {
+                threadComEvent = CreateSingleAppComEvent();
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Another elevated instance can win the race with older event security.
+                runShutdown = false;
+                Current.Shutdown();
+                return;
+            }
+
             CreateTempWorkerThread();
 
             CreateControlService(parser);
@@ -291,6 +308,29 @@ namespace DS4WinWPF
                     CleanShutdown();
                 }
             }
+        }
+
+        private static EventWaitHandle CreateSingleAppComEvent()
+        {
+            EventWaitHandleSecurity security = new EventWaitHandleSecurity();
+            EventWaitHandleRights appRights = EventWaitHandleRights.Synchronize |
+                EventWaitHandleRights.Modify |
+                EventWaitHandleRights.ReadPermissions;
+
+            SecurityIdentifier authenticatedUsersSid = new SecurityIdentifier(
+                WellKnownSidType.AuthenticatedUserSid, null);
+            security.AddAccessRule(new EventWaitHandleAccessRule(authenticatedUsersSid,
+                appRights, AccessControlType.Allow));
+
+            SecurityIdentifier currentUserSid = WindowsIdentity.GetCurrent().User;
+            if (currentUserSid != null)
+            {
+                security.AddAccessRule(new EventWaitHandleAccessRule(currentUserSid,
+                    EventWaitHandleRights.FullControl, AccessControlType.Allow));
+            }
+
+            return EventWaitHandleAcl.Create(false, EventResetMode.ManualReset,
+                SingleAppComEventName, out _, security);
         }
 
         private void App_DispatcherUnhandledException(object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)

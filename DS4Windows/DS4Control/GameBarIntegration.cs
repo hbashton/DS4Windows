@@ -40,9 +40,18 @@ namespace DS4Windows
         private const int MaxAutomationVisitCount = 500;
         private const int MaxAutomationDepth = 5;
         private const int MaxDiagnosticTextLength = 160;
+        private const int LiveGameBarApiPollMs = 500;
+        private const int LiveGameBarApiCacheMs = 1500;
+        private const int LiveGameBarApiHangMs = 1500;
         private const int LiveAutomationPollMs = 1000;
         private const int LiveAutomationCacheMs = 3000;
         private static bool? gameBarApiPresent;
+        private static readonly object gameBarApiPollLock = new object();
+        private static bool gameBarApiPollRunning;
+        private static bool gameBarApiPollCachedVisible;
+        private static DateTime gameBarApiPollLastStartedUtc = DateTime.MinValue;
+        private static DateTime gameBarApiPollLastCompletedUtc = DateTime.MinValue;
+        private static int gameBarApiPollGeneration;
         private static readonly object automationPollLock = new object();
         private static bool automationPollRunning;
         private static bool automationPollCachedVisible;
@@ -118,6 +127,11 @@ namespace DS4Windows
                 return true;
             }
 
+            if (IsGameBarVisibleByCachedGameBarApi())
+            {
+                return true;
+            }
+
             return IsGameBarVisibleByCachedAutomation();
         }
 
@@ -149,6 +163,71 @@ namespace DS4Windows
             }
 
             return visible;
+        }
+
+        private static bool IsGameBarVisibleByCachedGameBarApi()
+        {
+            if (gameBarApiPresent.HasValue && !gameBarApiPresent.Value)
+            {
+                return false;
+            }
+
+            DateTime now = DateTime.UtcNow;
+            lock (gameBarApiPollLock)
+            {
+                bool cachedResultIsFresh = gameBarApiPollCachedVisible &&
+                    now - gameBarApiPollLastCompletedUtc < TimeSpan.FromMilliseconds(LiveGameBarApiCacheMs);
+
+                bool pollIsStale = gameBarApiPollRunning &&
+                    now - gameBarApiPollLastStartedUtc > TimeSpan.FromMilliseconds(LiveGameBarApiHangMs);
+
+                if ((!gameBarApiPollRunning || pollIsStale) &&
+                    now - gameBarApiPollLastStartedUtc >= TimeSpan.FromMilliseconds(LiveGameBarApiPollMs))
+                {
+                    gameBarApiPollRunning = true;
+                    gameBarApiPollLastStartedUtc = now;
+                    int pollGeneration = ++gameBarApiPollGeneration;
+
+                    Thread worker = new Thread(() =>
+                    {
+                        bool visible = false;
+                        try
+                        {
+                            if (TryGetGameBarApiStateCore(out bool apiVisible, out bool apiInputRedirected, out _))
+                            {
+                                visible = apiVisible || apiInputRedirected;
+                            }
+                        }
+                        catch
+                        {
+                            visible = false;
+                        }
+                        finally
+                        {
+                            lock (gameBarApiPollLock)
+                            {
+                                if (pollGeneration == gameBarApiPollGeneration || visible)
+                                {
+                                    gameBarApiPollCachedVisible = visible;
+                                    gameBarApiPollLastCompletedUtc = DateTime.UtcNow;
+                                }
+
+                                if (pollGeneration == gameBarApiPollGeneration)
+                                {
+                                    gameBarApiPollRunning = false;
+                                }
+                            }
+                        }
+                    });
+
+                    worker.IsBackground = true;
+                    worker.Name = "DS4Windows Game Bar API Poll";
+                    worker.SetApartmentState(ApartmentState.STA);
+                    worker.Start();
+                }
+
+                return cachedResultIsFresh;
+            }
         }
 
         private static bool IsGameBarVisibleByCachedAutomation()
@@ -189,6 +268,7 @@ namespace DS4Windows
 
                     worker.IsBackground = true;
                     worker.Name = "DS4Windows Game Bar UIA Poll";
+                    worker.SetApartmentState(ApartmentState.STA);
                     worker.Start();
                 }
 

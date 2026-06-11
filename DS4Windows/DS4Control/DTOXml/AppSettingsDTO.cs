@@ -396,6 +396,13 @@ namespace DS4WinWPF.DS4Control.DTOXml
             set;
         }
 
+        [XmlElement("BatteryToastNotifications")]
+        public bool BatteryToastNotifications
+        {
+            get;
+            set;
+        }
+
         [XmlIgnore]
         public bool CloseMinimizes
         {
@@ -872,6 +879,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
             UseMoonlight = source.useMoonlight;
             UseAdvancedMoonlight = source.useAdvancedMoonlight;
             VerboseStartupLogging = source.verboseStartupLogging;
+            BatteryToastNotifications = source.batteryToastNotifications;
             CloseMinimizes = source.closeMini;
             UseLang = source.useLang;
             DownloadLang = source.downloadLang;
@@ -973,6 +981,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
             destination.useMoonlight = UseMoonlight;
             destination.useAdvancedMoonlight = UseAdvancedMoonlight;
             destination.verboseStartupLogging = VerboseStartupLogging;
+            destination.batteryToastNotifications = BatteryToastNotifications;
             destination.closeMini = CloseMinimizes;
             destination.useLang = UseLang;
             destination.downloadLang = DownloadLang;

@@ -43,6 +43,7 @@ namespace DS4Windows
         private readonly DualSenseAudioPassthrough dualSenseAudioPassthrough = new DualSenseAudioPassthrough();
         private readonly DualSenseMicrophonePassthrough dualSenseMicrophonePassthrough = new DualSenseMicrophonePassthrough();
         private readonly GameBarIntegration gameBarIntegration = new GameBarIntegration();
+        private readonly BatteryToastNotifier batteryToastNotifier = new BatteryToastNotifier();
         // Might be useful for ScpVBus build
         public const int EXPANDED_CONTROLLER_COUNT = 8;
         public const int MAX_DS4_CONTROLLER_COUNT = Global.MAX_DS4_CONTROLLER_COUNT;
@@ -2888,6 +2889,9 @@ namespace DS4Windows
                 if (removingStatus)
                 {
                     CurrentState[ind].Battery = PreviousState[ind].Battery = 0; // Reset for the next connection's initial status change.
+                    currentBattery[ind] = 0;
+                    charging[ind] = false;
+                    batteryToastNotifier.Reset(ind);
                     if (!useDInputOnly[ind])
                     {
                         UnplugOutDev(ind, device);
@@ -3503,6 +3507,14 @@ namespace DS4Windows
                 if (device.PrimaryDevice && Global.UseIconChoice == TrayIconChoice.Battery)
                 {
                     InvokeBatteryChanged(cState.Battery);
+                }
+
+                bool currentCharging = device.isCharging();
+                if (cState.Battery != currentBattery[ind] || currentCharging != charging[ind])
+                {
+                    currentBattery[ind] = cState.Battery;
+                    charging[ind] = currentCharging;
+                    batteryToastNotifier.Update(ind, device.DisplayName, cState.Battery, currentCharging);
                 }
 
                 if (!device.PrimaryDevice)

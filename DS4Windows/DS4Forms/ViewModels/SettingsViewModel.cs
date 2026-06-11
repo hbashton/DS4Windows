@@ -125,6 +125,21 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             set => Global.ProfileChangedNotification = value;
         }
 
+        public bool BatteryToastNotifications
+        {
+            get => Global.BatteryToastNotifications;
+            set
+            {
+                if (Global.BatteryToastNotifications == value)
+                {
+                    return;
+                }
+
+                Global.BatteryToastNotifications = value;
+                Global.Save();
+            }
+        }
+
         public int ShowNotificationsIndex
         {
             get => DS4Windows.Global.Notifications;

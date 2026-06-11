@@ -288,6 +288,10 @@
                         </StackPanel>
                         <CheckBox Content="{lex:Loc ProfileSwitchNotification}" IsChecked="{Binding ProfileChangedNotification}"
                                   Visibility="{Binding IsProfileChangedCheckVisible}" Margin="16 0 0 10"/>
+                        <CheckBox Content="Battery notifications" IsChecked="{Binding BatteryToastNotifications}"
+                                  FontFamily="Segoe UI Variable, Segoe UI"
+                                  ToolTip="Alert at 75%, 50%, 25%, and 10%."
+                                  Margin="16 0 0 10"/>
                         <CheckBox Content="{lex:Loc DisconnectFromBtWhenStopping}" Margin="{StaticResource spaceMargin}"
                               IsChecked="{Binding DisconnectBTStop}" />
                         <StackPanel Orientation="Horizontal" Margin="{StaticResource spaceMargin}">

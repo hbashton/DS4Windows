@@ -1697,6 +1697,12 @@ namespace DS4Windows
             set => m_Config.verboseStartupLogging = value;
         }
 
+        public static bool BatteryToastNotifications
+        {
+            get => m_Config.batteryToastNotifications;
+            set => m_Config.batteryToastNotifications = value;
+        }
+
         public static bool getQuickCharge()
         {
             return m_Config.quickCharge;
@@ -3966,6 +3972,7 @@ namespace DS4Windows
         public bool useMoonlight = false;
         public bool useAdvancedMoonlight = false;
         public bool verboseStartupLogging = false;
+        public bool batteryToastNotifications = false;
         public bool closeMini = false;
         public List<SpecialAction> actions = new List<SpecialAction>();
         public List<DS4ControlSettings>[] ds4settings = new List<DS4ControlSettings>[Global.TEST_PROFILE_ITEM_COUNT]
@@ -8271,6 +8278,9 @@ namespace DS4Windows
                     }
                     catch { missingSetting = true; }
 
+                    try { Item = m_Xdoc.SelectSingleNode("/Profile/BatteryToastNotifications"); Boolean.TryParse(Item.InnerText, out batteryToastNotifications); }
+                    catch { missingSetting = true; }
+
                     try { Item = m_Xdoc.SelectSingleNode("/Profile/DisconnectBTAtStop"); Boolean.TryParse(Item.InnerText, out disconnectBTAtStop); }
                     catch { missingSetting = true; }
                     try { Item = m_Xdoc.SelectSingleNode("/Profile/SwipeProfiles"); Boolean.TryParse(Item.InnerText, out swipeProfiles); }
@@ -8624,6 +8634,7 @@ namespace DS4Windows
             }
 
             XmlNode xmlNotifications = m_Xdoc.CreateNode(XmlNodeType.Element, "Notifications", null); xmlNotifications.InnerText = notifications.ToString(); rootElement.AppendChild(xmlNotifications);
+            XmlNode xmlBatteryToastNotifications = m_Xdoc.CreateNode(XmlNodeType.Element, "BatteryToastNotifications", null); xmlBatteryToastNotifications.InnerText = batteryToastNotifications.ToString(); rootElement.AppendChild(xmlBatteryToastNotifications);
             XmlNode xmlDisconnectBT = m_Xdoc.CreateNode(XmlNodeType.Element, "DisconnectBTAtStop", null); xmlDisconnectBT.InnerText = disconnectBTAtStop.ToString(); rootElement.AppendChild(xmlDisconnectBT);
             XmlNode xmlSwipeProfiles = m_Xdoc.CreateNode(XmlNodeType.Element, "SwipeProfiles", null); xmlSwipeProfiles.InnerText = swipeProfiles.ToString(); rootElement.AppendChild(xmlSwipeProfiles);
             //XmlNode xmlDS4Mapping = m_Xdoc.CreateNode(XmlNodeType.Element, "UseDS4ForMapping", null); xmlDS4Mapping.InnerText = ds4Mapping.ToString(); rootElement.AppendChild(xmlDS4Mapping);

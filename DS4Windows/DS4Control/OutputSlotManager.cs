@@ -19,6 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -101,9 +102,15 @@ namespace DS4Windows
         public void Stop(bool immediate = false)
         {
             UnplugRemainingControllers(immediate);
-            while (RunningQueue)
+            Stopwatch queueWait = Stopwatch.StartNew();
+            while (RunningQueue && queueWait.ElapsedMilliseconds < 2000)
             {
-                Thread.SpinWait(500);
+                Thread.Sleep(1);
+            }
+
+            if (RunningQueue)
+            {
+                ControlService.StartupDiag("OutputSlotManager.Stop timed out waiting for queued output task");
             }
 
             deviceDict.Clear();

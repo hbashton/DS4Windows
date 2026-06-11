@@ -2091,10 +2091,14 @@ namespace DS4Windows
                         }
                         else
                         {
-                            DS4LightBar.forcelight[i] = false;
-                            DS4LightBar.forcedFlash[i] = 0;
-                            DS4LightBar.defaultLight = true;
-                            DS4LightBar.updateLightBar(DS4Controllers[i], i);
+                            if (!immediateUnplug)
+                            {
+                                DS4LightBar.forcelight[i] = false;
+                                DS4LightBar.forcedFlash[i] = 0;
+                                DS4LightBar.defaultLight = true;
+                                DS4LightBar.updateLightBar(DS4Controllers[i], i);
+                            }
+
                             tempDevice.IsRemoved = true;
                             tempDevice.StopUpdate();
                             DS4Devices.RemoveDevice(tempDevice);
@@ -2157,10 +2161,17 @@ namespace DS4Windows
                 if (showlog)
                     LogDebug(DS4WinWPF.Properties.Resources.StoppedDS4Windows);
 
-                while (outputslotMan.RunningQueue)
+                Stopwatch outputQueueWait = Stopwatch.StartNew();
+                while (outputslotMan.RunningQueue && outputQueueWait.ElapsedMilliseconds < 2000)
                 {
-                    Thread.SpinWait(500);
+                    Thread.Sleep(1);
                 }
+
+                if (outputslotMan.RunningQueue)
+                {
+                    StartupDiag("ControlService.Stop timed out waiting for output slot queue");
+                }
+
                 StartupDiag("ControlService.Stop outputslotMan.Stop begin");
                 outputslotMan.Stop(true);
                 StartupDiag("ControlService.Stop outputslotMan.Stop end");

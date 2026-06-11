@@ -222,18 +222,32 @@ namespace DS4Windows
         public override void Disconnect()
         {
             ControlService.StartupDiag("Xbox360OutDevice.Disconnect begin");
-            foreach (KeyValuePair<int, Xbox360FeedbackReceivedEventHandler> pair in forceFeedbacksDict)
+            if (cont != null)
             {
-                cont.FeedbackReceived -= pair.Value;
+                foreach (KeyValuePair<int, Xbox360FeedbackReceivedEventHandler> pair in forceFeedbacksDict)
+                {
+                    cont.FeedbackReceived -= pair.Value;
+                }
             }
 
             forceFeedbacksDict.Clear();
 
             connected = false;
             ControlService.StartupDiag("Xbox360OutDevice.Disconnect cont.Disconnect begin");
-            cont.Disconnect();
-            ControlService.StartupDiag("Xbox360OutDevice.Disconnect cont.Disconnect end");
-            cont = null;
+            try
+            {
+                cont?.Disconnect();
+                ControlService.StartupDiag("Xbox360OutDevice.Disconnect cont.Disconnect end");
+            }
+            catch (Exception ex)
+            {
+                ControlService.StartupDiag($"Xbox360OutDevice.Disconnect exception {ex.GetType().Name}: {ex.Message}");
+            }
+            finally
+            {
+                cont = null;
+            }
+
             ControlService.StartupDiag("Xbox360OutDevice.Disconnect end");
         }
         public override string GetDeviceType() => devType;
@@ -249,9 +263,12 @@ namespace DS4Windows
 
         public override void RemoveFeedbacks()
         {
-            foreach (KeyValuePair<int, Xbox360FeedbackReceivedEventHandler> pair in forceFeedbacksDict)
+            if (cont != null)
             {
-                cont.FeedbackReceived -= pair.Value;
+                foreach (KeyValuePair<int, Xbox360FeedbackReceivedEventHandler> pair in forceFeedbacksDict)
+                {
+                    cont.FeedbackReceived -= pair.Value;
+                }
             }
 
             forceFeedbacksDict.Clear();
@@ -259,7 +276,8 @@ namespace DS4Windows
 
         public override void RemoveFeedback(int inIdx)
         {
-            if (forceFeedbacksDict.TryGetValue(inIdx, out Xbox360FeedbackReceivedEventHandler handler))
+            if (cont != null &&
+                forceFeedbacksDict.TryGetValue(inIdx, out Xbox360FeedbackReceivedEventHandler handler))
             {
                 cont.FeedbackReceived -= handler;
                 forceFeedbacksDict.Remove(inIdx);

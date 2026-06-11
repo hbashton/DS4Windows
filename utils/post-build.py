@@ -24,6 +24,7 @@ def copy_virtual_dualsense_driver(repo_dir: Path, package_dir: Path):
         "FOLLOW_UP.md",
         "HBashtonVirtualDualSense.inf",
         "install-driver.ps1",
+        "uninstall-driver.ps1",
         "check-driver.ps1",
     ]:
         source_file = driver_dir / file_name

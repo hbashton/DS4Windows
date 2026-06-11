@@ -91,9 +91,29 @@ namespace DS4WinWPF
             runShutdown = true;
             skipSave = true;
 
+            if (DS4Windows.GameBarIntegration.TryRunProbeCommand(e.Args))
+            {
+                runShutdown = false;
+                Current.Shutdown();
+                return;
+            }
+
             ArgumentParser parser = new ArgumentParser();
             parser.Parse(e.Args);
             CheckOptions(parser);
+
+            try
+            {
+                string exeDir = Path.GetDirectoryName(DS4Windows.Global.exelocation);
+                if (!string.IsNullOrEmpty(exeDir))
+                {
+                    Environment.CurrentDirectory = exeDir;
+                }
+            }
+            catch
+            {
+                // Keep startup going. A bad working directory should not block DS4Windows.
+            }
 
             if (exitApp)
             {
@@ -207,8 +227,12 @@ namespace DS4WinWPF
             logger.Info($"OS Release ID: {DS4Windows.Util.GetOSReleaseId()}");
             logger.Info($"System Architecture: {(Environment.Is64BitOperatingSystem ? "x64" : "x86")}");
             logger.Info("Logger created");
+            StartupDiag(logger, $"App bootstrap pid={Environment.ProcessId} admin={DS4Windows.Global.IsAdministrator()} cwd=\"{Environment.CurrentDirectory}\" cmd=\"{Environment.CommandLine}\"");
+            StartupDiag(logger, $"Exe location=\"{DS4Windows.Global.exelocation}\" configPath=\"{DS4Windows.Global.appdatapath}\" firstRun={firstRun}");
 
+            StartupDiag(logger, "Global.Load begin");
             bool readAppConfig = DS4Windows.Global.Load();
+            StartupDiag(logger, $"Global.Load end readAppConfig={readAppConfig}");
             if (!firstRun && !readAppConfig)
             {
                 logger.Info($@"Profiles.xml not read at location ${DS4Windows.Global.appdatapath}\Profiles.xml. Using default app settings");
@@ -241,9 +265,16 @@ namespace DS4WinWPF
 
             skipSave = false;
 
+            StartupDiag(logger, "Global.LoadActions begin");
             if (!DS4Windows.Global.LoadActions())
             {
+                StartupDiag(logger, "Global.LoadActions failed; CreateStdActions begin");
                 DS4Windows.Global.CreateStdActions();
+                StartupDiag(logger, "CreateStdActions end");
+            }
+            else
+            {
+                StartupDiag(logger, "Global.LoadActions end success");
             }
 
             // Have app use selected culture
@@ -251,16 +282,24 @@ namespace DS4WinWPF
             DS4Windows.AppThemeChoice themeChoice = DS4Windows.Global.UseCurrentTheme;
             ChangeTheme(DS4Windows.Global.UseCurrentTheme, false);
 
+            StartupDiag(logger, "LoadLinkedProfiles begin");
             DS4Windows.Global.LoadLinkedProfiles();
+            StartupDiag(logger, "LoadLinkedProfiles end");
+            StartupDiag(logger, "MainWindow ctor begin");
             DS4Forms.MainWindow window = new DS4Forms.MainWindow(parser);
+            StartupDiag(logger, "MainWindow ctor end");
             MainWindow = window;
             window.IsInitialShow = true;
+            StartupDiag(logger, "MainWindow.Show begin");
             window.Show();
+            StartupDiag(logger, "MainWindow.Show end");
             window.IsInitialShow = false;
 
             // Set up hooks for IPC command calls
             HwndSource source = PresentationSource.FromVisual(window) as HwndSource;
+            StartupDiag(logger, "CreateIPCClassNameMMF begin");
             CreateIPCClassNameMMF(source.Handle);
+            StartupDiag(logger, "CreateIPCClassNameMMF end");
 
             window.CheckMinStatus();
 
@@ -269,11 +308,28 @@ namespace DS4WinWPF
 
             if (DS4Windows.Global.hidHideInstalled)
             {
+                StartupDiag(logger, "CheckHidHidePresence begin");
                 rootHub.CheckHidHidePresence();
+                StartupDiag(logger, "CheckHidHidePresence end");
             }
 
+            StartupDiag(logger, "LoadPermanentSlotsConfig begin");
             rootHub.LoadPermanentSlotsConfig();
+            StartupDiag(logger, "LoadPermanentSlotsConfig end");
+            StartupDiag(logger, "MainWindow.LateChecks begin");
             window.LateChecks(parser);
+            StartupDiag(logger, "MainWindow.LateChecks returned");
+        }
+
+        private static void StartupDiag(Logger logger, string message)
+        {
+            if (!DS4Windows.Global.VerboseStartupLogging)
+            {
+                return;
+            }
+
+            logger.Info($"[StartupDiag][T{Thread.CurrentThread.ManagedThreadId}] {message}");
+            LogManager.Flush(TimeSpan.FromSeconds(1));
         }
 
         private void CurrentDomain_UnhandledException(object sender, UnhandledExceptionEventArgs e)
@@ -786,16 +842,28 @@ namespace DS4WinWPF
         {
             if (runShutdown)
             {
+                bool shutdownTimedOut = false;
                 if (rootHub != null)
                 {
-                    Task.Run(() =>
+                    Task shutdownTask = Task.Run(() =>
                     {
                         if (rootHub.running)
                         {
                             rootHub.Stop(immediateUnplug: true, disposeViGEm: false);
                             rootHub.ShutDown();
                         }
-                    }).Wait();
+                    });
+
+                    if (!shutdownTask.Wait(TimeSpan.FromSeconds(8)))
+                    {
+                        shutdownTimedOut = true;
+                        try
+                        {
+                            logHolder?.Logger?.Warn("Timed out while stopping controller service during shutdown. Forcing process exit to avoid a stale single-instance lock.");
+                            rootHub.PrepareAbort();
+                        }
+                        catch { }
+                    }
                 }
 
                 if (!skipSave)
@@ -810,8 +878,11 @@ namespace DS4WinWPF
                 if (threadComEvent != null)
                 {
                     threadComEvent.Set();  // signal the other instance.
-                    while (testThread.IsAlive)
-                        Thread.SpinWait(500);
+                    if (testThread != null && !testThread.Join(2000))
+                    {
+                        shutdownTimedOut = true;
+                        logHolder?.Logger?.Warn("Timed out waiting for single-instance worker thread to exit.");
+                    }
                     threadComEvent.Close();
                 }
 
@@ -819,6 +890,11 @@ namespace DS4WinWPF
 
                 LogManager.Flush();
                 LogManager.Shutdown();
+
+                if (shutdownTimedOut)
+                {
+                    Environment.Exit(0);
+                }
             }
         }
     }

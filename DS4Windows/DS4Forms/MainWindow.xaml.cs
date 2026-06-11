@@ -189,9 +189,13 @@ namespace DS4WinWPF.DS4Forms
 
         public void LateChecks(ArgumentParser parser)
         {
+            ControlService.StartupDiag($"MainWindow.LateChecks scheduled stopArg={parser.Stop}");
             Task tempTask = Task.Run(() =>
             {
+                ControlService.StartupDiag("MainWindow.LateChecks task begin");
+                ControlService.StartupDiag("MainWindow.CheckDrivers begin");
                 mainWinVM.CheckDrivers();
+                ControlService.StartupDiag("MainWindow.CheckDrivers end");
                 if (!parser.Stop)
                 {
                     Dispatcher.BeginInvoke((Action)(() =>
@@ -199,9 +203,12 @@ namespace DS4WinWPF.DS4Forms
                         StartStopBtn.IsEnabled = false;
                     }));
                     Thread.Sleep(1000);
+                    ControlService.StartupDiag("rootHub.Start begin from LateChecks");
                     App.rootHub.Start();
+                    ControlService.StartupDiag("rootHub.Start end from LateChecks");
                     //root.rootHubtest.Start();
                 }
+                ControlService.StartupDiag("MainWindow.LateChecks task end");
             });
 
             // Log exceptions that might occur
@@ -845,9 +852,7 @@ Suspend support not enabled.", true);
         {
             autoProfilesTimer.Stop();
             //Console.WriteLine("Event triggered");
-            App.rootHub.UpdateGameBarProfileState();
             autoprofileChecker.Process();
-            App.rootHub.UpdateGameBarProfileState();
 
             if (autoprofileChecker.Running)
             {

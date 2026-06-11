@@ -213,6 +213,7 @@ namespace DS4Windows
         // ViGEm-created DS4 controllers report the Sony VID with one of these PIDs.
         private static readonly int[] VirtualDS4Pids = { 0x05C4, 0x09CC };
         private static readonly TimeSpan OwnVirtualDS4PendingTimeout = TimeSpan.FromSeconds(2);
+        private const string VigemVirtualDS4MacPrefix = "C0:13:37";
 
         private static HashSet<string> SnapshotVirtualDS4Paths()
         {
@@ -318,6 +319,14 @@ namespace DS4Windows
             {
                 return ownVirtualDS4Paths.Count > 0 && ownVirtualDS4Paths.Contains(devicePath);
             }
+        }
+
+        private static bool HasViGEmVirtualDS4Identity(HidDevice hDevice, string serial)
+        {
+            return hDevice.Attributes.VendorId == SONY_VID &&
+                VirtualDS4Pids.Contains(hDevice.Attributes.ProductId) &&
+                !string.IsNullOrEmpty(serial) &&
+                serial.StartsWith(VigemVirtualDS4MacPrefix, StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsRealDS4(HidDevice hDevice)
@@ -487,6 +496,12 @@ namespace DS4Windows
                         else
                         {
                             serial = hDevice.ReadSerial(DS4Device.SERIAL_FEATURE_ID);
+                        }
+
+                        if (HasViGEmVirtualDS4Identity(hDevice, serial))
+                        {
+                            hDevice.Dispose();
+                            continue;
                         }
 
                         bool validSerial = !serial.Equals(DS4Device.BLANK_SERIAL);

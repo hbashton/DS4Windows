@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   test:
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
 
@@ -41,7 +41,7 @@ jobs:
         run: dotnet test .\DS4WindowsTests\DS4WindowsTests.csproj -c Release -p:Platform=x64 --verbosity normal --filter "Name!=CheckSettingsSave&Name!=CheckWriteProfile&Name!=CheckJaysProfileRead"
 
   build:
-    runs-on: windows-latest
+    runs-on: windows-2022
     needs: test
     strategy:
       fail-fast: false

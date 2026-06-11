@@ -5,10 +5,12 @@ DualSense output path.
 
 DS4Windows cannot create a real DualSense HID device through ViGEmBus today.
 The intended backend is a KMDF HID source driver using Microsoft VHF. The
-driver exposes `GUID_DEVINTERFACE_HBASHTON_VIRTUAL_DUALSENSE` and the
-compatibility symlink `\\.\HBashtonVirtualDualSense`; DS4Windows opens that
-device and sends IOCTLs to create virtual pads and submit DualSense-shaped USB
-or Bluetooth input reports.
+driver exposes a dedicated control symlink,
+`\\.\HBashtonVirtualDualSenseControl`, for DS4Windows IOCTLs. The root PnP
+device still publishes `GUID_DEVINTERFACE_HBASHTON_VIRTUAL_DUALSENSE` and the
+compatibility symlink `\\.\HBashtonVirtualDualSense`, but new DS4Windows builds
+open the control device first so VHF/HID stack IOCTL handling cannot intercept
+private pad commands.
 
 Current contract:
 
@@ -42,7 +44,7 @@ Backend implementation:
 
 - `driver/Driver.c`
   Creates the KMDF root device, compatibility symbolic link, device interface,
-  and sequential IOCTL queue.
+  dedicated control device, and sequential IOCTL queues.
 - `driver/Pad.c`
   Owns up to eight VHF-backed virtual DualSense pads. Each create request calls
   `VhfCreate` and `VhfStart`; each submit request calls `VhfReadReportSubmit`.

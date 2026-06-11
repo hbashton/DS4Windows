@@ -15,6 +15,7 @@ typedef struct _VDS_PAD_CONTEXT
 {
     ULONG PadId;
     BOOLEAN Active;
+    BOOLEAN Destroying;
     VHFHANDLE VhfHandle;
     struct _DEVICE_CONTEXT* ParentContext;
     ULONG OutputSequence;

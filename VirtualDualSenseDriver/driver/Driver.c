@@ -34,6 +34,7 @@ HBashtonVdsEvtDeviceAdd(
 
     WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&deviceAttributes, DEVICE_CONTEXT);
     deviceAttributes.EvtCleanupCallback = HBashtonVdsEvtDeviceContextCleanup;
+    deviceAttributes.ExecutionLevel = WdfExecutionLevelPassive;
 
     status = WdfDeviceCreate(&DeviceInit, &deviceAttributes, &device);
     if (!NT_SUCCESS(status))

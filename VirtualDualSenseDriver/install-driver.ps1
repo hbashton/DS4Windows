@@ -41,13 +41,14 @@ if ($LASTEXITCODE -ne 0) {
     throw "pnputil failed while staging the driver package. Exit code: $LASTEXITCODE"
 }
 
+$helperTypeName = "RootDeviceInstaller_" + [Guid]::NewGuid().ToString("N")
 $source = @"
 using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Text;
 
-public static class RootDeviceInstaller
+public static class $helperTypeName
 {
     private const int DICD_GENERATE_ID = 0x00000001;
     private const int DIF_REGISTERDEVICE = 0x00000019;
@@ -155,17 +156,20 @@ public static class RootDeviceInstaller
 }
 "@
 
-Add-Type -TypeDefinition $source
+$installerType = Add-Type -TypeDefinition $source -PassThru | Where-Object { $_.Name -eq $helperTypeName } | Select-Object -First 1
+if ($installerType -eq $null) {
+    throw "Failed to compile root device installer helper."
+}
 
 if (-not (Test-RootDevicePresent)) {
     Write-Host "Creating root-enumerated device $hardwareId..."
-    [RootDeviceInstaller]::CreateRootDevice($rootDeviceName, $hardwareId)
+    $installerType.GetMethod("CreateRootDevice").Invoke($null, @($rootDeviceName, $hardwareId))
 } else {
     Write-Host "Root-enumerated device already exists."
 }
 
 Write-Host "Binding driver package to $hardwareId..."
-$rebootRequired = [RootDeviceInstaller]::UpdateDriver($hardwareId, $infPath, $Force.IsPresent)
+$rebootRequired = [bool]$installerType.GetMethod("UpdateDriver").Invoke($null, @($hardwareId, $infPath, $Force.IsPresent))
 
 Write-Host "Refreshing Plug and Play device tree..."
 & pnputil.exe /scan-devices | Write-Host

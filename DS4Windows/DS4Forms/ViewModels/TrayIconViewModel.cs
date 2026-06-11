@@ -143,28 +143,48 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         private void ClearControllerList(object sender, EventArgs e)
         {
-            _colLocker.EnterWriteLock();
-            controllerList.Clear();
-            _colLocker.ExitWriteLock();
+            using (WriteLocker locker = new WriteLocker(_colLocker))
+            {
+                foreach (ControllerHolder holder in controllerList)
+                {
+                    RemoveDeviceEvents(holder.Device);
+                }
+
+                controllerList.Clear();
+            }
         }
 
         private void UnhookEvents(object sender, EventArgs e)
         {
-            _colLocker.EnterReadLock();
-            foreach (ControllerHolder holder in controllerList)
+            using (ReadLocker locker = new ReadLocker(_colLocker))
             {
-                DS4Device currentDev = holder.Device;
-                RemoveDeviceEvents(currentDev);
+                foreach (ControllerHolder holder in controllerList)
+                {
+                    RemoveDeviceEvents(holder.Device);
+                }
             }
-            _colLocker.ExitReadLock();
         }
 
         private void Service_HotplugController(ControlService sender, DS4Device device, int index)
         {
-            SetupDeviceEvents(device);
-            _colLocker.EnterWriteLock();
-            controllerList.Add(new ControllerHolder(device, index));
-            _colLocker.ExitWriteLock();
+            try
+            {
+                if (device == null)
+                {
+                    return;
+                }
+
+                using (WriteLocker locker = new WriteLocker(_colLocker))
+                {
+                    controllerList.RemoveAll(holder => holder.Device == device || holder.Index == index);
+                    controllerList.Add(new ControllerHolder(device, index));
+                    SetupDeviceEvents(device);
+                }
+            }
+            catch (Exception ex)
+            {
+                DS4Windows.AppLogger.LogToGui($"Tray hotplug update failed: {ex.Message}", true);
+            }
         }
 
         private void ProfileListCol_CollectionChanged(object sender,
@@ -175,7 +195,14 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         private void BuildControllerList(object sender, EventArgs e)
         {
-            PopulateControllerList();
+            try
+            {
+                PopulateControllerList();
+            }
+            catch (Exception ex)
+            {
+                DS4Windows.AppLogger.LogToGui($"Tray controller list update failed: {ex.Message}", true);
+            }
         }
 
         public void PopulateContextMenu()
@@ -271,7 +298,12 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         {
             MenuItem item = sender as MenuItem;
             int idx = Convert.ToInt32(item.Tag);
-            ControllerHolder holder = controllerList[idx];
+            ControllerHolder holder = GetControllerHolderByListIndex(idx);
+            if (holder == null)
+            {
+                return;
+            }
+
             // Un-escape underscores is MenuItem header. Header holds the profile name
             string tempProfileName = Regex.Replace(item.Header.ToString(),
                 "_{2}", "_");
@@ -283,7 +315,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         {
             MenuItem item = sender as MenuItem;
             int idx = Convert.ToInt32(item.Tag);
-            ControllerHolder holder = controllerList[idx];
+            ControllerHolder holder = GetControllerHolderByListIndex(idx);
             DS4Device tempDev = holder?.Device;
             if (tempDev != null && tempDev.Synced && !tempDev.Charging)
             {
@@ -303,15 +335,31 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         private void PopulateControllerList()
         {
-            //IEnumerable<DS4Device> devices = DS4Devices.getDS4Controllers();
-            int idx = 0;
-            _colLocker.EnterWriteLock();
-            foreach (DS4Device currentDev in controlService.slotManager.ControllerColl)
+            List<ControllerHolder> holders = new List<ControllerHolder>();
+            using (ReadLocker slotLocker = new ReadLocker(controlService.slotManager.CollectionLocker))
             {
-                controllerList.Add(new ControllerHolder(currentDev, idx));
-                idx++;
+                int idx = 0;
+                foreach (DS4Device currentDev in controlService.slotManager.ControllerColl)
+                {
+                    holders.Add(new ControllerHolder(currentDev, idx));
+                    idx++;
+                }
             }
-            _colLocker.ExitWriteLock();
+
+            using (WriteLocker locker = new WriteLocker(_colLocker))
+            {
+                foreach (ControllerHolder holder in controllerList)
+                {
+                    RemoveDeviceEvents(holder.Device);
+                }
+
+                controllerList.Clear();
+                foreach (ControllerHolder holder in holders)
+                {
+                    controllerList.Add(holder);
+                    SetupDeviceEvents(holder.Device);
+                }
+            }
         }
 
         private void StartPopulateText(object sender, EventArgs e)
@@ -332,17 +380,23 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         {
             //IEnumerable<DS4Device> devices = DS4Devices.getDS4Controllers();
             //foreach (DS4Device currentDev in devices)
-            _colLocker.EnterReadLock();
-            foreach (ControllerHolder holder in controllerList)
+            using (ReadLocker locker = new ReadLocker(_colLocker))
             {
-                DS4Device currentDev = holder.Device;
-                SetupDeviceEvents(currentDev);
+                foreach (ControllerHolder holder in controllerList)
+                {
+                    SetupDeviceEvents(holder.Device);
+                }
             }
-            _colLocker.ExitReadLock();
         }
 
         private void SetupDeviceEvents(DS4Device device)
         {
+            if (device == null)
+            {
+                return;
+            }
+
+            RemoveDeviceEvents(device);
             device.BatteryChanged += UpdateForBattery;
             device.ChargingChanged += UpdateForBattery;
             device.Removal += CurrentDev_Removal;
@@ -350,6 +404,11 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         private void RemoveDeviceEvents(DS4Device device)
         {
+            if (device == null)
+            {
+                return;
+            }
+
             device.BatteryChanged -= UpdateForBattery;
             device.ChargingChanged -= UpdateForBattery;
             device.Removal -= CurrentDev_Removal;
@@ -382,6 +441,14 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             }
 
             PopulateToolText();
+        }
+
+        private ControllerHolder GetControllerHolderByListIndex(int idx)
+        {
+            using (ReadLocker locker = new ReadLocker(_colLocker))
+            {
+                return idx >= 0 && idx < controllerList.Count ? controllerList[idx] : null;
+            }
         }
 
         private void HookEvents(object sender, EventArgs e)

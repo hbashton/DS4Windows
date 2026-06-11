@@ -194,7 +194,9 @@ namespace DS4Windows
 
         public override void Connect()
         {
+            ControlService.StartupDiag("Xbox360OutDevice.Connect cont.Connect begin");
             cont.Connect();
+            ControlService.StartupDiag("Xbox360OutDevice.Connect cont.Connect end");
             connected = true;
 
             if (_features.HasFlag(X360Features.XInputSlotNum))
@@ -203,10 +205,13 @@ namespace DS4Windows
                 Thread.Sleep(USER_INDEX_WAIT);
                 try
                 {
+                    ControlService.StartupDiag("Xbox360OutDevice.Connect UserIndex begin");
                     XinputSlotNum = cont.UserIndex;
+                    ControlService.StartupDiag($"Xbox360OutDevice.Connect UserIndex end slot={XinputSlotNum}");
                 }
                 catch (Exception)
                 {
+                    ControlService.StartupDiag("Xbox360OutDevice.Connect UserIndex exception; disabling feature");
                     // Failed to grab xinput slot number. Set default
                     // slot number and remove feature flag
                     _xInputSlotNum = XINPUT_SLOT_NUM_DEFAULT;
@@ -216,6 +221,7 @@ namespace DS4Windows
         }
         public override void Disconnect()
         {
+            ControlService.StartupDiag("Xbox360OutDevice.Disconnect begin");
             foreach (KeyValuePair<int, Xbox360FeedbackReceivedEventHandler> pair in forceFeedbacksDict)
             {
                 cont.FeedbackReceived -= pair.Value;
@@ -224,8 +230,11 @@ namespace DS4Windows
             forceFeedbacksDict.Clear();
 
             connected = false;
+            ControlService.StartupDiag("Xbox360OutDevice.Disconnect cont.Disconnect begin");
             cont.Disconnect();
+            ControlService.StartupDiag("Xbox360OutDevice.Disconnect cont.Disconnect end");
             cont = null;
+            ControlService.StartupDiag("Xbox360OutDevice.Disconnect end");
         }
         public override string GetDeviceType() => devType;
 

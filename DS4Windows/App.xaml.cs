@@ -207,8 +207,12 @@ namespace DS4WinWPF
             logger.Info($"OS Release ID: {DS4Windows.Util.GetOSReleaseId()}");
             logger.Info($"System Architecture: {(Environment.Is64BitOperatingSystem ? "x64" : "x86")}");
             logger.Info("Logger created");
+            StartupDiag(logger, $"App bootstrap pid={Environment.ProcessId} admin={DS4Windows.Global.IsAdministrator()} cwd=\"{Environment.CurrentDirectory}\" cmd=\"{Environment.CommandLine}\"");
+            StartupDiag(logger, $"Exe location=\"{DS4Windows.Global.exelocation}\" configPath=\"{DS4Windows.Global.appdatapath}\" firstRun={firstRun}");
 
+            StartupDiag(logger, "Global.Load begin");
             bool readAppConfig = DS4Windows.Global.Load();
+            StartupDiag(logger, $"Global.Load end readAppConfig={readAppConfig}");
             if (!firstRun && !readAppConfig)
             {
                 logger.Info($@"Profiles.xml not read at location ${DS4Windows.Global.appdatapath}\Profiles.xml. Using default app settings");
@@ -241,9 +245,16 @@ namespace DS4WinWPF
 
             skipSave = false;
 
+            StartupDiag(logger, "Global.LoadActions begin");
             if (!DS4Windows.Global.LoadActions())
             {
+                StartupDiag(logger, "Global.LoadActions failed; CreateStdActions begin");
                 DS4Windows.Global.CreateStdActions();
+                StartupDiag(logger, "CreateStdActions end");
+            }
+            else
+            {
+                StartupDiag(logger, "Global.LoadActions end success");
             }
 
             // Have app use selected culture
@@ -251,16 +262,24 @@ namespace DS4WinWPF
             DS4Windows.AppThemeChoice themeChoice = DS4Windows.Global.UseCurrentTheme;
             ChangeTheme(DS4Windows.Global.UseCurrentTheme, false);
 
+            StartupDiag(logger, "LoadLinkedProfiles begin");
             DS4Windows.Global.LoadLinkedProfiles();
+            StartupDiag(logger, "LoadLinkedProfiles end");
+            StartupDiag(logger, "MainWindow ctor begin");
             DS4Forms.MainWindow window = new DS4Forms.MainWindow(parser);
+            StartupDiag(logger, "MainWindow ctor end");
             MainWindow = window;
             window.IsInitialShow = true;
+            StartupDiag(logger, "MainWindow.Show begin");
             window.Show();
+            StartupDiag(logger, "MainWindow.Show end");
             window.IsInitialShow = false;
 
             // Set up hooks for IPC command calls
             HwndSource source = PresentationSource.FromVisual(window) as HwndSource;
+            StartupDiag(logger, "CreateIPCClassNameMMF begin");
             CreateIPCClassNameMMF(source.Handle);
+            StartupDiag(logger, "CreateIPCClassNameMMF end");
 
             window.CheckMinStatus();
 
@@ -269,11 +288,28 @@ namespace DS4WinWPF
 
             if (DS4Windows.Global.hidHideInstalled)
             {
+                StartupDiag(logger, "CheckHidHidePresence begin");
                 rootHub.CheckHidHidePresence();
+                StartupDiag(logger, "CheckHidHidePresence end");
             }
 
+            StartupDiag(logger, "LoadPermanentSlotsConfig begin");
             rootHub.LoadPermanentSlotsConfig();
+            StartupDiag(logger, "LoadPermanentSlotsConfig end");
+            StartupDiag(logger, "MainWindow.LateChecks begin");
             window.LateChecks(parser);
+            StartupDiag(logger, "MainWindow.LateChecks returned");
+        }
+
+        private static void StartupDiag(Logger logger, string message)
+        {
+            if (!DS4Windows.Global.VerboseStartupLogging)
+            {
+                return;
+            }
+
+            logger.Info($"[StartupDiag][T{Thread.CurrentThread.ManagedThreadId}] {message}");
+            LogManager.Flush(TimeSpan.FromSeconds(1));
         }
 
         private void CurrentDomain_UnhandledException(object sender, UnhandledExceptionEventArgs e)

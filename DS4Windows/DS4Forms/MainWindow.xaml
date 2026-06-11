@@ -311,6 +311,9 @@
                         <CheckBox Content="{lex:Loc QuickCharge}" Margin="{StaticResource spaceMargin}"
                               IsChecked="{Binding QuickCharge}"
                               ToolTip="{lex:Loc Resources:QuickCharge}" />
+                        <CheckBox Content="Enable startup diagnostics" Margin="{StaticResource spaceMargin}"
+                              IsChecked="{Binding VerboseStartupLogging}"
+                              ToolTip="Writes detailed startup diagnostic markers to the log. Disable after testing." />
                         <StackPanel Orientation="Horizontal" Margin="{StaticResource spaceMargin}">
                             <Label Content="{lex:Loc IconChoice}" ContentStringFormat="{}{0}:"/>
                             <ComboBox x:Name="useIconChoiceCom" SelectedIndex="{Binding IconChoiceIndex,FallbackValue='0'}" Margin="10,0,0,0">

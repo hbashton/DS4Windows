@@ -19,6 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text;
@@ -40,11 +41,13 @@ namespace DS4Windows
         private const int MaxAutomationVisitCount = 500;
         private const int MaxAutomationDepth = 5;
         private const int MaxDiagnosticTextLength = 160;
-        private const int LiveGameBarApiPollMs = 500;
+        private const int LiveGameBarApiPollMs = 1000;
         private const int LiveGameBarApiCacheMs = 1500;
-        private const int LiveGameBarApiHangMs = 1500;
+        private const int LiveGameBarApiProbeTimeoutMs = 1500;
+        private const int LiveGameBarApiHangMs = 2500;
         private const int LiveAutomationPollMs = 1000;
         private const int LiveAutomationCacheMs = 3000;
+        public const string ProbeArgument = "--ds4windows-gamebar-probe";
         private static readonly object detectionStatusLock = new object();
         private static readonly object gameBarApiPollLock = new object();
         private static bool gameBarApiPollRunning;
@@ -106,6 +109,46 @@ namespace DS4Windows
             public int Top;
             public int Right;
             public int Bottom;
+        }
+
+        public static bool TryRunProbeCommand(string[] args)
+        {
+            if (args == null ||
+                args.Length < 2 ||
+                !args[0].Equals(ProbeArgument, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            RunProbeCommand(args[1]);
+            return true;
+        }
+
+        private static void RunProbeCommand(string resultPath)
+        {
+            bool supported = false;
+            bool visible = false;
+            bool inputRedirected = false;
+            string status = "not started";
+
+            try
+            {
+                supported = TryGetGameBarApiStateCore(out visible, out inputRedirected, out status);
+            }
+            catch (Exception ex)
+            {
+                status = ex.GetType().Name + ": " + ex.Message;
+            }
+
+            try
+            {
+                File.WriteAllText(resultPath,
+                    $"{supported}|{visible}|{inputRedirected}|{SanitizeProbeStatus(status)}",
+                    Encoding.UTF8);
+            }
+            catch
+            {
+            }
         }
 
         public bool IsRunningElevated()
@@ -230,7 +273,8 @@ namespace DS4Windows
                         Stopwatch stopwatch = Stopwatch.StartNew();
                         try
                         {
-                            supported = TryGetGameBarApiStateCore(out apiVisible, out apiInputRedirected, out apiStatus);
+                            supported = TryGetGameBarApiStateOutOfProcess(LiveGameBarApiProbeTimeoutMs,
+                                out apiVisible, out apiInputRedirected, out apiStatus);
                             visible = supported && (apiVisible || apiInputRedirected);
                         }
                         catch (Exception ex)
@@ -403,38 +447,158 @@ namespace DS4Windows
 
         private static string GetGameBarApiDiagnostics()
         {
-            bool supported = TryGetGameBarApiState(500, out bool visible, out bool inputRedirected, out string status);
+            bool supported = TryGetGameBarApiStateOutOfProcess(2000, out bool visible, out bool inputRedirected, out string status);
             return $"GameBarApi supported={supported} visible={visible} inputRedirected={inputRedirected} status='{TruncateDiagnosticText(status)}'";
         }
 
-        private static bool TryGetGameBarApiState(int timeoutMs, out bool visible, out bool inputRedirected, out string status)
+        private static bool TryParseProbeResult(string result, out bool supported, out bool visible, out bool inputRedirected, out string status)
         {
-            bool apiSupported = false;
-            bool apiVisible = false;
-            bool apiInputRedirected = false;
-            string apiStatus = "not started";
+            supported = false;
+            visible = false;
+            inputRedirected = false;
+            status = string.Empty;
 
-            Thread worker = new Thread(() =>
+            if (string.IsNullOrEmpty(result))
             {
-                apiSupported = TryGetGameBarApiStateCore(out apiVisible, out apiInputRedirected, out apiStatus);
-            });
-
-            worker.IsBackground = true;
-            worker.Name = "DS4Windows Game Bar API Probe";
-            worker.Start();
-
-            if (!worker.Join(timeoutMs))
-            {
-                visible = false;
-                inputRedirected = false;
-                status = $"timeout after {timeoutMs}ms";
                 return false;
             }
 
-            visible = apiVisible;
-            inputRedirected = apiInputRedirected;
-            status = apiStatus;
-            return apiSupported;
+            string[] parts = result.Split(new[] { '|' }, 4);
+            if (parts.Length < 4)
+            {
+                return false;
+            }
+
+            if (!bool.TryParse(parts[0], out supported) ||
+                !bool.TryParse(parts[1], out visible) ||
+                !bool.TryParse(parts[2], out inputRedirected))
+            {
+                supported = false;
+                visible = false;
+                inputRedirected = false;
+                return false;
+            }
+
+            status = parts[3];
+            return true;
+        }
+
+        private static string SanitizeProbeStatus(string status)
+        {
+            if (string.IsNullOrEmpty(status))
+            {
+                return string.Empty;
+            }
+
+            return status.Replace('|', '/').Replace('\r', ' ').Replace('\n', ' ');
+        }
+
+        private static void TryKillProbeProcess(Process process)
+        {
+            try
+            {
+                if (process != null && !process.HasExited)
+                {
+                    process.Kill(true);
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static void TryDeleteProbeFile(string resultPath)
+        {
+            try
+            {
+                if (!string.IsNullOrEmpty(resultPath) && File.Exists(resultPath))
+                {
+                    File.Delete(resultPath);
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static bool TryGetGameBarApiStateOutOfProcess(int timeoutMs, out bool visible, out bool inputRedirected, out string status)
+        {
+            visible = false;
+            inputRedirected = false;
+
+            string exePath = Environment.ProcessPath;
+            if (string.IsNullOrEmpty(exePath))
+            {
+                try
+                {
+                    exePath = Process.GetCurrentProcess().MainModule?.FileName;
+                }
+                catch
+                {
+                    exePath = string.Empty;
+                }
+            }
+
+            if (string.IsNullOrEmpty(exePath) || !File.Exists(exePath))
+            {
+                status = "probe exe not found";
+                return false;
+            }
+
+            string resultPath = Path.Combine(Path.GetTempPath(), "DS4Windows.GameBarProbe." + Guid.NewGuid().ToString("N") + ".txt");
+            Process process = null;
+            try
+            {
+                ProcessStartInfo startInfo = new ProcessStartInfo
+                {
+                    FileName = exePath,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden,
+                };
+
+                startInfo.ArgumentList.Add(ProbeArgument);
+                startInfo.ArgumentList.Add(resultPath);
+
+                process = Process.Start(startInfo);
+                if (process == null)
+                {
+                    status = "probe process did not start";
+                    return false;
+                }
+
+                if (!process.WaitForExit(timeoutMs))
+                {
+                    TryKillProbeProcess(process);
+                    status = $"probe timeout after {timeoutMs}ms";
+                    return false;
+                }
+
+                if (!File.Exists(resultPath))
+                {
+                    status = $"probe exited {process.ExitCode} without result";
+                    return false;
+                }
+
+                string result = File.ReadAllText(resultPath, Encoding.UTF8);
+                if (!TryParseProbeResult(result, out bool supported, out visible, out inputRedirected, out status))
+                {
+                    status = "invalid probe result: " + TruncateDiagnosticText(result);
+                    return false;
+                }
+
+                return supported;
+            }
+            catch (Exception ex)
+            {
+                status = ex.GetType().Name + ": " + ex.Message;
+                return false;
+            }
+            finally
+            {
+                process?.Dispose();
+                TryDeleteProbeFile(resultPath);
+            }
         }
 
         private static bool IsGameBarVisibleByAutomation()

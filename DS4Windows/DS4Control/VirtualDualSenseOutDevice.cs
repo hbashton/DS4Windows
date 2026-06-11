@@ -18,9 +18,13 @@ namespace DS4Windows
     public class VirtualDualSenseOutDevice : OutputDevice
     {
         public const string DevType = "DualSense";
+        private const VirtualDualSenseBusMode DriverBusMode = VirtualDualSenseBusMode.Bluetooth;
         private const int OutputReportPollPeriodMs = 15;
         private const byte UsbOutputReportId = 0x02;
+        private const byte BluetoothOutputReportId = 0x31;
+        private const byte BluetoothOutputDataId = 0x10;
         private const int MinUsbOutputReportLength = 48;
+        private const int MinBluetoothOutputReportLength = 49;
 
         private readonly VirtualDualSenseDriverClient driverClient;
         private Timer outputReportPollTimer;
@@ -36,7 +40,7 @@ namespace DS4Windows
 
         public override void Connect()
         {
-            driverClient.Connect();
+            driverClient.Connect(DriverBusMode);
             Volatile.Write(ref submitFailureLogged, 0);
             Volatile.Write(ref lastInputDeviceIndex, -1);
             connected = true;
@@ -60,7 +64,7 @@ namespace DS4Windows
 
             try
             {
-                driverClient.SubmitInputReport(VirtualDualSenseInputReport.BuildUsbReport(state));
+                driverClient.SubmitInputReport(BuildInputReport(state));
             }
             catch (Win32Exception ex)
             {
@@ -78,7 +82,7 @@ namespace DS4Windows
             {
                 try
                 {
-                    driverClient.SubmitInputReport(VirtualDualSenseInputReport.BuildUsbReport(new DS4State()));
+                    driverClient.SubmitInputReport(BuildInputReport(new DS4State()));
                 }
                 catch (Win32Exception ex)
                 {
@@ -138,12 +142,12 @@ namespace DS4Windows
                 }
 
                 lastOutputReportSequence = sequence;
-                if (!IsUsbOutputReport02(report))
+                if (!TryNormalizeOutputReport(report, out byte[] usbOutputReport))
                 {
                     return;
                 }
 
-                ApplyOutputReportToPhysicalController(report);
+                ApplyOutputReportToPhysicalController(usbOutputReport);
             }
             catch (Win32Exception ex)
             {
@@ -169,6 +173,37 @@ namespace DS4Windows
             return report != null &&
                 report.Length >= MinUsbOutputReportLength &&
                 report[0] == UsbOutputReportId;
+        }
+
+        private static bool TryNormalizeOutputReport(byte[] report, out byte[] usbOutputReport)
+        {
+            usbOutputReport = null;
+
+            if (IsUsbOutputReport02(report))
+            {
+                usbOutputReport = report;
+                return true;
+            }
+
+            if (report == null ||
+                report.Length < MinBluetoothOutputReportLength ||
+                report[0] != BluetoothOutputReportId ||
+                report[1] != BluetoothOutputDataId)
+            {
+                return false;
+            }
+
+            usbOutputReport = new byte[MinUsbOutputReportLength];
+            usbOutputReport[0] = UsbOutputReportId;
+            Buffer.BlockCopy(report, 2, usbOutputReport, 1, MinUsbOutputReportLength - 1);
+            return true;
+        }
+
+        private static byte[] BuildInputReport(DS4State state)
+        {
+            return DriverBusMode == VirtualDualSenseBusMode.Bluetooth
+                ? VirtualDualSenseInputReport.BuildBluetoothReport(state)
+                : VirtualDualSenseInputReport.BuildUsbReport(state);
         }
 
         private void ApplyOutputReportToPhysicalController(byte[] report)

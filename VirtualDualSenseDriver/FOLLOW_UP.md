@@ -54,10 +54,15 @@ Still needs validation on a WDK machine:
 
 1. Confirm Device Manager and HID tools report Sony VID `054C`, DualSense PID
    `0CE6`, and product string `Wireless Controller`.
-2. Confirm the virtual device exposes the expected DualSense USB report
-   descriptor.
-3. Confirm games/tools that look for a DualSense see the virtual device as a
+2. Confirm USB mode exposes the expected DualSense USB report descriptor.
+3. Confirm Bluetooth mode exposes the expected DualSense Bluetooth report
+   descriptor and accepts the 10-byte basic input report `0x01`.
+4. Confirm games/tools that look for a DualSense see the virtual device as a
    DualSense, not just a generic HID gamepad.
+5. Inspect the virtual child devnode instance IDs. VHF should expose a HID child
+   with the Sony VID/PID, but it is not expected to create a real
+   `BTHENUM\...` Bluetooth stack child. That likely requires a dedicated
+   Bluetooth/profile/bus driver below HID, not only VHF.
 
 ## Input Report Validation
 
@@ -91,12 +96,14 @@ Implemented:
    while the virtual DualSense is connected.
 2. It tracks the last output report sequence number so the same report is not
    processed repeatedly.
-3. It parses USB DualSense output report `0x02` first and ignores other report
-   IDs for now.
-4. If the source controller is a physical DualSense, DS4Windows maps ordinary
+3. It parses USB DualSense output report `0x02` first.
+4. It also accepts Bluetooth DualSense output report `0x31` with data report
+   byte `0x10`, then normalizes bytes `2..48` into the existing USB `0x02`
+   parser shape.
+5. If the source controller is a physical DualSense, DS4Windows maps ordinary
    rumble, lightbar color, player LED mask, mute LED mode, and raw adaptive
    trigger bytes back to that physical controller.
-5. Advanced haptics/audio/audio-device behavior remains intentionally out of
+6. Advanced haptics/audio/audio-device behavior remains intentionally out of
    scope until the base HID loop is proven stable.
 
 Next validation:
@@ -125,9 +132,30 @@ Next validation:
 
 ## Known Limitations
 
-- This is a USB-shaped virtual DualSense, not Bluetooth transport emulation.
+- This is a USB or Bluetooth-HID-shaped virtual DualSense over VHF, not real
+  Bluetooth transport emulation.
+- Bluetooth mode currently submits the basic 10-byte report `0x01`, so it does
+  not include gyro, touch contacts, battery, or mute button state yet.
 - Bluetooth audio passthrough to the controller speaker is not solved here.
 - Advanced Sony haptics over Bluetooth still require deeper transport/driver
   work.
+- True `BTHENUM` hardware instances are not created by this driver. If an app
+  hard-requires the Microsoft Bluetooth stack's exact device tree rather than
+  the HID VID/PID/report descriptor, the next step is a real virtual Bluetooth
+  transport/profile driver or a bus driver that can safely enumerate that stack.
 - The DS4Windows app can select DualSense output now, but the backend must be
   installed and working before a virtual controller appears in Windows.
+
+## Fake Bluetooth Adapter Decision Point
+
+Do not spoof Bluetooth class or `BTHENUM` IDs from the current VHF source
+driver. Microsoft's Bluetooth profile-driver model expects drivers to
+communicate through `BthPort.sys`, and a software adapter would need to emulate
+the lower HCI/radio or profile transport layer well enough for Windows to own
+enumeration. That is a separate signed bus/transport driver, not an INF tweak.
+
+Build that adapter only if CI plus hardware/app testing proves that HID
+descriptor-level Bluetooth emulation is not enough for target games. If needed,
+start from the WDK Bluetooth profile samples and design a separate
+`HBashtonVirtualBluetoothDualSense` transport that feeds HID reports into this
+same DS4Windows mapping path instead of replacing it.

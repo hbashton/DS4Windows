@@ -21,18 +21,65 @@ HBashtonVdsFindPadById(
     return NULL;
 }
 
+static
+NTSTATUS
+HBashtonVdsResolveBusMode(
+    _In_ ULONG BusMode,
+    _Out_ PCUCHAR* ReportDescriptor,
+    _Out_ PULONG ReportDescriptorSize,
+    _Out_ PUCHAR InputReportId,
+    _Out_ PULONG InputReportSize
+    )
+{
+    switch (BusMode)
+    {
+        case HBASHTON_VDS_BUS_MODE_USB:
+            *ReportDescriptor = DualSenseUsbReportDescriptor;
+            *ReportDescriptorSize = sizeof(DualSenseUsbReportDescriptor);
+            *InputReportId = HBASHTON_DUALSENSE_USB_INPUT_REPORT_ID;
+            *InputReportSize = HBASHTON_DUALSENSE_USB_INPUT_REPORT_SIZE;
+            return STATUS_SUCCESS;
+
+        case HBASHTON_VDS_BUS_MODE_BLUETOOTH:
+            *ReportDescriptor = DualSenseBluetoothReportDescriptor;
+            *ReportDescriptorSize = sizeof(DualSenseBluetoothReportDescriptor);
+            *InputReportId = HBASHTON_DUALSENSE_BLUETOOTH_INPUT_REPORT_ID;
+            *InputReportSize = HBASHTON_DUALSENSE_BLUETOOTH_INPUT_REPORT_SIZE;
+            return STATUS_SUCCESS;
+
+        default:
+            return STATUS_INVALID_PARAMETER;
+    }
+}
+
 NTSTATUS
 HBashtonVdsCreatePad(
     _In_ WDFDEVICE Device,
+    _In_ ULONG BusMode,
     _Out_ PULONG PadId
     )
 {
     NTSTATUS status = STATUS_INSUFFICIENT_RESOURCES;
     PDEVICE_CONTEXT deviceContext = DeviceGetContext(Device);
     PVDS_PAD_CONTEXT pad = NULL;
+    PCUCHAR reportDescriptor = NULL;
+    ULONG reportDescriptorSize = 0;
+    UCHAR inputReportId = 0;
+    ULONG inputReportSize = 0;
     VHF_CONFIG vhfConfig;
 
     *PadId = 0;
+
+    status = HBashtonVdsResolveBusMode(
+        BusMode,
+        &reportDescriptor,
+        &reportDescriptorSize,
+        &inputReportId,
+        &inputReportSize);
+    if (!NT_SUCCESS(status))
+    {
+        return status;
+    }
 
     WdfWaitLockAcquire(deviceContext->PadLock, NULL);
     for (ULONG i = 0; i < HBASHTON_VDS_MAX_PADS; i++)
@@ -43,6 +90,9 @@ HBashtonVdsCreatePad(
             RtlZeroMemory(pad, sizeof(*pad));
             pad->PadId = deviceContext->NextPadId++;
             pad->ParentContext = deviceContext;
+            pad->BusMode = BusMode;
+            pad->InputReportId = inputReportId;
+            pad->InputReportSize = inputReportSize;
             if (deviceContext->NextPadId == 0)
             {
                 deviceContext->NextPadId = 1;
@@ -62,8 +112,8 @@ HBashtonVdsCreatePad(
     VHF_CONFIG_INIT(
         &vhfConfig,
         WdfDeviceWdmGetDeviceObject(Device),
-        sizeof(DualSenseUsbReportDescriptor),
-        (PUCHAR)DualSenseUsbReportDescriptor);
+        reportDescriptorSize,
+        (PUCHAR)reportDescriptor);
 
     vhfConfig.VendorID = SONY_VENDOR_ID;
     vhfConfig.ProductID = DUALSENSE_PRODUCT_ID;
@@ -137,7 +187,8 @@ NTSTATUS
 HBashtonVdsSubmitInputReport(
     _In_ WDFDEVICE Device,
     _In_ ULONG PadId,
-    _In_reads_bytes_(HBASHTON_DUALSENSE_USB_INPUT_REPORT_SIZE) PUCHAR Report
+    _In_reads_bytes_(ReportLength) PUCHAR Report,
+    _In_ ULONG ReportLength
     )
 {
     NTSTATUS status;
@@ -145,7 +196,7 @@ HBashtonVdsSubmitInputReport(
     PVDS_PAD_CONTEXT pad;
     HID_XFER_PACKET transferPacket;
 
-    if (Report[0] != HBASHTON_DUALSENSE_USB_INPUT_REPORT_ID)
+    if (Report == NULL || ReportLength == 0)
     {
         return STATUS_INVALID_PARAMETER;
     }
@@ -158,10 +209,16 @@ HBashtonVdsSubmitInputReport(
         return STATUS_NOT_FOUND;
     }
 
+    if (ReportLength != pad->InputReportSize || Report[0] != pad->InputReportId)
+    {
+        WdfWaitLockRelease(deviceContext->PadLock);
+        return STATUS_INVALID_PARAMETER;
+    }
+
     RtlZeroMemory(&transferPacket, sizeof(transferPacket));
-    transferPacket.reportId = HBASHTON_DUALSENSE_USB_INPUT_REPORT_ID;
+    transferPacket.reportId = pad->InputReportId;
     transferPacket.reportBuffer = Report;
-    transferPacket.reportBufferLen = HBASHTON_DUALSENSE_USB_INPUT_REPORT_SIZE;
+    transferPacket.reportBufferLen = ReportLength;
 
     status = VhfReadReportSubmit(pad->VhfHandle, &transferPacket);
     WdfWaitLockRelease(deviceContext->PadLock);

@@ -16,6 +16,9 @@ typedef struct _VDS_PAD_CONTEXT
     ULONG PadId;
     BOOLEAN Active;
     BOOLEAN Destroying;
+    ULONG BusMode;
+    UCHAR InputReportId;
+    ULONG InputReportSize;
     VHFHANDLE VhfHandle;
     struct _DEVICE_CONTEXT* ParentContext;
     ULONG OutputSequence;
@@ -40,12 +43,13 @@ EVT_WDF_OBJECT_CONTEXT_CLEANUP HBashtonVdsEvtDeviceContextCleanup;
 EVT_WDF_IO_QUEUE_IO_DEVICE_CONTROL HBashtonVdsEvtIoDeviceControl;
 EVT_VHF_ASYNC_OPERATION HBashtonVdsEvtVhfWriteReport;
 
-NTSTATUS HBashtonVdsCreatePad(_In_ WDFDEVICE Device, _Out_ PULONG PadId);
+NTSTATUS HBashtonVdsCreatePad(_In_ WDFDEVICE Device, _In_ ULONG BusMode, _Out_ PULONG PadId);
 NTSTATUS HBashtonVdsDestroyPad(_In_ WDFDEVICE Device, _In_ ULONG PadId);
 NTSTATUS HBashtonVdsSubmitInputReport(
     _In_ WDFDEVICE Device,
     _In_ ULONG PadId,
-    _In_reads_bytes_(HBASHTON_DUALSENSE_USB_INPUT_REPORT_SIZE) PUCHAR Report);
+    _In_reads_bytes_(ReportLength) PUCHAR Report,
+    _In_ ULONG ReportLength);
 NTSTATUS HBashtonVdsReadOutputReport(
     _In_ WDFDEVICE Device,
     _In_ ULONG PadId,

@@ -37,6 +37,21 @@ typedef struct _DUALSENSE_USB_INPUT_REPORT
     UCHAR BatteryStatus;
     UCHAR Reserved4[10];
 } DUALSENSE_USB_INPUT_REPORT, *PDUALSENSE_USB_INPUT_REPORT;
+
+typedef struct _DUALSENSE_BLUETOOTH_INPUT_REPORT
+{
+    UCHAR ReportId;
+    UCHAR LeftStickX;
+    UCHAR LeftStickY;
+    UCHAR RightStickX;
+    UCHAR RightStickY;
+    UCHAR DpadAndFaceButtons;
+    UCHAR ShoulderAndMenuButtons;
+    UCHAR SystemButtons;
+    UCHAR LeftTrigger;
+    UCHAR RightTrigger;
+} DUALSENSE_BLUETOOTH_INPUT_REPORT, *PDUALSENSE_BLUETOOTH_INPUT_REPORT;
 #pragma pack(pop)
 
 C_ASSERT(sizeof(DUALSENSE_USB_INPUT_REPORT) == 64);
+C_ASSERT(sizeof(DUALSENSE_BLUETOOTH_INPUT_REPORT) == 10);

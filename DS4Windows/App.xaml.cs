@@ -95,6 +95,19 @@ namespace DS4WinWPF
             parser.Parse(e.Args);
             CheckOptions(parser);
 
+            try
+            {
+                string exeDir = Path.GetDirectoryName(DS4Windows.Global.exelocation);
+                if (!string.IsNullOrEmpty(exeDir))
+                {
+                    Environment.CurrentDirectory = exeDir;
+                }
+            }
+            catch
+            {
+                // Keep startup going. A bad working directory should not block DS4Windows.
+            }
+
             if (exitApp)
             {
                 return;
@@ -822,16 +835,28 @@ namespace DS4WinWPF
         {
             if (runShutdown)
             {
+                bool shutdownTimedOut = false;
                 if (rootHub != null)
                 {
-                    Task.Run(() =>
+                    Task shutdownTask = Task.Run(() =>
                     {
                         if (rootHub.running)
                         {
                             rootHub.Stop(immediateUnplug: true, disposeViGEm: false);
                             rootHub.ShutDown();
                         }
-                    }).Wait();
+                    });
+
+                    if (!shutdownTask.Wait(TimeSpan.FromSeconds(8)))
+                    {
+                        shutdownTimedOut = true;
+                        try
+                        {
+                            logHolder?.Logger?.Warn("Timed out while stopping controller service during shutdown. Forcing process exit to avoid a stale single-instance lock.");
+                            rootHub.PrepareAbort();
+                        }
+                        catch { }
+                    }
                 }
 
                 if (!skipSave)
@@ -846,8 +871,11 @@ namespace DS4WinWPF
                 if (threadComEvent != null)
                 {
                     threadComEvent.Set();  // signal the other instance.
-                    while (testThread.IsAlive)
-                        Thread.SpinWait(500);
+                    if (testThread != null && !testThread.Join(2000))
+                    {
+                        shutdownTimedOut = true;
+                        logHolder?.Logger?.Warn("Timed out waiting for single-instance worker thread to exit.");
+                    }
                     threadComEvent.Close();
                 }
 
@@ -855,6 +883,11 @@ namespace DS4WinWPF
 
                 LogManager.Flush();
                 LogManager.Shutdown();
+
+                if (shutdownTimedOut)
+                {
+                    Environment.Exit(0);
+                }
             }
         }
     }

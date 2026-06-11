@@ -51,20 +51,33 @@ first-pass KMDF/VHF backend. The next work should be done in this order.
 
 ## Output Report Passthrough
 
-The backend now captures host write reports and DS4Windows can poll them through
-`VirtualDualSenseDriverClient.TryReadOutputReport`. The next step is to wire
-that into `VirtualDualSenseOutDevice`.
+The backend captures host write reports and DS4Windows polls them through
+`VirtualDualSenseDriverClient.TryReadOutputReport`.
 
-Recommended path:
+Implemented:
 
-1. Add a lightweight polling loop while the virtual DualSense is connected.
-2. Track the last output report sequence number so the same report is not
+1. `VirtualDualSenseOutDevice` starts a lightweight output-report polling timer
+   while the virtual DualSense is connected.
+2. It tracks the last output report sequence number so the same report is not
    processed repeatedly.
-3. Parse USB DualSense output report `0x02` first.
-4. Map ordinary rumble, lightbar, player LEDs, mute LED, and adaptive trigger
-   commands back to the real input controller when it is a physical DualSense.
-5. Leave advanced audio/haptic/audio-device behavior out of this path until the
-   base HID loop is proven stable.
+3. It parses USB DualSense output report `0x02` first and ignores other report
+   IDs for now.
+4. If the source controller is a physical DualSense, DS4Windows maps ordinary
+   rumble, lightbar color, player LED mask, mute LED mode, and raw adaptive
+   trigger bytes back to that physical controller.
+5. Advanced haptics/audio/audio-device behavior remains intentionally out of
+   scope until the base HID loop is proven stable.
+
+Next validation:
+
+1. Confirm VHF write callbacks deliver output report `0x02` with the report ID
+   in byte `0`. The driver now normalizes this when VHF supplies the report ID
+   separately from the report buffer.
+2. Use a DualSense-aware game or HID test app to write rumble/lightbar/trigger
+   output reports to the virtual controller and confirm the physical DualSense
+   receives matching effects.
+3. If effects are stale, inspect whether the physical DualSense input thread is
+   processing queued output events quickly enough.
 
 ## Packaging And Release
 

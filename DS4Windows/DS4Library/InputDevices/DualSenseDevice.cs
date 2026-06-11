@@ -188,6 +188,13 @@ namespace DS4Windows.InputDevices
                 triggerActuationFrequency = frequency;
             }
 
+            public void ChangeRaw(byte mode, byte startResistance, byte effectForce, byte rangeForce,
+                byte nearReleaseStrength, byte nearMiddleStrength, byte pressedStrength, byte frequency)
+            {
+                SetRaw(mode, startResistance, effectForce, rangeForce, nearReleaseStrength,
+                    nearMiddleStrength, pressedStrength, frequency);
+            }
+
             private void SetResistance(byte start, byte force)
             {
                 if (start > 9) start = 9;
@@ -1567,6 +1574,85 @@ namespace DS4Windows.InputDevices
             else
             {
                 throw new ArgumentOutOfRangeException("Invalid Trigger Id");
+            }
+
+            queueEvent(() =>
+            {
+                outputDirty = true;
+                currentHap.dirty = true;
+                PrepareOutReport();
+            });
+        }
+
+        public void ApplyVirtualDualSenseUsbOutputReport(byte[] report)
+        {
+            if (report == null || report.Length < USB_OUTPUT_CHANGE_LENGTH ||
+                report[0] != OUTPUT_REPORT_ID_USB)
+            {
+                return;
+            }
+
+            bool shouldWriteReport = false;
+            byte mainFlags = report[1];
+            byte ledFlags = report[2];
+
+            if ((mainFlags & 0x03) != 0)
+            {
+                setRumble(report[3], report[4]);
+                shouldWriteReport = true;
+            }
+
+            if ((mainFlags & 0x04) != 0)
+            {
+                r2EffectData.ChangeRaw(report[11], report[12], report[13], report[14],
+                    report[15], report[16], report[17], report[20]);
+                shouldWriteReport = true;
+            }
+
+            if ((mainFlags & 0x08) != 0)
+            {
+                l2EffectData.ChangeRaw(report[22], report[23], report[24], report[25],
+                    report[26], report[27], report[28], report[31]);
+                shouldWriteReport = true;
+            }
+
+            if ((ledFlags & 0x08) != 0)
+            {
+                muteLEDByte = 0x00;
+                activePlayerLEDMask = 0x00;
+                DS4LightbarState lightState = new DS4LightbarState
+                {
+                    LightBarColor = new DS4Color(0, 0, 0),
+                };
+                SetLightbarState(ref lightState);
+                shouldWriteReport = true;
+            }
+
+            if ((ledFlags & 0x01) != 0)
+            {
+                muteLEDByte = report[9];
+                shouldWriteReport = true;
+            }
+
+            if ((ledFlags & 0x10) != 0)
+            {
+                activePlayerLEDMask = report[44];
+                shouldWriteReport = true;
+            }
+
+            if ((ledFlags & 0x04) != 0)
+            {
+                DS4LightbarState lightState = new DS4LightbarState
+                {
+                    LightBarColor = new DS4Color(report[45], report[46], report[47]),
+                };
+                SetLightbarState(ref lightState);
+                shouldWriteReport = true;
+            }
+
+            if (!shouldWriteReport)
+            {
+                return;
             }
 
             queueEvent(() =>

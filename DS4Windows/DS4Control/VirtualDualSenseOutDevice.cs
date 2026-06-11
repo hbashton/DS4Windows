@@ -8,13 +8,25 @@ the Free Software Foundation, either version 3 of the License, or
 (at your option) any later version.
 */
 
+using System;
+using System.ComponentModel;
+using System.IO;
+using System.Threading;
+
 namespace DS4Windows
 {
     public class VirtualDualSenseOutDevice : OutputDevice
     {
         public const string DevType = "DualSense";
+        private const int OutputReportPollPeriodMs = 15;
+        private const byte UsbOutputReportId = 0x02;
+        private const int MinUsbOutputReportLength = 48;
 
         private readonly VirtualDualSenseDriverClient driverClient;
+        private Timer outputReportPollTimer;
+        private int outputPollInProgress;
+        private int lastInputDeviceIndex = -1;
+        private uint lastOutputReportSequence;
         private bool submitFailureLogged;
 
         public VirtualDualSenseOutDevice()
@@ -26,17 +38,19 @@ namespace DS4Windows
         {
             driverClient.Connect();
             connected = true;
+            StartOutputReportPolling();
         }
 
         public override void Disconnect()
         {
             connected = false;
+            StopOutputReportPolling();
             driverClient.Disconnect();
         }
 
         public override void ConvertandSendReport(DS4State state, int device)
         {
-            _ = device;
+            Volatile.Write(ref lastInputDeviceIndex, device);
             if (!connected)
             {
                 return;
@@ -46,11 +60,11 @@ namespace DS4Windows
             {
                 driverClient.SubmitInputReport(VirtualDualSenseInputReport.BuildUsbReport(state));
             }
-            catch (System.ComponentModel.Win32Exception ex)
+            catch (Win32Exception ex)
             {
                 LogSubmitFailure(ex.Message);
             }
-            catch (System.IO.IOException ex)
+            catch (IOException ex)
             {
                 LogSubmitFailure(ex.Message);
             }
@@ -82,9 +96,90 @@ namespace DS4Windows
             _ = inIdx;
         }
 
+        private void StartOutputReportPolling()
+        {
+            StopOutputReportPolling();
+            lastOutputReportSequence = 0;
+            outputPollInProgress = 0;
+            outputReportPollTimer = new Timer(PollOutputReports, null,
+                OutputReportPollPeriodMs, OutputReportPollPeriodMs);
+        }
+
+        private void StopOutputReportPolling()
+        {
+            Timer timer = Interlocked.Exchange(ref outputReportPollTimer, null);
+            timer?.Dispose();
+        }
+
+        private void PollOutputReports(object state)
+        {
+            _ = state;
+            if (!connected || Interlocked.Exchange(ref outputPollInProgress, 1) == 1)
+            {
+                return;
+            }
+
+            try
+            {
+                if (!driverClient.TryReadOutputReport(out byte[] report, out uint sequence) ||
+                    sequence == lastOutputReportSequence)
+                {
+                    return;
+                }
+
+                lastOutputReportSequence = sequence;
+                if (!IsUsbOutputReport02(report))
+                {
+                    return;
+                }
+
+                ApplyOutputReportToPhysicalController(report);
+            }
+            catch (Win32Exception ex)
+            {
+                LogSubmitFailure(ex.Message);
+            }
+            catch (IOException ex)
+            {
+                LogSubmitFailure(ex.Message);
+            }
+            catch (ObjectDisposedException)
+            {
+                connected = false;
+            }
+            finally
+            {
+                Volatile.Write(ref outputPollInProgress, 0);
+            }
+        }
+
+        private static bool IsUsbOutputReport02(byte[] report)
+        {
+            return report != null &&
+                report.Length >= MinUsbOutputReportLength &&
+                report[0] == UsbOutputReportId;
+        }
+
+        private void ApplyOutputReportToPhysicalController(byte[] report)
+        {
+            int deviceIndex = Volatile.Read(ref lastInputDeviceIndex);
+            if (deviceIndex < 0 ||
+                Program.rootHub == null ||
+                deviceIndex >= Program.rootHub.DS4Controllers.Length)
+            {
+                return;
+            }
+
+            if (Program.rootHub.DS4Controllers[deviceIndex] is InputDevices.DualSenseDevice dualSense)
+            {
+                dualSense.ApplyVirtualDualSenseUsbOutputReport(report);
+            }
+        }
+
         private void LogSubmitFailure(string message)
         {
             connected = false;
+            StopOutputReportPolling();
             driverClient.Disconnect();
 
             if (submitFailureLogged)

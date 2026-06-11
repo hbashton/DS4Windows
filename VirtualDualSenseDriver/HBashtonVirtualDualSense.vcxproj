@@ -45,6 +45,12 @@
     <Inf2CatUseLocalTime>true</Inf2CatUseLocalTime>
   </PropertyGroup>
 
+  <ItemDefinitionGroup>
+    <DriverSign>
+      <FileDigestAlgorithm Condition="'%(DriverSign.FileDigestAlgorithm)' == ''">sha256</FileDigestAlgorithm>
+    </DriverSign>
+  </ItemDefinitionGroup>
+
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <WarningLevel>Level4</WarningLevel>

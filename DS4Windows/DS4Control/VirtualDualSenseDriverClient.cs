@@ -26,6 +26,7 @@ namespace DS4Windows
 
     public sealed class VirtualDualSenseDriverClient : IDisposable
     {
+        public const string ControlDevicePath = @"\\.\HBashtonVirtualDualSenseControl";
         public const string DevicePath = @"\\.\HBashtonVirtualDualSense";
         public const string DeviceInterfaceGuid = "{F7F9D9A2-16A8-49D7-AC95-75D9289A1DA6}";
         public const uint IoctlDeviceType = 0x00000022;
@@ -176,6 +177,8 @@ namespace DS4Windows
 
         private static IEnumerable<string> EnumerateCandidateDevicePaths()
         {
+            yield return ControlDevicePath;
+
             foreach (string devicePath in EnumerateDeviceInterfacePaths())
             {
                 yield return devicePath;

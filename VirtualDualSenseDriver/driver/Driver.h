@@ -28,6 +28,7 @@ typedef struct _VDS_PAD_CONTEXT
 typedef struct _DEVICE_CONTEXT
 {
     WDFQUEUE IoQueue;
+    WDFDEVICE ControlDevice;
     WDFWAITLOCK PadLock;
     WDFSPINLOCK OutputReportLock;
     ULONG NextPadId;
@@ -36,10 +37,19 @@ typedef struct _DEVICE_CONTEXT
 
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(DEVICE_CONTEXT, DeviceGetContext)
 
+typedef struct _CONTROL_DEVICE_CONTEXT
+{
+    WDFDEVICE ParentDevice;
+} CONTROL_DEVICE_CONTEXT, *PCONTROL_DEVICE_CONTEXT;
+
+WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(CONTROL_DEVICE_CONTEXT, ControlDeviceGetContext)
+
 DRIVER_INITIALIZE DriverEntry;
 EVT_WDF_DRIVER_DEVICE_ADD HBashtonVdsEvtDeviceAdd;
 EVT_WDF_OBJECT_CONTEXT_CLEANUP HBashtonVdsEvtDeviceContextCleanup;
+EVT_WDF_OBJECT_CONTEXT_CLEANUP HBashtonVdsEvtControlDeviceContextCleanup;
 EVT_WDF_IO_QUEUE_IO_DEVICE_CONTROL HBashtonVdsEvtIoDeviceControl;
+EVT_WDF_IO_QUEUE_IO_DEVICE_CONTROL HBashtonVdsEvtControlIoDeviceControl;
 EVT_VHF_ASYNC_OPERATION HBashtonVdsEvtVhfWriteReport;
 
 NTSTATUS HBashtonVdsCreatePad(_In_ WDFDEVICE Device, _In_ ULONG BusMode, _Out_ PULONG PadId);

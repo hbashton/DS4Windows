@@ -1,6 +1,14 @@
 #include <initguid.h>
 #include "Driver.h"
 
+static NTSTATUS HBashtonVdsCreateControlDevice(_In_ WDFDRIVER Driver, _In_ WDFDEVICE ParentDevice);
+static VOID HBashtonVdsProcessIoDeviceControl(
+    _In_ WDFDEVICE Device,
+    _In_ WDFREQUEST Request,
+    _In_ size_t OutputBufferLength,
+    _In_ size_t InputBufferLength,
+    _In_ ULONG IoControlCode);
+
 NTSTATUS
 DriverEntry(
     _In_ PDRIVER_OBJECT DriverObject,
@@ -64,6 +72,12 @@ HBashtonVdsEvtDeviceAdd(
         return status;
     }
 
+    status = HBashtonVdsCreateControlDevice(Driver, device);
+    if (!NT_SUCCESS(status))
+    {
+        return status;
+    }
+
     status = WdfDeviceCreateSymbolicLink(device, &symbolicLink);
     if (!NT_SUCCESS(status))
     {
@@ -100,6 +114,12 @@ HBashtonVdsEvtDeviceContextCleanup(
     WDFDEVICE device = (WDFDEVICE)DeviceObject;
     PDEVICE_CONTEXT deviceContext = DeviceGetContext(device);
 
+    if (deviceContext->ControlDevice != NULL)
+    {
+        WdfObjectDelete(deviceContext->ControlDevice);
+        deviceContext->ControlDevice = NULL;
+    }
+
     for (ULONG i = 0; i < HBASHTON_VDS_MAX_PADS; i++)
     {
         if (deviceContext->Pads[i].Active && deviceContext->Pads[i].VhfHandle != NULL)
@@ -112,6 +132,86 @@ HBashtonVdsEvtDeviceContextCleanup(
 }
 
 VOID
+HBashtonVdsEvtControlDeviceContextCleanup(
+    _In_ WDFOBJECT DeviceObject
+    )
+{
+    PCONTROL_DEVICE_CONTEXT controlContext = ControlDeviceGetContext((WDFDEVICE)DeviceObject);
+    controlContext->ParentDevice = NULL;
+}
+
+static
+NTSTATUS
+HBashtonVdsCreateControlDevice(
+    _In_ WDFDRIVER Driver,
+    _In_ WDFDEVICE ParentDevice
+    )
+{
+    NTSTATUS status;
+    PWDFDEVICE_INIT controlInit;
+    WDFDEVICE controlDevice;
+    WDF_OBJECT_ATTRIBUTES controlAttributes;
+    WDF_IO_QUEUE_CONFIG queueConfig;
+    PCONTROL_DEVICE_CONTEXT controlContext;
+    PDEVICE_CONTEXT parentContext = DeviceGetContext(ParentDevice);
+    DECLARE_CONST_UNICODE_STRING(deviceName, HBASHTON_VDS_CONTROL_DEVICE_NAME);
+    DECLARE_CONST_UNICODE_STRING(symbolicLink, HBASHTON_VDS_CONTROL_SYMBOLIC_LINK);
+    DECLARE_CONST_UNICODE_STRING(sddl, L"D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;BU)");
+
+    controlInit = WdfControlDeviceInitAllocate(Driver, &sddl);
+    if (controlInit == NULL)
+    {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    WdfDeviceInitSetDeviceType(controlInit, FILE_DEVICE_UNKNOWN);
+    WdfDeviceInitSetIoType(controlInit, WdfDeviceIoBuffered);
+    WdfDeviceInitSetExclusive(controlInit, FALSE);
+
+    status = WdfDeviceInitAssignName(controlInit, &deviceName);
+    if (!NT_SUCCESS(status))
+    {
+        WdfDeviceInitFree(controlInit);
+        return status;
+    }
+
+    WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&controlAttributes, CONTROL_DEVICE_CONTEXT);
+    controlAttributes.EvtCleanupCallback = HBashtonVdsEvtControlDeviceContextCleanup;
+    controlAttributes.ExecutionLevel = WdfExecutionLevelPassive;
+
+    status = WdfDeviceCreate(&controlInit, &controlAttributes, &controlDevice);
+    if (!NT_SUCCESS(status))
+    {
+        return status;
+    }
+
+    controlContext = ControlDeviceGetContext(controlDevice);
+    controlContext->ParentDevice = ParentDevice;
+
+    status = WdfDeviceCreateSymbolicLink(controlDevice, &symbolicLink);
+    if (!NT_SUCCESS(status))
+    {
+        WdfObjectDelete(controlDevice);
+        return status;
+    }
+
+    WDF_IO_QUEUE_CONFIG_INIT_DEFAULT_QUEUE(&queueConfig, WdfIoQueueDispatchSequential);
+    queueConfig.PowerManaged = WdfFalse;
+    queueConfig.EvtIoDeviceControl = HBashtonVdsEvtControlIoDeviceControl;
+
+    status = WdfIoQueueCreate(controlDevice, &queueConfig, WDF_NO_OBJECT_ATTRIBUTES, WDF_NO_HANDLE);
+    if (!NT_SUCCESS(status))
+    {
+        WdfObjectDelete(controlDevice);
+        return status;
+    }
+
+    parentContext->ControlDevice = controlDevice;
+    WdfControlFinishInitializing(controlDevice);
+    return STATUS_SUCCESS;
+}
+
+VOID
 HBashtonVdsEvtIoDeviceControl(
     _In_ WDFQUEUE Queue,
     _In_ WDFREQUEST Request,
@@ -120,9 +220,53 @@ HBashtonVdsEvtIoDeviceControl(
     _In_ ULONG IoControlCode
     )
 {
+    HBashtonVdsProcessIoDeviceControl(
+        WdfIoQueueGetDevice(Queue),
+        Request,
+        OutputBufferLength,
+        InputBufferLength,
+        IoControlCode);
+}
+
+VOID
+HBashtonVdsEvtControlIoDeviceControl(
+    _In_ WDFQUEUE Queue,
+    _In_ WDFREQUEST Request,
+    _In_ size_t OutputBufferLength,
+    _In_ size_t InputBufferLength,
+    _In_ ULONG IoControlCode
+    )
+{
+    WDFDEVICE controlDevice = WdfIoQueueGetDevice(Queue);
+    PCONTROL_DEVICE_CONTEXT controlContext = ControlDeviceGetContext(controlDevice);
+    WDFDEVICE parentDevice = controlContext->ParentDevice;
+
+    if (parentDevice == NULL)
+    {
+        WdfRequestComplete(Request, STATUS_DEVICE_NOT_READY);
+        return;
+    }
+
+    HBashtonVdsProcessIoDeviceControl(
+        parentDevice,
+        Request,
+        OutputBufferLength,
+        InputBufferLength,
+        IoControlCode);
+}
+
+static
+VOID
+HBashtonVdsProcessIoDeviceControl(
+    _In_ WDFDEVICE Device,
+    _In_ WDFREQUEST Request,
+    _In_ size_t OutputBufferLength,
+    _In_ size_t InputBufferLength,
+    _In_ ULONG IoControlCode
+    )
+{
     NTSTATUS status = STATUS_INVALID_DEVICE_REQUEST;
     size_t bytesReturned = 0;
-    WDFDEVICE device = WdfIoQueueGetDevice(Queue);
 
     UNREFERENCED_PARAMETER(OutputBufferLength);
 
@@ -163,7 +307,7 @@ HBashtonVdsEvtIoDeviceControl(
                 NULL);
             if (NT_SUCCESS(status))
             {
-                status = HBashtonVdsCreatePad(device, busMode, &output->PadId);
+                status = HBashtonVdsCreatePad(Device, busMode, &output->PadId);
                 if (NT_SUCCESS(status))
                 {
                     bytesReturned = sizeof(HBASHTON_VDS_CREATE_PAD_OUT);
@@ -184,7 +328,7 @@ HBashtonVdsEvtIoDeviceControl(
                 NULL);
             if (NT_SUCCESS(status))
             {
-                status = HBashtonVdsDestroyPad(device, input->PadId);
+                status = HBashtonVdsDestroyPad(Device, input->PadId);
             }
 
             break;
@@ -211,7 +355,7 @@ HBashtonVdsEvtIoDeviceControl(
                 reportLength = (ULONG)(InputBufferLength -
                     FIELD_OFFSET(HBASHTON_VDS_SUBMIT_INPUT_REPORT_IN, Report));
                 status = HBashtonVdsSubmitInputReport(
-                    device,
+                    Device,
                     input->PadId,
                     input->Report,
                     reportLength);
@@ -242,7 +386,7 @@ HBashtonVdsEvtIoDeviceControl(
                 NULL);
             if (NT_SUCCESS(status))
             {
-                status = HBashtonVdsReadOutputReport(device, input->PadId, output);
+                status = HBashtonVdsReadOutputReport(Device, input->PadId, output);
                 if (NT_SUCCESS(status))
                 {
                     bytesReturned = sizeof(HBASHTON_VDS_READ_OUTPUT_REPORT_OUT);

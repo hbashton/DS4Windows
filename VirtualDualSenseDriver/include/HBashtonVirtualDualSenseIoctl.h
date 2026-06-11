@@ -14,6 +14,9 @@
 #define HBASHTON_VDS_DEVICE_NAME      L"\\Device\\HBashtonVirtualDualSense"
 #define HBASHTON_VDS_SYMBOLIC_LINK    L"\\DosDevices\\HBashtonVirtualDualSense"
 #define HBASHTON_VDS_USER_DEVICE_PATH L"\\\\.\\HBashtonVirtualDualSense"
+#define HBASHTON_VDS_CONTROL_DEVICE_NAME      L"\\Device\\HBashtonVirtualDualSenseControl"
+#define HBASHTON_VDS_CONTROL_SYMBOLIC_LINK    L"\\DosDevices\\HBashtonVirtualDualSenseControl"
+#define HBASHTON_VDS_USER_CONTROL_DEVICE_PATH L"\\\\.\\HBashtonVirtualDualSenseControl"
 
 // {F7F9D9A2-16A8-49D7-AC95-75D9289A1DA6}
 DEFINE_GUID(GUID_DEVINTERFACE_HBASHTON_VIRTUAL_DUALSENSE,

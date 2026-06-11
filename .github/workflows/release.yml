@@ -36,6 +36,10 @@ jobs:
       shell: bash
     - name: Add MSBuild to PATH
       uses: microsoft/setup-msbuild@v2
+    - name: Install WDK toolchain
+      shell: pwsh
+      timeout-minutes: 60
+      run: .\.github\scripts\install-wdk.ps1
     - name: Build experimental Virtual DualSense driver
       shell: pwsh
       run: .\VirtualDualSenseDriver\build-driver.ps1 -Configuration Release -Platform x64

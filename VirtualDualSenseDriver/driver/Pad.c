@@ -109,10 +109,15 @@ HBashtonVdsCreatePad(
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
+    if (reportDescriptorSize > 0xFFFF)
+    {
+        return STATUS_INVALID_BUFFER_SIZE;
+    }
+
     VHF_CONFIG_INIT(
         &vhfConfig,
         WdfDeviceWdmGetDeviceObject(Device),
-        reportDescriptorSize,
+        (USHORT)reportDescriptorSize,
         (PUCHAR)reportDescriptor);
 
     vhfConfig.VendorID = SONY_VENDOR_ID;

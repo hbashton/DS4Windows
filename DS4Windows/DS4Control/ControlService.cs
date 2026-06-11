@@ -20,6 +20,7 @@ using DS4Windows.DS4Control;
 using DS4WinWPF.DS4Control;
 using Microsoft.Win32;
 using Nefarius.ViGEm.Client;
+using NLog;
 using Sensorit.Base;
 using SharpOSC;
 using System;
@@ -68,6 +69,7 @@ namespace DS4Windows
         bool[] buttonsdown = new bool[MAX_DS4_CONTROLLER_COUNT] { false, false, false, false, false, false, false, false };
         bool[] held = new bool[MAX_DS4_CONTROLLER_COUNT];
         int[] oldmouse = new int[MAX_DS4_CONTROLLER_COUNT] { -1, -1, -1, -1, -1, -1, -1, -1 };
+        private int[] startupReportDiagCounts = new int[MAX_DS4_CONTROLLER_COUNT];
         public OutputDevice[] outputDevices = new OutputDevice[MAX_DS4_CONTROLLER_COUNT] { null, null, null, null, null, null, null, null };
         private OneEuroFilter3D[] udpEuroPairAccel = new OneEuroFilter3D[UdpServer.NUMBER_SLOTS]
         {
@@ -100,6 +102,7 @@ namespace DS4Windows
         public ControlServiceDeviceOptions DeviceOptions { get => deviceOptions; }
 
         private DS4WinWPF.ArgumentParser cmdParser;
+        private static readonly Logger startupDiagLogger = LogManager.GetCurrentClassLogger();
 
         public event EventHandler ServiceStarted;
         public event EventHandler PreServiceStop;
@@ -489,18 +492,26 @@ namespace DS4Windows
 
         private void InitOutputKBMHandler(string attemptVirtualkbmHandler)
         {
+            StartupDiag($"InitOutputKBMHandler begin requested={attemptVirtualkbmHandler}");
             Global.InitOutputKBMHandler(attemptVirtualkbmHandler);
+            StartupDiag($"InitOutputKBMHandler created handler={Global.outputKBMHandler?.GetIdentifier()}");
 
             bool handlerConnected = false;
             try
             {
+                StartupDiag($"OutputKBM.Connect begin handler={Global.outputKBMHandler?.GetIdentifier()}");
                 handlerConnected = Global.outputKBMHandler.Connect();
+                StartupDiag($"OutputKBM.Connect end handler={Global.outputKBMHandler?.GetIdentifier()} connected={handlerConnected}");
             }
-            catch { }
+            catch (Exception ex)
+            {
+                StartupDiag($"OutputKBM.Connect exception handler={Global.outputKBMHandler?.GetIdentifier()} {ex.GetType().Name}: {ex.Message}");
+            }
 
             if (!handlerConnected &&
                 attemptVirtualkbmHandler != VirtualKBMFactory.GetFallbackHandlerIdentifier())
             {
+                StartupDiag($"OutputKBM falling back to {VirtualKBMFactory.GetFallbackHandlerIdentifier()}");
                 Global.outputKBMHandler = VirtualKBMFactory.GetFallbackHandler();
             }
             else
@@ -515,6 +526,7 @@ namespace DS4Windows
             Global.InitOutputKBMMapping(Global.outputKBMHandler.GetIdentifier());
             Global.outputKBMMapping.PopulateConstants();
             Global.outputKBMMapping.PopulateMappings();
+            StartupDiag($"InitOutputKBMHandler end active={Global.outputKBMHandler?.GetFullDisplayName()} mapping={Global.outputKBMMapping?.GetType().Name}");
         }
 
         private bool SwitchOutputKBMHandler(string identifier)
@@ -1161,17 +1173,24 @@ namespace DS4Windows
 
         private void StartViGEm()
         {
+            StartupDiag("StartViGEm begin");
             // Refresh internal ViGEmBus info
             Global.RefreshViGEmBusInfo();
+            StartupDiag($"StartViGEm info installed={Global.vigemInstalled} version={Global.vigembusVersion} supported={Global.IsRunningSupportedViGEmBus()}");
             if (Global.IsRunningSupportedViGEmBus())
             {
                 tempThread = new Thread(() =>
                 {
                     try
                     {
+                        StartupDiag("ViGEmClient ctor begin");
                         vigemTestClient = new ViGEmClient();
+                        StartupDiag("ViGEmClient ctor end success");
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        StartupDiag($"ViGEmClient ctor exception {ex.GetType().Name}: {ex.Message}");
+                    }
                 });
                 tempThread.Priority = ThreadPriority.AboveNormal;
                 tempThread.IsBackground = true;
@@ -1183,13 +1202,16 @@ namespace DS4Windows
             }
 
             tempThread = null;
+            StartupDiag($"StartViGEm end clientCreated={vigemTestClient != null}");
         }
 
         private void StopViGEm()
         {
             if (vigemTestClient != null)
             {
+                StartupDiag("StopViGEm Dispose begin");
                 vigemTestClient.Dispose();
+                StartupDiag("StopViGEm Dispose end");
                 vigemTestClient = null;
             }
         }
@@ -1233,8 +1255,10 @@ namespace DS4Windows
 
         private OutputDevice EstablishOutDevice(int index, OutContType contType)
         {
+            StartupDiag($"EstablishOutDevice begin index={index} contType={contType} client={vigemTestClient != null}");
             OutputDevice temp = null;
             temp = outputslotMan.AllocateController(contType, vigemTestClient);
+            StartupDiag($"EstablishOutDevice end index={index} contType={contType} result={temp?.GetType().Name ?? "null"}");
             return temp;
         }
 
@@ -1521,11 +1545,13 @@ namespace DS4Windows
         public void PluginOutDev(int index, DS4Device device)
         {
             OutContType contType = Global.OutContType[index];
+            StartupDiag($"PluginOutDev enter index={index} contType={contType} useDInputOnly={useDInputOnly[index]} profileDInputOnly={getDInputOnly(index)}");
 
             OutSlotDevice slotDevice = null;
             if (!getDInputOnly(index))
             {
                 slotDevice = outputslotMan.FindExistUnboundSlotType(contType);
+                StartupDiag($"PluginOutDev existingSlot index={index} found={slotDevice != null} slot={(slotDevice != null ? slotDevice.Index + 1 : 0)}");
             }
 
             if (useDInputOnly[index])
@@ -1538,10 +1564,12 @@ namespace DS4Windows
                     if (slotDevice == null)
                     {
                         slotDevice = outputslotMan.FindOpenSlot();
+                        StartupDiag($"PluginOutDev X360 openSlot index={index} found={slotDevice != null} slot={(slotDevice != null ? slotDevice.Index + 1 : 0)}");
                         if (slotDevice != null)
                         {
                             Xbox360OutDevice tempXbox = EstablishOutDevice(index, OutContType.X360)
                             as Xbox360OutDevice;
+                            StartupDiag($"PluginOutDev X360 established index={index} null={tempXbox == null}");
                             //outputDevices[index] = tempXbox;
 
                             // Enable ViGem feedback callback handler only if lightbar/rumble data output is enabled (if those are disabled then no point enabling ViGem callback handler call)
@@ -1559,7 +1587,9 @@ namespace DS4Windows
                                 }
                             }
 
+                            StartupDiag($"PluginOutDev X360 DeferredPlugin begin index={index}");
                             outputslotMan.DeferredPlugin(tempXbox, index, $"{device.DisplayName} [{device.MacAddress}]", outputDevices, contType);
+                            StartupDiag($"PluginOutDev X360 DeferredPlugin end index={index}");
                             //slotDevice.CurrentInputBound = OutSlotDevice.InputBound.Bound;
 
                             success = true;
@@ -1571,6 +1601,7 @@ namespace DS4Windows
                     }
                     else
                     {
+                        StartupDiag($"PluginOutDev X360 reusing slot index={index} slot={slotDevice.Index + 1}");
                         slotDevice.CurrentInputBound = OutSlotDevice.InputBound.Bound;
                         Xbox360OutDevice tempXbox = slotDevice.OutputDevice as Xbox360OutDevice;
 
@@ -1603,10 +1634,12 @@ namespace DS4Windows
                     if (slotDevice == null)
                     {
                         slotDevice = outputslotMan.FindOpenSlot();
+                        StartupDiag($"PluginOutDev DS4 openSlot index={index} found={slotDevice != null} slot={(slotDevice != null ? slotDevice.Index + 1 : 0)}");
                         if (slotDevice != null)
                         {
                             DS4OutDevice tempDS4 = EstablishOutDevice(index, OutContType.DS4)
                             as DS4OutDevice;
+                            StartupDiag($"PluginOutDev DS4 established index={index} null={tempDS4 == null}");
 
                             // Enable ViGem feedback callback handler only if DS4 lightbar/rumble data output is enabled (if those are disabled then no point enabling ViGem callback handler call)
                             if (Global.EnableOutputDataToDS4[index])
@@ -1623,7 +1656,9 @@ namespace DS4Windows
                                 }
                             }
 
+                            StartupDiag($"PluginOutDev DS4 DeferredPlugin begin index={index}");
                             outputslotMan.DeferredPlugin(tempDS4, index, $"{device.DisplayName} [{device.MacAddress}]", outputDevices, contType);
+                            StartupDiag($"PluginOutDev DS4 DeferredPlugin end index={index}");
                             //slotDevice.CurrentInputBound = OutSlotDevice.InputBound.Bound;
 
                             success = true;
@@ -1635,6 +1670,7 @@ namespace DS4Windows
                     }
                     else
                     {
+                        StartupDiag($"PluginOutDev DS4 reusing slot index={index} slot={slotDevice.Index + 1}");
                         slotDevice.CurrentInputBound = OutSlotDevice.InputBound.Bound;
                         DS4OutDevice tempDS4 = slotDevice.OutputDevice as DS4OutDevice;
 
@@ -1672,11 +1708,17 @@ namespace DS4Windows
                 {
                     LogDebug($"Associated input controller #{index + 1} ({device.DisplayName}) to virtual {slotDevice.OutputDevice.GetDeviceType()} Controller in{(slotDevice.PermanentType != OutContType.None ? " permanent" : "")} output slot #{slotDevice.Index + 1}");
                     useDInputOnly[index] = false;
+                    StartupDiag($"PluginOutDev success index={index} slot={slotDevice.Index + 1} output={slotDevice.OutputDevice.GetDeviceType()}");
                 }
                 else
                 {
                     LogDebug("Failed. No output device was associated");
+                    StartupDiag($"PluginOutDev failed index={index} success={success} slotNull={slotDevice == null} slotOutputNull={slotDevice?.OutputDevice == null}");
                 }
+            }
+            else
+            {
+                StartupDiag($"PluginOutDev skipped index={index} useDInputOnly=false");
             }
         }
 
@@ -1718,13 +1760,18 @@ namespace DS4Windows
 
         public bool Start(bool showlog = true)
         {
+            StartupDiag($"ControlService.Start enter showlog={showlog} running={running} inServiceTask={inServiceTask} admin={Global.IsAdministrator()}");
             inServiceTask = true;
+            StartupDiag("ControlService.Start before StartViGEm");
             StartViGEm();
+            StartupDiag($"ControlService.Start after StartViGEm client={vigemTestClient != null}");
             if (vigemTestClient != null)
             //if (x360Bus.Open() && x360Bus.Start())
             {
                 // Initialize output KBM handler at start of ControlService
+                StartupDiag("ControlService.Start before InitOutputKBMHandler");
                 InitOutputKBMHandler();
+                StartupDiag($"ControlService.Start after InitOutputKBMHandler handler={Global.outputKBMHandler?.GetFullDisplayName()}");
 
                 if (showlog)
                     LogDebug(DS4WinWPF.Properties.Resources.Starting);
@@ -1743,11 +1790,15 @@ namespace DS4Windows
 
                 DS4Devices.isExclusiveMode = getUseExclusiveMode(); //Re-enable Exclusive Mode
 
+                StartupDiag($"UpdateHidHiddenAttributes begin exclusive={DS4Devices.isExclusiveMode}");
                 UpdateHidHiddenAttributes();
+                StartupDiag("UpdateHidHiddenAttributes end");
 
                 if (Global.openRGBSyncEnabled)
                 {
+                    StartupDiag($"OpenRGB start begin port={Global.openRGBServerPort}");
                     bool openRGBStarted = OpenRGBServer.Instance.Start(Global.openRGBServerPort);
+                    StartupDiag($"OpenRGB start end started={openRGBStarted}");
                     if (showlog)
                         LogDebug(openRGBStarted
                             ? $"OpenRGB server listening on port {Global.openRGBServerPort}"
@@ -1762,35 +1813,46 @@ namespace DS4Windows
 
                 if (isUsingOSCServer() && oscListener == null)
                 {
+                    StartupDiag("OSC listener start begin");
                     ChangeOSCListenerStatus(true);
+                    StartupDiag("OSC listener start requested");
                 }
 
                 if (isUsingOSCSender() && oscSender == null)
                 {
+                    StartupDiag("OSC sender start begin");
                     ChangeOSCSenderStatus(true);
+                    StartupDiag("OSC sender start requested");
                 }
 
                 if (isUsingUDPServer() && _udpServer == null)
                 {
+                    StartupDiag("UDP change-status start begin");
                     ChangeUDPStatus(true, false);
                     while (udpChangeStatus == true)
                     {
                         Thread.SpinWait(500);
                     }
+                    StartupDiag("UDP change-status start end");
                 }
 
                 try
                 {
                     loopControllers = true;
+                    StartupDiag("AssignInitialDevices begin");
                     AssignInitialDevices();
+                    StartupDiag("AssignInitialDevices end");
 
+                    StartupDiag("DS4Devices.findControllers dispatch begin");
                     eventDispatcher.Invoke(() =>
                     {
                         DS4Devices.findControllers();
                     });
+                    StartupDiag("DS4Devices.findControllers dispatch end");
 
                     IEnumerable<DS4Device> devices = DS4Devices.getDS4Controllers();
                     int numControllers = devices.Count();
+                    StartupDiag($"DS4Devices.getDS4Controllers count={numControllers}");
                     activeControllers = numControllers;
                     DS4LightBar.defaultLight = false;
                     int i = 0;
@@ -1799,8 +1861,11 @@ namespace DS4Windows
                         devEnum.MoveNext() && loopControllers; i++)
                     {
                         DS4Device device = devEnum.Current;
+                        StartupDiag($"Prepare controller loop index={i} type={device.DeviceType} display={device.DisplayName} mac={device.MacAddress} conn={device.ConnectionType} synced={device.isSynced()} primary={device.PrimaryDevice}");
 
+                        StartupDiag($"BeginPrepareConnectedInputController begin index={i}");
                         BeginPrepareConnectedInputController(device, showlog: true);
+                        StartupDiag($"BeginPrepareConnectedInputController end index={i}");
 
                         if (deviceOptions.JoyConDeviceOpts.LinkedMode == JoyConDeviceOptions.LinkMode.Joined)
                         {
@@ -1836,7 +1901,9 @@ namespace DS4Windows
 
                         DS4Controllers[i] = device;
                         device.DeviceSlotNumber = i;
+                        StartupDiag($"PrepareConnectedInputControllerSettingEvents begin index={i}");
                         PrepareConnectedInputControllerSettingEvents(numControllers, device, index: i);
+                        StartupDiag($"PrepareConnectedInputControllerSettingEvents end index={i}");
 
                         if (i >= CURRENT_DS4_CONTROLLER_LIMIT) // out of Xinput devices!
                             break;
@@ -1844,10 +1911,12 @@ namespace DS4Windows
                 }
                 catch (Exception e)
                 {
+                    StartupDiag($"ControlService.Start managed exception {e.GetType().Name}: {e.Message}");
                     LogDebug(e.Message, true);
                     AppLogger.LogToTray(e.Message, true);
                 }
 
+                StartupDiag("ControlService.Start setting running=true");
                 running = true;
 
                 if (_udpServer != null)
@@ -1858,11 +1927,14 @@ namespace DS4Windows
 
                     try
                     {
+                        StartupDiag($"UDP server Start begin address={UDP_SERVER_LISTEN_ADDRESS} port={UDP_SERVER_PORT}");
                         _udpServer.Start(UDP_SERVER_PORT, UDP_SERVER_LISTEN_ADDRESS);
                         LogDebug($"UDP server listening on address {UDP_SERVER_LISTEN_ADDRESS} port {UDP_SERVER_PORT}");
+                        StartupDiag("UDP server Start end");
                     }
                     catch (System.Net.Sockets.SocketException ex)
                     {
+                        StartupDiag($"UDP server Start exception {ex.SocketErrorCode}: {ex.Message}");
                         var errMsg = string.Format("Couldn't start UDP server on address {0}:{1}, outside applications won't be able to access pad data ({2})", UDP_SERVER_LISTEN_ADDRESS, UDP_SERVER_PORT, ex.SocketErrorCode);
 
                         LogDebug(errMsg, true);
@@ -1872,6 +1944,7 @@ namespace DS4Windows
             }
             else
             {
+                StartupDiag("ControlService.Start no ViGEm client");
                 string logMessage = string.Empty;
                 if (!vigemInstalled)
                 {
@@ -1892,10 +1965,13 @@ namespace DS4Windows
 
             inServiceTask = false;
             runHotPlug = true;
+            StartupDiag("ControlService.Start before ServiceStarted events");
             ServiceStarted?.Invoke(this, EventArgs.Empty);
             RunningChanged?.Invoke(this, EventArgs.Empty);
+            StartupDiag("ControlService.Start after RunningChanged");
             using var process = Process.GetCurrentProcess();
             process.PriorityClass = MainWindow.ProcessPriorityClasses[Global.ProcessPriority];
+            StartupDiag($"ControlService.Start exit priority={process.PriorityClass}");
             return true;
         }
 
@@ -1962,15 +2038,22 @@ namespace DS4Windows
 
         public bool Stop(bool showlog = true, bool immediateUnplug = false, bool disposeViGEm = true)
         {
+            StartupDiag($"ControlService.Stop enter showlog={showlog} immediate={immediateUnplug} disposeViGEm={disposeViGEm} running={running}");
             if (running)
             {
                 if (OpenRGBServer.Instance.IsRunning)
+                {
+                    StartupDiag("ControlService.Stop OpenRGB stop begin");
                     OpenRGBServer.Instance.Stop();
+                    StartupDiag("ControlService.Stop OpenRGB stop end");
+                }
 
                 running = false;
                 runHotPlug = false;
                 inServiceTask = true;
+                StartupDiag("ControlService.Stop PreServiceStop begin");
                 PreServiceStop?.Invoke(this, EventArgs.Empty);
+                StartupDiag("ControlService.Stop PreServiceStop end");
 
                 if (showlog)
                     LogDebug(DS4WinWPF.Properties.Resources.StoppingX360);
@@ -1983,6 +2066,7 @@ namespace DS4Windows
                     DS4Device tempDevice = DS4Controllers[i];
                     if (tempDevice != null)
                     {
+                        StartupDiag($"ControlService.Stop controller loop index={i} display={tempDevice.DisplayName} mac={tempDevice.MacAddress} conn={tempDevice.ConnectionType} charging={tempDevice.isCharging()}");
                         if ((DCBTatStop && !tempDevice.isCharging()) || suspending)
                         {
                             if (tempDevice.getConnectionType() == ConnectionType.BT)
@@ -2017,7 +2101,9 @@ namespace DS4Windows
                         OutputDevice tempout = outputDevices[i];
                         if (tempout != null)
                         {
+                            StartupDiag($"ControlService.Stop UnplugOutDev begin index={i} type={tempout.GetDeviceType()}");
                             UnplugOutDev(i, tempDevice, immediate: immediateUnplug, force: true);
+                            StartupDiag($"ControlService.Stop UnplugOutDev end index={i}");
                             anyUnplugged = true;
                         }
 
@@ -2036,9 +2122,15 @@ namespace DS4Windows
                 if (showlog)
                     LogDebug(DS4WinWPF.Properties.Resources.StoppingDS4);
 
+                StartupDiag("ControlService.Stop DualSenseAudio dispose begin");
                 dualSenseAudioPassthrough.Dispose();
+                StartupDiag("ControlService.Stop DualSenseAudio dispose end");
+                StartupDiag("ControlService.Stop DualSenseMicrophone dispose begin");
                 dualSenseMicrophonePassthrough.Dispose();
+                StartupDiag("ControlService.Stop DualSenseMicrophone dispose end");
+                StartupDiag("ControlService.Stop DS4Devices.stopControllers begin");
                 DS4Devices.stopControllers();
+                StartupDiag("ControlService.Stop DS4Devices.stopControllers end");
                 slotManager.ClearControllerList();
 
                 if (oscListener != null)
@@ -2053,7 +2145,9 @@ namespace DS4Windows
 
                 if (_udpServer != null)
                 {
+                    StartupDiag("ControlService.Stop UDP stop begin");
                     ChangeUDPStatus(false);
+                    StartupDiag("ControlService.Stop UDP stop requested");
                 }
 
                 if (showlog)
@@ -2063,7 +2157,9 @@ namespace DS4Windows
                 {
                     Thread.SpinWait(500);
                 }
+                StartupDiag("ControlService.Stop outputslotMan.Stop begin");
                 outputslotMan.Stop(true);
+                StartupDiag("ControlService.Stop outputslotMan.Stop end");
 
                 if (anyUnplugged)
                 {
@@ -2076,19 +2172,24 @@ namespace DS4Windows
                 }
                 else
                 {
+                    StartupDiag("ControlService.Stop skipping ViGEm Dispose during app exit");
                     vigemTestClient = null;
                 }
 
                 // Disconnect from KBM system when stopping ControlService
+                StartupDiag($"ControlService.Stop outputKBM Disconnect begin handler={outputKBMHandler?.GetFullDisplayName()}");
                 LogDebug($"Closing connection to output handler {outputKBMHandler.GetDisplayName()}");
                 outputKBMHandler.Disconnect();
+                StartupDiag("ControlService.Stop outputKBM Disconnect end");
                 inServiceTask = false;
                 activeControllers = 0;
             }
 
             runHotPlug = false;
+            StartupDiag("ControlService.Stop before stopped events");
             ServiceStopped?.Invoke(this, EventArgs.Empty);
             RunningChanged?.Invoke(this, EventArgs.Empty);
+            StartupDiag("ControlService.Stop exit");
             return true;
         }
 
@@ -2224,10 +2325,19 @@ namespace DS4Windows
 
         private void PrepareConnectedInputControllerSettingEvents(int numControllers, DS4Device device, int index)
         {
+            StartupDiag($"Controller prep begin index={index} numControllers={numControllers} display={device.DisplayName} mac={device.MacAddress} type={device.DeviceType}");
+            StartupDiag($"RefreshExtrasButtons begin index={index}");
             Global.RefreshExtrasButtons(index, GetKnownExtraButtons(device));
+            StartupDiag($"RefreshExtrasButtons end index={index}");
+            StartupDiag($"LoadControllerConfigs begin index={index}");
             Global.LoadControllerConfigs(device);
+            StartupDiag($"LoadControllerConfigs end index={index}");
+            StartupDiag($"device.LoadStoreSettings begin index={index}");
             device.LoadStoreSettings();
+            StartupDiag($"device.LoadStoreSettings end index={index}");
+            StartupDiag($"CheckControllerNumDeviceSettings begin index={index}");
             device.CheckControllerNumDeviceSettings(numControllers);
+            StartupDiag($"CheckControllerNumDeviceSettings end index={index}");
 
             slotManager.AddController(device, index);
             if (isUsingOSCSender())
@@ -2241,7 +2351,9 @@ namespace DS4Windows
             device.SerialChange += this.On_SerialChange;
             device.ChargingChanged += CheckQuickCharge;
 
+            StartupDiag($"TouchPad create begin index={index}");
             touchPad[index] = new Mouse(index, device);
+            StartupDiag($"TouchPad create end index={index}");
             bool profileLoaded = false;
             bool useAutoProfile = useTempProfile[index];
             if (!useAutoProfile)
@@ -2258,7 +2370,13 @@ namespace DS4Windows
                 }
 
                 // Now attempt to load requested profile and settings
+                StartupDiag($"LoadProfile begin index={index} profile=\"{ProfilePath[index]}\" linked={Global.linkedProfileCheck[index]}");
                 profileLoaded = LoadProfile(index, false, this, false, false);
+                StartupDiag($"LoadProfile end index={index} loaded={profileLoaded} profile=\"{ProfilePath[index]}\" dinputOnly={getDInputOnly(index)} outType={Global.OutContType[index]}");
+            }
+            else
+            {
+                StartupDiag($"LoadProfile skipped for auto/temp profile index={index} tempProfile=\"{tempprofilename[index]}\"");
             }
 
             if (profileLoaded || useAutoProfile)
@@ -2269,7 +2387,9 @@ namespace DS4Windows
                 {
                     if (device.PrimaryDevice)
                     {
+                        StartupDiag($"PluginOutDev begin index={index} outType={Global.OutContType[index]}");
                         PluginOutDev(index, device);
+                        StartupDiag($"PluginOutDev end index={index} useDInputOnly={useDInputOnly[index]} activeOut={activeOutDevType[index]} outDev={outputDevices[index]?.GetDeviceType() ?? "null"}");
                     }
                     else if (device.JointDeviceSlotNumber != DS4Device.DEFAULT_JOINT_SLOT_NUMBER)
                     {
@@ -2292,7 +2412,9 @@ namespace DS4Windows
 
                 if (device.PrimaryDevice && device.OutputMapGyro)
                 {
+                    StartupDiag($"TouchPadOn begin index={index}");
                     TouchPadOn(index, device);
+                    StartupDiag($"TouchPadOn end index={index}");
                 }
                 else if (device.JointDeviceSlotNumber != DS4Device.DEFAULT_JOINT_SLOT_NUMBER)
                 {
@@ -2309,8 +2431,16 @@ namespace DS4Windows
                     }
                 }
 
+                StartupDiag($"CheckProfileOptions begin index={index}");
                 CheckProfileOptions(index, device);
+                StartupDiag($"CheckProfileOptions end index={index}");
+                StartupDiag($"SetupInitialHookEvents begin index={index}");
                 SetupInitialHookEvents(index, device);
+                StartupDiag($"SetupInitialHookEvents end index={index}");
+            }
+            else
+            {
+                StartupDiag($"Controller prep profile not loaded index={index} profile=\"{ProfilePath[index]}\"");
             }
 
             int tempIdx = index;
@@ -2318,13 +2448,19 @@ namespace DS4Windows
             {
                 this.On_Report(sender, e, tempIdx);
             };
+            StartupDiag($"Report hook added index={index}");
 
             if (_udpServer != null && index < UdpServer.NUMBER_SLOTS)
             {
+                StartupDiag($"PrepareDevUDPMotion begin index={index}");
                 PrepareDevUDPMotion(device, tempIdx);
+                StartupDiag($"PrepareDevUDPMotion end index={index}");
             }
 
+            StartupDiag($"device.StartUpdate begin index={index}");
             device.StartUpdate();
+            StartupDiag($"device.StartUpdate end index={index}");
+            StartupDiag($"Controller prep end index={index}");
         }
 
         private void BeginPrepareConnectedInputController(DS4Device device, bool showlog = false)
@@ -3108,6 +3244,18 @@ namespace DS4Windows
         {
             if (ind != -1)
             {
+                int startupReportCount = 0;
+                bool startupReportDiag = false;
+                if (Global.VerboseStartupLogging)
+                {
+                    startupReportCount = ++startupReportDiagCounts[ind];
+                    startupReportDiag = startupReportCount <= 5 || startupReportCount == 50;
+                    if (startupReportDiag)
+                    {
+                        StartupDiag($"On_Report enter index={ind} count={startupReportCount} synced={device.isSynced()} latency={device.Latency} useDInputOnly={useDInputOnly[ind]} activeOut={activeOutDevType[ind]} outDev={outputDevices[ind]?.GetDeviceType() ?? "null"}");
+                    }
+                }
+
                 string devError = tempStrings[ind] = device.error;
                 if (!string.IsNullOrEmpty(devError))
                 {
@@ -3232,6 +3380,11 @@ namespace DS4Windows
 
                 cState = device.Debouncer.ProcessInput(cState);
 
+                if (startupReportDiag)
+                {
+                    StartupDiag($"On_Report pre-map index={ind} count={startupReportCount} buttons Cross={cState.Cross} Circle={cState.Circle} PS={cState.PS} LX={cState.LX} LY={cState.LY} RX={cState.RX} RY={cState.RY} L2={cState.L2} R2={cState.R2}");
+                }
+
                 cState = Mapping.SetCurveAndDeadzone(ind, cState, TempState[ind]);
 
                 if (!recordingMacro && (useTempProfile[ind] ||
@@ -3246,7 +3399,15 @@ namespace DS4Windows
                         OSCPreMappingStep(ind, cState, tempMapState, oscMapState);
                     }
 
+                    if (startupReportDiag)
+                    {
+                        StartupDiag($"On_Report MapCustom begin index={ind} count={startupReportCount}");
+                    }
                     Mapping.MapCustom(ind, cState, tempMapState, ExposedState[ind], touchPad[ind], this);
+                    if (startupReportDiag)
+                    {
+                        StartupDiag($"On_Report MapCustom end index={ind} count={startupReportCount}");
+                    }
 
                     // Copy current Touchpad and Gyro data
                     // Might change to use new DS4State.CopyExtrasTo method
@@ -3287,7 +3448,15 @@ namespace DS4Windows
                         }
                     }
 
+                    if (startupReportDiag)
+                    {
+                        StartupDiag($"On_Report ConvertandSendReport begin index={ind} count={startupReportCount} outDev={outputDevices[ind]?.GetDeviceType() ?? "null"}");
+                    }
                     outputDevices[ind]?.ConvertandSendReport(cState, ind);
+                    if (startupReportDiag)
+                    {
+                        StartupDiag($"On_Report ConvertandSendReport end index={ind} count={startupReportCount}");
+                    }
                     //testNewReport(ref x360reports[ind], cState, ind);
                     //x360controls[ind]?.SendReport(x360reports[ind]);
 
@@ -3335,10 +3504,26 @@ namespace DS4Windows
                 }
 
                 // Output any synthetic events.
+                if (startupReportDiag)
+                {
+                    StartupDiag($"On_Report Mapping.Commit begin index={ind} count={startupReportCount}");
+                }
                 Mapping.Commit(ind);
+                if (startupReportDiag)
+                {
+                    StartupDiag($"On_Report Mapping.Commit end index={ind} count={startupReportCount}");
+                }
 
                 // Update the Lightbar color
+                if (startupReportDiag)
+                {
+                    StartupDiag($"On_Report updateLightBar begin index={ind} count={startupReportCount}");
+                }
                 DS4LightBar.updateLightBar(device, ind);
+                if (startupReportDiag)
+                {
+                    StartupDiag($"On_Report updateLightBar end index={ind} count={startupReportCount}");
+                }
 
                 if (device.PerformStateMerge)
                 {
@@ -3349,6 +3534,11 @@ namespace DS4Windows
                 {
                     // Copy for use in UDP
                     tempControlState.Motion = device.GetRawCurrentStateRef().Motion;
+                }
+
+                if (startupReportDiag)
+                {
+                    StartupDiag($"On_Report exit index={ind} count={startupReportCount}");
                 }
             }
         }
@@ -3705,6 +3895,17 @@ namespace DS4Windows
                 DebugEventArgs args = new DebugEventArgs(Data, warning);
                 OnDebug(this, args);
             }
+        }
+
+        public static void StartupDiag(string data)
+        {
+            if (!Global.VerboseStartupLogging)
+            {
+                return;
+            }
+
+            startupDiagLogger.Info($"[StartupDiag][T{Thread.CurrentThread.ManagedThreadId}] {data}");
+            LogManager.Flush(TimeSpan.FromSeconds(1));
         }
 
         public void OnDebug(object sender, DebugEventArgs args)

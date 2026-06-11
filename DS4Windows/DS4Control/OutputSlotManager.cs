@@ -156,12 +156,14 @@ namespace DS4Windows
         public void DeferredPlugin(OutputDevice outputDevice, int inIdx, string inDisplayString,
             OutputDevice[] outdevs, OutContType contType)
         {
+            ControlService.StartupDiag($"OutputSlotManager.DeferredPlugin enter inIdx={inIdx} contType={contType} outputNull={outputDevice == null}");
             // releases ReaderWriterLockSlim when locker goes out of scope
             using WriteLocker locker = new WriteLocker(queueLocker);
             //queuedTasks++;
             //Action tempAction = new Action(() =>
             {
                 int slot = FindEmptySlot();
+                ControlService.StartupDiag($"OutputSlotManager.DeferredPlugin emptySlot={slot + 1} inIdx={inIdx} contType={contType}");
                 if (slot != -1)
                 {
                     // Only relevant when Virtual Controller (Moonlight) support is on and
@@ -176,10 +178,13 @@ namespace DS4Windows
 
                     try
                     {
+                        ControlService.StartupDiag($"OutputSlotManager.Connect begin slot={slot + 1} type={contType} output={outputDevice.GetType().Name}");
                         outputDevice.Connect();
+                        ControlService.StartupDiag($"OutputSlotManager.Connect end slot={slot + 1} type={contType}");
                     }
                     catch (Win32Exception e)
                     {
+                        ControlService.StartupDiag($"OutputSlotManager.Connect Win32Exception slot={slot + 1} type={contType} error={e.ErrorCode} message={e.Message}");
                         // Leave task immediately if connect call failed
                         //queuedTasks--;
                         ViGEmFailure?.Invoke(this, e.ErrorCode);
@@ -223,6 +228,11 @@ namespace DS4Windows
                         outputSlots[slot].CurrentInputBound = OutSlotDevice.InputBound.Bound;
                     }
                     SlotAssigned?.Invoke(this, slot, outputSlots[slot]);
+                    ControlService.StartupDiag($"OutputSlotManager.DeferredPlugin assigned slot={slot + 1} inIdx={inIdx} type={contType}");
+                }
+                else
+                {
+                    ControlService.StartupDiag($"OutputSlotManager.DeferredPlugin no empty slot inIdx={inIdx} type={contType}");
                 }
             };
 
@@ -233,6 +243,7 @@ namespace DS4Windows
             OutputDevice[] outdevs, bool immediate = false)
         {
             _ = immediate;
+            ControlService.StartupDiag($"OutputSlotManager.DeferredRemoval enter inIdx={inIdx} outputNull={outputDevice == null}");
 
             // releases ReaderWriterLockSlim when locker goes out of scope
             using WriteLocker locker = new WriteLocker(queueLocker);
@@ -241,13 +252,18 @@ namespace DS4Windows
             {
                 if (revDeviceDict.TryGetValue(outputDevice, out int slot))
                 {
+                    ControlService.StartupDiag($"OutputSlotManager.DeferredRemoval found slot={slot + 1} type={outputDevice.GetDeviceType()}");
                     //int slot = revDeviceDict[outputDevice];
                     outputDevices[slot] = null;
                     deviceDict.Remove(slot);
                     revDeviceDict.Remove(outputDevice);
 
+                    ControlService.StartupDiag($"OutputSlotManager.RemoveFeedbacks begin slot={slot + 1}");
                     outputDevice.RemoveFeedbacks();
+                    ControlService.StartupDiag($"OutputSlotManager.RemoveFeedbacks end slot={slot + 1}");
+                    ControlService.StartupDiag($"OutputSlotManager.Disconnect begin slot={slot + 1}");
                     outputDevice.Disconnect();
+                    ControlService.StartupDiag($"OutputSlotManager.Disconnect end slot={slot + 1}");
 
                     if (inIdx != -1)
                     {
@@ -257,11 +273,16 @@ namespace DS4Windows
                     outputSlots[slot].DetachDevice();
                     SlotUnassigned?.Invoke(this, slot, outputSlots[slot]);
                     AppLogger.LogToGui($"Unplugging virtual {outputDevice.GetDeviceType()} Controller from output slot #{slot + 1}",false);
+                    ControlService.StartupDiag($"OutputSlotManager.DeferredRemoval unassigned slot={slot + 1}");
 
                     //if (!immediate)
                     //{
                         //    Task.Delay(DELAY_TIME).Wait();
                     //}
+                }
+                else
+                {
+                    ControlService.StartupDiag("OutputSlotManager.DeferredRemoval output not found in reverse map");
                 }
             };
 

@@ -70,7 +70,20 @@ Install on a test-signed machine from an elevated PowerShell window:
 The install script stages the INF with PnPUtil, creates the
 `Root\HBashtonVirtualDualSense` devnode through SetupAPI, then binds the driver
 package to that root device. This replaces the old manual `devcon install`
-step. To inspect the current machine state:
+step.
+
+Uninstall from an elevated PowerShell window:
+
+```powershell
+.\uninstall-driver.ps1
+```
+
+Use `.\uninstall-driver.ps1 -Force` if Windows refuses to remove the root
+device while it is still considered active. If this was the only reason Windows
+test-signing mode was enabled, `.\uninstall-driver.ps1 -DisableTestSigning`
+also turns test-signing back off; reboot Windows afterwards.
+
+To inspect the current machine state:
 
 ```powershell
 .\check-driver.ps1

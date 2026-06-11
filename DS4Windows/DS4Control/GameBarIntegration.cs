@@ -45,7 +45,6 @@ namespace DS4Windows
         private const int LiveGameBarApiHangMs = 1500;
         private const int LiveAutomationPollMs = 1000;
         private const int LiveAutomationCacheMs = 3000;
-        private static bool? gameBarApiPresent;
         private static readonly object gameBarApiPollLock = new object();
         private static bool gameBarApiPollRunning;
         private static bool gameBarApiPollCachedVisible;
@@ -167,11 +166,6 @@ namespace DS4Windows
 
         private static bool IsGameBarVisibleByCachedGameBarApi()
         {
-            if (gameBarApiPresent.HasValue && !gameBarApiPresent.Value)
-            {
-                return false;
-            }
-
             DateTime now = DateTime.UtcNow;
             lock (gameBarApiPollLock)
             {
@@ -222,7 +216,6 @@ namespace DS4Windows
 
                     worker.IsBackground = true;
                     worker.Name = "DS4Windows Game Bar API Poll";
-                    worker.SetApartmentState(ApartmentState.STA);
                     worker.Start();
                 }
 
@@ -324,13 +317,6 @@ namespace DS4Windows
 
             try
             {
-                gameBarApiPresent ??= ApiInformation.IsTypePresent("Windows.Gaming.UI.GameBar");
-                if (!gameBarApiPresent.Value)
-                {
-                    status = "not present";
-                    return false;
-                }
-
                 visible = GameBar.Visible;
                 inputRedirected = GameBar.IsInputRedirected;
                 status = "ok";
@@ -338,6 +324,18 @@ namespace DS4Windows
             }
             catch (Exception ex)
             {
+                try
+                {
+                    if (!ApiInformation.IsTypePresent("Windows.Gaming.UI.GameBar"))
+                    {
+                        status = "not present";
+                        return false;
+                    }
+                }
+                catch
+                {
+                }
+
                 status = ex.GetType().Name + ": " + ex.Message;
                 return false;
             }

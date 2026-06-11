@@ -2063,6 +2063,7 @@
                                       ToolTip="{lex:Loc OutContNotice}">
                                         <ComboBoxItem Content="Xbox 360"/>
                                         <ComboBoxItem Content="DualShock 4"/>
+                                        <ComboBoxItem Content="DualSense"/>
                                     </ComboBox>
                                 </StackPanel>
                                 <CheckBox Content="{lex:Loc DisableVirtualController}" IsChecked="{Binding DInputOnly}"

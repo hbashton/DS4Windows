@@ -63,6 +63,9 @@ namespace DS4WinWPF.DS4Forms
                 case 1:
                     contType = OutContType.DS4;
                     break;
+                case 2:
+                    contType = OutContType.DualSense;
+                    break;
                 default:
                     break;
             }

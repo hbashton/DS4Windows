@@ -1640,6 +1640,34 @@ namespace DS4Windows
                     //tempDS4.Connect();
                     //LogDebug("DS4 Controller #" + (index + 1) + " connected");
                 }
+                else if (contType == OutContType.DualSense)
+                {
+                    activeOutDevType[index] = OutContType.DualSense;
+                    if (slotDevice == null)
+                    {
+                        slotDevice = outputslotMan.FindOpenSlot();
+                        if (slotDevice != null)
+                        {
+                            VirtualDualSenseOutDevice tempDualSense =
+                                EstablishOutDevice(index, OutContType.DualSense) as VirtualDualSenseOutDevice;
+                            outputslotMan.DeferredPlugin(tempDualSense, index,
+                                $"{device.DisplayName} [{device.MacAddress}]", outputDevices, contType);
+                            success = true;
+                        }
+                        else
+                        {
+                            LogDebug("Failed. No open output slot found");
+                        }
+                    }
+                    else
+                    {
+                        slotDevice.CurrentInputBound = OutSlotDevice.InputBound.Bound;
+                        VirtualDualSenseOutDevice tempDualSense = slotDevice.OutputDevice as VirtualDualSenseOutDevice;
+                        outputDevices[index] = tempDualSense;
+                        slotDevice.CurrentType = contType;
+                        success = true;
+                    }
+                }
 
                 // Need to check for possible ViGEmBus failure here
                 if (success && slotDevice.OutputDevice != null)

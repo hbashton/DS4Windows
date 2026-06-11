@@ -130,6 +130,9 @@ namespace DS4Windows
                 case OutContType.DS4:
                     outputDevice = DS4OutDeviceFactory.CreateDS4Device(client, Global.vigemBusVersionInfo);
                     break;
+                case OutContType.DualSense:
+                    outputDevice = new VirtualDualSenseOutDevice();
+                    break;
                 case OutContType.None:
                 default:
                     break;
@@ -182,7 +185,25 @@ namespace DS4Windows
                     {
                         // Leave task immediately if connect call failed
                         //queuedTasks--;
-                        ViGEmFailure?.Invoke(this, e.ErrorCode);
+                        if (contType == OutContType.DualSense)
+                        {
+                            AppLogger.LogToGui($"Failed to plug in virtual DualSense controller: {e.Message}", true);
+                        }
+                        else
+                        {
+                            ViGEmFailure?.Invoke(this, e.ErrorCode);
+                        }
+
+                        if (beforeVirtualDS4 != null)
+                        {
+                            DS4Devices.EndOwnVirtualDS4Connect();
+                        }
+
+                        return;
+                    }
+                    catch (Exception e)
+                    {
+                        AppLogger.LogToGui($"Failed to plug in virtual {contType} controller: {e.Message}", true);
                         if (beforeVirtualDS4 != null)
                         {
                             DS4Devices.EndOwnVirtualDS4Connect();

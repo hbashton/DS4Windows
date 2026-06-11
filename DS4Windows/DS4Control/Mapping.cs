@@ -6857,7 +6857,8 @@ namespace DS4Windows
                 double sxAntiDead = getSXAntiDeadzone(device);
 
                 int outputAxisMax, outputAxisMin, outputAxisZero;
-                if ( Global.OutContType[device] == OutContType.DS4 )
+                if ( Global.OutContType[device] == OutContType.DS4 ||
+                    Global.OutContType[device] == OutContType.DualSense )
                 {
                     // DS4 analog stick axis supports only 0...255 output value range (not the best one for steering wheel usage)
                     outputAxisMax = 255;

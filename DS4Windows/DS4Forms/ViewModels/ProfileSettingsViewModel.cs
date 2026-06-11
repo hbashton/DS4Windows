@@ -893,6 +893,10 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                         type = 1;
                         break;
 
+                    case OutContType.DualSense:
+                        type = 2;
+                        break;
+
                     default: break;
                 }
 
@@ -921,6 +925,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                         result = OutContType.X360; break;
                     case 1:
                         result = OutContType.DS4; break;
+                    case 2:
+                        result = OutContType.DualSense; break;
                     default: result = OutContType.X360; break;
                 }
                 return result;

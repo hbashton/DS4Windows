@@ -386,6 +386,9 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 case OutContType.DS4:
                     result = 2;
                     break;
+                case OutContType.DualSense:
+                    result = 3;
+                    break;
                 default:
                     break;
             }
@@ -423,6 +426,9 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     break;
                 case 2:
                     result = OutContType.DS4;
+                    break;
+                case 3:
+                    result = OutContType.DualSense;
                     break;
                 default:
                     break;

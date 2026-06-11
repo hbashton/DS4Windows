@@ -7,7 +7,30 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $project = Join-Path $PSScriptRoot "HBashtonVirtualDualSense.vcxproj"
+$packagesConfig = Join-Path $repoRoot "packages.config"
+$packagesDir = Join-Path $repoRoot "packages"
+
+function Get-NuGetExe {
+    $nuget = Get-Command nuget.exe -ErrorAction SilentlyContinue
+    if ($nuget) {
+        return $nuget.Source
+    }
+
+    $toolsDir = Join-Path $repoRoot ".tools"
+    $nugetExe = Join-Path $toolsDir "nuget.exe"
+    if (-not (Test-Path $nugetExe)) {
+        New-Item -ItemType Directory -Path $toolsDir -Force | Out-Null
+        $ProgressPreference = "SilentlyContinue"
+        Invoke-WebRequest "https://dist.nuget.org/win-x86-commandline/latest/nuget.exe" -OutFile $nugetExe
+    }
+
+    return $nugetExe
+}
+
+$nugetExe = Get-NuGetExe
+& $nugetExe restore $packagesConfig -PackagesDirectory $packagesDir -Source "https://api.nuget.org/v3/index.json" -NonInteractive
 
 $msbuild = Get-Command msbuild.exe -ErrorAction SilentlyContinue
 if (-not $msbuild) {

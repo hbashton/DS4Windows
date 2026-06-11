@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project>
+  <PropertyGroup>
+    <VirtualDualSenseWindowsSdkCppVersion>10.0.26100.7463</VirtualDualSenseWindowsSdkCppVersion>
+    <VirtualDualSenseWindowsWdkVersion>10.0.26100.6584</VirtualDualSenseWindowsWdkVersion>
+  </PropertyGroup>
+
+  <Import Project="packages\Microsoft.Windows.SDK.CPP.$(VirtualDualSenseWindowsSdkCppVersion)\build\native\Microsoft.Windows.SDK.cpp.props"
+          Condition="'$(MSBuildProjectExtension)' == '.vcxproj' and Exists('packages\Microsoft.Windows.SDK.CPP.$(VirtualDualSenseWindowsSdkCppVersion)\build\native\Microsoft.Windows.SDK.cpp.props')" />
+  <Import Project="packages\Microsoft.Windows.SDK.CPP.x64.$(VirtualDualSenseWindowsSdkCppVersion)\build\native\Microsoft.Windows.SDK.cpp.x64.props"
+          Condition="'$(MSBuildProjectExtension)' == '.vcxproj' and '$(Platform)' == 'x64' and Exists('packages\Microsoft.Windows.SDK.CPP.x64.$(VirtualDualSenseWindowsSdkCppVersion)\build\native\Microsoft.Windows.SDK.cpp.x64.props')" />
+  <Import Project="packages\Microsoft.Windows.WDK.x64.$(VirtualDualSenseWindowsWdkVersion)\build\native\Microsoft.Windows.WDK.x64.props"
+          Condition="'$(MSBuildProjectExtension)' == '.vcxproj' and '$(Platform)' == 'x64' and Exists('packages\Microsoft.Windows.WDK.x64.$(VirtualDualSenseWindowsWdkVersion)\build\native\Microsoft.Windows.WDK.x64.props')" />
+</Project>

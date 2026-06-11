@@ -942,7 +942,33 @@ namespace DS4Windows
             if (Global.hidHideInstalled)
             {
                 dev.CurrentExclusiveStatus = DS4Device.ExclusiveStatus.HidHideAffected;
+                TryAddDeviceToSessionBlacklist(dev);
             }
+        }
+
+        /// <summary>
+        /// Adds the device to HidHide's process-lifetime (session) blacklist.
+        /// The entry is automatically removed by HidHide when DS4Windows exits --
+        /// cleanly or otherwise -- so other apps (Steam, OpenRGB) can reclaim the
+        /// device without requiring a reboot or manual HidHide configuration.
+        /// Falls back silently if the installed HidHide version predates session
+        /// blacklist support.
+        /// </summary>
+        private void TryAddDeviceToSessionBlacklist(DS4Device dev)
+        {
+            if (!Global.hidHideInstalled) return;
+            try
+            {
+                string instanceId = Global.GetInstanceIdFromDevicePath(dev.HidDevice.DevicePath);
+                if (string.IsNullOrEmpty(instanceId)) return;
+
+                using (HidHideAPIDevice hidHideDevice = new HidHideAPIDevice())
+                {
+                    if (!hidHideDevice.IsOpen()) return;
+                    hidHideDevice.AddSessionBlacklist(new System.Collections.Generic.List<string> { instanceId });
+                }
+            }
+            catch { /* HidHide version predates session blacklist -- ignore */ }
         }
 
         private void TestQueueBus(Action temp)

@@ -37,6 +37,12 @@ namespace DS4Windows
         private const byte VK_G = 0x47;
         private const int KEYEVENTF_KEYUP = 0x0002;
         private const int DWMWA_CLOAKED = 14;
+        private const int STARTF_USESHOWWINDOW = 0x00000001;
+        private const int STARTF_FORCEOFFFEEDBACK = 0x00000080;
+        private const int SW_HIDE = 0;
+        private const uint CREATE_NO_WINDOW = 0x08000000;
+        private const uint WAIT_OBJECT_0 = 0x00000000;
+        private const uint WAIT_TIMEOUT = 0x00000102;
         private const int MaxAutomationDiagnosticRows = 20;
         private const int MaxAutomationVisitCount = 500;
         private const int MaxAutomationDepth = 5;
@@ -102,6 +108,30 @@ namespace DS4Windows
         [DllImport("dwmapi.dll")]
         private static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
 
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern bool CreateProcess(string lpApplicationName,
+            StringBuilder lpCommandLine,
+            IntPtr lpProcessAttributes,
+            IntPtr lpThreadAttributes,
+            bool bInheritHandles,
+            uint dwCreationFlags,
+            IntPtr lpEnvironment,
+            string lpCurrentDirectory,
+            ref STARTUPINFO lpStartupInfo,
+            out PROCESS_INFORMATION lpProcessInformation);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool GetExitCodeProcess(IntPtr hProcess, out uint lpExitCode);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool TerminateProcess(IntPtr hProcess, uint uExitCode);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CloseHandle(IntPtr hObject);
+
         [StructLayout(LayoutKind.Sequential)]
         private struct RECT
         {
@@ -109,6 +139,38 @@ namespace DS4Windows
             public int Top;
             public int Right;
             public int Bottom;
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct STARTUPINFO
+        {
+            public int cb;
+            public string lpReserved;
+            public string lpDesktop;
+            public string lpTitle;
+            public int dwX;
+            public int dwY;
+            public int dwXSize;
+            public int dwYSize;
+            public int dwXCountChars;
+            public int dwYCountChars;
+            public int dwFillAttribute;
+            public int dwFlags;
+            public short wShowWindow;
+            public short cbReserved2;
+            public IntPtr lpReserved2;
+            public IntPtr hStdInput;
+            public IntPtr hStdOutput;
+            public IntPtr hStdError;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct PROCESS_INFORMATION
+        {
+            public IntPtr hProcess;
+            public IntPtr hThread;
+            public int dwProcessId;
+            public int dwThreadId;
         }
 
         public static bool TryRunProbeCommand(string[] args)
@@ -493,18 +555,118 @@ namespace DS4Windows
             return status.Replace('|', '/').Replace('\r', ' ').Replace('\n', ' ');
         }
 
-        private static void TryKillProbeProcess(Process process)
+        private static bool TryRunProbeProcess(string exePath, string resultPath, int timeoutMs, out int exitCode, out string status)
         {
+            exitCode = -1;
+            status = string.Empty;
+
+            STARTUPINFO startupInfo = new STARTUPINFO
+            {
+                cb = Marshal.SizeOf<STARTUPINFO>(),
+                dwFlags = STARTF_USESHOWWINDOW | STARTF_FORCEOFFFEEDBACK,
+                wShowWindow = SW_HIDE,
+            };
+
+            StringBuilder commandLine = new StringBuilder(QuoteCommandLineArgument(exePath) + " " +
+                QuoteCommandLineArgument(ProbeArgument) + " " +
+                QuoteCommandLineArgument(resultPath));
+            string workingDirectory = Path.GetDirectoryName(exePath);
+
+            if (!CreateProcess(exePath,
+                commandLine,
+                IntPtr.Zero,
+                IntPtr.Zero,
+                false,
+                CREATE_NO_WINDOW,
+                IntPtr.Zero,
+                workingDirectory,
+                ref startupInfo,
+                out PROCESS_INFORMATION processInfo))
+            {
+                status = "CreateProcess failed: " + Marshal.GetLastWin32Error();
+                return false;
+            }
+
             try
             {
-                if (process != null && !process.HasExited)
+                uint waitResult = WaitForSingleObject(processInfo.hProcess, (uint)Math.Max(1, timeoutMs));
+                if (waitResult == WAIT_TIMEOUT)
                 {
-                    process.Kill(true);
+                    TerminateProcess(processInfo.hProcess, 1);
+                    status = $"probe timeout after {timeoutMs}ms";
+                    return false;
+                }
+
+                if (waitResult != WAIT_OBJECT_0)
+                {
+                    status = "WaitForSingleObject failed: " + waitResult;
+                    return false;
+                }
+
+                if (GetExitCodeProcess(processInfo.hProcess, out uint nativeExitCode))
+                {
+                    exitCode = unchecked((int)nativeExitCode);
+                }
+
+                return true;
+            }
+            finally
+            {
+                if (processInfo.hThread != IntPtr.Zero)
+                {
+                    CloseHandle(processInfo.hThread);
+                }
+
+                if (processInfo.hProcess != IntPtr.Zero)
+                {
+                    CloseHandle(processInfo.hProcess);
                 }
             }
-            catch
+        }
+
+        private static string QuoteCommandLineArgument(string value)
+        {
+            if (string.IsNullOrEmpty(value))
             {
+                return "\"\"";
             }
+
+            StringBuilder builder = new StringBuilder();
+            builder.Append('"');
+            int backslashCount = 0;
+
+            foreach (char c in value)
+            {
+                if (c == '\\')
+                {
+                    backslashCount++;
+                    continue;
+                }
+
+                if (c == '"')
+                {
+                    builder.Append('\\', backslashCount * 2 + 1);
+                    builder.Append('"');
+                    backslashCount = 0;
+                    continue;
+                }
+
+                if (backslashCount > 0)
+                {
+                    builder.Append('\\', backslashCount);
+                    backslashCount = 0;
+                }
+
+                builder.Append(c);
+            }
+
+            if (backslashCount > 0)
+            {
+                builder.Append('\\', backslashCount * 2);
+            }
+
+            builder.Append('"');
+            return builder.ToString();
         }
 
         private static void TryDeleteProbeFile(string resultPath)
@@ -546,37 +708,17 @@ namespace DS4Windows
             }
 
             string resultPath = Path.Combine(Path.GetTempPath(), "DS4Windows.GameBarProbe." + Guid.NewGuid().ToString("N") + ".txt");
-            Process process = null;
             try
             {
-                ProcessStartInfo startInfo = new ProcessStartInfo
+                if (!TryRunProbeProcess(exePath, resultPath, timeoutMs, out int exitCode, out string launchStatus))
                 {
-                    FileName = exePath,
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    WindowStyle = ProcessWindowStyle.Hidden,
-                };
-
-                startInfo.ArgumentList.Add(ProbeArgument);
-                startInfo.ArgumentList.Add(resultPath);
-
-                process = Process.Start(startInfo);
-                if (process == null)
-                {
-                    status = "probe process did not start";
-                    return false;
-                }
-
-                if (!process.WaitForExit(timeoutMs))
-                {
-                    TryKillProbeProcess(process);
-                    status = $"probe timeout after {timeoutMs}ms";
+                    status = launchStatus;
                     return false;
                 }
 
                 if (!File.Exists(resultPath))
                 {
-                    status = $"probe exited {process.ExitCode} without result";
+                    status = $"probe exited {exitCode} without result";
                     return false;
                 }
 
@@ -596,7 +738,6 @@ namespace DS4Windows
             }
             finally
             {
-                process?.Dispose();
                 TryDeleteProbeFile(resultPath);
             }
         }

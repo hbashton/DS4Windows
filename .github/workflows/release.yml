@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   release:
-    runs-on: windows-latest
+    runs-on: windows-2022
     #this makes it not run if tests failed.
     #needs: test
     steps:

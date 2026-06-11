@@ -26,11 +26,18 @@ HBashtonVdsEvtDeviceAdd(
     WDF_OBJECT_ATTRIBUTES deviceAttributes;
     WDF_IO_QUEUE_CONFIG queueConfig;
     PDEVICE_CONTEXT deviceContext;
+    DECLARE_CONST_UNICODE_STRING(deviceName, HBASHTON_VDS_DEVICE_NAME);
     DECLARE_CONST_UNICODE_STRING(symbolicLink, HBASHTON_VDS_SYMBOLIC_LINK);
 
     WdfDeviceInitSetDeviceType(DeviceInit, FILE_DEVICE_UNKNOWN);
     WdfDeviceInitSetIoType(DeviceInit, WdfDeviceIoBuffered);
     WdfDeviceInitSetExclusive(DeviceInit, FALSE);
+
+    status = WdfDeviceInitAssignName(DeviceInit, &deviceName);
+    if (!NT_SUCCESS(status))
+    {
+        return status;
+    }
 
     WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&deviceAttributes, DEVICE_CONTEXT);
     deviceAttributes.EvtCleanupCallback = HBashtonVdsEvtDeviceContextCleanup;
@@ -73,6 +80,7 @@ HBashtonVdsEvtDeviceAdd(
     }
 
     WDF_IO_QUEUE_CONFIG_INIT_DEFAULT_QUEUE(&queueConfig, WdfIoQueueDispatchSequential);
+    queueConfig.PowerManaged = WdfFalse;
     queueConfig.EvtIoDeviceControl = HBashtonVdsEvtIoDeviceControl;
 
     status = WdfIoQueueCreate(

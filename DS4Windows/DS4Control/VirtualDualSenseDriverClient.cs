@@ -23,9 +23,11 @@ namespace DS4Windows
         public const uint IoctlDeviceType = 0x00000022;
         public const uint IoctlMethodBuffered = 0;
         public const uint IoctlFileAnyAccess = 0;
+        public const int MaxOutputReportLength = 1024;
         public static readonly uint IoctlCreatePad = CtlCode(IoctlDeviceType, 0x901, IoctlMethodBuffered, IoctlFileAnyAccess);
         public static readonly uint IoctlDestroyPad = CtlCode(IoctlDeviceType, 0x902, IoctlMethodBuffered, IoctlFileAnyAccess);
         public static readonly uint IoctlSubmitInputReport = CtlCode(IoctlDeviceType, 0x903, IoctlMethodBuffered, IoctlFileAnyAccess);
+        public static readonly uint IoctlReadOutputReport = CtlCode(IoctlDeviceType, 0x904, IoctlMethodBuffered, IoctlFileAnyAccess);
 
         private SafeFileHandle handle;
         private uint padId;
@@ -68,6 +70,34 @@ namespace DS4Windows
             BitConverter.GetBytes(padId).CopyTo(buffer, 0);
             Buffer.BlockCopy(report, 0, buffer, sizeof(uint), report.Length);
             DeviceIoControlChecked(IoctlSubmitInputReport, buffer, Span<byte>.Empty);
+        }
+
+        public bool TryReadOutputReport(out byte[] report, out uint sequence)
+        {
+            report = Array.Empty<byte>();
+            sequence = 0;
+
+            if (!IsConnected)
+            {
+                return false;
+            }
+
+            Span<byte> padBuffer = stackalloc byte[4];
+            BitConverter.TryWriteBytes(padBuffer, padId);
+
+            byte[] outputBuffer = new byte[sizeof(uint) * 3 + MaxOutputReportLength];
+            DeviceIoControlChecked(IoctlReadOutputReport, padBuffer, outputBuffer);
+
+            sequence = BitConverter.ToUInt32(outputBuffer, sizeof(uint));
+            uint reportLength = BitConverter.ToUInt32(outputBuffer, sizeof(uint) * 2);
+            if (reportLength == 0 || reportLength > MaxOutputReportLength)
+            {
+                return false;
+            }
+
+            report = new byte[reportLength];
+            Buffer.BlockCopy(outputBuffer, sizeof(uint) * 3, report, 0, report.Length);
+            return true;
         }
 
         public void Disconnect()

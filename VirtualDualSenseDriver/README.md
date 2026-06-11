@@ -18,6 +18,10 @@ Current contract:
   Destroys the VHF child HID device for a `PadId`.
 - `IOCTL_HBASHTON_VDS_SUBMIT_INPUT_REPORT`
   Sends one 64-byte report ID `0x01` DualSense USB input report for a `PadId`.
+- `IOCTL_HBASHTON_VDS_READ_OUTPUT_REPORT`
+  Returns the latest HID output report written by a host application to the
+  virtual DualSense. DS4Windows can use this for future rumble, lightbar,
+  adaptive trigger, mute LED, and haptic passthrough logic.
 
 The HID identity should present as Sony VID `054C`, DualSense PID `0CE6`, and
 product string `Wireless Controller`. The initial DS4Windows client reports
@@ -25,6 +29,37 @@ buttons, d-pad, sticks, triggers, touchpad contacts, gyro, accelerometer, packet
 counters, and battery. Output reports for advanced haptics, adaptive triggers,
 lightbar, player LEDs, microphone mute LED, and speaker/audio are intentionally
 not part of this first contract yet.
+
+Backend implementation:
+
+- `driver/Driver.c`
+  Creates the KMDF root device, compatibility symbolic link, device interface,
+  and sequential IOCTL queue.
+- `driver/Pad.c`
+  Owns up to eight VHF-backed virtual DualSense pads. Each create request calls
+  `VhfCreate` and `VhfStart`; each submit request calls `VhfReadReportSubmit`.
+  Host write reports are captured by `EvtVhfAsyncOperationWriteReport` and
+  exposed back to DS4Windows through `IOCTL_HBASHTON_VDS_READ_OUTPUT_REPORT`.
+- `driver/DualSenseDescriptor.h`
+  Contains the USB DualSense HID report descriptor used by each VHF child.
+- `HBashtonVirtualDualSense.inf`
+  Installs the root-enumerated KMDF device and configures `vhf` as the lower
+  filter required by the Windows Virtual HID Framework.
+
+Build:
+
+```powershell
+.\build-driver.ps1 -Configuration Release -Platform x64
+```
+
+Install on a test-signed machine with WDK tools:
+
+```powershell
+devcon install .\HBashtonVirtualDualSense.inf Root\HBashtonVirtualDualSense
+```
+
+The driver must be signed. A development machine can use test-signing; a public
+release needs a proper driver signing pipeline.
 
 Useful references:
 

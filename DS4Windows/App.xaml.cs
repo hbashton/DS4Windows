@@ -91,6 +91,13 @@ namespace DS4WinWPF
             runShutdown = true;
             skipSave = true;
 
+            if (DS4Windows.GameBarIntegration.TryRunProbeCommand(e.Args))
+            {
+                runShutdown = false;
+                Current.Shutdown();
+                return;
+            }
+
             ArgumentParser parser = new ArgumentParser();
             parser.Parse(e.Args);
             CheckOptions(parser);

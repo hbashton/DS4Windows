@@ -221,6 +221,25 @@ HBashtonVdsEvtVhfWriteReport(
     }
 
     length = HidTransferPacket->reportBufferLen;
+    if (HidTransferPacket->reportId != 0 &&
+        (length == 0 || HidTransferPacket->reportBuffer[0] != HidTransferPacket->reportId) &&
+        length < HBASHTON_DUALSENSE_MAX_OUTPUT_REPORT_SIZE)
+    {
+        WdfSpinLockAcquire(pad->ParentContext->OutputReportLock);
+        pad->LastOutputReport[0] = HidTransferPacket->reportId;
+        if (length != 0)
+        {
+            RtlCopyMemory(&pad->LastOutputReport[1], HidTransferPacket->reportBuffer, length);
+        }
+
+        pad->LastOutputReportLength = length + 1;
+        pad->OutputSequence++;
+        WdfSpinLockRelease(pad->ParentContext->OutputReportLock);
+
+        VhfAsyncOperationComplete(VhfOperationHandle, STATUS_SUCCESS);
+        return;
+    }
+
     if (length > HBASHTON_DUALSENSE_MAX_OUTPUT_REPORT_SIZE)
     {
         length = HBASHTON_DUALSENSE_MAX_OUTPUT_REPORT_SIZE;

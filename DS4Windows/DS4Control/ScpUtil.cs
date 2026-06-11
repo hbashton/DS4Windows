@@ -57,7 +57,7 @@ namespace DS4Windows
     public enum X360Controls : byte { None, LXNeg, LXPos, LYNeg, LYPos, RXNeg, RXPos, RYNeg, RYPos, LB, LT, LS, RB, RT, RS, X, Y, B, A, DpadUp, DpadRight, DpadDown, DpadLeft, Guide, Back, Start, TouchpadClick, LeftMouse, RightMouse, MiddleMouse, FourthMouse, FifthMouse, WUP, WDOWN, MouseUp, MouseDown, MouseLeft, MouseRight, AbsMouseUp, AbsMouseDown, AbsMouseLeft, AbsMouseRight, Unbound };
 
     public enum SASteeringWheelEmulationAxisType : byte { None = 0, LX, LY, RX, RY, L2R2, VJoy1X, VJoy1Y, VJoy1Z, VJoy2X, VJoy2Y, VJoy2Z };
-    public enum OutContType : uint { None = 0, X360, DS4 }
+    public enum OutContType : uint { None = 0, X360, DS4, DualSense }
 
     public enum GyroOutMode : uint
     {
@@ -826,7 +826,8 @@ namespace DS4Windows
             {
                 xboxDefaultNames.TryGetValue(key, out result);
             }
-            else if (conType == DS4Windows.OutContType.DS4)
+            else if (conType == DS4Windows.OutContType.DS4 ||
+                conType == DS4Windows.OutContType.DualSense)
             {
                 ds4DefaultNames.TryGetValue(key, out result);
             }
@@ -4355,6 +4356,7 @@ namespace DS4Windows
                 case OutContType.None:
                 case OutContType.X360: result = "X360"; break;
                 case OutContType.DS4: result = "DS4"; break;
+                case OutContType.DualSense: result = "DualSense"; break;
                 default: break;
             }
 
@@ -4369,6 +4371,7 @@ namespace DS4Windows
                 case "None":
                 case "X360": id = OutContType.X360; break;
                 case "DS4": id = OutContType.DS4; break;
+                case "DualSense": id = OutContType.DualSense; break;
                 default: break;
             }
 

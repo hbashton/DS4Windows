@@ -21,6 +21,7 @@
         <ComboBox x:Name="devTypeCombo" SelectedIndex="0" DockPanel.Dock="Top">
             <ComboBoxItem Tag="0" Content="X360" />
             <ComboBoxItem Tag="1" Content="DS4" />
+            <ComboBoxItem Tag="2" Content="DualSense" />
         </ComboBox>
 
         <ComboBox x:Name="reserveTypeCombo" SelectedIndex="0" DockPanel.Dock="Top">

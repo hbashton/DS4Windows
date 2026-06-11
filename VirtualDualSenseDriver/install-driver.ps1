@@ -4,8 +4,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$rootDeviceName = "HBashtonVirtualDualSense"
 $hardwareId = "Root\HBashtonVirtualDualSense"
-$instanceId = "ROOT\HBashtonVirtualDualSense"
 $infPath = Join-Path $PSScriptRoot "HBashtonVirtualDualSense.inf"
 $sysPath = Join-Path $PSScriptRoot "HBashtonVirtualDualSense.sys"
 $catPath = Join-Path $PSScriptRoot "HBashtonVirtualDualSense.cat"
@@ -27,7 +27,7 @@ function Assert-DriverPackage {
 }
 
 function Test-RootDevicePresent {
-    $output = & pnputil.exe /enum-devices /instanceid $instanceId 2>&1
+    $output = & pnputil.exe /enum-devices /deviceid $hardwareId 2>&1
     $text = $output | Out-String
     return ($LASTEXITCODE -eq 0) -and ($text -notmatch "No devices were found")
 }
@@ -66,7 +66,7 @@ public static class RootDeviceInstaller
         public IntPtr Reserved;
     }
 
-    public static void CreateRootDevice(string hardwareId)
+    public static void CreateRootDevice(string rootDeviceName, string hardwareId)
     {
         Guid classGuid = SystemClassGuid;
         IntPtr deviceInfoSet = SetupDiCreateDeviceInfoList(ref classGuid, IntPtr.Zero);
@@ -82,7 +82,7 @@ public static class RootDeviceInstaller
                 cbSize = Marshal.SizeOf(typeof(SP_DEVINFO_DATA))
             };
 
-            if (!SetupDiCreateDeviceInfo(deviceInfoSet, hardwareId, ref classGuid, null,
+            if (!SetupDiCreateDeviceInfo(deviceInfoSet, rootDeviceName, ref classGuid, null,
                     IntPtr.Zero, DICD_GENERATE_ID, ref deviceInfoData))
             {
                 ThrowLastWin32("SetupDiCreateDeviceInfo failed");
@@ -159,7 +159,7 @@ Add-Type -TypeDefinition $source
 
 if (-not (Test-RootDevicePresent)) {
     Write-Host "Creating root-enumerated device $hardwareId..."
-    [RootDeviceInstaller]::CreateRootDevice($hardwareId)
+    [RootDeviceInstaller]::CreateRootDevice($rootDeviceName, $hardwareId)
 } else {
     Write-Host "Root-enumerated device already exists."
 }

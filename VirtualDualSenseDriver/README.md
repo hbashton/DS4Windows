@@ -52,14 +52,26 @@ Build:
 .\build-driver.ps1 -Configuration Release -Platform x64
 ```
 
-Install on a test-signed machine with WDK tools:
+Install on a test-signed machine from an elevated PowerShell window:
 
 ```powershell
-devcon install .\HBashtonVirtualDualSense.inf Root\HBashtonVirtualDualSense
+.\install-driver.ps1
 ```
 
-The driver must be signed. A development machine can use test-signing; a public
-release needs a proper driver signing pipeline.
+The install script stages the INF with PnPUtil, creates the
+`Root\HBashtonVirtualDualSense` devnode through SetupAPI, then binds the driver
+package to that root device. This replaces the old manual `devcon install`
+step. To inspect the current machine state:
+
+```powershell
+.\check-driver.ps1
+```
+
+The driver must be signed. A development machine can use test-signing with a
+test-signed package; a public release needs a proper driver signing pipeline.
+If `HBashtonVirtualDualSense.sys` or `HBashtonVirtualDualSense.cat` is missing
+from the packaged `VirtualDualSenseDriver` folder, the app can show the
+DualSense output option but Windows cannot create the backend yet.
 
 Useful references:
 

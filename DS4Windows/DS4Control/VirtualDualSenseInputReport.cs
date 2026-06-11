@@ -90,8 +90,8 @@ namespace DS4Windows
 
         private static void WriteTouch(byte[] report, int offset, DS4State.TrackPadTouch touch)
         {
-            int x = Math.Clamp(touch.X, 0, DS4Touchpad.RESOLUTION_X_MAX);
-            int y = Math.Clamp(touch.Y, 0, DS4Touchpad.RESOLUTION_Y_MAX);
+            int x = Math.Clamp((int)touch.X, 0, DS4Touchpad.RESOLUTION_X_MAX);
+            int y = Math.Clamp((int)touch.Y, 0, DS4Touchpad.RESOLUTION_Y_MAX);
 
             report[offset] = (byte)((touch.IsActive ? 0x00 : 0x80) | (touch.Id & 0x7f));
             report[offset + 1] = (byte)(x & 0xff);

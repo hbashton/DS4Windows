@@ -5531,8 +5531,8 @@ namespace DS4Windows
                     }
                 }
 
-                // Check if Touchpad should be switched off
-                if (startTouchpadOff[device] == true) control.StartTPOff(device);
+                // Reset the runtime touchpad movement toggle from the loaded profile.
+                control.SetTouchpadMovementActive(device, !startTouchpadOff[device]);
 
                 {
                     bool tempToggle = gyroControlsInf[device].triggerToggle;
@@ -6584,9 +6584,14 @@ namespace DS4Windows
                 {
                     Item = m_Xdoc.SelectSingleNode("/" + rootname + "/StartTouchpadOff");
                     bool.TryParse(Item.InnerText, out startTouchpadOff[device]);
-                    if (startTouchpadOff[device] == true) control.StartTPOff(device);
+                    control.SetTouchpadMovementActive(device, !startTouchpadOff[device]);
                 }
-                catch { startTouchpadOff[device] = false; missingSetting = true; }
+                catch
+                {
+                    startTouchpadOff[device] = false;
+                    control.SetTouchpadMovementActive(device, true);
+                    missingSetting = true;
+                }
 
                 // Fallback lookup if TouchpadOutMode is not set
                 bool tpForControlsPresent = false;

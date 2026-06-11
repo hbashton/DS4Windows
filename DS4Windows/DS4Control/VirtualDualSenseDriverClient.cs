@@ -42,6 +42,7 @@ namespace DS4Windows
         private const int ErrorFileNotFound = 2;
         private const int ErrorPathNotFound = 3;
         private const int ErrorAccessDenied = 5;
+        private const int ErrorInvalidFunction = 1;
         private const uint GenericRead = 0x80000000;
         private const uint GenericWrite = 0x40000000;
         private const int FileShareRead = 0x00000001;
@@ -58,48 +59,43 @@ namespace DS4Windows
 
         public void Connect(VirtualDualSenseBusMode busMode = VirtualDualSenseBusMode.Usb)
         {
-            List<string> attemptedPaths = new List<string>();
+            List<string> attemptResults = new List<string>();
             int lastError = ErrorFileNotFound;
 
-            foreach (string candidatePath in EnumerateCandidateDevicePaths())
+            foreach (string candidatePath in EnumerateCandidateDevicePaths().Distinct(StringComparer.OrdinalIgnoreCase))
             {
-                attemptedPaths.Add(candidatePath);
-                handle = CreateFile(candidatePath, GenericRead | GenericWrite,
+                SafeFileHandle candidateHandle = CreateFile(candidatePath, GenericRead | GenericWrite,
                     FileShareRead | FileShareWrite, IntPtr.Zero, OpenExisting,
                     FileAttributeNormal, IntPtr.Zero);
 
-                if (handle != null && !handle.IsInvalid)
+                if (candidateHandle == null || candidateHandle.IsInvalid)
                 {
-                    break;
+                    lastError = Marshal.GetLastWin32Error();
+                    attemptResults.Add(FormatAttemptResult(candidatePath, "open", lastError));
+                    candidateHandle?.Dispose();
+                    continue;
                 }
 
-                lastError = Marshal.GetLastWin32Error();
-                handle?.Dispose();
-                handle = null;
+                try
+                {
+                    padId = CreatePad(candidateHandle, busMode);
+                    handle = candidateHandle;
+                    return;
+                }
+                catch (Win32Exception e)
+                {
+                    lastError = e.NativeErrorCode;
+                    attemptResults.Add(FormatAttemptResult(candidatePath, "create pad", lastError));
+                    candidateHandle.Dispose();
+                }
+                catch
+                {
+                    candidateHandle.Dispose();
+                    throw;
+                }
             }
 
-            if (handle == null || handle.IsInvalid)
-            {
-                throw new Win32Exception(lastError, BuildUnavailableMessage(lastError, attemptedPaths));
-            }
-
-            try
-            {
-                Span<byte> createRequest = stackalloc byte[CreatePadRequestLength];
-                Span<byte> createBuffer = stackalloc byte[4];
-                BitConverter.TryWriteBytes(createRequest.Slice(0, sizeof(uint)), CreatePadRequestLength);
-                BitConverter.TryWriteBytes(createRequest.Slice(sizeof(uint), sizeof(uint)), CreatePadVersion);
-                BitConverter.TryWriteBytes(createRequest.Slice(sizeof(uint) * 2, sizeof(uint)), (uint)busMode);
-                BitConverter.TryWriteBytes(createRequest.Slice(sizeof(uint) * 3, sizeof(uint)), 0U);
-                DeviceIoControlChecked(IoctlCreatePad, createRequest, createBuffer);
-                padId = BitConverter.ToUInt32(createBuffer);
-            }
-            catch
-            {
-                handle.Dispose();
-                handle = null;
-                throw;
-            }
+            throw new Win32Exception(lastError, BuildUnavailableMessage(lastError, attemptResults));
         }
 
         public void SubmitInputReport(byte[] report)
@@ -264,7 +260,7 @@ namespace DS4Windows
             bool accessDenied = lastError == ErrorAccessDenied;
             string systemMessage = new Win32Exception(lastError).Message;
             string pathList = attemptedPaths.Count > 0 ?
-                string.Join(", ", attemptedPaths.Distinct()) :
+                string.Join("; ", attemptedPaths.Distinct()) :
                 DevicePath;
 
             StringBuilder builder = new StringBuilder();
@@ -279,25 +275,52 @@ namespace DS4Windows
                 builder.Append("Virtual DualSense driver is installed but DS4Windows could not open it. ");
                 builder.Append("Run DS4Windows as Administrator or reinstall the driver package.");
             }
+            else if (lastError == ErrorInvalidFunction)
+            {
+                builder.Append("Virtual DualSense driver was found, but the opened device path did not accept DS4Windows' virtual pad commands. ");
+                builder.Append("Reinstall the bundled HBashton Virtual DualSense driver package as Administrator, then restart DS4Windows.");
+            }
             else
             {
                 builder.Append("Virtual DualSense driver is installed or partially installed, but DS4Windows could not open it. ");
                 builder.Append("Restart DS4Windows, reconnect the virtual output, or reinstall the driver package.");
             }
 
-            builder.Append($" Last CreateFile error {lastError}: {systemMessage}. ");
-            builder.Append($"Tried: {pathList}.");
+            builder.Append($" Last driver error {lastError}: {systemMessage}. ");
+            builder.Append($"Attempts: {pathList}.");
             return builder.ToString();
         }
 
+        private static string FormatAttemptResult(string devicePath, string operation, int errorCode)
+        {
+            return $"{devicePath} ({operation} failed {errorCode}: {new Win32Exception(errorCode).Message})";
+        }
+
+        private static uint CreatePad(SafeFileHandle deviceHandle, VirtualDualSenseBusMode busMode)
+        {
+            Span<byte> createRequest = stackalloc byte[CreatePadRequestLength];
+            Span<byte> createBuffer = stackalloc byte[4];
+            BitConverter.TryWriteBytes(createRequest.Slice(0, sizeof(uint)), CreatePadRequestLength);
+            BitConverter.TryWriteBytes(createRequest.Slice(sizeof(uint), sizeof(uint)), CreatePadVersion);
+            BitConverter.TryWriteBytes(createRequest.Slice(sizeof(uint) * 2, sizeof(uint)), (uint)busMode);
+            BitConverter.TryWriteBytes(createRequest.Slice(sizeof(uint) * 3, sizeof(uint)), 0U);
+            DeviceIoControlChecked(deviceHandle, IoctlCreatePad, createRequest, createBuffer);
+            return BitConverter.ToUInt32(createBuffer);
+        }
+
         private void DeviceIoControlChecked(uint ioctl, ReadOnlySpan<byte> input, Span<byte> output)
+        {
+            DeviceIoControlChecked(handle, ioctl, input, output);
+        }
+
+        private static void DeviceIoControlChecked(SafeFileHandle deviceHandle, uint ioctl, ReadOnlySpan<byte> input, Span<byte> output)
         {
             unsafe
             {
                 fixed (byte* inputPtr = input)
                 fixed (byte* outputPtr = output)
                 {
-                    bool ok = DeviceIoControl(handle, ioctl,
+                    bool ok = DeviceIoControl(deviceHandle, ioctl,
                         input.IsEmpty ? IntPtr.Zero : (IntPtr)inputPtr, input.Length,
                         output.IsEmpty ? IntPtr.Zero : (IntPtr)outputPtr, output.Length,
                         out _, IntPtr.Zero);

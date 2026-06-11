@@ -35,6 +35,8 @@ namespace DS4WinWPF
     [SuppressUnmanagedCodeSecurity]
     public class AutoProfileChecker
     {
+        private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+
         private AutoProfileHolder profileHolder;
         private IntPtr prevForegroundWnd = IntPtr.Zero;
         private uint prevForegroundProcessID;
@@ -311,7 +313,6 @@ namespace DS4WinWPF
 
             prevForegroundWnd = hWnd;
 
-            IntPtr hProcess = IntPtr.Zero;
             uint lpdwProcessId = 0;
             GetWindowThreadProcessId(hWnd, out lpdwProcessId);
 
@@ -322,24 +323,57 @@ namespace DS4WinWPF
             else
             {
                 prevForegroundProcessID = lpdwProcessId;
-
-                hProcess = OpenProcess(0x0410, false, lpdwProcessId);
-                if (hProcess != IntPtr.Zero) GetModuleFileNameEx(hProcess, IntPtr.Zero, autoProfileCheckTextBuilder, autoProfileCheckTextBuilder.Capacity);
-                else autoProfileCheckTextBuilder.Clear();
-
-                prevForegroundProcessName = topProcessName = autoProfileCheckTextBuilder.Replace('/', '\\').ToString().ToLower();
+                prevForegroundProcessName = topProcessName = GetProcessExecutablePath(lpdwProcessId)
+                    .Replace('/', '\\')
+                    .ToLower();
             }
 
             GetWindowText(hWnd, autoProfileCheckTextBuilder, autoProfileCheckTextBuilder.Capacity);
             prevForegroundWndTitleName = topWndTitleName = autoProfileCheckTextBuilder.ToString().ToLower();
 
 
-            if (hProcess != IntPtr.Zero) CloseHandle(hProcess);
-
             if (autoProfileDebugLogLevel > 0)
                 DS4Windows.AppLogger.LogToGui($"DEBUG: Auto-Profile. PID={lpdwProcessId}  Path={topProcessName} | WND={hWnd}  Title={topWndTitleName}", false, true);
 
             return true;
+        }
+
+        private static string GetProcessExecutablePath(uint processId)
+        {
+            if (processId == 0)
+            {
+                return string.Empty;
+            }
+
+            IntPtr hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, processId);
+            if (hProcess != IntPtr.Zero)
+            {
+                try
+                {
+                    StringBuilder builder = new StringBuilder(1000);
+                    int size = builder.Capacity;
+                    if (QueryFullProcessImageName(hProcess, 0, builder, ref size) && size > 0)
+                    {
+                        return builder.ToString();
+                    }
+                }
+                finally
+                {
+                    CloseHandle(hProcess);
+                }
+            }
+
+            try
+            {
+                using (Process process = Process.GetProcessById((int)processId))
+                {
+                    return process.ProcessName + ".exe";
+                }
+            }
+            catch
+            {
+                return string.Empty;
+            }
         }
 
         private static unsafe string GetWindowTitle(HWND handle)
@@ -413,8 +447,8 @@ namespace DS4WinWPF
         [DllImport("kernel32.dll")]
         private static extern bool CloseHandle(IntPtr handle);
 
-        [DllImport("psapi.dll")]
-        private static extern uint GetModuleFileNameEx(IntPtr hWnd, IntPtr hModule, StringBuilder lpFileName, int nSize);
+        [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        private static extern bool QueryFullProcessImageName(IntPtr hProcess, int dwFlags, StringBuilder lpExeName, ref int lpdwSize);
 
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         private static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nSize);

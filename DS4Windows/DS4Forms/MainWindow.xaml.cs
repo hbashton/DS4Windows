@@ -852,9 +852,7 @@ Suspend support not enabled.", true);
         {
             autoProfilesTimer.Stop();
             //Console.WriteLine("Event triggered");
-            App.rootHub.UpdateGameBarProfileState();
             autoprofileChecker.Process();
-            App.rootHub.UpdateGameBarProfileState();
 
             if (autoprofileChecker.Running)
             {

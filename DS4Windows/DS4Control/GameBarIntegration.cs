@@ -22,6 +22,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text;
+using System.Threading;
 using System.Windows.Automation;
 using Windows.Foundation.Metadata;
 using Windows.Gaming.UI;
@@ -39,7 +40,14 @@ namespace DS4Windows
         private const int MaxAutomationVisitCount = 500;
         private const int MaxAutomationDepth = 5;
         private const int MaxDiagnosticTextLength = 160;
+        private const int LiveAutomationPollMs = 1000;
+        private const int LiveAutomationCacheMs = 3000;
         private static bool? gameBarApiPresent;
+        private static readonly object automationPollLock = new object();
+        private static bool automationPollRunning;
+        private static bool automationPollCachedVisible;
+        private static DateTime automationPollLastStartedUtc = DateTime.MinValue;
+        private static DateTime automationPollLastCompletedUtc = DateTime.MinValue;
 
         private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
@@ -105,30 +113,87 @@ namespace DS4Windows
 
         public bool IsGameBarVisible()
         {
-            if (TryGetGameBarApiState(out bool apiVisible, out bool apiInputRedirected, out _))
+            if (IsGameBarVisibleByWindowEnumeration())
             {
-                return apiVisible || apiInputRedirected;
+                return true;
             }
 
+            return IsGameBarVisibleByCachedAutomation();
+        }
+
+        private static bool IsGameBarVisibleByWindowEnumeration()
+        {
             bool visible = false;
 
-            EnumWindows((hWnd, lParam) =>
+            try
             {
-                if (!IsInspectableWindow(hWnd))
+                EnumWindows((hWnd, lParam) =>
                 {
+                    if (!IsInspectableWindow(hWnd))
+                    {
+                        return true;
+                    }
+
+                    if (LooksLikeGameBarWindow(hWnd) || HasGameBarChildWindow(hWnd))
+                    {
+                        visible = true;
+                        return false;
+                    }
+
                     return true;
-                }
+                }, IntPtr.Zero);
+            }
+            catch
+            {
+                visible = false;
+            }
 
-                if (LooksLikeGameBarWindow(hWnd) || HasGameBarChildWindow(hWnd))
+            return visible;
+        }
+
+        private static bool IsGameBarVisibleByCachedAutomation()
+        {
+            DateTime now = DateTime.UtcNow;
+            lock (automationPollLock)
+            {
+                bool cachedResultIsFresh = automationPollCachedVisible &&
+                    now - automationPollLastCompletedUtc < TimeSpan.FromMilliseconds(LiveAutomationCacheMs);
+
+                if (!automationPollRunning &&
+                    now - automationPollLastStartedUtc >= TimeSpan.FromMilliseconds(LiveAutomationPollMs))
                 {
-                    visible = true;
-                    return false;
+                    automationPollRunning = true;
+                    automationPollLastStartedUtc = now;
+
+                    Thread worker = new Thread(() =>
+                    {
+                        bool visible = false;
+                        try
+                        {
+                            visible = IsGameBarVisibleByAutomation();
+                        }
+                        catch
+                        {
+                            visible = false;
+                        }
+                        finally
+                        {
+                            lock (automationPollLock)
+                            {
+                                automationPollCachedVisible = visible;
+                                automationPollLastCompletedUtc = DateTime.UtcNow;
+                                automationPollRunning = false;
+                            }
+                        }
+                    });
+
+                    worker.IsBackground = true;
+                    worker.Name = "DS4Windows Game Bar UIA Poll";
+                    worker.Start();
                 }
 
-                return true;
-            }, IntPtr.Zero);
-
-            return visible || IsGameBarVisibleByAutomation();
+                return cachedResultIsFresh;
+            }
         }
 
         public string GetGameBarWindowDiagnostics()
@@ -172,7 +237,7 @@ namespace DS4Windows
             return $"GameBarVisible={IsGameBarVisible()} Elevated={IsRunningElevated()}\n{GetGameBarApiDiagnostics()}";
         }
 
-        private static bool TryGetGameBarApiState(out bool visible, out bool inputRedirected, out string status)
+        private static bool TryGetGameBarApiStateCore(out bool visible, out bool inputRedirected, out string status)
         {
             visible = false;
             inputRedirected = false;
@@ -200,8 +265,38 @@ namespace DS4Windows
 
         private static string GetGameBarApiDiagnostics()
         {
-            bool supported = TryGetGameBarApiState(out bool visible, out bool inputRedirected, out string status);
+            bool supported = TryGetGameBarApiState(500, out bool visible, out bool inputRedirected, out string status);
             return $"GameBarApi supported={supported} visible={visible} inputRedirected={inputRedirected} status='{TruncateDiagnosticText(status)}'";
+        }
+
+        private static bool TryGetGameBarApiState(int timeoutMs, out bool visible, out bool inputRedirected, out string status)
+        {
+            bool apiSupported = false;
+            bool apiVisible = false;
+            bool apiInputRedirected = false;
+            string apiStatus = "not started";
+
+            Thread worker = new Thread(() =>
+            {
+                apiSupported = TryGetGameBarApiStateCore(out apiVisible, out apiInputRedirected, out apiStatus);
+            });
+
+            worker.IsBackground = true;
+            worker.Name = "DS4Windows Game Bar API Probe";
+            worker.Start();
+
+            if (!worker.Join(timeoutMs))
+            {
+                visible = false;
+                inputRedirected = false;
+                status = $"timeout after {timeoutMs}ms";
+                return false;
+            }
+
+            visible = apiVisible;
+            inputRedirected = apiInputRedirected;
+            status = apiStatus;
+            return apiSupported;
         }
 
         private static bool IsGameBarVisibleByAutomation()

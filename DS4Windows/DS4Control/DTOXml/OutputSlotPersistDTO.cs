@@ -18,8 +18,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 using System;
 using System.Collections.Generic;
-using System.Windows.Documents;
-using System.Xml;
 using System.Xml.Serialization;
 using DS4Windows;
 
@@ -76,10 +74,36 @@ namespace DS4WinWPF.DS4Control.DTOXml
 
                 if (tempDev != null)
                 {
+                    if (tempSlot.DeviceType == OutContType.None)
+                    {
+                        continue;
+                    }
+
                     tempDev.CurrentReserveStatus = OutSlotDevice.ReserveStatus.Permanent;
                     tempDev.PermanentType = tempSlot.DeviceType;
                 }
             }
+        }
+
+        internal static OutContType ParseOutputDeviceType(string value, OutContType fallback)
+        {
+            if (Enum.TryParse(value, true, out OutContType parsed) &&
+                Enum.IsDefined(typeof(OutContType), parsed))
+            {
+                return parsed;
+            }
+
+            return fallback;
+        }
+
+        internal static string FormatOutputDeviceType(OutContType value)
+        {
+            return value switch
+            {
+                OutContType.DS4 => "DS4",
+                OutContType.None => "None",
+                _ => "X360",
+            };
         }
     }
 
@@ -91,10 +115,17 @@ namespace DS4WinWPF.DS4Control.DTOXml
             get; set;
         } = 0;
 
-        [XmlElement("DeviceType")]
+        [XmlIgnore]
         public OutContType DeviceType
         {
             get; set;
+        }
+
+        [XmlElement("DeviceType")]
+        public string DeviceTypeString
+        {
+            get => OutputSlotPersistDTO.FormatOutputDeviceType(DeviceType);
+            set => DeviceType = OutputSlotPersistDTO.ParseOutputDeviceType(value, OutContType.None);
         }
     }
 }

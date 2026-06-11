@@ -57,18 +57,41 @@ namespace DS4Windows
         }
         public override void Disconnect()
         {
-            // Remove feedback handlers before Disconnect
-            RemoveFeedbacks();
+            try
+            {
+                // Remove feedback handlers before Disconnect
+                RemoveFeedbacks();
+            }
+            catch (Exception ex)
+            {
+                ControlService.StartupDiag($"DS4OutDevice.RemoveFeedbacks exception {ex.GetType().Name}: {ex.Message}");
+            }
 
-            connected = false;
-            cont.Disconnect();
-            //cont.Dispose();
-            cont = null;
+            try
+            {
+                cont?.Disconnect();
+            }
+            catch (Exception ex)
+            {
+                ControlService.StartupDiag($"DS4OutDevice.Disconnect exception {ex.GetType().Name}: {ex.Message}");
+            }
+            finally
+            {
+                connected = false;
+                //cont.Dispose();
+                cont = null;
+            }
         }
         public override string GetDeviceType() => devtype;
 
         public override void RemoveFeedbacks()
         {
+            if (cont == null)
+            {
+                forceFeedbacksDict.Clear();
+                return;
+            }
+
             foreach (KeyValuePair<int, DualShock4FeedbackReceivedEventHandler> pair in forceFeedbacksDict)
             {
                 cont.FeedbackReceived -= pair.Value;
@@ -79,7 +102,8 @@ namespace DS4Windows
 
         public override void RemoveFeedback(int inIdx)
         {
-            if (forceFeedbacksDict.TryGetValue(inIdx, out DualShock4FeedbackReceivedEventHandler handler))
+            if (cont != null &&
+                forceFeedbacksDict.TryGetValue(inIdx, out DualShock4FeedbackReceivedEventHandler handler))
             {
                 cont.FeedbackReceived -= handler;
                 forceFeedbacksDict.Remove(inIdx);

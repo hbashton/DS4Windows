@@ -194,7 +194,9 @@ namespace DS4Windows
 
         public override void Connect()
         {
+            ControlService.StartupDiag("Xbox360OutDevice.Connect cont.Connect begin");
             cont.Connect();
+            ControlService.StartupDiag("Xbox360OutDevice.Connect cont.Connect end");
             connected = true;
 
             if (_features.HasFlag(X360Features.XInputSlotNum))
@@ -203,10 +205,13 @@ namespace DS4Windows
                 Thread.Sleep(USER_INDEX_WAIT);
                 try
                 {
+                    ControlService.StartupDiag("Xbox360OutDevice.Connect UserIndex begin");
                     XinputSlotNum = cont.UserIndex;
+                    ControlService.StartupDiag($"Xbox360OutDevice.Connect UserIndex end slot={XinputSlotNum}");
                 }
                 catch (Exception)
                 {
+                    ControlService.StartupDiag("Xbox360OutDevice.Connect UserIndex exception; disabling feature");
                     // Failed to grab xinput slot number. Set default
                     // slot number and remove feature flag
                     _xInputSlotNum = XINPUT_SLOT_NUM_DEFAULT;
@@ -216,16 +221,34 @@ namespace DS4Windows
         }
         public override void Disconnect()
         {
-            foreach (KeyValuePair<int, Xbox360FeedbackReceivedEventHandler> pair in forceFeedbacksDict)
+            ControlService.StartupDiag("Xbox360OutDevice.Disconnect begin");
+            if (cont != null)
             {
-                cont.FeedbackReceived -= pair.Value;
+                foreach (KeyValuePair<int, Xbox360FeedbackReceivedEventHandler> pair in forceFeedbacksDict)
+                {
+                    cont.FeedbackReceived -= pair.Value;
+                }
             }
 
             forceFeedbacksDict.Clear();
 
             connected = false;
-            cont.Disconnect();
-            cont = null;
+            ControlService.StartupDiag("Xbox360OutDevice.Disconnect cont.Disconnect begin");
+            try
+            {
+                cont?.Disconnect();
+                ControlService.StartupDiag("Xbox360OutDevice.Disconnect cont.Disconnect end");
+            }
+            catch (Exception ex)
+            {
+                ControlService.StartupDiag($"Xbox360OutDevice.Disconnect exception {ex.GetType().Name}: {ex.Message}");
+            }
+            finally
+            {
+                cont = null;
+            }
+
+            ControlService.StartupDiag("Xbox360OutDevice.Disconnect end");
         }
         public override string GetDeviceType() => devType;
 
@@ -240,9 +263,12 @@ namespace DS4Windows
 
         public override void RemoveFeedbacks()
         {
-            foreach (KeyValuePair<int, Xbox360FeedbackReceivedEventHandler> pair in forceFeedbacksDict)
+            if (cont != null)
             {
-                cont.FeedbackReceived -= pair.Value;
+                foreach (KeyValuePair<int, Xbox360FeedbackReceivedEventHandler> pair in forceFeedbacksDict)
+                {
+                    cont.FeedbackReceived -= pair.Value;
+                }
             }
 
             forceFeedbacksDict.Clear();
@@ -250,7 +276,8 @@ namespace DS4Windows
 
         public override void RemoveFeedback(int inIdx)
         {
-            if (forceFeedbacksDict.TryGetValue(inIdx, out Xbox360FeedbackReceivedEventHandler handler))
+            if (cont != null &&
+                forceFeedbacksDict.TryGetValue(inIdx, out Xbox360FeedbackReceivedEventHandler handler))
             {
                 cont.FeedbackReceived -= handler;
                 forceFeedbacksDict.Remove(inIdx);

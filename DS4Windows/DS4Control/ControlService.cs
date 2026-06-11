@@ -3616,6 +3616,15 @@ namespace DS4Windows
             }
         }
 
+        public void SetTouchpadMovementActive(int deviceID, bool active)
+        {
+            if (deviceID < CURRENT_DS4_CONTROLLER_LIMIT)
+            {
+                TouchActive[deviceID] = active;
+                touchreleased[deviceID] = true;
+            }
+        }
+
         public string TouchpadSlide(int ind)
         {
             DS4State cState = CurrentState[ind];

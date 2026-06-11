@@ -426,6 +426,13 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         private void UpdateTrayBattery(object sender, byte percentage)
         {
+            if (Application.Current?.Dispatcher != null &&
+                !Application.Current.Dispatcher.CheckAccess())
+            {
+                Application.Current.Dispatcher.BeginInvoke((Action)(() => UpdateTrayBattery(sender, percentage)));
+                return;
+            }
+
             IconSource = percentage switch
             {
                 < 10 => $"{Global.RESOURCES_PREFIX}/0.ico",

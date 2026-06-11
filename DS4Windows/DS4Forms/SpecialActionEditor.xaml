@@ -403,12 +403,18 @@
                                     <xctk:DecimalUpDown Value="{Binding Delay}" Width="60" Minimum="0" Maximum="60" FormatString= "F2" Increment="0.5" />
                                     <Label Content="secs" />
                                 </StackPanel>
-                                <Button x:Name="launchProgBrowseBtn" Content="{lex:Loc Browse}" Margin="{StaticResource spaceMargin}"
-                                        Click="LaunchProgBrowseBtn_Click" />
-                                <StackPanel Orientation="Horizontal" Margin="{StaticResource spaceMargin}">
-                                    <Label Content="{Binding ProgramName}" ToolTip="{Binding Filepath}" Width="150" HorizontalContentAlignment="Center" />
-                                    <Image Source="{Binding ProgramIcon}" Width="32" Height="32" Margin="10,0,0,0" />
-                                </StackPanel>
+                                <Grid Margin="{StaticResource spaceMargin}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="90" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Text="{Binding Filepath, Mode=OneWay}" ToolTip="{Binding Filepath}"
+                                             IsReadOnly="True" VerticalContentAlignment="Center"
+                                             TextWrapping="NoWrap" HorizontalScrollBarVisibility="Auto"
+                                             Margin="0,0,8,0" />
+                                    <Button x:Name="launchProgBrowseBtn" Grid.Column="1" Content="{lex:Loc Browse}"
+                                            Click="LaunchProgBrowseBtn_Click" />
+                                </Grid>
                                 <StackPanel Margin="{StaticResource spaceMargin}">
                                     <Label Content="Arguments"/>
                                     <TextBox Text="{Binding Arguments}" />

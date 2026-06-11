@@ -21,9 +21,9 @@ DefaultDestDir = 13
 HBashtonVirtualDualSense.sys = 1,,
 
 [Manufacturer]
-%ManufacturerName%=Standard,NTamd64
+%ManufacturerName%=Standard,NTamd64.10.0...16299
 
-[Standard.NTamd64]
+[Standard.NTamd64.10.0...16299]
 %DeviceName%=HBashtonVirtualDualSense_Device, Root\HBashtonVirtualDualSense
 
 [HBashtonVirtualDualSense_Device.NT]

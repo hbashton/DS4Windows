@@ -1,7 +1,7 @@
 param()
 
 $ErrorActionPreference = "Stop"
-$hardwareId = "ROOT\HBashtonVirtualDualSense"
+$hardwareId = "Root\HBashtonVirtualDualSense"
 $serviceName = "HBashtonVirtualDualSense"
 $symbolicLink = "\\.\HBashtonVirtualDualSense"
 
@@ -17,7 +17,7 @@ if ($service) {
 
 Write-Host ""
 Write-Host "PnP device:"
-$deviceText = & pnputil.exe /enum-devices /instanceid $hardwareId 2>&1
+$deviceText = & pnputil.exe /enum-devices /deviceid $hardwareId /deviceids 2>&1
 $deviceText | ForEach-Object { Write-Host $_ }
 
 Write-Host ""

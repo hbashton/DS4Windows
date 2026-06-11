@@ -5,7 +5,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$hardwareId = "ROOT\HBashtonVirtualDualSense"
+$hardwareId = "Root\HBashtonVirtualDualSense"
 $originalInfName = "HBashtonVirtualDualSense.inf"
 $serviceName = "HBashtonVirtualDualSense"
 
@@ -37,7 +37,7 @@ function Invoke-PnPUtil {
 }
 
 function Get-RootDeviceInstanceIds {
-    $output = & pnputil.exe /enum-devices /instanceid $hardwareId 2>&1
+    $output = & pnputil.exe /enum-devices /deviceid $hardwareId /deviceids 2>&1
     $text = $output | Out-String
     if ($LASTEXITCODE -ne 0 -or $text -match "No devices were found") {
         return @()

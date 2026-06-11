@@ -35,6 +35,10 @@ function Test-RootDevicePresent {
 Assert-Administrator
 Assert-DriverPackage
 
+$infPath = [string](Resolve-Path -LiteralPath $infPath).ProviderPath
+$sysPath = [string](Resolve-Path -LiteralPath $sysPath).ProviderPath
+$catPath = [string](Resolve-Path -LiteralPath $catPath).ProviderPath
+
 Write-Host "Staging HBashton Virtual DualSense driver package..."
 & pnputil.exe /add-driver $infPath | Write-Host
 if ($LASTEXITCODE -ne 0) {
@@ -163,13 +167,20 @@ if ($installerType -eq $null) {
 
 if (-not (Test-RootDevicePresent)) {
     Write-Host "Creating root-enumerated device $hardwareId..."
-    $installerType.GetMethod("CreateRootDevice").Invoke($null, @($rootDeviceName, $hardwareId))
+    $createRootArgs = New-Object 'object[]' 2
+    $createRootArgs[0] = [string]$rootDeviceName
+    $createRootArgs[1] = [string]$hardwareId
+    $installerType.GetMethod("CreateRootDevice").Invoke($null, $createRootArgs)
 } else {
     Write-Host "Root-enumerated device already exists."
 }
 
 Write-Host "Binding driver package to $hardwareId..."
-$rebootRequired = [bool]$installerType.GetMethod("UpdateDriver").Invoke($null, @($hardwareId, $infPath, $Force.IsPresent))
+$updateDriverArgs = New-Object 'object[]' 3
+$updateDriverArgs[0] = [string]$hardwareId
+$updateDriverArgs[1] = [string]$infPath
+$updateDriverArgs[2] = [bool]$Force.IsPresent
+$rebootRequired = [bool]$installerType.GetMethod("UpdateDriver").Invoke($null, $updateDriverArgs)
 
 Write-Host "Refreshing Plug and Play device tree..."
 & pnputil.exe /scan-devices | Write-Host

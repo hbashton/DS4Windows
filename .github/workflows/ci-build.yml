@@ -66,6 +66,8 @@ jobs:
       - name: Add MSBuild to PATH
         if: matrix.platform == 'x64'
         uses: microsoft/setup-msbuild@v2
+        with:
+          msbuild-architecture: x64
 
       - name: Build experimental Virtual DualSense driver
         if: matrix.platform == 'x64'

@@ -92,4 +92,10 @@
   </ItemGroup>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+
+  <Target Name="HBashtonVdsAddDriverOutputToPackage" BeforeTargets="DriverPackageTarget">
+    <ItemGroup>
+      <FilesToPackage Include="$(TargetPath)" PackageRelativeDirectory="" Condition="Exists('$(TargetPath)')" />
+    </ItemGroup>
+  </Target>
 </Project>

@@ -365,7 +365,7 @@ namespace DS4WinWPF
 
             try
             {
-                using (Process process = Process.GetProcessById((int)processId))
+                using (System.Diagnostics.Process process = System.Diagnostics.Process.GetProcessById((int)processId))
                 {
                     return process.ProcessName + ".exe";
                 }

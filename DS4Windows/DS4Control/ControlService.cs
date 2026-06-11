@@ -2975,6 +2975,9 @@ namespace DS4Windows
         private DateTime gameBarLastVisibleUtc = DateTime.MinValue;
         private DateTime gameBarInvisibleSinceUtc = DateTime.MinValue;
         private DateTime gameBarLastVisibilityCheckUtc = DateTime.MinValue;
+        private bool gameBarVerboseDetectionLogInitialized = false;
+        private bool gameBarVerboseLastVisible = false;
+        private DateTime gameBarVerboseLastDetectionLogUtc = DateTime.MinValue;
 
         public bool IsGameBarProfilePriorityActive(int ind)
         {
@@ -3080,6 +3083,7 @@ namespace DS4Windows
             gameBarRequestedProfileName[ind] = profileName;
             gameBarProfileRequestedUtc[ind] = now;
             gameBarProfilePending[ind] = true;
+            StartupDiag($"GameBar profile requested controller={ind + 1} target='{profileName}' previousTemp={gameBarPreviousUseTempProfile[ind]} previousTempProfile='{gameBarPreviousTempProfileName[ind]}' previousProfile='{gameBarPreviousProfileName[ind]}'");
         }
 
         private void CheckGameBarHomeButton(int ind, DS4State cState, DS4State tempControlState, DS4State pState)
@@ -3106,7 +3110,8 @@ namespace DS4Windows
             {
                 cState.PS = false;
                 tempControlState.PS = false;
-                gameBarIntegration.OpenGameBar();
+                string openResult = gameBarIntegration.OpenGameBar();
+                StartupDiag($"GameBar home button controller={ind + 1} existingPriority active={gameBarProfileActive[ind]} pending={gameBarProfilePending[ind]} {openResult}");
                 gameBarHomeButtonIgnoreUntilUtc[ind] = now + TimeSpan.FromSeconds(1);
                 return;
             }
@@ -3120,7 +3125,8 @@ namespace DS4Windows
             tempControlState.PS = false;
             gameBarHomeButtonIgnoreUntilUtc[ind] = now + TimeSpan.FromSeconds(1);
             RequestGameBarProfilePriority(ind, profileName, now);
-            gameBarIntegration.OpenGameBar();
+            string result = gameBarIntegration.OpenGameBar();
+            StartupDiag($"GameBar home button controller={ind + 1} requestedProfile='{profileName}' {result}");
         }
 
         public void UpdateGameBarProfileState()
@@ -3153,6 +3159,7 @@ namespace DS4Windows
 
                 gameBarLastVisibilityCheckUtc = now;
                 bool gameBarVisible = gameBarIntegration.IsGameBarVisible();
+                LogGameBarDetectionIfVerbose(now, gameBarVisible, anyConfigured, anyActiveOrPending);
                 if (gameBarVisible)
                 {
                     gameBarLastVisibleUtc = now;
@@ -3206,6 +3213,65 @@ namespace DS4Windows
             }
         }
 
+        private void LogGameBarDetectionIfVerbose(DateTime now, bool gameBarVisible, bool anyConfigured, bool anyActiveOrPending)
+        {
+            if (!Global.VerboseStartupLogging)
+            {
+                return;
+            }
+
+            bool shouldLog = !gameBarVerboseDetectionLogInitialized ||
+                gameBarVisible != gameBarVerboseLastVisible ||
+                now - gameBarVerboseLastDetectionLogUtc > TimeSpan.FromSeconds(3);
+
+            if (!shouldLog)
+            {
+                return;
+            }
+
+            gameBarVerboseDetectionLogInitialized = true;
+            gameBarVerboseLastVisible = gameBarVisible;
+            gameBarVerboseLastDetectionLogUtc = now;
+            StartupDiag($"GameBar detection visible={gameBarVisible} anyConfigured={anyConfigured} anyActiveOrPending={anyActiveOrPending} {gameBarIntegration.LastDetectionSummary} controllers={BuildGameBarPriorityStateSummary()}");
+        }
+
+        private string BuildGameBarPriorityStateSummary()
+        {
+            StringBuilder builder = new StringBuilder();
+            for (int i = 0; i < MAX_DS4_CONTROLLER_COUNT; i++)
+            {
+                if (DS4Controllers[i] == null &&
+                    !gameBarProfileActive[i] &&
+                    !gameBarProfilePending[i])
+                {
+                    continue;
+                }
+
+                if (builder.Length > 0)
+                {
+                    builder.Append(" ");
+                }
+
+                builder.Append("C");
+                builder.Append(i + 1);
+                builder.Append("[connected=");
+                builder.Append(DS4Controllers[i] != null);
+                builder.Append(",enabled=");
+                builder.Append(Global.GameBarHomeButtonSupport[i]);
+                builder.Append(",target='");
+                builder.Append(Global.GameBarProfileName[i]);
+                builder.Append("',active=");
+                builder.Append(gameBarProfileActive[i]);
+                builder.Append(",pending=");
+                builder.Append(gameBarProfilePending[i]);
+                builder.Append(",requested='");
+                builder.Append(gameBarRequestedProfileName[i]);
+                builder.Append("']");
+            }
+
+            return builder.Length == 0 ? "none" : builder.ToString();
+        }
+
         private void RequestVisibleGameBarProfiles(DateTime now)
         {
             for (int i = 0; i < MAX_DS4_CONTROLLER_COUNT; i++)
@@ -3242,6 +3308,7 @@ namespace DS4Windows
 
                 if (!actionRan)
                 {
+                    StartupDiag($"GameBar profile activation skipped controller={i + 1} target='{profileName}' reason=reporting-action-not-run");
                     continue;
                 }
 
@@ -3249,6 +3316,11 @@ namespace DS4Windows
                 {
                     gameBarProfileActive[i] = true;
                     gameBarProfileActivatedUtc[i] = now;
+                    StartupDiag($"GameBar profile activated controller={i + 1} target='{profileName}'");
+                }
+                else
+                {
+                    StartupDiag($"GameBar profile activation failed controller={i + 1} target='{profileName}'");
                 }
 
                 ClearPendingGameBarProfile(i);
@@ -3281,11 +3353,13 @@ namespace DS4Windows
                     () => restored = Global.LoadTempProfile(ind, gameBarPreviousTempProfileName[ind], false, this));
                 if (!actionRan)
                 {
+                    StartupDiag($"GameBar profile restore skipped controller={ind + 1} targetTemp='{gameBarPreviousTempProfileName[ind]}' reason=reporting-action-not-run");
                     return false;
                 }
 
                 if (restored)
                 {
+                    StartupDiag($"GameBar profile restored controller={ind + 1} tempProfile='{gameBarPreviousTempProfileName[ind]}'");
                     return true;
                 }
             }
@@ -3299,6 +3373,7 @@ namespace DS4Windows
 
             actionRan = RunProfileActionWithReportingPaused(ind,
                 () => restored = Global.LoadProfile(ind, false, this));
+            StartupDiag($"GameBar profile restore controller={ind + 1} profile='{previousProfileName}' actionRan={actionRan} restored={restored}");
             return actionRan && restored;
         }
 

@@ -45,12 +45,19 @@ namespace DS4Windows
         private const int LiveGameBarApiHangMs = 1500;
         private const int LiveAutomationPollMs = 1000;
         private const int LiveAutomationCacheMs = 3000;
+        private static readonly object detectionStatusLock = new object();
         private static readonly object gameBarApiPollLock = new object();
         private static bool gameBarApiPollRunning;
         private static bool gameBarApiPollCachedVisible;
         private static DateTime gameBarApiPollLastStartedUtc = DateTime.MinValue;
         private static DateTime gameBarApiPollLastCompletedUtc = DateTime.MinValue;
         private static int gameBarApiPollGeneration;
+        private static bool gameBarApiPollLastSupported;
+        private static bool gameBarApiPollLastVisible;
+        private static bool gameBarApiPollLastInputRedirected;
+        private static long gameBarApiPollLastElapsedMs;
+        private static string gameBarApiPollLastStatus = "not started";
+        private static string lastDetectionSummary = "not checked";
         private static readonly object automationPollLock = new object();
         private static bool automationPollRunning;
         private static bool automationPollCachedVisible;
@@ -119,24 +126,45 @@ namespace DS4Windows
             return "keybd_event Win+G sent";
         }
 
+        public string LastDetectionSummary
+        {
+            get
+            {
+                lock (detectionStatusLock)
+                {
+                    return lastDetectionSummary;
+                }
+            }
+        }
+
         public bool IsGameBarVisible()
         {
-            if (IsGameBarVisibleByWindowEnumeration())
-            {
-                return true;
-            }
+            bool apiVisible = IsGameBarVisibleByCachedGameBarApi(out string apiSummary);
+            bool windowVisible = IsGameBarVisibleByWindowEnumeration(out string windowSummary);
+            bool visible = apiVisible || windowVisible;
+            string source = apiVisible ? "api" : windowVisible ? "window" : "none";
+            UpdateLastDetectionSummary(visible, source,
+                $"api={apiSummary}; window={windowSummary}; uia=diagnostic-only");
+            return visible;
+        }
 
-            if (IsGameBarVisibleByCachedGameBarApi())
+        private static void UpdateLastDetectionSummary(bool visible, string source, string details)
+        {
+            lock (detectionStatusLock)
             {
-                return true;
+                lastDetectionSummary = $"source={source} visible={visible} {details}";
             }
-
-            return IsGameBarVisibleByCachedAutomation();
         }
 
         private static bool IsGameBarVisibleByWindowEnumeration()
         {
+            return IsGameBarVisibleByWindowEnumeration(out _);
+        }
+
+        private static bool IsGameBarVisibleByWindowEnumeration(out string summary)
+        {
             bool visible = false;
+            string matchSummary = string.Empty;
 
             try
             {
@@ -147,24 +175,34 @@ namespace DS4Windows
                         return true;
                     }
 
-                    if (LooksLikeGameBarWindow(hWnd) || HasGameBarChildWindow(hWnd))
+                    if (LooksLikeGameBarWindow(hWnd, out string windowReason) ||
+                        HasGameBarChildWindow(hWnd, out windowReason))
                     {
                         visible = true;
+                        matchSummary = windowReason;
                         return false;
                     }
 
                     return true;
                 }, IntPtr.Zero);
             }
-            catch
+            catch (Exception ex)
             {
-                visible = false;
+                summary = "error " + ex.GetType().Name + ": " + TruncateDiagnosticText(ex.Message);
+                return false;
             }
 
-            return visible;
+            if (visible)
+            {
+                summary = matchSummary;
+                return true;
+            }
+
+            summary = "no strict visible HWND match";
+            return false;
         }
 
-        private static bool IsGameBarVisibleByCachedGameBarApi()
+        private static bool IsGameBarVisibleByCachedGameBarApi(out string summary)
         {
             DateTime now = DateTime.UtcNow;
             lock (gameBarApiPollLock)
@@ -185,21 +223,32 @@ namespace DS4Windows
                     Thread worker = new Thread(() =>
                     {
                         bool visible = false;
+                        bool supported = false;
+                        bool apiVisible = false;
+                        bool apiInputRedirected = false;
+                        string apiStatus = "not started";
+                        Stopwatch stopwatch = Stopwatch.StartNew();
                         try
                         {
-                            if (TryGetGameBarApiStateCore(out bool apiVisible, out bool apiInputRedirected, out _))
-                            {
-                                visible = apiVisible || apiInputRedirected;
-                            }
+                            supported = TryGetGameBarApiStateCore(out apiVisible, out apiInputRedirected, out apiStatus);
+                            visible = supported && (apiVisible || apiInputRedirected);
                         }
-                        catch
+                        catch (Exception ex)
                         {
+                            apiStatus = ex.GetType().Name + ": " + ex.Message;
                             visible = false;
                         }
                         finally
                         {
+                            stopwatch.Stop();
                             lock (gameBarApiPollLock)
                             {
+                                gameBarApiPollLastSupported = supported;
+                                gameBarApiPollLastVisible = apiVisible;
+                                gameBarApiPollLastInputRedirected = apiInputRedirected;
+                                gameBarApiPollLastElapsedMs = stopwatch.ElapsedMilliseconds;
+                                gameBarApiPollLastStatus = apiStatus;
+
                                 if (pollGeneration == gameBarApiPollGeneration || visible)
                                 {
                                     gameBarApiPollCachedVisible = visible;
@@ -219,8 +268,25 @@ namespace DS4Windows
                     worker.Start();
                 }
 
+                summary = BuildCachedGameBarApiSummary(now, cachedResultIsFresh, pollIsStale);
                 return cachedResultIsFresh;
             }
+        }
+
+        private static string BuildCachedGameBarApiSummary(DateTime now, bool cachedResultIsFresh, bool pollIsStale)
+        {
+            string completedAge = gameBarApiPollLastCompletedUtc == DateTime.MinValue ?
+                "never" :
+                ((int)(now - gameBarApiPollLastCompletedUtc).TotalMilliseconds).ToString() + "ms";
+            string startedAge = gameBarApiPollLastStartedUtc == DateTime.MinValue ?
+                "never" :
+                ((int)(now - gameBarApiPollLastStartedUtc).TotalMilliseconds).ToString() + "ms";
+
+            return $"cachedFresh={cachedResultIsFresh} cachedVisible={gameBarApiPollCachedVisible} " +
+                $"running={gameBarApiPollRunning} stale={pollIsStale} startedAge={startedAge} completedAge={completedAge} " +
+                $"lastSupported={gameBarApiPollLastSupported} lastVisible={gameBarApiPollLastVisible} " +
+                $"lastInputRedirected={gameBarApiPollLastInputRedirected} lastElapsedMs={gameBarApiPollLastElapsedMs} " +
+                $"lastStatus='{TruncateDiagnosticText(gameBarApiPollLastStatus)}'";
         }
 
         private static bool IsGameBarVisibleByCachedAutomation()
@@ -317,6 +383,12 @@ namespace DS4Windows
 
             try
             {
+                if (!ApiInformation.IsTypePresent("Windows.Gaming.UI.GameBar"))
+                {
+                    status = "not present";
+                    return false;
+                }
+
                 visible = GameBar.Visible;
                 inputRedirected = GameBar.IsInputRedirected;
                 status = "ok";
@@ -324,18 +396,6 @@ namespace DS4Windows
             }
             catch (Exception ex)
             {
-                try
-                {
-                    if (!ApiInformation.IsTypePresent("Windows.Gaming.UI.GameBar"))
-                    {
-                        status = "not present";
-                        return false;
-                    }
-                }
-                catch
-                {
-                }
-
                 status = ex.GetType().Name + ": " + ex.Message;
                 return false;
             }
@@ -576,17 +636,23 @@ namespace DS4Windows
                 return false;
             }
 
-            bool processLooksRight = IsGameBarRelatedProcessName(processName);
-
             bool textLooksRight =
                 name.IndexOf("Xbox Game Bar", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 name.IndexOf("Game Bar", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 automationId.IndexOf("GameBar", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                automationId.IndexOf("Xbox", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                automationId.IndexOf("XboxGameBar", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 className.IndexOf("GameBar", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                className.IndexOf("Xbox", StringComparison.OrdinalIgnoreCase) >= 0;
+                className.IndexOf("XboxGameBar", StringComparison.OrdinalIgnoreCase) >= 0;
 
-            return processLooksRight || (textLooksRight && !IsKnownNoisyProcessName(processName));
+            if (textLooksRight)
+            {
+                return true;
+            }
+
+            return IsStrictGameBarProcessName(processName) &&
+                (className.IndexOf("Xaml", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                 className.IndexOf("CoreWindow", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                 automationId.IndexOf("GameBar", StringComparison.OrdinalIgnoreCase) >= 0);
         }
 
         private static bool IsAutomationDiagnosticCandidate(string processName, string name, string className, string automationId)
@@ -649,7 +715,13 @@ namespace DS4Windows
 
         private static bool HasGameBarChildWindow(IntPtr parentWindow)
         {
+            return HasGameBarChildWindow(parentWindow, out _);
+        }
+
+        private static bool HasGameBarChildWindow(IntPtr parentWindow, out string summary)
+        {
             bool found = false;
+            string matchSummary = string.Empty;
 
             EnumChildWindows(parentWindow, (hWnd, lParam) =>
             {
@@ -658,42 +730,71 @@ namespace DS4Windows
                     return true;
                 }
 
-                if (LooksLikeGameBarWindow(hWnd))
+                if (LooksLikeGameBarWindow(hWnd, out string windowReason))
                 {
                     found = true;
+                    matchSummary = "child " + windowReason;
                     return false;
                 }
 
                 return true;
             }, IntPtr.Zero);
 
+            summary = matchSummary;
             return found;
         }
 
         private static bool LooksLikeGameBarWindow(IntPtr hWnd)
         {
+            return LooksLikeGameBarWindow(hWnd, out _);
+        }
+
+        private static bool LooksLikeGameBarWindow(IntPtr hWnd, out string summary)
+        {
             string title = GetWindowTitle(hWnd);
             string className = GetWindowClassName(hWnd);
             string processName = GetProcessName(hWnd);
+            summary = $"hwnd=0x{hWnd.ToInt64():X} proc='{TruncateDiagnosticText(processName)}' class='{TruncateDiagnosticText(className)}' title='{TruncateDiagnosticText(title)}'";
 
-            bool processLooksRight =
-                processName.Equals("GameBar", StringComparison.OrdinalIgnoreCase) ||
+            bool trustedProcess = IsStrictGameBarProcessName(processName) ||
+                processName.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("ShellExperienceHost", StringComparison.OrdinalIgnoreCase);
+
+            if (!trustedProcess)
+            {
+                return false;
+            }
+
+            bool titleExplicitlyGameBar =
+                title.IndexOf("Xbox Game Bar", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                title.Equals("Game Bar", StringComparison.OrdinalIgnoreCase);
+
+            bool classExplicitlyGameBar =
+                className.IndexOf("GameBar", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                className.IndexOf("XboxGameBar", StringComparison.OrdinalIgnoreCase) >= 0;
+
+            if (titleExplicitlyGameBar || classExplicitlyGameBar)
+            {
+                return true;
+            }
+
+            bool strictProcessGenericOverlayWindow =
+                IsStrictGameBarProcessName(processName) &&
+                (className.IndexOf("Xaml", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                 className.IndexOf("CoreWindow", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                 className.IndexOf("ApplicationFrame", StringComparison.OrdinalIgnoreCase) >= 0);
+
+            return strictProcessGenericOverlayWindow;
+        }
+
+        private static bool IsStrictGameBarProcessName(string processName)
+        {
+            return processName.Equals("GameBar", StringComparison.OrdinalIgnoreCase) ||
                 processName.Equals("XboxGameBar", StringComparison.OrdinalIgnoreCase) ||
                 processName.Equals("GameBarFTServer", StringComparison.OrdinalIgnoreCase) ||
                 processName.Equals("GameBarWidgets", StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("XboxGameBarWidgets", StringComparison.OrdinalIgnoreCase) ||
                 processName.Equals("GameBarElevatedFT_Alias", StringComparison.OrdinalIgnoreCase);
-
-            bool titleLooksRight =
-                title.IndexOf("Xbox Game Bar", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                title.IndexOf("Game Bar", StringComparison.OrdinalIgnoreCase) >= 0;
-
-            bool classLooksRight =
-                className.IndexOf("GameBar", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                className.IndexOf("Xbox", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                className.IndexOf("Xaml", StringComparison.OrdinalIgnoreCase) >= 0;
-
-            return (processLooksRight && (titleLooksRight || classLooksRight)) ||
-                titleLooksRight;
         }
 
         private static bool IsInspectableWindow(IntPtr hWnd)

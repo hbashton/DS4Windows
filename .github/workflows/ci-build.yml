@@ -67,6 +67,12 @@ jobs:
         if: matrix.platform == 'x64'
         uses: microsoft/setup-msbuild@v2
 
+      - name: Install WDK toolchain
+        if: matrix.platform == 'x64'
+        shell: pwsh
+        timeout-minutes: 60
+        run: .\.github\scripts\install-wdk.ps1
+
       - name: Build experimental Virtual DualSense driver
         if: matrix.platform == 'x64'
         shell: pwsh

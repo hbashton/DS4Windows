@@ -102,6 +102,7 @@ namespace DS4WinWPF.DS4Forms
             AssignSwipeAssociation();
             AssignTriggerFullPullAssociation();
             AssignStickOuterBindAssociation();
+            UpdateOutputControllerHint(profileSettingsVM.TempConType);
             AssignGyroSwipeAssociation();
 
             inputTimer = new NonFormTimer(100);
@@ -1459,7 +1460,51 @@ namespace DS4WinWPF.DS4Forms
             int index = outConTypeCombo.SelectedIndex;
             if (index >= 0)
             {
+                if (ViiperSetupManager.IsViiperOutputType(profileSettingsVM.TempConType))
+                {
+                    ViiperSetupManager.EnsureReadyWithPrompt(Application.Current.MainWindow);
+                }
+
+                UpdateOutputControllerHint(profileSettingsVM.TempConType);
                 mappingListVM.UpdateMappingDevType(profileSettingsVM.TempConType);
+            }
+        }
+
+        private void UpdateOutputControllerHint(OutContType type)
+        {
+            if (outputControllerHintText == null)
+            {
+                return;
+            }
+
+            outputControllerHintText.Text = type switch
+            {
+                OutContType.ViiperSwitch2Pro =>
+                    "Switch 2 layout: Cross -> B, Circle -> A, Square -> Y, Triangle -> X, Share -> Minus, Options -> Plus, PS -> Home, Capture -> Capture.",
+                OutContType.ViiperDualSense =>
+                    "VIIPER DualSense exposes native DualSense identity with mute, touch, gyro, rumble, lightbar, and player LEDs. Adaptive triggers require the raw-output follow-up.",
+                OutContType.ViiperDualSenseEdge =>
+                    "VIIPER DualSense Edge exposes native Edge identity with mute, touch, gyro, Fn buttons, back paddles, rumble, lightbar, and player LEDs. Adaptive triggers require the raw-output follow-up.",
+                OutContType.ViiperDS4 =>
+                    "VIIPER DualShock 4 uses USB/IP output with DS4 buttons, touch, gyro, rumble, lightbar, and flash feedback.",
+                OutContType.ViiperX360 =>
+                    "VIIPER Xbox 360 uses USB/IP output with standard XInput-style buttons, sticks, triggers, and rumble.",
+                _ => string.Empty,
+            };
+
+            if (dualsenseViiperLegendPanel != null)
+            {
+                dualsenseViiperLegendPanel.Visibility =
+                    type == OutContType.ViiperDualSense || type == OutContType.ViiperDualSenseEdge
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            }
+
+            if (switch2ViiperLegendPanel != null)
+            {
+                switch2ViiperLegendPanel.Visibility = type == OutContType.ViiperSwitch2Pro
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
             }
         }
 

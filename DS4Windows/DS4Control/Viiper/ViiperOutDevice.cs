@@ -50,6 +50,13 @@ namespace DS4Windows
 
         public override void Connect()
         {
+            ViiperPrerequisiteStatus status = ViiperSetupManager.GetStatus(tryStartServer: true);
+            if (!status.Ready)
+            {
+                throw new IOException(
+                    $"{status.DisplayText}. Use Settings > VIIPER Virtual Controller Support to install or repair VIIPER and usbip-win2.");
+            }
+
             deviceStream = client.CreateDeviceAndOpenStream(viiperType);
             Volatile.Write(ref submitFailureLogged, 0);
             Volatile.Write(ref lastInputDeviceIndex, -1);
@@ -756,8 +763,8 @@ namespace DS4Windows
             if (state.L3) buttons |= 1u << 15;
             if (state.PS) buttons |= 1u << 16;
             if (state.Capture) buttons |= 1u << 17;
-            if (state.FnR || state.BRP) buttons |= 1u << 18;
-            if (state.FnL || state.BLP) buttons |= 1u << 19;
+            if (state.FnR || state.BRP || state.SideR) buttons |= 1u << 18;
+            if (state.FnL || state.BLP || state.SideL) buttons |= 1u << 19;
             if (state.Mute) buttons |= 1u << 21;
             return buttons;
         }

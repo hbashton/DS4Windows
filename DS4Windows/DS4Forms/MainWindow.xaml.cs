@@ -98,6 +98,7 @@ namespace DS4WinWPF.DS4Forms
             App root = Application.Current as App;
             settingsWrapVM = new SettingsViewModel();
             settingsTab.DataContext = settingsWrapVM;
+            RefreshViiperStatusText();
             logvm = new LogViewModel(App.rootHub);
             //logListView.ItemsSource = logvm.LogItems;
             logListView.DataContext = logvm;
@@ -1581,6 +1582,30 @@ Suspend support not enabled.", true);
                 }
             }
             catch { }
+        }
+
+        private void ViiperSetupBtn_Click(object sender, RoutedEventArgs e)
+        {
+            ViiperSetupManager.LaunchInstaller(ViiperSetupManager.GetStatus(), this);
+        }
+
+        private void ViiperRefreshBtn_Click(object sender, RoutedEventArgs e)
+        {
+            RefreshViiperStatusText();
+        }
+
+        private void RefreshViiperStatusText()
+        {
+            if (viiperStatusText == null)
+            {
+                return;
+            }
+
+            ViiperPrerequisiteStatus status = ViiperSetupManager.GetStatus(tryStartServer: false);
+            viiperStatusText.Text = $"{status.DisplayText}. " +
+                $"VIIPER helper: {(status.ViiperInstalled ? "installed" : "missing")}; " +
+                $"usbip-win2: {(status.UsbipInstalled ? "installed" : "missing")}; " +
+                $"server: {(status.ServerRunning ? "running" : "not running")}.";
         }
 
         private void CheckUpdatesBtn_Click(object sender, RoutedEventArgs e)

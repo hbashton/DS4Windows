@@ -343,6 +343,31 @@
                                 <ComboBoxItem Content="{lex:Loc Days}" />
                             </ComboBox>
                         </StackPanel>
+                        <GroupBox Header="VIIPER Virtual Controller Support" Padding="8" Margin="{StaticResource spaceMargin}" HorizontalAlignment="Left">
+                            <StackPanel>
+                                <TextBlock x:Name="viiperStatusText"
+                                           Text="VIIPER status unknown"
+                                           TextWrapping="Wrap"
+                                           MaxWidth="420"
+                                           Margin="0,0,0,6" />
+                                <StackPanel Orientation="Horizontal">
+                                    <Button x:Name="viiperSetupBtn"
+                                            Content="Install / Repair VIIPER"
+                                            Padding="8,2"
+                                            Click="ViiperSetupBtn_Click" />
+                                    <Button x:Name="viiperRefreshBtn"
+                                            Content="Refresh"
+                                            Padding="8,2"
+                                            Margin="8,0,0,0"
+                                            Click="ViiperRefreshBtn_Click" />
+                                </StackPanel>
+                                <TextBlock Text="Required for VIIPER outputs: DualSense, DualSense Edge, Switch 2 Pro, DS4, and Xbox 360 over USB/IP."
+                                           TextWrapping="Wrap"
+                                           MaxWidth="420"
+                                           Opacity="0.75"
+                                           Margin="0,6,0,0" />
+                            </StackPanel>
+                        </GroupBox>
                         <GroupBox Header="{lex:Loc OscServerHeading}" Padding="0,10,0,0" Margin="{StaticResource spaceMargin}">
                             <StackPanel>
                                 <StackPanel Orientation="Horizontal" MinHeight="20">

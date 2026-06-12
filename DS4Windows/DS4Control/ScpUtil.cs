@@ -640,6 +640,10 @@ namespace DS4Windows
                 BLANK_VIGEMBUS_VERSION);
         public static Version minSupportedViGEmBusVersionInfo = new Version(MIN_SUPPORTED_VIGEMBUS_VERSION);
         public static bool hidHideInstalled = IsHidHideInstalled();
+
+        public static bool openRGBSyncEnabled = false;
+        public static int openRGBServerPort   = 6743;
+
         public static bool fakerInputInstalled = IsFakerInputInstalled();
         public const string BLANK_FAKERINPUT_VERSION = "0.0.0.0";
         public static string fakerInputVersion = FakerInputVersion();
@@ -1752,6 +1756,12 @@ namespace DS4Windows
         {
             get => m_Config.useAdvancedMoonlight;
             set => m_Config.useAdvancedMoonlight = value;
+        }
+
+        public static bool VerboseStartupLogging
+        {
+            get => m_Config.verboseStartupLogging;
+            set => m_Config.verboseStartupLogging = value;
         }
 
         public static bool getQuickCharge()
@@ -4022,6 +4032,7 @@ namespace DS4Windows
         public bool quickCharge = false;
         public bool useMoonlight = false;
         public bool useAdvancedMoonlight = false;
+        public bool verboseStartupLogging = false;
         public bool closeMini = false;
         public List<SpecialAction> actions = new List<SpecialAction>();
         public List<DS4ControlSettings>[] ds4settings = new List<DS4ControlSettings>[Global.TEST_PROFILE_ITEM_COUNT]

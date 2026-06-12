@@ -1436,11 +1436,18 @@ namespace DS4WinWPF.DS4Control.DTOXml
             get; set;
         }
 
-        [XmlElement("OutputContDevice")]
+        [XmlIgnore]
         public OutContType OutputContDevice
         {
             get; set;
         } = BackingStore.DEFAULT_OUT_CONT_TYPE;
+
+        [XmlElement("OutputContDevice")]
+        public string OutputContDeviceString
+        {
+            get => OutputSlotPersistDTO.FormatOutputDeviceType(OutputContDevice);
+            set => OutputContDevice = OutputSlotPersistDTO.ParseOutputDeviceType(value, BackingStore.DEFAULT_OUT_CONT_TYPE);
+        }
 
         [XmlElement("DS4OutputTriggerMode")]
         public DS4TriggerOutputMode OutputDS4TriggerMode

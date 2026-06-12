@@ -311,7 +311,7 @@
                         <CheckBox Content="{lex:Loc QuickCharge}" Margin="{StaticResource spaceMargin}"
                               IsChecked="{Binding QuickCharge}"
                               ToolTip="{lex:Loc Resources:QuickCharge}" />
-                        <CheckBox Content="Verbose logging" Margin="{StaticResource spaceMargin}"
+                        <CheckBox x:Name="verboseLoggingCheck" Content="Verbose logging" Margin="{StaticResource spaceMargin}"
                               IsChecked="{Binding VerboseStartupLogging}"
                               ToolTip="Writes detailed diagnostic markers to the log. Disable after testing." />
                         <StackPanel Orientation="Horizontal" Margin="{StaticResource spaceMargin}">
@@ -495,7 +495,15 @@
                             </WrapPanel>
                         </GroupBox>
 
-                        <Button x:Name="deviceOptionSettingsBtn" MaxWidth="140" HorizontalAlignment="Center" Content="{lex:Loc DeviceOptions}" Click="DeviceOptionSettingsBtn_Click" />
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="{StaticResource spaceMargin}">
+                            <Button x:Name="deviceOptionSettingsBtn" MaxWidth="140" Content="{lex:Loc DeviceOptions}" Click="DeviceOptionSettingsBtn_Click" />
+                            <Button x:Name="viiperDebuggerBtn"
+                                    MaxWidth="140"
+                                    Content="Debugger"
+                                    Margin="8,0,0,0"
+                                    Visibility="{Binding IsChecked, ElementName=verboseLoggingCheck, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                    Click="ViiperDebuggerBtn_Click" />
+                        </StackPanel>
                     </WrapPanel>
                 </ScrollViewer>
 

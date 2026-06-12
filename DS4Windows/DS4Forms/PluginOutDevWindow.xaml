@@ -22,6 +22,11 @@
             <ComboBoxItem Tag="0" Content="X360" />
             <ComboBoxItem Tag="1" Content="DS4" />
             <ComboBoxItem Tag="2" Content="DualSense" />
+            <ComboBoxItem Tag="3" Content="X360 (VIIPER)" />
+            <ComboBoxItem Tag="4" Content="DS4 (VIIPER)" />
+            <ComboBoxItem Tag="5" Content="DualSense (VIIPER)" />
+            <ComboBoxItem Tag="6" Content="DualSense Edge (VIIPER)" />
+            <ComboBoxItem Tag="7" Content="Switch 2 Pro (VIIPER)" />
         </ComboBox>
 
         <ComboBox x:Name="reserveTypeCombo" SelectedIndex="0" DockPanel.Dock="Top">

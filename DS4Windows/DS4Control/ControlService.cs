@@ -1668,6 +1668,32 @@ namespace DS4Windows
                         success = true;
                     }
                 }
+                else if (ViiperOutDevice.IsViiperType(contType))
+                {
+                    activeOutDevType[index] = contType;
+                    if (slotDevice == null)
+                    {
+                        slotDevice = outputslotMan.FindOpenSlot();
+                        if (slotDevice != null)
+                        {
+                            OutputDevice tempViiper = EstablishOutDevice(index, contType);
+                            outputslotMan.DeferredPlugin(tempViiper, index,
+                                $"{device.DisplayName} [{device.MacAddress}]", outputDevices, contType);
+                            success = true;
+                        }
+                        else
+                        {
+                            LogDebug("Failed. No open output slot found");
+                        }
+                    }
+                    else
+                    {
+                        slotDevice.CurrentInputBound = OutSlotDevice.InputBound.Bound;
+                        outputDevices[index] = slotDevice.OutputDevice;
+                        slotDevice.CurrentType = contType;
+                        success = true;
+                    }
+                }
 
                 // Need to check for possible ViGEmBus failure here
                 if (success && slotDevice.OutputDevice != null)

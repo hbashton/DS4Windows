@@ -57,7 +57,18 @@ namespace DS4Windows
     public enum X360Controls : byte { None, LXNeg, LXPos, LYNeg, LYPos, RXNeg, RXPos, RYNeg, RYPos, LB, LT, LS, RB, RT, RS, X, Y, B, A, DpadUp, DpadRight, DpadDown, DpadLeft, Guide, Back, Start, TouchpadClick, LeftMouse, RightMouse, MiddleMouse, FourthMouse, FifthMouse, WUP, WDOWN, MouseUp, MouseDown, MouseLeft, MouseRight, AbsMouseUp, AbsMouseDown, AbsMouseLeft, AbsMouseRight, Unbound };
 
     public enum SASteeringWheelEmulationAxisType : byte { None = 0, LX, LY, RX, RY, L2R2, VJoy1X, VJoy1Y, VJoy1Z, VJoy2X, VJoy2Y, VJoy2Z };
-    public enum OutContType : uint { None = 0, X360, DS4, DualSense }
+    public enum OutContType : uint
+    {
+        None = 0,
+        X360,
+        DS4,
+        DualSense,
+        ViiperX360,
+        ViiperDS4,
+        ViiperDualSense,
+        ViiperDualSenseEdge,
+        ViiperSwitch2Pro,
+    }
 
     public enum GyroOutMode : uint
     {
@@ -822,12 +833,17 @@ namespace DS4Windows
         public static string getX360ControlString(X360Controls key, OutContType conType)
         {
             string result = string.Empty;
-            if (conType == DS4Windows.OutContType.X360)
+            if (conType == DS4Windows.OutContType.X360 ||
+                conType == DS4Windows.OutContType.ViiperX360)
             {
                 xboxDefaultNames.TryGetValue(key, out result);
             }
             else if (conType == DS4Windows.OutContType.DS4 ||
-                conType == DS4Windows.OutContType.DualSense)
+                conType == DS4Windows.OutContType.DualSense ||
+                conType == DS4Windows.OutContType.ViiperDS4 ||
+                conType == DS4Windows.OutContType.ViiperDualSense ||
+                conType == DS4Windows.OutContType.ViiperDualSenseEdge ||
+                conType == DS4Windows.OutContType.ViiperSwitch2Pro)
             {
                 ds4DefaultNames.TryGetValue(key, out result);
             }
@@ -4357,6 +4373,11 @@ namespace DS4Windows
                 case OutContType.X360: result = "X360"; break;
                 case OutContType.DS4: result = "DS4"; break;
                 case OutContType.DualSense: result = "DualSense"; break;
+                case OutContType.ViiperX360: result = "ViiperX360"; break;
+                case OutContType.ViiperDS4: result = "ViiperDS4"; break;
+                case OutContType.ViiperDualSense: result = "ViiperDualSense"; break;
+                case OutContType.ViiperDualSenseEdge: result = "ViiperDualSenseEdge"; break;
+                case OutContType.ViiperSwitch2Pro: result = "ViiperSwitch2Pro"; break;
                 default: break;
             }
 
@@ -4372,6 +4393,11 @@ namespace DS4Windows
                 case "X360": id = OutContType.X360; break;
                 case "DS4": id = OutContType.DS4; break;
                 case "DualSense": id = OutContType.DualSense; break;
+                case "ViiperX360": id = OutContType.ViiperX360; break;
+                case "ViiperDS4": id = OutContType.ViiperDS4; break;
+                case "ViiperDualSense": id = OutContType.ViiperDualSense; break;
+                case "ViiperDualSenseEdge": id = OutContType.ViiperDualSenseEdge; break;
+                case "ViiperSwitch2Pro": id = OutContType.ViiperSwitch2Pro; break;
                 default: break;
             }
 

@@ -2063,7 +2063,6 @@
                                       ToolTip="{lex:Loc OutContNotice}">
                                         <ComboBoxItem Content="Xbox 360"/>
                                         <ComboBoxItem Content="DualShock 4"/>
-                                        <ComboBoxItem Content="DualSense"/>
                                         <ComboBoxItem Content="Xbox 360 (VIIPER)"/>
                                         <ComboBoxItem Content="DualShock 4 (VIIPER)"/>
                                         <ComboBoxItem Content="DualSense (VIIPER)"/>

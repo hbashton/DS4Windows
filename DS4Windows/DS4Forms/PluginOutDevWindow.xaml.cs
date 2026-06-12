@@ -64,21 +64,18 @@ namespace DS4WinWPF.DS4Forms
                     contType = OutContType.DS4;
                     break;
                 case 2:
-                    contType = OutContType.DualSense;
-                    break;
-                case 3:
                     contType = OutContType.ViiperX360;
                     break;
-                case 4:
+                case 3:
                     contType = OutContType.ViiperDS4;
                     break;
-                case 5:
+                case 4:
                     contType = OutContType.ViiperDualSense;
                     break;
-                case 6:
+                case 5:
                     contType = OutContType.ViiperDualSenseEdge;
                     break;
-                case 7:
+                case 6:
                     contType = OutContType.ViiperSwitch2Pro;
                     break;
                 default:

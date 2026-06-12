@@ -386,23 +386,20 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 case OutContType.DS4:
                     result = 2;
                     break;
-                case OutContType.DualSense:
+                case OutContType.ViiperX360:
                     result = 3;
                     break;
-                case OutContType.ViiperX360:
+                case OutContType.ViiperDS4:
                     result = 4;
                     break;
-                case OutContType.ViiperDS4:
+                case OutContType.ViiperDualSense:
                     result = 5;
                     break;
-                case OutContType.ViiperDualSense:
+                case OutContType.ViiperDualSenseEdge:
                     result = 6;
                     break;
-                case OutContType.ViiperDualSenseEdge:
-                    result = 7;
-                    break;
                 case OutContType.ViiperSwitch2Pro:
-                    result = 8;
+                    result = 7;
                     break;
                 default:
                     break;
@@ -443,21 +440,18 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     result = OutContType.DS4;
                     break;
                 case 3:
-                    result = OutContType.DualSense;
-                    break;
-                case 4:
                     result = OutContType.ViiperX360;
                     break;
-                case 5:
+                case 4:
                     result = OutContType.ViiperDS4;
                     break;
-                case 6:
+                case 5:
                     result = OutContType.ViiperDualSense;
                     break;
-                case 7:
+                case 6:
                     result = OutContType.ViiperDualSenseEdge;
                     break;
-                case 8:
+                case 7:
                     result = OutContType.ViiperSwitch2Pro;
                     break;
                 default:

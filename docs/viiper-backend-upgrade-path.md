@@ -15,7 +15,7 @@ The first DS4Windows-side milestone should feel like a normal profile option:
 - A bundled setup script installs/repairs usbip-win2, downloads the latest VIIPER Windows helper, starts the VIIPER API, and verifies localhost connectivity.
 - Switch 2 output labels use Nintendo naming, including `B/A/Y/X`, `Minus`, `Plus`, `Home`, `Capture`, `L/R`, and `ZL/ZR`.
 - The profile editor presents compact DualSense/DualSense Edge and Switch 2 legends beside the emulated controller picker.
-- Existing ViGEm Xbox 360, ViGEm DS4, and custom virtual DualSense output choices stay available.
+- Existing ViGEm Xbox 360 and ViGEm DS4 output choices stay available. Native DualSense-style virtual output now lives in the VIIPER path only.
 
 ## Completed in this branch
 

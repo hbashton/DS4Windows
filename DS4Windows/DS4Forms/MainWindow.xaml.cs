@@ -1336,8 +1336,6 @@ Suspend support not enabled.", true);
                                             Program.rootHub.AttachUnboundOutDev(slotDevice, OutContType.DS4);
                                         else if (strData[2] == "plugx360")
                                             Program.rootHub.AttachUnboundOutDev(slotDevice, OutContType.X360);
-                                        else if (strData[2] == "plugdualsense")
-                                            Program.rootHub.AttachUnboundOutDev(slotDevice, OutContType.DualSense);
                                         else if (strData[2] == "plugviiperx360")
                                             Program.rootHub.AttachUnboundOutDev(slotDevice, OutContType.ViiperX360);
                                         else if (strData[2] == "plugviiperds4")

@@ -62,7 +62,6 @@ namespace DS4Windows
         None = 0,
         X360,
         DS4,
-        DualSense,
         ViiperX360,
         ViiperDS4,
         ViiperDualSense,
@@ -894,7 +893,6 @@ namespace DS4Windows
                 switchDefaultNames.TryGetValue(key, out result);
             }
             else if (conType == DS4Windows.OutContType.DS4 ||
-                conType == DS4Windows.OutContType.DualSense ||
                 conType == DS4Windows.OutContType.ViiperDS4 ||
                 conType == DS4Windows.OutContType.ViiperDualSense ||
                 conType == DS4Windows.OutContType.ViiperDualSenseEdge)
@@ -4433,7 +4431,6 @@ namespace DS4Windows
                 case OutContType.None:
                 case OutContType.X360: result = "X360"; break;
                 case OutContType.DS4: result = "DS4"; break;
-                case OutContType.DualSense: result = "DualSense"; break;
                 case OutContType.ViiperX360: result = "ViiperX360"; break;
                 case OutContType.ViiperDS4: result = "ViiperDS4"; break;
                 case OutContType.ViiperDualSense: result = "ViiperDualSense"; break;
@@ -4453,7 +4450,7 @@ namespace DS4Windows
                 case "None":
                 case "X360": id = OutContType.X360; break;
                 case "DS4": id = OutContType.DS4; break;
-                case "DualSense": id = OutContType.DualSense; break;
+                case "DualSense": id = OutContType.ViiperDualSense; break;
                 case "ViiperX360": id = OutContType.ViiperX360; break;
                 case "ViiperDS4": id = OutContType.ViiperDS4; break;
                 case "ViiperDualSense": id = OutContType.ViiperDualSense; break;

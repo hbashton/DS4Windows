@@ -893,28 +893,24 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                         type = 1;
                         break;
 
-                    case OutContType.DualSense:
+                    case OutContType.ViiperX360:
                         type = 2;
                         break;
 
-                    case OutContType.ViiperX360:
+                    case OutContType.ViiperDS4:
                         type = 3;
                         break;
 
-                    case OutContType.ViiperDS4:
+                    case OutContType.ViiperDualSense:
                         type = 4;
                         break;
 
-                    case OutContType.ViiperDualSense:
+                    case OutContType.ViiperDualSenseEdge:
                         type = 5;
                         break;
 
-                    case OutContType.ViiperDualSenseEdge:
-                        type = 6;
-                        break;
-
                     case OutContType.ViiperSwitch2Pro:
-                        type = 7;
+                        type = 6;
                         break;
 
                     default: break;
@@ -946,16 +942,14 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     case 1:
                         result = OutContType.DS4; break;
                     case 2:
-                        result = OutContType.DualSense; break;
-                    case 3:
                         result = OutContType.ViiperX360; break;
-                    case 4:
+                    case 3:
                         result = OutContType.ViiperDS4; break;
-                    case 5:
+                    case 4:
                         result = OutContType.ViiperDualSense; break;
-                    case 6:
+                    case 5:
                         result = OutContType.ViiperDualSenseEdge; break;
-                    case 7:
+                    case 6:
                         result = OutContType.ViiperSwitch2Pro; break;
                     default: result = OutContType.X360; break;
                 }

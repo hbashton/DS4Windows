@@ -6858,7 +6858,6 @@ namespace DS4Windows
 
                 int outputAxisMax, outputAxisMin, outputAxisZero;
                 if ( Global.OutContType[device] == OutContType.DS4 ||
-                    Global.OutContType[device] == OutContType.DualSense ||
                     Global.OutContType[device] == OutContType.ViiperDS4 ||
                     Global.OutContType[device] == OutContType.ViiperDualSense ||
                     Global.OutContType[device] == OutContType.ViiperDualSenseEdge )

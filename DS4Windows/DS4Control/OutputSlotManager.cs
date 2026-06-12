@@ -137,9 +137,6 @@ namespace DS4Windows
                 case OutContType.DS4:
                     outputDevice = DS4OutDeviceFactory.CreateDS4Device(client, Global.vigemBusVersionInfo);
                     break;
-                case OutContType.DualSense:
-                    outputDevice = new VirtualDualSenseOutDevice();
-                    break;
                 case OutContType.ViiperX360:
                     outputDevice = new ViiperOutDevice(contType, ViiperVirtualDeviceType.Xbox360);
                     break;
@@ -212,11 +209,7 @@ namespace DS4Windows
                         ControlService.StartupDiag($"OutputSlotManager.Connect Win32Exception slot={slot + 1} type={contType} error={e.ErrorCode} message={e.Message}");
                         // Leave task immediately if connect call failed
                         //queuedTasks--;
-                        if (contType == OutContType.DualSense)
-                        {
-                            AppLogger.LogToGui($"Failed to plug in virtual DualSense controller: {e.Message}", true);
-                        }
-                        else if (ViiperOutDevice.IsViiperType(contType))
+                        if (ViiperOutDevice.IsViiperType(contType))
                         {
                             AppLogger.LogToGui($"Failed to plug in virtual {contType} controller: {e.Message}", true);
                         }

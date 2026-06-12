@@ -25,6 +25,7 @@ using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using System.Windows.Automation;
+using Microsoft.Win32;
 using Windows.Foundation.Metadata;
 using Windows.Gaming.UI;
 using WinRect = System.Windows.Rect;
@@ -72,6 +73,8 @@ namespace DS4Windows
         private static bool automationPollCachedVisible;
         private static DateTime automationPollLastStartedUtc = DateTime.MinValue;
         private static DateTime automationPollLastCompletedUtc = DateTime.MinValue;
+        private static bool? gameBarProtocolRegistered;
+        private static int gameBarMissingWarningLogged;
 
         private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
@@ -224,11 +227,62 @@ namespace DS4Windows
 
         public string OpenGameBar()
         {
+            if (!IsGameBarProtocolRegistered())
+            {
+                LogMissingGameBarWarning();
+                return "Game Bar not opened: ms-gamebar protocol is not registered";
+            }
+
             keybd_event(VK_LWIN, 0, 0, UIntPtr.Zero);
             keybd_event(VK_G, 0, 0, UIntPtr.Zero);
             keybd_event(VK_G, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
             keybd_event(VK_LWIN, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
             return "keybd_event Win+G sent";
+        }
+
+        private static bool IsGameBarProtocolRegistered()
+        {
+            if (gameBarProtocolRegistered.HasValue)
+            {
+                return gameBarProtocolRegistered.Value;
+            }
+
+            bool registered = RegistryProtocolExists(Registry.CurrentUser, @"Software\Classes\ms-gamebar") ||
+                RegistryProtocolExists(Registry.ClassesRoot, "ms-gamebar");
+            gameBarProtocolRegistered = registered;
+            return registered;
+        }
+
+        private static bool RegistryProtocolExists(RegistryKey root, string subKeyName)
+        {
+            try
+            {
+                using RegistryKey key = root.OpenSubKey(subKeyName);
+                if (key == null)
+                {
+                    return false;
+                }
+
+                object urlProtocol = key.GetValue("URL Protocol");
+                return urlProtocol != null ||
+                    !string.IsNullOrWhiteSpace(key.GetValue(null) as string);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void LogMissingGameBarWarning()
+        {
+            if (Interlocked.Exchange(ref gameBarMissingWarningLogged, 1) == 1)
+            {
+                return;
+            }
+
+            const string message = "Xbox Game Bar is not installed or its ms-gamebar protocol handler is not registered. Install or repair Xbox Game Bar from the Microsoft Store, then restart DS4Windows to use Game Bar profile support.";
+            AppLogger.LogToGui(message, true);
+            AppLogger.LogToTray(message, true, true);
         }
 
         public string LastDetectionSummary

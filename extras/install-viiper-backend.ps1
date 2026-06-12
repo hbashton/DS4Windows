@@ -61,6 +61,37 @@ function Get-GithubLatestAsset($repo, $assetPattern) {
     return $asset.browser_download_url
 }
 
+function Install-ViiperAsset($assetUrl, $installPath, $tempDir) {
+    $extension = [IO.Path]::GetExtension(([Uri]$assetUrl).AbsolutePath)
+    $downloadPath = Join-Path $tempDir ("viiper-download" + $extension)
+    Invoke-Download $assetUrl $downloadPath
+
+    if ($extension -ieq ".exe") {
+        Copy-Item $downloadPath $installPath -Force
+        return
+    }
+
+    if ($extension -ieq ".zip") {
+        $extractDir = Join-Path $tempDir "viiper-extract"
+        if (Test-Path $extractDir) {
+            Remove-Item $extractDir -Recurse -Force
+        }
+
+        Expand-Archive -LiteralPath $downloadPath -DestinationPath $extractDir -Force
+        $executable = Get-ChildItem -Path $extractDir -Recurse -Filter "viiper.exe" |
+            Select-Object -First 1
+
+        if (-not $executable) {
+            throw "Downloaded VIIPER archive did not contain viiper.exe."
+        }
+
+        Copy-Item $executable.FullName $installPath -Force
+        return
+    }
+
+    throw "Unsupported VIIPER release asset type '$extension' from $assetUrl"
+}
+
 if (-not (Test-Administrator)) {
     throw "Please run this script as Administrator. DS4Windows normally launches it elevated for you."
 }
@@ -96,10 +127,8 @@ else {
 }
 
 Write-Step "Installing VIIPER"
-$viiperAssetUrl = Get-GithubLatestAsset "Alia5/VIIPER" "(?i)((windows|win).*(x64|amd64).*\.exe$|^viiper\.exe$)"
-$tempViiper = Join-Path $tempDir "viiper.exe"
-Invoke-Download $viiperAssetUrl $tempViiper
-Copy-Item $tempViiper $viiperPath -Force
+$viiperAssetUrl = Get-GithubLatestAsset "Alia5/VIIPER" "(?i)(^viiper\.exe$|^viiper-windows-amd64\.zip$|^(?!.*libviiper).*(windows|win).*(x64|amd64).*\.(exe|zip)$)"
+Install-ViiperAsset $viiperAssetUrl $viiperPath $tempDir
 Write-Host "VIIPER installed to $viiperPath" -ForegroundColor Green
 
 Write-Step "Registering and starting VIIPER server"

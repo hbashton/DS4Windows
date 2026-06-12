@@ -131,7 +131,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     displayName = Properties.Resources.Macro + (action.keyType.HasFlag(DS4KeyType.ScanCode) ? " (" + Properties.Resources.ScanCode + ")" : "");
                     break;
                 case SpecialAction.ActionTypeId.Program:
-                    displayName = Properties.Resources.LaunchProgram.Replace("*program*", Path.GetFileNameWithoutExtension(action.details));
+                    displayName = Properties.Resources.LaunchProgram.Replace("*program*", Path.GetFileName(action.details));
                     break;
                 case SpecialAction.ActionTypeId.Profile:
                     displayName = Properties.Resources.LoadProfile.Replace("*profile*", action.details);

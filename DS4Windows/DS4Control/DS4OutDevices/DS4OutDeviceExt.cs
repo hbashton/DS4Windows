@@ -333,14 +333,24 @@ namespace DS4Windows
             {
                 if (awaitOutBuffThread != null)
                 {
-                    if (!awaitOutBuffThread.ThreadState.HasFlag(ThreadState.WaitSleepJoin))
+                    try
                     {
                         awaitOutBuffThread.Interrupt();
                     }
+                    catch
+                    {
+                    }
 
-                    awaitOutBuffThread.Join();
+                    if (!awaitOutBuffThread.Join(1000))
+                    {
+                        ControlService.StartupDiag("DS4OutDeviceExt.Disconnect output-buffer thread did not exit before timeout");
+                    }
                 }
             }
+
+            tokenSource?.Dispose();
+            tokenSource = null;
+            awaitOutBuffThread = null;
         }
     }
 }

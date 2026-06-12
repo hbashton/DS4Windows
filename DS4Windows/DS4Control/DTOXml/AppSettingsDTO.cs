@@ -389,6 +389,13 @@ namespace DS4WinWPF.DS4Control.DTOXml
             set;
         }
 
+        [XmlElement("VerboseStartupLogging")]
+        public bool VerboseStartupLogging
+        {
+            get;
+            set;
+        }
+
         [XmlIgnore]
         public bool CloseMinimizes
         {
@@ -864,6 +871,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
             QuickCharge = source.quickCharge;
             UseMoonlight = source.useMoonlight;
             UseAdvancedMoonlight = source.useAdvancedMoonlight;
+            VerboseStartupLogging = source.verboseStartupLogging;
             CloseMinimizes = source.closeMini;
             UseLang = source.useLang;
             DownloadLang = source.downloadLang;
@@ -964,6 +972,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
             destination.quickCharge = QuickCharge;
             destination.useMoonlight = UseMoonlight;
             destination.useAdvancedMoonlight = UseAdvancedMoonlight;
+            destination.verboseStartupLogging = VerboseStartupLogging;
             destination.closeMini = CloseMinimizes;
             destination.useLang = UseLang;
             destination.downloadLang = DownloadLang;

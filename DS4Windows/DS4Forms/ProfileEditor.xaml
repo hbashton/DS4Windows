@@ -2064,6 +2064,11 @@
                                         <ComboBoxItem Content="Xbox 360"/>
                                         <ComboBoxItem Content="DualShock 4"/>
                                         <ComboBoxItem Content="DualSense"/>
+                                        <ComboBoxItem Content="Xbox 360 (VIIPER)"/>
+                                        <ComboBoxItem Content="DualShock 4 (VIIPER)"/>
+                                        <ComboBoxItem Content="DualSense (VIIPER)"/>
+                                        <ComboBoxItem Content="DualSense Edge (VIIPER)"/>
+                                        <ComboBoxItem Content="Switch 2 Pro (VIIPER)"/>
                                     </ComboBox>
                                 </StackPanel>
                                 <CheckBox Content="{lex:Loc DisableVirtualController}" IsChecked="{Binding DInputOnly}"

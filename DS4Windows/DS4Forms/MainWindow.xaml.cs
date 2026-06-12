@@ -1332,6 +1332,16 @@ Suspend support not enabled.", true);
                                             Program.rootHub.AttachUnboundOutDev(slotDevice, OutContType.X360);
                                         else if (strData[2] == "plugdualsense")
                                             Program.rootHub.AttachUnboundOutDev(slotDevice, OutContType.DualSense);
+                                        else if (strData[2] == "plugviiperx360")
+                                            Program.rootHub.AttachUnboundOutDev(slotDevice, OutContType.ViiperX360);
+                                        else if (strData[2] == "plugviiperds4")
+                                            Program.rootHub.AttachUnboundOutDev(slotDevice, OutContType.ViiperDS4);
+                                        else if (strData[2] == "plugviiperdualsense")
+                                            Program.rootHub.AttachUnboundOutDev(slotDevice, OutContType.ViiperDualSense);
+                                        else if (strData[2] == "plugviiperdualsenseedge")
+                                            Program.rootHub.AttachUnboundOutDev(slotDevice, OutContType.ViiperDualSenseEdge);
+                                        else if (strData[2] == "plugviiperswitch2pro")
+                                            Program.rootHub.AttachUnboundOutDev(slotDevice, OutContType.ViiperSwitch2Pro);
                                     }
                                 }
                                 else if (strData[0] == "query" && strData.Length >= 3)

@@ -133,6 +133,21 @@ namespace DS4Windows
                 case OutContType.DualSense:
                     outputDevice = new VirtualDualSenseOutDevice();
                     break;
+                case OutContType.ViiperX360:
+                    outputDevice = new ViiperOutDevice(contType, ViiperVirtualDeviceType.Xbox360);
+                    break;
+                case OutContType.ViiperDS4:
+                    outputDevice = new ViiperOutDevice(contType, ViiperVirtualDeviceType.DualShock4);
+                    break;
+                case OutContType.ViiperDualSense:
+                    outputDevice = new ViiperOutDevice(contType, ViiperVirtualDeviceType.DualSense);
+                    break;
+                case OutContType.ViiperDualSenseEdge:
+                    outputDevice = new ViiperOutDevice(contType, ViiperVirtualDeviceType.DualSenseEdge);
+                    break;
+                case OutContType.ViiperSwitch2Pro:
+                    outputDevice = new ViiperOutDevice(contType, ViiperVirtualDeviceType.Switch2Pro);
+                    break;
                 case OutContType.None:
                 default:
                     break;
@@ -188,6 +203,10 @@ namespace DS4Windows
                         if (contType == OutContType.DualSense)
                         {
                             AppLogger.LogToGui($"Failed to plug in virtual DualSense controller: {e.Message}", true);
+                        }
+                        else if (ViiperOutDevice.IsViiperType(contType))
+                        {
+                            AppLogger.LogToGui($"Failed to plug in virtual {contType} controller: {e.Message}", true);
                         }
                         else
                         {

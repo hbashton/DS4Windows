@@ -6858,12 +6858,21 @@ namespace DS4Windows
 
                 int outputAxisMax, outputAxisMin, outputAxisZero;
                 if ( Global.OutContType[device] == OutContType.DS4 ||
-                    Global.OutContType[device] == OutContType.DualSense )
+                    Global.OutContType[device] == OutContType.DualSense ||
+                    Global.OutContType[device] == OutContType.ViiperDS4 ||
+                    Global.OutContType[device] == OutContType.ViiperDualSense ||
+                    Global.OutContType[device] == OutContType.ViiperDualSenseEdge )
                 {
                     // DS4 analog stick axis supports only 0...255 output value range (not the best one for steering wheel usage)
                     outputAxisMax = 255;
                     outputAxisMin = 0;
                     outputAxisZero = 128;
+                }
+                else if (Global.OutContType[device] == OutContType.ViiperSwitch2Pro)
+                {
+                    outputAxisMax = 4095;
+                    outputAxisMin = 0;
+                    outputAxisZero = 2048;
                 }
                 else
                 {

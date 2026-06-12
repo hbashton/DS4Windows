@@ -2071,6 +2071,58 @@
                                         <ComboBoxItem Content="Switch 2 Pro (VIIPER)"/>
                                     </ComboBox>
                                 </StackPanel>
+                                <TextBlock x:Name="outputControllerHintText"
+                                           TextWrapping="Wrap"
+                                           MaxWidth="430"
+                                           Margin="6,0,0,8"
+                                           Opacity="0.78" />
+                                <StackPanel x:Name="dualsenseViiperLegendPanel" Orientation="Horizontal" Margin="6,0,0,8" Visibility="Collapsed">
+                                    <Border BorderBrush="{DynamicResource ForegroundColor}" BorderThickness="1" CornerRadius="2" Padding="6,2" Margin="0,0,6,0">
+                                        <TextBlock Text="Mute" />
+                                    </Border>
+                                    <Border BorderBrush="{DynamicResource ForegroundColor}" BorderThickness="1" CornerRadius="2" Padding="6,2" Margin="0,0,6,0">
+                                        <TextBlock Text="Touch" />
+                                    </Border>
+                                    <Border BorderBrush="{DynamicResource ForegroundColor}" BorderThickness="1" CornerRadius="2" Padding="6,2" Margin="0,0,6,0">
+                                        <TextBlock Text="Gyro" />
+                                    </Border>
+                                    <Border BorderBrush="{DynamicResource ForegroundColor}" BorderThickness="1" CornerRadius="2" Padding="6,2" Margin="0,0,6,0">
+                                        <TextBlock Text="Fn" />
+                                    </Border>
+                                    <Border BorderBrush="{DynamicResource ForegroundColor}" BorderThickness="1" CornerRadius="2" Padding="6,2">
+                                        <TextBlock Text="Paddles" />
+                                    </Border>
+                                </StackPanel>
+                                <StackPanel x:Name="switch2ViiperLegendPanel" Orientation="Horizontal" Margin="6,0,0,8" Visibility="Collapsed">
+                                    <Grid Width="92" Height="72" Margin="0,0,10,0">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="24" />
+                                            <RowDefinition Height="24" />
+                                            <RowDefinition Height="24" />
+                                        </Grid.RowDefinitions>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="30" />
+                                            <ColumnDefinition Width="30" />
+                                            <ColumnDefinition Width="30" />
+                                        </Grid.ColumnDefinitions>
+                                        <Border Grid.Row="0" Grid.Column="1" BorderBrush="{DynamicResource ForegroundColor}" BorderThickness="1" CornerRadius="12" Width="24" Height="24">
+                                            <TextBlock Text="X" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
+                                        <Border Grid.Row="1" Grid.Column="0" BorderBrush="{DynamicResource ForegroundColor}" BorderThickness="1" CornerRadius="12" Width="24" Height="24">
+                                            <TextBlock Text="Y" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
+                                        <Border Grid.Row="1" Grid.Column="2" BorderBrush="{DynamicResource ForegroundColor}" BorderThickness="1" CornerRadius="12" Width="24" Height="24">
+                                            <TextBlock Text="A" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
+                                        <Border Grid.Row="2" Grid.Column="1" BorderBrush="{DynamicResource ForegroundColor}" BorderThickness="1" CornerRadius="12" Width="24" Height="24">
+                                            <TextBlock Text="B" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
+                                    </Grid>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="Nintendo face layout" FontWeight="Bold" />
+                                        <TextBlock Text="Plus, Minus, Home, Capture, L/R, ZL/ZR" Opacity="0.78" />
+                                    </StackPanel>
+                                </StackPanel>
                                 <CheckBox Content="{lex:Loc DisableVirtualController}" IsChecked="{Binding DInputOnly}"
                                   ToolTip="{lex:Loc DisableVirtualControllerTip}" />
                                 <StackPanel Orientation="Horizontal" Margin="{StaticResource spaceMargin}">

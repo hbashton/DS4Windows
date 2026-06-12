@@ -830,6 +830,53 @@ namespace DS4Windows
             [X360Controls.Unbound] = "Unbound",
         };
 
+        public static Dictionary<X360Controls, string> switchDefaultNames = new Dictionary<X360Controls, string>()
+        {
+            [X360Controls.LXNeg] = "Left Stick Left",
+            [X360Controls.LXPos] = "Left Stick Right",
+            [X360Controls.LYNeg] = "Left Stick Up",
+            [X360Controls.LYPos] = "Left Stick Down",
+            [X360Controls.RXNeg] = "Right Stick Left",
+            [X360Controls.RXPos] = "Right Stick Right",
+            [X360Controls.RYNeg] = "Right Stick Up",
+            [X360Controls.RYPos] = "Right Stick Down",
+            [X360Controls.LB] = "L Button",
+            [X360Controls.LT] = "ZL Button",
+            [X360Controls.LS] = "Left Stick Button",
+            [X360Controls.RB] = "R Button",
+            [X360Controls.RT] = "ZR Button",
+            [X360Controls.RS] = "Right Stick Button",
+            [X360Controls.X] = "Y Button",
+            [X360Controls.Y] = "X Button",
+            [X360Controls.B] = "A Button",
+            [X360Controls.A] = "B Button",
+            [X360Controls.DpadUp] = "Dpad Up",
+            [X360Controls.DpadRight] = "Dpad Right",
+            [X360Controls.DpadDown] = "Dpad Down",
+            [X360Controls.DpadLeft] = "Dpad Left",
+            [X360Controls.Guide] = "Home",
+            [X360Controls.Back] = "Minus",
+            [X360Controls.Start] = "Plus",
+            [X360Controls.TouchpadClick] = "Capture",
+            [X360Controls.LeftMouse] = "Left Mouse Button",
+            [X360Controls.RightMouse] = "Right Mouse Button",
+            [X360Controls.MiddleMouse] = "Middle Mouse Button",
+            [X360Controls.FourthMouse] = "4th Mouse Button",
+            [X360Controls.FifthMouse] = "5th Mouse Button",
+            [X360Controls.WUP] = "Mouse Wheel Up",
+            [X360Controls.WDOWN] = "Mouse Wheel Down",
+            [X360Controls.MouseUp] = "Mouse Up",
+            [X360Controls.MouseDown] = "Mouse Down",
+            [X360Controls.MouseLeft] = "Mouse Left",
+            [X360Controls.MouseRight] = "Mouse Right",
+            [X360Controls.AbsMouseUp] = "Abs Mouse Up",
+            [X360Controls.AbsMouseDown] = "Abs Mouse Down",
+            [X360Controls.AbsMouseLeft] = "Abs Mouse Left",
+            [X360Controls.AbsMouseRight] = "Abs Mouse Right",
+            [X360Controls.Unbound] = "Unbound",
+            [X360Controls.None] = "Unassigned",
+        };
+
         public static string getX360ControlString(X360Controls key, OutContType conType)
         {
             string result = string.Empty;
@@ -838,12 +885,15 @@ namespace DS4Windows
             {
                 xboxDefaultNames.TryGetValue(key, out result);
             }
+            else if (conType == DS4Windows.OutContType.ViiperSwitch2Pro)
+            {
+                switchDefaultNames.TryGetValue(key, out result);
+            }
             else if (conType == DS4Windows.OutContType.DS4 ||
                 conType == DS4Windows.OutContType.DualSense ||
                 conType == DS4Windows.OutContType.ViiperDS4 ||
                 conType == DS4Windows.OutContType.ViiperDualSense ||
-                conType == DS4Windows.OutContType.ViiperDualSenseEdge ||
-                conType == DS4Windows.OutContType.ViiperSwitch2Pro)
+                conType == DS4Windows.OutContType.ViiperDualSenseEdge)
             {
                 ds4DefaultNames.TryGetValue(key, out result);
             }

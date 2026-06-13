@@ -230,7 +230,7 @@ namespace DS4Windows
                 if (Global.VerboseStartupLogging)
                 {
                     startInfo.Environment["VIIPER_DUALSENSE_RAW_OUTPUT_LOG"] = "1";
-                    AppLogger.LogToGui("Starting VIIPER with raw DualSense host-output logging enabled.");
+                    AppLogger.LogToGui("Starting VIIPER with raw DualSense host-output logging enabled.", false);
                 }
 
                 Process.Start(startInfo);

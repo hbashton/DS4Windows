@@ -40,9 +40,13 @@ namespace DS4Windows
         private readonly OutContType outputType;
         private readonly ViiperVirtualDeviceType viiperType;
         private readonly ViiperClient client;
-        private readonly object streamWriteLock = new object();
+        private readonly object pendingPacketLock = new object();
+        private readonly AutoResetEvent writerSignal = new AutoResetEvent(false);
         private ViiperDeviceStream deviceStream;
         private Thread feedbackThread;
+        private Thread stateWriterThread;
+        private byte[] pendingStatePacket;
+        private volatile bool writerStopRequested;
         private int lastInputDeviceIndex = -1;
         private int submitFailureLogged;
         private int activeFeedbackLength;
@@ -70,7 +74,9 @@ namespace DS4Windows
             deviceStream = CreateDeviceStream();
             Volatile.Write(ref submitFailureLogged, 0);
             Volatile.Write(ref lastInputDeviceIndex, -1);
+            writerStopRequested = false;
             connected = true;
+            StartStateWriter();
             ResetState();
             StartFeedbackReader();
         }
@@ -116,12 +122,25 @@ namespace DS4Windows
         public override void Disconnect()
         {
             connected = false;
-            ViiperDeviceStream stream;
-            lock (streamWriteLock)
+            writerStopRequested = true;
+            writerSignal.Set();
+            lock (pendingPacketLock)
             {
-                stream = Interlocked.Exchange(ref deviceStream, null);
-                stream?.Dispose();
+                pendingStatePacket = null;
             }
+
+            ViiperDeviceStream stream = Interlocked.Exchange(ref deviceStream, null);
+            stream?.Dispose();
+
+            if (stateWriterThread != null && stateWriterThread.IsAlive)
+            {
+                if (Thread.CurrentThread.ManagedThreadId != stateWriterThread.ManagedThreadId)
+                {
+                    stateWriterThread.Join(500);
+                }
+            }
+
+            stateWriterThread = null;
 
             if (feedbackThread != null && feedbackThread.IsAlive)
             {
@@ -144,7 +163,7 @@ namespace DS4Windows
 
             try
             {
-                WriteState(ViiperStatePacketBuilder.Build(viiperType, state, device));
+                QueueStatePacket(ViiperStatePacketBuilder.Build(viiperType, state, device));
             }
             catch (IOException ex)
             {
@@ -169,7 +188,7 @@ namespace DS4Windows
 
             try
             {
-                WriteState(ViiperStatePacketBuilder.Build(viiperType, new DS4State(), -1));
+                QueueStatePacket(ViiperStatePacketBuilder.Build(viiperType, new DS4State(), -1));
             }
             catch (IOException ex)
             {
@@ -205,18 +224,90 @@ namespace DS4Windows
                 type == OutContType.ViiperSwitch2Pro;
         }
 
-        private void WriteState(byte[] data)
+        private void QueueStatePacket(byte[] data)
         {
-            lock (streamWriteLock)
+            lock (pendingPacketLock)
             {
-                ViiperDeviceStream stream = deviceStream;
-                if (stream == null)
+                pendingStatePacket = data;
+            }
+
+            writerSignal.Set();
+        }
+
+        private void StartStateWriter()
+        {
+            if (stateWriterThread != null && stateWriterThread.IsAlive)
+            {
+                return;
+            }
+
+            stateWriterThread = new Thread(StateWriteLoop)
+            {
+                IsBackground = true,
+                Name = $"VIIPER {viiperType} writer",
+            };
+            stateWriterThread.Start();
+        }
+
+        private void StateWriteLoop()
+        {
+            while (!writerStopRequested)
+            {
+                writerSignal.WaitOne();
+                if (writerStopRequested)
                 {
-                    throw new ObjectDisposedException(nameof(ViiperDeviceStream));
+                    return;
                 }
 
-                stream.Write(data);
+                while (!writerStopRequested)
+                {
+                    byte[] packet;
+                    lock (pendingPacketLock)
+                    {
+                        packet = pendingStatePacket;
+                        pendingStatePacket = null;
+                    }
+
+                    if (packet == null)
+                    {
+                        break;
+                    }
+
+                    try
+                    {
+                        WriteState(packet);
+                    }
+                    catch (IOException ex)
+                    {
+                        LogSubmitFailure(ex.Message);
+                        return;
+                    }
+                    catch (SocketException ex)
+                    {
+                        LogSubmitFailure(ex.Message);
+                        return;
+                    }
+                    catch (ObjectDisposedException ex)
+                    {
+                        if (!writerStopRequested)
+                        {
+                            LogSubmitFailure(ex.Message);
+                        }
+                        return;
+                    }
+                }
             }
+        }
+
+        private void WriteState(byte[] data)
+        {
+            ViiperDeviceStream stream = deviceStream;
+            if (stream == null)
+            {
+                throw new ObjectDisposedException(nameof(ViiperDeviceStream));
+            }
+
+            stream.Write(data);
         }
 
         private void StartFeedbackReader()

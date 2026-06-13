@@ -395,6 +395,12 @@ namespace DS4Windows
             return true;
         }
 
+        public static bool ResetSyntheticDualSenseTriggerFeedback(int deviceIndex, bool rightTrigger)
+        {
+            return ApplySyntheticDualSenseTriggerFeedback(deviceIndex, rightTrigger,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00);
+        }
+
         private static bool TriggerFeedbackEquals(byte[] source, int sourceOffset, byte[] previous)
         {
             for (int i = 0; i < DualSenseTriggerEffectLength; i++)

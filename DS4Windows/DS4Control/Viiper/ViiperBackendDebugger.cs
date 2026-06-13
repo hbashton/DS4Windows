@@ -152,8 +152,34 @@ namespace DS4Windows
         private void RunAdaptiveTriggerProbe()
         {
             Log("VIIPER adaptive trigger passthrough is enabled for physical DualSense/DualSense Edge input controllers.");
-            Log("Expected feedback contract: DualSense feedback may extend the base 6-byte rumble/LED packet with R2[8] then L2[8] raw trigger effect bytes.");
-            Log("If trigger effects do not reach the real controller, update VIIPER to expose the trigger blocks parsed from USB output report 0x02.");
+            Log("Expected feedback contract: extended DualSense streams send base rumble/LED bytes followed by R2[8] then L2[8] raw trigger effect bytes parsed from USB output report 0x02.");
+
+            bool anyApplied = false;
+            if (Program.rootHub != null)
+            {
+                for (int i = 0; i < Program.rootHub.DS4Controllers.Length; i++)
+                {
+                    if (Program.rootHub.DS4Controllers[i] == null)
+                    {
+                        continue;
+                    }
+
+                    bool right = ViiperOutDevice.ApplySyntheticDualSenseTriggerFeedback(i, true,
+                        0x21, 0xFC, 0x03, 0xFF, 0xFF, 0xFF, 0x3F, 0x00);
+                    bool left = ViiperOutDevice.ApplySyntheticDualSenseTriggerFeedback(i, false,
+                        0x21, 0xFC, 0x03, 0xFF, 0xFF, 0xFF, 0x3F, 0x00);
+                    if (right || left)
+                    {
+                        anyApplied = true;
+                        Log($"Synthetic game-feedback trigger effect applied to controller {i + 1}: right={right} left={left}");
+                    }
+                }
+            }
+
+            if (!anyApplied)
+            {
+                Log("No physical DualSense/DualSense Edge input controller was available for synthetic trigger feedback.");
+            }
         }
 
         private void RunStep(string name, Action action, CancellationToken cancellationToken)

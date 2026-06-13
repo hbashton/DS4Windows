@@ -327,6 +327,34 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void CheckViiperOutputDeviceTypesRoundTrip()
+        {
+            OutContType[] outputTypes =
+            {
+                OutContType.ViiperX360,
+                OutContType.ViiperDS4,
+                OutContType.ViiperDualSense,
+                OutContType.ViiperDualSenseEdge,
+                OutContType.ViiperSwitch2Pro,
+            };
+
+            foreach (OutContType outputType in outputTypes)
+            {
+                ProfileDTO source = new ProfileDTO
+                {
+                    OutputContDevice = outputType,
+                };
+
+                ProfileDTO target = new ProfileDTO
+                {
+                    OutputContDeviceString = source.OutputContDeviceString,
+                };
+
+                Assert.AreEqual(outputType, target.OutputContDevice, $"{outputType} should round-trip through profile XML.");
+            }
+        }
+
+        [TestMethod]
         public void CheckWriteProfile()
         {
             BackingStore tempStore = new BackingStore();

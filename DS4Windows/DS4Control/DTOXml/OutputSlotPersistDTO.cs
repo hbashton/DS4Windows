@@ -87,6 +87,45 @@ namespace DS4WinWPF.DS4Control.DTOXml
 
         internal static OutContType ParseOutputDeviceType(string value, OutContType fallback)
         {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return fallback;
+            }
+
+            switch (value.Trim())
+            {
+                case "Xbox 360":
+                case "Xbox360":
+                case "X360":
+                    return OutContType.X360;
+                case "DualShock 4":
+                case "DualShock4":
+                case "DS4":
+                    return OutContType.DS4;
+                case "Xbox 360 (VIIPER)":
+                case "ViiperXbox360":
+                case "ViiperX360":
+                    return OutContType.ViiperX360;
+                case "DualShock 4 (VIIPER)":
+                case "ViiperDualShock4":
+                case "ViiperDS4":
+                    return OutContType.ViiperDS4;
+                case "DualSense (VIIPER)":
+                case "DualSense":
+                case "ViiperDualSense":
+                    return OutContType.ViiperDualSense;
+                case "DualSense Edge (VIIPER)":
+                case "DualSenseEdge":
+                case "ViiperDualSenseEdge":
+                    return OutContType.ViiperDualSenseEdge;
+                case "Switch 2 Pro (VIIPER)":
+                case "Switch2Pro":
+                case "ViiperSwitch2Pro":
+                    return OutContType.ViiperSwitch2Pro;
+                case "None":
+                    return OutContType.None;
+            }
+
             if (Enum.TryParse(value, true, out OutContType parsed) &&
                 Enum.IsDefined(typeof(OutContType), parsed))
             {
@@ -100,8 +139,14 @@ namespace DS4WinWPF.DS4Control.DTOXml
         {
             return value switch
             {
+                OutContType.X360 => "X360",
                 OutContType.DS4 => "DS4",
                 OutContType.None => "None",
+                OutContType.ViiperX360 => "ViiperX360",
+                OutContType.ViiperDS4 => "ViiperDS4",
+                OutContType.ViiperDualSense => "ViiperDualSense",
+                OutContType.ViiperDualSenseEdge => "ViiperDualSenseEdge",
+                OutContType.ViiperSwitch2Pro => "ViiperSwitch2Pro",
                 _ => "X360",
             };
         }

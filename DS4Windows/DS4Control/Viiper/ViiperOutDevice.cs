@@ -1575,15 +1575,15 @@ namespace DS4Windows
                 return;
             }
 
-            int gyroX = SnapToZero(motion.gyroYawFull, DualSenseGyroRestDeadband);
-            int gyroY = SnapToZero(motion.gyroPitchFull, DualSenseGyroRestDeadband);
-            int gyroZ = SnapToZero(motion.gyroRollFull, DualSenseGyroRestDeadband);
+            int gyroX = SnapToZero(motion.gyroPitchFull, DualSenseGyroRestDeadband);
+            int gyroY = SnapToZero(-motion.gyroYawFull, DualSenseGyroRestDeadband);
+            int gyroZ = SnapToZero(-motion.gyroRollFull, DualSenseGyroRestDeadband);
 
             WriteInt16(packet, offset, ClampShort(gyroX));
             WriteInt16(packet, offset + 2, ClampShort(gyroY));
             WriteInt16(packet, offset + 4, ClampShort(gyroZ));
-            WriteInt16(packet, offset + 6, ClampShort(motion.accelXFull));
-            WriteInt16(packet, offset + 8, ClampShort(motion.accelYFull));
+            WriteInt16(packet, offset + 6, ClampShort(-motion.accelXFull));
+            WriteInt16(packet, offset + 8, ClampShort(-motion.accelYFull));
             WriteInt16(packet, offset + 10, ClampShort(motion.accelZFull));
         }
 

@@ -61,6 +61,22 @@ function Get-GithubLatestAsset($repo, $assetPattern) {
     return $asset.browser_download_url
 }
 
+function Get-GithubLatestAssetWithFallback($repos, $assetPattern) {
+    $errors = @()
+    foreach ($repo in $repos) {
+        try {
+            Write-Host "Checking VIIPER release assets in $repo"
+            return Get-GithubLatestAsset $repo $assetPattern
+        }
+        catch {
+            $errors += "${repo}: $($_.Exception.Message)"
+            Write-Host "Could not use ${repo}: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+
+    throw "Could not find a usable VIIPER release asset. Attempts: $($errors -join '; ')"
+}
+
 function Install-ViiperAsset($assetUrl, $installPath, $tempDir) {
     $extension = [IO.Path]::GetExtension(([Uri]$assetUrl).AbsolutePath)
     $downloadPath = Join-Path $tempDir ("viiper-download" + $extension)
@@ -127,7 +143,11 @@ else {
 }
 
 Write-Step "Installing VIIPER"
-$viiperAssetUrl = Get-GithubLatestAsset "Alia5/VIIPER" "(?i)(^viiper\.exe$|^viiper-windows-amd64\.zip$|^(?!.*libviiper).*(windows|win).*(x64|amd64).*\.(exe|zip)$)"
+$viiperRepos = @(
+    "hbashton/VIIPER",
+    "Alia5/VIIPER"
+)
+$viiperAssetUrl = Get-GithubLatestAssetWithFallback $viiperRepos "(?i)(^viiper\.exe$|^viiper-windows-amd64\.zip$|^(?!.*libviiper).*(windows|win).*(x64|amd64).*\.(exe|zip)$)"
 Install-ViiperAsset $viiperAssetUrl $viiperPath $tempDir
 Write-Host "VIIPER installed to $viiperPath" -ForegroundColor Green
 

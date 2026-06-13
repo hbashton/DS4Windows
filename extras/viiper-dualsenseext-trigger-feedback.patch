@@ -1,0 +1,271 @@
+﻿From ac10bb414b1d42c7b5e0cf47739d748e6f4fbf67 Mon Sep 17 00:00:00 2001
+From: strifeforlyfe <hbashton13@gmail.com>
+Date: Fri, 12 Jun 2026 21:09:46 -0500
+Subject: [PATCH] Expose DualSense adaptive trigger feedback
+
+---
+ device/dualsense/const.go          |  9 ++--
+ device/dualsense/device.go         | 19 +++++++++
+ device/dualsense/ds_handler.go     | 13 +++++-
+ device/dualsense/dsedge_handler.go | 13 +++++-
+ device/dualsense/state.go          | 66 +++++++++++++++++++++++++++++-
+ docs/devices/dualsense.md          | 29 +++++++++----
+ 6 files changed, 132 insertions(+), 17 deletions(-)
+
+diff --git a/device/dualsense/const.go b/device/dualsense/const.go
+index 530b457..5264236 100644
+--- a/device/dualsense/const.go
++++ b/device/dualsense/const.go
+@@ -39,10 +39,11 @@ const (
+ )
+ 
+ const (
+-	InputReportSize  = 64
+-	OutputReportSize = 64
+-	InputStateSize   = 33
+-	OutputStateSize  = 6
++	InputReportSize    = 64
++	OutputReportSize   = 64
++	InputStateSize     = 33
++	OutputStateSize    = 6
++	OutputStateExtSize = 22
+ )
+ 
+ const (
+diff --git a/device/dualsense/device.go b/device/dualsense/device.go
+index 20cd2c8..b6f77c9 100644
+--- a/device/dualsense/device.go
++++ b/device/dualsense/device.go
+@@ -282,6 +282,25 @@ func parseOutputReport(out []byte) OutputState {
+ 			feedback.PlayerLeds = out[44]
+ 		}
+ 	}
++	if len(out) > 31 {
++		feedback.TriggerR2Mode = out[11]
++		feedback.TriggerR2StartResistance = out[12]
++		feedback.TriggerR2EffectForce = out[13]
++		feedback.TriggerR2RangeForce = out[14]
++		feedback.TriggerR2NearReleaseStrength = out[15]
++		feedback.TriggerR2NearMiddleStrength = out[16]
++		feedback.TriggerR2PressedStrength = out[17]
++		feedback.TriggerR2Frequency = out[20]
++
++		feedback.TriggerL2Mode = out[22]
++		feedback.TriggerL2StartResistance = out[23]
++		feedback.TriggerL2EffectForce = out[24]
++		feedback.TriggerL2RangeForce = out[25]
++		feedback.TriggerL2NearReleaseStrength = out[26]
++		feedback.TriggerL2NearMiddleStrength = out[27]
++		feedback.TriggerL2PressedStrength = out[28]
++		feedback.TriggerL2Frequency = out[31]
++	}
+ 	return feedback
+ }
+ 
+diff --git a/device/dualsense/ds_handler.go b/device/dualsense/ds_handler.go
+index 3a02c10..b9d0087 100644
+--- a/device/dualsense/ds_handler.go
++++ b/device/dualsense/ds_handler.go
+@@ -15,9 +15,12 @@ import (
+ 
+ func init() {
+ 	api.RegisterDevice("dualsense", &dshandler{})
++	api.RegisterDevice("dualsenseext", &dshandler{extendedFeedback: true})
+ }
+ 
+-type dshandler struct{}
++type dshandler struct {
++	extendedFeedback bool
++}
+ 
+ func (h *dshandler) CreateDevice(o *device.CreateOptions) (usb.Device, error) {
+ 	if o == nil {
+@@ -110,7 +113,13 @@ func (h *dshandler) StreamHandler() api.StreamHandlerFunc {
+ 		}
+ 
+ 		dse.SetOutputCallback(func(feedback OutputState) {
+-			data, err := feedback.MarshalBinary()
++			var data []byte
++			var err error
++			if h.extendedFeedback {
++				data, err = feedback.MarshalExtendedBinary()
++			} else {
++				data, err = feedback.MarshalBinary()
++			}
+ 			if err != nil {
+ 				logger.Error("failed to marshal feedback", "error", err)
+ 				return
+diff --git a/device/dualsense/dsedge_handler.go b/device/dualsense/dsedge_handler.go
+index aa45522..57fadb5 100644
+--- a/device/dualsense/dsedge_handler.go
++++ b/device/dualsense/dsedge_handler.go
+@@ -15,9 +15,12 @@ import (
+ 
+ func init() {
+ 	api.RegisterDevice("dualsenseedge", &dsedgehandler{})
++	api.RegisterDevice("dualsenseedgeext", &dsedgehandler{extendedFeedback: true})
+ }
+ 
+-type dsedgehandler struct{}
++type dsedgehandler struct {
++	extendedFeedback bool
++}
+ 
+ func (h *dsedgehandler) CreateDevice(o *device.CreateOptions) (usb.Device, error) {
+ 	if o == nil {
+@@ -110,7 +113,13 @@ func (h *dsedgehandler) StreamHandler() api.StreamHandlerFunc {
+ 		}
+ 
+ 		dse.SetOutputCallback(func(feedback OutputState) {
+-			data, err := feedback.MarshalBinary()
++			var data []byte
++			var err error
++			if h.extendedFeedback {
++				data, err = feedback.MarshalExtendedBinary()
++			} else {
++				data, err = feedback.MarshalBinary()
++			}
+ 			if err != nil {
+ 				logger.Error("failed to marshal feedback", "error", err)
+ 				return
+diff --git a/device/dualsense/state.go b/device/dualsense/state.go
+index c3e140b..d4e6379 100644
+--- a/device/dualsense/state.go
++++ b/device/dualsense/state.go
+@@ -93,7 +93,7 @@ func (s *InputState) UnmarshalBinary(data []byte) error {
+ }
+ 
+ // nolint
+-// viiper:wire dualsense s2c rumbleSmall:u8 rumbleLarge:u8 ledRed:u8 ledGreen:u8 ledBlue:u8 playerLeds:u8
++// viiper:wire dualsense s2c rumbleSmall:u8 rumbleLarge:u8 ledRed:u8 ledGreen:u8 ledBlue:u8 playerLeds:u8 triggerR2Mode:u8 triggerR2StartResistance:u8 triggerR2EffectForce:u8 triggerR2RangeForce:u8 triggerR2NearReleaseStrength:u8 triggerR2NearMiddleStrength:u8 triggerR2PressedStrength:u8 triggerR2Frequency:u8 triggerL2Mode:u8 triggerL2StartResistance:u8 triggerL2EffectForce:u8 triggerL2RangeForce:u8 triggerL2NearReleaseStrength:u8 triggerL2NearMiddleStrength:u8 triggerL2PressedStrength:u8 triggerL2Frequency:u8
+ type OutputState struct {
+ 	RumbleSmall uint8
+ 	RumbleLarge uint8
+@@ -101,6 +101,23 @@ type OutputState struct {
+ 	LedGreen    uint8
+ 	LedBlue     uint8
+ 	PlayerLeds  uint8
++
++	TriggerR2Mode                uint8
++	TriggerR2StartResistance     uint8
++	TriggerR2EffectForce         uint8
++	TriggerR2RangeForce          uint8
++	TriggerR2NearReleaseStrength uint8
++	TriggerR2NearMiddleStrength  uint8
++	TriggerR2PressedStrength     uint8
++	TriggerR2Frequency           uint8
++	TriggerL2Mode                uint8
++	TriggerL2StartResistance     uint8
++	TriggerL2EffectForce         uint8
++	TriggerL2RangeForce          uint8
++	TriggerL2NearReleaseStrength uint8
++	TriggerL2NearMiddleStrength  uint8
++	TriggerL2PressedStrength     uint8
++	TriggerL2Frequency           uint8
+ }
+ 
+ func (f *OutputState) MarshalBinary() ([]byte, error) {
+@@ -114,6 +131,33 @@ func (f *OutputState) MarshalBinary() ([]byte, error) {
+ 	}, nil
+ }
+ 
++func (f *OutputState) MarshalExtendedBinary() ([]byte, error) {
++	return []byte{
++		f.RumbleSmall,
++		f.RumbleLarge,
++		f.LedRed,
++		f.LedGreen,
++		f.LedBlue,
++		f.PlayerLeds,
++		f.TriggerR2Mode,
++		f.TriggerR2StartResistance,
++		f.TriggerR2EffectForce,
++		f.TriggerR2RangeForce,
++		f.TriggerR2NearReleaseStrength,
++		f.TriggerR2NearMiddleStrength,
++		f.TriggerR2PressedStrength,
++		f.TriggerR2Frequency,
++		f.TriggerL2Mode,
++		f.TriggerL2StartResistance,
++		f.TriggerL2EffectForce,
++		f.TriggerL2RangeForce,
++		f.TriggerL2NearReleaseStrength,
++		f.TriggerL2NearMiddleStrength,
++		f.TriggerL2PressedStrength,
++		f.TriggerL2Frequency,
++	}, nil
++}
++
+ func (f *OutputState) UnmarshalBinary(data []byte) error {
+ 	if len(data) < OutputStateSize {
+ 		return io.ErrUnexpectedEOF
+@@ -124,6 +168,26 @@ func (f *OutputState) UnmarshalBinary(data []byte) error {
+ 	f.LedGreen = data[3]
+ 	f.LedBlue = data[4]
+ 	f.PlayerLeds = data[5]
++	if len(data) < OutputStateExtSize {
++		return nil
++	}
++
++	f.TriggerR2Mode = data[6]
++	f.TriggerR2StartResistance = data[7]
++	f.TriggerR2EffectForce = data[8]
++	f.TriggerR2RangeForce = data[9]
++	f.TriggerR2NearReleaseStrength = data[10]
++	f.TriggerR2NearMiddleStrength = data[11]
++	f.TriggerR2PressedStrength = data[12]
++	f.TriggerR2Frequency = data[13]
++	f.TriggerL2Mode = data[14]
++	f.TriggerL2StartResistance = data[15]
++	f.TriggerL2EffectForce = data[16]
++	f.TriggerL2RangeForce = data[17]
++	f.TriggerL2NearReleaseStrength = data[18]
++	f.TriggerL2NearMiddleStrength = data[19]
++	f.TriggerL2PressedStrength = data[20]
++	f.TriggerL2Frequency = data[21]
+ 	return nil
+ }
+ 
+diff --git a/docs/devices/dualsense.md b/docs/devices/dualsense.md
+index ccea23f..11ff3cb 100644
+--- a/docs/devices/dualsense.md
++++ b/docs/devices/dualsense.md
+@@ -52,14 +52,27 @@ IMU (gyro + accelerometer), and touchpad finger coordinates.
+ 
+     ### Feedback (Rumble & LED)
+ 
+-    - 6-byte packets:
+-        - RumbleSmall: uint8, RumbleLarge: uint8 (2 bytes), 0-255 intensity
+-          values
+-        - LED Color: LedRed, LedGreen, LedBlue: uint8 each (3 bytes), 0-255 per
+-          channel
+-        - PlayerLeds: uint8 (1 byte), host-controlled player indicator LED mask
+-
+-    See `/device/dualsense/state.go` for the `OutputState` wire definition.
++    - Base `dualsense` / `dualsenseedge` streams send 6-byte packets:
++        - RumbleSmall: uint8, RumbleLarge: uint8 (2 bytes), 0-255 intensity
++          values
++        - LED Color: LedRed, LedGreen, LedBlue: uint8 each (3 bytes), 0-255 per
++          channel
++        - PlayerLeds: uint8 (1 byte), host-controlled player indicator LED mask
++    - Extended `dualsenseext` / `dualsenseedgeext` streams send 22-byte packets.
++      Bytes 0..5 preserve the original rumble/LED layout above. Bytes 6..13
++      contain the raw R2 adaptive-trigger effect block copied from USB output
++      report 0x02. Bytes 14..21 contain the raw L2 adaptive-trigger effect
++      block. Each trigger block is:
++        - Mode
++        - StartResistance
++        - EffectForce
++        - RangeForce
++        - NearReleaseStrength
++        - NearMiddleStrength
++        - PressedStrength
++        - Frequency
++
++    See `/device/dualsense/state.go` for the `OutputState` wire definition.
+ 
+     ## Reference
+ 
+-- 
+2.54.0.windows.1
+

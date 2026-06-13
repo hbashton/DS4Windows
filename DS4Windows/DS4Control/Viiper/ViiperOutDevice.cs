@@ -45,6 +45,7 @@ namespace DS4Windows
         private Thread feedbackThread;
         private int lastInputDeviceIndex = -1;
         private int submitFailureLogged;
+        private int activeFeedbackLength;
         private bool micMuted;
         private bool muteToggleButtonWasDown;
         private readonly byte[] lastR2TriggerFeedback = new byte[DualSenseTriggerEffectLength];
@@ -68,13 +69,51 @@ namespace DS4Windows
                     $"{status.DisplayText}. Use Settings > VIIPER Virtual Controller Support to install or repair VIIPER and usbip-win2.");
             }
 
-            deviceStream = client.CreateDeviceAndOpenStream(viiperType);
+            deviceStream = CreateDeviceStream();
             Volatile.Write(ref submitFailureLogged, 0);
             Volatile.Write(ref lastInputDeviceIndex, -1);
             ResetToggleState();
             connected = true;
             ResetState();
             StartFeedbackReader();
+        }
+
+        private ViiperDeviceStream CreateDeviceStream()
+        {
+            if (viiperType == ViiperVirtualDeviceType.DualSense)
+            {
+                try
+                {
+                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream("dualsenseext");
+                    activeFeedbackLength = DualSenseExtendedFeedbackLength;
+                    return stream;
+                }
+                catch (IOException ex)
+                {
+                    AppLogger.LogToGui($"VIIPER DualSense adaptive trigger feedback unavailable, falling back to base DualSense output: {ex.Message}", false);
+                    activeFeedbackLength = DualSenseBaseFeedbackLength;
+                    return client.CreateDeviceAndOpenStream("dualsense");
+                }
+            }
+
+            if (viiperType == ViiperVirtualDeviceType.DualSenseEdge)
+            {
+                try
+                {
+                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream("dualsenseedgeext");
+                    activeFeedbackLength = DualSenseExtendedFeedbackLength;
+                    return stream;
+                }
+                catch (IOException ex)
+                {
+                    AppLogger.LogToGui($"VIIPER DualSense Edge adaptive trigger feedback unavailable, falling back to base DualSense Edge output: {ex.Message}", false);
+                    activeFeedbackLength = DualSenseBaseFeedbackLength;
+                    return client.CreateDeviceAndOpenStream("dualsenseedge");
+                }
+            }
+
+            activeFeedbackLength = ViiperStatePacketBuilder.GetFeedbackLength(viiperType);
+            return client.CreateDeviceAndOpenStream(viiperType);
         }
 
         public override void Disconnect()
@@ -214,7 +253,7 @@ namespace DS4Windows
 
         private void StartFeedbackReader()
         {
-            int length = ViiperStatePacketBuilder.GetFeedbackLength(viiperType);
+            int length = activeFeedbackLength > 0 ? activeFeedbackLength : ViiperStatePacketBuilder.GetFeedbackLength(viiperType);
             if (length <= 0)
             {
                 return;
@@ -432,10 +471,15 @@ namespace DS4Windows
 
         public ViiperDeviceStream CreateDeviceAndOpenStream(ViiperVirtualDeviceType deviceType)
         {
+            return CreateDeviceAndOpenStream(ViiperStatePacketBuilder.GetViiperDeviceName(deviceType));
+        }
+
+        public ViiperDeviceStream CreateDeviceAndOpenStream(string deviceName)
+        {
             ViiperBusCreateResponse bus = SendRequest<ViiperBusCreateResponse>("bus/create", "0");
             string payload = JsonSerializer.Serialize(new ViiperDeviceCreateRequest
             {
-                Type = ViiperStatePacketBuilder.GetViiperDeviceName(deviceType),
+                Type = deviceName,
             }, JsonOptions);
 
             ViiperDeviceResponse device = SendRequest<ViiperDeviceResponse>($"bus/{bus.BusId}/add", payload);

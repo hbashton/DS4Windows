@@ -37,6 +37,8 @@ namespace DS4Windows
         private const int DualSenseTriggerFeedbackOffset = 6;
         private const int DualSenseTriggerEffectLength = 8;
         private const int MaxStreamRecoveryAttempts = 2;
+        private const int ApiReceiveTimeoutMs = 5000;
+        private const int StreamReceiveTimeoutMs = 0;
 
         private readonly OutContType outputType;
         private readonly ViiperVirtualDeviceType viiperType;
@@ -775,7 +777,7 @@ namespace DS4Windows
 
         private ViiperDeviceStream OpenStream(uint busId, string devId)
         {
-            TcpClient tcp = Connect();
+            TcpClient tcp = Connect(StreamReceiveTimeoutMs);
             try
             {
                 NetworkStream stream = tcp.GetStream();
@@ -837,7 +839,7 @@ namespace DS4Windows
 
         private string SendRequestRaw(string path, string payload = null)
         {
-            using TcpClient tcp = Connect();
+            using TcpClient tcp = Connect(ApiReceiveTimeoutMs);
             NetworkStream stream = tcp.GetStream();
             string request = string.IsNullOrEmpty(payload) ? path : $"{path} {payload}";
             byte[] requestBytes = Encoding.UTF8.GetBytes(request + "\0");
@@ -854,13 +856,13 @@ namespace DS4Windows
             return Encoding.UTF8.GetString(response.ToArray()).TrimEnd('\n');
         }
 
-        private TcpClient Connect()
+        private TcpClient Connect(int receiveTimeout)
         {
             TcpClient tcp = new TcpClient
             {
                 NoDelay = true,
                 SendTimeout = 1000,
-                ReceiveTimeout = 5000,
+                ReceiveTimeout = receiveTimeout,
             };
 
             IAsyncResult result = tcp.BeginConnect(host, port, null, null);

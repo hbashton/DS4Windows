@@ -9,6 +9,8 @@ the Free Software Foundation, either version 3 of the License, or
 */
 
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Net.Sockets;
 using System.Text;
@@ -730,6 +732,7 @@ namespace DS4Windows
     {
         private const int ApiReceiveTimeoutMs = 5000;
         private const int StreamReceiveTimeoutMs = 0;
+        private static int staleUsbipCleanupAttempted;
 
         private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
         {
@@ -752,6 +755,8 @@ namespace DS4Windows
 
         public ViiperDeviceStream CreateDeviceAndOpenStream(string deviceName)
         {
+            ViiperUsbipPortManager.DetachStaleLocalSonyPortsOnce(ref staleUsbipCleanupAttempted);
+
             ViiperBusCreateResponse bus = SendRequest<ViiperBusCreateResponse>("bus/create", "0");
             ViiperDeviceResponse device = null;
             try
@@ -762,7 +767,8 @@ namespace DS4Windows
                 }, JsonOptions);
 
                 device = SendRequest<ViiperDeviceResponse>($"bus/{bus.BusId}/add", payload);
-                return OpenStream(bus.BusId, device.DevId);
+                int usbipPort = ViiperUsbipPortManager.FindLocalSonyPort(bus.BusId, device.DevId);
+                return OpenStream(bus.BusId, device.DevId, usbipPort);
             }
             catch
             {
@@ -776,7 +782,7 @@ namespace DS4Windows
             }
         }
 
-        private ViiperDeviceStream OpenStream(uint busId, string devId)
+        private ViiperDeviceStream OpenStream(uint busId, string devId, int usbipPort)
         {
             TcpClient tcp = Connect(StreamReceiveTimeoutMs);
             try
@@ -784,7 +790,7 @@ namespace DS4Windows
                 NetworkStream stream = tcp.GetStream();
                 byte[] request = Encoding.UTF8.GetBytes($"bus/{busId}/{devId}\0");
                 stream.Write(request, 0, request.Length);
-                return new ViiperDeviceStream(tcp, busId, devId, RemoveDevice);
+                return new ViiperDeviceStream(tcp, busId, devId, usbipPort, RemoveDevice);
             }
             catch
             {
@@ -917,21 +923,265 @@ namespace DS4Windows
         }
     }
 
+    internal static class ViiperUsbipPortManager
+    {
+        private const string SonyVendorId = "054c";
+        private const string DualSenseProductId = "0ce6";
+        private const string DualSenseEdgeProductId = "0df2";
+
+        public static void DetachStaleLocalSonyPortsOnce(ref int attemptedFlag)
+        {
+            if (Interlocked.Exchange(ref attemptedFlag, 1) == 1)
+            {
+                return;
+            }
+
+            foreach (UsbipPortBlock port in GetImportedPorts())
+            {
+                if (IsLocalSonyViiperPort(port, null))
+                {
+                    DetachPort(port.Port, "stale local VIIPER DualSense import");
+                }
+            }
+        }
+
+        public static int FindLocalSonyPort(uint busId, string devId)
+        {
+            string remoteBusId = $"{busId}-{devId}";
+            for (int attempt = 0; attempt < 15; attempt++)
+            {
+                foreach (UsbipPortBlock port in GetImportedPorts())
+                {
+                    if (IsLocalSonyViiperPort(port, remoteBusId))
+                    {
+                        return port.Port;
+                    }
+                }
+
+                if (attempt < 14)
+                {
+                    Thread.Sleep(100);
+                }
+            }
+
+            return -1;
+        }
+
+        public static void DetachPort(int port, string reason)
+        {
+            if (port < 0)
+            {
+                return;
+            }
+
+            if (!TryRunUsbip(new[] { "detach", "-p", port.ToString() }, out _, out string error))
+            {
+                AppLogger.LogToGui($"VIIPER could not detach usbip port {port} ({reason}): {error}", true);
+                return;
+            }
+
+            AppLogger.LogToGui($"VIIPER detached usbip port {port} ({reason}).");
+        }
+
+        private static IReadOnlyList<UsbipPortBlock> GetImportedPorts()
+        {
+            if (!TryRunUsbip(new[] { "port" }, out string output, out string error))
+            {
+                if (!string.IsNullOrWhiteSpace(error))
+                {
+                    AppLogger.LogToGui($"VIIPER could not query usbip ports: {error}", true);
+                }
+
+                return Array.Empty<UsbipPortBlock>();
+            }
+
+            List<UsbipPortBlock> ports = new List<UsbipPortBlock>();
+            string[] lines = output.Replace("\r\n", "\n").Split('\n');
+            int currentPort = -1;
+            StringBuilder currentBlock = new StringBuilder();
+
+            foreach (string line in lines)
+            {
+                if (TryParsePortHeader(line, out int port))
+                {
+                    AddCurrentBlock();
+                    currentPort = port;
+                    currentBlock.Clear();
+                }
+
+                if (currentPort >= 0)
+                {
+                    currentBlock.AppendLine(line);
+                }
+            }
+
+            AddCurrentBlock();
+            return ports;
+
+            void AddCurrentBlock()
+            {
+                if (currentPort >= 0)
+                {
+                    ports.Add(new UsbipPortBlock(currentPort, currentBlock.ToString()));
+                }
+            }
+        }
+
+        private static bool IsLocalSonyViiperPort(UsbipPortBlock port, string remoteBusId)
+        {
+            string block = port.Block.ToLowerInvariant();
+            bool sonyDualSense = block.Contains(SonyVendorId) &&
+                (block.Contains(DualSenseProductId) || block.Contains(DualSenseEdgeProductId));
+            bool localHost = block.Contains("usbip://localhost:") ||
+                block.Contains("usbip://127.0.0.1:") ||
+                block.Contains("usbip://[::1]:") ||
+                block.Contains("usbip://::1:");
+            bool busMatches = string.IsNullOrEmpty(remoteBusId) ||
+                block.Contains("/" + remoteBusId.ToLowerInvariant());
+
+            return sonyDualSense && localHost && busMatches;
+        }
+
+        private static bool TryParsePortHeader(string line, out int port)
+        {
+            port = -1;
+            string trimmed = line.TrimStart();
+            if (!trimmed.StartsWith("Port ", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            int start = "Port ".Length;
+            int colon = trimmed.IndexOf(':', start);
+            if (colon < 0)
+            {
+                return false;
+            }
+
+            return int.TryParse(trimmed.Substring(start, colon - start), out port);
+        }
+
+        private static bool TryRunUsbip(string[] arguments, out string output, out string error)
+        {
+            output = string.Empty;
+            error = string.Empty;
+            string usbipPath = FindUsbipPath();
+            if (string.IsNullOrEmpty(usbipPath))
+            {
+                error = "usbip.exe was not found.";
+                return false;
+            }
+
+            try
+            {
+                using Process process = new Process
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = usbipPath,
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        CreateNoWindow = true,
+                    },
+                };
+
+                foreach (string argument in arguments)
+                {
+                    process.StartInfo.ArgumentList.Add(argument);
+                }
+
+                process.Start();
+                if (!process.WaitForExit(4000))
+                {
+                    try
+                    {
+                        process.Kill();
+                    }
+                    catch
+                    {
+                    }
+
+                    error = "usbip.exe timed out.";
+                    return false;
+                }
+
+                output = process.StandardOutput.ReadToEnd();
+                string standardError = process.StandardError.ReadToEnd().Trim();
+                error = string.IsNullOrWhiteSpace(standardError) ? output.Trim() : standardError;
+                return process.ExitCode == 0;
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return false;
+            }
+        }
+
+        private static string FindUsbipPath()
+        {
+            string pathValue = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+            foreach (string folder in pathValue.Split(Path.PathSeparator))
+            {
+                if (string.IsNullOrWhiteSpace(folder))
+                {
+                    continue;
+                }
+
+                string candidate = Path.Combine(folder.Trim(), "usbip.exe");
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+
+            string[] candidates =
+            {
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "USBip", "usbip.exe"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "USBip", "usbip.exe"),
+            };
+
+            foreach (string candidate in candidates)
+            {
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+
+            return null;
+        }
+
+        private readonly struct UsbipPortBlock
+        {
+            public UsbipPortBlock(int port, string block)
+            {
+                Port = port;
+                Block = block ?? string.Empty;
+            }
+
+            public int Port { get; }
+            public string Block { get; }
+        }
+    }
+
     internal sealed class ViiperDeviceStream : IDisposable
     {
         private readonly TcpClient tcp;
         private readonly NetworkStream stream;
         private readonly uint busId;
         private readonly string devId;
+        private readonly int usbipPort;
         private readonly Action<uint, string> removeDevice;
         private int disposed;
 
-        public ViiperDeviceStream(TcpClient tcp, uint busId, string devId, Action<uint, string> removeDevice)
+        public ViiperDeviceStream(TcpClient tcp, uint busId, string devId, int usbipPort, Action<uint, string> removeDevice)
         {
             this.tcp = tcp;
             this.stream = tcp.GetStream();
             this.busId = busId;
             this.devId = devId;
+            this.usbipPort = usbipPort;
             this.removeDevice = removeDevice;
         }
 
@@ -971,6 +1221,8 @@ namespace DS4Windows
             {
                 return;
             }
+
+            ViiperUsbipPortManager.DetachPort(usbipPort, "DS4Windows VIIPER device stopped");
 
             try
             {

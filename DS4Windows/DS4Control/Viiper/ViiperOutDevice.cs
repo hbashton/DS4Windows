@@ -553,6 +553,7 @@ namespace DS4Windows
         private const int DS4PacketSize = 31;
         private const int DualSensePacketSize = 33;
         private const int Switch2PacketSize = 24;
+        private const short DualSenseNeutralAccelZ = -8192;
         private const float X360RecipInputPosResolution = 1 / 127f;
         private const float X360RecipInputNegResolution = 1 / 128f;
         private const int X360OutputResolution = 32767 - (-32768);
@@ -681,7 +682,7 @@ namespace DS4Windows
             packet[10] = r2;
             WriteTouch(packet, 11, state.TrackPadTouch0, 1920, 1080);
             WriteTouch(packet, 16, state.TrackPadTouch1, 1920, 1080);
-            WriteMotion(packet, 21, state);
+            WriteDualSenseMotion(packet, 21, state);
             return packet;
         }
 
@@ -807,6 +808,28 @@ namespace DS4Windows
             WriteInt16(packet, offset + 6, ClampShort(state.Motion?.accelXFull ?? 0));
             WriteInt16(packet, offset + 8, ClampShort(state.Motion?.accelYFull ?? 0));
             WriteInt16(packet, offset + 10, ClampShort(state.Motion?.accelZFull ?? 0));
+        }
+
+        private static void WriteDualSenseMotion(byte[] packet, int offset, DS4State state)
+        {
+            SixAxis motion = state.Motion;
+            if (motion == null)
+            {
+                WriteInt16(packet, offset, 0);
+                WriteInt16(packet, offset + 2, 0);
+                WriteInt16(packet, offset + 4, 0);
+                WriteInt16(packet, offset + 6, 0);
+                WriteInt16(packet, offset + 8, 0);
+                WriteInt16(packet, offset + 10, DualSenseNeutralAccelZ);
+                return;
+            }
+
+            WriteInt16(packet, offset, ClampShort(motion.gyroPitchFull));
+            WriteInt16(packet, offset + 2, ClampShort(-motion.gyroYawFull));
+            WriteInt16(packet, offset + 4, ClampShort(-motion.gyroRollFull));
+            WriteInt16(packet, offset + 6, ClampShort(-motion.accelXFull));
+            WriteInt16(packet, offset + 8, ClampShort(-motion.accelYFull));
+            WriteInt16(packet, offset + 10, ClampShort(-motion.accelZFull));
         }
 
         private static void ApplySteeringWheelX360(DS4State state, int device, ref byte l2, ref byte r2, ref short lx, ref short ly, ref short rx, ref short ry)

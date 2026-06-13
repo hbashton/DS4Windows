@@ -36,18 +36,22 @@ namespace DS4Windows
         private const int DualSenseExtendedFeedbackLength = 22;
         private const int DualSenseTriggerFeedbackOffset = 6;
         private const int DualSenseTriggerEffectLength = 8;
+        private const int MaxStreamRecoveryAttempts = 2;
 
         private readonly OutContType outputType;
         private readonly ViiperVirtualDeviceType viiperType;
         private readonly ViiperClient client;
         private readonly object pendingPacketLock = new object();
         private readonly object writerThreadLock = new object();
+        private readonly object streamRecoveryLock = new object();
         private readonly AutoResetEvent writerSignal = new AutoResetEvent(false);
         private ViiperDeviceStream deviceStream;
         private Thread feedbackThread;
         private Thread stateWriterThread;
         private byte[] pendingStatePacket;
         private volatile bool writerStopRequested;
+        private int streamRecoveryAttempts;
+        private DateTime lastStreamRecoveryAttemptUtc = DateTime.MinValue;
         private long replacedPendingPacketCount;
         private long submittedPacketCount;
         private long writtenPacketCount;
@@ -76,9 +80,11 @@ namespace DS4Windows
                     $"{status.DisplayText}. Use Settings > VIIPER Virtual Controller Support to install or repair VIIPER and usbip-win2.");
             }
 
-            deviceStream = CreateDeviceStream();
+            deviceStream = CreateDeviceStreamWithServerFallback();
             Volatile.Write(ref submitFailureLogged, 0);
             Volatile.Write(ref lastInputDeviceIndex, -1);
+            streamRecoveryAttempts = 0;
+            lastStreamRecoveryAttemptUtc = DateTime.MinValue;
             Interlocked.Exchange(ref replacedPendingPacketCount, 0);
             Interlocked.Exchange(ref submittedPacketCount, 0);
             Interlocked.Exchange(ref writtenPacketCount, 0);
@@ -128,6 +134,26 @@ namespace DS4Windows
             return client.CreateDeviceAndOpenStream(viiperType);
         }
 
+        private ViiperDeviceStream CreateDeviceStreamWithServerFallback()
+        {
+            try
+            {
+                return CreateDeviceStream();
+            }
+            catch (IOException first)
+            {
+                ViiperPrerequisiteStatus status = ViiperSetupManager.GetStatus(tryStartServer: true);
+                if (!status.Ready)
+                {
+                    throw;
+                }
+
+                AppLogger.LogToGui($"VIIPER {viiperType} stream open failed once; server is available, retrying: {first.Message}", false);
+                Thread.Sleep(250);
+                return CreateDeviceStream();
+            }
+        }
+
         public override void Disconnect()
         {
             connected = false;
@@ -150,7 +176,11 @@ namespace DS4Windows
             }
 
             stateWriterThread = null;
+            StopFeedbackReader();
+        }
 
+        private void StopFeedbackReader()
+        {
             if (feedbackThread != null && feedbackThread.IsAlive)
             {
                 if (Thread.CurrentThread.ManagedThreadId != feedbackThread.ManagedThreadId)
@@ -309,15 +339,26 @@ namespace DS4Windows
                     {
                         WriteState(packet);
                         Interlocked.Increment(ref writtenPacketCount);
+                        streamRecoveryAttempts = 0;
                         LogWriterHealthIfNeeded();
                     }
                     catch (IOException ex)
                     {
+                        if (TryRecoverStream(ex.Message, packet))
+                        {
+                            continue;
+                        }
+
                         LogSubmitFailure(ex.Message);
                         return;
                     }
                     catch (SocketException ex)
                     {
+                        if (TryRecoverStream(ex.Message, packet))
+                        {
+                            continue;
+                        }
+
                         LogSubmitFailure(ex.Message);
                         return;
                     }
@@ -325,10 +366,84 @@ namespace DS4Windows
                     {
                         if (!writerStopRequested)
                         {
+                            if (TryRecoverStream(ex.Message, packet))
+                            {
+                                continue;
+                            }
+
                             LogSubmitFailure(ex.Message);
                         }
+
                         return;
                     }
+                }
+            }
+        }
+
+        private bool TryRecoverStream(string reason, byte[] packetToRetry = null)
+        {
+            if (writerStopRequested || !connected)
+            {
+                return false;
+            }
+
+            lock (streamRecoveryLock)
+            {
+                if (writerStopRequested || !connected)
+                {
+                    return false;
+                }
+
+                DateTime now = DateTime.UtcNow;
+                if (now - lastStreamRecoveryAttemptUtc < TimeSpan.FromSeconds(2))
+                {
+                    return false;
+                }
+
+                if (streamRecoveryAttempts >= MaxStreamRecoveryAttempts)
+                {
+                    return false;
+                }
+
+                streamRecoveryAttempts++;
+                lastStreamRecoveryAttemptUtc = now;
+                AppLogger.LogToGui(
+                    $"VIIPER {viiperType} stream interrupted; attempting recovery {streamRecoveryAttempts}/{MaxStreamRecoveryAttempts}: {reason}",
+                    true);
+
+                try
+                {
+                    ViiperPrerequisiteStatus status = ViiperSetupManager.GetStatus(tryStartServer: true);
+                    if (!status.Ready)
+                    {
+                        AppLogger.LogToGui($"VIIPER {viiperType} recovery failed: {status.DisplayText}", true);
+                        return false;
+                    }
+
+                    ViiperDeviceStream oldStream = Interlocked.Exchange(ref deviceStream, null);
+                    oldStream?.Dispose();
+                    StopFeedbackReader();
+
+                    deviceStream = CreateDeviceStreamWithServerFallback();
+                    StartFeedbackReader();
+
+                    if (packetToRetry != null)
+                    {
+                        lock (pendingPacketLock)
+                        {
+                            pendingStatePacket = packetToRetry;
+                        }
+
+                        writerSignal.Set();
+                    }
+
+                    AppLogger.LogToGui($"VIIPER {viiperType} stream recovered.", false);
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.LogToGui($"VIIPER {viiperType} recovery failed: {ex.Message}", true);
+                    return false;
                 }
             }
         }
@@ -400,14 +515,14 @@ namespace DS4Windows
             }
             catch (IOException)
             {
-                if (connected)
+                if (connected && !TryRecoverStream("feedback reader stopped"))
                 {
                     AppLogger.LogToGui($"VIIPER {viiperType} feedback reader stopped.", true);
                 }
             }
             catch (SocketException)
             {
-                if (connected)
+                if (connected && !TryRecoverStream("feedback reader stopped due to socket error"))
                 {
                     AppLogger.LogToGui($"VIIPER {viiperType} feedback reader stopped due to socket error.", true);
                 }

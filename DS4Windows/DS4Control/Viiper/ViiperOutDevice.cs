@@ -15,6 +15,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
+using DS4Windows.InputDevices;
 
 namespace DS4Windows
 {
@@ -40,6 +41,8 @@ namespace DS4Windows
         private Thread feedbackThread;
         private int lastInputDeviceIndex = -1;
         private int submitFailureLogged;
+        private bool micMuted;
+        private bool muteToggleButtonWasDown;
 
         public ViiperOutDevice(OutContType outputType, ViiperVirtualDeviceType viiperType)
         {
@@ -62,6 +65,7 @@ namespace DS4Windows
             deviceStream = client.CreateDeviceAndOpenStream(viiperType);
             Volatile.Write(ref submitFailureLogged, 0);
             Volatile.Write(ref lastInputDeviceIndex, -1);
+            ResetToggleState();
             connected = true;
             ResetState();
             StartFeedbackReader();
@@ -70,6 +74,7 @@ namespace DS4Windows
         public override void Disconnect()
         {
             connected = false;
+            ResetToggleState();
             ViiperDeviceStream stream;
             lock (streamWriteLock)
             {
@@ -95,6 +100,7 @@ namespace DS4Windows
 
             try
             {
+                UpdatePhysicalDualSenseMicMute(state, device);
                 WriteState(ViiperStatePacketBuilder.Build(viiperType, state, device));
             }
             catch (IOException ex)
@@ -168,6 +174,36 @@ namespace DS4Windows
 
                 stream.Write(data);
             }
+        }
+
+        private void UpdatePhysicalDualSenseMicMute(DS4State state, int device)
+        {
+            if (viiperType != ViiperVirtualDeviceType.DualSense &&
+                viiperType != ViiperVirtualDeviceType.DualSenseEdge)
+            {
+                return;
+            }
+
+            bool muteDown = state.Mute;
+            if (muteDown && !muteToggleButtonWasDown)
+            {
+                micMuted = !micMuted;
+                if (device >= 0 &&
+                    Program.rootHub != null &&
+                    device < Program.rootHub.DS4Controllers.Length &&
+                    Program.rootHub.DS4Controllers[device] is DualSenseDevice dualSenseDevice)
+                {
+                    dualSenseDevice.SetMicrophoneMuteState(micMuted);
+                }
+            }
+
+            muteToggleButtonWasDown = muteDown;
+        }
+
+        private void ResetToggleState()
+        {
+            micMuted = false;
+            muteToggleButtonWasDown = false;
         }
 
         private void StartFeedbackReader()

@@ -1411,8 +1411,8 @@ namespace DS4Windows
             packet[8] = BuildDPadBits(state);
             packet[9] = l2;
             packet[10] = r2;
-            WriteTouch(packet, 11, state.TrackPadTouch0, 1920, 1080);
-            WriteTouch(packet, 16, state.TrackPadTouch1, 1920, 1080);
+            WriteDualSenseTouch(packet, 11, state.TrackPadTouch0, 1920, 1080);
+            WriteDualSenseTouch(packet, 16, state.TrackPadTouch1, 1920, 1080);
             WriteDualSenseMotion(packet, 21, state);
             return packet;
         }
@@ -1529,6 +1529,26 @@ namespace DS4Windows
             WriteUInt16(packet, offset, x);
             WriteUInt16(packet, offset + 2, y);
             packet[offset + 4] = touch.IsActive ? (byte)1 : (byte)0;
+        }
+
+        private static void WriteDualSenseTouch(byte[] packet, int offset, DS4State.TrackPadTouch touch, int maxX, int maxY)
+        {
+            ushort x = (ushort)Math.Clamp(touch.X, 0, maxX);
+            ushort y = (ushort)Math.Clamp(touch.Y, 0, maxY);
+            WriteUInt16(packet, offset, x);
+            WriteUInt16(packet, offset + 2, y);
+
+            byte tracking = touch.RawTrackingNum;
+            if (tracking == 0 && !touch.IsActive)
+            {
+                tracking = 0x80;
+            }
+            else if (touch.IsActive)
+            {
+                tracking = (byte)(tracking & 0x7f);
+            }
+
+            packet[offset + 4] = tracking;
         }
 
         private static void WriteMotion(byte[] packet, int offset, DS4State state)

@@ -37,8 +37,6 @@ namespace DS4Windows
         private const int DualSenseTriggerFeedbackOffset = 6;
         private const int DualSenseTriggerEffectLength = 8;
         private const int MaxStreamRecoveryAttempts = 2;
-        private const int ApiReceiveTimeoutMs = 5000;
-        private const int StreamReceiveTimeoutMs = 0;
 
         private readonly OutContType outputType;
         private readonly ViiperVirtualDeviceType viiperType;
@@ -730,6 +728,9 @@ namespace DS4Windows
 
     internal sealed class ViiperClient
     {
+        private const int ApiReceiveTimeoutMs = 5000;
+        private const int StreamReceiveTimeoutMs = 0;
+
         private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true,

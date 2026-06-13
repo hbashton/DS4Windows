@@ -35,9 +35,9 @@ namespace DS4Windows
         private const string DefaultHost = "127.0.0.1";
         private const int DefaultPort = 3242;
         private const int DualSenseBaseFeedbackLength = 6;
-        private const int DualSenseExtendedFeedbackLength = 22;
         private const int DualSenseTriggerFeedbackOffset = 6;
-        private const int DualSenseTriggerEffectLength = 8;
+        private const int DualSenseTriggerEffectLength = 11;
+        private const int DualSenseExtendedFeedbackLength = DualSenseBaseFeedbackLength + (DualSenseTriggerEffectLength * 2);
         private const int MaxStreamRecoveryAttempts = 2;
 
         private readonly OutContType outputType;
@@ -631,7 +631,7 @@ namespace DS4Windows
                 feedback[offset + 4],
                 feedback[offset + 5],
                 feedback[offset + 6],
-                feedback[offset + 7]);
+                feedback[offset + 9]);
         }
 
         public static bool ApplySyntheticDualSenseTriggerFeedback(int deviceIndex, bool rightTrigger, byte mode,
@@ -656,7 +656,7 @@ namespace DS4Windows
             feedback[offset + 4] = nearReleaseStrength;
             feedback[offset + 5] = nearMiddleStrength;
             feedback[offset + 6] = pressedStrength;
-            feedback[offset + 7] = frequency;
+            feedback[offset + 9] = frequency;
 
             ApplyRawTriggerEffect(dualSenseDevice,
                 rightTrigger ? TriggerId.RightTrigger : TriggerId.LeftTrigger,
@@ -1283,7 +1283,7 @@ namespace DS4Windows
         private const int DS4PacketSize = 31;
         private const int DualSensePacketSize = 33;
         private const int Switch2PacketSize = 24;
-        private const int DualSenseFeedbackPacketSize = 22;
+        private const int DualSenseFeedbackPacketSize = 28;
         private const int DualSenseGyroRestDeadband = 32;
         private const int DualSenseAccelRestZ = -8192;
         private const float X360RecipInputPosResolution = 1 / 127f;
@@ -1296,8 +1296,8 @@ namespace DS4Windows
             {
                 ViiperVirtualDeviceType.Xbox360 => "xbox360",
                 ViiperVirtualDeviceType.DualShock4 => "dualshock4",
-                ViiperVirtualDeviceType.DualSense => "dualsense",
-                ViiperVirtualDeviceType.DualSenseEdge => "dualsenseedge",
+                ViiperVirtualDeviceType.DualSense => "dualsenseext",
+                ViiperVirtualDeviceType.DualSenseEdge => "dualsenseedgeext",
                 ViiperVirtualDeviceType.Switch2Pro => "ns2pro",
                 _ => "xbox360",
             };
@@ -1576,8 +1576,8 @@ namespace DS4Windows
                 return;
             }
 
-            int gyroX = SnapToZero(motion.gyroPitchFull, DualSenseGyroRestDeadband);
-            int gyroY = SnapToZero(-motion.gyroYawFull, DualSenseGyroRestDeadband);
+            int gyroX = SnapToZero(-motion.gyroYawFull, DualSenseGyroRestDeadband);
+            int gyroY = SnapToZero(motion.gyroPitchFull, DualSenseGyroRestDeadband);
             int gyroZ = SnapToZero(-motion.gyroRollFull, DualSenseGyroRestDeadband);
             int accelX = -motion.accelXFull;
             int accelY = -motion.accelYFull;

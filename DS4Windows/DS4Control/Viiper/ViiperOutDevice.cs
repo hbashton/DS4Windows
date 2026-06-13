@@ -704,6 +704,7 @@ namespace DS4Windows
         private const int DS4PacketSize = 31;
         private const int DualSensePacketSize = 33;
         private const int Switch2PacketSize = 24;
+        private const int DualSenseFeedbackPacketSize = 22;
         private const short DualSenseNeutralAccelZ = -8192;
         private const int DualSenseGyroRestDeadband = 32;
         private const int DualSenseAccelRestDeadband = 256;
@@ -730,8 +731,8 @@ namespace DS4Windows
             {
                 ViiperVirtualDeviceType.Xbox360 => 2,
                 ViiperVirtualDeviceType.DualShock4 => 7,
-                ViiperVirtualDeviceType.DualSense => DualSenseExtendedFeedbackLength,
-                ViiperVirtualDeviceType.DualSenseEdge => DualSenseExtendedFeedbackLength,
+                ViiperVirtualDeviceType.DualSense => DualSenseFeedbackPacketSize,
+                ViiperVirtualDeviceType.DualSenseEdge => DualSenseFeedbackPacketSize,
                 ViiperVirtualDeviceType.Switch2Pro => 34,
                 _ => 0,
             };

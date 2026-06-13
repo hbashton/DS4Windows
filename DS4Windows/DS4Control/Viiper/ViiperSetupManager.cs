@@ -226,6 +226,13 @@ namespace DS4Windows
                     WindowStyle = ProcessWindowStyle.Hidden,
                     UseShellExecute = false,
                 };
+
+                if (Global.VerboseStartupLogging)
+                {
+                    startInfo.Environment["VIIPER_DUALSENSE_RAW_OUTPUT_LOG"] = "1";
+                    AppLogger.LogToGui("Starting VIIPER with raw DualSense host-output logging enabled.");
+                }
+
                 Process.Start(startInfo);
                 System.Threading.Thread.Sleep(750);
                 return true;

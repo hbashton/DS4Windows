@@ -1596,6 +1596,33 @@ namespace DS4Windows.InputDevices
             });
         }
 
+        public void PrepareRawTriggerEffect(TriggerId trigger, byte mode, byte startResistance,
+            byte effectForce, byte rangeForce, byte nearReleaseStrength, byte nearMiddleStrength,
+            byte pressedStrength, byte frequency)
+        {
+            queueEvent(() =>
+            {
+                if (trigger == TriggerId.LeftTrigger)
+                {
+                    l2EffectData.ChangeRaw(mode, startResistance, effectForce, rangeForce,
+                        nearReleaseStrength, nearMiddleStrength, pressedStrength, frequency);
+                }
+                else if (trigger == TriggerId.RightTrigger)
+                {
+                    r2EffectData.ChangeRaw(mode, startResistance, effectForce, rangeForce,
+                        nearReleaseStrength, nearMiddleStrength, pressedStrength, frequency);
+                }
+                else
+                {
+                    throw new ArgumentOutOfRangeException(nameof(trigger), "Invalid Trigger Id");
+                }
+
+                outputDirty = true;
+                currentHap.dirty = true;
+                PrepareOutReport();
+            });
+        }
+
         private byte DeviceBatteryLinearMask(int deviceBattery)
         {
             byte batteryMask;

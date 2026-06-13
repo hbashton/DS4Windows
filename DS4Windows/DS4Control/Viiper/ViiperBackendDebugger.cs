@@ -151,9 +151,9 @@ namespace DS4Windows
 
         private void RunAdaptiveTriggerProbe()
         {
-            Log("NOT IMPLEMENTED: VIIPER adaptive trigger emulation probe.");
-            Log("Current DS4Windows VIIPER path sends input-state packets only. It does not yet parse raw DualSense output report 0x02 or bridge adaptive trigger commands back to a physical DualSense.");
-            Log("Expected future test: create VIIPER DualSense, inject/observe raw output report with trigger mode bytes, verify DS4Windows maps it into TriggerEffectSettings for L2/R2.");
+            Log("VIIPER adaptive trigger passthrough is enabled for physical DualSense/DualSense Edge input controllers.");
+            Log("Expected feedback contract: DualSense feedback may extend the base 6-byte rumble/LED packet with R2[8] then L2[8] raw trigger effect bytes.");
+            Log("If trigger effects do not reach the real controller, update VIIPER to expose the trigger blocks parsed from USB output report 0x02.");
         }
 
         private void RunStep(string name, Action action, CancellationToken cancellationToken)

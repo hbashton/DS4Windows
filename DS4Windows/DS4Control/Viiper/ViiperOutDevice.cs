@@ -32,6 +32,10 @@ namespace DS4Windows
     {
         private const string DefaultHost = "127.0.0.1";
         private const int DefaultPort = 3242;
+        private const int DualSenseBaseFeedbackLength = 6;
+        private const int DualSenseExtendedFeedbackLength = 22;
+        private const int DualSenseTriggerFeedbackOffset = 6;
+        private const int DualSenseTriggerEffectLength = 8;
 
         private readonly OutContType outputType;
         private readonly ViiperVirtualDeviceType viiperType;
@@ -43,6 +47,8 @@ namespace DS4Windows
         private int submitFailureLogged;
         private bool micMuted;
         private bool muteToggleButtonWasDown;
+        private readonly byte[] lastR2TriggerFeedback = new byte[DualSenseTriggerEffectLength];
+        private readonly byte[] lastL2TriggerFeedback = new byte[DualSenseTriggerEffectLength];
 
         public ViiperOutDevice(OutContType outputType, ViiperVirtualDeviceType viiperType)
         {
@@ -224,7 +230,8 @@ namespace DS4Windows
 
         private void FeedbackReadLoop(int feedbackLength)
         {
-            byte[] buffer = new byte[feedbackLength];
+            int bufferLength = IsDualSenseType() ? Math.Max(feedbackLength, DualSenseExtendedFeedbackLength) : feedbackLength;
+            byte[] buffer = new byte[bufferLength];
             try
             {
                 while (connected)
@@ -236,7 +243,7 @@ namespace DS4Windows
                     }
 
                     stream.ReadExactly(buffer, 0, feedbackLength);
-                    ApplyFeedback(buffer);
+                    ApplyFeedback(buffer, feedbackLength);
                 }
             }
             catch (IOException)
@@ -250,7 +257,7 @@ namespace DS4Windows
             }
         }
 
-        private void ApplyFeedback(byte[] feedback)
+        private void ApplyFeedback(byte[] feedback, int feedbackLength)
         {
             int deviceIndex = Volatile.Read(ref lastInputDeviceIndex);
             if (deviceIndex < 0 ||
@@ -270,14 +277,14 @@ namespace DS4Windows
             switch (viiperType)
             {
                 case ViiperVirtualDeviceType.Xbox360:
-                    if (feedback.Length >= 2)
+                    if (feedbackLength >= 2)
                     {
                         Program.rootHub.SetDevRumble(device, feedback[0], feedback[1], deviceIndex);
                     }
                     break;
 
                 case ViiperVirtualDeviceType.DualShock4:
-                    if (feedback.Length >= 7)
+                    if (feedbackLength >= 7)
                     {
                         Program.rootHub.SetDevRumble(device, feedback[1], feedback[0], deviceIndex);
                         ApplyLightbar(device, feedback[2], feedback[3], feedback[4], feedback[5], feedback[6]);
@@ -286,15 +293,16 @@ namespace DS4Windows
 
                 case ViiperVirtualDeviceType.DualSense:
                 case ViiperVirtualDeviceType.DualSenseEdge:
-                    if (feedback.Length >= 6)
+                    if (feedbackLength >= DualSenseBaseFeedbackLength)
                     {
                         Program.rootHub.SetDevRumble(device, feedback[1], feedback[0], deviceIndex);
                         ApplyLightbar(device, feedback[2], feedback[3], feedback[4], 0, 0);
+                        ApplyDualSenseTriggerFeedback(device, feedback, feedbackLength);
                     }
                     break;
 
                 case ViiperVirtualDeviceType.Switch2Pro:
-                    if (feedback.Length >= 34)
+                    if (feedbackLength >= 34)
                     {
                         byte left = MaxByte(feedback, 0, 16);
                         byte right = MaxByte(feedback, 16, 16);
@@ -302,6 +310,69 @@ namespace DS4Windows
                     }
                     break;
             }
+        }
+
+        private bool IsDualSenseType()
+        {
+            return viiperType == ViiperVirtualDeviceType.DualSense ||
+                viiperType == ViiperVirtualDeviceType.DualSenseEdge;
+        }
+
+        private void ApplyDualSenseTriggerFeedback(DS4Device device, byte[] feedback, int feedbackLength)
+        {
+            if (feedbackLength < DualSenseExtendedFeedbackLength ||
+                device is not DualSenseDevice dualSenseDevice)
+            {
+                return;
+            }
+
+            int r2Offset = DualSenseTriggerFeedbackOffset;
+            int l2Offset = DualSenseTriggerFeedbackOffset + DualSenseTriggerEffectLength;
+            bool r2Changed = !TriggerFeedbackEquals(feedback, r2Offset, lastR2TriggerFeedback);
+            bool l2Changed = !TriggerFeedbackEquals(feedback, l2Offset, lastL2TriggerFeedback);
+
+            if (r2Changed)
+            {
+                CopyTriggerFeedback(feedback, r2Offset, lastR2TriggerFeedback);
+                ApplyRawTriggerEffect(dualSenseDevice, TriggerId.RightTrigger, feedback, r2Offset);
+            }
+
+            if (l2Changed)
+            {
+                CopyTriggerFeedback(feedback, l2Offset, lastL2TriggerFeedback);
+                ApplyRawTriggerEffect(dualSenseDevice, TriggerId.LeftTrigger, feedback, l2Offset);
+            }
+        }
+
+        private static void ApplyRawTriggerEffect(DualSenseDevice device, TriggerId trigger, byte[] feedback, int offset)
+        {
+            device.PrepareRawTriggerEffect(trigger,
+                feedback[offset],
+                feedback[offset + 1],
+                feedback[offset + 2],
+                feedback[offset + 3],
+                feedback[offset + 4],
+                feedback[offset + 5],
+                feedback[offset + 6],
+                feedback[offset + 7]);
+        }
+
+        private static bool TriggerFeedbackEquals(byte[] source, int sourceOffset, byte[] previous)
+        {
+            for (int i = 0; i < DualSenseTriggerEffectLength; i++)
+            {
+                if (source[sourceOffset + i] != previous[i])
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static void CopyTriggerFeedback(byte[] source, int sourceOffset, byte[] destination)
+        {
+            Array.Copy(source, sourceOffset, destination, 0, DualSenseTriggerEffectLength);
         }
 
         private static void ApplyLightbar(DS4Device device, byte red, byte green, byte blue, byte flashOn, byte flashOff)
@@ -615,8 +686,8 @@ namespace DS4Windows
             {
                 ViiperVirtualDeviceType.Xbox360 => 2,
                 ViiperVirtualDeviceType.DualShock4 => 7,
-                ViiperVirtualDeviceType.DualSense => 6,
-                ViiperVirtualDeviceType.DualSenseEdge => 6,
+                ViiperVirtualDeviceType.DualSense => DualSenseExtendedFeedbackLength,
+                ViiperVirtualDeviceType.DualSenseEdge => DualSenseExtendedFeedbackLength,
                 ViiperVirtualDeviceType.Switch2Pro => 34,
                 _ => 0,
             };

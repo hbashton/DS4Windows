@@ -15,6 +15,7 @@ using System.IO;
 using System.Linq;
 using System.Net.Sockets;
 using System.Text;
+using System.Threading;
 using System.Windows;
 
 namespace DS4Windows
@@ -67,7 +68,9 @@ namespace DS4Windows
         public const string ViiperReleasesUrl = "https://github.com/Alia5/VIIPER/releases";
 
         private const string InstallerScriptName = "install-viiper-backend.ps1";
-        private static bool promptShownThisSession;
+        private static readonly object serverStartLock = new object();
+        private static DateTime lastServerStartAttemptUtc = DateTime.MinValue;
+        private static int promptShownThisSession;
 
         public static bool IsViiperOutputType(OutContType type) => ViiperOutDevice.IsViiperType(type);
 
@@ -87,7 +90,7 @@ namespace DS4Windows
 
             if (tryStartServer && !status.ServerRunning && status.ViiperInstalled)
             {
-                TryStartServer(viiperPath);
+                TryStartServerOnce(viiperPath);
                 status.ServerRunning = CanPingServer();
             }
 
@@ -102,12 +105,12 @@ namespace DS4Windows
                 return true;
             }
 
-            if (promptShownThisSession && !forcePrompt)
+            if (Volatile.Read(ref promptShownThisSession) == 1 && !forcePrompt)
             {
                 return false;
             }
 
-            promptShownThisSession = true;
+            Interlocked.Exchange(ref promptShownThisSession, 1);
             string message =
                 "This profile uses a VIIPER virtual controller output.\n\n" +
                 "DS4Windows needs two pieces installed before this can work:\n" +
@@ -187,6 +190,26 @@ namespace DS4Windows
         private static string GetSetupScriptPath()
         {
             return Path.Combine(Global.exedirpath, "extras", InstallerScriptName);
+        }
+
+        private static bool TryStartServerOnce(string viiperPath)
+        {
+            lock (serverStartLock)
+            {
+                if (CanPingServer())
+                {
+                    return true;
+                }
+
+                DateTime now = DateTime.UtcNow;
+                if ((now - lastServerStartAttemptUtc).TotalSeconds < 3)
+                {
+                    return false;
+                }
+
+                lastServerStartAttemptUtc = now;
+                return TryStartServer(viiperPath);
+            }
         }
 
         private static bool TryStartServer(string viiperPath)

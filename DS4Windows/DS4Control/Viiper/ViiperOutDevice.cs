@@ -980,7 +980,7 @@ namespace DS4Windows
                 return;
             }
 
-            AppLogger.LogToGui($"VIIPER detached usbip port {port} ({reason}).");
+            AppLogger.LogToGui($"VIIPER detached usbip port {port} ({reason}).", false);
         }
 
         private static IReadOnlyList<UsbipPortBlock> GetImportedPorts()

@@ -36,6 +36,8 @@ namespace DS4Windows
         private const int DefaultPort = 3242;
         private const int DualSenseBaseFeedbackLength = 6;
         private const int DualSenseTriggerFeedbackOffset = 6;
+        // VIIPER sends compact feedback, not a full native HID output report:
+        // base rumble/LED bytes plus two native-spaced trigger effect blocks.
         private const int DualSenseTriggerEffectLength = 11;
         private const int DualSenseExtendedFeedbackLength = DualSenseBaseFeedbackLength + (DualSenseTriggerEffectLength * 2);
         private const int MaxStreamRecoveryAttempts = 2;

@@ -43,6 +43,9 @@ namespace DS4Windows
         private readonly DualSenseAudioPassthrough dualSenseAudioPassthrough = new DualSenseAudioPassthrough();
         private readonly DualSenseMicrophonePassthrough dualSenseMicrophonePassthrough = new DualSenseMicrophonePassthrough();
         private readonly GameBarIntegration gameBarIntegration = new GameBarIntegration();
+        private readonly object hidHideSessionLock = new object();
+        private readonly HashSet<string> hidHideManagedInstanceIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> hidHidePersistentAddedInstanceIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         // Might be useful for ScpVBus build
         public const int EXPANDED_CONTROLLER_COUNT = 8;
         public const int MAX_DS4_CONTROLLER_COUNT = Global.MAX_DS4_CONTROLLER_COUNT;
@@ -956,33 +959,123 @@ namespace DS4Windows
             if (Global.hidHideInstalled)
             {
                 dev.CurrentExclusiveStatus = DS4Device.ExclusiveStatus.HidHideAffected;
-                TryAddDeviceToSessionBlacklist(dev);
             }
         }
 
         /// <summary>
-        /// Adds the device to HidHide's process-lifetime (session) blacklist.
-        /// The entry is automatically removed by HidHide when DS4Windows exits --
-        /// cleanly or otherwise -- so other apps (Steam, OpenRGB) can reclaim the
-        /// device without requiring a reboot or manual HidHide configuration.
-        /// Falls back silently if the installed HidHide version predates session
-        /// blacklist support.
+        /// Adds the device to HidHide for this DS4Windows run and enables hiding.
+        /// Prefer HidHide's session blacklist so the driver removes entries when
+        /// DS4Windows exits. Older HidHide builds are handled with a bounded
+        /// persistent fallback that DS4Windows removes during Stop().
         /// </summary>
-        private void TryAddDeviceToSessionBlacklist(DS4Device dev)
+        private bool EnsureHidHideSessionForDevice(DS4Device dev)
         {
-            if (!Global.hidHideInstalled) return;
+            if (!Global.hidHideInstalled || dev == null) return false;
+
+            string instanceId = Global.GetInstanceIdFromDevicePath(dev.HidDevice.DevicePath);
+            if (string.IsNullOrEmpty(instanceId)) return false;
+
+            lock (hidHideSessionLock)
+            {
+                if (hidHideManagedInstanceIds.Contains(instanceId))
+                {
+                    return true;
+                }
+            }
+
             try
             {
-                string instanceId = Global.GetInstanceIdFromDevicePath(dev.HidDevice.DevicePath);
-                if (string.IsNullOrEmpty(instanceId)) return;
+                using (HidHideAPIDevice hidHideDevice = new HidHideAPIDevice())
+                {
+                    if (!hidHideDevice.IsOpen()) return false;
 
+                    if (!hidHideDevice.GetActiveState())
+                    {
+                        hidHideDevice.SetActiveState(true);
+                    }
+
+                    bool sessionAdded = hidHideDevice.AddSessionBlacklist(new List<string> { instanceId });
+                    if (!sessionAdded)
+                    {
+                        List<string> persistentList = hidHideDevice.GetBlacklist();
+                        if (!persistentList.Contains(instanceId, StringComparer.OrdinalIgnoreCase))
+                        {
+                            persistentList.Add(instanceId);
+                            hidHideDevice.SetBlacklist(persistentList);
+                            lock (hidHideSessionLock)
+                            {
+                                hidHidePersistentAddedInstanceIds.Add(instanceId);
+                            }
+                        }
+                    }
+
+                    lock (hidHideSessionLock)
+                    {
+                        hidHideManagedInstanceIds.Add(instanceId);
+                    }
+
+                    LogDebug($"HidHide session hiding enabled for {dev.DisplayName} ({instanceId})", false);
+                    UpdateHidHideAttributes();
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                LogDebug($"HidHide session setup failed for {dev.DisplayName}: {ex.Message}", true);
+                return false;
+            }
+        }
+
+        private void ClearHidHideSession()
+        {
+            if (!Global.hidHideInstalled) return;
+
+            lock (hidHideSessionLock)
+            {
+                if (hidHideManagedInstanceIds.Count == 0 &&
+                    hidHidePersistentAddedInstanceIds.Count == 0)
+                {
+                    return;
+                }
+            }
+
+            try
+            {
                 using (HidHideAPIDevice hidHideDevice = new HidHideAPIDevice())
                 {
                     if (!hidHideDevice.IsOpen()) return;
-                    hidHideDevice.AddSessionBlacklist(new System.Collections.Generic.List<string> { instanceId });
+
+                    hidHideDevice.ClearSessionBlacklist();
+
+                    List<string> persistentAdded;
+                    lock (hidHideSessionLock)
+                    {
+                        persistentAdded = hidHidePersistentAddedInstanceIds.ToList();
+                    }
+
+                    if (persistentAdded.Count > 0)
+                    {
+                        List<string> persistentList = hidHideDevice.GetBlacklist();
+                        persistentList.RemoveAll(instance =>
+                            persistentAdded.Contains(instance, StringComparer.OrdinalIgnoreCase));
+                        hidHideDevice.SetBlacklist(persistentList);
+                    }
                 }
             }
-            catch { /* HidHide version predates session blacklist -- ignore */ }
+            catch (Exception ex)
+            {
+                LogDebug($"HidHide session cleanup failed: {ex.Message}", true);
+            }
+            finally
+            {
+                lock (hidHideSessionLock)
+                {
+                    hidHideManagedInstanceIds.Clear();
+                    hidHidePersistentAddedInstanceIds.Clear();
+                }
+
+                UpdateHidHideAttributes();
+            }
         }
 
         private void TestQueueBus(Action temp)
@@ -2227,6 +2320,9 @@ namespace DS4Windows
             }
 
             runHotPlug = false;
+            StartupDiag("ControlService.Stop HidHide session cleanup begin");
+            ClearHidHideSession();
+            StartupDiag("ControlService.Stop HidHide session cleanup end");
             StartupDiag("ControlService.Stop before stopped events");
             ServiceStopped?.Invoke(this, EventArgs.Empty);
             RunningChanged?.Invoke(this, EventArgs.Empty);
@@ -2506,9 +2602,12 @@ namespace DS4Windows
 
         private void BeginPrepareConnectedInputController(DS4Device device, bool showlog = false)
         {
-            if (hidDeviceHidingEnabled && CheckAffected(device))
+            if (DS4Devices.isExclusiveMode && EnsureHidHideSessionForDevice(device))
             {
-                //device.CurrentExclusiveStatus = DS4Device.ExclusiveStatus.HidGuardAffected;
+                ChangeExclusiveStatus(device);
+            }
+            else if (hidDeviceHidingEnabled && CheckAffected(device))
+            {
                 ChangeExclusiveStatus(device);
             }
 

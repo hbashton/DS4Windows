@@ -129,7 +129,10 @@ namespace DS4Windows
 
             if (feedbackThread != null && feedbackThread.IsAlive)
             {
-                feedbackThread.Join(200);
+                if (Thread.CurrentThread.ManagedThreadId != feedbackThread.ManagedThreadId)
+                {
+                    feedbackThread.Join(500);
+                }
             }
 
             feedbackThread = null;
@@ -396,6 +399,37 @@ namespace DS4Windows
                 feedback[offset + 7]);
         }
 
+        public static bool ApplySyntheticDualSenseTriggerFeedback(int deviceIndex, bool rightTrigger, byte mode,
+            byte startResistance, byte effectForce, byte rangeForce, byte nearReleaseStrength,
+            byte nearMiddleStrength, byte pressedStrength, byte frequency)
+        {
+            if (Program.rootHub == null ||
+                deviceIndex < 0 ||
+                deviceIndex >= Program.rootHub.DS4Controllers.Length ||
+                Program.rootHub.DS4Controllers[deviceIndex] is not DualSenseDevice dualSenseDevice)
+            {
+                return false;
+            }
+
+            byte[] feedback = new byte[DualSenseExtendedFeedbackLength];
+            int offset = DualSenseTriggerFeedbackOffset +
+                (rightTrigger ? 0 : DualSenseTriggerEffectLength);
+            feedback[offset] = mode;
+            feedback[offset + 1] = startResistance;
+            feedback[offset + 2] = effectForce;
+            feedback[offset + 3] = rangeForce;
+            feedback[offset + 4] = nearReleaseStrength;
+            feedback[offset + 5] = nearMiddleStrength;
+            feedback[offset + 6] = pressedStrength;
+            feedback[offset + 7] = frequency;
+
+            ApplyRawTriggerEffect(dualSenseDevice,
+                rightTrigger ? TriggerId.RightTrigger : TriggerId.LeftTrigger,
+                feedback,
+                offset);
+            return true;
+        }
+
         private static bool TriggerFeedbackEquals(byte[] source, int sourceOffset, byte[] previous)
         {
             for (int i = 0; i < DualSenseTriggerEffectLength; i++)
@@ -477,19 +511,25 @@ namespace DS4Windows
         public ViiperDeviceStream CreateDeviceAndOpenStream(string deviceName)
         {
             ViiperBusCreateResponse bus = SendRequest<ViiperBusCreateResponse>("bus/create", "0");
-            string payload = JsonSerializer.Serialize(new ViiperDeviceCreateRequest
-            {
-                Type = deviceName,
-            }, JsonOptions);
-
-            ViiperDeviceResponse device = SendRequest<ViiperDeviceResponse>($"bus/{bus.BusId}/add", payload);
+            ViiperDeviceResponse device = null;
             try
             {
+                string payload = JsonSerializer.Serialize(new ViiperDeviceCreateRequest
+                {
+                    Type = deviceName,
+                }, JsonOptions);
+
+                device = SendRequest<ViiperDeviceResponse>($"bus/{bus.BusId}/add", payload);
                 return OpenStream(bus.BusId, device.DevId);
             }
             catch
             {
-                TryRemoveDevice(bus.BusId, device.DevId);
+                if (device != null && !string.IsNullOrEmpty(device.DevId))
+                {
+                    TryRemoveDevice(bus.BusId, device.DevId);
+                }
+
+                TryRemoveBus(bus.BusId);
                 throw;
             }
         }
@@ -514,6 +554,7 @@ namespace DS4Windows
         private void RemoveDevice(uint busId, string devId)
         {
             TryRemoveDevice(busId, devId);
+            TryRemoveBus(busId);
         }
 
         private void TryRemoveDevice(uint busId, string devId)
@@ -521,6 +562,17 @@ namespace DS4Windows
             try
             {
                 SendRequestRaw($"bus/{busId}/remove", devId);
+            }
+            catch
+            {
+            }
+        }
+
+        private void TryRemoveBus(uint busId)
+        {
+            try
+            {
+                SendRequestRaw("bus/remove", busId.ToString());
             }
             catch
             {
@@ -705,9 +757,7 @@ namespace DS4Windows
         private const int DualSensePacketSize = 33;
         private const int Switch2PacketSize = 24;
         private const int DualSenseFeedbackPacketSize = 22;
-        private const short DualSenseNeutralAccelZ = -8192;
         private const int DualSenseGyroRestDeadband = 32;
-        private const int DualSenseAccelRestDeadband = 256;
         private const float X360RecipInputPosResolution = 1 / 127f;
         private const float X360RecipInputNegResolution = 1 / 128f;
         private const int X360OutputResolution = 32767 - (-32768);
@@ -974,42 +1024,25 @@ namespace DS4Windows
                 WriteInt16(packet, offset + 4, 0);
                 WriteInt16(packet, offset + 6, 0);
                 WriteInt16(packet, offset + 8, 0);
-                WriteInt16(packet, offset + 10, DualSenseNeutralAccelZ);
+                WriteInt16(packet, offset + 10, 0);
                 return;
             }
 
-            int gyroX = SnapToZero(motion.gyroPitchFull, DualSenseGyroRestDeadband);
-            int gyroY = SnapToZero(-motion.gyroYawFull, DualSenseGyroRestDeadband);
-            int gyroZ = SnapToZero(-motion.gyroRollFull, DualSenseGyroRestDeadband);
-            int accelX = -motion.accelXFull;
-            int accelY = -motion.accelYFull;
-            int accelZ = -motion.accelZFull;
-
-            if (IsNear(accelX, 0, DualSenseAccelRestDeadband) &&
-                IsNear(accelY, 0, DualSenseAccelRestDeadband) &&
-                IsNear(accelZ, DualSenseNeutralAccelZ, DualSenseAccelRestDeadband))
-            {
-                accelX = 0;
-                accelY = 0;
-                accelZ = DualSenseNeutralAccelZ;
-            }
+            int gyroX = SnapToZero(motion.gyroYawFull, DualSenseGyroRestDeadband);
+            int gyroY = SnapToZero(motion.gyroPitchFull, DualSenseGyroRestDeadband);
+            int gyroZ = SnapToZero(motion.gyroRollFull, DualSenseGyroRestDeadband);
 
             WriteInt16(packet, offset, ClampShort(gyroX));
             WriteInt16(packet, offset + 2, ClampShort(gyroY));
             WriteInt16(packet, offset + 4, ClampShort(gyroZ));
-            WriteInt16(packet, offset + 6, ClampShort(accelX));
-            WriteInt16(packet, offset + 8, ClampShort(accelY));
-            WriteInt16(packet, offset + 10, ClampShort(accelZ));
+            WriteInt16(packet, offset + 6, ClampShort(motion.accelXFull));
+            WriteInt16(packet, offset + 8, ClampShort(motion.accelYFull));
+            WriteInt16(packet, offset + 10, ClampShort(motion.accelZFull));
         }
 
         private static int SnapToZero(int value, int deadband)
         {
             return Math.Abs((long)value) <= deadband ? 0 : value;
-        }
-
-        private static bool IsNear(int value, int target, int tolerance)
-        {
-            return Math.Abs((long)value - target) <= tolerance;
         }
 
         private static void ApplySteeringWheelX360(DS4State state, int device, ref byte l2, ref byte r2, ref short lx, ref short ly, ref short rx, ref short ry)

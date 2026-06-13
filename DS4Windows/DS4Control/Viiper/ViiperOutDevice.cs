@@ -50,6 +50,8 @@ namespace DS4Windows
 
         public override void Connect()
         {
+            Disconnect();
+
             ViiperPrerequisiteStatus status = ViiperSetupManager.GetStatus(tryStartServer: true);
             if (!status.Ready)
             {
@@ -68,8 +70,13 @@ namespace DS4Windows
         public override void Disconnect()
         {
             connected = false;
-            ViiperDeviceStream stream = Interlocked.Exchange(ref deviceStream, null);
-            stream?.Dispose();
+            ViiperDeviceStream stream;
+            lock (streamWriteLock)
+            {
+                stream = Interlocked.Exchange(ref deviceStream, null);
+                stream?.Dispose();
+            }
+
             if (feedbackThread != null && feedbackThread.IsAlive)
             {
                 feedbackThread.Join(200);
@@ -151,14 +158,14 @@ namespace DS4Windows
 
         private void WriteState(byte[] data)
         {
-            ViiperDeviceStream stream = deviceStream;
-            if (stream == null)
-            {
-                throw new ObjectDisposedException(nameof(ViiperDeviceStream));
-            }
-
             lock (streamWriteLock)
             {
+                ViiperDeviceStream stream = deviceStream;
+                if (stream == null)
+                {
+                    throw new ObjectDisposedException(nameof(ViiperDeviceStream));
+                }
+
                 stream.Write(data);
             }
         }
@@ -472,7 +479,7 @@ namespace DS4Windows
         private readonly uint busId;
         private readonly string devId;
         private readonly Action<uint, string> removeDevice;
-        private bool disposed;
+        private int disposed;
 
         public ViiperDeviceStream(TcpClient tcp, uint busId, string devId, Action<uint, string> removeDevice)
         {
@@ -485,7 +492,7 @@ namespace DS4Windows
 
         public void Write(byte[] data)
         {
-            if (disposed)
+            if (Volatile.Read(ref disposed) == 1)
             {
                 throw new ObjectDisposedException(nameof(ViiperDeviceStream));
             }
@@ -498,6 +505,11 @@ namespace DS4Windows
             int total = 0;
             while (total < count)
             {
+                if (Volatile.Read(ref disposed) == 1)
+                {
+                    throw new ObjectDisposedException(nameof(ViiperDeviceStream));
+                }
+
                 int read = stream.Read(buffer, offset + total, count - total);
                 if (read == 0)
                 {
@@ -510,12 +522,11 @@ namespace DS4Windows
 
         public void Dispose()
         {
-            if (disposed)
+            if (Interlocked.Exchange(ref disposed, 1) == 1)
             {
                 return;
             }
 
-            disposed = true;
             try
             {
                 stream.Dispose();

@@ -46,8 +46,6 @@ namespace DS4Windows
         private int lastInputDeviceIndex = -1;
         private int submitFailureLogged;
         private int activeFeedbackLength;
-        private bool micMuted;
-        private bool muteToggleButtonWasDown;
         private readonly byte[] lastR2TriggerFeedback = new byte[DualSenseTriggerEffectLength];
         private readonly byte[] lastL2TriggerFeedback = new byte[DualSenseTriggerEffectLength];
 
@@ -72,7 +70,6 @@ namespace DS4Windows
             deviceStream = CreateDeviceStream();
             Volatile.Write(ref submitFailureLogged, 0);
             Volatile.Write(ref lastInputDeviceIndex, -1);
-            ResetToggleState();
             connected = true;
             ResetState();
             StartFeedbackReader();
@@ -119,7 +116,6 @@ namespace DS4Windows
         public override void Disconnect()
         {
             connected = false;
-            ResetToggleState();
             ViiperDeviceStream stream;
             lock (streamWriteLock)
             {
@@ -148,7 +144,6 @@ namespace DS4Windows
 
             try
             {
-                UpdatePhysicalDualSenseMicMute(state, device);
                 WriteState(ViiperStatePacketBuilder.Build(viiperType, state, device));
             }
             catch (IOException ex)
@@ -222,36 +217,6 @@ namespace DS4Windows
 
                 stream.Write(data);
             }
-        }
-
-        private void UpdatePhysicalDualSenseMicMute(DS4State state, int device)
-        {
-            if (viiperType != ViiperVirtualDeviceType.DualSense &&
-                viiperType != ViiperVirtualDeviceType.DualSenseEdge)
-            {
-                return;
-            }
-
-            bool muteDown = state.Mute;
-            if (muteDown && !muteToggleButtonWasDown)
-            {
-                micMuted = !micMuted;
-                if (device >= 0 &&
-                    Program.rootHub != null &&
-                    device < Program.rootHub.DS4Controllers.Length &&
-                    Program.rootHub.DS4Controllers[device] is DualSenseDevice dualSenseDevice)
-                {
-                    dualSenseDevice.SetMicrophoneMuteState(micMuted);
-                }
-            }
-
-            muteToggleButtonWasDown = muteDown;
-        }
-
-        private void ResetToggleState()
-        {
-            micMuted = false;
-            muteToggleButtonWasDown = false;
         }
 
         private void StartFeedbackReader()

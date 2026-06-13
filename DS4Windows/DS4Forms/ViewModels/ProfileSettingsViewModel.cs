@@ -714,23 +714,53 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             set => Global.GameBarProfileName[device] = value ?? string.Empty;
         }
 
+        public bool DualSenseMuteButtonLightEnabled
+        {
+            get => Global.DualSenseMuteButtonLightEnabled[device];
+            set => Global.DualSenseMuteButtonLightEnabled[device] = value;
+        }
+
+        public string DualSenseMuteOnProfileName
+        {
+            get => Global.DualSenseMuteOnProfileName[device];
+            set => Global.DualSenseMuteOnProfileName[device] = value ?? string.Empty;
+        }
+
+        public string DualSenseMuteOffProfileName
+        {
+            get => Global.DualSenseMuteOffProfileName[device];
+            set => Global.DualSenseMuteOffProfileName[device] = value ?? string.Empty;
+        }
+
         public List<string> GameBarProfileChoices
         {
-            get
-            {
-                List<string> choices = new List<string>();
-                string profilesDir = Path.Combine(Global.appdatapath, "Profiles");
-                if (Directory.Exists(profilesDir))
-                {
-                    foreach (string file in Directory.GetFiles(profilesDir, "*.xml"))
-                    {
-                        choices.Add(Path.GetFileNameWithoutExtension(file));
-                    }
-                }
+            get => GetProfileChoices(false);
+        }
 
-                choices.Sort(StringComparer.CurrentCultureIgnoreCase);
-                return choices;
+        public List<string> OptionalProfileChoices
+        {
+            get => GetProfileChoices(true);
+        }
+
+        private static List<string> GetProfileChoices(bool includeEmpty)
+        {
+            List<string> choices = new List<string>();
+            if (includeEmpty)
+            {
+                choices.Add(string.Empty);
             }
+
+            string profilesDir = Path.Combine(Global.appdatapath, "Profiles");
+            if (Directory.Exists(profilesDir))
+            {
+                foreach (string file in Directory.GetFiles(profilesDir, "*.xml"))
+                {
+                    choices.Add(Path.GetFileNameWithoutExtension(file));
+                }
+            }
+
+            choices.Sort(StringComparer.CurrentCultureIgnoreCase);
+            return choices;
         }
 
         public bool LaunchProgramExists

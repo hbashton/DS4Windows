@@ -2672,6 +2672,24 @@ namespace DS4Windows
             get => m_Config.gameBarProfileName;
             set => m_Config.gameBarProfileName = value;
         }
+
+        public static bool[] DualSenseMuteButtonLightEnabled
+        {
+            get => m_Config.dualSenseMuteButtonLightEnabled;
+            set => m_Config.dualSenseMuteButtonLightEnabled = value;
+        }
+
+        public static string[] DualSenseMuteOnProfileName
+        {
+            get => m_Config.dualSenseMuteOnProfileName;
+            set => m_Config.dualSenseMuteOnProfileName = value;
+        }
+
+        public static string[] DualSenseMuteOffProfileName
+        {
+            get => m_Config.dualSenseMuteOffProfileName;
+            set => m_Config.dualSenseMuteOffProfileName = value;
+        }
         //
         // End of DualSense specific profile settings
 
@@ -3843,6 +3861,9 @@ namespace DS4Windows
         public string[] dualSenseMicrophoneOutputEndpointId = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
         public bool[] gameBarHomeButtonSupport = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
         public string[] gameBarProfileName = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
+        public bool[] dualSenseMuteButtonLightEnabled = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
+        public string[] dualSenseMuteOnProfileName = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
+        public string[] dualSenseMuteOffProfileName = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
         //
         // End of DualSense specific profile options
 
@@ -4786,6 +4807,9 @@ namespace DS4Windows
                 XmlNode xmlLaunchProgram = m_Xdoc.CreateNode(XmlNodeType.Element, "LaunchProgram", null); xmlLaunchProgram.InnerText = launchProgram[device].ToString(); rootElement.AppendChild(xmlLaunchProgram);
                 XmlNode xmlGameBarHomeButtonSupport = m_Xdoc.CreateNode(XmlNodeType.Element, "GameBarHomeButtonSupport", null); xmlGameBarHomeButtonSupport.InnerText = gameBarHomeButtonSupport[device].ToString(); rootElement.AppendChild(xmlGameBarHomeButtonSupport);
                 XmlNode xmlGameBarProfileName = m_Xdoc.CreateNode(XmlNodeType.Element, "GameBarProfileName", null); xmlGameBarProfileName.InnerText = gameBarProfileName[device]; rootElement.AppendChild(xmlGameBarProfileName);
+                XmlNode xmlDualSenseMuteButtonLightEnabled = m_Xdoc.CreateNode(XmlNodeType.Element, "DualSenseMuteButtonLightEnabled", null); xmlDualSenseMuteButtonLightEnabled.InnerText = dualSenseMuteButtonLightEnabled[device].ToString(); rootElement.AppendChild(xmlDualSenseMuteButtonLightEnabled);
+                XmlNode xmlDualSenseMuteOnProfileName = m_Xdoc.CreateNode(XmlNodeType.Element, "DualSenseMuteOnProfileName", null); xmlDualSenseMuteOnProfileName.InnerText = dualSenseMuteOnProfileName[device]; rootElement.AppendChild(xmlDualSenseMuteOnProfileName);
+                XmlNode xmlDualSenseMuteOffProfileName = m_Xdoc.CreateNode(XmlNodeType.Element, "DualSenseMuteOffProfileName", null); xmlDualSenseMuteOffProfileName.InnerText = dualSenseMuteOffProfileName[device]; rootElement.AppendChild(xmlDualSenseMuteOffProfileName);
                 XmlNode xmlDinput = m_Xdoc.CreateNode(XmlNodeType.Element, "DinputOnly", null); xmlDinput.InnerText = dinputOnly[device].ToString(); rootElement.AppendChild(xmlDinput);
                 XmlNode xmlStartTouchpadOff = m_Xdoc.CreateNode(XmlNodeType.Element, "StartTouchpadOff", null); xmlStartTouchpadOff.InnerText = startTouchpadOff[device].ToString(); rootElement.AppendChild(xmlStartTouchpadOff);
                 XmlNode xmlTouchOutMode = m_Xdoc.CreateNode(XmlNodeType.Element, "TouchpadOutputMode", null); xmlTouchOutMode.InnerText = touchOutMode[device].ToString(); rootElement.AppendChild(xmlTouchOutMode);
@@ -6620,6 +6644,27 @@ namespace DS4Windows
                     gameBarProfileName[device] = Item.InnerText;
                 }
                 catch { gameBarProfileName[device] = string.Empty; missingSetting = true; }
+
+                try
+                {
+                    Item = m_Xdoc.SelectSingleNode("/" + rootname + "/DualSenseMuteButtonLightEnabled");
+                    bool.TryParse(Item.InnerText, out dualSenseMuteButtonLightEnabled[device]);
+                }
+                catch { dualSenseMuteButtonLightEnabled[device] = false; missingSetting = true; }
+
+                try
+                {
+                    Item = m_Xdoc.SelectSingleNode("/" + rootname + "/DualSenseMuteOnProfileName");
+                    dualSenseMuteOnProfileName[device] = Item.InnerText;
+                }
+                catch { dualSenseMuteOnProfileName[device] = string.Empty; missingSetting = true; }
+
+                try
+                {
+                    Item = m_Xdoc.SelectSingleNode("/" + rootname + "/DualSenseMuteOffProfileName");
+                    dualSenseMuteOffProfileName[device] = Item.InnerText;
+                }
+                catch { dualSenseMuteOffProfileName[device] = string.Empty; missingSetting = true; }
 
                 if (launchprogram == true && launchProgram[device] != string.Empty)
                 {
@@ -9912,6 +9957,11 @@ namespace DS4Windows
             enableTouchToggle[device] = DEFAULT_TOUCH_TOGGLE;
             idleDisconnectTimeout[device] = 0;
             enableOutputDataToDS4[device] = DEFAULT_OUTPUT_TO_DS4;
+            gameBarHomeButtonSupport[device] = false;
+            gameBarProfileName[device] = string.Empty;
+            dualSenseMuteButtonLightEnabled[device] = false;
+            dualSenseMuteOnProfileName[device] = string.Empty;
+            dualSenseMuteOffProfileName[device] = string.Empty;
             touchpadJitterCompensation[device] = DEFAULT_TOUCHPAD_JITTER_COMP;
             lowerRCOn[device] = false;
             touchClickPassthru[device] = false;

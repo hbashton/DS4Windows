@@ -322,6 +322,8 @@ namespace DS4Windows.InputDevices
         private byte muteLEDByte = 0x00;
         private bool microphoneMuteOverride;
         private bool microphoneMuted;
+        private bool muteLedOverride;
+        private bool muteLedOn;
         private uint hwVersion;
         private uint fwVersion;
         private uint updateVersion;
@@ -337,6 +339,16 @@ namespace DS4Windows.InputDevices
             {
                 microphoneMuteOverride = true;
                 microphoneMuted = muted;
+                outputDirty = true;
+            });
+        }
+
+        public void SetProfileMuteLedState(bool enabled, bool ledOn)
+        {
+            queueEvent(() =>
+            {
+                muteLedOverride = enabled;
+                muteLedOn = ledOn;
                 outputDirty = true;
             });
         }
@@ -1193,7 +1205,9 @@ namespace DS4Windows.InputDevices
                 // 0x04 Toggling LED strips on the sides of the Touchpad, 0x08 Turn off all LED lights
                 // 0x10 Toggle player LED lights below Touchpad, 0x20 ???
                 // 0x40 Adjust overall motor/effect power, 0x80 ???
-                outputReport[2] = (byte)(0x55 | (microphoneMuteOverride ? 0x02 : 0x00)); // 0x04 | 0x01 | 0x10 | 0x40
+                outputReport[2] = (byte)(0x55 |
+                    (muteLedOverride || microphoneMuteOverride ? 0x01 : 0x00) |
+                    (microphoneMuteOverride ? 0x02 : 0x00)); // 0x04 | 0x01 | 0x10 | 0x40
 
                 if (useRumble || useAccurateRumble)
                 {
@@ -1214,7 +1228,8 @@ namespace DS4Windows.InputDevices
                 outputReport[8] = enableSpeakerOutput ? (byte)0x20 : (byte)0x00;
 
                 // Mute button LED. 0x01 = Solid. 0x02 = Pulsating
-                outputReport[9] = microphoneMuteOverride ? (microphoneMuted ? (byte)0x01 : (byte)0x00) : muteLEDByte;
+                outputReport[9] = muteLedOverride ? (muteLedOn ? (byte)0x01 : (byte)0x00) :
+                    microphoneMuteOverride ? (microphoneMuted ? (byte)0x01 : (byte)0x00) : muteLEDByte;
 
                 // audio settings requiring mute toggling flags
                 outputReport[10] = microphoneMuteOverride && microphoneMuted ? (byte)0x10 : (byte)0x00; // 0x10 microphone mute, 0x40 audio mute
@@ -1326,7 +1341,9 @@ namespace DS4Windows.InputDevices
                 // 0x04 Toggling LED strips on the sides of the Touchpad, 0x08 Turn off all LED lights
                 // 0x10 Toggle player LED lights below Touchpad, 0x20 ???
                 // 0x40 Adjust overall motor/effect power, 0x80 ???
-                outputReport[3] = (byte)(0x55 | (microphoneMuteOverride ? 0x02 : 0x00)); // 0x04 | 0x01 | 0x10 | 0x40
+                outputReport[3] = (byte)(0x55 |
+                    (muteLedOverride || microphoneMuteOverride ? 0x01 : 0x00) |
+                    (microphoneMuteOverride ? 0x02 : 0x00)); // 0x04 | 0x01 | 0x10 | 0x40
 
                 if (useRumble || useAccurateRumble)
                 {
@@ -1347,7 +1364,8 @@ namespace DS4Windows.InputDevices
                 outputReport[9] = enableSpeakerOutput ? (byte)0x20 : (byte)0x00;
 
                 // Mute button LED. 0x01 = Solid. 0x02 = Pulsating
-                outputReport[10] = microphoneMuteOverride ? (microphoneMuted ? (byte)0x01 : (byte)0x00) : muteLEDByte;
+                outputReport[10] = muteLedOverride ? (muteLedOn ? (byte)0x01 : (byte)0x00) :
+                    microphoneMuteOverride ? (microphoneMuted ? (byte)0x01 : (byte)0x00) : muteLEDByte;
 
                 // audio settings requiring mute toggling flags
                 outputReport[11] = microphoneMuteOverride && microphoneMuted ? (byte)0x10 : (byte)0x00; // 0x10 microphone mute, 0x40 audio mute

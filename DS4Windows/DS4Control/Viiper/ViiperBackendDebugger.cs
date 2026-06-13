@@ -155,24 +155,43 @@ namespace DS4Windows
             Log("Expected feedback contract: extended DualSense streams send base rumble/LED bytes followed by R2[8] then L2[8] raw trigger effect bytes parsed from USB output report 0x02.");
 
             bool anyApplied = false;
-            if (Program.rootHub != null)
+            List<int> appliedControllers = new List<int>();
+            try
             {
-                for (int i = 0; i < Program.rootHub.DS4Controllers.Length; i++)
+                if (Program.rootHub != null)
                 {
-                    if (Program.rootHub.DS4Controllers[i] == null)
+                    for (int i = 0; i < Program.rootHub.DS4Controllers.Length; i++)
                     {
-                        continue;
-                    }
+                        if (Program.rootHub.DS4Controllers[i] == null)
+                        {
+                            continue;
+                        }
 
-                    bool right = ViiperOutDevice.ApplySyntheticDualSenseTriggerFeedback(i, true,
-                        0x21, 0xFC, 0x03, 0xFF, 0xFF, 0xFF, 0x3F, 0x00);
-                    bool left = ViiperOutDevice.ApplySyntheticDualSenseTriggerFeedback(i, false,
-                        0x21, 0xFC, 0x03, 0xFF, 0xFF, 0xFF, 0x3F, 0x00);
-                    if (right || left)
-                    {
-                        anyApplied = true;
-                        Log($"Synthetic game-feedback trigger effect applied to controller {i + 1}: right={right} left={left}");
+                        bool right = ViiperOutDevice.ApplySyntheticDualSenseTriggerFeedback(i, true,
+                            0x21, 0xFC, 0x03, 0xFF, 0xFF, 0xFF, 0x3F, 0x00);
+                        bool left = ViiperOutDevice.ApplySyntheticDualSenseTriggerFeedback(i, false,
+                            0x21, 0xFC, 0x03, 0xFF, 0xFF, 0xFF, 0x3F, 0x00);
+                        if (right || left)
+                        {
+                            anyApplied = true;
+                            appliedControllers.Add(i);
+                            Log($"Synthetic game-feedback trigger effect applied to controller {i + 1}: right={right} left={left}");
+                        }
                     }
+                }
+
+                if (anyApplied)
+                {
+                    Thread.Sleep(1200);
+                }
+            }
+            finally
+            {
+                foreach (int controllerIndex in appliedControllers)
+                {
+                    bool rightReset = ViiperOutDevice.ResetSyntheticDualSenseTriggerFeedback(controllerIndex, true);
+                    bool leftReset = ViiperOutDevice.ResetSyntheticDualSenseTriggerFeedback(controllerIndex, false);
+                    Log($"Synthetic game-feedback trigger effect reset on controller {controllerIndex + 1}: right={rightReset} left={leftReset}");
                 }
             }
 

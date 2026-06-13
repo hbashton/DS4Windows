@@ -47,18 +47,35 @@ function Invoke-Download($url, $outFile) {
     Invoke-WebRequest -Uri $url -OutFile $outFile -UseBasicParsing
 }
 
-function Get-GithubLatestAsset($repo, $assetPattern) {
-    $apiUrl = "https://api.github.com/repos/$repo/releases/latest"
-    $release = Invoke-RestMethod -Uri $apiUrl -Headers @{ "User-Agent" = "DS4Windows-VIIPER-Setup" }
-    $asset = $release.assets |
-        Where-Object { $_.name -match $assetPattern } |
-        Select-Object -First 1
+function Get-GithubReleaseAsset($repo, $assetPattern) {
+    $apiUrl = "https://api.github.com/repos/$repo/releases?per_page=20"
+    $releases = Invoke-RestMethod -Uri $apiUrl -Headers @{ "User-Agent" = "DS4Windows-VIIPER-Setup" }
 
-    if (-not $asset) {
-        throw "Could not find a release asset matching '$assetPattern' in $repo latest release."
+    if (-not $releases) {
+        throw "No releases were found in $repo."
     }
 
-    return $asset.browser_download_url
+    foreach ($release in @($releases | Where-Object { -not $_.draft })) {
+        $asset = @($release.assets) |
+            Where-Object { $_.name -match $assetPattern } |
+            Sort-Object @{ Expression = {
+                if ($_.name -match '(?i)^viiper-(windows|win)-(amd64|x64)\.zip$') { 0 }
+                elseif ($_.name -match '(?i)^viiper\.exe$') { 1 }
+                elseif ($_.name -match '(?i)(windows|win).*(amd64|x64).*\.(exe|zip)$') { 2 }
+                elseif ($_.name -match '(?i)\.(exe|zip)$') { 3 }
+                else { 4 }
+            }}, name |
+            Select-Object -First 1
+
+        if ($asset) {
+            $label = if ($release.tag_name) { $release.tag_name } elseif ($release.name) { $release.name } else { $release.id }
+            Write-Host "Using VIIPER asset '$($asset.name)' from $repo release '$label'"
+            return $asset.browser_download_url
+        }
+    }
+
+    $assetNames = @($releases | ForEach-Object { $_.assets } | ForEach-Object { $_.name }) -join ", "
+    throw "Could not find a usable Windows VIIPER asset in $repo releases. Assets seen: $assetNames"
 }
 
 function Get-GithubLatestAssetWithFallback($repos, $assetPattern) {
@@ -66,7 +83,7 @@ function Get-GithubLatestAssetWithFallback($repos, $assetPattern) {
     foreach ($repo in $repos) {
         try {
             Write-Host "Checking VIIPER release assets in $repo"
-            return Get-GithubLatestAsset $repo $assetPattern
+            return Get-GithubReleaseAsset $repo $assetPattern
         }
         catch {
             $errors += "${repo}: $($_.Exception.Message)"
@@ -147,7 +164,7 @@ $viiperRepos = @(
     "hbashton/VIIPER",
     "Alia5/VIIPER"
 )
-$viiperAssetUrl = Get-GithubLatestAssetWithFallback $viiperRepos "(?i)(^viiper\.exe$|^viiper-windows-amd64\.zip$|^(?!.*libviiper).*(windows|win).*(x64|amd64).*\.(exe|zip)$)"
+$viiperAssetUrl = Get-GithubLatestAssetWithFallback $viiperRepos "(?i)^(?!.*(libviiper|client|headers|linux|arm64|\.nupkg|\.crate|\.tgz)).*\.(exe|zip)$"
 Install-ViiperAsset $viiperAssetUrl $viiperPath $tempDir
 Write-Host "VIIPER installed to $viiperPath" -ForegroundColor Green
 

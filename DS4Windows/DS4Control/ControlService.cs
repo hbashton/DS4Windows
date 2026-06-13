@@ -45,7 +45,6 @@ namespace DS4Windows
         private readonly GameBarIntegration gameBarIntegration = new GameBarIntegration();
         private readonly object hidHideSessionLock = new object();
         private readonly HashSet<string> hidHideManagedInstanceIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        private readonly HashSet<string> hidHidePersistentAddedInstanceIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         // Might be useful for ScpVBus build
         public const int EXPANDED_CONTROLLER_COUNT = 8;
         public const int MAX_DS4_CONTROLLER_COUNT = Global.MAX_DS4_CONTROLLER_COUNT;
@@ -964,9 +963,8 @@ namespace DS4Windows
 
         /// <summary>
         /// Adds the device to HidHide for this DS4Windows run and enables hiding.
-        /// Prefer HidHide's session blacklist so the driver removes entries when
-        /// DS4Windows exits. Older HidHide builds are handled with a bounded
-        /// persistent fallback that DS4Windows removes during Stop().
+        /// Session entries stay active across Stop/Start inside this process and
+        /// are automatically removed by HidHide when DS4Windows exits.
         /// </summary>
         private bool EnsureHidHideSessionForDevice(DS4Device dev)
         {
@@ -994,19 +992,9 @@ namespace DS4Windows
                         hidHideDevice.SetActiveState(true);
                     }
 
-                    bool sessionAdded = hidHideDevice.AddSessionBlacklist(new List<string> { instanceId });
-                    if (!sessionAdded)
+                    if (!hidHideDevice.AddSessionBlacklist(new List<string> { instanceId }))
                     {
-                        List<string> persistentList = hidHideDevice.GetBlacklist();
-                        if (!persistentList.Contains(instanceId, StringComparer.OrdinalIgnoreCase))
-                        {
-                            persistentList.Add(instanceId);
-                            hidHideDevice.SetBlacklist(persistentList);
-                            lock (hidHideSessionLock)
-                            {
-                                hidHidePersistentAddedInstanceIds.Add(instanceId);
-                            }
-                        }
+                        return false;
                     }
 
                     lock (hidHideSessionLock)
@@ -1023,58 +1011,6 @@ namespace DS4Windows
             {
                 LogDebug($"HidHide session setup failed for {dev.DisplayName}: {ex.Message}", true);
                 return false;
-            }
-        }
-
-        private void ClearHidHideSession()
-        {
-            if (!Global.hidHideInstalled) return;
-
-            lock (hidHideSessionLock)
-            {
-                if (hidHideManagedInstanceIds.Count == 0 &&
-                    hidHidePersistentAddedInstanceIds.Count == 0)
-                {
-                    return;
-                }
-            }
-
-            try
-            {
-                using (HidHideAPIDevice hidHideDevice = new HidHideAPIDevice())
-                {
-                    if (!hidHideDevice.IsOpen()) return;
-
-                    hidHideDevice.ClearSessionBlacklist();
-
-                    List<string> persistentAdded;
-                    lock (hidHideSessionLock)
-                    {
-                        persistentAdded = hidHidePersistentAddedInstanceIds.ToList();
-                    }
-
-                    if (persistentAdded.Count > 0)
-                    {
-                        List<string> persistentList = hidHideDevice.GetBlacklist();
-                        persistentList.RemoveAll(instance =>
-                            persistentAdded.Contains(instance, StringComparer.OrdinalIgnoreCase));
-                        hidHideDevice.SetBlacklist(persistentList);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                LogDebug($"HidHide session cleanup failed: {ex.Message}", true);
-            }
-            finally
-            {
-                lock (hidHideSessionLock)
-                {
-                    hidHideManagedInstanceIds.Clear();
-                    hidHidePersistentAddedInstanceIds.Clear();
-                }
-
-                UpdateHidHideAttributes();
             }
         }
 
@@ -2320,9 +2256,6 @@ namespace DS4Windows
             }
 
             runHotPlug = false;
-            StartupDiag("ControlService.Stop HidHide session cleanup begin");
-            ClearHidHideSession();
-            StartupDiag("ControlService.Stop HidHide session cleanup end");
             StartupDiag("ControlService.Stop before stopped events");
             ServiceStopped?.Invoke(this, EventArgs.Empty);
             RunningChanged?.Invoke(this, EventArgs.Empty);

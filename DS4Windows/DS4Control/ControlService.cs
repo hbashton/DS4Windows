@@ -973,12 +973,10 @@ namespace DS4Windows
             string instanceId = Global.GetInstanceIdFromDevicePath(dev.HidDevice.DevicePath);
             if (string.IsNullOrEmpty(instanceId)) return false;
 
+            bool alreadyManaged;
             lock (hidHideSessionLock)
             {
-                if (hidHideManagedInstanceIds.Contains(instanceId))
-                {
-                    return true;
-                }
+                alreadyManaged = hidHideManagedInstanceIds.Contains(instanceId);
             }
 
             try
@@ -992,7 +990,7 @@ namespace DS4Windows
                         hidHideDevice.SetActiveState(true);
                     }
 
-                    if (!hidHideDevice.AddSessionBlacklist(new List<string> { instanceId }))
+                    if (!alreadyManaged && !hidHideDevice.AddSessionBlacklist(new List<string> { instanceId }))
                     {
                         return false;
                     }
@@ -1002,7 +1000,11 @@ namespace DS4Windows
                         hidHideManagedInstanceIds.Add(instanceId);
                     }
 
-                    LogDebug($"HidHide session hiding enabled for {dev.DisplayName} ({instanceId})", false);
+                    if (!alreadyManaged)
+                    {
+                        LogDebug($"HidHide session hiding enabled for {dev.DisplayName} ({instanceId})", false);
+                    }
+
                     UpdateHidHideAttributes();
                     return true;
                 }
@@ -1011,6 +1013,31 @@ namespace DS4Windows
             {
                 LogDebug($"HidHide session setup failed for {dev.DisplayName}: {ex.Message}", true);
                 return false;
+            }
+        }
+
+        private void EnsureHidHideForVirtualOutput(int index, DS4Device device, OutContType contType)
+        {
+            if (device == null || !DS4Devices.isExclusiveMode)
+            {
+                return;
+            }
+
+            if (contType != OutContType.X360 &&
+                contType != OutContType.DS4 &&
+                !ViiperOutDevice.IsViiperType(contType))
+            {
+                return;
+            }
+
+            if (EnsureHidHideSessionForDevice(device))
+            {
+                ChangeExclusiveStatus(device);
+                StartupDiag($"HidHide virtual-output containment ready index={index} type={contType}");
+            }
+            else if (ViiperOutDevice.IsViiperType(contType))
+            {
+                LogDebug($"VIIPER {contType} output is active but the physical {device.DisplayName} could not be hidden with HidHide. Games may detect both the physical controller and the virtual controller.", true);
             }
         }
 
@@ -1587,6 +1614,8 @@ namespace DS4Windows
 
             if (useDInputOnly[index])
             {
+                EnsureHidHideForVirtualOutput(index, device, contType);
+
                 bool success = false;
                 if (contType == OutContType.X360)
                 {

@@ -1285,6 +1285,7 @@ namespace DS4Windows
         private const int Switch2PacketSize = 24;
         private const int DualSenseFeedbackPacketSize = 22;
         private const int DualSenseGyroRestDeadband = 32;
+        private const int DualSenseAccelRestZ = -8192;
         private const float X360RecipInputPosResolution = 1 / 127f;
         private const float X360RecipInputNegResolution = 1 / 128f;
         private const int X360OutputResolution = 32767 - (-32768);
@@ -1571,20 +1572,27 @@ namespace DS4Windows
                 WriteInt16(packet, offset + 4, 0);
                 WriteInt16(packet, offset + 6, 0);
                 WriteInt16(packet, offset + 8, 0);
-                WriteInt16(packet, offset + 10, 0);
+                WriteInt16(packet, offset + 10, DualSenseAccelRestZ);
                 return;
             }
 
             int gyroX = SnapToZero(motion.gyroPitchFull, DualSenseGyroRestDeadband);
             int gyroY = SnapToZero(-motion.gyroYawFull, DualSenseGyroRestDeadband);
             int gyroZ = SnapToZero(-motion.gyroRollFull, DualSenseGyroRestDeadband);
+            int accelX = -motion.accelXFull;
+            int accelY = -motion.accelYFull;
+            int accelZ = motion.accelZFull;
+            if (accelX == 0 && accelY == 0 && accelZ == 0)
+            {
+                accelZ = DualSenseAccelRestZ;
+            }
 
             WriteInt16(packet, offset, ClampShort(gyroX));
             WriteInt16(packet, offset + 2, ClampShort(gyroY));
             WriteInt16(packet, offset + 4, ClampShort(gyroZ));
-            WriteInt16(packet, offset + 6, ClampShort(-motion.accelXFull));
-            WriteInt16(packet, offset + 8, ClampShort(-motion.accelYFull));
-            WriteInt16(packet, offset + 10, ClampShort(motion.accelZFull));
+            WriteInt16(packet, offset + 6, ClampShort(accelX));
+            WriteInt16(packet, offset + 8, ClampShort(accelY));
+            WriteInt16(packet, offset + 10, ClampShort(accelZ));
         }
 
         private static int SnapToZero(int value, int deadband)

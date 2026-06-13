@@ -41,12 +41,17 @@ namespace DS4Windows
         private readonly ViiperVirtualDeviceType viiperType;
         private readonly ViiperClient client;
         private readonly object pendingPacketLock = new object();
+        private readonly object writerThreadLock = new object();
         private readonly AutoResetEvent writerSignal = new AutoResetEvent(false);
         private ViiperDeviceStream deviceStream;
         private Thread feedbackThread;
         private Thread stateWriterThread;
         private byte[] pendingStatePacket;
         private volatile bool writerStopRequested;
+        private long replacedPendingPacketCount;
+        private long submittedPacketCount;
+        private long writtenPacketCount;
+        private DateTime lastWriterHealthLogUtc = DateTime.MinValue;
         private int lastInputDeviceIndex = -1;
         private int submitFailureLogged;
         private int activeFeedbackLength;
@@ -74,6 +79,10 @@ namespace DS4Windows
             deviceStream = CreateDeviceStream();
             Volatile.Write(ref submitFailureLogged, 0);
             Volatile.Write(ref lastInputDeviceIndex, -1);
+            Interlocked.Exchange(ref replacedPendingPacketCount, 0);
+            Interlocked.Exchange(ref submittedPacketCount, 0);
+            Interlocked.Exchange(ref writtenPacketCount, 0);
+            lastWriterHealthLogUtc = DateTime.MinValue;
             writerStopRequested = false;
             connected = true;
             StartStateWriter();
@@ -228,25 +237,48 @@ namespace DS4Windows
         {
             lock (pendingPacketLock)
             {
+                if (pendingStatePacket != null)
+                {
+                    Interlocked.Increment(ref replacedPendingPacketCount);
+                }
+
                 pendingStatePacket = data;
             }
 
+            Interlocked.Increment(ref submittedPacketCount);
+            EnsureStateWriterAlive();
             writerSignal.Set();
         }
 
-        private void StartStateWriter()
+        private void EnsureStateWriterAlive()
         {
-            if (stateWriterThread != null && stateWriterThread.IsAlive)
+            if (!connected || writerStopRequested)
             {
                 return;
             }
 
-            stateWriterThread = new Thread(StateWriteLoop)
+            if (stateWriterThread == null || !stateWriterThread.IsAlive)
             {
-                IsBackground = true,
-                Name = $"VIIPER {viiperType} writer",
-            };
-            stateWriterThread.Start();
+                StartStateWriter();
+            }
+        }
+
+        private void StartStateWriter()
+        {
+            lock (writerThreadLock)
+            {
+                if (stateWriterThread != null && stateWriterThread.IsAlive)
+                {
+                    return;
+                }
+
+                stateWriterThread = new Thread(StateWriteLoop)
+                {
+                    IsBackground = true,
+                    Name = $"VIIPER {viiperType} writer",
+                };
+                stateWriterThread.Start();
+            }
         }
 
         private void StateWriteLoop()
@@ -276,6 +308,8 @@ namespace DS4Windows
                     try
                     {
                         WriteState(packet);
+                        Interlocked.Increment(ref writtenPacketCount);
+                        LogWriterHealthIfNeeded();
                     }
                     catch (IOException ex)
                     {
@@ -308,6 +342,26 @@ namespace DS4Windows
             }
 
             stream.Write(data);
+        }
+
+        private void LogWriterHealthIfNeeded()
+        {
+            long replaced = Interlocked.Read(ref replacedPendingPacketCount);
+            if (replaced == 0 && !Global.VerboseStartupLogging)
+            {
+                return;
+            }
+
+            DateTime now = DateTime.UtcNow;
+            if (now - lastWriterHealthLogUtc < TimeSpan.FromSeconds(5))
+            {
+                return;
+            }
+
+            lastWriterHealthLogUtc = now;
+            AppLogger.LogToGui(
+                $"VIIPER {viiperType} writer stats: submitted={Interlocked.Read(ref submittedPacketCount)} written={Interlocked.Read(ref writtenPacketCount)} coalesced={replaced}",
+                false);
         }
 
         private void StartFeedbackReader()
@@ -346,9 +400,17 @@ namespace DS4Windows
             }
             catch (IOException)
             {
+                if (connected)
+                {
+                    AppLogger.LogToGui($"VIIPER {viiperType} feedback reader stopped.", true);
+                }
             }
             catch (SocketException)
             {
+                if (connected)
+                {
+                    AppLogger.LogToGui($"VIIPER {viiperType} feedback reader stopped due to socket error.", true);
+                }
             }
             catch (ObjectDisposedException)
             {

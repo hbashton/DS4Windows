@@ -3100,9 +3100,16 @@ namespace DS4Windows
         private DateTime gameBarLastVisibleUtc = DateTime.MinValue;
         private DateTime gameBarInvisibleSinceUtc = DateTime.MinValue;
         private DateTime gameBarLastVisibilityCheckUtc = DateTime.MinValue;
+        private DateTime gameBarHomeButtonGraceVisibleUntilUtc = DateTime.MinValue;
         private bool gameBarVerboseDetectionLogInitialized = false;
         private bool gameBarVerboseLastVisible = false;
         private DateTime gameBarVerboseLastDetectionLogUtc = DateTime.MinValue;
+        private bool[] dualSenseMuteButtonWasDown = new bool[MAX_DS4_CONTROLLER_COUNT] { false, false, false, false, false, false, false, false };
+        private bool[] dualSenseMuteLedOn = new bool[MAX_DS4_CONTROLLER_COUNT] { false, false, false, false, false, false, false, false };
+        private bool[] dualSenseMuteLedOverrideActive = new bool[MAX_DS4_CONTROLLER_COUNT] { false, false, false, false, false, false, false, false };
+        private bool[] dualSenseMuteProfilePending = new bool[MAX_DS4_CONTROLLER_COUNT] { false, false, false, false, false, false, false, false };
+        private string[] dualSenseMuteRequestedProfileName = new string[MAX_DS4_CONTROLLER_COUNT] { string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty };
+        private string[] dualSenseMuteRememberedOffProfileName = new string[MAX_DS4_CONTROLLER_COUNT] { string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty };
 
         public bool IsGameBarProfilePriorityActive(int ind)
         {
@@ -3251,6 +3258,7 @@ namespace DS4Windows
             gameBarHomeButtonIgnoreUntilUtc[ind] = now + TimeSpan.FromSeconds(1);
             RequestGameBarProfilePriority(ind, profileName, now);
             string result = gameBarIntegration.OpenGameBar();
+            gameBarHomeButtonGraceVisibleUntilUtc = now + TimeSpan.FromSeconds(10);
             StartupDiag($"GameBar home button controller={ind + 1} requestedProfile='{profileName}' {result}");
         }
 
@@ -3270,8 +3278,9 @@ namespace DS4Windows
             {
                 bool anyActiveOrPending = IsAnyGameBarProfilePriorityActive();
                 bool anyConfigured = HasAnyConfiguredGameBarProfile();
+                bool anyMutePending = HasAnyPendingDualSenseMuteProfile();
 
-                if (!anyActiveOrPending && !anyConfigured)
+                if (!anyActiveOrPending && !anyConfigured && !anyMutePending)
                 {
                     return;
                 }
@@ -3283,7 +3292,9 @@ namespace DS4Windows
                 }
 
                 gameBarLastVisibilityCheckUtc = now;
-                bool gameBarVisible = gameBarIntegration.IsGameBarVisible();
+                bool detectedGameBarVisible = gameBarIntegration.IsGameBarVisible();
+                bool gameBarVisible = detectedGameBarVisible ||
+                    (anyActiveOrPending && now < gameBarHomeButtonGraceVisibleUntilUtc);
                 LogGameBarDetectionIfVerbose(now, gameBarVisible, anyConfigured, anyActiveOrPending);
                 if (gameBarVisible)
                 {
@@ -3293,6 +3304,8 @@ namespace DS4Windows
                     ActivatePendingGameBarProfiles(now);
                     return;
                 }
+
+                ProcessPendingDualSenseMuteProfiles();
 
                 if (gameBarInvisibleSinceUtc == DateTime.MinValue)
                 {
@@ -3521,6 +3534,122 @@ namespace DS4Windows
             return actionRan;
         }
 
+        private bool HasAnyPendingDualSenseMuteProfile()
+        {
+            for (int i = 0; i < MAX_DS4_CONTROLLER_COUNT; i++)
+            {
+                if (dualSenseMuteProfilePending[i])
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void QueueDualSenseMuteProfile(int ind, string profileName)
+        {
+            if (string.IsNullOrEmpty(profileName))
+            {
+                return;
+            }
+
+            string profilePath = Path.Combine(appdatapath, "Profiles", $"{profileName}.xml");
+            if (!File.Exists(profilePath))
+            {
+                LogDebug($"DualSense mute profile action skipped. Profile '{profileName}' was not found.", true);
+                return;
+            }
+
+            dualSenseMuteRequestedProfileName[ind] = profileName;
+            dualSenseMuteProfilePending[ind] = true;
+        }
+
+        private void ProcessPendingDualSenseMuteProfiles()
+        {
+            for (int i = 0; i < MAX_DS4_CONTROLLER_COUNT; i++)
+            {
+                if (!dualSenseMuteProfilePending[i])
+                {
+                    continue;
+                }
+
+                string profileName = dualSenseMuteRequestedProfileName[i];
+                bool profileLoaded = false;
+                bool actionRan = RunProfileActionWithReportingPaused(i,
+                    () => profileLoaded = Global.LoadTempProfile(i, profileName, false, this));
+
+                if (!actionRan)
+                {
+                    continue;
+                }
+
+                dualSenseMuteProfilePending[i] = false;
+                dualSenseMuteRequestedProfileName[i] = string.Empty;
+
+                if (!profileLoaded)
+                {
+                    LogDebug($"DualSense mute profile action failed to load '{profileName}'.", true);
+                }
+            }
+        }
+
+        private void CheckDualSenseMuteButtonProfileActions(int ind, DS4State cState)
+        {
+            if (!(DS4Controllers[ind] is InputDevices.DualSenseDevice dualSenseDevice))
+            {
+                dualSenseMuteButtonWasDown[ind] = false;
+                dualSenseMuteLedOverrideActive[ind] = false;
+                dualSenseMuteRememberedOffProfileName[ind] = string.Empty;
+                return;
+            }
+
+            bool muteLightEnabled = Global.DualSenseMuteButtonLightEnabled[ind];
+            if (!muteLightEnabled)
+            {
+                if (dualSenseMuteLedOverrideActive[ind])
+                {
+                    dualSenseDevice.SetProfileMuteLedState(false, false);
+                    dualSenseMuteLedOverrideActive[ind] = false;
+                }
+
+                dualSenseMuteButtonWasDown[ind] = cState.Mute;
+                return;
+            }
+
+            bool muteDown = cState.Mute;
+            if (muteDown && !dualSenseMuteButtonWasDown[ind])
+            {
+                dualSenseMuteLedOn[ind] = !dualSenseMuteLedOn[ind];
+                dualSenseDevice.SetProfileMuteLedState(true, dualSenseMuteLedOn[ind]);
+                dualSenseMuteLedOverrideActive[ind] = true;
+
+                string requestedProfileName;
+                if (dualSenseMuteLedOn[ind])
+                {
+                    requestedProfileName = Global.DualSenseMuteOnProfileName[ind];
+                    dualSenseMuteRememberedOffProfileName[ind] = Global.DualSenseMuteOffProfileName[ind];
+                }
+                else
+                {
+                    requestedProfileName = Global.DualSenseMuteOffProfileName[ind];
+                    if (string.IsNullOrEmpty(requestedProfileName))
+                    {
+                        requestedProfileName = dualSenseMuteRememberedOffProfileName[ind];
+                    }
+                }
+
+                QueueDualSenseMuteProfile(ind, requestedProfileName);
+            }
+            else if (!dualSenseMuteLedOverrideActive[ind])
+            {
+                dualSenseDevice.SetProfileMuteLedState(true, dualSenseMuteLedOn[ind]);
+                dualSenseMuteLedOverrideActive[ind] = true;
+            }
+
+            dualSenseMuteButtonWasDown[ind] = muteDown;
+        }
+
         private void StartGameBarProfileTimer()
         {
             if (gameBarProfileTimer != null)
@@ -3669,6 +3798,7 @@ namespace DS4Windows
                 }
 
                 CheckGameBarHomeButton(ind, cState, tempControlState, pState);
+                CheckDualSenseMuteButtonProfileActions(ind, cState);
 
                 if (getEnableTouchToggle(ind))
                 {

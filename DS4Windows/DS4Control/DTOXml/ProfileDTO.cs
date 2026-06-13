@@ -771,6 +771,26 @@ namespace DS4WinWPF.DS4Control.DTOXml
             get; set;
         } = string.Empty;
 
+        private bool _dualSenseMuteButtonLightEnabled;
+        [XmlElement("DualSenseMuteButtonLightEnabled")]
+        public string DualSenseMuteButtonLightEnabledString
+        {
+            get => _dualSenseMuteButtonLightEnabled.ToString();
+            set => _dualSenseMuteButtonLightEnabled = XmlDataUtilities.StrToBool(value);
+        }
+
+        [XmlElement("DualSenseMuteOnProfileName")]
+        public string DualSenseMuteOnProfileName
+        {
+            get; set;
+        } = string.Empty;
+
+        [XmlElement("DualSenseMuteOffProfileName")]
+        public string DualSenseMuteOffProfileName
+        {
+            get; set;
+        } = string.Empty;
+
         private bool _dinputOnly;
         [XmlElement("DinputOnly")]
         public string DinputOnlyString
@@ -1648,6 +1668,9 @@ namespace DS4WinWPF.DS4Control.DTOXml
             LaunchProgram = source.launchProgram[deviceIndex];
             _gameBarHomeButtonSupport = source.gameBarHomeButtonSupport[deviceIndex];
             GameBarProfileName = source.gameBarProfileName[deviceIndex];
+            _dualSenseMuteButtonLightEnabled = source.dualSenseMuteButtonLightEnabled[deviceIndex];
+            DualSenseMuteOnProfileName = source.dualSenseMuteOnProfileName[deviceIndex];
+            DualSenseMuteOffProfileName = source.dualSenseMuteOffProfileName[deviceIndex];
             _dinputOnly = source.dinputOnly[deviceIndex];
             _startTouchpadOff = source.startTouchpadOff[deviceIndex];
             _useTPforControls = source.touchOutMode[deviceIndex] == TouchpadOutMode.Controls;
@@ -2252,6 +2275,9 @@ namespace DS4WinWPF.DS4Control.DTOXml
             destination.launchProgram[deviceIndex] = LaunchProgram;
             destination.gameBarHomeButtonSupport[deviceIndex] = _gameBarHomeButtonSupport;
             destination.gameBarProfileName[deviceIndex] = GameBarProfileName ?? string.Empty;
+            destination.dualSenseMuteButtonLightEnabled[deviceIndex] = _dualSenseMuteButtonLightEnabled;
+            destination.dualSenseMuteOnProfileName[deviceIndex] = DualSenseMuteOnProfileName ?? string.Empty;
+            destination.dualSenseMuteOffProfileName[deviceIndex] = DualSenseMuteOffProfileName ?? string.Empty;
             destination.dinputOnly[deviceIndex] = _dinputOnly;
             destination.startTouchpadOff[deviceIndex] = _startTouchpadOff;
             destination.sATriggers[deviceIndex] = SATriggers;

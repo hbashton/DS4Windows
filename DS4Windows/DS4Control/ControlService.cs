@@ -3100,7 +3100,6 @@ namespace DS4Windows
         private DateTime gameBarLastVisibleUtc = DateTime.MinValue;
         private DateTime gameBarInvisibleSinceUtc = DateTime.MinValue;
         private DateTime gameBarLastVisibilityCheckUtc = DateTime.MinValue;
-        private DateTime gameBarHomeButtonGraceVisibleUntilUtc = DateTime.MinValue;
         private bool gameBarVerboseDetectionLogInitialized = false;
         private bool gameBarVerboseLastVisible = false;
         private DateTime gameBarVerboseLastDetectionLogUtc = DateTime.MinValue;
@@ -3258,7 +3257,6 @@ namespace DS4Windows
             gameBarHomeButtonIgnoreUntilUtc[ind] = now + TimeSpan.FromSeconds(1);
             RequestGameBarProfilePriority(ind, profileName, now);
             string result = gameBarIntegration.OpenGameBar();
-            gameBarHomeButtonGraceVisibleUntilUtc = now + TimeSpan.FromSeconds(10);
             StartupDiag($"GameBar home button controller={ind + 1} requestedProfile='{profileName}' {result}");
         }
 
@@ -3292,9 +3290,7 @@ namespace DS4Windows
                 }
 
                 gameBarLastVisibilityCheckUtc = now;
-                bool detectedGameBarVisible = gameBarIntegration.IsGameBarVisible();
-                bool gameBarVisible = detectedGameBarVisible ||
-                    (anyActiveOrPending && now < gameBarHomeButtonGraceVisibleUntilUtc);
+                bool gameBarVisible = gameBarIntegration.IsGameBarVisible();
                 LogGameBarDetectionIfVerbose(now, gameBarVisible, anyConfigured, anyActiveOrPending);
                 if (gameBarVisible)
                 {

@@ -1730,7 +1730,7 @@ namespace DS4Windows
                 WriteInt16(packet, offset + 4, 0);
                 WriteInt16(packet, offset + 6, 0);
                 WriteInt16(packet, offset + 8, 0);
-                WriteInt16(packet, offset + 10, restAccelZ);
+                WriteInt16(packet, offset + 10, ClampShort(restAccelZ));
                 return;
             }
 

@@ -2075,23 +2075,6 @@
                                            MaxWidth="430"
                                            Margin="6,0,0,8"
                                            Opacity="0.78" />
-                                <StackPanel x:Name="dualsenseViiperLegendPanel" Orientation="Horizontal" Margin="6,0,0,8" Visibility="Collapsed">
-                                    <Border BorderBrush="{DynamicResource ForegroundColor}" BorderThickness="1" CornerRadius="2" Padding="6,2" Margin="0,0,6,0">
-                                        <TextBlock Text="Mute" />
-                                    </Border>
-                                    <Border BorderBrush="{DynamicResource ForegroundColor}" BorderThickness="1" CornerRadius="2" Padding="6,2" Margin="0,0,6,0">
-                                        <TextBlock Text="Touch" />
-                                    </Border>
-                                    <Border BorderBrush="{DynamicResource ForegroundColor}" BorderThickness="1" CornerRadius="2" Padding="6,2" Margin="0,0,6,0">
-                                        <TextBlock Text="Gyro" />
-                                    </Border>
-                                    <Border BorderBrush="{DynamicResource ForegroundColor}" BorderThickness="1" CornerRadius="2" Padding="6,2" Margin="0,0,6,0">
-                                        <TextBlock Text="Fn" />
-                                    </Border>
-                                    <Border BorderBrush="{DynamicResource ForegroundColor}" BorderThickness="1" CornerRadius="2" Padding="6,2">
-                                        <TextBlock Text="Paddles" />
-                                    </Border>
-                                </StackPanel>
                                 <StackPanel x:Name="switch2ViiperLegendPanel" Orientation="Horizontal" Margin="6,0,0,8" Visibility="Collapsed">
                                     <Grid Width="92" Height="72" Margin="0,0,10,0">
                                         <Grid.RowDefinitions>
@@ -2190,15 +2173,9 @@
 
                                         <CheckBox x:Name="dualSForceGenRumbleRescale" IsChecked="{Binding EnableGenericRumbleStrRescaleForDualSenseDevices}" Content="{lex:Loc DualSRumbleForceGenericRescale}" ToolTip="{lex:Loc DualSRumbleForceGenericRescale_Tip}" Margin="3,8,0,0" HorizontalAlignment="Left" />
 
-                                        <GroupBox Header="DualSense Audio" Margin="0,10,0,0" Padding="2,4">
+                                        <GroupBox Header="DualSense Mute Button" Margin="0,10,0,0" Padding="2,4">
                                             <Grid>
                                                 <Grid.RowDefinitions>
-                                                    <RowDefinition Height="30" />
-                                                    <RowDefinition Height="30" />
-                                                    <RowDefinition Height="30" />
-                                                    <RowDefinition Height="30" />
-                                                    <RowDefinition Height="30" />
-                                                    <RowDefinition Height="30" />
                                                     <RowDefinition Height="30" />
                                                     <RowDefinition Height="30" />
                                                     <RowDefinition Height="30" />
@@ -2208,43 +2185,19 @@
                                                     <ColumnDefinition />
                                                 </Grid.ColumnDefinitions>
 
-                                                <CheckBox Content="Audio passthrough to internal speaker" IsChecked="{Binding DualSenseEnableSpeakerOutput}"
-                                                          Grid.Row="0" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}" />
-
-                                                <Label Content="Speaker endpoint:" Grid.Row="1" Grid.Column="0" />
-                                                <ComboBox ItemsSource="{Binding AudioSpeakerEndpointChoices}" DisplayMemberPath="Name" SelectedValuePath="EndpointId"
-                                                          SelectedValue="{Binding DualSenseAudioSpeakerEndpointId}" Grid.Row="1" Grid.Column="1"
-                                                          Margin="{StaticResource spaceMargin}" />
-
-                                                <Label Content="Capture source:" Grid.Row="2" Grid.Column="0" />
-                                                <ComboBox ItemsSource="{Binding AudioCaptureEndpointChoices}" DisplayMemberPath="Name" SelectedValuePath="EndpointId"
-                                                          SelectedValue="{Binding DualSenseAudioCaptureEndpointId}" Grid.Row="2" Grid.Column="1"
-                                                          Margin="{StaticResource spaceMargin}" />
-
-                                                <Label Content="Speaker:" Grid.Row="3" Grid.Column="0" />
-                                                <xctk:IntegerUpDown d:IsHidden="True" Value="{Binding DualSenseSpeakerVolume}" Minimum="0" Maximum="255" Increment="1"
-                                                                 Grid.Row="3" Grid.Column="1" Margin="{StaticResource spaceMargin}" />
-
-                                                <Label Content="Headphones:" Grid.Row="4" Grid.Column="0" />
-                                                <xctk:IntegerUpDown d:IsHidden="True" Value="{Binding DualSenseHeadphoneVolume}" Minimum="0" Maximum="255" Increment="1"
-                                                                 Grid.Row="4" Grid.Column="1" Margin="{StaticResource spaceMargin}" />
-
-                                                <Label Content="Microphone:" Grid.Row="5" Grid.Column="0" />
-                                                <xctk:IntegerUpDown d:IsHidden="True" Value="{Binding DualSenseMicrophoneVolume}" Minimum="0" Maximum="255" Increment="1"
-                                                                 Grid.Row="5" Grid.Column="1" Margin="{StaticResource spaceMargin}" />
-
-                                                <CheckBox Content="Microphone passthrough to virtual audio device" IsChecked="{Binding DualSenseEnableMicrophonePassthrough}"
-                                                          Grid.Row="6" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}" />
-
-                                                <Label Content="Controller mic:" Grid.Row="7" Grid.Column="0" />
-                                                <ComboBox ItemsSource="{Binding MicrophoneCaptureEndpointChoices}" DisplayMemberPath="Name" SelectedValuePath="EndpointId"
-                                                          SelectedValue="{Binding DualSenseMicrophoneCaptureEndpointId}" Grid.Row="7" Grid.Column="1"
-                                                          Margin="{StaticResource spaceMargin}" />
-
-                                                <Label Content="Virtual output:" Grid.Row="8" Grid.Column="0" />
-                                                <ComboBox ItemsSource="{Binding MicrophoneOutputEndpointChoices}" DisplayMemberPath="Name" SelectedValuePath="EndpointId"
-                                                          SelectedValue="{Binding DualSenseMicrophoneOutputEndpointId}" Grid.Row="8" Grid.Column="1"
-                                                          Margin="{StaticResource spaceMargin}" />
+                                                <CheckBox Content="Enable mute button light" IsChecked="{Binding DualSenseMuteButtonLightEnabled}"
+                                                          Grid.Row="0" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}"
+                                                          ToolTip="Mirrors the physical DualSense mute button state to the controller mute LED while this profile is active. This only controls the light, not Windows microphone routing." />
+                                                <Label Content="Mute on profile:" Grid.Row="1" Grid.Column="0"
+                                                       ToolTip="Optional. Switch to this profile when the physical DualSense mute button toggles on." />
+                                                <ComboBox ItemsSource="{Binding OptionalProfileChoices}" SelectedItem="{Binding DualSenseMuteOnProfileName}"
+                                                          Grid.Row="1" Grid.Column="1" Margin="{StaticResource spaceMargin}"
+                                                          ToolTip="Leave blank to avoid changing profiles when mute turns on." />
+                                                <Label Content="Mute off profile:" Grid.Row="2" Grid.Column="0"
+                                                       ToolTip="Optional. Switch to this profile when the physical DualSense mute button toggles off." />
+                                                <ComboBox ItemsSource="{Binding OptionalProfileChoices}" SelectedItem="{Binding DualSenseMuteOffProfileName}"
+                                                          Grid.Row="2" Grid.Column="1" Margin="{StaticResource spaceMargin}"
+                                                          ToolTip="Leave blank to avoid changing profiles when mute turns off." />
                                             </Grid>
                                         </GroupBox>
 
@@ -2313,33 +2266,6 @@
                                 <Label Content="Profile:" Grid.Row="1" Grid.Column="0" />
                                 <ComboBox ItemsSource="{Binding GameBarProfileChoices}" SelectedItem="{Binding GameBarProfileName}"
                                           Grid.Row="1" Grid.Column="1" Margin="{StaticResource spaceMargin}" />
-                            </Grid>
-                        </GroupBox>
-                        <GroupBox Header="DualSense Mute Button" Margin="0,8,0,0" Padding="2,4">
-                            <Grid>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="30" />
-                                    <RowDefinition Height="30" />
-                                    <RowDefinition Height="30" />
-                                </Grid.RowDefinitions>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition />
-                                </Grid.ColumnDefinitions>
-
-                                <CheckBox Content="Enable mute button light" IsChecked="{Binding DualSenseMuteButtonLightEnabled}"
-                                          Grid.Row="0" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}"
-                                          ToolTip="Mirrors the physical DualSense mute button state to the controller mute LED while this profile is active. This only controls the light, not Windows microphone routing." />
-                                <Label Content="Mute on profile:" Grid.Row="1" Grid.Column="0"
-                                       ToolTip="Optional. Switch to this profile when the physical DualSense mute button toggles on." />
-                                <ComboBox ItemsSource="{Binding OptionalProfileChoices}" SelectedItem="{Binding DualSenseMuteOnProfileName}"
-                                          Grid.Row="1" Grid.Column="1" Margin="{StaticResource spaceMargin}"
-                                          ToolTip="Leave blank to avoid changing profiles when mute turns on." />
-                                <Label Content="Mute off profile:" Grid.Row="2" Grid.Column="0"
-                                       ToolTip="Optional. Switch to this profile when the physical DualSense mute button toggles off." />
-                                <ComboBox ItemsSource="{Binding OptionalProfileChoices}" SelectedItem="{Binding DualSenseMuteOffProfileName}"
-                                          Grid.Row="2" Grid.Column="1" Margin="{StaticResource spaceMargin}"
-                                          ToolTip="Leave blank to avoid changing profiles when mute turns off." />
                             </Grid>
                         </GroupBox>
                         <StackPanel Orientation="Horizontal" Margin="0,6,0,0">

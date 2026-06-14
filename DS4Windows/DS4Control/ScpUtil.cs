@@ -10685,6 +10685,7 @@ namespace DS4Windows
         private void PostLoadSnippet(int device, ControlService control, bool xinputStatus, bool xinputPlug)
         {
             DS4Device tempDev = control.DS4Controllers[device];
+            OutContType oldContType = Global.activeOutDevType[device];
             if (tempDev != null && tempDev.isSynced())
             {
                 tempDev.queueEvent(() =>

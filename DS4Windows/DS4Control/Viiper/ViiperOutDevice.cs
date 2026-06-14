@@ -1517,7 +1517,7 @@ namespace DS4Windows
             packet[8] = r2;
             WriteTouch(packet, 9, state.TrackPadTouch0, 1920, 942);
             WriteTouch(packet, 14, state.TrackPadTouch1, 1920, 942);
-            WriteMotion(packet, 19, state);
+            WriteSonyMotion(packet, 19, state, 0, 0);
             return packet;
         }
 
@@ -1542,7 +1542,7 @@ namespace DS4Windows
             packet[10] = r2;
             WriteDualSenseTouch(packet, 11, state.TrackPadTouch0, 1920, 1080);
             WriteDualSenseTouch(packet, 16, state.TrackPadTouch1, 1920, 1080);
-            WriteDualSenseMotion(packet, 21, state);
+            WriteSonyMotion(packet, 21, state, DualSenseGyroRestDeadband, DualSenseAccelRestZ);
             return packet;
         }
 
@@ -1680,17 +1680,7 @@ namespace DS4Windows
             packet[offset + 4] = tracking;
         }
 
-        private static void WriteMotion(byte[] packet, int offset, DS4State state)
-        {
-            WriteInt16(packet, offset, ClampShort(state.Motion?.gyroYawFull ?? 0));
-            WriteInt16(packet, offset + 2, ClampShort(state.Motion?.gyroPitchFull ?? 0));
-            WriteInt16(packet, offset + 4, ClampShort(state.Motion?.gyroRollFull ?? 0));
-            WriteInt16(packet, offset + 6, ClampShort(state.Motion?.accelXFull ?? 0));
-            WriteInt16(packet, offset + 8, ClampShort(state.Motion?.accelYFull ?? 0));
-            WriteInt16(packet, offset + 10, ClampShort(state.Motion?.accelZFull ?? 0));
-        }
-
-        private static void WriteDualSenseMotion(byte[] packet, int offset, DS4State state)
+        private static void WriteSonyMotion(byte[] packet, int offset, DS4State state, int gyroDeadband, int restAccelZ)
         {
             SixAxis motion = state.Motion;
             if (motion == null)
@@ -1700,19 +1690,19 @@ namespace DS4Windows
                 WriteInt16(packet, offset + 4, 0);
                 WriteInt16(packet, offset + 6, 0);
                 WriteInt16(packet, offset + 8, 0);
-                WriteInt16(packet, offset + 10, DualSenseAccelRestZ);
+                WriteInt16(packet, offset + 10, restAccelZ);
                 return;
             }
 
-            int gyroX = SnapToZero(motion.gyroPitchFull, DualSenseGyroRestDeadband);
-            int gyroY = SnapToZero(-motion.gyroYawFull, DualSenseGyroRestDeadband);
-            int gyroZ = SnapToZero(-motion.gyroRollFull, DualSenseGyroRestDeadband);
+            int gyroX = SnapToZero(motion.gyroPitchFull, gyroDeadband);
+            int gyroY = SnapToZero(-motion.gyroYawFull, gyroDeadband);
+            int gyroZ = SnapToZero(-motion.gyroRollFull, gyroDeadband);
             int accelX = -motion.accelXFull;
             int accelY = -motion.accelYFull;
             int accelZ = motion.accelZFull;
             if (accelX == 0 && accelY == 0 && accelZ == 0)
             {
-                accelZ = DualSenseAccelRestZ;
+                accelZ = restAccelZ;
             }
 
             WriteInt16(packet, offset, ClampShort(gyroX));

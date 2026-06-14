@@ -43,6 +43,14 @@ namespace DS4WinWPF.DS4Forms
 
         private void AdaptiveBtn_Click(object sender, RoutedEventArgs e) => RunProbe(ViiperDebugTest.AdaptiveTriggers);
 
+        private void StartTrafficBtn_Click(object sender, RoutedEventArgs e) => RunDebuggerAction("Starting DualSense traffic capture...", () => debugger.StartDualSenseTrafficCaptureAsync());
+
+        private void StopTrafficBtn_Click(object sender, RoutedEventArgs e) => RunDebuggerAction("Stopping DualSense traffic capture...", () => debugger.StopDualSenseTrafficCaptureAsync());
+
+        private void DumpTrafficBtn_Click(object sender, RoutedEventArgs e) => RunDebuggerAction("Dumping DualSense traffic capture...", () => debugger.DumpDualSenseTrafficCaptureAsync());
+
+        private void ClearTrafficBtn_Click(object sender, RoutedEventArgs e) => RunDebuggerAction("Clearing DualSense traffic capture...", () => debugger.ClearDualSenseTrafficCaptureAsync());
+
         private async void RunProbe(ViiperDebugTest test)
         {
             if (running)
@@ -66,7 +74,35 @@ namespace DS4WinWPF.DS4Forms
             }
         }
 
+        private async void RunDebuggerAction(string status, Func<Task> action)
+        {
+            if (running)
+            {
+                AppendLogLine("A debugger action is already running. Wait for it to finish before starting another.");
+                return;
+            }
+
+            SetRunning(true, status);
+            try
+            {
+                await action();
+            }
+            catch (Exception ex)
+            {
+                AppendLogLine($"VIIPER DEBUG WINDOW EXCEPTION: {ex}");
+            }
+            finally
+            {
+                SetRunning(false, "Ready");
+            }
+        }
+
         private void SetRunning(bool value, ViiperDebugTest test)
+        {
+            SetRunning(value, value ? $"Running {test}..." : "Ready");
+        }
+
+        private void SetRunning(bool value, string status)
         {
             running = value;
             runAllBtn.IsEnabled = !value;
@@ -77,8 +113,12 @@ namespace DS4WinWPF.DS4Forms
             dualSenseEdgeBtn.IsEnabled = !value;
             switch2Btn.IsEnabled = !value;
             adaptiveBtn.IsEnabled = !value;
+            startTrafficBtn.IsEnabled = !value;
+            stopTrafficBtn.IsEnabled = !value;
+            dumpTrafficBtn.IsEnabled = !value;
+            clearTrafficBtn.IsEnabled = !value;
             closeBtn.IsEnabled = !value;
-            statusText.Text = value ? $"Running {test}..." : "Ready";
+            statusText.Text = status;
         }
 
         private void AppendLogLine(string line)

@@ -30,6 +30,10 @@
                 <Button x:Name="dualSenseEdgeBtn" Content="DualSense Edge" MinWidth="125" Margin="0,0,8,8" Click="DualSenseEdgeBtn_Click" />
                 <Button x:Name="switch2Btn" Content="Switch 2" MinWidth="90" Margin="0,0,8,8" Click="Switch2Btn_Click" />
                 <Button x:Name="adaptiveBtn" Content="Adaptive Triggers" MinWidth="135" Margin="0,0,8,8" Click="AdaptiveBtn_Click" />
+                <Button x:Name="startTrafficBtn" Content="Start DS Traffic Capture" MinWidth="165" Margin="0,0,8,8" Click="StartTrafficBtn_Click" />
+                <Button x:Name="stopTrafficBtn" Content="Stop DS Traffic Capture" MinWidth="160" Margin="0,0,8,8" Click="StopTrafficBtn_Click" />
+                <Button x:Name="dumpTrafficBtn" Content="Dump DS Traffic" MinWidth="130" Margin="0,0,8,8" Click="DumpTrafficBtn_Click" />
+                <Button x:Name="clearTrafficBtn" Content="Clear DS Traffic" MinWidth="130" Margin="0,0,8,8" Click="ClearTrafficBtn_Click" />
             </WrapPanel>
         </StackPanel>
 

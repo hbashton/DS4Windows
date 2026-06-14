@@ -11,6 +11,7 @@ the Free Software Foundation, either version 3 of the License, or
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -40,6 +41,65 @@ namespace DS4Windows
         public Task RunAsync(ViiperDebugTest test, CancellationToken cancellationToken = default)
         {
             return Task.Run(() => Run(test, cancellationToken), cancellationToken);
+        }
+
+        public Task StartDualSenseTrafficCaptureAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.Run(() => SetDualSenseTrafficCapture(true, true, cancellationToken), cancellationToken);
+        }
+
+        public Task StopDualSenseTrafficCaptureAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.Run(() => SetDualSenseTrafficCapture(false, false, cancellationToken), cancellationToken);
+        }
+
+        public Task ClearDualSenseTrafficCaptureAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.Run(() =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                ViiperPrerequisiteStatus status = ViiperSetupManager.GetStatus(tryStartServer: true);
+                if (!status.Ready)
+                {
+                    throw new InvalidOperationException($"VIIPER backend is not ready: {status.DisplayText}");
+                }
+
+                ViiperClient client = new ViiperClient(ViiperSetupManager.ApiHost, ViiperSetupManager.ApiPort);
+                string response = client.ClearDualSenseTrafficCapture();
+                Log($"DualSense traffic capture cleared: {FormatJson(response)}");
+            }, cancellationToken);
+        }
+
+        public Task DumpDualSenseTrafficCaptureAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.Run(() =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                ViiperPrerequisiteStatus status = ViiperSetupManager.GetStatus(tryStartServer: true);
+                if (!status.Ready)
+                {
+                    throw new InvalidOperationException($"VIIPER backend is not ready: {status.DisplayText}");
+                }
+
+                ViiperClient client = new ViiperClient(ViiperSetupManager.ApiHost, ViiperSetupManager.ApiPort);
+                string response = client.GetDualSenseTrafficCapture();
+                Log("DualSense traffic capture dump follows:");
+                Log(FormatJson(response));
+            }, cancellationToken);
+        }
+
+        private void SetDualSenseTrafficCapture(bool enabled, bool clear, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ViiperPrerequisiteStatus status = ViiperSetupManager.GetStatus(tryStartServer: true);
+            if (!status.Ready)
+            {
+                throw new InvalidOperationException($"VIIPER backend is not ready: {status.DisplayText}");
+            }
+
+            ViiperClient client = new ViiperClient(ViiperSetupManager.ApiHost, ViiperSetupManager.ApiPort);
+            string response = client.SetDualSenseTrafficCapture(enabled, clear);
+            Log($"DualSense traffic capture enabled={enabled} clear={clear}: {FormatJson(response)}");
         }
 
         private void Run(ViiperDebugTest test, CancellationToken cancellationToken)
@@ -311,6 +371,27 @@ namespace DS4Windows
         {
             Log($"EXCEPTION step={step} type={ex.GetType().FullName} message={ex.Message}");
             Log(ex.ToString());
+        }
+
+        private static string FormatJson(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return json;
+            }
+
+            try
+            {
+                using JsonDocument doc = JsonDocument.Parse(json);
+                return JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions
+                {
+                    WriteIndented = true,
+                });
+            }
+            catch
+            {
+                return json;
+            }
         }
 
         private void Log(string message)

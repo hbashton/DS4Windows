@@ -720,6 +720,23 @@ namespace DS4Windows
                 DualSenseBluetoothHapticsReportLength);
         }
 
+        private bool IsNativeDualSenseFeedbackCompatible(DS4Device device)
+        {
+            if (viiperType != ViiperVirtualDeviceType.DualSenseEdge ||
+                device is not DualSenseDevice dualSenseDevice ||
+                dualSenseDevice.SubType == DualSenseDevice.DeviceSubType.DSEdge)
+            {
+                return true;
+            }
+
+            if (Interlocked.Exchange(ref edgePhysicalMismatchLogged, 1) == 0)
+            {
+                AppLogger.LogToGui("VIIPER DualSense Edge native feedback is not being forwarded to a physical non-Edge DualSense. Use DualSense output for normal DualSense controllers, or connect a DualSense Edge for Edge native feedback.", true);
+            }
+
+            return false;
+        }
+
         public static bool ApplySyntheticDualSenseTriggerFeedback(int deviceIndex, bool rightTrigger, byte mode,
             byte startResistance, byte effectForce, byte rangeForce, byte nearReleaseStrength,
             byte nearMiddleStrength, byte pressedStrength, byte frequency)
@@ -882,23 +899,6 @@ namespace DS4Windows
                 TryRemoveBus(bus.BusId);
                 throw;
             }
-        }
-
-        private bool IsNativeDualSenseFeedbackCompatible(DS4Device device)
-        {
-            if (viiperType != ViiperVirtualDeviceType.DualSenseEdge ||
-                device is not DualSenseDevice dualSenseDevice ||
-                dualSenseDevice.SubType == DualSenseDevice.DeviceSubType.DSEdge)
-            {
-                return true;
-            }
-
-            if (Interlocked.Exchange(ref edgePhysicalMismatchLogged, 1) == 0)
-            {
-                AppLogger.LogToGui("VIIPER DualSense Edge native feedback is not being forwarded to a physical non-Edge DualSense. Use DualSense output for normal DualSense controllers, or connect a DualSense Edge for Edge native feedback.", true);
-            }
-
-            return false;
         }
 
         public string SetDualSenseTrafficCapture(bool enabled, bool clear)

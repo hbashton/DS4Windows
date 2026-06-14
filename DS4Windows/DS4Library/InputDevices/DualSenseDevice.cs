@@ -1560,6 +1560,29 @@ namespace DS4Windows.InputDevices
             return true;
         }
 
+        public bool WriteBluetoothHapticsOutputReport(byte[] report, int offset, int length)
+        {
+            if (report == null ||
+                conType != ConnectionType.BT ||
+                length != 141 ||
+                offset < 0 ||
+                offset + length > report.Length ||
+                report[offset] != 0x32)
+            {
+                return false;
+            }
+
+            byte[] hapticsReport = new byte[length];
+            Array.Copy(report, offset, hapticsReport, 0, length);
+
+            queueEvent(() =>
+            {
+                hDevice.WriteOutputReportViaInterrupt(hapticsReport, READ_STREAM_TIMEOUT);
+            });
+
+            return true;
+        }
+
         private void Detach()
         {
             SendEmptyOutputReport();

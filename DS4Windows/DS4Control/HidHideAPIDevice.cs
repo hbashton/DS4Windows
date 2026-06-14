@@ -42,10 +42,16 @@ namespace DS4WinWPF.DS4Control
 
         private SafeHandle hidHideHandle;
 
-        public HidHideAPIDevice()
+        public HidHideAPIDevice(bool writeAccess = true)
         {
+            uint desiredAccess = NativeMethods.GENERIC_READ;
+            if (writeAccess)
+            {
+                desiredAccess |= NativeMethods.GENERIC_WRITE;
+            }
+
             hidHideHandle = NativeMethods.CreateFile(CONTROL_DEVICE_FILENAME,
-                    NativeMethods.GENERIC_READ,
+                    desiredAccess,
                     NativeMethods.FILE_SHARE_READ | NativeMethods.FILE_SHARE_WRITE,
                     IntPtr.Zero,
                     NativeMethods.OpenExisting,

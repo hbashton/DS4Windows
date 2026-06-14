@@ -1812,35 +1812,42 @@ namespace DS4Windows
         {
             if (!useDInputOnly[index])
             {
-                //OutContType contType = Global.OutContType[index];
-                OutputDevice dev = outputDevices[index];
-                OutSlotDevice slotDevice = outputslotMan.GetOutSlotDevice(dev);
-                if (dev != null && slotDevice != null)
+                try
                 {
-                    string tempType = dev.GetDeviceType();
-                    LogDebug($"Disassociated virtual {tempType} Controller in{(slotDevice.CurrentReserveStatus == OutSlotDevice.ReserveStatus.Permanent ? " permanent" : "")} output slot #{slotDevice.Index + 1} from input controller #{index + 1} ({device.DisplayName})", false);
+                    //OutContType contType = Global.OutContType[index];
+                    OutputDevice dev = outputDevices[index];
+                    OutSlotDevice slotDevice = outputslotMan.GetOutSlotDevice(dev);
+                    if (dev != null && slotDevice != null)
+                    {
+                        string tempType = dev.GetDeviceType();
+                        LogDebug($"Disassociated virtual {tempType} Controller in{(slotDevice.CurrentReserveStatus == OutSlotDevice.ReserveStatus.Permanent ? " permanent" : "")} output slot #{slotDevice.Index + 1} from input controller #{index + 1} ({device.DisplayName})", false);
 
-                    OutContType currentType = activeOutDevType[index];
+                        OutContType currentType = activeOutDevType[index];
+                        outputDevices[index] = null;
+                        activeOutDevType[index] = OutContType.None;
+                        if ((slotDevice.CurrentAttachedStatus == OutSlotDevice.AttachedStatus.Attached &&
+                            slotDevice.CurrentReserveStatus == OutSlotDevice.ReserveStatus.Dynamic) || force)
+                        {
+                            //slotDevice.CurrentInputBound = OutSlotDevice.InputBound.Unbound;
+                            outputslotMan.DeferredRemoval(dev, index, outputDevices, immediate);
+                        }
+                        else if (slotDevice.CurrentAttachedStatus == OutSlotDevice.AttachedStatus.Attached)
+                        {
+                            slotDevice.CurrentInputBound = OutSlotDevice.InputBound.Unbound;
+                            dev.ResetState();
+                            dev.RemoveFeedbacks();
+                            //RemoveOutFeedback(currentType, dev);
+                        }
+                        //dev.Disconnect();
+                        //LogDebug(tempType + " Controller # " + (index + 1) + " unplugged");
+                    }
+                }
+                finally
+                {
                     outputDevices[index] = null;
                     activeOutDevType[index] = OutContType.None;
-                    if ((slotDevice.CurrentAttachedStatus == OutSlotDevice.AttachedStatus.Attached &&
-                        slotDevice.CurrentReserveStatus == OutSlotDevice.ReserveStatus.Dynamic) || force)
-                    {
-                        //slotDevice.CurrentInputBound = OutSlotDevice.InputBound.Unbound;
-                        outputslotMan.DeferredRemoval(dev, index, outputDevices, immediate);
-                    }
-                    else if (slotDevice.CurrentAttachedStatus == OutSlotDevice.AttachedStatus.Attached)
-                    {
-                        slotDevice.CurrentInputBound = OutSlotDevice.InputBound.Unbound;
-                        dev.ResetState();
-                        dev.RemoveFeedbacks();
-                        //RemoveOutFeedback(currentType, dev);
-                    }
-                    //dev.Disconnect();
-                    //LogDebug(tempType + " Controller # " + (index + 1) + " unplugged");
+                    useDInputOnly[index] = true;
                 }
-
-                useDInputOnly[index] = true;
             }
         }
 

@@ -10695,16 +10695,43 @@ namespace DS4Windows
                     {
                         if (xinputPlug)
                         {
-                            OutputDevice tempOutDev = control.outputDevices[device];
-                            if (tempOutDev != null)
+                            bool shouldPlugin = !dinputOnly[device] && tempDev.isSynced();
+                            try
                             {
-                                tempOutDev = null;
-                                //Global.activeOutDevType[device] = OutContType.None;
-                                control.UnplugOutDev(device, tempDev);
+                                ControlService.StartupDiag($"Profile output transition begin index={device} oldType={oldContType} newType={outputDevType[device]}");
+                                OutputDevice tempOutDev = control.outputDevices[device];
+                                if (tempOutDev != null)
+                                {
+                                    //Global.activeOutDevType[device] = OutContType.None;
+                                    control.UnplugOutDev(device, tempDev);
+                                    ControlService.StartupDiag($"Profile output transition unplugged index={device}");
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                AppLogger.LogToGui($"Profile output transition unplug failed for controller {device + 1}: {ex.Message}", true);
+                                ControlService.StartupDiag($"Profile output transition unplug exception index={device} oldType={oldContType} newType={outputDevType[device]} error={ex}");
                             }
 
-                            OutContType tempContType = outputDevType[device];
-                            control.PluginOutDev(device, tempDev);
+                            try
+                            {
+                                if (shouldPlugin)
+                                {
+                                    ControlService.StartupDiag($"Profile output transition plugin begin index={device} type={outputDevType[device]}");
+                                    Global.useDInputOnly[device] = true;
+                                    control.PluginOutDev(device, tempDev);
+                                    ControlService.StartupDiag($"Profile output transition plugin end index={device} type={outputDevType[device]}");
+                                }
+                                else
+                                {
+                                    ControlService.StartupDiag($"Profile output transition plugin skipped index={device} dinputOnly={dinputOnly[device]} synced={tempDev.isSynced()}");
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                AppLogger.LogToGui($"Profile output transition plug failed for controller {device + 1}: {ex.Message}", true);
+                                ControlService.StartupDiag($"Profile output transition plug exception index={device} type={outputDevType[device]} error={ex}");
+                            }
                             //Global.useDInputOnly[device] = false;
                         }
                         else

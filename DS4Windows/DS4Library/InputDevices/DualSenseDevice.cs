@@ -1560,7 +1560,7 @@ namespace DS4Windows.InputDevices
             return true;
         }
 
-        public bool WriteBluetoothHapticsOutputReport(byte[] report, int offset, int length)
+        public bool WriteBluetoothHapticsOutputReport(byte[] report, int offset, int length, bool waitForWrite = false)
         {
             if (report == null ||
                 conType != ConnectionType.BT ||
@@ -1575,12 +1575,30 @@ namespace DS4Windows.InputDevices
             byte[] hapticsReport = new byte[length];
             Array.Copy(report, offset, hapticsReport, 0, length);
 
+            if (!waitForWrite)
+            {
+                queueEvent(() =>
+                {
+                    hDevice.WriteOutputReportViaInterrupt(hapticsReport, READ_STREAM_TIMEOUT);
+                });
+
+                return true;
+            }
+
+            TaskCompletionSource<bool> writeCompletion = new TaskCompletionSource<bool>();
             queueEvent(() =>
             {
-                hDevice.WriteOutputReportViaInterrupt(hapticsReport, READ_STREAM_TIMEOUT);
+                try
+                {
+                    writeCompletion.TrySetResult(hDevice.WriteOutputReportViaInterrupt(hapticsReport, READ_STREAM_TIMEOUT));
+                }
+                catch
+                {
+                    writeCompletion.TrySetResult(false);
+                }
             });
 
-            return true;
+            return writeCompletion.Task.Wait(READ_STREAM_TIMEOUT + 500) && writeCompletion.Task.Result;
         }
 
         public bool PlayBluetoothHapticsTestTone(int durationMs = 900, int frequencyHz = 85, byte amplitude = 72)
@@ -1612,7 +1630,7 @@ namespace DS4Windows.InputDevices
                 }
 
                 byte[] report = BuildBluetoothHapticsOutputReport((byte)packet, (byte)packet, sample);
-                if (!WriteBluetoothHapticsOutputReport(report, 0, report.Length))
+                if (!WriteBluetoothHapticsOutputReport(report, 0, report.Length, true))
                 {
                     return false;
                 }

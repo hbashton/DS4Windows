@@ -1583,6 +1583,87 @@ namespace DS4Windows.InputDevices
             return true;
         }
 
+        public bool PlayBluetoothHapticsTestTone(int durationMs = 900, int frequencyHz = 85, byte amplitude = 72)
+        {
+            if (conType != ConnectionType.BT)
+            {
+                return false;
+            }
+
+            durationMs = Math.Max(100, Math.Min(durationMs, 3000));
+            frequencyHz = Math.Max(20, Math.Min(frequencyHz, 900));
+            amplitude = (byte)Math.Min(amplitude, (byte)120);
+
+            const int sampleRate = 3000;
+            const int sampleBytes = 64;
+            const int framesPerPacket = sampleBytes / 2;
+            int packetCount = Math.Max(1, (durationMs * sampleRate) / (1000 * framesPerPacket));
+
+            for (int packet = 0; packet < packetCount; packet++)
+            {
+                byte[] sample = new byte[sampleBytes];
+                for (int frame = 0; frame < framesPerPacket; frame++)
+                {
+                    int sampleIndex = packet * framesPerPacket + frame;
+                    double phase = 2.0 * Math.PI * frequencyHz * sampleIndex / sampleRate;
+                    sbyte value = (sbyte)Math.Round(Math.Sin(phase) * amplitude);
+                    sample[frame * 2] = unchecked((byte)value);
+                    sample[(frame * 2) + 1] = unchecked((byte)value);
+                }
+
+                byte[] report = BuildBluetoothHapticsOutputReport((byte)packet, (byte)packet, sample);
+                if (!WriteBluetoothHapticsOutputReport(report, 0, report.Length))
+                {
+                    return false;
+                }
+
+                Thread.Sleep(11);
+            }
+
+            return true;
+        }
+
+        private static byte[] BuildBluetoothHapticsOutputReport(byte sequence, byte intervalIndex, byte[] sample)
+        {
+            const int reportSize = 141;
+            const int sampleSize = 64;
+            byte[] report = new byte[reportSize];
+            report[0] = 0x32;
+            report[1] = (byte)((sequence & 0x0F) << 4);
+
+            report[2] = 0x91;
+            report[3] = 0x07;
+            report[4] = 0xFE;
+            report[9] = 0xFF;
+            report[10] = intervalIndex;
+
+            report[11] = 0x92;
+            report[12] = sampleSize;
+            Array.Copy(sample, 0, report, 13, sampleSize);
+
+            uint crc = DualSenseBluetoothCrc32(report, reportSize - 4);
+            report[reportSize - 4] = (byte)crc;
+            report[reportSize - 3] = (byte)(crc >> 8);
+            report[reportSize - 2] = (byte)(crc >> 16);
+            report[reportSize - 1] = (byte)(crc >> 24);
+            return report;
+        }
+
+        private static uint DualSenseBluetoothCrc32(byte[] data, int length)
+        {
+            uint crc = ~0xEADA2D49u;
+            for (int i = 0; i < length; i++)
+            {
+                crc ^= data[i];
+                for (int bit = 0; bit < 8; bit++)
+                {
+                    crc = (crc >> 1) ^ ((crc & 1) != 0 ? 0xEDB88320u : 0u);
+                }
+            }
+
+            return ~crc;
+        }
+
         private void Detach()
         {
             SendEmptyOutputReport();

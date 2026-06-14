@@ -42,7 +42,9 @@ namespace DS4Windows
         private const int DualSenseCompatExtendedFeedbackLength = DualSenseBaseFeedbackLength + (DualSenseTriggerEffectLength * 2);
         private const int DualSenseNativeOutputReportLength = 48;
         private const int DualSenseNativeOutputReportOffset = DualSenseCompatExtendedFeedbackLength;
-        private const int DualSenseExtendedFeedbackLength = DualSenseCompatExtendedFeedbackLength + DualSenseNativeOutputReportLength;
+        private const int DualSenseBluetoothHapticsReportLength = 141;
+        private const int DualSenseBluetoothHapticsReportOffset = DualSenseNativeOutputReportOffset + DualSenseNativeOutputReportLength;
+        private const int DualSenseExtendedFeedbackLength = DualSenseBluetoothHapticsReportOffset + DualSenseBluetoothHapticsReportLength;
         private const int MaxStreamRecoveryAttempts = 2;
 
         private readonly OutContType outputType;
@@ -577,6 +579,11 @@ namespace DS4Windows
                 case ViiperVirtualDeviceType.DualSenseEdge:
                     if (feedbackLength >= DualSenseBaseFeedbackLength)
                     {
+                        if (TryApplyBluetoothHapticsOutputReport(device, feedback, feedbackLength))
+                        {
+                            break;
+                        }
+
                         if (TryApplyNativeDualSenseOutputReport(device, feedback, feedbackLength))
                         {
                             break;
@@ -646,7 +653,7 @@ namespace DS4Windows
 
         private static bool TryApplyNativeDualSenseOutputReport(DS4Device device, byte[] feedback, int feedbackLength)
         {
-            if (feedbackLength < DualSenseExtendedFeedbackLength ||
+            if (feedbackLength < DualSenseBluetoothHapticsReportOffset ||
                 device is not DualSenseDevice dualSenseDevice ||
                 feedback[DualSenseNativeOutputReportOffset] != 0x02)
             {
@@ -656,6 +663,20 @@ namespace DS4Windows
             return dualSenseDevice.WriteRawOutputReportFromGame(feedback,
                 DualSenseNativeOutputReportOffset,
                 DualSenseNativeOutputReportLength);
+        }
+
+        private static bool TryApplyBluetoothHapticsOutputReport(DS4Device device, byte[] feedback, int feedbackLength)
+        {
+            if (feedbackLength < DualSenseExtendedFeedbackLength ||
+                device is not DualSenseDevice dualSenseDevice ||
+                feedback[DualSenseBluetoothHapticsReportOffset] != 0x32)
+            {
+                return false;
+            }
+
+            return dualSenseDevice.WriteBluetoothHapticsOutputReport(feedback,
+                DualSenseBluetoothHapticsReportOffset,
+                DualSenseBluetoothHapticsReportLength);
         }
 
         public static bool ApplySyntheticDualSenseTriggerFeedback(int deviceIndex, bool rightTrigger, byte mode,

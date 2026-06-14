@@ -787,6 +787,26 @@ namespace DS4Windows
             }
         }
 
+        public string SetDualSenseTrafficCapture(bool enabled, bool clear)
+        {
+            string payload = JsonSerializer.Serialize(new ViiperDualSenseTrafficSetRequest
+            {
+                Enabled = enabled,
+                Clear = clear,
+            }, JsonOptions);
+            return SendRequestRaw("debug/dualsense-traffic/set", payload);
+        }
+
+        public string GetDualSenseTrafficCapture()
+        {
+            return SendRequestRaw("debug/dualsense-traffic/get");
+        }
+
+        public string ClearDualSenseTrafficCapture()
+        {
+            return SendRequestRaw("debug/dualsense-traffic/clear");
+        }
+
         private ViiperDeviceStream OpenStream(uint busId, string devId, int usbipPort)
         {
             TcpClient tcp = Connect(StreamReceiveTimeoutMs);
@@ -913,6 +933,15 @@ namespace DS4Windows
         {
             [JsonPropertyName("type")]
             public string Type { get; set; }
+        }
+
+        private sealed class ViiperDualSenseTrafficSetRequest
+        {
+            [JsonPropertyName("enabled")]
+            public bool Enabled { get; set; }
+
+            [JsonPropertyName("clear")]
+            public bool Clear { get; set; }
         }
 
         private sealed class ViiperApiError

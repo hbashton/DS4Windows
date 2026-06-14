@@ -39,7 +39,10 @@ namespace DS4Windows
         // VIIPER sends compact feedback, not a full native HID output report:
         // base rumble/LED bytes plus two native-spaced trigger effect blocks.
         private const int DualSenseTriggerEffectLength = 11;
-        private const int DualSenseExtendedFeedbackLength = DualSenseBaseFeedbackLength + (DualSenseTriggerEffectLength * 2);
+        private const int DualSenseCompatExtendedFeedbackLength = DualSenseBaseFeedbackLength + (DualSenseTriggerEffectLength * 2);
+        private const int DualSenseNativeOutputReportLength = 48;
+        private const int DualSenseNativeOutputReportOffset = DualSenseCompatExtendedFeedbackLength;
+        private const int DualSenseExtendedFeedbackLength = DualSenseCompatExtendedFeedbackLength + DualSenseNativeOutputReportLength;
         private const int MaxStreamRecoveryAttempts = 2;
 
         private readonly OutContType outputType;
@@ -574,6 +577,11 @@ namespace DS4Windows
                 case ViiperVirtualDeviceType.DualSenseEdge:
                     if (feedbackLength >= DualSenseBaseFeedbackLength)
                     {
+                        if (TryApplyNativeDualSenseOutputReport(device, feedback, feedbackLength))
+                        {
+                            break;
+                        }
+
                         Program.rootHub.SetDevRumble(device, feedback[1], feedback[0], deviceIndex);
                         ApplyLightbar(device, feedback[2], feedback[3], feedback[4], 0, 0);
                         ApplyDualSenseTriggerFeedback(device, feedback, feedbackLength);
@@ -634,6 +642,20 @@ namespace DS4Windows
                 feedback[offset + 5],
                 feedback[offset + 6],
                 feedback[offset + 9]);
+        }
+
+        private static bool TryApplyNativeDualSenseOutputReport(DS4Device device, byte[] feedback, int feedbackLength)
+        {
+            if (feedbackLength < DualSenseExtendedFeedbackLength ||
+                device is not DualSenseDevice dualSenseDevice ||
+                feedback[DualSenseNativeOutputReportOffset] != 0x02)
+            {
+                return false;
+            }
+
+            return dualSenseDevice.WriteRawOutputReportFromGame(feedback,
+                DualSenseNativeOutputReportOffset,
+                DualSenseNativeOutputReportLength);
         }
 
         public static bool ApplySyntheticDualSenseTriggerFeedback(int deviceIndex, bool rightTrigger, byte mode,
@@ -1314,7 +1336,7 @@ namespace DS4Windows
         private const int DS4PacketSize = 31;
         private const int DualSensePacketSize = 33;
         private const int Switch2PacketSize = 24;
-        private const int DualSenseFeedbackPacketSize = 28;
+        private const int DualSenseFeedbackPacketSize = 76;
         private const int DualSenseGyroRestDeadband = 32;
         private const int DualSenseAccelRestZ = -8192;
         private const float X360RecipInputPosResolution = 1 / 127f;

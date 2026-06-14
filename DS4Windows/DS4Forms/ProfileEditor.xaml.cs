@@ -1492,14 +1492,6 @@ namespace DS4WinWPF.DS4Forms
                 _ => string.Empty,
             };
 
-            if (dualsenseViiperLegendPanel != null)
-            {
-                dualsenseViiperLegendPanel.Visibility =
-                    type == OutContType.ViiperDualSense || type == OutContType.ViiperDualSenseEdge
-                    ? Visibility.Visible
-                    : Visibility.Collapsed;
-            }
-
             if (switch2ViiperLegendPanel != null)
             {
                 switch2ViiperLegendPanel.Visibility = type == OutContType.ViiperSwitch2Pro

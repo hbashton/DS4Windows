@@ -31,6 +31,7 @@ namespace DS4WinWPF.DS4Control
             None,
             Xbox360,
             DualShock4,
+            DualSense,
         }
 
         protected string name;
@@ -48,6 +49,12 @@ namespace DS4WinWPF.DS4Control
         }
 
         public abstract void ApplyPreset(int idx);
+
+        protected static void ApplyDualSenseViiperDefaults(int idx)
+        {
+            DS4Windows.Global.OutContType[idx] = DS4Windows.OutContType.ViiperDualSense;
+            DS4Windows.Global.UseGenericRumbleStrRescaleForDualSenses[idx] = true;
+        }
     }
 
     public class GamepadPreset : PresetOption
@@ -69,6 +76,11 @@ namespace DS4WinWPF.DS4Control
             else if (outputCont == OutputContChoice.DualShock4)
             {
                 DS4Windows.Global.LoadBlankDS4Profile(idx, false, App.rootHub, false);
+            }
+            else if (outputCont == OutputContChoice.DualSense)
+            {
+                DS4Windows.Global.LoadBlankDS4Profile(idx, false, App.rootHub, false);
+                ApplyDualSenseViiperDefaults(idx);
             }
         }
     }
@@ -93,6 +105,11 @@ namespace DS4WinWPF.DS4Control
             {
                 DS4Windows.Global.LoadDefaultDS4GamepadGyroProfile(idx, false, App.rootHub, false);
             }
+            else if (outputCont == OutputContChoice.DualSense)
+            {
+                DS4Windows.Global.LoadDefaultDS4GamepadGyroProfile(idx, false, App.rootHub, false);
+                ApplyDualSenseViiperDefaults(idx);
+            }
         }
     }
 
@@ -116,6 +133,11 @@ namespace DS4WinWPF.DS4Control
             {
                 DS4Windows.Global.LoadDefaultDS4MixedControlsProfile(idx, false, App.rootHub, false);
             }
+            else if (outputCont == OutputContChoice.DualSense)
+            {
+                DS4Windows.Global.LoadDefaultDS4MixedControlsProfile(idx, false, App.rootHub, false);
+                ApplyDualSenseViiperDefaults(idx);
+            }
         }
     }
 
@@ -138,6 +160,11 @@ namespace DS4WinWPF.DS4Control
             else if (outputCont == OutputContChoice.DualShock4)
             {
                 DS4Windows.Global.LoadDefaultDS4MixedGyroMouseProfile(idx, false, App.rootHub, false);
+            }
+            else if (outputCont == OutputContChoice.DualSense)
+            {
+                DS4Windows.Global.LoadDefaultDS4MixedGyroMouseProfile(idx, false, App.rootHub, false);
+                ApplyDualSenseViiperDefaults(idx);
             }
         }
     }

@@ -665,42 +665,25 @@ namespace DS4Windows
                 return false;
             }
 
-            byte[] report = PrepareNativeDualSenseOutputReportForProfile(feedback, deviceIndex);
+            byte[] report = PrepareNativeDualSenseOutputReportForProfile(feedback);
             return dualSenseDevice.WriteRawOutputReportFromGame(report,
                 0,
                 DualSenseNativeOutputReportLength);
         }
 
-        private static byte[] PrepareNativeDualSenseOutputReportForProfile(byte[] feedback, int deviceIndex)
+        private static byte[] PrepareNativeDualSenseOutputReportForProfile(byte[] feedback)
         {
             byte[] report = new byte[DualSenseNativeOutputReportLength];
             Array.Copy(feedback, DualSenseNativeOutputReportOffset, report, 0, report.Length);
 
-            bool allowGameVisuals = deviceIndex >= 0 &&
-                deviceIndex < Global.LightbarSettingsInfo.Length &&
-                Global.LightbarSettingsInfo[deviceIndex].Mode == LightbarMode.Passthru;
-            if (allowGameVisuals)
-            {
-                return report;
-            }
-
-            // Keep game rumble and adaptive triggers, but do not let virtual
-            // DualSense output seize lightbar, player LEDs, mute LED, or
-            // mic/audio state unless the profile explicitly uses passthrough.
+            // Keep game rumble, adaptive triggers, lightbar, and player LEDs.
+            // DS4Windows owns the mute button LED/mic mute state so profile
+            // mute actions cannot get stuck behind game output reports.
             if (report.Length > 10)
             {
-                report[1] &= 0x4F;
-                report[2] &= 0xE0;
-                Array.Clear(report, 5, 6);
-            }
-
-            if (report.Length > 48)
-            {
-                Array.Clear(report, 42, 6);
-            }
-            else
-            {
-                Array.Clear(report, 42, report.Length - 42);
+                report[2] &= 0xFC;
+                report[9] = 0x00;
+                report[10] = 0x00;
             }
 
             return report;

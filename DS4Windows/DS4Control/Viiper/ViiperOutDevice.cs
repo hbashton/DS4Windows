@@ -175,8 +175,11 @@ namespace DS4Windows
                 pendingStatePacket = null;
             }
 
-            ViiperDeviceStream stream = Interlocked.Exchange(ref deviceStream, null);
-            stream?.Dispose();
+            lock (streamRecoveryLock)
+            {
+                ViiperDeviceStream stream = Interlocked.Exchange(ref deviceStream, null);
+                stream?.Dispose();
+            }
 
             if (stateWriterThread != null && stateWriterThread.IsAlive)
             {
@@ -188,6 +191,7 @@ namespace DS4Windows
 
             stateWriterThread = null;
             StopFeedbackReader();
+            ViiperUsbipPortManager.DetachStaleLocalViiperPorts();
         }
 
         private void StopFeedbackReader()
@@ -853,7 +857,7 @@ namespace DS4Windows
 
         public ViiperDeviceStream CreateDeviceAndOpenStream(string deviceName)
         {
-            ViiperUsbipPortManager.DetachStaleLocalSonyPorts();
+            ViiperUsbipPortManager.DetachStaleLocalViiperPorts();
 
             ViiperBusCreateResponse bus = SendRequest<ViiperBusCreateResponse>("bus/create", "0");
             ViiperDeviceResponse device = null;
@@ -866,8 +870,9 @@ namespace DS4Windows
                 }, JsonOptions);
 
                 device = SendRequest<ViiperDeviceResponse>($"bus/{bus.BusId}/add", payload);
-                usbipPort = ViiperUsbipPortManager.FindLocalSonyPort(bus.BusId, device.DevId);
+                usbipPort = ViiperUsbipPortManager.FindLocalViiperPort(bus.BusId, device.DevId);
                 ViiperUsbipPortManager.RegisterActivePort(usbipPort);
+                ViiperUsbipPortManager.DetachDuplicateLocalViiperPorts(bus.BusId, device.DevId, usbipPort);
                 return OpenStream(bus.BusId, device.DevId, usbipPort);
             }
             catch
@@ -1056,13 +1061,19 @@ namespace DS4Windows
 
     internal static class ViiperUsbipPortManager
     {
-        private const string SonyVendorId = "054c";
-        private const string DualSenseProductId = "0ce6";
-        private const string DualSenseEdgeProductId = "0df2";
+        private static readonly string[] KnownViiperDeviceIds =
+        {
+            "054c:09cc", // DualShock 4
+            "054c:0ce6", // DualSense
+            "054c:0df2", // DualSense Edge
+            "045e:028e", // Xbox 360
+            "057e:2069", // Switch 2 Pro
+        };
+
         private static readonly object ActivePortsLock = new object();
         private static readonly HashSet<int> ActivePorts = new HashSet<int>();
 
-        public static void DetachStaleLocalSonyPorts()
+        public static void DetachStaleLocalViiperPorts()
         {
             HashSet<int> activePorts;
             lock (ActivePortsLock)
@@ -1072,21 +1083,21 @@ namespace DS4Windows
 
             foreach (UsbipPortBlock port in GetImportedPorts())
             {
-                if (!activePorts.Contains(port.Port) && IsLocalSonyViiperPort(port, null))
+                if (!activePorts.Contains(port.Port) && IsLocalViiperPort(port, null))
                 {
-                    DetachPort(port.Port, "stale local VIIPER DualSense import");
+                    DetachPort(port.Port, "stale local VIIPER controller import");
                 }
             }
         }
 
-        public static int FindLocalSonyPort(uint busId, string devId)
+        public static int FindLocalViiperPort(uint busId, string devId)
         {
             string remoteBusId = $"{busId}-{devId}";
             for (int attempt = 0; attempt < 15; attempt++)
             {
                 foreach (UsbipPortBlock port in GetImportedPorts())
                 {
-                    if (IsLocalSonyViiperPort(port, remoteBusId))
+                    if (IsLocalViiperPort(port, remoteBusId))
                     {
                         return port.Port;
                     }
@@ -1099,6 +1110,23 @@ namespace DS4Windows
             }
 
             return -1;
+        }
+
+        public static void DetachDuplicateLocalViiperPorts(uint busId, string devId, int keepPort)
+        {
+            if (keepPort < 0)
+            {
+                return;
+            }
+
+            string remoteBusId = $"{busId}-{devId}";
+            foreach (UsbipPortBlock port in GetImportedPorts())
+            {
+                if (port.Port != keepPort && IsLocalViiperPort(port, remoteBusId))
+                {
+                    DetachPort(port.Port, $"duplicate local VIIPER import for {remoteBusId}");
+                }
+            }
         }
 
         public static void RegisterActivePort(int port)
@@ -1187,11 +1215,9 @@ namespace DS4Windows
             }
         }
 
-        private static bool IsLocalSonyViiperPort(UsbipPortBlock port, string remoteBusId)
+        private static bool IsLocalViiperPort(UsbipPortBlock port, string remoteBusId)
         {
             string block = port.Block.ToLowerInvariant();
-            bool sonyDualSense = block.Contains(SonyVendorId) &&
-                (block.Contains(DualSenseProductId) || block.Contains(DualSenseEdgeProductId));
             bool localHost = block.Contains("usbip://localhost:") ||
                 block.Contains("usbip://127.0.0.1:") ||
                 block.Contains("usbip://[::1]:") ||
@@ -1199,7 +1225,20 @@ namespace DS4Windows
             bool busMatches = string.IsNullOrEmpty(remoteBusId) ||
                 block.Contains("/" + remoteBusId.ToLowerInvariant());
 
-            return sonyDualSense && localHost && busMatches;
+            return localHost && busMatches && (IsKnownViiperDevice(block) || !string.IsNullOrEmpty(remoteBusId));
+        }
+
+        private static bool IsKnownViiperDevice(string block)
+        {
+            foreach (string deviceId in KnownViiperDeviceIds)
+            {
+                if (block.Contains(deviceId))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static bool TryParsePortHeader(string line, out int port)
@@ -1382,9 +1421,6 @@ namespace DS4Windows
                 return;
             }
 
-            ViiperUsbipPortManager.DetachPort(usbipPort, "DS4Windows VIIPER device stopped");
-            ViiperUsbipPortManager.UnregisterActivePort(usbipPort);
-
             try
             {
                 stream.Dispose();
@@ -1401,7 +1437,11 @@ namespace DS4Windows
             {
             }
 
+            ViiperUsbipPortManager.DetachPort(usbipPort, "DS4Windows VIIPER device stopped");
+            ViiperUsbipPortManager.UnregisterActivePort(usbipPort);
+
             removeDevice?.Invoke(busId, devId);
+            ViiperUsbipPortManager.DetachStaleLocalViiperPorts();
         }
     }
 

@@ -67,6 +67,7 @@ namespace DS4Windows
         private DateTime lastWriterHealthLogUtc = DateTime.MinValue;
         private int lastInputDeviceIndex = -1;
         private int submitFailureLogged;
+        private int edgePhysicalMismatchLogged;
         private int activeFeedbackLength;
         private readonly byte[] lastR2TriggerFeedback = new byte[DualSenseTriggerEffectLength];
         private readonly byte[] lastL2TriggerFeedback = new byte[DualSenseTriggerEffectLength];
@@ -97,6 +98,7 @@ namespace DS4Windows
             Interlocked.Exchange(ref replacedPendingPacketCount, 0);
             Interlocked.Exchange(ref submittedPacketCount, 0);
             Interlocked.Exchange(ref writtenPacketCount, 0);
+            Volatile.Write(ref edgePhysicalMismatchLogged, 0);
             lastWriterHealthLogUtc = DateTime.MinValue;
             writerStopRequested = false;
             connected = true;
@@ -579,12 +581,15 @@ namespace DS4Windows
                 case ViiperVirtualDeviceType.DualSenseEdge:
                     if (feedbackLength >= DualSenseBaseFeedbackLength)
                     {
-                        if (TryApplyBluetoothHapticsOutputReport(device, feedback, feedbackLength))
+                        bool nativeForwardingAllowed = IsNativeDualSenseFeedbackCompatible(device);
+                        if (nativeForwardingAllowed &&
+                            TryApplyBluetoothHapticsOutputReport(device, feedback, feedbackLength))
                         {
                             break;
                         }
 
-                        if (TryApplyNativeDualSenseOutputReport(device, feedback, feedbackLength))
+                        if (nativeForwardingAllowed &&
+                            TryApplyNativeDualSenseOutputReport(device, deviceIndex, feedback, feedbackLength))
                         {
                             break;
                         }
@@ -651,7 +656,7 @@ namespace DS4Windows
                 feedback[offset + 9]);
         }
 
-        private static bool TryApplyNativeDualSenseOutputReport(DS4Device device, byte[] feedback, int feedbackLength)
+        private static bool TryApplyNativeDualSenseOutputReport(DS4Device device, int deviceIndex, byte[] feedback, int feedbackLength)
         {
             if (feedbackLength < DualSenseBluetoothHapticsReportOffset ||
                 device is not DualSenseDevice dualSenseDevice ||
@@ -660,9 +665,45 @@ namespace DS4Windows
                 return false;
             }
 
-            return dualSenseDevice.WriteRawOutputReportFromGame(feedback,
-                DualSenseNativeOutputReportOffset,
+            byte[] report = PrepareNativeDualSenseOutputReportForProfile(feedback, deviceIndex);
+            return dualSenseDevice.WriteRawOutputReportFromGame(report,
+                0,
                 DualSenseNativeOutputReportLength);
+        }
+
+        private static byte[] PrepareNativeDualSenseOutputReportForProfile(byte[] feedback, int deviceIndex)
+        {
+            byte[] report = new byte[DualSenseNativeOutputReportLength];
+            Array.Copy(feedback, DualSenseNativeOutputReportOffset, report, 0, report.Length);
+
+            bool allowGameVisuals = deviceIndex >= 0 &&
+                deviceIndex < Global.LightbarSettingsInfo.Length &&
+                Global.LightbarSettingsInfo[deviceIndex].Mode == LightbarMode.Passthru;
+            if (allowGameVisuals)
+            {
+                return report;
+            }
+
+            // Keep game rumble and adaptive triggers, but do not let virtual
+            // DualSense output seize lightbar, player LEDs, mute LED, or
+            // mic/audio state unless the profile explicitly uses passthrough.
+            if (report.Length > 10)
+            {
+                report[1] &= 0x4F;
+                report[2] &= 0xE0;
+                Array.Clear(report, 5, 6);
+            }
+
+            if (report.Length > 48)
+            {
+                Array.Clear(report, 42, 6);
+            }
+            else
+            {
+                Array.Clear(report, 42, report.Length - 42);
+            }
+
+            return report;
         }
 
         private static bool TryApplyBluetoothHapticsOutputReport(DS4Device device, byte[] feedback, int feedbackLength)
@@ -714,6 +755,19 @@ namespace DS4Windows
         {
             return ApplySyntheticDualSenseTriggerFeedback(deviceIndex, rightTrigger,
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00);
+        }
+
+        public static bool PlaySyntheticDualSenseHapticsTone(int deviceIndex)
+        {
+            if (Program.rootHub == null ||
+                deviceIndex < 0 ||
+                deviceIndex >= Program.rootHub.DS4Controllers.Length ||
+                Program.rootHub.DS4Controllers[deviceIndex] is not DualSenseDevice dualSenseDevice)
+            {
+                return false;
+            }
+
+            return dualSenseDevice.PlayBluetoothHapticsTestTone();
         }
 
         private static bool TriggerFeedbackEquals(byte[] source, int sourceOffset, byte[] previous)
@@ -828,6 +882,23 @@ namespace DS4Windows
                 TryRemoveBus(bus.BusId);
                 throw;
             }
+        }
+
+        private bool IsNativeDualSenseFeedbackCompatible(DS4Device device)
+        {
+            if (viiperType != ViiperVirtualDeviceType.DualSenseEdge ||
+                device is not DualSenseDevice dualSenseDevice ||
+                dualSenseDevice.SubType == DualSenseDevice.DeviceSubType.DSEdge)
+            {
+                return true;
+            }
+
+            if (Interlocked.Exchange(ref edgePhysicalMismatchLogged, 1) == 0)
+            {
+                AppLogger.LogToGui("VIIPER DualSense Edge native feedback is not being forwarded to a physical non-Edge DualSense. Use DualSense output for normal DualSense controllers, or connect a DualSense Edge for Edge native feedback.", true);
+            }
+
+            return false;
         }
 
         public string SetDualSenseTrafficCapture(bool enabled, bool clear)

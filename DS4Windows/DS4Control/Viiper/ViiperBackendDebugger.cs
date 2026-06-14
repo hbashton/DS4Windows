@@ -27,6 +27,7 @@ namespace DS4Windows
         DualSenseEdge,
         Switch2Pro,
         AdaptiveTriggers,
+        HapticsTone,
         All,
     }
 
@@ -183,6 +184,11 @@ namespace DS4Windows
                 {
                     RunStep("Adaptive trigger emulation", RunAdaptiveTriggerProbe, cancellationToken);
                 }
+
+                if (test == ViiperDebugTest.All || test == ViiperDebugTest.HapticsTone)
+                {
+                    RunStep("DualSense Bluetooth haptics tone", RunHapticsToneProbe, cancellationToken);
+                }
             }
             finally
             {
@@ -293,6 +299,32 @@ namespace DS4Windows
                 Log("No physical DualSense/DualSense Edge input controller was available for synthetic trigger feedback.");
             }
         }
+
+        private void RunHapticsToneProbe()
+        {
+            Log("Sending SAxense-style Bluetooth HID report 0x32 test tone to physical Bluetooth DualSense controllers.");
+            bool anyApplied = false;
+            if (Program.rootHub != null)
+            {
+                for (int i = 0; i < Program.rootHub.DS4Controllers.Length; i++)
+                {
+                    if (Program.rootHub.DS4Controllers[i] == null)
+                    {
+                        continue;
+                    }
+
+                    bool applied = ViiperOutDevice.PlaySyntheticDualSenseHapticsTone(i);
+                    Log($"Bluetooth haptics tone controller {i + 1}: applied={applied}");
+                    anyApplied |= applied;
+                }
+            }
+
+            if (!anyApplied)
+            {
+                Log("No Bluetooth DualSense/DualSense Edge input controller accepted the haptics tone.");
+            }
+        }
+
 
         private void RunStep(string name, Action action, CancellationToken cancellationToken)
         {

@@ -329,6 +329,13 @@ namespace DS4Windows
                 serial.StartsWith(VigemVirtualDS4MacPrefix, StringComparison.OrdinalIgnoreCase);
         }
 
+        private static bool IsKnownVirtualDS4(HidDevice hDevice, bool isVirtualDevice)
+        {
+            return isVirtualDevice &&
+                hDevice.Attributes.VendorId == SONY_VID &&
+                VirtualDS4Pids.Contains(hDevice.Attributes.ProductId);
+        }
+
         private static bool IsRealDS4(HidDevice hDevice)
         {
             // Our own virtual output controllers are never valid input, regardless of
@@ -355,7 +362,7 @@ namespace DS4Windows
             if (!Global.UseAdvancedMoonlight)
             {
                 // this approach should work on most devices, but not on my pc for some reason
-                if (hDevice.Attributes.VendorId == 1356 && hDevice.Attributes.ProductId == 1476)
+                if (IsKnownVirtualDS4(hDevice, isVirtualDevice))
                 {
                     return true;
                 }
@@ -367,11 +374,11 @@ namespace DS4Windows
                 if (!DetectNewControllers)
                 {
                     var curTimestamp = Stopwatch.GetTimestamp();
-                    if (curTimestamp - timestamp > 5 * TimeSpan.TicksPerSecond) DetectNewControllers = true;
+                    if (curTimestamp - timestamp > 5 * Stopwatch.Frequency) DetectNewControllers = true;
                 }
 
                 // Moonlight detection
-                if (hDevice.Attributes.VendorId == 1356 && hDevice.Attributes.ProductId == 1476)
+                if (IsKnownVirtualDS4(hDevice, isVirtualDevice))
                 {
                     if (DetectNewControllers)
                     {
@@ -498,7 +505,8 @@ namespace DS4Windows
                             serial = hDevice.ReadSerial(DS4Device.SERIAL_FEATURE_ID);
                         }
 
-                        if (HasViGEmVirtualDS4Identity(hDevice, serial))
+                        if (HasViGEmVirtualDS4Identity(hDevice, serial) &&
+                            !Global.UseMoonlight)
                         {
                             hDevice.Dispose();
                             continue;

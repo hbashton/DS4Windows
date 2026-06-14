@@ -47,7 +47,7 @@ namespace DS4WinWPF.DS4Forms
 
         private void StopTrafficBtn_Click(object sender, RoutedEventArgs e) => RunDebuggerAction("Stopping DualSense traffic capture...", () => debugger.StopDualSenseTrafficCaptureAsync());
 
-        private void DumpTrafficBtn_Click(object sender, RoutedEventArgs e) => RunDebuggerAction("Dumping DualSense traffic capture...", () => debugger.DumpDualSenseTrafficCaptureAsync());
+        private void DumpTrafficBtn_Click(object sender, RoutedEventArgs e) => RunDebuggerAction("Exporting DualSense traffic capture...", () => debugger.DumpDualSenseTrafficCaptureAsync());
 
         private void ClearTrafficBtn_Click(object sender, RoutedEventArgs e) => RunDebuggerAction("Clearing DualSense traffic capture...", () => debugger.ClearDualSenseTrafficCaptureAsync());
 

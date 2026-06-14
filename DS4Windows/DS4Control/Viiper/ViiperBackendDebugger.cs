@@ -11,6 +11,7 @@ the Free Software Foundation, either version 3 of the License, or
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -83,8 +84,9 @@ namespace DS4Windows
 
                 ViiperClient client = new ViiperClient(ViiperSetupManager.ApiHost, ViiperSetupManager.ApiPort);
                 string response = client.GetDualSenseTrafficCapture();
-                Log("DualSense traffic capture dump follows:");
-                Log(FormatJson(response));
+                string dumpPath = WriteDualSenseTrafficDump(response);
+                Log($"DualSense traffic capture exported to {dumpPath}");
+                Log($"DualSense traffic capture summary: {FormatCaptureSummary(response)}");
             }, cancellationToken);
         }
 
@@ -100,6 +102,36 @@ namespace DS4Windows
             ViiperClient client = new ViiperClient(ViiperSetupManager.ApiHost, ViiperSetupManager.ApiPort);
             string response = client.SetDualSenseTrafficCapture(enabled, clear);
             Log($"DualSense traffic capture enabled={enabled} clear={clear}: {FormatJson(response)}");
+        }
+
+        private static string WriteDualSenseTrafficDump(string response)
+        {
+            string basePath = string.IsNullOrWhiteSpace(Global.appdatapath) ?
+                Global.appDataPpath : Global.appdatapath;
+            string logPath = Path.Combine(basePath, "Logs");
+            Directory.CreateDirectory(logPath);
+
+            string filePath = Path.Combine(logPath, $"dualsense_traffic_{DateTime.Now:yyyyMMdd_HHmmss}.json");
+            File.WriteAllText(filePath, FormatJson(response));
+            return filePath;
+        }
+
+        private static string FormatCaptureSummary(string response)
+        {
+            try
+            {
+                using JsonDocument document = JsonDocument.Parse(response);
+                JsonElement root = document.RootElement;
+                bool enabled = root.TryGetProperty("enabled", out JsonElement enabledElement) &&
+                    enabledElement.GetBoolean();
+                int count = root.TryGetProperty("count", out JsonElement countElement) &&
+                    countElement.TryGetInt32(out int parsedCount) ? parsedCount : 0;
+                return $"enabled={enabled} count={count}";
+            }
+            catch
+            {
+                return "Unable to parse capture summary.";
+            }
         }
 
         private void Run(ViiperDebugTest test, CancellationToken cancellationToken)

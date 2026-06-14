@@ -17,8 +17,8 @@
 		<ServerGarbageCollection>true</ServerGarbageCollection>
 		<AssemblyVersion>4.0.2.1</AssemblyVersion>
 		<FileVersion>4.0.2.1</FileVersion>
-		<Version>4.0.2.1</Version>
-		<InformationalVersion>4.0.2.1</InformationalVersion>
+		<Version>4.0.2.1-dualsense-beta</Version>
+		<InformationalVersion>4.0.2.1 DualSense Beta</InformationalVersion>
 		<IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 		<Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
 		<Platform Condition=" '$(Platform)' == '' ">x64</Platform>

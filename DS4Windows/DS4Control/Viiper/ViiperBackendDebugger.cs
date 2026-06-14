@@ -15,6 +15,7 @@ using System.IO;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using DS4Windows.InputDevices;
 
 namespace DS4Windows
 {
@@ -314,7 +315,10 @@ namespace DS4Windows
                     }
 
                     bool applied = ViiperOutDevice.PlaySyntheticDualSenseHapticsTone(i);
-                    Log($"Bluetooth haptics tone controller {i + 1}: applied={applied}");
+                    string status = Program.rootHub.DS4Controllers[i] is DualSenseDevice dualSenseDevice ?
+                        dualSenseDevice.LastBluetoothHapticsWriteStatus :
+                        "Skipped: controller is not a DualSense input device.";
+                    Log($"Bluetooth haptics tone controller {i + 1}: applied={applied} status=\"{status}\"");
                     anyApplied |= applied;
                 }
             }

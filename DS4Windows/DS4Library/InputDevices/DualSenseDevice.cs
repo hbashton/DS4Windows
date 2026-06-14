@@ -329,6 +329,7 @@ namespace DS4Windows.InputDevices
         private uint updateVersion;
         private DeviceSubType subType = DeviceSubType.DualSense;
         public DeviceSubType SubType => subType;
+        public string LastBluetoothHapticsWriteStatus { get; private set; } = "Not attempted";
 
         private DualSenseControllerOptions nativeOptionsStore;
         public DualSenseControllerOptions NativeOptionsStore { get => nativeOptionsStore; }
@@ -1562,13 +1563,33 @@ namespace DS4Windows.InputDevices
 
         public bool WriteBluetoothHapticsOutputReport(byte[] report, int offset, int length, bool waitForWrite = false)
         {
-            if (report == null ||
-                conType != ConnectionType.BT ||
-                length != 141 ||
-                offset < 0 ||
-                offset + length > report.Length ||
-                report[offset] != 0x32)
+            if (report == null)
             {
+                LastBluetoothHapticsWriteStatus = "Rejected: report was null.";
+                return false;
+            }
+
+            if (conType != ConnectionType.BT)
+            {
+                LastBluetoothHapticsWriteStatus = $"Rejected: controller connection type is {conType}, not Bluetooth.";
+                return false;
+            }
+
+            if (length != 141)
+            {
+                LastBluetoothHapticsWriteStatus = $"Rejected: report length was {length}, expected 141.";
+                return false;
+            }
+
+            if (offset < 0 || offset + length > report.Length)
+            {
+                LastBluetoothHapticsWriteStatus = $"Rejected: invalid report slice offset={offset} length={length} bufferLength={report.Length}.";
+                return false;
+            }
+
+            if (report[offset] != 0x32)
+            {
+                LastBluetoothHapticsWriteStatus = $"Rejected: report ID was 0x{report[offset]:X2}, expected 0x32.";
                 return false;
             }
 
@@ -1579,9 +1600,13 @@ namespace DS4Windows.InputDevices
             {
                 queueEvent(() =>
                 {
-                    hDevice.WriteOutputReportViaInterrupt(hapticsReport, READ_STREAM_TIMEOUT);
+                    bool result = hDevice.WriteOutputReportViaInterrupt(hapticsReport, READ_STREAM_TIMEOUT);
+                    LastBluetoothHapticsWriteStatus = result ?
+                        "Queued write completed successfully." :
+                        $"Queued write returned false. LastWin32Error={Marshal.GetLastWin32Error()}.";
                 });
 
+                LastBluetoothHapticsWriteStatus = "Queued Bluetooth haptics report for asynchronous HID write.";
                 return true;
             }
 
@@ -1590,21 +1615,46 @@ namespace DS4Windows.InputDevices
             {
                 try
                 {
-                    writeCompletion.TrySetResult(hDevice.WriteOutputReportViaInterrupt(hapticsReport, READ_STREAM_TIMEOUT));
+                    bool result = hDevice.WriteOutputReportViaInterrupt(hapticsReport, READ_STREAM_TIMEOUT);
+                    if (!result)
+                    {
+                        LastBluetoothHapticsWriteStatus = $"HID interrupt write returned false. LastWin32Error={Marshal.GetLastWin32Error()}.";
+                    }
+
+                    writeCompletion.TrySetResult(result);
                 }
-                catch
+                catch (Exception ex)
                 {
+                    LastBluetoothHapticsWriteStatus = $"HID interrupt write threw {ex.GetType().Name}: {ex.Message}";
                     writeCompletion.TrySetResult(false);
                 }
             });
 
-            return writeCompletion.Task.Wait(READ_STREAM_TIMEOUT + 500) && writeCompletion.Task.Result;
+            if (!writeCompletion.Task.Wait(READ_STREAM_TIMEOUT + 500))
+            {
+                LastBluetoothHapticsWriteStatus = "Timed out waiting for input thread to perform HID interrupt write.";
+                return false;
+            }
+
+            if (!writeCompletion.Task.Result)
+            {
+                if (string.IsNullOrWhiteSpace(LastBluetoothHapticsWriteStatus))
+                {
+                    LastBluetoothHapticsWriteStatus = "HID interrupt write returned false.";
+                }
+
+                return false;
+            }
+
+            LastBluetoothHapticsWriteStatus = "HID interrupt write completed successfully.";
+            return true;
         }
 
         public bool PlayBluetoothHapticsTestTone(int durationMs = 900, int frequencyHz = 85, byte amplitude = 72)
         {
             if (conType != ConnectionType.BT)
             {
+                LastBluetoothHapticsWriteStatus = $"Rejected: controller connection type is {conType}, not Bluetooth.";
                 return false;
             }
 

@@ -1704,8 +1704,8 @@ namespace DS4Windows
                 return;
             }
 
-            int gyroX = SnapToZero(-motion.gyroYawFull, DualSenseGyroRestDeadband);
-            int gyroY = SnapToZero(motion.gyroPitchFull, DualSenseGyroRestDeadband);
+            int gyroX = SnapToZero(motion.gyroPitchFull, DualSenseGyroRestDeadband);
+            int gyroY = SnapToZero(-motion.gyroYawFull, DualSenseGyroRestDeadband);
             int gyroZ = SnapToZero(-motion.gyroRollFull, DualSenseGyroRestDeadband);
             int accelX = -motion.accelXFull;
             int accelY = -motion.accelYFull;

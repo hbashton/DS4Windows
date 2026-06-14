@@ -1511,6 +1511,55 @@ namespace DS4Windows.InputDevices
             return result;
         }
 
+        public bool WriteRawOutputReportFromGame(byte[] report, int offset, int length)
+        {
+            if (report == null ||
+                length < USB_OUTPUT_CHANGE_LENGTH ||
+                offset < 0 ||
+                offset + USB_OUTPUT_CHANGE_LENGTH > report.Length ||
+                report[offset] != OUTPUT_REPORT_ID_USB)
+            {
+                return false;
+            }
+
+            queueEvent(() =>
+            {
+                Array.Clear(outputReport, 0, outputReport.Length);
+
+                if (conType == ConnectionType.BT)
+                {
+                    if (outputReport.Length < BT_OUTPUT_REPORT_LENGTH)
+                    {
+                        return;
+                    }
+
+                    outputReport[0] = OUTPUT_REPORT_ID_BT;
+                    outputReport[1] = OUTPUT_REPORT_ID_DATA;
+                    Array.Copy(report, offset + 1, outputReport, 2, USB_OUTPUT_CHANGE_LENGTH - 1);
+
+                    uint calcCrc32 = ~Crc32Algorithm.Compute(outputBTCrc32Head);
+                    calcCrc32 = ~Crc32Algorithm.CalculateBasicHash(ref calcCrc32, ref outputReport, 0, BT_OUTPUT_REPORT_LENGTH - 4);
+                    outputReport[74] = (byte)calcCrc32;
+                    outputReport[75] = (byte)(calcCrc32 >> 8);
+                    outputReport[76] = (byte)(calcCrc32 >> 16);
+                    outputReport[77] = (byte)(calcCrc32 >> 24);
+                }
+                else
+                {
+                    if (outputReport.Length < USB_OUTPUT_CHANGE_LENGTH)
+                    {
+                        return;
+                    }
+
+                    Array.Copy(report, offset, outputReport, 0, USB_OUTPUT_CHANGE_LENGTH);
+                }
+
+                WriteReport();
+            });
+
+            return true;
+        }
+
         private void Detach()
         {
             SendEmptyOutputReport();

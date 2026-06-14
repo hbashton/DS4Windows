@@ -44,7 +44,9 @@ namespace DS4Windows
         private readonly DualSenseMicrophonePassthrough dualSenseMicrophonePassthrough = new DualSenseMicrophonePassthrough();
         private readonly GameBarIntegration gameBarIntegration = new GameBarIntegration();
         private readonly object hidHideSessionLock = new object();
-        private readonly HashSet<string> hidHideManagedInstanceIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> hidHideSessionManagedInstanceIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> hidHidePersistentManagedInstanceIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private bool? hidHideActiveStateBeforeManagedSession;
         // Might be useful for ScpVBus build
         public const int EXPANDED_CONTROLLER_COUNT = 8;
         public const int MAX_DS4_CONTROLLER_COUNT = Global.MAX_DS4_CONTROLLER_COUNT;
@@ -750,6 +752,7 @@ namespace DS4Windows
 
         public void ShutDown()
         {
+            ReleaseHidHideManagedDevices();
             outputslotMan.ShutDown();
             OutputSlotPersist.WriteConfig(outputslotMan);
 
@@ -871,7 +874,7 @@ namespace DS4Windows
                 hidDeviceHidingForced = false; // No known equivalent in HidHide
                 hidDeviceHidingEnabled = false;
 
-                using (HidHideAPIDevice hidHideDevice = new HidHideAPIDevice())
+                using (HidHideAPIDevice hidHideDevice = new HidHideAPIDevice(writeAccess: false))
                 {
                     if (!hidHideDevice.IsOpen())
                     {
@@ -976,7 +979,8 @@ namespace DS4Windows
             bool alreadyManaged;
             lock (hidHideSessionLock)
             {
-                alreadyManaged = hidHideManagedInstanceIds.Contains(instanceId);
+                alreadyManaged = hidHideSessionManagedInstanceIds.Contains(instanceId) ||
+                    hidHidePersistentManagedInstanceIds.Contains(instanceId);
             }
 
             try
@@ -985,24 +989,29 @@ namespace DS4Windows
                 {
                     if (!hidHideDevice.IsOpen()) return false;
 
-                    if (!hidHideDevice.GetActiveState())
+                    bool active = hidHideDevice.GetActiveState();
+                    lock (hidHideSessionLock)
+                    {
+                        hidHideActiveStateBeforeManagedSession ??= active;
+                    }
+
+                    if (!active)
                     {
                         hidHideDevice.SetActiveState(true);
                     }
 
-                    if (!alreadyManaged && !hidHideDevice.AddSessionBlacklist(new List<string> { instanceId }))
+                    if (!alreadyManaged && hidHideDevice.AddSessionBlacklist(new List<string> { instanceId }))
+                    {
+                        lock (hidHideSessionLock)
+                        {
+                            hidHideSessionManagedInstanceIds.Add(instanceId);
+                        }
+
+                        LogDebug($"HidHide session hiding enabled for {dev.DisplayName} ({instanceId})", false);
+                    }
+                    else if (!alreadyManaged && !EnsurePersistentHidHideBlacklist(hidHideDevice, instanceId, dev))
                     {
                         return false;
-                    }
-
-                    lock (hidHideSessionLock)
-                    {
-                        hidHideManagedInstanceIds.Add(instanceId);
-                    }
-
-                    if (!alreadyManaged)
-                    {
-                        LogDebug($"HidHide session hiding enabled for {dev.DisplayName} ({instanceId})", false);
                     }
 
                     UpdateHidHideAttributes();
@@ -1013,6 +1022,88 @@ namespace DS4Windows
             {
                 LogDebug($"HidHide session setup failed for {dev.DisplayName}: {ex.Message}", true);
                 return false;
+            }
+        }
+
+        private bool EnsurePersistentHidHideBlacklist(HidHideAPIDevice hidHideDevice, string instanceId, DS4Device dev)
+        {
+            List<string> instances = hidHideDevice.GetBlacklist()
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .ToList();
+
+            if (instances.Any(item => string.Equals(item, instanceId, StringComparison.OrdinalIgnoreCase)))
+            {
+                StartupDiag($"HidHide persistent blacklist already contains {instanceId}");
+                return true;
+            }
+
+            instances.Add(instanceId);
+            if (!hidHideDevice.SetBlacklist(instances))
+            {
+                StartupDiag($"HidHide persistent blacklist fallback failed for {dev.DisplayName} ({instanceId})");
+                return false;
+            }
+
+            lock (hidHideSessionLock)
+            {
+                hidHidePersistentManagedInstanceIds.Add(instanceId);
+            }
+
+            LogDebug($"HidHide persistent hiding enabled for {dev.DisplayName} ({instanceId})", false);
+            return true;
+        }
+
+        private void ReleaseHidHideManagedDevices()
+        {
+            if (!Global.hidHideInstalled) return;
+
+            List<string> persistentIds;
+            bool? restoreActiveState;
+            lock (hidHideSessionLock)
+            {
+                persistentIds = hidHidePersistentManagedInstanceIds.ToList();
+                restoreActiveState = hidHideActiveStateBeforeManagedSession;
+                hidHideSessionManagedInstanceIds.Clear();
+                hidHidePersistentManagedInstanceIds.Clear();
+                hidHideActiveStateBeforeManagedSession = null;
+            }
+
+            if (persistentIds.Count == 0 && restoreActiveState is null) return;
+
+            try
+            {
+                using (HidHideAPIDevice hidHideDevice = new HidHideAPIDevice())
+                {
+                    if (!hidHideDevice.IsOpen()) return;
+
+                    hidHideDevice.ClearSessionBlacklist();
+
+                    if (persistentIds.Count > 0)
+                    {
+                        List<string> instances = hidHideDevice.GetBlacklist()
+                            .Where(item => !string.IsNullOrWhiteSpace(item))
+                            .ToList();
+
+                        int removed = instances.RemoveAll(item =>
+                            persistentIds.Any(managed => string.Equals(managed, item, StringComparison.OrdinalIgnoreCase)));
+
+                        if (removed > 0 && hidHideDevice.SetBlacklist(instances))
+                        {
+                            StartupDiag($"Released {removed} DS4Windows-managed HidHide blacklist entries");
+                        }
+                    }
+
+                    if (restoreActiveState == false)
+                    {
+                        hidHideDevice.SetActiveState(false);
+                    }
+
+                    UpdateHidHideAttributes();
+                }
+            }
+            catch (Exception ex)
+            {
+                StartupDiag($"ReleaseHidHideManagedDevices exception {ex.GetType().Name}: {ex.Message}");
             }
         }
 
@@ -2292,6 +2383,7 @@ namespace DS4Windows
             }
 
             runHotPlug = false;
+            ReleaseHidHideManagedDevices();
             StartupDiag("ControlService.Stop before stopped events");
             ServiceStopped?.Invoke(this, EventArgs.Empty);
             RunningChanged?.Invoke(this, EventArgs.Empty);

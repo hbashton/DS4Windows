@@ -476,8 +476,13 @@ namespace DS4Windows
 
         private void LogWriterHealthIfNeeded()
         {
+            if (!Global.VerboseStartupLogging)
+            {
+                return;
+            }
+
             long replaced = Interlocked.Read(ref replacedPendingPacketCount);
-            if (replaced == 0 && !Global.VerboseStartupLogging)
+            if (replaced == 0)
             {
                 return;
             }

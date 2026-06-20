@@ -57,25 +57,29 @@ These are the user-facing features that should be added before VIIPER becomes th
 
 4. **DualSense raw output report support**
 
-   Current VIIPER feedback exposes basic rumble, lightbar RGB, and player LEDs. Full DualSense behavior needs raw output report forwarding or a richer VIIPER feedback schema so adaptive triggers, mic LED, mute LED, speaker volume, and advanced haptics can be passed back to a physical DualSense.
+   Completed for the VIIPER extended DualSense stream. Native `0x02` output reports are preserved for adaptive triggers, lightbar, player LEDs, and mute behavior. The experimental UAC haptics endpoint produces a separate Bluetooth `0x32` haptics stream; it must remain distinct from ordinary rumble.
 
 5. **Adaptive trigger bridge**
 
-   After raw output support exists, map DualSense adaptive-trigger commands from games into DS4Windows' existing adaptive-trigger implementation when the real input controller is a DualSense.
+   Completed for a compatible physical DualSense / DualSense Edge. A virtual Edge does not forward native Edge output reports to a standard physical DualSense because the report sizes differ.
 
-6. **Switch 2 feedback polish**
+6. **Bluetooth controller speaker audio**
+
+   The selected Windows render endpoint can be mirrored to a physical Bluetooth DualSense using the `0x35` speaker transport. Selecting VIIPER's virtual `Wireless Controller` endpoint lets a game render controller audio into the same virtual USB Audio Class device that supplies channels 3/4 for advanced haptics.
+
+7. **Switch 2 feedback polish**
 
    Improve Switch 2 rumble decoding beyond "best effort" motor intensity and add any VIIPER-specific output report handling as it becomes available.
 
-7. **Configurable VIIPER endpoint**
+8. **Configurable VIIPER endpoint**
 
     Add host, port, and password fields for advanced users who run VIIPER on another machine, while keeping localhost defaults hidden unless advanced settings are expanded.
 
-8. **Output backend migration tools**
+9. **Output backend migration tools**
 
     Add a profile migration command that can duplicate existing ViGEm profiles into VIIPER profiles. Users should be able to test VIIPER without risking their working setup.
 
-9. **Diagnostics that users can send**
+10. **Diagnostics that users can send**
 
     Add a compact "Copy VIIPER diagnostics" button that includes DS4Windows version, VIIPER server version, usbip-win2 state, selected output type, last API error, and attach status.
 

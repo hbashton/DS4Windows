@@ -161,8 +161,7 @@ else {
 
 Write-Step "Installing VIIPER"
 $viiperRepos = @(
-    "hbashton/VIIPER",
-    "Alia5/VIIPER"
+    "hbashton/VIIPER"
 )
 $viiperAssetUrl = Get-GithubLatestAssetWithFallback $viiperRepos "(?i)^(?!.*(libviiper|client|headers|linux|arm64|\.nupkg|\.crate|\.tgz)).*\.(exe|zip)$"
 Install-ViiperAsset $viiperAssetUrl $viiperPath $tempDir

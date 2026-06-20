@@ -1,8 +1,11 @@
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
+using DS4Windows.InputDevices;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace DS4Windows
 {
@@ -11,17 +14,27 @@ namespace DS4Windows
         private const int ControllerCount = ControlService.MAX_DS4_CONTROLLER_COUNT;
         private readonly object syncRoot = new object();
         private readonly SlotPlayback[] slots = new SlotPlayback[ControllerCount];
+        private readonly DualSenseBluetoothSpeakerPassthrough[] bluetoothSlots = new DualSenseBluetoothSpeakerPassthrough[ControllerCount];
+        private readonly int[] bluetoothStartGeneration = new int[ControllerCount];
         private WasapiLoopbackCapture capture;
         private WaveFormat captureFormat;
         private string captureEndpointId = string.Empty;
 
-        public void Start(int slot, byte speakerVolume, string requestedCaptureEndpointId,
+        public void Start(int slot, DualSenseDevice dualSenseDevice, byte speakerVolume, string requestedCaptureEndpointId,
             string requestedSpeakerEndpointId)
         {
             if (slot < 0 || slot >= slots.Length)
             {
                 return;
             }
+
+            if (dualSenseDevice?.ConnectionType == ConnectionType.BT)
+            {
+                StartBluetooth(slot, dualSenseDevice, speakerVolume, requestedCaptureEndpointId);
+                return;
+            }
+
+            StopBluetooth(slot);
 
             lock (syncRoot)
             {
@@ -82,6 +95,11 @@ namespace DS4Windows
                 slots[slot] = null;
                 playback?.Dispose();
 
+                DualSenseBluetoothSpeakerPassthrough bluetoothPlayback = bluetoothSlots[slot];
+                bluetoothSlots[slot] = null;
+                bluetoothStartGeneration[slot]++;
+                bluetoothPlayback?.Dispose();
+
                 if (!slots.Any(item => item != null))
                 {
                     StopCapture();
@@ -97,9 +115,89 @@ namespace DS4Windows
                 {
                     slots[i]?.Dispose();
                     slots[i] = null;
+                    bluetoothSlots[i]?.Dispose();
+                    bluetoothSlots[i] = null;
+                    bluetoothStartGeneration[i]++;
                 }
 
                 StopCapture();
+            }
+        }
+
+        private void StartBluetooth(int slot, DualSenseDevice device, byte speakerVolume, string requestedCaptureEndpointId)
+        {
+            lock (syncRoot)
+            {
+                SlotPlayback usbPlayback = slots[slot];
+                slots[slot] = null;
+                usbPlayback?.Dispose();
+                if (!slots.Any(item => item != null))
+                {
+                    StopCapture();
+                }
+
+                DualSenseBluetoothSpeakerPassthrough previous = bluetoothSlots[slot];
+                bluetoothSlots[slot] = null;
+                previous?.Dispose();
+                int generation = ++bluetoothStartGeneration[slot];
+                _ = Task.Run(() => StartBluetoothWithRetry(slot, device, speakerVolume,
+                    requestedCaptureEndpointId, generation));
+            }
+        }
+
+        private void StartBluetoothWithRetry(int slot, DualSenseDevice device, byte speakerVolume,
+            string requestedCaptureEndpointId, int generation)
+        {
+            const int attempts = 10;
+            Exception lastError = null;
+
+            for (int attempt = 0; attempt < attempts; attempt++)
+            {
+                lock (syncRoot)
+                {
+                    if (generation != bluetoothStartGeneration[slot])
+                    {
+                        return;
+                    }
+                }
+
+                var bluetoothPlayback = new DualSenseBluetoothSpeakerPassthrough(device, speakerVolume,
+                    requestedCaptureEndpointId);
+                try
+                {
+                    bluetoothPlayback.Start();
+                    lock (syncRoot)
+                    {
+                        if (generation != bluetoothStartGeneration[slot])
+                        {
+                            bluetoothPlayback.Dispose();
+                            return;
+                        }
+
+                        bluetoothSlots[slot] = bluetoothPlayback;
+                    }
+
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    lastError = ex;
+                    bluetoothPlayback.Dispose();
+                    Thread.Sleep(500);
+                }
+            }
+
+            AppLogger.LogToGui($"DualSense Bluetooth speaker passthrough could not start after waiting for the selected audio endpoint: {lastError?.Message}", true);
+        }
+
+        private void StopBluetooth(int slot)
+        {
+            lock (syncRoot)
+            {
+                DualSenseBluetoothSpeakerPassthrough bluetoothPlayback = bluetoothSlots[slot];
+                bluetoothSlots[slot] = null;
+                bluetoothStartGeneration[slot]++;
+                bluetoothPlayback?.Dispose();
             }
         }
 

@@ -53,6 +53,7 @@ namespace DS4Windows
         private readonly object pendingPacketLock = new object();
         private readonly object writerThreadLock = new object();
         private readonly object streamRecoveryLock = new object();
+        private readonly object physicalDualSenseIdentityLock = new object();
         private readonly AutoResetEvent writerSignal = new AutoResetEvent(false);
         private ViiperDeviceStream deviceStream;
         private Thread feedbackThread;
@@ -69,6 +70,8 @@ namespace DS4Windows
         private int submitFailureLogged;
         private int edgePhysicalMismatchLogged;
         private int activeFeedbackLength;
+        private string physicalDualSenseIdentityPath;
+        private bool physicalDualSenseIdentityVerified;
         private readonly byte[] lastR2TriggerFeedback = new byte[DualSenseTriggerEffectLength];
         private readonly byte[] lastL2TriggerFeedback = new byte[DualSenseTriggerEffectLength];
 
@@ -99,6 +102,11 @@ namespace DS4Windows
             Interlocked.Exchange(ref submittedPacketCount, 0);
             Interlocked.Exchange(ref writtenPacketCount, 0);
             Volatile.Write(ref edgePhysicalMismatchLogged, 0);
+            lock (physicalDualSenseIdentityLock)
+            {
+                physicalDualSenseIdentityPath = null;
+                physicalDualSenseIdentityVerified = false;
+            }
             lastWriterHealthLogUtc = DateTime.MinValue;
             writerStopRequested = false;
             connected = true;
@@ -629,7 +637,8 @@ namespace DS4Windows
         private void ApplyDualSenseTriggerFeedback(DS4Device device, byte[] feedback, int feedbackLength)
         {
             if (feedbackLength < DualSenseExtendedFeedbackLength ||
-                device is not DualSenseDevice dualSenseDevice)
+                device is not DualSenseDevice dualSenseDevice ||
+                !IsCurrentPhysicalSonyDualSense(dualSenseDevice))
             {
                 return;
             }
@@ -714,8 +723,13 @@ namespace DS4Windows
 
         private bool IsNativeDualSenseFeedbackCompatible(DS4Device device)
         {
+            if (device is not DualSenseDevice dualSenseDevice ||
+                !IsCurrentPhysicalSonyDualSense(dualSenseDevice))
+            {
+                return false;
+            }
+
             if (viiperType != ViiperVirtualDeviceType.DualSenseEdge ||
-                device is not DualSenseDevice dualSenseDevice ||
                 dualSenseDevice.SubType == DualSenseDevice.DeviceSubType.DSEdge)
             {
                 return true;
@@ -729,6 +743,55 @@ namespace DS4Windows
             return false;
         }
 
+        private bool IsCurrentPhysicalSonyDualSense(DualSenseDevice device)
+        {
+            if (!IsGenuineSonyDualSense(device))
+            {
+                return false;
+            }
+
+            string devicePath = device.HidDevice.DevicePath ?? string.Empty;
+            lock (physicalDualSenseIdentityLock)
+            {
+                if (string.Equals(devicePath, physicalDualSenseIdentityPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    return physicalDualSenseIdentityVerified;
+                }
+            }
+
+            bool isPhysical;
+            try
+            {
+                isPhysical = !Global.CheckIfVirtualDevice(devicePath);
+            }
+            catch
+            {
+                // Treat an unverified controller as ineligible for raw output.
+                // Generic rumble remains available through the normal fallback.
+                isPhysical = false;
+            }
+
+            lock (physicalDualSenseIdentityLock)
+            {
+                physicalDualSenseIdentityPath = devicePath;
+                physicalDualSenseIdentityVerified = isPhysical;
+            }
+
+            return isPhysical;
+        }
+
+        private static bool IsGenuineSonyDualSense(DualSenseDevice device)
+        {
+            if (device?.HidDevice?.Attributes == null)
+            {
+                return false;
+            }
+
+            int vendorId = device.HidDevice.Attributes.VendorId;
+            int productId = device.HidDevice.Attributes.ProductId;
+            return vendorId == DS4Devices.SONY_VID && (productId == 0x0CE6 || productId == 0x0DF2);
+        }
+
         public static bool ApplySyntheticDualSenseTriggerFeedback(int deviceIndex, bool rightTrigger, byte mode,
             byte startResistance, byte effectForce, byte rangeForce, byte nearReleaseStrength,
             byte nearMiddleStrength, byte pressedStrength, byte frequency)
@@ -736,7 +799,8 @@ namespace DS4Windows
             if (Program.rootHub == null ||
                 deviceIndex < 0 ||
                 deviceIndex >= Program.rootHub.DS4Controllers.Length ||
-                Program.rootHub.DS4Controllers[deviceIndex] is not DualSenseDevice dualSenseDevice)
+                Program.rootHub.DS4Controllers[deviceIndex] is not DualSenseDevice dualSenseDevice ||
+                !IsGenuineSonyDualSense(dualSenseDevice))
             {
                 return false;
             }
@@ -771,7 +835,8 @@ namespace DS4Windows
             if (Program.rootHub == null ||
                 deviceIndex < 0 ||
                 deviceIndex >= Program.rootHub.DS4Controllers.Length ||
-                Program.rootHub.DS4Controllers[deviceIndex] is not DualSenseDevice dualSenseDevice)
+                Program.rootHub.DS4Controllers[deviceIndex] is not DualSenseDevice dualSenseDevice ||
+                !IsGenuineSonyDualSense(dualSenseDevice))
             {
                 return false;
             }

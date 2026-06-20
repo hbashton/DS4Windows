@@ -1563,9 +1563,28 @@ namespace DS4Windows.InputDevices
 
         public bool WriteBluetoothHapticsOutputReport(byte[] report, int offset, int length, bool waitForWrite = false)
         {
+            return WriteBluetoothAudioOutputReport(report, offset, length, 0x32, 141,
+                "haptics", waitForWrite);
+        }
+
+        /// <summary>
+        /// Queues a DualSense Bluetooth speaker stream report. This is the 334-byte
+        /// report 0x35 packet 0x13 lane used by the controller's internal speaker.
+        /// It is deliberately separate from the 0x32 haptics PCM lane so a game
+        /// audio mirror cannot overwrite adaptive-trigger or haptics state.
+        /// </summary>
+        public bool WriteBluetoothSpeakerAudioOutputReport(byte[] report, int offset, int length)
+        {
+            return WriteBluetoothAudioOutputReport(report, offset, length, 0x35, 334,
+                "speaker audio", waitForWrite: false);
+        }
+
+        private bool WriteBluetoothAudioOutputReport(byte[] report, int offset, int length,
+            byte expectedReportId, int expectedLength, string reportDescription, bool waitForWrite)
+        {
             if (report == null)
             {
-                LastBluetoothHapticsWriteStatus = "Rejected: report was null.";
+                LastBluetoothHapticsWriteStatus = $"Rejected: {reportDescription} report was null.";
                 return false;
             }
 
@@ -1575,9 +1594,9 @@ namespace DS4Windows.InputDevices
                 return false;
             }
 
-            if (length != 141)
+            if (length != expectedLength)
             {
-                LastBluetoothHapticsWriteStatus = $"Rejected: report length was {length}, expected 141.";
+                LastBluetoothHapticsWriteStatus = $"Rejected: {reportDescription} report length was {length}, expected {expectedLength}.";
                 return false;
             }
 
@@ -1587,26 +1606,26 @@ namespace DS4Windows.InputDevices
                 return false;
             }
 
-            if (report[offset] != 0x32)
+            if (report[offset] != expectedReportId)
             {
-                LastBluetoothHapticsWriteStatus = $"Rejected: report ID was 0x{report[offset]:X2}, expected 0x32.";
+                LastBluetoothHapticsWriteStatus = $"Rejected: report ID was 0x{report[offset]:X2}, expected 0x{expectedReportId:X2}.";
                 return false;
             }
 
-            byte[] hapticsReport = new byte[length];
-            Array.Copy(report, offset, hapticsReport, 0, length);
+            byte[] audioReport = new byte[length];
+            Array.Copy(report, offset, audioReport, 0, length);
 
             if (!waitForWrite)
             {
                 queueEvent(() =>
                 {
-                    bool result = hDevice.WriteOutputReportViaInterrupt(hapticsReport, READ_STREAM_TIMEOUT);
+                    bool result = hDevice.WriteOutputReportViaInterrupt(audioReport, READ_STREAM_TIMEOUT);
                     LastBluetoothHapticsWriteStatus = result ?
                         "Queued write completed successfully." :
                         $"Queued write returned false. LastWin32Error={Marshal.GetLastWin32Error()}.";
                 });
 
-                LastBluetoothHapticsWriteStatus = "Queued Bluetooth haptics report for asynchronous HID write.";
+                LastBluetoothHapticsWriteStatus = $"Queued Bluetooth {reportDescription} report for asynchronous HID write.";
                 return true;
             }
 
@@ -1615,7 +1634,7 @@ namespace DS4Windows.InputDevices
             {
                 try
                 {
-                    bool result = hDevice.WriteOutputReportViaInterrupt(hapticsReport, READ_STREAM_TIMEOUT);
+                    bool result = hDevice.WriteOutputReportViaInterrupt(audioReport, READ_STREAM_TIMEOUT);
                     if (!result)
                     {
                         LastBluetoothHapticsWriteStatus = $"HID interrupt write returned false. LastWin32Error={Marshal.GetLastWin32Error()}.";

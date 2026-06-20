@@ -2173,6 +2173,38 @@
 
                                         <CheckBox x:Name="dualSForceGenRumbleRescale" IsChecked="{Binding EnableGenericRumbleStrRescaleForDualSenseDevices}" Content="{lex:Loc DualSRumbleForceGenericRescale}" ToolTip="{lex:Loc DualSRumbleForceGenericRescale_Tip}" Margin="3,8,0,0" HorizontalAlignment="Left" />
 
+                                        <GroupBox Header="DualSense Audio" Margin="0,10,0,0" Padding="2,4">
+                                            <Grid>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="30" />
+                                                    <RowDefinition Height="30" />
+                                                    <RowDefinition Height="30" />
+                                                    <RowDefinition Height="30" />
+                                                </Grid.RowDefinitions>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition />
+                                                </Grid.ColumnDefinitions>
+
+                                                <CheckBox Content="Mirror audio to controller speaker" IsChecked="{Binding DualSenseEnableSpeakerOutput}"
+                                                          Grid.Row="0" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}"
+                                                          ToolTip="Mirrors the selected Windows playback endpoint to a physical DualSense speaker. Bluetooth uses the controller speaker stream; USB uses its Windows speaker endpoint." />
+                                                <Label Content="Audio source:" Grid.Row="1" Grid.Column="0"
+                                                       ToolTip="For VIIPER game audio, select the virtual Wireless Controller endpoint created by a DualSense VIIPER profile. The first stereo pair is mirrored to the physical controller speaker." />
+                                                <ComboBox ItemsSource="{Binding AudioCaptureEndpointChoices}" DisplayMemberPath="Name" SelectedValuePath="EndpointId"
+                                                          SelectedValue="{Binding DualSenseAudioCaptureEndpointId}" Grid.Row="1" Grid.Column="1"
+                                                          Margin="{StaticResource spaceMargin}" />
+                                                <Label Content="USB speaker endpoint:" Grid.Row="2" Grid.Column="0"
+                                                       ToolTip="Only used for a physical USB DualSense. Bluetooth controllers stream audio directly to the controller." />
+                                                <ComboBox ItemsSource="{Binding AudioSpeakerEndpointChoices}" DisplayMemberPath="Name" SelectedValuePath="EndpointId"
+                                                          SelectedValue="{Binding DualSenseAudioSpeakerEndpointId}" Grid.Row="2" Grid.Column="1"
+                                                          Margin="{StaticResource spaceMargin}" />
+                                                <Label Content="Speaker volume:" Grid.Row="3" Grid.Column="0" />
+                                                <xctk:IntegerUpDown Value="{Binding DualSenseSpeakerVolume}" Minimum="0" Maximum="255" Grid.Row="3" Grid.Column="1"
+                                                                    Margin="{StaticResource spaceMargin}" />
+                                            </Grid>
+                                        </GroupBox>
+
                                         <GroupBox Header="DualSense Mute Button" Margin="0,10,0,0" Padding="2,4">
                                             <Grid>
                                                 <Grid.RowDefinitions>

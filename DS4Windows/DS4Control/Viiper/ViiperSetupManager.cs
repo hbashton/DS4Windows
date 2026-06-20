@@ -66,7 +66,6 @@ namespace DS4Windows
         public const int ApiPort = 3242;
         public const string UsbipWin2ReleasesUrl = "https://github.com/vadimgrn/usbip-win2/releases";
         public const string ViiperReleasesUrl = "https://github.com/hbashton/VIIPER/releases";
-        public const string UpstreamViiperReleasesUrl = "https://github.com/Alia5/VIIPER/releases";
 
         private const string InstallerScriptName = "install-viiper-backend.ps1";
         private static readonly object serverStartLock = new object();
@@ -150,7 +149,6 @@ namespace DS4Windows
                 }
 
                 Util.StartProcessHelper(ViiperReleasesUrl);
-                Util.StartProcessHelper(UpstreamViiperReleasesUrl);
                 Util.StartProcessHelper(UsbipWin2ReleasesUrl);
                 return false;
             }

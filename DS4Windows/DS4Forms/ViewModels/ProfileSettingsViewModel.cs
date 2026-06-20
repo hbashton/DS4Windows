@@ -3146,12 +3146,13 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     using var enumerator = new MMDeviceEnumerator();
                     foreach (MMDevice endpoint in enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active))
                     {
+                        string name = endpoint.FriendlyName;
                         if (DualSenseAudioPassthrough.IsDualSenseEndpoint(endpoint))
                         {
-                            continue;
+                            name += " (controller or VIIPER audio)";
                         }
 
-                        choices.Add(new AudioEndpointChoice(endpoint.FriendlyName, endpoint.ID));
+                        choices.Add(new AudioEndpointChoice(name, endpoint.ID));
                     }
                 }
                 catch { }

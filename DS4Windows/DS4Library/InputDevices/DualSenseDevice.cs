@@ -330,6 +330,43 @@ namespace DS4Windows.InputDevices
         private DeviceSubType subType = DeviceSubType.DualSense;
         public DeviceSubType SubType => subType;
         public string LastBluetoothHapticsWriteStatus { get; private set; } = "Not attempted";
+        private const int BluetoothCombinedOutputReportLength = 398;
+        private const int BluetoothCombinedSpeakerOffset = 142;
+        private const int BluetoothCombinedSpeakerDataOffset = 144;
+        private const int BluetoothCombinedSpeakerFrameLength = 200;
+        private readonly object bluetoothSpeakerFrameLock = new object();
+        private readonly byte[] latestBluetoothSpeakerFrame = new byte[BluetoothCombinedSpeakerFrameLength];
+        private int latestBluetoothSpeakerFrameLength;
+        private int bluetoothCombinedOutputTransportEnabled;
+
+        /// <summary>
+        /// True after VIIPER has delivered a vDS-compatible combined Bluetooth
+        /// haptics report. Speaker frames are then embedded in that single
+        /// output stream rather than competing with it through report 0x35.
+        /// </summary>
+        public bool BluetoothCombinedOutputTransportEnabled =>
+            Volatile.Read(ref bluetoothCombinedOutputTransportEnabled) != 0;
+
+        /// <summary>
+        /// Stores the latest fixed-size Opus frame produced by the selected
+        /// Windows audio source. The next combined haptics output report will
+        /// include it. No HID traffic is emitted from this method.
+        /// </summary>
+        public void SetBluetoothSpeakerAudioFrame(byte[] frame, int length)
+        {
+            if (frame == null || length <= 0)
+            {
+                return;
+            }
+
+            lock (bluetoothSpeakerFrameLock)
+            {
+                Array.Clear(latestBluetoothSpeakerFrame, 0, latestBluetoothSpeakerFrame.Length);
+                int bytesToCopy = Math.Min(Math.Min(length, frame.Length), latestBluetoothSpeakerFrame.Length);
+                Array.Copy(frame, 0, latestBluetoothSpeakerFrame, 0, bytesToCopy);
+                latestBluetoothSpeakerFrameLength = bytesToCopy;
+            }
+        }
 
         private DualSenseControllerOptions nativeOptionsStore;
         public DualSenseControllerOptions NativeOptionsStore { get => nativeOptionsStore; }
@@ -1579,6 +1616,44 @@ namespace DS4Windows.InputDevices
                 "speaker audio", waitForWrite: false);
         }
 
+        /// <summary>
+        /// Queues the vDS-compatible Bluetooth report 0x36 carrying state,
+        /// haptics, and the most recent 10 ms Opus speaker frame. Keeping this
+        /// as one write prevents the controller from seeing independent 0x32
+        /// haptics and 0x35 speaker streams at the same time.
+        /// </summary>
+        public bool WriteBluetoothCombinedHapticsAudioOutputReport(byte[] report, int offset, int length)
+        {
+            if (report == null || offset < 0 || length != BluetoothCombinedOutputReportLength ||
+                offset + length > report.Length || report[offset] != 0x36)
+            {
+                return WriteBluetoothAudioOutputReport(report, offset, length, 0x36,
+                    BluetoothCombinedOutputReportLength, "combined haptics/audio", waitForWrite: false);
+            }
+
+            byte[] combined = new byte[BluetoothCombinedOutputReportLength];
+            Array.Copy(report, offset, combined, 0, combined.Length);
+            lock (bluetoothSpeakerFrameLock)
+            {
+                if (latestBluetoothSpeakerFrameLength > 0)
+                {
+                    combined[BluetoothCombinedSpeakerOffset] = 0x93;
+                    combined[BluetoothCombinedSpeakerOffset + 1] = BluetoothCombinedSpeakerFrameLength;
+                    Array.Copy(latestBluetoothSpeakerFrame, 0, combined,
+                        BluetoothCombinedSpeakerDataOffset, BluetoothCombinedSpeakerFrameLength);
+                }
+            }
+
+            uint crc = DualSenseBluetoothCrc32(combined, combined.Length - 4);
+            combined[combined.Length - 4] = (byte)crc;
+            combined[combined.Length - 3] = (byte)(crc >> 8);
+            combined[combined.Length - 2] = (byte)(crc >> 16);
+            combined[combined.Length - 1] = (byte)(crc >> 24);
+
+            Interlocked.Exchange(ref bluetoothCombinedOutputTransportEnabled, 1);
+            return WriteBluetoothAudioOutputReport(combined, 0, combined.Length, 0x36,
+                BluetoothCombinedOutputReportLength, "combined haptics/audio", waitForWrite: false);
+        }
         private bool WriteBluetoothAudioOutputReport(byte[] report, int offset, int length,
             byte expectedReportId, int expectedLength, string reportDescription, bool waitForWrite)
         {

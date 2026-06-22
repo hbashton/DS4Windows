@@ -5,6 +5,7 @@ using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 using System;
+using System.Diagnostics;
 using System.Threading;
 
 namespace DS4Windows
@@ -32,6 +33,7 @@ namespace DS4Windows
         private readonly string sourceEndpointId;
         private readonly byte speakerVolume;
         private readonly float[] frame = new float[FrameSamples * Channels];
+        private readonly float[] sourceFrame = new float[512 * Channels];
         private readonly byte[] opusFrame = new byte[OpusBytes];
         private readonly byte[] report = new byte[ReportLength];
 
@@ -43,6 +45,10 @@ namespace DS4Windows
         private int reportSequence;
         private byte packetCounter;
         private int loggedWriteFailure;
+        private long framesSent;
+        private long shortCaptureReads;
+        private long skippedScheduleSlots;
+        private long lastDiagnosticUtcTicks;
 
         public DualSenseBluetoothSpeakerPassthrough(DualSenseDevice device, byte speakerVolume,
             string sourceEndpointId)
@@ -86,6 +92,7 @@ namespace DS4Windows
                 {
                     IsBackground = true,
                     Name = "DualSense Bluetooth speaker audio",
+                    Priority = ThreadPriority.Highest,
                 };
                 capture.StartRecording();
                 worker.Start();
@@ -168,41 +175,102 @@ namespace DS4Windows
 
         private void StreamLoop(ISampleProvider source)
         {
+            const int sourceFramesPerTick = 512;
+            const double frameDurationMs = 10.0 + (2.0 / 3.0);
+            double frameTicks = Stopwatch.Frequency * frameDurationMs / 1000.0;
+            double nextFrame = Stopwatch.GetTimestamp() + frameTicks;
+
             while (!stopping)
             {
+                Array.Clear(sourceFrame, 0, sourceFrame.Length);
                 Array.Clear(frame, 0, frame.Length);
                 int samplesRead;
                 lock (syncRoot)
                 {
-                    samplesRead = stopping ? 0 : source.Read(frame, 0, frame.Length);
+                    samplesRead = stopping ? 0 : source.Read(sourceFrame, 0, sourceFrame.Length);
                 }
 
-                if (samplesRead > 0 && HasAudibleSamples(frame, samplesRead))
+                if (samplesRead < sourceFrame.Length)
+                {
+                    Interlocked.Increment(ref shortCaptureReads);
+                }
+
+                if (samplesRead > 0)
                 {
                     float volume = speakerVolume / 255.0f;
                     for (int i = 0; i < samplesRead; i++)
                     {
-                        frame[i] = Math.Clamp(frame[i] * volume, -1.0f, 1.0f);
+                        sourceFrame[i] = Math.Clamp(sourceFrame[i] * volume, -1.0f, 1.0f);
                     }
-
-                    SendFrame();
                 }
 
-                Thread.Sleep(10);
+                // SAxense, PadForge, and DS5Dongle converge on this firmware
+                // cadence: consume 512 frames every 10.667 ms, then compress
+                // them into one 480-sample Opus frame. Sending one report per
+                // 10 ms is 6.7% too fast and eventually overruns the pad.
+                const double step = sourceFramesPerTick / (double)FrameSamples;
+                for (int outputFrame = 0; outputFrame < FrameSamples; outputFrame++)
+                {
+                    double position = outputFrame * step;
+                    int first = (int)position;
+                    int second = Math.Min(first + 1, sourceFramesPerTick - 1);
+                    double fraction = position - first;
+                    int outputOffset = outputFrame * Channels;
+                    int firstOffset = first * Channels;
+                    int secondOffset = second * Channels;
+                    frame[outputOffset] = (float)(sourceFrame[firstOffset] * (1.0 - fraction) + sourceFrame[secondOffset] * fraction);
+                    frame[outputOffset + 1] = (float)(sourceFrame[firstOffset + 1] * (1.0 - fraction) + sourceFrame[secondOffset + 1] * fraction);
+                }
+
+                SendFrame();
+                Interlocked.Increment(ref framesSent);
+                LogStreamDiagnosticsIfVerbose();
+
+                nextFrame += frameTicks;
+                double remainingTicks = nextFrame - Stopwatch.GetTimestamp();
+                if (remainingTicks > 0)
+                {
+                    int sleepMs = (int)(remainingTicks * 1000 / Stopwatch.Frequency);
+                    if (sleepMs > 1)
+                    {
+                        Thread.Sleep(sleepMs - 1);
+                    }
+
+                    while (!stopping && Stopwatch.GetTimestamp() < nextFrame)
+                    {
+                        Thread.SpinWait(64);
+                    }
+                }
+                else
+                {
+                    // Never emit catch-up bursts. Missing one audio slot is
+                    // preferable to overflowing the controller receive queue.
+                    Interlocked.Increment(ref skippedScheduleSlots);
+                    nextFrame = Stopwatch.GetTimestamp() + frameTicks;
+                }
             }
         }
 
-        private static bool HasAudibleSamples(float[] samples, int count)
+        private void LogStreamDiagnosticsIfVerbose()
         {
-            for (int i = 0; i < count; i++)
+            if (!Global.VerboseStartupLogging)
             {
-                if (Math.Abs(samples[i]) > 0.0001f)
-                {
-                    return true;
-                }
+                return;
             }
 
-            return false;
+            long now = DateTime.UtcNow.Ticks;
+            long previous = Interlocked.Read(ref lastDiagnosticUtcTicks);
+            if (previous != 0 && now - previous < TimeSpan.FromSeconds(5).Ticks)
+            {
+                return;
+            }
+
+            if (Interlocked.CompareExchange(ref lastDiagnosticUtcTicks, now, previous) != previous)
+            {
+                return;
+            }
+
+            AppLogger.LogToGui($"DualSense Bluetooth speaker stats: frames={Interlocked.Read(ref framesSent)} shortCaptureReads={Interlocked.Read(ref shortCaptureReads)} skippedSlots={Interlocked.Read(ref skippedScheduleSlots)} status={device.LastBluetoothHapticsWriteStatus}", false);
         }
 
         private void SendFrame()

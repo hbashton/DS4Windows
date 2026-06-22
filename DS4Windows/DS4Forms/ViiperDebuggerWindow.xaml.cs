@@ -45,6 +45,8 @@ namespace DS4WinWPF.DS4Forms
 
         private void HapticsToneBtn_Click(object sender, RoutedEventArgs e) => RunProbe(ViiperDebugTest.HapticsTone);
 
+        private void MicrophoneBtn_Click(object sender, RoutedEventArgs e) => RunProbe(ViiperDebugTest.BluetoothMicrophone);
+
         private void StartTrafficBtn_Click(object sender, RoutedEventArgs e) => RunDebuggerAction("Starting DualSense traffic capture...", () => debugger.StartDualSenseTrafficCaptureAsync());
 
         private void StopTrafficBtn_Click(object sender, RoutedEventArgs e) => RunDebuggerAction("Stopping DualSense traffic capture...", () => debugger.StopDualSenseTrafficCaptureAsync());
@@ -116,6 +118,7 @@ namespace DS4WinWPF.DS4Forms
             switch2Btn.IsEnabled = !value;
             adaptiveBtn.IsEnabled = !value;
             hapticsToneBtn.IsEnabled = !value;
+            microphoneBtn.IsEnabled = !value;
             startTrafficBtn.IsEnabled = !value;
             stopTrafficBtn.IsEnabled = !value;
             dumpTrafficBtn.IsEnabled = !value;

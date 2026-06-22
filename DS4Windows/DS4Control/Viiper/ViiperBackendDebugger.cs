@@ -29,6 +29,7 @@ namespace DS4Windows
         Switch2Pro,
         AdaptiveTriggers,
         HapticsTone,
+        BluetoothMicrophone,
         All,
     }
 
@@ -190,6 +191,11 @@ namespace DS4Windows
                 {
                     RunStep("DualSense Bluetooth haptics tone", RunHapticsToneProbe, cancellationToken);
                 }
+
+                if (test == ViiperDebugTest.BluetoothMicrophone)
+                {
+                    RunStep("DualSense Bluetooth microphone transport", RunBluetoothMicrophoneProbe, cancellationToken);
+                }
             }
             finally
             {
@@ -326,6 +332,67 @@ namespace DS4Windows
             if (!anyApplied)
             {
                 Log("No Bluetooth DualSense/DualSense Edge input controller accepted the haptics tone.");
+            }
+        }
+
+        private void RunBluetoothMicrophoneProbe()
+        {
+            Log("Arming physical Bluetooth DualSense microphone streaming with report 0x36. This probe records packet counts only; it does not log voice data or expose an audio endpoint.");
+            bool anyEnabled = false;
+
+            if (Program.rootHub == null)
+            {
+                Log("No controller hub is available.");
+                return;
+            }
+
+            for (int i = 0; i < Program.rootHub.DS4Controllers.Length; i++)
+            {
+                if (Program.rootHub.DS4Controllers[i] is not DualSenseDevice dualSenseDevice)
+                {
+                    continue;
+                }
+
+                dualSenseDevice.ResetBluetoothMicrophoneProbeStatistics();
+                bool enabled = false;
+                try
+                {
+                    // The direct-L2CAP implementation sends a short keepalive while
+                    // waiting for the controller's sticky mic stream to begin.
+                    for (int attempt = 1; attempt <= 4; attempt++)
+                    {
+                        enabled = dualSenseDevice.SetBluetoothMicrophoneStreaming(true, waitForWrite: true);
+                        Log($"Bluetooth microphone controller {i + 1}: enable attempt={attempt} accepted={enabled} status=\"{dualSenseDevice.LastBluetoothMicrophoneWriteStatus}\"");
+                        if (!enabled)
+                        {
+                            break;
+                        }
+
+                        anyEnabled = true;
+                        Thread.Sleep(250);
+                    }
+
+                    if (enabled)
+                    {
+                        Thread.Sleep(1250);
+                    }
+
+                    DateTime lastFrame = dualSenseDevice.BluetoothMicrophoneLastFrameUtc;
+                    Log($"Bluetooth microphone controller {i + 1}: frames={dualSenseDevice.BluetoothMicrophoneFrameCount} lastFrameUtc={(lastFrame == DateTime.MinValue ? "none" : lastFrame.ToString("O"))}");
+                }
+                finally
+                {
+                    if (enabled)
+                    {
+                        bool disabled = dualSenseDevice.SetBluetoothMicrophoneStreaming(false, waitForWrite: true);
+                        Log($"Bluetooth microphone controller {i + 1}: disable accepted={disabled} status=\"{dualSenseDevice.LastBluetoothMicrophoneWriteStatus}\"");
+                    }
+                }
+            }
+
+            if (!anyEnabled)
+            {
+                Log("No Bluetooth DualSense/DualSense Edge input controller accepted the microphone control report.");
             }
         }
 

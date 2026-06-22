@@ -330,6 +330,19 @@ namespace DS4Windows.InputDevices
         private DeviceSubType subType = DeviceSubType.DualSense;
         public DeviceSubType SubType => subType;
         public string LastBluetoothHapticsWriteStatus { get; private set; } = "Not attempted";
+        public string LastBluetoothMicrophoneWriteStatus { get; private set; } = "Not attempted";
+        private long bluetoothMicrophoneFrameCount;
+        private long bluetoothMicrophoneLastFrameUtcTicks;
+
+        public long BluetoothMicrophoneFrameCount => Interlocked.Read(ref bluetoothMicrophoneFrameCount);
+        public DateTime BluetoothMicrophoneLastFrameUtc
+        {
+            get
+            {
+                long ticks = Interlocked.Read(ref bluetoothMicrophoneLastFrameUtcTicks);
+                return ticks == 0 ? DateTime.MinValue : new DateTime(ticks, DateTimeKind.Utc);
+            }
+        }
 
         private DualSenseControllerOptions nativeOptionsStore;
         public DualSenseControllerOptions NativeOptionsStore { get => nativeOptionsStore; }
@@ -683,6 +696,7 @@ namespace DS4Windows.InputDevices
                 {
                     oldCharging = charging;
                     currerror = string.Empty;
+                    bool bluetoothMicrophoneFrame = false;
 
                     if (tempLatencyCount >= 20)
                     {
@@ -705,40 +719,52 @@ namespace DS4Windows.InputDevices
                         HidDevice.ReadStatus res = hDevice.ReadFile(inputReport);
                         if (res == HidDevice.ReadStatus.Success)
                         {
-                            uint recvCrc32 = inputReport[BT_INPUT_REPORT_CRC32_POS] |
-                                (uint)(inputReport[CRC32_POS_1] << 8) |
-                                (uint)(inputReport[CRC32_POS_2] << 16) |
-                                (uint)(inputReport[CRC32_POS_3] << 24);
-
-                            uint calcCrc32 = ~Crc32Algorithm.CalculateFasterBT78Hash(ref HamSeed, ref inputReport, ref crcoffset, ref crcpos);
-                            if (recvCrc32 != calcCrc32)
+                            bluetoothMicrophoneFrame = IsBluetoothMicrophoneFrame(inputReport);
+                            if (bluetoothMicrophoneFrame)
                             {
-                                cState.PacketCounter = pState.PacketCounter + 1; //still increase so we know there were lost packets
-                                if (this.inputReportErrorCount >= 10)
+                                // A valid mic packet is not a malformed normal
+                                // input packet, so it must clear any previous
+                                // normal-input CRC error streak.
+                                this.inputReportErrorCount = 0;
+                                RecordBluetoothMicrophoneFrame();
+                            }
+                            else
+                            {
+                                uint recvCrc32 = inputReport[BT_INPUT_REPORT_CRC32_POS] |
+                                    (uint)(inputReport[CRC32_POS_1] << 8) |
+                                    (uint)(inputReport[CRC32_POS_2] << 16) |
+                                    (uint)(inputReport[CRC32_POS_3] << 24);
+
+                                uint calcCrc32 = ~Crc32Algorithm.CalculateFasterBT78Hash(ref HamSeed, ref inputReport, ref crcoffset, ref crcpos);
+                                if (recvCrc32 != calcCrc32)
                                 {
-                                    exitInputThread = true;
+                                    cState.PacketCounter = pState.PacketCounter + 1; //still increase so we know there were lost packets
+                                    if (this.inputReportErrorCount >= 10)
+                                    {
+                                        exitInputThread = true;
 
-                                    AppLogger.LogToGui(DS4WinWPF.Translations.Strings.CRC32Fail, true);
+                                        AppLogger.LogToGui(DS4WinWPF.Translations.Strings.CRC32Fail, true);
+                                        readWaitEv.Reset();
+                                        //sendOutputReport(true, true); // Kick Windows into noticing the disconnection.
+                                        StopOutputUpdate();
+                                        isDisconnecting = true;
+                                        RunRemoval();
+
+                                        timeoutExecuted = true;
+                                        continue;
+                                    }
+                                    else
+                                    {
+                                        this.inputReportErrorCount++;
+                                    }
+
                                     readWaitEv.Reset();
-                                    //sendOutputReport(true, true); // Kick Windows into noticing the disconnection.
-                                    StopOutputUpdate();
-                                    isDisconnecting = true;
-                                    RunRemoval();
-
-                                    timeoutExecuted = true;
                                     continue;
                                 }
                                 else
                                 {
-                                    this.inputReportErrorCount++;
+                                    this.inputReportErrorCount = 0;
                                 }
-
-                                readWaitEv.Reset();
-                                continue;
-                            }
-                            else
-                            {
-                                this.inputReportErrorCount = 0;
                             }
                         }
                         else
@@ -802,6 +828,16 @@ namespace DS4Windows.InputDevices
                     lastTimeElapsedDouble = testelapsed * (1.0 / Stopwatch.Frequency) * 1000.0;
                     lastTimeElapsed = (long)lastTimeElapsedDouble;
                     oldtime = curtime;
+
+                    if (bluetoothMicrophoneFrame)
+                    {
+                        // Mic packets share report ID 0x31 with normal Bluetooth
+                        // input but do not use the normal gamepad packet layout.
+                        // Keep output actions flowing without feeding voice data
+                        // into controller-state parsing.
+                        ProcessQueuedEvents();
+                        continue;
+                    }
 
                     if (conType == ConnectionType.BT && inputReport[0] != 0x31)
                     {
@@ -1104,24 +1140,46 @@ namespace DS4Windows.InputDevices
 
                     cState.CopyTo(pState);
 
-                    if (hasInputEvts)
-                    {
-                        lock (eventQueueLock)
-                        {
-                            Action tempAct = null;
-                            for (int actInd = 0, actLen = eventQueue.Count; actInd < actLen; actInd++)
-                            {
-                                tempAct = eventQueue.Dequeue();
-                                tempAct.Invoke();
-                            }
-
-                            hasInputEvts = false;
-                        }
-                    }
+                    ProcessQueuedEvents();
                 }
             }
 
             timeoutExecuted = true;
+        }
+
+        private static bool IsBluetoothMicrophoneFrame(byte[] report)
+        {
+            // HidBth strips the HIDP 0xA1 transaction prefix. Direct-L2CAP
+            // references therefore see A1 31 flags, while this handle exposes
+            // 31 flags. Bit 1 in flags marks a 71-byte Opus mic frame.
+            return report != null && report.Length >= 2 && report[0] == 0x31 &&
+                (report[1] & 0x02) != 0;
+        }
+
+        private void RecordBluetoothMicrophoneFrame()
+        {
+            Interlocked.Increment(ref bluetoothMicrophoneFrameCount);
+            Interlocked.Exchange(ref bluetoothMicrophoneLastFrameUtcTicks, DateTime.UtcNow.Ticks);
+        }
+
+        private void ProcessQueuedEvents()
+        {
+            if (!hasInputEvts)
+            {
+                return;
+            }
+
+            lock (eventQueueLock)
+            {
+                Action tempAct = null;
+                for (int actInd = 0, actLen = eventQueue.Count; actInd < actLen; actInd++)
+                {
+                    tempAct = eventQueue.Dequeue();
+                    tempAct.Invoke();
+                }
+
+                hasInputEvts = false;
+            }
         }
 
         protected override void StopOutputUpdate()
@@ -1579,6 +1637,26 @@ namespace DS4Windows.InputDevices
                 "speaker audio", waitForWrite: false);
         }
 
+        /// <summary>
+        /// Sends the controller's Bluetooth microphone stream-control packet. This
+        /// only controls microphone streaming; it does not replace the normal
+        /// state, trigger, haptics, or speaker output report.
+        /// </summary>
+        public bool SetBluetoothMicrophoneStreaming(bool enabled, bool waitForWrite = false)
+        {
+            byte[] report = BuildBluetoothMicrophoneControlReport(enabled);
+            bool result = WriteBluetoothAudioOutputReport(report, 0, report.Length, 0x36, 398,
+                enabled ? "microphone enable" : "microphone disable", waitForWrite);
+            LastBluetoothMicrophoneWriteStatus = LastBluetoothHapticsWriteStatus;
+            return result;
+        }
+
+        public void ResetBluetoothMicrophoneProbeStatistics()
+        {
+            Interlocked.Exchange(ref bluetoothMicrophoneFrameCount, 0);
+            Interlocked.Exchange(ref bluetoothMicrophoneLastFrameUtcTicks, 0);
+        }
+
         private bool WriteBluetoothAudioOutputReport(byte[] report, int offset, int length,
             byte expectedReportId, int expectedLength, string reportDescription, bool waitForWrite)
         {
@@ -1727,6 +1805,29 @@ namespace DS4Windows.InputDevices
             report[11] = 0x92;
             report[12] = sampleSize;
             Array.Copy(sample, 0, report, 13, sampleSize);
+
+            uint crc = DualSenseBluetoothCrc32(report, reportSize - 4);
+            report[reportSize - 4] = (byte)crc;
+            report[reportSize - 3] = (byte)(crc >> 8);
+            report[reportSize - 2] = (byte)(crc >> 16);
+            report[reportSize - 1] = (byte)(crc >> 24);
+            return report;
+        }
+
+        private static byte[] BuildBluetoothMicrophoneControlReport(bool enabled)
+        {
+            const int reportSize = 398;
+            byte[] report = new byte[reportSize];
+            report[0] = 0x36;
+            report[1] = 0x10;
+            report[2] = 0x91;
+            report[3] = 0x07;
+            report[4] = enabled ? (byte)0xFF : (byte)0xFE;
+            report[5] = 64;
+            report[6] = 64;
+            report[7] = 64;
+            report[8] = 64;
+            report[9] = 64;
 
             uint crc = DualSenseBluetoothCrc32(report, reportSize - 4);
             report[reportSize - 4] = (byte)crc;

@@ -600,7 +600,8 @@ namespace DS4Windows
                     {
                         bool nativeForwardingAllowed = IsNativeDualSenseFeedbackCompatible(device);
                         if (nativeForwardingAllowed &&
-                            TryApplyBluetoothHapticsOutputReport(device, feedback, feedbackLength))
+                            TryApplyBluetoothHapticsOutputReport(device, feedback, feedbackLength,
+                                waitForWrite: true))
                         {
                             break;
                         }
@@ -707,7 +708,8 @@ namespace DS4Windows
             return report;
         }
 
-        private static bool TryApplyBluetoothHapticsOutputReport(DS4Device device, byte[] feedback, int feedbackLength)
+        private static bool TryApplyBluetoothHapticsOutputReport(DS4Device device, byte[] feedback, int feedbackLength,
+            bool waitForWrite)
         {
             if (feedbackLength < DualSenseExtendedFeedbackLength ||
                 device is not DualSenseDevice dualSenseDevice ||
@@ -718,7 +720,8 @@ namespace DS4Windows
 
             return dualSenseDevice.WriteBluetoothHapticsOutputReport(feedback,
                 DualSenseBluetoothHapticsReportOffset,
-                DualSenseBluetoothHapticsReportLength);
+                DualSenseBluetoothHapticsReportLength,
+                waitForWrite);
         }
 
         private bool IsNativeDualSenseFeedbackCompatible(DS4Device device)

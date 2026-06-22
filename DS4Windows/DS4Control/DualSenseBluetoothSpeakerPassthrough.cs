@@ -12,8 +12,9 @@ namespace DS4Windows
 {
     /// <summary>
     /// Mirrors a Windows render endpoint to a physical Bluetooth DualSense
-    /// speaker. The transport is the 0x35 / packet 0x13 Opus lane documented
-    /// by SAxense and the MIT-licensed dualsense-bt-haptics research project.
+    /// speaker. Before VIIPER activates combined Bluetooth output, frames use
+    /// the 0x35 / packet 0x13 Opus lane. Once combined mode is active, frames
+    /// are cached for the next vDS-style 0x36 haptics/state write.
     ///
     /// VIIPER's virtual DualSense audio interface is a valid source here: its
     /// first two channels are controller speaker audio. Channels three and four
@@ -287,6 +288,25 @@ namespace DS4Windows
                     AppLogger.LogToGui($"DualSense Bluetooth speaker encoder failed: {ex.Message}", true);
                 }
 
+                return;
+            }
+
+            // vDS uses a fixed 200-byte CBR frame in the 0x36 speaker block.
+            // Do not pad a short frame with zeros: that changes its Opus packet
+            // structure and can make the controller reject the combined report.
+            if (encoded != OpusBytes)
+            {
+                if (Interlocked.Exchange(ref loggedWriteFailure, 1) == 0)
+                {
+                    AppLogger.LogToGui($"DualSense Bluetooth speaker encoder produced {encoded} bytes; expected {OpusBytes} for the combined transport.", true);
+                }
+
+                return;
+            }
+
+            device.SetBluetoothSpeakerAudioFrame(opusFrame, encoded);
+            if (device.BluetoothCombinedOutputTransportEnabled)
+            {
                 return;
             }
 

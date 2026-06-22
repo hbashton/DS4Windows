@@ -45,6 +45,9 @@ namespace DS4Windows
         private const int DualSenseBluetoothHapticsReportLength = 141;
         private const int DualSenseBluetoothHapticsReportOffset = DualSenseNativeOutputReportOffset + DualSenseNativeOutputReportLength;
         private const int DualSenseExtendedFeedbackLength = DualSenseBluetoothHapticsReportOffset + DualSenseBluetoothHapticsReportLength;
+        private const int DualSenseCombinedBluetoothReportLength = 398;
+        private const int DualSenseCombinedBluetoothReportOffset = DualSenseNativeOutputReportOffset + DualSenseNativeOutputReportLength;
+        private const int DualSenseCombinedExtendedFeedbackLength = DualSenseCombinedBluetoothReportOffset + DualSenseCombinedBluetoothReportLength;
         private const int MaxStreamRecoveryAttempts = 2;
 
         private readonly OutContType outputType;
@@ -121,15 +124,25 @@ namespace DS4Windows
             {
                 try
                 {
-                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream("dualsenseext");
-                    activeFeedbackLength = DualSenseExtendedFeedbackLength;
+                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream("dualsensecombinedext");
+                    activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
                     return stream;
                 }
                 catch (IOException ex)
                 {
-                    AppLogger.LogToGui($"VIIPER DualSense adaptive trigger feedback unavailable, falling back to base DualSense output: {ex.Message}", false);
-                    activeFeedbackLength = DualSenseBaseFeedbackLength;
-                    return client.CreateDeviceAndOpenStream("dualsense");
+                    try
+                    {
+                        AppLogger.LogToGui($"VIIPER DualSense combined haptics feedback unavailable, using legacy extended feedback: {ex.Message}", false);
+                        ViiperDeviceStream stream = client.CreateDeviceAndOpenStream("dualsenseext");
+                        activeFeedbackLength = DualSenseExtendedFeedbackLength;
+                        return stream;
+                    }
+                    catch (IOException legacyEx)
+                    {
+                        AppLogger.LogToGui($"VIIPER DualSense adaptive trigger feedback unavailable, falling back to base DualSense output: {legacyEx.Message}", false);
+                        activeFeedbackLength = DualSenseBaseFeedbackLength;
+                        return client.CreateDeviceAndOpenStream("dualsense");
+                    }
                 }
             }
 
@@ -137,15 +150,25 @@ namespace DS4Windows
             {
                 try
                 {
-                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream("dualsenseedgeext");
-                    activeFeedbackLength = DualSenseExtendedFeedbackLength;
+                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream("dualsenseedgecombinedext");
+                    activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
                     return stream;
                 }
                 catch (IOException ex)
                 {
-                    AppLogger.LogToGui($"VIIPER DualSense Edge adaptive trigger feedback unavailable, falling back to base DualSense Edge output: {ex.Message}", false);
-                    activeFeedbackLength = DualSenseBaseFeedbackLength;
-                    return client.CreateDeviceAndOpenStream("dualsenseedge");
+                    try
+                    {
+                        AppLogger.LogToGui($"VIIPER DualSense Edge combined haptics feedback unavailable, using legacy extended feedback: {ex.Message}", false);
+                        ViiperDeviceStream stream = client.CreateDeviceAndOpenStream("dualsenseedgeext");
+                        activeFeedbackLength = DualSenseExtendedFeedbackLength;
+                        return stream;
+                    }
+                    catch (IOException legacyEx)
+                    {
+                        AppLogger.LogToGui($"VIIPER DualSense Edge adaptive trigger feedback unavailable, falling back to base DualSense Edge output: {legacyEx.Message}", false);
+                        activeFeedbackLength = DualSenseBaseFeedbackLength;
+                        return client.CreateDeviceAndOpenStream("dualsenseedge");
+                    }
                 }
             }
 
@@ -525,7 +548,7 @@ namespace DS4Windows
 
         private void FeedbackReadLoop(int feedbackLength)
         {
-            int bufferLength = IsDualSenseType() ? Math.Max(feedbackLength, DualSenseExtendedFeedbackLength) : feedbackLength;
+            int bufferLength = IsDualSenseType() ? Math.Max(feedbackLength, DualSenseCombinedExtendedFeedbackLength) : feedbackLength;
             byte[] buffer = new byte[bufferLength];
             try
             {
@@ -600,8 +623,14 @@ namespace DS4Windows
                     {
                         bool nativeForwardingAllowed = IsNativeDualSenseFeedbackCompatible(device);
                         if (nativeForwardingAllowed &&
+                            TryApplyBluetoothCombinedHapticsOutputReport(device, feedback, feedbackLength))
+                        {
+                            break;
+                        }
+
+                        if (nativeForwardingAllowed &&
                             TryApplyBluetoothHapticsOutputReport(device, feedback, feedbackLength,
-                                waitForWrite: true))
+                                waitForWrite: false))
                         {
                             break;
                         }
@@ -722,6 +751,20 @@ namespace DS4Windows
                 DualSenseBluetoothHapticsReportOffset,
                 DualSenseBluetoothHapticsReportLength,
                 waitForWrite);
+        }
+
+        private static bool TryApplyBluetoothCombinedHapticsOutputReport(DS4Device device, byte[] feedback, int feedbackLength)
+        {
+            if (feedbackLength < DualSenseCombinedExtendedFeedbackLength ||
+                device is not DualSenseDevice dualSenseDevice ||
+                feedback[DualSenseCombinedBluetoothReportOffset] != 0x36)
+            {
+                return false;
+            }
+
+            return dualSenseDevice.WriteBluetoothCombinedHapticsAudioOutputReport(feedback,
+                DualSenseCombinedBluetoothReportOffset,
+                DualSenseCombinedBluetoothReportLength);
         }
 
         private bool IsNativeDualSenseFeedbackCompatible(DS4Device device)

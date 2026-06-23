@@ -157,13 +157,13 @@ namespace DS4Windows
             if (string.IsNullOrEmpty(endpointId))
             {
                 sourceName = "Default audio endpoint";
-                using var enumerator = new MMDeviceEnumerator();
-                return new LowLatencyLoopbackCapture(enumerator.GetDefaultAudioEndpoint(
+                using var defaultEnumerator = new MMDeviceEnumerator();
+                return new LowLatencyLoopbackCapture(defaultEnumerator.GetDefaultAudioEndpoint(
                     DataFlow.Render, Role.Multimedia));
             }
 
-            using var enumerator = new MMDeviceEnumerator();
-            MMDevice endpoint = enumerator.GetDevice(endpointId);
+            using var endpointEnumerator = new MMDeviceEnumerator();
+            MMDevice endpoint = endpointEnumerator.GetDevice(endpointId);
             if (endpoint == null || endpoint.State != DeviceState.Active)
             {
                 throw new InvalidOperationException("Selected Bluetooth speaker audio source is not available.");
@@ -632,7 +632,7 @@ namespace DS4Windows
             }
 
             capturePump = null;
-            WasapiLoopbackCapture oldCapture;
+            WasapiCapture oldCapture;
             lock (syncRoot)
             {
                 oldCapture = capture;

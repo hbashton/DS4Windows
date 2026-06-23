@@ -356,11 +356,17 @@ namespace DS4Windows.InputDevices
         private const int MaxBluetoothSpeakerFrames = 64;
         private readonly object bluetoothSpeakerFrameLock = new object();
         private readonly Queue<byte[]> bluetoothSpeakerFrames = new Queue<byte[]>(MaxBluetoothSpeakerFrames);
+        private readonly object bluetoothCombinedOutputWriteLock = new object();
+        private byte[] pendingBluetoothCombinedOutputReport;
+        private bool bluetoothCombinedOutputWriteScheduled;
+        private long bluetoothCombinedOutputReportsCoalesced;
         private int bluetoothCombinedOutputTransportEnabled;
         private long bluetoothMicrophoneFrameCount;
         private long bluetoothMicrophoneLastFrameUtcTicks;
 
         public long BluetoothMicrophoneFrameCount => Interlocked.Read(ref bluetoothMicrophoneFrameCount);
+        public long BluetoothCombinedOutputReportsCoalesced =>
+            Interlocked.Read(ref bluetoothCombinedOutputReportsCoalesced);
         public DateTime BluetoothMicrophoneLastFrameUtc
         {
             get
@@ -1767,8 +1773,88 @@ namespace DS4Windows.InputDevices
             combined[combined.Length - 1] = (byte)(crc >> 24);
 
             Interlocked.Exchange(ref bluetoothCombinedOutputTransportEnabled, 1);
+            if (!enableSpeakerOutput)
+            {
+                return QueueLatestBluetoothCombinedOutputReport(combined);
+            }
+
             return WriteBluetoothAudioOutputReport(combined, 0, combined.Length, 0x36,
                 BluetoothCombinedOutputReportLength, "combined haptics/audio", waitForWrite: false);
+        }
+
+        /// <summary>
+        /// Keeps Bluetooth haptics responsive when Windows delivers several USB
+        /// isochronous packets in a burst. Advanced-haptics samples are time
+        /// sensitive, so the newest packet is more useful than a delayed queue
+        /// of old packets. This is deliberately disabled while speaker audio is
+        /// active because Opus frames must be delivered in order.
+        /// </summary>
+        private bool QueueLatestBluetoothCombinedOutputReport(byte[] report)
+        {
+            bool scheduleWrite = false;
+            lock (bluetoothCombinedOutputWriteLock)
+            {
+                if (pendingBluetoothCombinedOutputReport != null)
+                {
+                    Interlocked.Increment(ref bluetoothCombinedOutputReportsCoalesced);
+                }
+
+                pendingBluetoothCombinedOutputReport = report;
+                if (!bluetoothCombinedOutputWriteScheduled)
+                {
+                    bluetoothCombinedOutputWriteScheduled = true;
+                    scheduleWrite = true;
+                }
+            }
+
+            if (scheduleWrite)
+            {
+                queueEvent(WriteLatestBluetoothCombinedOutputReport);
+            }
+
+            LastBluetoothHapticsWriteStatus = "Queued latest Bluetooth combined haptics report for asynchronous HID write.";
+            return true;
+        }
+
+        private void WriteLatestBluetoothCombinedOutputReport()
+        {
+            byte[] report;
+            lock (bluetoothCombinedOutputWriteLock)
+            {
+                report = pendingBluetoothCombinedOutputReport;
+                pendingBluetoothCombinedOutputReport = null;
+            }
+
+            if (report != null)
+            {
+                try
+                {
+                    bool result = hDevice.WriteOutputReportViaInterrupt(report, READ_STREAM_TIMEOUT);
+                    LastBluetoothHapticsWriteStatus = result ?
+                        "Coalesced combined haptics write completed successfully." :
+                        $"Coalesced combined haptics write returned false. LastWin32Error={Marshal.GetLastWin32Error()}.";
+                }
+                catch (Exception ex)
+                {
+                    LastBluetoothHapticsWriteStatus =
+                        $"Coalesced combined haptics write threw {ex.GetType().Name}: {ex.Message}";
+                }
+            }
+
+            lock (bluetoothCombinedOutputWriteLock)
+            {
+                if (pendingBluetoothCombinedOutputReport != null)
+                {
+                    // A newer haptics packet arrived during the HID write.
+                    // Do not let it form a second queue behind this one: the
+                    // next USB audio packet will schedule a fresh, current
+                    // write on the next controller poll.
+                    pendingBluetoothCombinedOutputReport = null;
+                    Interlocked.Increment(ref bluetoothCombinedOutputReportsCoalesced);
+                }
+
+                bluetoothCombinedOutputWriteScheduled = false;
+            }
         }
 
         /// <summary>

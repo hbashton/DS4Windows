@@ -227,7 +227,7 @@ namespace DS4Windows
                 // then compress them into one 480-sample Opus frame. A small
                 // drift trim preserves the capture cushion without adding
                 // reports or changing the firmware-facing cadence.
-                const double step = sourceFramesPerTick / (double)FrameSamples;
+                double step = sourceFramesPerTick / (double)FrameSamples;
                 for (int outputFrame = 0; outputFrame < FrameSamples; outputFrame++)
                 {
                     double position = outputFrame * step;

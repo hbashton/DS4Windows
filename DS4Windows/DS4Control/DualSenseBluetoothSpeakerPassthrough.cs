@@ -12,9 +12,8 @@ namespace DS4Windows
 {
     /// <summary>
     /// Mirrors a Windows render endpoint to a physical Bluetooth DualSense
-    /// speaker. Before VIIPER activates combined Bluetooth output, frames use
-    /// the 0x35 / packet 0x13 Opus lane. Once combined mode is active, frames
-    /// are cached for the next vDS-style 0x36 haptics/state write.
+    /// speaker using the 0x35 / packet 0x13 Opus lane. This path has its own
+    /// audio clock and must not be paced by virtual-controller feedback.
     ///
     /// VIIPER's virtual DualSense audio interface is a valid source here: its
     /// first two channels are controller speaker audio. Channels three and four
@@ -34,7 +33,6 @@ namespace DS4Windows
         private readonly string sourceEndpointId;
         private readonly byte speakerVolume;
         private readonly float[] frame = new float[FrameSamples * Channels];
-        private readonly float[] sourceFrame = new float[512 * Channels];
         private readonly byte[] opusFrame = new byte[OpusBytes];
         private readonly byte[] report = new byte[ReportLength];
 
@@ -80,7 +78,9 @@ namespace DS4Windows
                 capture = CreateCapture(sourceEndpointId, out string sourceName);
                 captureBuffer = new BufferedWaveProvider(capture.WaveFormat)
                 {
-                    BufferDuration = TimeSpan.FromMilliseconds(120),
+                    // Keep enough room for one normal WASAPI scheduling delay
+                    // without turning endpoint capture into a visible audio lag.
+                    BufferDuration = TimeSpan.FromMilliseconds(40),
                     DiscardOnBufferOverflow = true,
                     ReadFully = false,
                 };
@@ -185,22 +185,22 @@ namespace DS4Windows
 
         private void StreamLoop(ISampleProvider source)
         {
-            const int sourceFramesPerTick = 512;
-            const double frameDurationMs = 10.0 + (2.0 / 3.0);
+            // Opus frames contain 480 samples at 48 kHz: exactly 10 ms. The
+            // DualSense Bluetooth speaker stream expects one packet per frame.
+            const double frameDurationMs = 10.0;
             double frameTicks = Stopwatch.Frequency * frameDurationMs / 1000.0;
             double nextFrame = Stopwatch.GetTimestamp() + frameTicks;
 
             while (!stopping)
             {
-                Array.Clear(sourceFrame, 0, sourceFrame.Length);
                 Array.Clear(frame, 0, frame.Length);
                 int samplesRead;
                 lock (syncRoot)
                 {
-                    samplesRead = stopping ? 0 : source.Read(sourceFrame, 0, sourceFrame.Length);
+                    samplesRead = stopping ? 0 : source.Read(frame, 0, frame.Length);
                 }
 
-                if (samplesRead < sourceFrame.Length)
+                if (samplesRead < frame.Length)
                 {
                     Interlocked.Increment(ref shortCaptureReads);
                 }
@@ -210,26 +210,8 @@ namespace DS4Windows
                     float volume = speakerVolume / 255.0f;
                     for (int i = 0; i < samplesRead; i++)
                     {
-                        sourceFrame[i] = Math.Clamp(sourceFrame[i] * volume, -1.0f, 1.0f);
+                        frame[i] = Math.Clamp(frame[i] * volume, -1.0f, 1.0f);
                     }
-                }
-
-                // SAxense, PadForge, and DS5Dongle converge on this firmware
-                // cadence: consume 512 frames every 10.667 ms, then compress
-                // them into one 480-sample Opus frame. Sending one report per
-                // 10 ms is 6.7% too fast and eventually overruns the pad.
-                const double step = sourceFramesPerTick / (double)FrameSamples;
-                for (int outputFrame = 0; outputFrame < FrameSamples; outputFrame++)
-                {
-                    double position = outputFrame * step;
-                    int first = (int)position;
-                    int second = Math.Min(first + 1, sourceFramesPerTick - 1);
-                    double fraction = position - first;
-                    int outputOffset = outputFrame * Channels;
-                    int firstOffset = first * Channels;
-                    int secondOffset = second * Channels;
-                    frame[outputOffset] = (float)(sourceFrame[firstOffset] * (1.0 - fraction) + sourceFrame[secondOffset] * fraction);
-                    frame[outputOffset + 1] = (float)(sourceFrame[firstOffset + 1] * (1.0 - fraction) + sourceFrame[secondOffset + 1] * fraction);
                 }
 
                 SendFrame();
@@ -280,7 +262,7 @@ namespace DS4Windows
                 return;
             }
 
-            AppLogger.LogToGui($"DualSense Bluetooth speaker stats: frames={Interlocked.Read(ref framesSent)} shortCaptureReads={Interlocked.Read(ref shortCaptureReads)} skippedSlots={Interlocked.Read(ref skippedScheduleSlots)} status={device.LastBluetoothHapticsWriteStatus}", false);
+            AppLogger.LogToGui($"DualSense Bluetooth speaker stats: frames={Interlocked.Read(ref framesSent)} shortCaptureReads={Interlocked.Read(ref shortCaptureReads)} skippedSlots={Interlocked.Read(ref skippedScheduleSlots)} coalesced={device.BluetoothSpeakerOutputReportsCoalesced} status={device.LastBluetoothHapticsWriteStatus}", false);
         }
 
         private void SendFrame()

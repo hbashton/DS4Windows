@@ -311,6 +311,11 @@ namespace DS4Windows
                 Array.Clear(opusFrame, encoded, OpusBytes - encoded);
             }
 
+            if (stopping)
+            {
+                return;
+            }
+
             device.SetBluetoothSpeakerAudioFrame(opusFrame, encoded);
             if (device.BluetoothCombinedOutputTransportEnabled)
             {
@@ -392,6 +397,8 @@ namespace DS4Windows
 
                 oldCapture.Dispose();
             }
+
+            device.ClearBluetoothSpeakerAudioFrame();
         }
     }
 }

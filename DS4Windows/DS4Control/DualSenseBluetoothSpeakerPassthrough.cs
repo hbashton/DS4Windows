@@ -28,6 +28,8 @@ namespace DS4Windows
         private const int FrameSamples = 480;
         private const int OpusBytes = 200;
         private const int ReportLength = 334;
+        private const int CaptureBufferMilliseconds = 500;
+        private const int InitialBufferMilliseconds = 64;
 
         private readonly object syncRoot = new object();
         private readonly DualSenseDevice device;
@@ -59,6 +61,15 @@ namespace DS4Windows
             this.sourceEndpointId = sourceEndpointId ?? string.Empty;
         }
 
+        public bool Matches(DualSenseDevice candidateDevice, byte candidateVolume,
+            string candidateSourceEndpointId)
+        {
+            return !stopping && ReferenceEquals(device, candidateDevice) &&
+                speakerVolume == candidateVolume &&
+                string.Equals(sourceEndpointId, candidateSourceEndpointId ?? string.Empty,
+                    StringComparison.Ordinal);
+        }
+
         public void Start()
         {
             if (!IsGenuineBluetoothDualSense(device))
@@ -71,7 +82,7 @@ namespace DS4Windows
                 capture = CreateCapture(sourceEndpointId, out string sourceName);
                 captureBuffer = new BufferedWaveProvider(capture.WaveFormat)
                 {
-                    BufferDuration = TimeSpan.FromMilliseconds(120),
+                    BufferDuration = TimeSpan.FromMilliseconds(CaptureBufferMilliseconds),
                     DiscardOnBufferOverflow = true,
                     ReadFully = false,
                 };
@@ -178,6 +189,7 @@ namespace DS4Windows
         {
             const int sourceFramesPerTick = 512;
             const double frameDurationMs = 10.0 + (2.0 / 3.0);
+            WaitForInitialCaptureBuffer();
             double frameTicks = Stopwatch.Frequency * frameDurationMs / 1000.0;
             double nextFrame = Stopwatch.GetTimestamp() + frameTicks;
 
@@ -252,6 +264,35 @@ namespace DS4Windows
             }
         }
 
+        private void WaitForInitialCaptureBuffer()
+        {
+            int minimumBytes;
+            lock (syncRoot)
+            {
+                minimumBytes = capture?.WaveFormat == null ? 0 :
+                    (capture.WaveFormat.AverageBytesPerSecond * InitialBufferMilliseconds) / 1000;
+            }
+
+            if (minimumBytes <= 0)
+            {
+                return;
+            }
+
+            long deadline = Stopwatch.GetTimestamp() + (Stopwatch.Frequency / 2);
+            while (!stopping && Stopwatch.GetTimestamp() < deadline)
+            {
+                lock (syncRoot)
+                {
+                    if (captureBuffer?.BufferedBytes >= minimumBytes)
+                    {
+                        return;
+                    }
+                }
+
+                Thread.Sleep(2);
+            }
+        }
+
         private void LogStreamDiagnosticsIfVerbose()
         {
             if (!Global.VerboseStartupLogging)
@@ -316,9 +357,9 @@ namespace DS4Windows
                 return;
             }
 
-            device.SetBluetoothSpeakerAudioFrame(opusFrame, encoded);
             if (device.BluetoothCombinedOutputTransportEnabled)
             {
+                device.SetBluetoothSpeakerAudioFrame(opusFrame, encoded);
                 return;
             }
 

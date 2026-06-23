@@ -14,7 +14,15 @@
 		<NeutralLanguage>en</NeutralLanguage>
 		<RunAnalyzersDuringBuild>true</RunAnalyzersDuringBuild>
 		<EnableNETAnalyzers>false</EnableNETAnalyzers>
-		<ServerGarbageCollection>true</ServerGarbageCollection>
+		<!--
+			DS4Windows is an interactive desktop mapper. Server GC creates one heap
+			per logical processor during CoreCLR startup, before our single-instance
+			guard can exit a duplicate launch. On high-core systems that can fail with
+			PER_HEAP_ISOLATED initialization errors while another DS4Windows instance
+			is already active. Workstation GC remains concurrent and is appropriate for
+			this workload.
+		-->
+		<ServerGarbageCollection>false</ServerGarbageCollection>
 		<AssemblyVersion>4.0.2.1</AssemblyVersion>
 		<FileVersion>4.0.2.1</FileVersion>
 		<Version>4.0.2.1-dualsense-beta</Version>

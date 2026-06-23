@@ -2690,6 +2690,12 @@ namespace DS4Windows
             get => m_Config.dualSenseMuteOffProfileName;
             set => m_Config.dualSenseMuteOffProfileName = value;
         }
+
+        public static bool[] DualSenseMuteDefaultBackToThisProfile
+        {
+            get => m_Config.dualSenseMuteDefaultBackToThisProfile;
+            set => m_Config.dualSenseMuteDefaultBackToThisProfile = value;
+        }
         //
         // End of DualSense specific profile settings
 
@@ -3864,6 +3870,7 @@ namespace DS4Windows
         public bool[] dualSenseMuteButtonLightEnabled = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
         public string[] dualSenseMuteOnProfileName = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
         public string[] dualSenseMuteOffProfileName = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
+        public bool[] dualSenseMuteDefaultBackToThisProfile = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
         //
         // End of DualSense specific profile options
 
@@ -4810,6 +4817,7 @@ namespace DS4Windows
                 XmlNode xmlDualSenseMuteButtonLightEnabled = m_Xdoc.CreateNode(XmlNodeType.Element, "DualSenseMuteButtonLightEnabled", null); xmlDualSenseMuteButtonLightEnabled.InnerText = dualSenseMuteButtonLightEnabled[device].ToString(); rootElement.AppendChild(xmlDualSenseMuteButtonLightEnabled);
                 XmlNode xmlDualSenseMuteOnProfileName = m_Xdoc.CreateNode(XmlNodeType.Element, "DualSenseMuteOnProfileName", null); xmlDualSenseMuteOnProfileName.InnerText = dualSenseMuteOnProfileName[device]; rootElement.AppendChild(xmlDualSenseMuteOnProfileName);
                 XmlNode xmlDualSenseMuteOffProfileName = m_Xdoc.CreateNode(XmlNodeType.Element, "DualSenseMuteOffProfileName", null); xmlDualSenseMuteOffProfileName.InnerText = dualSenseMuteOffProfileName[device]; rootElement.AppendChild(xmlDualSenseMuteOffProfileName);
+                XmlNode xmlDualSenseMuteDefaultBack = m_Xdoc.CreateNode(XmlNodeType.Element, "DualSenseMuteDefaultBackToThisProfile", null); xmlDualSenseMuteDefaultBack.InnerText = dualSenseMuteDefaultBackToThisProfile[device].ToString(); rootElement.AppendChild(xmlDualSenseMuteDefaultBack);
                 XmlNode xmlDinput = m_Xdoc.CreateNode(XmlNodeType.Element, "DinputOnly", null); xmlDinput.InnerText = dinputOnly[device].ToString(); rootElement.AppendChild(xmlDinput);
                 XmlNode xmlStartTouchpadOff = m_Xdoc.CreateNode(XmlNodeType.Element, "StartTouchpadOff", null); xmlStartTouchpadOff.InnerText = startTouchpadOff[device].ToString(); rootElement.AppendChild(xmlStartTouchpadOff);
                 XmlNode xmlTouchOutMode = m_Xdoc.CreateNode(XmlNodeType.Element, "TouchpadOutputMode", null); xmlTouchOutMode.InnerText = touchOutMode[device].ToString(); rootElement.AppendChild(xmlTouchOutMode);
@@ -6665,6 +6673,13 @@ namespace DS4Windows
                     dualSenseMuteOffProfileName[device] = Item.InnerText;
                 }
                 catch { dualSenseMuteOffProfileName[device] = string.Empty; missingSetting = true; }
+
+                try
+                {
+                    Item = m_Xdoc.SelectSingleNode("/" + rootname + "/DualSenseMuteDefaultBackToThisProfile");
+                    bool.TryParse(Item.InnerText, out dualSenseMuteDefaultBackToThisProfile[device]);
+                }
+                catch { dualSenseMuteDefaultBackToThisProfile[device] = false; missingSetting = true; }
 
                 if (launchprogram == true && launchProgram[device] != string.Empty)
                 {
@@ -9962,6 +9977,7 @@ namespace DS4Windows
             dualSenseMuteButtonLightEnabled[device] = false;
             dualSenseMuteOnProfileName[device] = string.Empty;
             dualSenseMuteOffProfileName[device] = string.Empty;
+            dualSenseMuteDefaultBackToThisProfile[device] = false;
             touchpadJitterCompensation[device] = DEFAULT_TOUCHPAD_JITTER_COMP;
             lowerRCOn[device] = false;
             touchClickPassthru[device] = false;

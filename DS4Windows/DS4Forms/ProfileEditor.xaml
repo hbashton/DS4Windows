@@ -2211,6 +2211,7 @@
                                                     <RowDefinition Height="30" />
                                                     <RowDefinition Height="30" />
                                                     <RowDefinition Height="30" />
+                                                    <RowDefinition Height="30" />
                                                 </Grid.RowDefinitions>
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto" />
@@ -2230,6 +2231,9 @@
                                                 <ComboBox ItemsSource="{Binding OptionalProfileChoices}" SelectedItem="{Binding DualSenseMuteOffProfileName}"
                                                           Grid.Row="2" Grid.Column="1" Margin="{StaticResource spaceMargin}"
                                                           ToolTip="Leave blank to avoid changing profiles when mute turns off." />
+                                                <CheckBox Content="Default back to this profile" IsChecked="{Binding DualSenseMuteDefaultBackToThisProfile}"
+                                                          Grid.Row="3" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}"
+                                                          ToolTip="When this profile's Mute on target is used, the next mute toggle returns here instead of using the target profile's Mute off setting." />
                                             </Grid>
                                         </GroupBox>
 

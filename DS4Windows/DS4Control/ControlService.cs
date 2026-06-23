@@ -3169,7 +3169,11 @@ namespace DS4Windows
         private bool[] dualSenseMuteLedOverrideActive = new bool[MAX_DS4_CONTROLLER_COUNT] { false, false, false, false, false, false, false, false };
         private bool[] dualSenseMuteProfilePending = new bool[MAX_DS4_CONTROLLER_COUNT] { false, false, false, false, false, false, false, false };
         private string[] dualSenseMuteRequestedProfileName = new string[MAX_DS4_CONTROLLER_COUNT] { string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty };
-        private string[] dualSenseMuteRememberedOffProfileName = new string[MAX_DS4_CONTROLLER_COUNT] { string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty };
+        private bool[] dualSenseMuteRequestedProfileRestore = new bool[MAX_DS4_CONTROLLER_COUNT] { false, false, false, false, false, false, false, false };
+        private bool[] dualSenseMuteRequestedRestoreWasTemporary = new bool[MAX_DS4_CONTROLLER_COUNT] { false, false, false, false, false, false, false, false };
+        private bool[] dualSenseMuteReturnProfileActive = new bool[MAX_DS4_CONTROLLER_COUNT] { false, false, false, false, false, false, false, false };
+        private bool[] dualSenseMuteReturnProfileWasTemporary = new bool[MAX_DS4_CONTROLLER_COUNT] { false, false, false, false, false, false, false, false };
+        private string[] dualSenseMuteReturnProfileName = new string[MAX_DS4_CONTROLLER_COUNT] { string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty };
 
         public bool IsGameBarProfilePriorityActive(int ind)
         {
@@ -3604,22 +3608,46 @@ namespace DS4Windows
             return false;
         }
 
-        private void QueueDualSenseMuteProfile(int ind, string profileName)
+        private bool QueueDualSenseMuteProfile(int ind, string profileName)
         {
             if (string.IsNullOrEmpty(profileName))
             {
-                return;
+                return false;
             }
 
             string profilePath = Path.Combine(appdatapath, "Profiles", $"{profileName}.xml");
             if (!File.Exists(profilePath))
             {
                 LogDebug($"DualSense mute profile action skipped. Profile '{profileName}' was not found.", true);
-                return;
+                return false;
             }
 
             dualSenseMuteRequestedProfileName[ind] = profileName;
+            dualSenseMuteRequestedProfileRestore[ind] = false;
+            dualSenseMuteRequestedRestoreWasTemporary[ind] = false;
             dualSenseMuteProfilePending[ind] = true;
+            return true;
+        }
+
+        private bool QueueDualSenseMuteProfileRestore(int ind, string profileName, bool wasTemporary)
+        {
+            if (string.IsNullOrEmpty(profileName))
+            {
+                return false;
+            }
+
+            string profilePath = Path.Combine(appdatapath, "Profiles", $"{profileName}.xml");
+            if (!File.Exists(profilePath))
+            {
+                LogDebug($"DualSense mute profile return skipped. Profile '{profileName}' was not found.", true);
+                return false;
+            }
+
+            dualSenseMuteRequestedProfileName[ind] = profileName;
+            dualSenseMuteRequestedProfileRestore[ind] = true;
+            dualSenseMuteRequestedRestoreWasTemporary[ind] = wasTemporary;
+            dualSenseMuteProfilePending[ind] = true;
+            return true;
         }
 
         private void ProcessPendingDualSenseMuteProfiles()
@@ -3632,9 +3660,22 @@ namespace DS4Windows
                 }
 
                 string profileName = dualSenseMuteRequestedProfileName[i];
+                bool restoreRequested = dualSenseMuteRequestedProfileRestore[i];
+                bool restoreWasTemporary = dualSenseMuteRequestedRestoreWasTemporary[i];
                 bool profileLoaded = false;
-                bool actionRan = RunProfileActionWithReportingPaused(i,
-                    () => profileLoaded = Global.LoadTempProfile(i, profileName, false, this));
+                bool actionRan = RunProfileActionWithReportingPaused(i, () =>
+                {
+                    if (restoreRequested && !restoreWasTemporary)
+                    {
+                        Global.ProfilePath[i] = profileName;
+                        Global.OlderProfilePath[i] = profileName;
+                        profileLoaded = Global.LoadProfile(i, false, this);
+                    }
+                    else
+                    {
+                        profileLoaded = Global.LoadTempProfile(i, profileName, false, this);
+                    }
+                });
 
                 if (!actionRan)
                 {
@@ -3643,6 +3684,8 @@ namespace DS4Windows
 
                 dualSenseMuteProfilePending[i] = false;
                 dualSenseMuteRequestedProfileName[i] = string.Empty;
+                dualSenseMuteRequestedProfileRestore[i] = false;
+                dualSenseMuteRequestedRestoreWasTemporary[i] = false;
 
                 if (!profileLoaded)
                 {
@@ -3657,12 +3700,17 @@ namespace DS4Windows
             {
                 dualSenseMuteButtonWasDown[ind] = false;
                 dualSenseMuteLedOverrideActive[ind] = false;
-                dualSenseMuteRememberedOffProfileName[ind] = string.Empty;
+                dualSenseMuteReturnProfileActive[ind] = false;
+                dualSenseMuteReturnProfileWasTemporary[ind] = false;
+                dualSenseMuteReturnProfileName[ind] = string.Empty;
                 return;
             }
 
             bool muteLightEnabled = Global.DualSenseMuteButtonLightEnabled[ind];
-            if (!muteLightEnabled)
+            bool hasProfileAction = !string.IsNullOrEmpty(Global.DualSenseMuteOnProfileName[ind]) ||
+                !string.IsNullOrEmpty(Global.DualSenseMuteOffProfileName[ind]) ||
+                Global.DualSenseMuteDefaultBackToThisProfile[ind];
+            if (!muteLightEnabled && !hasProfileAction)
             {
                 if (dualSenseMuteLedOverrideActive[ind])
                 {
@@ -3678,27 +3726,64 @@ namespace DS4Windows
             if (muteDown && !dualSenseMuteButtonWasDown[ind])
             {
                 dualSenseMuteLedOn[ind] = !dualSenseMuteLedOn[ind];
-                dualSenseDevice.SetProfileMuteLedState(true, dualSenseMuteLedOn[ind]);
-                dualSenseMuteLedOverrideActive[ind] = true;
+                if (muteLightEnabled)
+                {
+                    dualSenseDevice.SetProfileMuteLedState(true, dualSenseMuteLedOn[ind]);
+                    dualSenseMuteLedOverrideActive[ind] = true;
+                }
+                else if (dualSenseMuteLedOverrideActive[ind])
+                {
+                    dualSenseDevice.SetProfileMuteLedState(false, false);
+                    dualSenseMuteLedOverrideActive[ind] = false;
+                }
 
-                string requestedProfileName;
                 if (dualSenseMuteLedOn[ind])
                 {
-                    requestedProfileName = Global.DualSenseMuteOnProfileName[ind];
-                    dualSenseMuteRememberedOffProfileName[ind] = Global.DualSenseMuteOffProfileName[ind];
+                    string requestedProfileName = Global.DualSenseMuteOnProfileName[ind];
+                    bool shouldReturnToCurrentProfile =
+                        Global.DualSenseMuteDefaultBackToThisProfile[ind] &&
+                        !string.IsNullOrEmpty(requestedProfileName);
+                    string currentProfileName = string.Empty;
+                    bool currentProfileWasTemporary = false;
+                    if (shouldReturnToCurrentProfile)
+                    {
+                        currentProfileName = Global.useTempProfile[ind] ?
+                            Global.tempprofilename[ind] : Global.ProfilePath[ind];
+                        currentProfileWasTemporary = Global.useTempProfile[ind];
+                    }
+
+                    if (QueueDualSenseMuteProfile(ind, requestedProfileName))
+                    {
+                        dualSenseMuteReturnProfileActive[ind] = shouldReturnToCurrentProfile &&
+                            !string.IsNullOrEmpty(currentProfileName);
+                        dualSenseMuteReturnProfileWasTemporary[ind] = currentProfileWasTemporary;
+                        dualSenseMuteReturnProfileName[ind] = currentProfileName;
+                    }
                 }
                 else
                 {
-                    requestedProfileName = Global.DualSenseMuteOffProfileName[ind];
-                    if (string.IsNullOrEmpty(requestedProfileName))
+                    if (dualSenseMuteReturnProfileActive[ind])
                     {
-                        requestedProfileName = dualSenseMuteRememberedOffProfileName[ind];
+                        bool returnQueued = QueueDualSenseMuteProfileRestore(ind,
+                            dualSenseMuteReturnProfileName[ind],
+                            dualSenseMuteReturnProfileWasTemporary[ind]);
+                        if (returnQueued)
+                        {
+                            dualSenseMuteReturnProfileActive[ind] = false;
+                            dualSenseMuteReturnProfileWasTemporary[ind] = false;
+                            dualSenseMuteReturnProfileName[ind] = string.Empty;
+                        }
+                    }
+                    else
+                    {
+                        // The currently active profile owns the next step. This
+                        // makes A -> B -> C chains deterministic and avoids
+                        // leaking A's Mute Off target into B.
+                        QueueDualSenseMuteProfile(ind, Global.DualSenseMuteOffProfileName[ind]);
                     }
                 }
-
-                QueueDualSenseMuteProfile(ind, requestedProfileName);
             }
-            else if (!dualSenseMuteLedOverrideActive[ind])
+            else if (muteLightEnabled && !dualSenseMuteLedOverrideActive[ind])
             {
                 dualSenseDevice.SetProfileMuteLedState(true, dualSenseMuteLedOn[ind]);
                 dualSenseMuteLedOverrideActive[ind] = true;

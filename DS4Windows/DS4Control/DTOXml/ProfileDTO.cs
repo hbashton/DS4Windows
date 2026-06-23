@@ -791,6 +791,14 @@ namespace DS4WinWPF.DS4Control.DTOXml
             get; set;
         } = string.Empty;
 
+        private bool _dualSenseMuteDefaultBackToThisProfile;
+        [XmlElement("DualSenseMuteDefaultBackToThisProfile")]
+        public string DualSenseMuteDefaultBackToThisProfileString
+        {
+            get => _dualSenseMuteDefaultBackToThisProfile.ToString();
+            set => _dualSenseMuteDefaultBackToThisProfile = XmlDataUtilities.StrToBool(value);
+        }
+
         private bool _dinputOnly;
         [XmlElement("DinputOnly")]
         public string DinputOnlyString
@@ -1671,6 +1679,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
             _dualSenseMuteButtonLightEnabled = source.dualSenseMuteButtonLightEnabled[deviceIndex];
             DualSenseMuteOnProfileName = source.dualSenseMuteOnProfileName[deviceIndex];
             DualSenseMuteOffProfileName = source.dualSenseMuteOffProfileName[deviceIndex];
+            _dualSenseMuteDefaultBackToThisProfile = source.dualSenseMuteDefaultBackToThisProfile[deviceIndex];
             _dinputOnly = source.dinputOnly[deviceIndex];
             _startTouchpadOff = source.startTouchpadOff[deviceIndex];
             _useTPforControls = source.touchOutMode[deviceIndex] == TouchpadOutMode.Controls;
@@ -2278,6 +2287,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
             destination.dualSenseMuteButtonLightEnabled[deviceIndex] = _dualSenseMuteButtonLightEnabled;
             destination.dualSenseMuteOnProfileName[deviceIndex] = DualSenseMuteOnProfileName ?? string.Empty;
             destination.dualSenseMuteOffProfileName[deviceIndex] = DualSenseMuteOffProfileName ?? string.Empty;
+            destination.dualSenseMuteDefaultBackToThisProfile[deviceIndex] = _dualSenseMuteDefaultBackToThisProfile;
             destination.dinputOnly[deviceIndex] = _dinputOnly;
             destination.startTouchpadOff[deviceIndex] = _startTouchpadOff;
             destination.sATriggers[deviceIndex] = SATriggers;

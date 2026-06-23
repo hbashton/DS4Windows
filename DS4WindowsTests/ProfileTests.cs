@@ -355,6 +355,25 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void CheckDualSenseMuteDefaultBackProfileSettingRoundTrip()
+        {
+            BackingStore sourceStore = new BackingStore();
+            sourceStore.dualSenseMuteDefaultBackToThisProfile[0] = true;
+
+            ProfileDTO dto = new ProfileDTO
+            {
+                DeviceIndex = 0,
+            };
+            dto.MapFrom(sourceStore);
+
+            Assert.AreEqual(bool.TrueString, dto.DualSenseMuteDefaultBackToThisProfileString);
+
+            BackingStore targetStore = new BackingStore();
+            dto.MapTo(targetStore);
+            Assert.IsTrue(targetStore.dualSenseMuteDefaultBackToThisProfile[0]);
+        }
+
+        [TestMethod]
         public void CheckWriteProfile()
         {
             BackingStore tempStore = new BackingStore();

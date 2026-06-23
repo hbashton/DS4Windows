@@ -732,6 +732,12 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             set => Global.DualSenseMuteOffProfileName[device] = value ?? string.Empty;
         }
 
+        public bool DualSenseMuteDefaultBackToThisProfile
+        {
+            get => Global.DualSenseMuteDefaultBackToThisProfile[device];
+            set => Global.DualSenseMuteDefaultBackToThisProfile[device] = value;
+        }
+
         public List<string> GameBarProfileChoices
         {
             get => GetProfileChoices(false);

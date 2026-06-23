@@ -350,6 +350,9 @@ namespace DS4Windows.InputDevices
         public string LastBluetoothHapticsWriteStatus { get; private set; } = "Not attempted";
         public string LastBluetoothMicrophoneWriteStatus { get; private set; } = "Not attempted";
         private const int BluetoothCombinedOutputReportLength = 398;
+        private const int BluetoothCombinedHapticsOffset = 76;
+        private const int BluetoothCombinedHapticsDataOffset = 78;
+        private const int BluetoothCombinedHapticsDataLength = 64;
         private const int BluetoothCombinedSpeakerOffset = 142;
         private const int BluetoothCombinedSpeakerDataOffset = 144;
         private const int BluetoothCombinedSpeakerFrameLength = 200;
@@ -359,6 +362,7 @@ namespace DS4Windows.InputDevices
         private const int BluetoothCombinedStateSpeakerVolumeOffset = BluetoothCombinedStateOffset + 5;
         private const int BluetoothCombinedStateAudioControlOffset = BluetoothCombinedStateOffset + 7;
         private const int BluetoothCombinedStateAudioControl2Offset = BluetoothCombinedStateOffset + 37;
+        private const int BluetoothCombinedHapticsFreshnessMilliseconds = 30;
         private const int MaxBluetoothSpeakerFrames = 4;
         private readonly object bluetoothSpeakerFrameLock = new object();
         private readonly Queue<byte[]> bluetoothSpeakerFrames = new Queue<byte[]>(MaxBluetoothSpeakerFrames);
@@ -375,6 +379,7 @@ namespace DS4Windows.InputDevices
         private long bluetoothCombinedSpeakerCacheDelayTicks;
         private long bluetoothCombinedSpeakerCacheDelayMaximumTicks;
         private long bluetoothCombinedSpeakerCacheDelayCount;
+        private long bluetoothCombinedSpeakerStaleHapticsSilenced;
         private readonly object bluetoothRealtimeWriterLock = new object();
         private DualSenseBluetoothRealtimeWriter bluetoothRealtimeWriter;
         private long bluetoothRealtimeWriterLastOpenAttemptUtcTicks;
@@ -424,6 +429,8 @@ namespace DS4Windows.InputDevices
         public double BluetoothCombinedSpeakerCacheMaximumDelayMilliseconds =>
             Interlocked.Read(ref bluetoothCombinedSpeakerCacheDelayMaximumTicks) * 1000.0 /
             Stopwatch.Frequency;
+        public long BluetoothCombinedSpeakerStaleHapticsSilenced =>
+            Interlocked.Read(ref bluetoothCombinedSpeakerStaleHapticsSilenced);
         public int PendingBluetoothSpeakerFrames
         {
             get
@@ -1989,6 +1996,22 @@ namespace DS4Windows.InputDevices
             }
 
             ApplyBluetoothSpeakerRouting(combined);
+            bool hapticsFresh = cachedTimestamp > 0 &&
+                Stopwatch.GetTimestamp() - cachedTimestamp <=
+                (Stopwatch.Frequency * BluetoothCombinedHapticsFreshnessMilliseconds) / 1000;
+            if (!hapticsFresh)
+            {
+                // Speaker audio is clocked continuously, while a game can stop
+                // its haptics stream at any time. Replaying the last 0x12 block
+                // after that point turns a transient effect into an endless buzz.
+                // Keep the combined report valid, but replace the stale haptics
+                // payload with an explicit silent sample.
+                combined[BluetoothCombinedHapticsOffset] = 0x92;
+                combined[BluetoothCombinedHapticsOffset + 1] = BluetoothCombinedHapticsDataLength;
+                Array.Clear(combined, BluetoothCombinedHapticsDataOffset,
+                    BluetoothCombinedHapticsDataLength);
+                Interlocked.Increment(ref bluetoothCombinedSpeakerStaleHapticsSilenced);
+            }
 
             // A 0x93 packet with a zero payload is not a valid silent Opus
             // frame. Omit the speaker TLV until an encoded frame is ready,
@@ -2050,7 +2073,10 @@ namespace DS4Windows.InputDevices
                 bluetoothCombinedSpeakerPacketSequence++;
             }
 
-            RecordBluetoothCombinedSpeakerCacheDelay(cachedTimestamp);
+            if (hapticsFresh)
+            {
+                RecordBluetoothCombinedSpeakerCacheDelay(cachedTimestamp);
+            }
 
             Interlocked.Increment(ref bluetoothCombinedSpeakerReportsWritten);
             LastBluetoothHapticsWriteStatus = "Speaker-clocked combined Bluetooth write completed successfully.";
@@ -2133,14 +2159,15 @@ namespace DS4Windows.InputDevices
             // mid-stream and corrupt an otherwise valid Opus frame.
             combined[BluetoothCombinedStateFlag0Offset] |= 0xA0;
             combined[BluetoothCombinedStateFlag1Offset] |= 0x80;
-            // vDS' hardware-derived state uses a 0x64 ceiling and preamp 2
-            // for the internal Bluetooth speaker. DS4Windows' normal output
-            // report permits a wider UI range, but applying that raw value to
-            // the Opus path can overdrive the controller's tiny amplifier.
+            // DS5Dongle documents speaker volume up to 0x7F and the low three
+            // bits of AudioControl2 as a speaker pre-gain control. The previous
+            // 0x64 / gain-2 setting was noticeably quieter than the physical
+            // controller endpoint. Use the documented maximum volume and one
+            // modest pre-gain step while retaining the hardware limiter.
             combined[BluetoothCombinedStateSpeakerVolumeOffset] =
-                (byte)Math.Min(0x64, (int)speakerVolume);
+                (byte)Math.Min(0x7F, (int)speakerVolume);
             combined[BluetoothCombinedStateAudioControlOffset] = 0x30;
-            combined[BluetoothCombinedStateAudioControl2Offset] = 0x02;
+            combined[BluetoothCombinedStateAudioControl2Offset] = 0x03;
         }
 
         /// <summary>

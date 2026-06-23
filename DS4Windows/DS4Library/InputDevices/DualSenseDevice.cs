@@ -356,10 +356,6 @@ namespace DS4Windows.InputDevices
         private readonly object bluetoothSpeakerFrameLock = new object();
         private readonly byte[] latestBluetoothSpeakerFrame = new byte[BluetoothCombinedSpeakerFrameLength];
         private int latestBluetoothSpeakerFrameLength;
-        private readonly object bluetoothSpeakerOutputWriteLock = new object();
-        private byte[] pendingBluetoothSpeakerOutputReport;
-        private bool bluetoothSpeakerOutputWriteScheduled;
-        private long bluetoothSpeakerOutputReportsCoalesced;
         private readonly object bluetoothCombinedOutputWriteLock = new object();
         private byte[] pendingBluetoothCombinedOutputReport;
         private bool bluetoothCombinedOutputWriteScheduled;
@@ -371,8 +367,6 @@ namespace DS4Windows.InputDevices
         public long BluetoothMicrophoneFrameCount => Interlocked.Read(ref bluetoothMicrophoneFrameCount);
         public long BluetoothCombinedOutputReportsCoalesced =>
             Interlocked.Read(ref bluetoothCombinedOutputReportsCoalesced);
-        public long BluetoothSpeakerOutputReportsCoalesced =>
-            Interlocked.Read(ref bluetoothSpeakerOutputReportsCoalesced);
         public DateTime BluetoothMicrophoneLastFrameUtc
         {
             get
@@ -423,11 +417,6 @@ namespace DS4Windows.InputDevices
             {
                 Array.Clear(latestBluetoothSpeakerFrame, 0, latestBluetoothSpeakerFrame.Length);
                 latestBluetoothSpeakerFrameLength = 0;
-            }
-
-            lock (bluetoothSpeakerOutputWriteLock)
-            {
-                pendingBluetoothSpeakerOutputReport = null;
             }
         }
 
@@ -1281,9 +1270,7 @@ namespace DS4Windows.InputDevices
                     tempAct.Invoke();
                 }
 
-                // An action may enqueue more work while this snapshot is being
-                // handled. Leave that work visible to the next input poll.
-                hasInputEvts = eventQueue.Count != 0;
+                hasInputEvts = false;
             }
         }
 
@@ -1739,75 +1726,7 @@ namespace DS4Windows.InputDevices
         public bool WriteBluetoothSpeakerAudioOutputReport(byte[] report, int offset, int length)
         {
             return WriteBluetoothAudioOutputReport(report, offset, length, 0x35, 334,
-                "speaker audio", waitForWrite: false, coalesceLatest: true);
-        }
-
-        private bool QueueLatestBluetoothSpeakerAudioOutputReport(byte[] report)
-        {
-            bool scheduleWrite = false;
-            lock (bluetoothSpeakerOutputWriteLock)
-            {
-                if (pendingBluetoothSpeakerOutputReport != null)
-                {
-                    Interlocked.Increment(ref bluetoothSpeakerOutputReportsCoalesced);
-                }
-
-                pendingBluetoothSpeakerOutputReport = report;
-                if (!bluetoothSpeakerOutputWriteScheduled)
-                {
-                    bluetoothSpeakerOutputWriteScheduled = true;
-                    scheduleWrite = true;
-                }
-            }
-
-            if (scheduleWrite)
-            {
-                queueEvent(WriteLatestBluetoothSpeakerAudioOutputReport);
-            }
-
-            LastBluetoothHapticsWriteStatus = "Queued current Bluetooth speaker audio frame for HID write.";
-            return true;
-        }
-
-        private void WriteLatestBluetoothSpeakerAudioOutputReport()
-        {
-            byte[] report;
-            lock (bluetoothSpeakerOutputWriteLock)
-            {
-                report = pendingBluetoothSpeakerOutputReport;
-                pendingBluetoothSpeakerOutputReport = null;
-            }
-
-            try
-            {
-                bool result = report != null && hDevice.WriteOutputReportViaInterrupt(report, READ_STREAM_TIMEOUT);
-                LastBluetoothHapticsWriteStatus = result ?
-                    "Current Bluetooth speaker audio frame write completed successfully." :
-                    $"Current Bluetooth speaker audio frame write returned false. LastWin32Error={Marshal.GetLastWin32Error()}.";
-            }
-            catch (Exception ex)
-            {
-                LastBluetoothHapticsWriteStatus =
-                    $"Current Bluetooth speaker audio frame write threw {ex.GetType().Name}: {ex.Message}";
-            }
-            finally
-            {
-                bool scheduleWrite = false;
-                lock (bluetoothSpeakerOutputWriteLock)
-                {
-                    bluetoothSpeakerOutputWriteScheduled = false;
-                    if (pendingBluetoothSpeakerOutputReport != null)
-                    {
-                        bluetoothSpeakerOutputWriteScheduled = true;
-                        scheduleWrite = true;
-                    }
-                }
-
-                if (scheduleWrite)
-                {
-                    queueEvent(WriteLatestBluetoothSpeakerAudioOutputReport);
-                }
-            }
+                "speaker audio", waitForWrite: false);
         }
 
         /// <summary>
@@ -1954,8 +1873,7 @@ namespace DS4Windows.InputDevices
         }
 
         private bool WriteBluetoothAudioOutputReport(byte[] report, int offset, int length,
-            byte expectedReportId, int expectedLength, string reportDescription, bool waitForWrite,
-            bool coalesceLatest = false)
+            byte expectedReportId, int expectedLength, string reportDescription, bool waitForWrite)
         {
             if (report == null)
             {
@@ -1989,11 +1907,6 @@ namespace DS4Windows.InputDevices
 
             byte[] audioReport = new byte[length];
             Array.Copy(report, offset, audioReport, 0, length);
-
-            if (coalesceLatest && !waitForWrite)
-            {
-                return QueueLatestBluetoothSpeakerAudioOutputReport(audioReport);
-            }
 
             if (!waitForWrite)
             {

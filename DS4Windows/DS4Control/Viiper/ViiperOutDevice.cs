@@ -124,19 +124,25 @@ namespace DS4Windows
             {
                 try
                 {
-                    // DS4Windows captures speaker audio independently of VIIPER. Keep
-                    // that audio on the native 0x35 lane and receive haptics on 0x32;
-                    // assembling 0x36 here joins two unrelated clocks and produces
-                    // audible latency and crackle.
-                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream("dualsenseext");
-                    activeFeedbackLength = DualSenseExtendedFeedbackLength;
+                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream("dualsensecombinedext");
+                    activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
                     return stream;
                 }
                 catch (IOException ex)
                 {
-                    AppLogger.LogToGui($"VIIPER DualSense extended feedback unavailable, falling back to base DualSense output: {ex.Message}", false);
-                    activeFeedbackLength = DualSenseBaseFeedbackLength;
-                    return client.CreateDeviceAndOpenStream("dualsense");
+                    try
+                    {
+                        AppLogger.LogToGui($"VIIPER DualSense combined haptics feedback unavailable, using legacy extended feedback: {ex.Message}", false);
+                        ViiperDeviceStream stream = client.CreateDeviceAndOpenStream("dualsenseext");
+                        activeFeedbackLength = DualSenseExtendedFeedbackLength;
+                        return stream;
+                    }
+                    catch (IOException legacyEx)
+                    {
+                        AppLogger.LogToGui($"VIIPER DualSense adaptive trigger feedback unavailable, falling back to base DualSense output: {legacyEx.Message}", false);
+                        activeFeedbackLength = DualSenseBaseFeedbackLength;
+                        return client.CreateDeviceAndOpenStream("dualsense");
+                    }
                 }
             }
 
@@ -144,15 +150,25 @@ namespace DS4Windows
             {
                 try
                 {
-                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream("dualsenseedgeext");
-                    activeFeedbackLength = DualSenseExtendedFeedbackLength;
+                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream("dualsenseedgecombinedext");
+                    activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
                     return stream;
                 }
                 catch (IOException ex)
                 {
-                    AppLogger.LogToGui($"VIIPER DualSense Edge extended feedback unavailable, falling back to base DualSense Edge output: {ex.Message}", false);
-                    activeFeedbackLength = DualSenseBaseFeedbackLength;
-                    return client.CreateDeviceAndOpenStream("dualsenseedge");
+                    try
+                    {
+                        AppLogger.LogToGui($"VIIPER DualSense Edge combined haptics feedback unavailable, using legacy extended feedback: {ex.Message}", false);
+                        ViiperDeviceStream stream = client.CreateDeviceAndOpenStream("dualsenseedgeext");
+                        activeFeedbackLength = DualSenseExtendedFeedbackLength;
+                        return stream;
+                    }
+                    catch (IOException legacyEx)
+                    {
+                        AppLogger.LogToGui($"VIIPER DualSense Edge adaptive trigger feedback unavailable, falling back to base DualSense Edge output: {legacyEx.Message}", false);
+                        activeFeedbackLength = DualSenseBaseFeedbackLength;
+                        return client.CreateDeviceAndOpenStream("dualsenseedge");
+                    }
                 }
             }
 

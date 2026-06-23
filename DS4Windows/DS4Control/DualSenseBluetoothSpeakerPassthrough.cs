@@ -30,13 +30,16 @@ namespace DS4Windows
         private const int ReportLength = 334;
         private const int CaptureBufferMilliseconds = 240;
         private const int InitialBufferMilliseconds = 24;
+        private const int TargetBufferMilliseconds = 20;
+        private const int BufferDeadbandMilliseconds = 5;
+        private const int DriftAdjustmentFrames = 4;
 
         private readonly object syncRoot = new object();
         private readonly DualSenseDevice device;
         private readonly string sourceEndpointId;
         private readonly byte speakerVolume;
         private readonly float[] frame = new float[FrameSamples * Channels];
-        private readonly float[] sourceFrame = new float[512 * Channels];
+        private readonly float[] sourceFrame = new float[(512 + DriftAdjustmentFrames) * Channels];
         private readonly byte[] opusFrame = new byte[OpusBytes];
         private readonly byte[] report = new byte[ReportLength];
 
@@ -51,6 +54,7 @@ namespace DS4Windows
         private long framesSent;
         private long shortCaptureReads;
         private long skippedScheduleSlots;
+        private long captureDriftAdjustments;
         private long lastDiagnosticUtcTicks;
 
         public DualSenseBluetoothSpeakerPassthrough(DualSenseDevice device, byte speakerVolume,
@@ -187,7 +191,6 @@ namespace DS4Windows
 
         private void StreamLoop(ISampleProvider source)
         {
-            const int sourceFramesPerTick = 512;
             const double frameDurationMs = 10.0 + (2.0 / 3.0);
             WaitForInitialCaptureBuffer();
             double frameTicks = Stopwatch.Frequency * frameDurationMs / 1000.0;
@@ -197,13 +200,15 @@ namespace DS4Windows
             {
                 Array.Clear(sourceFrame, 0, sourceFrame.Length);
                 Array.Clear(frame, 0, frame.Length);
+                int sourceFramesPerTick = GetSourceFramesPerTick();
+                int requestedSamples = sourceFramesPerTick * Channels;
                 int samplesRead;
                 lock (syncRoot)
                 {
-                    samplesRead = stopping ? 0 : source.Read(sourceFrame, 0, sourceFrame.Length);
+                    samplesRead = stopping ? 0 : source.Read(sourceFrame, 0, requestedSamples);
                 }
 
-                if (samplesRead < sourceFrame.Length)
+                if (samplesRead < requestedSamples)
                 {
                     Interlocked.Increment(ref shortCaptureReads);
                 }
@@ -218,9 +223,10 @@ namespace DS4Windows
                 }
 
                 // SAxense, PadForge, and DS5Dongle converge on this firmware
-                // cadence: consume 512 frames every 10.667 ms, then compress
-                // them into one 480-sample Opus frame. Sending one report per
-                // 10 ms is 6.7% too fast and eventually overruns the pad.
+                // cadence: consume approximately 512 frames every 10.667 ms,
+                // then compress them into one 480-sample Opus frame. A small
+                // drift trim preserves the capture cushion without adding
+                // reports or changing the firmware-facing cadence.
                 const double step = sourceFramesPerTick / (double)FrameSamples;
                 for (int outputFrame = 0; outputFrame < FrameSamples; outputFrame++)
                 {
@@ -262,6 +268,36 @@ namespace DS4Windows
                     nextFrame = Stopwatch.GetTimestamp() + frameTicks;
                 }
             }
+        }
+
+        private int GetSourceFramesPerTick()
+        {
+            const int baseFrames = 512;
+            lock (syncRoot)
+            {
+                WaveFormat captureFormat = capture?.WaveFormat;
+                if (captureBuffer == null || captureFormat == null || captureFormat.BlockAlign <= 0)
+                {
+                    return baseFrames;
+                }
+
+                int bufferedFrames = captureBuffer.BufferedBytes / captureFormat.BlockAlign;
+                int targetFrames = (captureFormat.SampleRate * TargetBufferMilliseconds) / 1000;
+                int deadbandFrames = (captureFormat.SampleRate * BufferDeadbandMilliseconds) / 1000;
+                if (bufferedFrames > targetFrames + deadbandFrames)
+                {
+                    Interlocked.Increment(ref captureDriftAdjustments);
+                    return baseFrames + DriftAdjustmentFrames;
+                }
+
+                if (bufferedFrames < targetFrames - deadbandFrames)
+                {
+                    Interlocked.Increment(ref captureDriftAdjustments);
+                    return baseFrames - DriftAdjustmentFrames;
+                }
+            }
+
+            return baseFrames;
         }
 
         private void WaitForInitialCaptureBuffer()
@@ -312,7 +348,7 @@ namespace DS4Windows
                 return;
             }
 
-            AppLogger.LogToGui($"DualSense Bluetooth speaker stats: frames={Interlocked.Read(ref framesSent)} shortCaptureReads={Interlocked.Read(ref shortCaptureReads)} skippedSlots={Interlocked.Read(ref skippedScheduleSlots)} queued={device.PendingBluetoothSpeakerFrames} queueDrops={device.BluetoothSpeakerFramesDropped} queueUnderruns={device.BluetoothSpeakerFramesUnderrun} combinedReports={device.BluetoothCombinedOutputReportCount} combinedLate={device.BluetoothCombinedOutputLateReportCount} combinedMaxGapMs={device.BluetoothCombinedOutputMaxGapMilliseconds:F1} speakerWrites={device.BluetoothCombinedSpeakerReportsWritten} speakerWriteFailures={device.BluetoothCombinedSpeakerWriteFailures} suppressed0x31={device.BluetoothNormalOutputWritesSuppressed} status={device.LastBluetoothHapticsWriteStatus}", false);
+            AppLogger.LogToGui($"DualSense Bluetooth speaker stats: frames={Interlocked.Read(ref framesSent)} shortCaptureReads={Interlocked.Read(ref shortCaptureReads)} driftAdjustments={Interlocked.Read(ref captureDriftAdjustments)} skippedSlots={Interlocked.Read(ref skippedScheduleSlots)} queued={device.PendingBluetoothSpeakerFrames} queueDrops={device.BluetoothSpeakerFramesDropped} queueUnderruns={device.BluetoothSpeakerFramesUnderrun} combinedReports={device.BluetoothCombinedOutputReportCount} combinedLate={device.BluetoothCombinedOutputLateReportCount} combinedMaxGapMs={device.BluetoothCombinedOutputMaxGapMilliseconds:F1} speakerWrites={device.BluetoothCombinedSpeakerReportsWritten} speakerWriteFailures={device.BluetoothCombinedSpeakerWriteFailures} suppressed0x31={device.BluetoothNormalOutputWritesSuppressed} status={device.LastBluetoothHapticsWriteStatus}", false);
         }
 
         private void SendFrame()

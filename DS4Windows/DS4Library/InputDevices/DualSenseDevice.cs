@@ -353,9 +353,9 @@ namespace DS4Windows.InputDevices
         private const int BluetoothCombinedSpeakerOffset = 142;
         private const int BluetoothCombinedSpeakerDataOffset = 144;
         private const int BluetoothCombinedSpeakerFrameLength = 200;
-        private const int MaxBluetoothSpeakerFrames = 64;
         private readonly object bluetoothSpeakerFrameLock = new object();
-        private readonly Queue<byte[]> bluetoothSpeakerFrames = new Queue<byte[]>(MaxBluetoothSpeakerFrames);
+        private readonly byte[] latestBluetoothSpeakerFrame = new byte[BluetoothCombinedSpeakerFrameLength];
+        private int latestBluetoothSpeakerFrameLength;
         private readonly object bluetoothCombinedOutputWriteLock = new object();
         private byte[] pendingBluetoothCombinedOutputReport;
         private bool bluetoothCombinedOutputWriteScheduled;
@@ -385,9 +385,10 @@ namespace DS4Windows.InputDevices
             Volatile.Read(ref bluetoothCombinedOutputTransportEnabled) != 0;
 
         /// <summary>
-        /// Queues one fixed-size Opus frame produced by the selected Windows
-        /// audio source. The next combined haptics output report consumes one
-        /// frame in order. No HID traffic is emitted from this method.
+        /// Stores the most recent fixed-size Opus frame produced by the
+        /// selected Windows audio source. The next combined haptics output
+        /// report reuses it until a fresher frame arrives. This keeps the
+        /// speaker decoder clocked without accumulating audio latency.
         /// </summary>
         public void SetBluetoothSpeakerAudioFrame(byte[] frame, int length)
         {
@@ -398,16 +399,10 @@ namespace DS4Windows.InputDevices
 
             lock (bluetoothSpeakerFrameLock)
             {
-                byte[] speakerFrame = new byte[BluetoothCombinedSpeakerFrameLength];
                 int bytesToCopy = Math.Min(Math.Min(length, frame.Length), BluetoothCombinedSpeakerFrameLength);
-                Array.Copy(frame, 0, speakerFrame, 0, bytesToCopy);
-
-                while (bluetoothSpeakerFrames.Count >= MaxBluetoothSpeakerFrames)
-                {
-                    bluetoothSpeakerFrames.Dequeue();
-                }
-
-                bluetoothSpeakerFrames.Enqueue(speakerFrame);
+                Array.Clear(latestBluetoothSpeakerFrame, 0, latestBluetoothSpeakerFrame.Length);
+                Array.Copy(frame, 0, latestBluetoothSpeakerFrame, 0, bytesToCopy);
+                latestBluetoothSpeakerFrameLength = bytesToCopy;
             }
         }
 
@@ -420,22 +415,22 @@ namespace DS4Windows.InputDevices
         {
             lock (bluetoothSpeakerFrameLock)
             {
-                bluetoothSpeakerFrames.Clear();
+                Array.Clear(latestBluetoothSpeakerFrame, 0, latestBluetoothSpeakerFrame.Length);
+                latestBluetoothSpeakerFrameLength = 0;
             }
         }
 
-        private bool TryTakeBluetoothSpeakerAudioFrame(byte[] destination, int destinationOffset)
+        private bool TryCopyBluetoothSpeakerAudioFrame(byte[] destination, int destinationOffset)
         {
             lock (bluetoothSpeakerFrameLock)
             {
-                if (!enableSpeakerOutput || bluetoothSpeakerFrames.Count == 0 || destination == null ||
+                if (!enableSpeakerOutput || latestBluetoothSpeakerFrameLength <= 0 || destination == null ||
                     destinationOffset < 0 || destinationOffset + BluetoothCombinedSpeakerFrameLength > destination.Length)
                 {
                     return false;
                 }
 
-                byte[] speakerFrame = bluetoothSpeakerFrames.Dequeue();
-                Array.Copy(speakerFrame, 0, destination, destinationOffset,
+                Array.Copy(latestBluetoothSpeakerFrame, 0, destination, destinationOffset,
                     BluetoothCombinedSpeakerFrameLength);
                 return true;
             }
@@ -1760,7 +1755,7 @@ namespace DS4Windows.InputDevices
             combined[BluetoothCombinedSpeakerOffset + 1] = 0;
             Array.Clear(combined, BluetoothCombinedSpeakerDataOffset,
                 BluetoothCombinedSpeakerFrameLength);
-            if (TryTakeBluetoothSpeakerAudioFrame(combined, BluetoothCombinedSpeakerDataOffset))
+            if (TryCopyBluetoothSpeakerAudioFrame(combined, BluetoothCombinedSpeakerDataOffset))
             {
                 combined[BluetoothCombinedSpeakerOffset] = 0x93;
                 combined[BluetoothCombinedSpeakerOffset + 1] = BluetoothCombinedSpeakerFrameLength;

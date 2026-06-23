@@ -366,11 +366,15 @@ namespace DS4Windows.InputDevices
         private long bluetoothSpeakerFramesUnderrun;
         private readonly object bluetoothCombinedSpeakerReportLock = new object();
         private byte[] latestBluetoothCombinedSpeakerReport;
+        private long latestBluetoothCombinedSpeakerReportTimestamp;
         private byte bluetoothCombinedSpeakerReportSequence;
         private byte bluetoothCombinedSpeakerPacketSequence;
         private bool bluetoothCombinedSpeakerSequenceInitialized;
         private long bluetoothCombinedSpeakerReportsWritten;
         private long bluetoothCombinedSpeakerWriteFailures;
+        private long bluetoothCombinedSpeakerCacheDelayTicks;
+        private long bluetoothCombinedSpeakerCacheDelayMaximumTicks;
+        private long bluetoothCombinedSpeakerCacheDelayCount;
         private readonly object bluetoothRealtimeWriterLock = new object();
         private DualSenseBluetoothRealtimeWriter bluetoothRealtimeWriter;
         private long bluetoothRealtimeWriterLastOpenAttemptUtcTicks;
@@ -407,6 +411,19 @@ namespace DS4Windows.InputDevices
             Interlocked.Read(ref bluetoothCombinedSpeakerReportsWritten);
         public long BluetoothCombinedSpeakerWriteFailures =>
             Interlocked.Read(ref bluetoothCombinedSpeakerWriteFailures);
+        public double BluetoothCombinedSpeakerCacheAverageDelayMilliseconds
+        {
+            get
+            {
+                long count = Interlocked.Read(ref bluetoothCombinedSpeakerCacheDelayCount);
+                return count == 0 ? 0.0 :
+                    Interlocked.Read(ref bluetoothCombinedSpeakerCacheDelayTicks) * 1000.0 /
+                    (Stopwatch.Frequency * count);
+            }
+        }
+        public double BluetoothCombinedSpeakerCacheMaximumDelayMilliseconds =>
+            Interlocked.Read(ref bluetoothCombinedSpeakerCacheDelayMaximumTicks) * 1000.0 /
+            Stopwatch.Frequency;
         public int PendingBluetoothSpeakerFrames
         {
             get
@@ -482,6 +499,7 @@ namespace DS4Windows.InputDevices
             lock (bluetoothCombinedSpeakerReportLock)
             {
                 latestBluetoothCombinedSpeakerReport = null;
+                latestBluetoothCombinedSpeakerReportTimestamp = 0;
                 bluetoothCombinedSpeakerSequenceInitialized = false;
             }
 
@@ -1907,6 +1925,7 @@ namespace DS4Windows.InputDevices
             lock (bluetoothCombinedSpeakerReportLock)
             {
                 latestBluetoothCombinedSpeakerReport = report;
+                latestBluetoothCombinedSpeakerReportTimestamp = Stopwatch.GetTimestamp();
                 if (!bluetoothCombinedSpeakerSequenceInitialized)
                 {
                     bluetoothCombinedSpeakerReportSequence = (byte)(report[1] >> 4);
@@ -1954,6 +1973,7 @@ namespace DS4Windows.InputDevices
             }
 
             byte[] combined;
+            long cachedTimestamp;
             lock (bluetoothCombinedSpeakerReportLock)
             {
                 if (latestBluetoothCombinedSpeakerReport == null)
@@ -1963,6 +1983,7 @@ namespace DS4Windows.InputDevices
 
                 combined = new byte[BluetoothCombinedOutputReportLength];
                 Array.Copy(latestBluetoothCombinedSpeakerReport, combined, combined.Length);
+                cachedTimestamp = latestBluetoothCombinedSpeakerReportTimestamp;
                 combined[1] = (byte)((bluetoothCombinedSpeakerReportSequence & 0x0F) << 4);
                 combined[10] = bluetoothCombinedSpeakerPacketSequence;
             }
@@ -2029,9 +2050,34 @@ namespace DS4Windows.InputDevices
                 bluetoothCombinedSpeakerPacketSequence++;
             }
 
+            RecordBluetoothCombinedSpeakerCacheDelay(cachedTimestamp);
+
             Interlocked.Increment(ref bluetoothCombinedSpeakerReportsWritten);
             LastBluetoothHapticsWriteStatus = "Speaker-clocked combined Bluetooth write completed successfully.";
             return true;
+        }
+
+        private void RecordBluetoothCombinedSpeakerCacheDelay(long cachedTimestamp)
+        {
+            if (cachedTimestamp <= 0)
+            {
+                return;
+            }
+
+            long elapsed = Math.Max(0, Stopwatch.GetTimestamp() - cachedTimestamp);
+            Interlocked.Add(ref bluetoothCombinedSpeakerCacheDelayTicks, elapsed);
+            Interlocked.Increment(ref bluetoothCombinedSpeakerCacheDelayCount);
+            long maximum;
+            do
+            {
+                maximum = Interlocked.Read(ref bluetoothCombinedSpeakerCacheDelayMaximumTicks);
+                if (elapsed <= maximum)
+                {
+                    break;
+                }
+            }
+            while (Interlocked.CompareExchange(ref bluetoothCombinedSpeakerCacheDelayMaximumTicks,
+                elapsed, maximum) != maximum);
         }
 
         private bool TryWriteBluetoothCombinedSpeakerReport(byte[] report, out bool realtimeWriterActive)

@@ -1778,6 +1778,14 @@ namespace DS4Windows.InputDevices
 
             queueEvent(() =>
             {
+                if (UsesCombinedBluetoothSpeakerTransport() &&
+                    UpdateCachedBluetoothCombinedState(report, offset))
+                {
+                    LastBluetoothHapticsWriteStatus =
+                        "Merged game output state into the speaker-clocked combined Bluetooth report.";
+                    return;
+                }
+
                 Array.Clear(outputReport, 0, outputReport.Length);
 
                 if (conType == ConnectionType.BT)
@@ -1905,6 +1913,36 @@ namespace DS4Windows.InputDevices
                     bluetoothCombinedSpeakerPacketSequence = report[10];
                     bluetoothCombinedSpeakerSequenceInitialized = true;
                 }
+            }
+        }
+
+        /// <summary>
+        /// A game can send an ordinary USB output report while its UAC haptics
+        /// stream is active. The current 0x36 report owns the physical
+        /// Bluetooth transport in that state, so fold the USB effect state
+        /// into its 0x10 state block instead of issuing a competing 0x31
+        /// write. VIIPER uses this exact raw-report-to-state mapping when it
+        /// creates the combined report.
+        /// </summary>
+        private bool UpdateCachedBluetoothCombinedState(byte[] report, int offset)
+        {
+            if (report == null || offset < 0 ||
+                offset + USB_OUTPUT_CHANGE_LENGTH > report.Length ||
+                report[offset] != OUTPUT_REPORT_ID_USB)
+            {
+                return false;
+            }
+
+            lock (bluetoothCombinedSpeakerReportLock)
+            {
+                if (latestBluetoothCombinedSpeakerReport == null)
+                {
+                    return false;
+                }
+
+                Array.Copy(report, offset + 1, latestBluetoothCombinedSpeakerReport,
+                    BluetoothCombinedStateOffset, USB_OUTPUT_CHANGE_LENGTH - 1);
+                return true;
             }
         }
 
@@ -2049,10 +2087,14 @@ namespace DS4Windows.InputDevices
             // mid-stream and corrupt an otherwise valid Opus frame.
             combined[BluetoothCombinedStateFlag0Offset] |= 0xA0;
             combined[BluetoothCombinedStateFlag1Offset] |= 0x80;
-            combined[BluetoothCombinedStateSpeakerVolumeOffset] = speakerVolume;
+            // vDS' hardware-derived state uses a 0x64 ceiling and preamp 2
+            // for the internal Bluetooth speaker. DS4Windows' normal output
+            // report permits a wider UI range, but applying that raw value to
+            // the Opus path can overdrive the controller's tiny amplifier.
+            combined[BluetoothCombinedStateSpeakerVolumeOffset] =
+                (byte)Math.Min(0x64, speakerVolume);
             combined[BluetoothCombinedStateAudioControlOffset] = 0x30;
-            combined[BluetoothCombinedStateAudioControl2Offset] =
-                (byte)Math.Min(7, speakerVolume / 32);
+            combined[BluetoothCombinedStateAudioControl2Offset] = 0x02;
         }
 
         /// <summary>

@@ -1,4 +1,5 @@
 using System;
+using Microsoft.Win32.SafeHandles;
 using System.Runtime.InteropServices;
 using System.Threading;
 
@@ -75,6 +76,9 @@ namespace DS4Windows.InputDevices
 
         private readonly object syncRoot = new object();
         private readonly IntPtr deviceHandle;
+        private readonly SafeFileHandle sharedDeviceHandle;
+        private readonly bool ownsDeviceHandle;
+        private bool sharedHandleReferenceAdded;
         private readonly WriteSlot[] slots;
         private int nextSlot;
         private bool disposed;
@@ -82,6 +86,7 @@ namespace DS4Windows.InputDevices
         private DualSenseBluetoothRealtimeWriter(IntPtr deviceHandle, int reportLength, int slotCount)
         {
             this.deviceHandle = deviceHandle;
+            ownsDeviceHandle = true;
             slots = new WriteSlot[slotCount];
             try
             {
@@ -95,6 +100,44 @@ namespace DS4Windows.InputDevices
                 foreach (WriteSlot slot in slots)
                 {
                     slot?.Dispose();
+                }
+
+                throw;
+            }
+        }
+
+        private DualSenseBluetoothRealtimeWriter(SafeFileHandle deviceHandle, int reportLength, int slotCount)
+        {
+            if (deviceHandle == null || deviceHandle.IsInvalid || deviceHandle.IsClosed)
+            {
+                throw new InvalidOperationException("The active controller HID handle is unavailable.");
+            }
+
+            bool addedReference = false;
+            WriteSlot[] createdSlots = null;
+            deviceHandle.DangerousAddRef(ref addedReference);
+            try
+            {
+                sharedDeviceHandle = deviceHandle;
+                sharedHandleReferenceAdded = addedReference;
+                this.deviceHandle = deviceHandle.DangerousGetHandle();
+                createdSlots = new WriteSlot[slotCount];
+                slots = createdSlots;
+                for (int index = 0; index < slots.Length; index++)
+                {
+                    slots[index] = new WriteSlot(reportLength);
+                }
+            }
+            catch
+            {
+                foreach (WriteSlot slot in createdSlots ?? Array.Empty<WriteSlot>())
+                {
+                    slot?.Dispose();
+                }
+
+                if (addedReference)
+                {
+                    deviceHandle.DangerousRelease();
                 }
 
                 throw;
@@ -129,6 +172,34 @@ namespace DS4Windows.InputDevices
             {
                 CloseHandle(handle);
                 throw;
+            }
+        }
+
+        /// <summary>
+        /// Builds the bounded writer around an already-open exclusive HID
+        /// handle. This is the only safe way to stream alongside DS4Windows'
+        /// reader: opening a second handle loses to the exclusive share mode.
+        /// </summary>
+        public static bool TryCreate(SafeFileHandle deviceHandle, int reportLength,
+            out DualSenseBluetoothRealtimeWriter writer, out int error)
+        {
+            writer = null;
+            error = 0;
+            if (deviceHandle == null || deviceHandle.IsInvalid || deviceHandle.IsClosed)
+            {
+                error = 6; // ERROR_INVALID_HANDLE
+                return false;
+            }
+
+            try
+            {
+                writer = new DualSenseBluetoothRealtimeWriter(deviceHandle, reportLength, slotCount: 3);
+                return true;
+            }
+            catch
+            {
+                error = Marshal.GetLastWin32Error();
+                return false;
             }
         }
 
@@ -212,18 +283,30 @@ namespace DS4Windows.InputDevices
                 }
 
                 disposed = true;
-                CancelIoEx(deviceHandle, IntPtr.Zero);
+                if (ownsDeviceHandle)
+                {
+                    CancelIoEx(deviceHandle, IntPtr.Zero);
+                }
+
                 foreach (WriteSlot slot in slots)
                 {
                     if (slot.Pending)
                     {
-                        WaitForSingleObject(slot.EventHandle, 100);
+                        WaitForSingleObject(slot.EventHandle, ownsDeviceHandle ? 100u : 1000u);
                     }
 
                     slot.Dispose();
                 }
 
-                CloseHandle(deviceHandle);
+                if (ownsDeviceHandle)
+                {
+                    CloseHandle(deviceHandle);
+                }
+                else if (sharedHandleReferenceAdded)
+                {
+                    sharedHandleReferenceAdded = false;
+                    sharedDeviceHandle.DangerousRelease();
+                }
             }
         }
 

@@ -353,6 +353,12 @@ namespace DS4Windows.InputDevices
         private const int BluetoothCombinedSpeakerOffset = 142;
         private const int BluetoothCombinedSpeakerDataOffset = 144;
         private const int BluetoothCombinedSpeakerFrameLength = 200;
+        private const int BluetoothCombinedStateOffset = 13;
+        private const int BluetoothCombinedStateFlag0Offset = BluetoothCombinedStateOffset;
+        private const int BluetoothCombinedStateFlag1Offset = BluetoothCombinedStateOffset + 1;
+        private const int BluetoothCombinedStateSpeakerVolumeOffset = BluetoothCombinedStateOffset + 5;
+        private const int BluetoothCombinedStateAudioControlOffset = BluetoothCombinedStateOffset + 7;
+        private const int BluetoothCombinedStateAudioControl2Offset = BluetoothCombinedStateOffset + 37;
         private const int MaxBluetoothSpeakerFrames = 4;
         private readonly object bluetoothSpeakerFrameLock = new object();
         private readonly Queue<byte[]> bluetoothSpeakerFrames = new Queue<byte[]>(MaxBluetoothSpeakerFrames);
@@ -1923,6 +1929,8 @@ namespace DS4Windows.InputDevices
                 combined[10] = bluetoothCombinedSpeakerPacketSequence;
             }
 
+            ApplyBluetoothSpeakerRouting(combined);
+
             // A 0x93 packet with a zero payload is not a valid silent Opus
             // frame. Omit the speaker TLV until an encoded frame is ready,
             // otherwise some controller firmware emits an audible alert tone.
@@ -1946,12 +1954,18 @@ namespace DS4Windows.InputDevices
             bool written;
             try
             {
-                // The active HidSharp handle is exclusive, so opening a
-                // second raw handle fails with ERROR_SHARING_VIOLATION. Use
-                // this already-open interrupt handle and serialize the write.
-                lock (bluetoothRealtimeWriterLock)
+                written = TryWriteBluetoothCombinedSpeakerReport(combined,
+                    out bool realtimeWriterActive);
+                if (!realtimeWriterActive)
                 {
-                    written = hDevice.WriteOutputReportViaInterrupt(combined, 0);
+                    // A controller can be transitioning between profiles while
+                    // its HID handle is recreated. Preserve the synchronous
+                    // fallback for that narrow window; normal streaming uses
+                    // the bounded asynchronous pool above.
+                    lock (bluetoothRealtimeWriterLock)
+                    {
+                        written = hDevice.WriteOutputReportViaInterrupt(combined, 0);
+                    }
                 }
             }
             catch (Exception ex)
@@ -1980,6 +1994,75 @@ namespace DS4Windows.InputDevices
             Interlocked.Increment(ref bluetoothCombinedSpeakerReportsWritten);
             LastBluetoothHapticsWriteStatus = "Speaker-clocked combined Bluetooth write completed successfully.";
             return true;
+        }
+
+        private bool TryWriteBluetoothCombinedSpeakerReport(byte[] report, out bool realtimeWriterActive)
+        {
+            realtimeWriterActive = false;
+            lock (bluetoothRealtimeWriterLock)
+            {
+                if (bluetoothRealtimeWriter == null)
+                {
+                    int error = 0;
+                    if (hDevice?.SafeReadHandle == null ||
+                        !DualSenseBluetoothRealtimeWriter.TryCreate(hDevice.SafeReadHandle,
+                            BluetoothCombinedOutputReportLength, out bluetoothRealtimeWriter, out error))
+                    {
+                        bluetoothRealtimeWriter = null;
+                        LastBluetoothHapticsWriteStatus =
+                            $"Realtime speaker writer unavailable on the active HID handle. LastWin32Error={error}.";
+                        return false;
+                    }
+                }
+
+                realtimeWriterActive = true;
+                bool accepted = bluetoothRealtimeWriter.TryWrite(report, out bool transportFault);
+                if (accepted)
+                {
+                    return true;
+                }
+
+                Interlocked.Increment(ref bluetoothRealtimeWriterDroppedReports);
+                if (transportFault)
+                {
+                    bluetoothRealtimeWriter.Dispose();
+                    bluetoothRealtimeWriter = null;
+                    realtimeWriterActive = false;
+                    LastBluetoothHapticsWriteStatus =
+                        "Realtime speaker writer encountered a transport fault; using the synchronous fallback.";
+                }
+                else
+                {
+                    LastBluetoothHapticsWriteStatus =
+                        "Realtime speaker writer was saturated; dropped one stale speaker frame to protect latency.";
+                }
+
+                return false;
+            }
+        }
+
+        private void ApplyBluetoothSpeakerRouting(byte[] combined)
+        {
+            // The firmware route is sticky. Keep the internal speaker path,
+            // volume, and pre-gain asserted on every combined packet while
+            // audio is active so a game's feedback cannot flip the route
+            // mid-stream and corrupt an otherwise valid Opus frame.
+            combined[BluetoothCombinedStateFlag0Offset] |= 0xA0;
+            combined[BluetoothCombinedStateFlag1Offset] |= 0x80;
+            combined[BluetoothCombinedStateSpeakerVolumeOffset] = GetBluetoothSpeakerVolume();
+            combined[BluetoothCombinedStateAudioControlOffset] = 0x30;
+            combined[BluetoothCombinedStateAudioControl2Offset] = 0x03;
+        }
+
+        private byte GetBluetoothSpeakerVolume()
+        {
+            if (speakerVolume == 0)
+            {
+                return 0;
+            }
+
+            int scaled = (speakerVolume * 0x64 + 127) / 255;
+            return (byte)Math.Clamp(scaled, 0x3D, 0x64);
         }
 
         /// <summary>

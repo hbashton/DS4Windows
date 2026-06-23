@@ -33,6 +33,8 @@ namespace DS4Windows
         private const int TargetBufferMilliseconds = 20;
         private const int BufferDeadbandMilliseconds = 5;
         private const int DriftAdjustmentFrames = 4;
+        private const int CaptureRingFrames = (SampleRate * CaptureBufferMilliseconds) / 1000;
+        private const int CapturePumpBufferFrames = 2048;
 
         private readonly object syncRoot = new object();
         private readonly DualSenseDevice device;
@@ -40,14 +42,23 @@ namespace DS4Windows
         private readonly byte speakerVolume;
         private readonly float[] frame = new float[FrameSamples * Channels];
         private readonly float[] sourceFrame = new float[(512 + DriftAdjustmentFrames) * Channels];
+        private readonly float[] lastSourceFrame = new float[(512 + DriftAdjustmentFrames) * Channels];
         private readonly byte[] opusFrame = new byte[OpusBytes];
         private readonly byte[] report = new byte[ReportLength];
+        private readonly float[] captureRing = new float[CaptureRingFrames * Channels];
+        private readonly AutoResetEvent captureDataAvailable = new AutoResetEvent(false);
+        private readonly AutoResetEvent captureFramesAvailable = new AutoResetEvent(false);
 
         private WasapiLoopbackCapture capture;
         private BufferedWaveProvider captureBuffer;
         private Thread worker;
+        private Thread capturePump;
         private IOpusEncoder opusEncoder;
         private volatile bool stopping;
+        private int captureRingReadIndex;
+        private int captureRingWriteIndex;
+        private int captureRingBufferedFrames;
+        private bool hasLastSourceFrame;
         private int reportSequence;
         private byte packetCounter;
         private int loggedWriteFailure;
@@ -104,13 +115,20 @@ namespace DS4Windows
                 opusEncoder.Bitrate = OpusBytes * 8 * 100;
                 opusEncoder.UseVBR = false;
 
-                worker = new Thread(() => StreamLoop(source))
+                capturePump = new Thread(() => CapturePumpLoop(source))
+                {
+                    IsBackground = true,
+                    Name = "DualSense Bluetooth speaker capture",
+                    Priority = ThreadPriority.AboveNormal,
+                };
+                worker = new Thread(StreamLoop)
                 {
                     IsBackground = true,
                     Name = "DualSense Bluetooth speaker audio",
                     Priority = ThreadPriority.Highest,
                 };
                 capture.StartRecording();
+                capturePump.Start();
                 worker.Start();
                 AppLogger.LogToGui($"DualSense Bluetooth speaker passthrough started: {sourceName}", false);
             }
@@ -177,6 +195,7 @@ namespace DS4Windows
                 if (!stopping)
                 {
                     captureBuffer?.AddSamples(e.Buffer, 0, e.BytesRecorded);
+                    captureDataAvailable.Set();
                 }
             }
         }
@@ -189,7 +208,96 @@ namespace DS4Windows
             }
         }
 
-        private void StreamLoop(ISampleProvider source)
+        private void CapturePumpLoop(ISampleProvider source)
+        {
+            float[] buffer = new float[CapturePumpBufferFrames * Channels];
+            while (!stopping)
+            {
+                captureDataAvailable.WaitOne(10);
+                while (!stopping)
+                {
+                    int samplesRead;
+                    lock (syncRoot)
+                    {
+                        samplesRead = stopping ? 0 : source.Read(buffer, 0, buffer.Length);
+                    }
+
+                    if (samplesRead <= 0)
+                    {
+                        break;
+                    }
+
+                    AppendCaptureSamples(buffer, samplesRead);
+                }
+            }
+        }
+
+        private void AppendCaptureSamples(float[] samples, int sampleCount)
+        {
+            int frames = Math.Min(sampleCount / Channels, CaptureRingFrames);
+            if (frames <= 0)
+            {
+                return;
+            }
+
+            int sourceFrameOffset = (sampleCount / Channels) - frames;
+            lock (syncRoot)
+            {
+                for (int frameIndex = 0; frameIndex < frames; frameIndex++)
+                {
+                    if (captureRingBufferedFrames == CaptureRingFrames)
+                    {
+                        captureRingReadIndex = (captureRingReadIndex + 1) % CaptureRingFrames;
+                        captureRingBufferedFrames--;
+                    }
+
+                    int sourceOffset = (sourceFrameOffset + frameIndex) * Channels;
+                    int destinationOffset = captureRingWriteIndex * Channels;
+                    captureRing[destinationOffset] = samples[sourceOffset];
+                    captureRing[destinationOffset + 1] = samples[sourceOffset + 1];
+                    captureRingWriteIndex = (captureRingWriteIndex + 1) % CaptureRingFrames;
+                    captureRingBufferedFrames++;
+                }
+            }
+
+            captureFramesAvailable.Set();
+        }
+
+        private bool ReadCaptureFrames(int frameCount)
+        {
+            long deadline = Stopwatch.GetTimestamp() + (Stopwatch.Frequency / 200);
+            while (!stopping)
+            {
+                lock (syncRoot)
+                {
+                    if (captureRingBufferedFrames >= frameCount)
+                    {
+                        for (int frameIndex = 0; frameIndex < frameCount; frameIndex++)
+                        {
+                            int sourceOffset = captureRingReadIndex * Channels;
+                            int destinationOffset = frameIndex * Channels;
+                            sourceFrame[destinationOffset] = captureRing[sourceOffset];
+                            sourceFrame[destinationOffset + 1] = captureRing[sourceOffset + 1];
+                            captureRingReadIndex = (captureRingReadIndex + 1) % CaptureRingFrames;
+                        }
+
+                        captureRingBufferedFrames -= frameCount;
+                        return true;
+                    }
+                }
+
+                if (Stopwatch.GetTimestamp() >= deadline)
+                {
+                    return false;
+                }
+
+                captureFramesAvailable.WaitOne(1);
+            }
+
+            return false;
+        }
+
+        private void StreamLoop()
         {
             const double frameDurationMs = 10.0 + (2.0 / 3.0);
             WaitForInitialCaptureBuffer();
@@ -201,25 +309,33 @@ namespace DS4Windows
                 Array.Clear(sourceFrame, 0, sourceFrame.Length);
                 Array.Clear(frame, 0, frame.Length);
                 int sourceFramesPerTick = GetSourceFramesPerTick();
-                int requestedSamples = sourceFramesPerTick * Channels;
-                int samplesRead;
-                lock (syncRoot)
-                {
-                    samplesRead = stopping ? 0 : source.Read(sourceFrame, 0, requestedSamples);
-                }
-
-                if (samplesRead < requestedSamples)
+                if (!ReadCaptureFrames(sourceFramesPerTick))
                 {
                     Interlocked.Increment(ref shortCaptureReads);
+                    if (hasLastSourceFrame)
+                    {
+                        Array.Copy(lastSourceFrame, sourceFrame, sourceFramesPerTick * Channels);
+                    }
+                }
+                else
+                {
+                    Array.Copy(sourceFrame, lastSourceFrame, sourceFramesPerTick * Channels);
+                    hasLastSourceFrame = true;
                 }
 
-                if (samplesRead > 0)
+                if (stopping)
                 {
-                    float volume = speakerVolume / 255.0f;
-                    for (int i = 0; i < samplesRead; i++)
-                    {
-                        sourceFrame[i] = Math.Clamp(sourceFrame[i] * volume, -1.0f, 1.0f);
-                    }
+                    break;
+                }
+
+                // Combined 0x36 packets carry the firmware speaker-volume
+                // byte. Keep PCM at full scale there; applying the profile
+                // gain a second time needlessly attenuates the program mix.
+                float volume = device.BluetoothCombinedOutputTransportEnabled ?
+                    1.0f : speakerVolume / 255.0f;
+                for (int i = 0; i < sourceFramesPerTick * Channels; i++)
+                {
+                    sourceFrame[i] = Math.Clamp(sourceFrame[i] * volume, -1.0f, 1.0f);
                 }
 
                 // SAxense, PadForge, and DS5Dongle converge on this firmware
@@ -276,14 +392,14 @@ namespace DS4Windows
             lock (syncRoot)
             {
                 WaveFormat captureFormat = capture?.WaveFormat;
-                if (captureBuffer == null || captureFormat == null || captureFormat.BlockAlign <= 0)
+                if (captureBuffer == null || captureFormat == null)
                 {
                     return baseFrames;
                 }
 
-                int bufferedFrames = captureBuffer.BufferedBytes / captureFormat.BlockAlign;
-                int targetFrames = (captureFormat.SampleRate * TargetBufferMilliseconds) / 1000;
-                int deadbandFrames = (captureFormat.SampleRate * BufferDeadbandMilliseconds) / 1000;
+                int bufferedFrames = captureRingBufferedFrames;
+                int targetFrames = (SampleRate * TargetBufferMilliseconds) / 1000;
+                int deadbandFrames = (SampleRate * BufferDeadbandMilliseconds) / 1000;
                 if (bufferedFrames > targetFrames + deadbandFrames)
                 {
                     Interlocked.Increment(ref captureDriftAdjustments);
@@ -302,30 +418,19 @@ namespace DS4Windows
 
         private void WaitForInitialCaptureBuffer()
         {
-            int minimumBytes;
-            lock (syncRoot)
-            {
-                minimumBytes = capture?.WaveFormat == null ? 0 :
-                    (capture.WaveFormat.AverageBytesPerSecond * InitialBufferMilliseconds) / 1000;
-            }
-
-            if (minimumBytes <= 0)
-            {
-                return;
-            }
-
+            int minimumFrames = (SampleRate * InitialBufferMilliseconds) / 1000;
             long deadline = Stopwatch.GetTimestamp() + (Stopwatch.Frequency / 2);
             while (!stopping && Stopwatch.GetTimestamp() < deadline)
             {
                 lock (syncRoot)
                 {
-                    if (captureBuffer?.BufferedBytes >= minimumBytes)
+                    if (captureRingBufferedFrames >= minimumFrames)
                     {
                         return;
                     }
                 }
 
-                Thread.Sleep(2);
+                captureFramesAvailable.WaitOne(2);
             }
         }
 
@@ -348,7 +453,7 @@ namespace DS4Windows
                 return;
             }
 
-            AppLogger.LogToGui($"DualSense Bluetooth speaker stats: frames={Interlocked.Read(ref framesSent)} shortCaptureReads={Interlocked.Read(ref shortCaptureReads)} driftAdjustments={Interlocked.Read(ref captureDriftAdjustments)} skippedSlots={Interlocked.Read(ref skippedScheduleSlots)} queued={device.PendingBluetoothSpeakerFrames} queueDrops={device.BluetoothSpeakerFramesDropped} queueUnderruns={device.BluetoothSpeakerFramesUnderrun} combinedReports={device.BluetoothCombinedOutputReportCount} combinedLate={device.BluetoothCombinedOutputLateReportCount} combinedMaxGapMs={device.BluetoothCombinedOutputMaxGapMilliseconds:F1} speakerWrites={device.BluetoothCombinedSpeakerReportsWritten} speakerWriteFailures={device.BluetoothCombinedSpeakerWriteFailures} suppressed0x31={device.BluetoothNormalOutputWritesSuppressed} status={device.LastBluetoothHapticsWriteStatus}", false);
+            AppLogger.LogToGui($"DualSense Bluetooth speaker stats: frames={Interlocked.Read(ref framesSent)} shortCaptureReads={Interlocked.Read(ref shortCaptureReads)} driftAdjustments={Interlocked.Read(ref captureDriftAdjustments)} skippedSlots={Interlocked.Read(ref skippedScheduleSlots)} queued={device.PendingBluetoothSpeakerFrames} queueDrops={device.BluetoothSpeakerFramesDropped} queueUnderruns={device.BluetoothSpeakerFramesUnderrun} realtimeQueueDrops={device.BluetoothRealtimeWriterDroppedReports} combinedReports={device.BluetoothCombinedOutputReportCount} combinedLate={device.BluetoothCombinedOutputLateReportCount} combinedMaxGapMs={device.BluetoothCombinedOutputMaxGapMilliseconds:F1} speakerWrites={device.BluetoothCombinedSpeakerReportsWritten} speakerWriteFailures={device.BluetoothCombinedSpeakerWriteFailures} suppressed0x31={device.BluetoothNormalOutputWritesSuppressed} status={device.LastBluetoothHapticsWriteStatus}", false);
         }
 
         private void SendFrame()
@@ -445,12 +550,21 @@ namespace DS4Windows
         public void Dispose()
         {
             stopping = true;
+            captureDataAvailable.Set();
+            captureFramesAvailable.Set();
             if (worker != null && worker.IsAlive && Thread.CurrentThread.ManagedThreadId != worker.ManagedThreadId)
             {
                 worker.Join(500);
             }
 
             worker = null;
+            if (capturePump != null && capturePump.IsAlive &&
+                Thread.CurrentThread.ManagedThreadId != capturePump.ManagedThreadId)
+            {
+                capturePump.Join(500);
+            }
+
+            capturePump = null;
             WasapiLoopbackCapture oldCapture;
             lock (syncRoot)
             {

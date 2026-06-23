@@ -28,6 +28,8 @@ namespace DS4Windows
         private const int FrameSamples = 480;
         private const int OpusBytes = 200;
         private const int ReportLength = 334;
+        private const int CaptureBufferMilliseconds = 240;
+        private const int InitialBufferMilliseconds = 24;
 
         private readonly object syncRoot = new object();
         private readonly DualSenseDevice device;
@@ -80,7 +82,7 @@ namespace DS4Windows
                 capture = CreateCapture(sourceEndpointId, out string sourceName);
                 captureBuffer = new BufferedWaveProvider(capture.WaveFormat)
                 {
-                    BufferDuration = TimeSpan.FromMilliseconds(120),
+                    BufferDuration = TimeSpan.FromMilliseconds(CaptureBufferMilliseconds),
                     DiscardOnBufferOverflow = true,
                     ReadFully = false,
                 };
@@ -187,6 +189,7 @@ namespace DS4Windows
         {
             const int sourceFramesPerTick = 512;
             const double frameDurationMs = 10.0 + (2.0 / 3.0);
+            WaitForInitialCaptureBuffer();
             double frameTicks = Stopwatch.Frequency * frameDurationMs / 1000.0;
             double nextFrame = Stopwatch.GetTimestamp() + frameTicks;
 
@@ -261,6 +264,35 @@ namespace DS4Windows
             }
         }
 
+        private void WaitForInitialCaptureBuffer()
+        {
+            int minimumBytes;
+            lock (syncRoot)
+            {
+                minimumBytes = capture?.WaveFormat == null ? 0 :
+                    (capture.WaveFormat.AverageBytesPerSecond * InitialBufferMilliseconds) / 1000;
+            }
+
+            if (minimumBytes <= 0)
+            {
+                return;
+            }
+
+            long deadline = Stopwatch.GetTimestamp() + (Stopwatch.Frequency / 2);
+            while (!stopping && Stopwatch.GetTimestamp() < deadline)
+            {
+                lock (syncRoot)
+                {
+                    if (captureBuffer?.BufferedBytes >= minimumBytes)
+                    {
+                        return;
+                    }
+                }
+
+                Thread.Sleep(2);
+            }
+        }
+
         private void LogStreamDiagnosticsIfVerbose()
         {
             if (!Global.VerboseStartupLogging)
@@ -280,7 +312,7 @@ namespace DS4Windows
                 return;
             }
 
-            AppLogger.LogToGui($"DualSense Bluetooth speaker stats: frames={Interlocked.Read(ref framesSent)} shortCaptureReads={Interlocked.Read(ref shortCaptureReads)} skippedSlots={Interlocked.Read(ref skippedScheduleSlots)} realtimeDrops={device.BluetoothRealtimeWriterDroppedReports} status={device.LastBluetoothHapticsWriteStatus}", false);
+            AppLogger.LogToGui($"DualSense Bluetooth speaker stats: frames={Interlocked.Read(ref framesSent)} shortCaptureReads={Interlocked.Read(ref shortCaptureReads)} skippedSlots={Interlocked.Read(ref skippedScheduleSlots)} queued={device.PendingBluetoothSpeakerFrames} queueDrops={device.BluetoothSpeakerFramesDropped} queueUnderruns={device.BluetoothSpeakerFramesUnderrun} combinedReports={device.BluetoothCombinedOutputReportCount} combinedLate={device.BluetoothCombinedOutputLateReportCount} combinedMaxGapMs={device.BluetoothCombinedOutputMaxGapMilliseconds:F1} suppressed0x31={device.BluetoothNormalOutputWritesSuppressed} realtimeDrops={device.BluetoothRealtimeWriterDroppedReports} status={device.LastBluetoothHapticsWriteStatus}", false);
         }
 
         private void SendFrame()
@@ -322,9 +354,9 @@ namespace DS4Windows
                 return;
             }
 
-            device.SetBluetoothSpeakerAudioFrame(opusFrame, encoded);
             if (device.BluetoothCombinedOutputTransportEnabled)
             {
+                device.SetBluetoothSpeakerAudioFrame(opusFrame, encoded);
                 return;
             }
 

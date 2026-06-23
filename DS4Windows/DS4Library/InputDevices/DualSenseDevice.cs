@@ -353,9 +353,11 @@ namespace DS4Windows.InputDevices
         private const int BluetoothCombinedSpeakerOffset = 142;
         private const int BluetoothCombinedSpeakerDataOffset = 144;
         private const int BluetoothCombinedSpeakerFrameLength = 200;
+        private const int MaxBluetoothSpeakerFrames = 4;
         private readonly object bluetoothSpeakerFrameLock = new object();
-        private readonly byte[] latestBluetoothSpeakerFrame = new byte[BluetoothCombinedSpeakerFrameLength];
-        private int latestBluetoothSpeakerFrameLength;
+        private readonly Queue<byte[]> bluetoothSpeakerFrames = new Queue<byte[]>(MaxBluetoothSpeakerFrames);
+        private long bluetoothSpeakerFramesDropped;
+        private long bluetoothSpeakerFramesUnderrun;
         private readonly object bluetoothRealtimeWriterLock = new object();
         private DualSenseBluetoothRealtimeWriter bluetoothRealtimeWriter;
         private long bluetoothRealtimeWriterLastOpenAttemptUtcTicks;
@@ -364,6 +366,11 @@ namespace DS4Windows.InputDevices
         private byte[] pendingBluetoothCombinedOutputReport;
         private bool bluetoothCombinedOutputWriteScheduled;
         private long bluetoothCombinedOutputReportsCoalesced;
+        private long bluetoothCombinedOutputReportCount;
+        private long bluetoothCombinedOutputLastTimestamp;
+        private long bluetoothCombinedOutputMaxGapTicks;
+        private long bluetoothCombinedOutputLateReportCount;
+        private long bluetoothNormalOutputWritesSuppressed;
         private int bluetoothCombinedOutputTransportEnabled;
         private long bluetoothMicrophoneFrameCount;
         private long bluetoothMicrophoneLastFrameUtcTicks;
@@ -371,8 +378,28 @@ namespace DS4Windows.InputDevices
         public long BluetoothMicrophoneFrameCount => Interlocked.Read(ref bluetoothMicrophoneFrameCount);
         public long BluetoothCombinedOutputReportsCoalesced =>
             Interlocked.Read(ref bluetoothCombinedOutputReportsCoalesced);
+        public long BluetoothCombinedOutputReportCount =>
+            Interlocked.Read(ref bluetoothCombinedOutputReportCount);
+        public long BluetoothCombinedOutputLateReportCount =>
+            Interlocked.Read(ref bluetoothCombinedOutputLateReportCount);
+        public long BluetoothNormalOutputWritesSuppressed =>
+            Interlocked.Read(ref bluetoothNormalOutputWritesSuppressed);
+        public double BluetoothCombinedOutputMaxGapMilliseconds =>
+            Interlocked.Read(ref bluetoothCombinedOutputMaxGapTicks) * 1000.0 / Stopwatch.Frequency;
         public long BluetoothRealtimeWriterDroppedReports =>
             Interlocked.Read(ref bluetoothRealtimeWriterDroppedReports);
+        public long BluetoothSpeakerFramesDropped => Interlocked.Read(ref bluetoothSpeakerFramesDropped);
+        public long BluetoothSpeakerFramesUnderrun => Interlocked.Read(ref bluetoothSpeakerFramesUnderrun);
+        public int PendingBluetoothSpeakerFrames
+        {
+            get
+            {
+                lock (bluetoothSpeakerFrameLock)
+                {
+                    return bluetoothSpeakerFrames.Count;
+                }
+            }
+        }
         public DateTime BluetoothMicrophoneLastFrameUtc
         {
             get
@@ -391,10 +418,9 @@ namespace DS4Windows.InputDevices
             Volatile.Read(ref bluetoothCombinedOutputTransportEnabled) != 0;
 
         /// <summary>
-        /// Stores the most recent fixed-size Opus frame produced by the
-        /// selected Windows audio source. The next combined haptics output
-        /// report reuses it until a fresher frame arrives. This keeps the
-        /// speaker decoder clocked without accumulating audio latency.
+        /// Queues one fixed-size Opus frame for the next combined Bluetooth
+        /// report. The small bounded queue aligns the capture and virtual-audio
+        /// clocks without allowing latency to grow under backpressure.
         /// </summary>
         public void SetBluetoothSpeakerAudioFrame(byte[] frame, int length)
         {
@@ -405,10 +431,17 @@ namespace DS4Windows.InputDevices
 
             lock (bluetoothSpeakerFrameLock)
             {
+                byte[] speakerFrame = new byte[BluetoothCombinedSpeakerFrameLength];
                 int bytesToCopy = Math.Min(Math.Min(length, frame.Length), BluetoothCombinedSpeakerFrameLength);
-                Array.Clear(latestBluetoothSpeakerFrame, 0, latestBluetoothSpeakerFrame.Length);
-                Array.Copy(frame, 0, latestBluetoothSpeakerFrame, 0, bytesToCopy);
-                latestBluetoothSpeakerFrameLength = bytesToCopy;
+                Array.Copy(frame, 0, speakerFrame, 0, bytesToCopy);
+
+                while (bluetoothSpeakerFrames.Count >= MaxBluetoothSpeakerFrames)
+                {
+                    bluetoothSpeakerFrames.Dequeue();
+                    Interlocked.Increment(ref bluetoothSpeakerFramesDropped);
+                }
+
+                bluetoothSpeakerFrames.Enqueue(speakerFrame);
             }
         }
 
@@ -421,22 +454,27 @@ namespace DS4Windows.InputDevices
         {
             lock (bluetoothSpeakerFrameLock)
             {
-                Array.Clear(latestBluetoothSpeakerFrame, 0, latestBluetoothSpeakerFrame.Length);
-                latestBluetoothSpeakerFrameLength = 0;
+                bluetoothSpeakerFrames.Clear();
             }
         }
 
-        private bool TryCopyBluetoothSpeakerAudioFrame(byte[] destination, int destinationOffset)
+        private bool TryTakeBluetoothSpeakerAudioFrame(byte[] destination, int destinationOffset)
         {
             lock (bluetoothSpeakerFrameLock)
             {
-                if (!enableSpeakerOutput || latestBluetoothSpeakerFrameLength <= 0 || destination == null ||
+                if (!enableSpeakerOutput || bluetoothSpeakerFrames.Count == 0 || destination == null ||
                     destinationOffset < 0 || destinationOffset + BluetoothCombinedSpeakerFrameLength > destination.Length)
                 {
+                    if (enableSpeakerOutput)
+                    {
+                        Interlocked.Increment(ref bluetoothSpeakerFramesUnderrun);
+                    }
+
                     return false;
                 }
 
-                Array.Copy(latestBluetoothSpeakerFrame, 0, destination, destinationOffset,
+                byte[] speakerFrame = bluetoothSpeakerFrames.Dequeue();
+                Array.Copy(speakerFrame, 0, destination, destinationOffset,
                     BluetoothCombinedSpeakerFrameLength);
                 return true;
             }
@@ -1222,7 +1260,20 @@ namespace DS4Windows.InputDevices
                     PrepareOutReport();
                     if (outputDirty)
                     {
-                        WriteReport();
+                        // A combined 0x36 report already carries the current
+                        // Bluetooth state, haptics, and speaker packet. A
+                        // separate 0x31 keepalive can interrupt that stream;
+                        // in particular, the normal four-second rumble timer
+                        // creates audible speaker dropouts.
+                        if (!UsesCombinedBluetoothSpeakerTransport())
+                        {
+                            WriteReport();
+                        }
+                        else
+                        {
+                            Interlocked.Increment(ref bluetoothNormalOutputWritesSuppressed);
+                        }
+
                         currentHap.dirty = false;
                         previousHapticState = currentHap;
                     }
@@ -1243,6 +1294,12 @@ namespace DS4Windows.InputDevices
             }
 
             timeoutExecuted = true;
+        }
+
+        private bool UsesCombinedBluetoothSpeakerTransport()
+        {
+            return conType == ConnectionType.BT && enableSpeakerOutput &&
+                BluetoothCombinedOutputTransportEnabled;
         }
 
         private static bool IsBluetoothMicrophoneFrame(byte[] report)
@@ -1747,7 +1804,7 @@ namespace DS4Windows.InputDevices
 
         /// <summary>
         /// Queues the vDS-compatible Bluetooth report 0x36 carrying state,
-        /// haptics, and the most recent 10 ms Opus speaker frame. Keeping this
+        /// haptics, and the next ordered 10 ms Opus speaker frame. Keeping this
         /// as one write prevents the controller from seeing independent 0x32
         /// haptics and 0x35 speaker streams at the same time.
         /// </summary>
@@ -1762,6 +1819,7 @@ namespace DS4Windows.InputDevices
 
             byte[] combined = new byte[BluetoothCombinedOutputReportLength];
             Array.Copy(report, offset, combined, 0, combined.Length);
+            RecordBluetoothCombinedOutputTiming();
 
             // A 0x93 packet with a zero payload is not a valid silent Opus
             // frame. Omit the speaker TLV entirely until a new encoded frame
@@ -1771,7 +1829,7 @@ namespace DS4Windows.InputDevices
             combined[BluetoothCombinedSpeakerOffset + 1] = 0;
             Array.Clear(combined, BluetoothCombinedSpeakerDataOffset,
                 BluetoothCombinedSpeakerFrameLength);
-            if (TryCopyBluetoothSpeakerAudioFrame(combined, BluetoothCombinedSpeakerDataOffset))
+            if (TryTakeBluetoothSpeakerAudioFrame(combined, BluetoothCombinedSpeakerDataOffset))
             {
                 combined[BluetoothCombinedSpeakerOffset] = 0x93;
                 combined[BluetoothCombinedSpeakerOffset + 1] = BluetoothCombinedSpeakerFrameLength;
@@ -1796,6 +1854,37 @@ namespace DS4Windows.InputDevices
 
             return WriteBluetoothAudioOutputReport(combined, 0, combined.Length, 0x36,
                 BluetoothCombinedOutputReportLength, "combined haptics/audio", waitForWrite: false);
+        }
+
+        private void RecordBluetoothCombinedOutputTiming()
+        {
+            long now = Stopwatch.GetTimestamp();
+            long previous = Interlocked.Exchange(ref bluetoothCombinedOutputLastTimestamp, now);
+            Interlocked.Increment(ref bluetoothCombinedOutputReportCount);
+            if (previous == 0)
+            {
+                return;
+            }
+
+            long gap = now - previous;
+            long maximum;
+            do
+            {
+                maximum = Interlocked.Read(ref bluetoothCombinedOutputMaxGapTicks);
+                if (gap <= maximum)
+                {
+                    break;
+                }
+            }
+            while (Interlocked.CompareExchange(ref bluetoothCombinedOutputMaxGapTicks, gap, maximum) != maximum);
+
+            if (gap > Stopwatch.Frequency / 67)
+            {
+                // The transport normally supplies an audio/haptics update
+                // about every 10-11 ms. Fifteen milliseconds is a useful
+                // conservative boundary for a real missed speaker slot.
+                Interlocked.Increment(ref bluetoothCombinedOutputLateReportCount);
+            }
         }
 
         private bool TryWriteBluetoothCombinedOutputRealtime(byte[] report)

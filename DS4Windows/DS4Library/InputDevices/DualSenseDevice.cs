@@ -2092,7 +2092,7 @@ namespace DS4Windows.InputDevices
             // report permits a wider UI range, but applying that raw value to
             // the Opus path can overdrive the controller's tiny amplifier.
             combined[BluetoothCombinedStateSpeakerVolumeOffset] =
-                (byte)Math.Min(0x64, speakerVolume);
+                (byte)Math.Min(0x64, (int)speakerVolume);
             combined[BluetoothCombinedStateAudioControlOffset] = 0x30;
             combined[BluetoothCombinedStateAudioControl2Offset] = 0x02;
         }

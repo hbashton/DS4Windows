@@ -356,6 +356,10 @@ namespace DS4Windows.InputDevices
         private readonly object bluetoothSpeakerFrameLock = new object();
         private readonly byte[] latestBluetoothSpeakerFrame = new byte[BluetoothCombinedSpeakerFrameLength];
         private int latestBluetoothSpeakerFrameLength;
+        private readonly object bluetoothRealtimeWriterLock = new object();
+        private DualSenseBluetoothRealtimeWriter bluetoothRealtimeWriter;
+        private long bluetoothRealtimeWriterLastOpenAttemptUtcTicks;
+        private long bluetoothRealtimeWriterDroppedReports;
         private readonly object bluetoothCombinedOutputWriteLock = new object();
         private byte[] pendingBluetoothCombinedOutputReport;
         private bool bluetoothCombinedOutputWriteScheduled;
@@ -367,6 +371,8 @@ namespace DS4Windows.InputDevices
         public long BluetoothMicrophoneFrameCount => Interlocked.Read(ref bluetoothMicrophoneFrameCount);
         public long BluetoothCombinedOutputReportsCoalesced =>
             Interlocked.Read(ref bluetoothCombinedOutputReportsCoalesced);
+        public long BluetoothRealtimeWriterDroppedReports =>
+            Interlocked.Read(ref bluetoothRealtimeWriterDroppedReports);
         public DateTime BluetoothMicrophoneLastFrameUtc
         {
             get
@@ -1276,7 +1282,17 @@ namespace DS4Windows.InputDevices
 
         protected override void StopOutputUpdate()
         {
+            DisposeBluetoothRealtimeWriter();
             SendEmptyOutputReport();
+        }
+
+        private void DisposeBluetoothRealtimeWriter()
+        {
+            lock (bluetoothRealtimeWriterLock)
+            {
+                bluetoothRealtimeWriter?.Dispose();
+                bluetoothRealtimeWriter = null;
+            }
         }
 
         private void SendEmptyOutputReport()
@@ -1773,8 +1789,81 @@ namespace DS4Windows.InputDevices
                 return QueueLatestBluetoothCombinedOutputReport(combined);
             }
 
+            if (TryWriteBluetoothCombinedOutputRealtime(combined))
+            {
+                return true;
+            }
+
             return WriteBluetoothAudioOutputReport(combined, 0, combined.Length, 0x36,
                 BluetoothCombinedOutputReportLength, "combined haptics/audio", waitForWrite: false);
+        }
+
+        private bool TryWriteBluetoothCombinedOutputRealtime(byte[] report)
+        {
+            if (conType != ConnectionType.BT || report == null ||
+                report.Length != BluetoothCombinedOutputReportLength)
+            {
+                return false;
+            }
+
+            lock (bluetoothRealtimeWriterLock)
+            {
+                if (bluetoothRealtimeWriter == null)
+                {
+                    long now = DateTime.UtcNow.Ticks;
+                    if (now - bluetoothRealtimeWriterLastOpenAttemptUtcTicks < TimeSpan.FromSeconds(1).Ticks)
+                    {
+                        return false;
+                    }
+
+                    bluetoothRealtimeWriterLastOpenAttemptUtcTicks = now;
+                    try
+                    {
+                        if (!DualSenseBluetoothRealtimeWriter.TryCreate(hDevice?.DevicePath,
+                            BluetoothCombinedOutputReportLength, out bluetoothRealtimeWriter, out int error))
+                        {
+                            if (Global.VerboseStartupLogging)
+                            {
+                                AppLogger.LogToGui($"DualSense Bluetooth realtime audio writer unavailable. Win32 error {error}; using the controller input queue.", false);
+                            }
+
+                            return false;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        bluetoothRealtimeWriter = null;
+                        if (Global.VerboseStartupLogging)
+                        {
+                            AppLogger.LogToGui($"DualSense Bluetooth realtime audio writer setup failed: {ex.Message}. Using the controller input queue.", false);
+                        }
+
+                        return false;
+                    }
+                }
+
+                if (bluetoothRealtimeWriter.TryWrite(report, out bool transportFault))
+                {
+                    return true;
+                }
+
+                if (!transportFault)
+                {
+                    // Preserve timing: the next report carries newer haptics
+                    // and speaker data, so replaying this frame would add lag.
+                    Interlocked.Increment(ref bluetoothRealtimeWriterDroppedReports);
+                    return true;
+                }
+
+                bluetoothRealtimeWriter.Dispose();
+                bluetoothRealtimeWriter = null;
+                if (Global.VerboseStartupLogging)
+                {
+                    AppLogger.LogToGui("DualSense Bluetooth realtime audio writer failed; using the controller input queue until it can be reopened.", true);
+                }
+
+                return false;
+            }
         }
 
         /// <summary>

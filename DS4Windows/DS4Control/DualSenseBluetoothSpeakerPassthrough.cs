@@ -280,7 +280,7 @@ namespace DS4Windows
                 return;
             }
 
-            AppLogger.LogToGui($"DualSense Bluetooth speaker stats: frames={Interlocked.Read(ref framesSent)} shortCaptureReads={Interlocked.Read(ref shortCaptureReads)} skippedSlots={Interlocked.Read(ref skippedScheduleSlots)} status={device.LastBluetoothHapticsWriteStatus}", false);
+            AppLogger.LogToGui($"DualSense Bluetooth speaker stats: frames={Interlocked.Read(ref framesSent)} shortCaptureReads={Interlocked.Read(ref shortCaptureReads)} skippedSlots={Interlocked.Read(ref skippedScheduleSlots)} realtimeDrops={device.BluetoothRealtimeWriterDroppedReports} status={device.LastBluetoothHapticsWriteStatus}", false);
         }
 
         private void SendFrame()
@@ -310,11 +310,8 @@ namespace DS4Windows
                 return;
             }
 
-            // vDS reserves a fixed 200-byte block for each 10 ms Opus packet.
-            // libopus legitimately produces shorter CBR frames; vDS preserves
-            // the fixed block by zero-filling the unused tail. Concentus leaves
-            // that tail untouched, so clear it explicitly before caching or
-            // writing the frame.
+            // The Bluetooth speaker lane requires a fixed 200-byte CBR Opus
+            // payload. A short encoder result is not a valid speaker frame.
             if (encoded < OpusBytes)
             {
                 Array.Clear(opusFrame, encoded, OpusBytes - encoded);

@@ -2049,20 +2049,10 @@ namespace DS4Windows.InputDevices
             // mid-stream and corrupt an otherwise valid Opus frame.
             combined[BluetoothCombinedStateFlag0Offset] |= 0xA0;
             combined[BluetoothCombinedStateFlag1Offset] |= 0x80;
-            combined[BluetoothCombinedStateSpeakerVolumeOffset] = GetBluetoothSpeakerVolume();
+            combined[BluetoothCombinedStateSpeakerVolumeOffset] = speakerVolume;
             combined[BluetoothCombinedStateAudioControlOffset] = 0x30;
-            combined[BluetoothCombinedStateAudioControl2Offset] = 0x03;
-        }
-
-        private byte GetBluetoothSpeakerVolume()
-        {
-            if (speakerVolume == 0)
-            {
-                return 0;
-            }
-
-            int scaled = (speakerVolume * 0x64 + 127) / 255;
-            return (byte)Math.Clamp(scaled, 0x3D, 0x64);
+            combined[BluetoothCombinedStateAudioControl2Offset] =
+                (byte)Math.Min(7, speakerVolume / 32);
         }
 
         /// <summary>

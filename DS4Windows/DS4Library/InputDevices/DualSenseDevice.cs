@@ -353,12 +353,6 @@ namespace DS4Windows.InputDevices
         private const int BluetoothCombinedSpeakerOffset = 142;
         private const int BluetoothCombinedSpeakerDataOffset = 144;
         private const int BluetoothCombinedSpeakerFrameLength = 200;
-        private const int BluetoothCombinedStateOffset = 13;
-        private const int BluetoothCombinedStateFlag0Offset = BluetoothCombinedStateOffset;
-        private const int BluetoothCombinedStateFlag1Offset = BluetoothCombinedStateOffset + 1;
-        private const int BluetoothCombinedStateSpeakerVolumeOffset = BluetoothCombinedStateOffset + 5;
-        private const int BluetoothCombinedStateAudioControlOffset = BluetoothCombinedStateOffset + 7;
-        private const int BluetoothCombinedStateAudioControl2Offset = BluetoothCombinedStateOffset + 37;
         private const int MaxBluetoothSpeakerFrames = 4;
         private readonly object bluetoothSpeakerFrameLock = new object();
         private readonly Queue<byte[]> bluetoothSpeakerFrames = new Queue<byte[]>(MaxBluetoothSpeakerFrames);
@@ -1929,8 +1923,6 @@ namespace DS4Windows.InputDevices
                 combined[10] = bluetoothCombinedSpeakerPacketSequence;
             }
 
-            ApplyBluetoothSpeakerRouting(combined);
-
             // A 0x93 packet with a zero payload is not a valid silent Opus
             // frame. Omit the speaker TLV until an encoded frame is ready,
             // otherwise some controller firmware emits an audible alert tone.
@@ -1988,32 +1980,6 @@ namespace DS4Windows.InputDevices
             Interlocked.Increment(ref bluetoothCombinedSpeakerReportsWritten);
             LastBluetoothHapticsWriteStatus = "Speaker-clocked combined Bluetooth write completed successfully.";
             return true;
-        }
-
-        private void ApplyBluetoothSpeakerRouting(byte[] combined)
-        {
-            // PadForge's physical-controller implementation keeps this audio
-            // surface owned by the speaker stream. A game's virtual DualSense
-            // packet may contain its own audio path, but allowing it to win
-            // mid-stream causes firmware route changes and audible corruption.
-            combined[BluetoothCombinedStateFlag0Offset] |= 0xA0;
-            combined[BluetoothCombinedStateFlag1Offset] |= 0x80;
-            combined[BluetoothCombinedStateSpeakerVolumeOffset] = GetBluetoothSpeakerVolume();
-            combined[BluetoothCombinedStateAudioControlOffset] = 0x30;
-            combined[BluetoothCombinedStateAudioControl2Offset] = 0x03;
-        }
-
-        private byte GetBluetoothSpeakerVolume()
-        {
-            if (speakerVolume == 0)
-            {
-                return 0;
-            }
-
-            // The Bluetooth firmware accepts 0x00-0x64 here. Keep ordinary
-            // profile settings useful while retaining PadForge's tested floor.
-            int scaled = (speakerVolume * 0x64 + 127) / 255;
-            return (byte)Math.Clamp(scaled, 0x3D, 0x64);
         }
 
         /// <summary>

@@ -312,7 +312,7 @@ namespace DS4Windows
                 return;
             }
 
-            AppLogger.LogToGui($"DualSense Bluetooth speaker stats: frames={Interlocked.Read(ref framesSent)} shortCaptureReads={Interlocked.Read(ref shortCaptureReads)} skippedSlots={Interlocked.Read(ref skippedScheduleSlots)} queued={device.PendingBluetoothSpeakerFrames} queueDrops={device.BluetoothSpeakerFramesDropped} queueUnderruns={device.BluetoothSpeakerFramesUnderrun} combinedReports={device.BluetoothCombinedOutputReportCount} combinedLate={device.BluetoothCombinedOutputLateReportCount} combinedMaxGapMs={device.BluetoothCombinedOutputMaxGapMilliseconds:F1} suppressed0x31={device.BluetoothNormalOutputWritesSuppressed} realtimeDrops={device.BluetoothRealtimeWriterDroppedReports} status={device.LastBluetoothHapticsWriteStatus}", false);
+            AppLogger.LogToGui($"DualSense Bluetooth speaker stats: frames={Interlocked.Read(ref framesSent)} shortCaptureReads={Interlocked.Read(ref shortCaptureReads)} skippedSlots={Interlocked.Read(ref skippedScheduleSlots)} queued={device.PendingBluetoothSpeakerFrames} queueDrops={device.BluetoothSpeakerFramesDropped} queueUnderruns={device.BluetoothSpeakerFramesUnderrun} combinedReports={device.BluetoothCombinedOutputReportCount} combinedLate={device.BluetoothCombinedOutputLateReportCount} combinedMaxGapMs={device.BluetoothCombinedOutputMaxGapMilliseconds:F1} speakerWrites={device.BluetoothCombinedSpeakerReportsWritten} speakerWriteFailures={device.BluetoothCombinedSpeakerWriteFailures} suppressed0x31={device.BluetoothNormalOutputWritesSuppressed} status={device.LastBluetoothHapticsWriteStatus}", false);
         }
 
         private void SendFrame()

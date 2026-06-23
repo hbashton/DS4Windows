@@ -291,17 +291,24 @@ namespace DS4Windows
                 return;
             }
 
-            // vDS uses a fixed 200-byte CBR frame in the 0x36 speaker block.
-            // Do not pad a short frame with zeros: that changes its Opus packet
-            // structure and can make the controller reject the combined report.
-            if (encoded != OpusBytes)
+            if (encoded <= 0 || encoded > OpusBytes)
             {
                 if (Interlocked.Exchange(ref loggedWriteFailure, 1) == 0)
                 {
-                    AppLogger.LogToGui($"DualSense Bluetooth speaker encoder produced {encoded} bytes; expected {OpusBytes} for the combined transport.", true);
+                    AppLogger.LogToGui($"DualSense Bluetooth speaker encoder returned an invalid frame length: {encoded}.", true);
                 }
 
                 return;
+            }
+
+            // vDS reserves a fixed 200-byte block for each 10 ms Opus packet.
+            // libopus legitimately produces shorter CBR frames; vDS preserves
+            // the fixed block by zero-filling the unused tail. Concentus leaves
+            // that tail untouched, so clear it explicitly before caching or
+            // writing the frame.
+            if (encoded < OpusBytes)
+            {
+                Array.Clear(opusFrame, encoded, OpusBytes - encoded);
             }
 
             device.SetBluetoothSpeakerAudioFrame(opusFrame, encoded);

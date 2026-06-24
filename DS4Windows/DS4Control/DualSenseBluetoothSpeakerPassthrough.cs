@@ -6,6 +6,7 @@ using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 using System;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Threading;
 
 namespace DS4Windows
@@ -53,6 +54,7 @@ namespace DS4Windows
         private Thread worker;
         private Thread capturePump;
         private IOpusEncoder opusEncoder;
+        private IntPtr highResolutionTimer;
         private volatile bool stopping;
         private int captureRingReadIndex;
         private int captureRingWriteIndex;
@@ -70,6 +72,9 @@ namespace DS4Windows
         private long concealedCaptureFrames;
         private long skippedScheduleSlots;
         private long captureDriftAdjustments;
+        private long scheduleLateTicks;
+        private long scheduleLateMaximumTicks;
+        private long scheduleLateCount;
         private long lastDiagnosticUtcTicks;
 
         public DualSenseBluetoothSpeakerPassthrough(DualSenseDevice device, byte speakerVolume,
@@ -124,6 +129,7 @@ namespace DS4Windows
                 opusEncoder.Bitrate = OpusBytes * 8 * 100;
                 opusEncoder.UseVBR = false;
                 opusEncoder.ExpertFrameDuration = OpusFramesize.OPUS_FRAMESIZE_10_MS;
+                highResolutionTimer = CreateHighResolutionTimer();
 
                 capturePump = new Thread(() => CapturePumpLoop(source))
                 {
@@ -347,9 +353,10 @@ namespace DS4Windows
             double frameTicks = Stopwatch.Frequency * frameDurationMs / 1000.0;
             double nextFrame = Stopwatch.GetTimestamp() + frameTicks;
 
-            while (!stopping)
-            {
-                Array.Clear(sourceFrame, 0, sourceFrame.Length);
+                while (!stopping)
+                {
+                    RecordScheduleLateness(Stopwatch.GetTimestamp() - nextFrame);
+                    Array.Clear(sourceFrame, 0, sourceFrame.Length);
                 Array.Clear(frame, 0, frame.Length);
                 int sourceFramesPerTick = GetSourceFramesPerTick();
                 int capturedFrames = ReadCaptureFrames(sourceFramesPerTick);
@@ -419,15 +426,23 @@ namespace DS4Windows
                 double remainingTicks = nextFrame - Stopwatch.GetTimestamp();
                 if (remainingTicks > 0)
                 {
-                    int sleepMs = (int)(remainingTicks * 1000 / Stopwatch.Frequency);
-                    if (sleepMs > 1)
+                    double remainingMilliseconds = remainingTicks * 1000.0 / Stopwatch.Frequency;
+                    if (highResolutionTimer != IntPtr.Zero)
                     {
-                        Thread.Sleep(sleepMs - 1);
+                        WaitHighResolution(highResolutionTimer, remainingMilliseconds);
                     }
-
-                    while (!stopping && Stopwatch.GetTimestamp() < nextFrame)
+                    else
                     {
-                        Thread.SpinWait(64);
+                        int sleepMs = (int)remainingMilliseconds;
+                        if (sleepMs > 1)
+                        {
+                            Thread.Sleep(sleepMs - 1);
+                        }
+
+                        while (!stopping && Stopwatch.GetTimestamp() < nextFrame)
+                        {
+                            Thread.SpinWait(64);
+                        }
                     }
                 }
                 else
@@ -532,7 +547,42 @@ namespace DS4Windows
                 return;
             }
 
-            AppLogger.LogToGui($"DualSense Bluetooth speaker stats: frames={Interlocked.Read(ref framesSent)} shortCaptureReads={Interlocked.Read(ref shortCaptureReads)} emptyCaptureReads={Interlocked.Read(ref emptyCaptureReads)} concealedCaptureFrames={Interlocked.Read(ref concealedCaptureFrames)} captureBufferedFrames={GetCaptureBufferedFrames()} capturePrimed={IsCapturePrimed()} driftAdjustments={Interlocked.Read(ref captureDriftAdjustments)} skippedSlots={Interlocked.Read(ref skippedScheduleSlots)} queued={device.PendingBluetoothSpeakerFrames} queueDrops={device.BluetoothSpeakerFramesDropped} queueUnderruns={device.BluetoothSpeakerFramesUnderrun} realtimeQueueDrops={device.BluetoothRealtimeWriterDroppedReports} combinedReports={device.BluetoothCombinedOutputReportCount} combinedLate={device.BluetoothCombinedOutputLateReportCount} combinedMaxGapMs={device.BluetoothCombinedOutputMaxGapMilliseconds:F1} combinedCacheAverageMs={device.BluetoothCombinedSpeakerCacheAverageDelayMilliseconds:F1} combinedCacheMaximumMs={device.BluetoothCombinedSpeakerCacheMaximumDelayMilliseconds:F1} staleHapticsSilenced={device.BluetoothCombinedSpeakerStaleHapticsSilenced} speakerWrites={device.BluetoothCombinedSpeakerReportsWritten} speakerWriteFailures={device.BluetoothCombinedSpeakerWriteFailures} suppressed0x31={device.BluetoothNormalOutputWritesSuppressed} status={device.LastBluetoothHapticsWriteStatus}", false);
+            AppLogger.LogToGui($"DualSense Bluetooth speaker stats: frames={Interlocked.Read(ref framesSent)} shortCaptureReads={Interlocked.Read(ref shortCaptureReads)} emptyCaptureReads={Interlocked.Read(ref emptyCaptureReads)} concealedCaptureFrames={Interlocked.Read(ref concealedCaptureFrames)} captureBufferedFrames={GetCaptureBufferedFrames()} capturePrimed={IsCapturePrimed()} driftAdjustments={Interlocked.Read(ref captureDriftAdjustments)} scheduleLateAverageMs={ScheduleLateAverageMilliseconds:F3} scheduleLateMaximumMs={ScheduleLateMaximumMilliseconds:F3} skippedSlots={Interlocked.Read(ref skippedScheduleSlots)} queued={device.PendingBluetoothSpeakerFrames} queueDrops={device.BluetoothSpeakerFramesDropped} queueUnderruns={device.BluetoothSpeakerFramesUnderrun} realtimeQueueDrops={device.BluetoothRealtimeWriterDroppedReports} combinedReports={device.BluetoothCombinedOutputReportCount} combinedLate={device.BluetoothCombinedOutputLateReportCount} combinedMaxGapMs={device.BluetoothCombinedOutputMaxGapMilliseconds:F1} combinedCacheAverageMs={device.BluetoothCombinedSpeakerCacheAverageDelayMilliseconds:F1} combinedCacheMaximumMs={device.BluetoothCombinedSpeakerCacheMaximumDelayMilliseconds:F1} staleHapticsSilenced={device.BluetoothCombinedSpeakerStaleHapticsSilenced} speakerWrites={device.BluetoothCombinedSpeakerReportsWritten} speakerWriteFailures={device.BluetoothCombinedSpeakerWriteFailures} suppressed0x31={device.BluetoothNormalOutputWritesSuppressed} status={device.LastBluetoothHapticsWriteStatus}", false);
+        }
+
+        private double ScheduleLateAverageMilliseconds
+        {
+            get
+            {
+                long count = Interlocked.Read(ref scheduleLateCount);
+                return count == 0 ? 0.0 : Interlocked.Read(ref scheduleLateTicks) * 1000.0 /
+                    (Stopwatch.Frequency * count);
+            }
+        }
+
+        private double ScheduleLateMaximumMilliseconds =>
+            Interlocked.Read(ref scheduleLateMaximumTicks) * 1000.0 / Stopwatch.Frequency;
+
+        private void RecordScheduleLateness(long elapsedTicks)
+        {
+            if (elapsedTicks <= 0)
+            {
+                return;
+            }
+
+            Interlocked.Add(ref scheduleLateTicks, elapsedTicks);
+            Interlocked.Increment(ref scheduleLateCount);
+            long maximum;
+            do
+            {
+                maximum = Interlocked.Read(ref scheduleLateMaximumTicks);
+                if (elapsedTicks <= maximum)
+                {
+                    break;
+                }
+            }
+            while (Interlocked.CompareExchange(ref scheduleLateMaximumTicks,
+                elapsedTicks, maximum) != maximum);
         }
 
         private int GetCaptureBufferedFrames()
@@ -642,6 +692,43 @@ namespace DS4Windows
             return ~crc;
         }
 
+        // PadForge uses a high-resolution waitable timer for the same 10.667 ms
+        // Bluetooth speaker cadence. It avoids relying on coarse scheduler
+        // wakeups while preserving the existing sleep/spin fallback.
+        private const uint CREATE_WAITABLE_TIMER_HIGH_RESOLUTION = 0x2;
+        private const uint TIMER_ACCESS = 0x0002 | 0x00100000;
+
+        private static IntPtr CreateHighResolutionTimer()
+        {
+            IntPtr timer = CreateWaitableTimerExW(IntPtr.Zero, null,
+                CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ACCESS);
+            return timer != IntPtr.Zero ? timer :
+                CreateWaitableTimerExW(IntPtr.Zero, null, 0, TIMER_ACCESS);
+        }
+
+        private static void WaitHighResolution(IntPtr timer, double milliseconds)
+        {
+            long dueTime = -(long)Math.Max(1.0, milliseconds * 10000.0);
+            if (SetWaitableTimer(timer, ref dueTime, 0, IntPtr.Zero, IntPtr.Zero, false))
+            {
+                WaitForSingleObject(timer, 100);
+            }
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern IntPtr CreateWaitableTimerExW(IntPtr attributes, string name,
+            uint flags, uint desiredAccess);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool SetWaitableTimer(IntPtr timer, ref long dueTime, int period,
+            IntPtr completionRoutine, IntPtr argument, bool resume);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CloseHandle(IntPtr handle);
+
         public void Dispose()
         {
             stopping = true;
@@ -653,6 +740,12 @@ namespace DS4Windows
             }
 
             worker = null;
+            if (highResolutionTimer != IntPtr.Zero)
+            {
+                CloseHandle(highResolutionTimer);
+                highResolutionTimer = IntPtr.Zero;
+            }
+
             if (capturePump != null && capturePump.IsAlive &&
                 Thread.CurrentThread.ManagedThreadId != capturePump.ManagedThreadId)
             {

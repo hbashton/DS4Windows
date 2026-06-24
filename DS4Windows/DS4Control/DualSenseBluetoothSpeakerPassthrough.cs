@@ -70,6 +70,12 @@ namespace DS4Windows
         private long concealedCaptureFrames;
         private long skippedScheduleSlots;
         private long captureDriftAdjustments;
+        private long captureStartedTicks;
+        private long captureCallbackCount;
+        private long captureInputFrames;
+        private long lastCaptureCallbackTicks;
+        private long captureCallbackGapsOverTwelveMilliseconds;
+        private long captureMaximumCallbackGapTicks;
         private long lastDiagnosticUtcTicks;
 
         public DualSenseBluetoothSpeakerPassthrough(DualSenseDevice device, byte speakerVolume,
@@ -137,6 +143,7 @@ namespace DS4Windows
                     Name = "DualSense Bluetooth speaker audio",
                     Priority = ThreadPriority.Highest,
                 };
+                Interlocked.Exchange(ref captureStartedTicks, Stopwatch.GetTimestamp());
                 capture.StartRecording();
                 capturePump.Start();
                 worker.Start();
@@ -221,6 +228,7 @@ namespace DS4Windows
 
         private void Capture_DataAvailable(object sender, WaveInEventArgs e)
         {
+            RecordCaptureCallback(e.BytesRecorded);
             lock (syncRoot)
             {
                 if (!stopping)
@@ -228,6 +236,39 @@ namespace DS4Windows
                     captureBuffer?.AddSamples(e.Buffer, 0, e.BytesRecorded);
                     captureDataAvailable.Set();
                 }
+            }
+        }
+
+        private void RecordCaptureCallback(int bytesRecorded)
+        {
+            long now = Stopwatch.GetTimestamp();
+            long previous = Interlocked.Exchange(ref lastCaptureCallbackTicks, now);
+            Interlocked.Increment(ref captureCallbackCount);
+            if (capture?.WaveFormat?.BlockAlign is int blockAlign && blockAlign > 0)
+            {
+                Interlocked.Add(ref captureInputFrames, bytesRecorded / blockAlign);
+            }
+
+            if (previous == 0)
+            {
+                return;
+            }
+
+            long elapsedTicks = now - previous;
+            if (elapsedTicks > Stopwatch.Frequency * 12 / 1000)
+            {
+                Interlocked.Increment(ref captureCallbackGapsOverTwelveMilliseconds);
+            }
+
+            UpdateMaximum(ref captureMaximumCallbackGapTicks, elapsedTicks);
+        }
+
+        private static void UpdateMaximum(ref long destination, long candidate)
+        {
+            long current;
+            while (candidate > (current = Interlocked.Read(ref destination)) &&
+                Interlocked.CompareExchange(ref destination, candidate, current) != current)
+            {
             }
         }
 
@@ -532,7 +573,14 @@ namespace DS4Windows
                 return;
             }
 
-            AppLogger.LogToGui($"DualSense Bluetooth speaker stats: frames={Interlocked.Read(ref framesSent)} shortCaptureReads={Interlocked.Read(ref shortCaptureReads)} emptyCaptureReads={Interlocked.Read(ref emptyCaptureReads)} concealedCaptureFrames={Interlocked.Read(ref concealedCaptureFrames)} captureBufferedFrames={GetCaptureBufferedFrames()} capturePrimed={IsCapturePrimed()} driftAdjustments={Interlocked.Read(ref captureDriftAdjustments)} skippedSlots={Interlocked.Read(ref skippedScheduleSlots)} queued={device.PendingBluetoothSpeakerFrames} queueDrops={device.BluetoothSpeakerFramesDropped} queueUnderruns={device.BluetoothSpeakerFramesUnderrun} realtimeQueueDrops={device.BluetoothRealtimeWriterDroppedReports} combinedReports={device.BluetoothCombinedOutputReportCount} combinedLate={device.BluetoothCombinedOutputLateReportCount} combinedMaxGapMs={device.BluetoothCombinedOutputMaxGapMilliseconds:F1} combinedCacheAverageMs={device.BluetoothCombinedSpeakerCacheAverageDelayMilliseconds:F1} combinedCacheMaximumMs={device.BluetoothCombinedSpeakerCacheMaximumDelayMilliseconds:F1} staleHapticsSilenced={device.BluetoothCombinedSpeakerStaleHapticsSilenced} speakerWrites={device.BluetoothCombinedSpeakerReportsWritten} speakerWriteFailures={device.BluetoothCombinedSpeakerWriteFailures} suppressed0x31={device.BluetoothNormalOutputWritesSuppressed} status={device.LastBluetoothHapticsWriteStatus}", false);
+            long elapsedTicks = Stopwatch.GetTimestamp() - Interlocked.Read(ref captureStartedTicks);
+            long capturedFrames = Interlocked.Read(ref captureInputFrames);
+            double captureInputFramesPerSecond = elapsedTicks > 0 ?
+                capturedFrames * (double)Stopwatch.Frequency / elapsedTicks : 0.0;
+            double captureMaximumCallbackGapMilliseconds =
+                Interlocked.Read(ref captureMaximumCallbackGapTicks) * 1000.0 / Stopwatch.Frequency;
+
+            AppLogger.LogToGui($"DualSense Bluetooth speaker stats: frames={Interlocked.Read(ref framesSent)} shortCaptureReads={Interlocked.Read(ref shortCaptureReads)} emptyCaptureReads={Interlocked.Read(ref emptyCaptureReads)} concealedCaptureFrames={Interlocked.Read(ref concealedCaptureFrames)} captureCallbacks={Interlocked.Read(ref captureCallbackCount)} captureInputFrames={capturedFrames} captureInputFramesPerSecond={captureInputFramesPerSecond:F1} captureCallbacksOver12Ms={Interlocked.Read(ref captureCallbackGapsOverTwelveMilliseconds)} captureMaximumCallbackGapMs={captureMaximumCallbackGapMilliseconds:F1} captureBufferedFrames={GetCaptureBufferedFrames()} capturePrimed={IsCapturePrimed()} driftAdjustments={Interlocked.Read(ref captureDriftAdjustments)} skippedSlots={Interlocked.Read(ref skippedScheduleSlots)} queued={device.PendingBluetoothSpeakerFrames} queueDrops={device.BluetoothSpeakerFramesDropped} queueUnderruns={device.BluetoothSpeakerFramesUnderrun} realtimeQueueDrops={device.BluetoothRealtimeWriterDroppedReports} combinedReports={device.BluetoothCombinedOutputReportCount} combinedLate={device.BluetoothCombinedOutputLateReportCount} combinedMaxGapMs={device.BluetoothCombinedOutputMaxGapMilliseconds:F1} combinedCacheAverageMs={device.BluetoothCombinedSpeakerCacheAverageDelayMilliseconds:F1} combinedCacheMaximumMs={device.BluetoothCombinedSpeakerCacheMaximumDelayMilliseconds:F1} staleHapticsSilenced={device.BluetoothCombinedSpeakerStaleHapticsSilenced} speakerWrites={device.BluetoothCombinedSpeakerReportsWritten} speakerWriteFailures={device.BluetoothCombinedSpeakerWriteFailures} suppressed0x31={device.BluetoothNormalOutputWritesSuppressed} status={device.LastBluetoothHapticsWriteStatus}", false);
         }
 
         private int GetCaptureBufferedFrames()

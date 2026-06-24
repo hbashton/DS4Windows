@@ -2397,6 +2397,7 @@ namespace DS4Windows
             {
                 inServiceTask = true;
                 loopControllers = true;
+                ReconcileDisconnectedControllers();
                 eventDispatcher.Invoke(() =>
                 {
                     DS4Devices.findControllers();
@@ -3627,6 +3628,42 @@ namespace DS4Windows
             dualSenseMuteRequestedRestoreWasTemporary[ind] = false;
             dualSenseMuteProfilePending[ind] = true;
             return true;
+        }
+
+        // WM_DEVICECHANGE is advisory: USB devices can disappear while their pending HID read
+        // remains blocked. Reconcile the tracked slots before scanning for arrivals so a dead
+        // path cannot keep its virtual output or prevent the same controller from reconnecting.
+        private void ReconcileDisconnectedControllers()
+        {
+            for (int index = 0; index < DS4Controllers.Length; index++)
+            {
+                DS4Device device = DS4Controllers[index];
+                if (device == null || device.IsRemoving)
+                {
+                    continue;
+                }
+
+                bool isConnected;
+                try
+                {
+                    isConnected = device.HidDevice.IsConnected;
+                }
+                catch
+                {
+                    // A failed presence probe must never evict an otherwise working controller.
+                    continue;
+                }
+
+                if (isConnected)
+                {
+                    continue;
+                }
+
+                LogDebug($"Controller {index + 1} HID path disappeared; reconciling removal for {device.getMacAddress()} ({device.getConnectionType()}).");
+                device.StopUpdate();
+                On_DS4Removal(device, EventArgs.Empty);
+                DS4Devices.RemoveDevice(device);
+            }
         }
 
         private bool QueueDualSenseMuteProfileRestore(int ind, string profileName, bool wasTemporary)

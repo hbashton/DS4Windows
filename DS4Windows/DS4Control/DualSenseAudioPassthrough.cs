@@ -13,9 +13,12 @@ namespace DS4Windows
     {
         private const int ControllerCount = ControlService.MAX_DS4_CONTROLLER_COUNT;
         private readonly object syncRoot = new object();
+        private readonly object operationQueueLock = new object();
         private readonly SlotPlayback[] slots = new SlotPlayback[ControllerCount];
         private readonly DualSenseBluetoothSpeakerPassthrough[] bluetoothSlots = new DualSenseBluetoothSpeakerPassthrough[ControllerCount];
         private readonly int[] bluetoothStartGeneration = new int[ControllerCount];
+        private readonly int[] operationGeneration = new int[ControllerCount];
+        private Task operationQueue = Task.CompletedTask;
         private WasapiLoopbackCapture capture;
         private WaveFormat captureFormat;
         private string captureEndpointId = string.Empty;
@@ -24,6 +27,21 @@ namespace DS4Windows
             string requestedSpeakerEndpointId)
         {
             if (slot < 0 || slot >= slots.Length)
+            {
+                return;
+            }
+
+            int generation = Interlocked.Increment(ref operationGeneration[slot]);
+            QueueOperation(() => StartCore(slot, generation, dualSenseDevice, speakerVolume,
+                requestedCaptureEndpointId, requestedSpeakerEndpointId));
+        }
+
+        // Audio endpoint shutdown can wait on the WASAPI capture thread. Never do that from
+        // a controller input thread or an unplug can no longer be observed by the HID reader.
+        private void StartCore(int slot, int generation, DualSenseDevice dualSenseDevice, byte speakerVolume,
+            string requestedCaptureEndpointId, string requestedSpeakerEndpointId)
+        {
+            if (generation != Volatile.Read(ref operationGeneration[slot]))
             {
                 return;
             }
@@ -44,7 +62,7 @@ namespace DS4Windows
                 if (endpoint == null)
                 {
                     AppLogger.LogToGui("DualSense audio passthrough could not find a controller speaker endpoint.", true);
-                    Stop(slot);
+                    StopCore(slot);
                     return;
                 }
 
@@ -55,7 +73,7 @@ namespace DS4Windows
                     return;
                 }
 
-                Stop(slot);
+                StopCore(slot);
 
                 try
                 {
@@ -77,7 +95,7 @@ namespace DS4Windows
                 catch (Exception ex)
                 {
                     AppLogger.LogToGui($"DualSense audio passthrough failed to start: {ex.Message}", true);
-                    Stop(slot);
+                    StopCore(slot);
                 }
             }
         }
@@ -89,6 +107,12 @@ namespace DS4Windows
                 return;
             }
 
+            Interlocked.Increment(ref operationGeneration[slot]);
+            QueueOperation(() => StopCore(slot));
+        }
+
+        private void StopCore(int slot)
+        {
             lock (syncRoot)
             {
                 SlotPlayback playback = slots[slot];
@@ -109,18 +133,44 @@ namespace DS4Windows
 
         public void Dispose()
         {
-            lock (syncRoot)
+            for (int i = 0; i < operationGeneration.Length; i++)
             {
-                for (int i = 0; i < slots.Length; i++)
-                {
-                    slots[i]?.Dispose();
-                    slots[i] = null;
-                    bluetoothSlots[i]?.Dispose();
-                    bluetoothSlots[i] = null;
-                    bluetoothStartGeneration[i]++;
-                }
+                Interlocked.Increment(ref operationGeneration[i]);
+            }
 
-                StopCapture();
+            QueueOperation(() =>
+            {
+                lock (syncRoot)
+                {
+                    for (int i = 0; i < slots.Length; i++)
+                    {
+                        slots[i]?.Dispose();
+                        slots[i] = null;
+                        bluetoothSlots[i]?.Dispose();
+                        bluetoothSlots[i] = null;
+                        bluetoothStartGeneration[i]++;
+                    }
+
+                    StopCapture();
+                }
+            });
+        }
+
+        private void QueueOperation(Action operation)
+        {
+            lock (operationQueueLock)
+            {
+                operationQueue = operationQueue.ContinueWith(_ =>
+                {
+                    try
+                    {
+                        operation();
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLogger.LogToGui($"DualSense audio passthrough lifecycle operation failed: {ex.Message}", true);
+                    }
+                }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
             }
         }
 

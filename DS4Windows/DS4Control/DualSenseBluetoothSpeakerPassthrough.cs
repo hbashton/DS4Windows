@@ -355,7 +355,7 @@ namespace DS4Windows
 
                 while (!stopping)
                 {
-                    RecordScheduleLateness(Stopwatch.GetTimestamp() - (long)nextFrame);
+                    RecordScheduleLateness(Stopwatch.GetTimestamp() - nextFrame);
                     Array.Clear(sourceFrame, 0, sourceFrame.Length);
                 Array.Clear(frame, 0, frame.Length);
                 int sourceFramesPerTick = GetSourceFramesPerTick();

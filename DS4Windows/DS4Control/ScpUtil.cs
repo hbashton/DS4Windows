@@ -2613,6 +2613,12 @@ namespace DS4Windows
             set => m_Config.dualSenseEnableSpeakerOutput = value;
         }
 
+        public static bool[] DualSenseHeadsetPluggedIn
+        {
+            get => m_Config.dualSenseHeadsetPluggedIn;
+            set => m_Config.dualSenseHeadsetPluggedIn = value;
+        }
+
         public static byte[] DualSenseSpeakerVolume
         {
             get => m_Config.dualSenseSpeakerVolume;
@@ -3857,6 +3863,7 @@ namespace DS4Windows
             0,0,0,0,0,0,0,0,0
         };
         public bool[] dualSenseEnableSpeakerOutput = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
+        public bool[] dualSenseHeadsetPluggedIn = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
         public byte[] dualSenseSpeakerVolume = new byte[Global.TEST_PROFILE_ITEM_COUNT] { 128, 128, 128, 128, 128, 128, 128, 128, 128 };
         public byte[] dualSenseHeadphoneVolume = new byte[Global.TEST_PROFILE_ITEM_COUNT] { 128, 128, 128, 128, 128, 128, 128, 128, 128 };
         public byte[] dualSenseMicrophoneVolume = new byte[Global.TEST_PROFILE_ITEM_COUNT] { 128, 128, 128, 128, 128, 128, 128, 128, 128 };
@@ -5039,6 +5046,7 @@ namespace DS4Windows
 
                 XmlElement xmlDSAudioGroupElement = m_Xdoc.CreateElement("AudioSettings"); xmlDualSenseControllerSettingsElement.AppendChild(xmlDSAudioGroupElement);
                 XmlNode xmlDSEnableSpeakerOutputElement = m_Xdoc.CreateNode(XmlNodeType.Element, "EnableSpeakerOutput", null); xmlDSEnableSpeakerOutputElement.InnerText = dualSenseEnableSpeakerOutput[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSEnableSpeakerOutputElement);
+                XmlNode xmlDSHeadsetPluggedInElement = m_Xdoc.CreateNode(XmlNodeType.Element, "HeadsetPluggedIn", null); xmlDSHeadsetPluggedInElement.InnerText = dualSenseHeadsetPluggedIn[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSHeadsetPluggedInElement);
                 XmlNode xmlDSSpeakerVolumeElement = m_Xdoc.CreateNode(XmlNodeType.Element, "SpeakerVolume", null); xmlDSSpeakerVolumeElement.InnerText = dualSenseSpeakerVolume[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSSpeakerVolumeElement);
                 XmlNode xmlDSHeadphoneVolumeElement = m_Xdoc.CreateNode(XmlNodeType.Element, "HeadphoneVolume", null); xmlDSHeadphoneVolumeElement.InnerText = dualSenseHeadphoneVolume[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSHeadphoneVolumeElement);
                 XmlNode xmlDSMicrophoneVolumeElement = m_Xdoc.CreateNode(XmlNodeType.Element, "MicrophoneVolume", null); xmlDSMicrophoneVolumeElement.InnerText = dualSenseMicrophoneVolume[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSMicrophoneVolumeElement);
@@ -7447,6 +7455,10 @@ namespace DS4Windows
                             dualSenseEnableSpeakerOutput[device] = temp;
                         }
                         catch { missingSetting = true; }
+
+                        Item = xmlDSAudioGroupElement.SelectSingleNode("HeadsetPluggedIn");
+                        dualSenseHeadsetPluggedIn[device] = Item != null &&
+                            bool.TryParse(Item.InnerText, out bool headsetPluggedIn) && headsetPluggedIn;
 
                         try
                         {

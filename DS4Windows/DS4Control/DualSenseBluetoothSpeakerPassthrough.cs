@@ -40,6 +40,8 @@ namespace DS4Windows
         private readonly DualSenseDevice device;
         private readonly string sourceEndpointId;
         private readonly byte speakerVolume;
+        private readonly byte headphoneVolume;
+        private readonly bool headsetPluggedIn;
         private readonly float[] frame = new float[FrameSamples * Channels];
         private readonly float[] sourceFrame = new float[(512 + DriftAdjustmentFrames) * Channels];
         private readonly byte[] opusFrame = new byte[OpusBytes];
@@ -79,18 +81,22 @@ namespace DS4Windows
         private long lastDiagnosticUtcTicks;
 
         public DualSenseBluetoothSpeakerPassthrough(DualSenseDevice device, byte speakerVolume,
-            string sourceEndpointId)
+            byte headphoneVolume, bool headsetPluggedIn, string sourceEndpointId)
         {
             this.device = device ?? throw new ArgumentNullException(nameof(device));
             this.speakerVolume = speakerVolume;
+            this.headphoneVolume = headphoneVolume;
+            this.headsetPluggedIn = headsetPluggedIn;
             this.sourceEndpointId = sourceEndpointId ?? string.Empty;
         }
 
-        public bool Matches(DualSenseDevice candidateDevice, byte candidateVolume,
-            string candidateSourceEndpointId)
+        public bool Matches(DualSenseDevice candidateDevice, byte candidateSpeakerVolume,
+            byte candidateHeadphoneVolume, bool candidateHeadsetPluggedIn, string candidateSourceEndpointId)
         {
             return !stopping && ReferenceEquals(device, candidateDevice) &&
-                speakerVolume == candidateVolume &&
+                speakerVolume == candidateSpeakerVolume &&
+                headphoneVolume == candidateHeadphoneVolume &&
+                headsetPluggedIn == candidateHeadsetPluggedIn &&
                 string.Equals(sourceEndpointId, candidateSourceEndpointId ?? string.Empty,
                     StringComparison.Ordinal);
         }
@@ -412,7 +418,7 @@ namespace DS4Windows
                 // byte. Keep PCM at full scale there; applying the profile
                 // gain a second time needlessly attenuates the program mix.
                 float volume = device.BluetoothCombinedOutputTransportEnabled ?
-                    1.0f : speakerVolume / 255.0f;
+                    1.0f : (headsetPluggedIn ? headphoneVolume : speakerVolume) / 255.0f;
                 for (int i = 0; i < sourceFramesPerTick * Channels; i++)
                 {
                     sourceFrame[i] = Math.Clamp(sourceFrame[i] * volume, -1.0f, 1.0f);
@@ -640,7 +646,7 @@ namespace DS4Windows
 
             if (device.BluetoothCombinedOutputTransportEnabled)
             {
-                device.SetBluetoothSpeakerAudioFrame(opusFrame, encoded);
+                device.SetBluetoothSpeakerAudioFrame(opusFrame, encoded, headsetPluggedIn);
                 return;
             }
 
@@ -649,14 +655,14 @@ namespace DS4Windows
             report[1] = (byte)((reportSequence & 0x0F) << 4);
             reportSequence = (reportSequence + 1) & 0x0F;
 
-            // Packet 0x11 starts the audio stream. Packet 0x13 is the
-            // internal speaker lane; packet 0x16 would target the headset.
+            // Packet 0x11 starts the audio stream. Packet 0x13 targets the
+            // internal speaker and 0x16 targets the 3.5 mm headset jack.
             report[2] = 0x91;
             report[3] = 0x07;
             report[4] = 0xFE;
             report[9] = 0xFF;
             report[10] = packetCounter++;
-            report[11] = 0x93;
+            report[11] = headsetPluggedIn ? (byte)0x96 : (byte)0x93;
             report[12] = OpusBytes;
             Array.Copy(opusFrame, 0, report, 13, Math.Min(encoded, OpusBytes));
 

@@ -360,6 +360,7 @@ namespace DS4Windows.InputDevices
         private const int BluetoothCombinedStateOffset = 13;
         private const int BluetoothCombinedStateFlag0Offset = BluetoothCombinedStateOffset;
         private const int BluetoothCombinedStateFlag1Offset = BluetoothCombinedStateOffset + 1;
+        private const int BluetoothCombinedStateHeadphoneVolumeOffset = BluetoothCombinedStateOffset + 4;
         private const int BluetoothCombinedStateSpeakerVolumeOffset = BluetoothCombinedStateOffset + 5;
         private const int BluetoothCombinedStateAudioControlOffset = BluetoothCombinedStateOffset + 7;
         private const int BluetoothCombinedStateAudioControl2Offset = BluetoothCombinedStateOffset + 37;
@@ -374,7 +375,8 @@ namespace DS4Windows.InputDevices
         private const int BluetoothCombinedHapticsFreshnessMilliseconds = 30;
         private const int MaxBluetoothSpeakerFrames = 4;
         private readonly object bluetoothSpeakerFrameLock = new object();
-        private readonly Queue<byte[]> bluetoothSpeakerFrames = new Queue<byte[]>(MaxBluetoothSpeakerFrames);
+        private readonly Queue<BluetoothSpeakerFrame> bluetoothSpeakerFrames =
+            new Queue<BluetoothSpeakerFrame>(MaxBluetoothSpeakerFrames);
         private long bluetoothSpeakerFramesDropped;
         private long bluetoothSpeakerFramesUnderrun;
         private readonly object bluetoothCombinedSpeakerReportLock = new object();
@@ -472,7 +474,7 @@ namespace DS4Windows.InputDevices
         /// report. The small bounded queue aligns the capture and virtual-audio
         /// clocks without allowing latency to grow under backpressure.
         /// </summary>
-        public void SetBluetoothSpeakerAudioFrame(byte[] frame, int length)
+        public void SetBluetoothSpeakerAudioFrame(byte[] frame, int length, bool headsetOutput)
         {
             if (frame == null || length <= 0)
             {
@@ -491,7 +493,7 @@ namespace DS4Windows.InputDevices
                     Interlocked.Increment(ref bluetoothSpeakerFramesDropped);
                 }
 
-                bluetoothSpeakerFrames.Enqueue(speakerFrame);
+                bluetoothSpeakerFrames.Enqueue(new BluetoothSpeakerFrame(speakerFrame, headsetOutput));
             }
 
             // VIIPER's combined haptics cadence can be slower and burstier
@@ -522,8 +524,10 @@ namespace DS4Windows.InputDevices
             Interlocked.Exchange(ref bluetoothCombinedOutputTransportEnabled, 0);
         }
 
-        private bool TryTakeBluetoothSpeakerAudioFrame(byte[] destination, int destinationOffset)
+        private bool TryTakeBluetoothSpeakerAudioFrame(byte[] destination, int destinationOffset,
+            out bool headsetOutput)
         {
+            headsetOutput = false;
             lock (bluetoothSpeakerFrameLock)
             {
                 if (!enableSpeakerOutput || bluetoothSpeakerFrames.Count == 0 || destination == null ||
@@ -537,11 +541,24 @@ namespace DS4Windows.InputDevices
                     return false;
                 }
 
-                byte[] speakerFrame = bluetoothSpeakerFrames.Dequeue();
-                Array.Copy(speakerFrame, 0, destination, destinationOffset,
+                BluetoothSpeakerFrame speakerFrame = bluetoothSpeakerFrames.Dequeue();
+                headsetOutput = speakerFrame.HeadsetOutput;
+                Array.Copy(speakerFrame.Payload, 0, destination, destinationOffset,
                     BluetoothCombinedSpeakerFrameLength);
                 return true;
             }
+        }
+
+        private sealed class BluetoothSpeakerFrame
+        {
+            public BluetoothSpeakerFrame(byte[] payload, bool headsetOutput)
+            {
+                Payload = payload;
+                HeadsetOutput = headsetOutput;
+            }
+
+            public byte[] Payload { get; }
+            public bool HeadsetOutput { get; }
         }
 
         private DualSenseControllerOptions nativeOptionsStore;
@@ -2004,7 +2021,6 @@ namespace DS4Windows.InputDevices
                 combined[10] = bluetoothCombinedSpeakerPacketSequence;
             }
 
-            ApplyBluetoothSpeakerRouting(combined);
             ApplyBluetoothSpeakerLocalLedState(combined);
             bool hapticsFresh = cachedTimestamp > 0 &&
                 Stopwatch.GetTimestamp() - cachedTimestamp <=
@@ -2030,12 +2046,14 @@ namespace DS4Windows.InputDevices
             combined[BluetoothCombinedSpeakerOffset + 1] = 0;
             Array.Clear(combined, BluetoothCombinedSpeakerDataOffset,
                 BluetoothCombinedSpeakerFrameLength);
-            if (!TryTakeBluetoothSpeakerAudioFrame(combined, BluetoothCombinedSpeakerDataOffset))
+            if (!TryTakeBluetoothSpeakerAudioFrame(combined, BluetoothCombinedSpeakerDataOffset,
+                out bool headsetOutput))
             {
                 return false;
             }
 
-            combined[BluetoothCombinedSpeakerOffset] = 0x93;
+            ApplyBluetoothSpeakerRouting(combined, headsetOutput);
+            combined[BluetoothCombinedSpeakerOffset] = headsetOutput ? (byte)0x96 : (byte)0x93;
             combined[BluetoothCombinedSpeakerOffset + 1] = BluetoothCombinedSpeakerFrameLength;
             uint crc = DualSenseBluetoothCrc32(combined, combined.Length - 4);
             combined[combined.Length - 4] = (byte)crc;
@@ -2161,12 +2179,11 @@ namespace DS4Windows.InputDevices
             }
         }
 
-        private void ApplyBluetoothSpeakerRouting(byte[] combined)
+        private void ApplyBluetoothSpeakerRouting(byte[] combined, bool headsetOutput)
         {
-            // The firmware route is sticky. Keep the internal speaker path,
-            // volume, and pre-gain asserted on every combined packet while
-            // audio is active so a game's feedback cannot flip the route
-            // mid-stream and corrupt an otherwise valid Opus frame.
+            // The firmware route is sticky. Assert the selected audio route,
+            // volume, and pre-gain on every combined packet so game feedback
+            // cannot flip the active output mid-stream.
             // VIIPER can request a small haptics-only buffer for lower effect
             // latency. These same 0x11 bytes are the controller's speaker
             // audio buffer controls, though, and the DS5Dongle reference uses
@@ -2179,14 +2196,23 @@ namespace DS4Windows.InputDevices
             combined[9] = BluetoothCombinedSpeakerBufferLength;
             combined[BluetoothCombinedStateFlag0Offset] |= 0xA0;
             combined[BluetoothCombinedStateFlag1Offset] |= 0x80;
-            // DS5Dongle documents speaker volume up to 0x7F and the low three
-            // bits of AudioControl2 as a speaker pre-gain control. The previous
-            // 0x64 / gain-2 setting was noticeably quieter than the physical
-            // controller endpoint. Use the documented maximum volume and one
-            // modest pre-gain step while retaining the hardware limiter.
-            combined[BluetoothCombinedStateSpeakerVolumeOffset] =
-                (byte)Math.Min(0x7F, (int)speakerVolume);
-            combined[BluetoothCombinedStateAudioControlOffset] = 0x30;
+            // AudioControl bit 0x10 disables an attached headset. Keep it set
+            // for the internal speaker route, but clear it for the documented
+            // 0x16 headset packet lane. The controller's regular USB output
+            // report uses the same distinction.
+            if (headsetOutput)
+            {
+                combined[BluetoothCombinedStateHeadphoneVolumeOffset] =
+                    (byte)Math.Min(0x7F, (int)headphoneVolume);
+                combined[BluetoothCombinedStateAudioControlOffset] = 0x20;
+            }
+            else
+            {
+                combined[BluetoothCombinedStateSpeakerVolumeOffset] =
+                    (byte)Math.Min(0x7F, (int)speakerVolume);
+                combined[BluetoothCombinedStateAudioControlOffset] = 0x30;
+            }
+
             combined[BluetoothCombinedStateAudioControl2Offset] = 0x03;
         }
 

@@ -2180,15 +2180,19 @@
                                                     <RowDefinition Height="30" />
                                                     <RowDefinition Height="30" />
                                                     <RowDefinition Height="30" />
+                                                    <RowDefinition Height="30" />
                                                 </Grid.RowDefinitions>
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition />
                                                 </Grid.ColumnDefinitions>
 
-                                                <CheckBox Content="Mirror audio to controller speaker" IsChecked="{Binding DualSenseEnableSpeakerOutput}"
-                                                          Grid.Row="0" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}"
-                                                          ToolTip="Mirrors the selected Windows playback endpoint to a physical DualSense speaker. Bluetooth uses the controller speaker stream; USB uses its Windows speaker endpoint." />
+                                                <StackPanel Orientation="Horizontal" Grid.Row="0" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}">
+                                                    <CheckBox Content="Enable controller audio" IsChecked="{Binding DualSenseEnableSpeakerOutput}"
+                                                              ToolTip="Mirrors the selected Windows playback endpoint to a physical DualSense. Bluetooth uses the controller audio stream; USB uses its Windows audio endpoint." />
+                                                    <CheckBox Content="Headset plugged in" IsChecked="{Binding DualSenseHeadsetPluggedIn}" Margin="18,0,0,0"
+                                                              ToolTip="Routes Bluetooth DualSense audio to the 3.5 mm headset jack instead of the controller speaker. Enable this only while a headset is connected." />
+                                                </StackPanel>
                                                 <Label Content="Audio source:" Grid.Row="1" Grid.Column="0"
                                                        ToolTip="For VIIPER game audio, select the virtual Wireless Controller endpoint created by a DualSense VIIPER profile. The first stereo pair is mirrored to the physical controller speaker." />
                                                 <ComboBox ItemsSource="{Binding AudioCaptureEndpointChoices}" DisplayMemberPath="Name" SelectedValuePath="EndpointId"
@@ -2201,6 +2205,9 @@
                                                           Margin="{StaticResource spaceMargin}" />
                                                 <Label Content="Speaker volume:" Grid.Row="3" Grid.Column="0" />
                                                 <xctk:IntegerUpDown Value="{Binding DualSenseSpeakerVolume}" Minimum="0" Maximum="255" Grid.Row="3" Grid.Column="1"
+                                                                    Margin="{StaticResource spaceMargin}" />
+                                                <Label Content="Headset volume:" Grid.Row="4" Grid.Column="0" />
+                                                <xctk:IntegerUpDown Value="{Binding DualSenseHeadphoneVolume}" Minimum="0" Maximum="255" Grid.Row="4" Grid.Column="1"
                                                                     Margin="{StaticResource spaceMargin}" />
                                             </Grid>
                                         </GroupBox>

@@ -2770,6 +2770,7 @@ namespace DS4Windows
                 if (DualSenseEnableSpeakerOutput[ind])
                 {
                     dualSenseAudioPassthrough.Start(ind, dualsense, DualSenseSpeakerVolume[ind],
+                        DualSenseHeadphoneVolume[ind], DualSenseHeadsetPluggedIn[ind],
                         DualSenseAudioCaptureEndpointId[ind],
                         DualSenseAudioSpeakerEndpointId[ind]);
                 }

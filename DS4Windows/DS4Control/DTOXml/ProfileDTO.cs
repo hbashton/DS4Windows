@@ -1808,6 +1808,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
                 AudioSettingsGroup = new DualSenseControllerSettings.AudioSettings()
                 {
                     EnableSpeakerOutput = source.dualSenseEnableSpeakerOutput[deviceIndex],
+                    HeadsetPluggedIn = source.dualSenseHeadsetPluggedIn[deviceIndex],
                     SpeakerVolume = source.dualSenseSpeakerVolume[deviceIndex],
                     HeadphoneVolume = source.dualSenseHeadphoneVolume[deviceIndex],
                     MicrophoneVolume = source.dualSenseMicrophoneVolume[deviceIndex],
@@ -2441,6 +2442,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
                 if (DualSenseControllerSettings.AudioSettingsGroup != null)
                 {
                     destination.dualSenseEnableSpeakerOutput[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.EnableSpeakerOutput;
+                    destination.dualSenseHeadsetPluggedIn[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.HeadsetPluggedIn;
                     destination.dualSenseSpeakerVolume[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.SpeakerVolume;
                     destination.dualSenseHeadphoneVolume[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.HeadphoneVolume;
                     destination.dualSenseMicrophoneVolume[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.MicrophoneVolume;
@@ -3231,6 +3233,12 @@ namespace DS4WinWPF.DS4Control.DTOXml
         {
             [XmlElement("EnableSpeakerOutput")]
             public bool EnableSpeakerOutput
+            {
+                get; set;
+            }
+
+            [XmlElement("HeadsetPluggedIn")]
+            public bool HeadsetPluggedIn
             {
                 get; set;
             }

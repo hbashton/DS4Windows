@@ -3138,6 +3138,12 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             set => Global.DualSenseEnableSpeakerOutput[device] = value;
         }
 
+        public bool DualSenseHeadsetPluggedIn
+        {
+            get => Global.DualSenseHeadsetPluggedIn[device];
+            set => Global.DualSenseHeadsetPluggedIn[device] = value;
+        }
+
         public List<AudioEndpointChoice> AudioCaptureEndpointChoices
         {
             get

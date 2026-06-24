@@ -23,8 +23,8 @@ namespace DS4Windows
         private WaveFormat captureFormat;
         private string captureEndpointId = string.Empty;
 
-        public void Start(int slot, DualSenseDevice dualSenseDevice, byte speakerVolume, string requestedCaptureEndpointId,
-            string requestedSpeakerEndpointId)
+        public void Start(int slot, DualSenseDevice dualSenseDevice, byte speakerVolume, byte headphoneVolume,
+            bool headsetPluggedIn, string requestedCaptureEndpointId, string requestedSpeakerEndpointId)
         {
             if (slot < 0 || slot >= slots.Length)
             {
@@ -32,14 +32,16 @@ namespace DS4Windows
             }
 
             int generation = Interlocked.Increment(ref operationGeneration[slot]);
-            QueueOperation(() => StartCore(slot, generation, dualSenseDevice, speakerVolume,
+            QueueOperation(() => StartCore(slot, generation, dualSenseDevice, speakerVolume, headphoneVolume,
+                headsetPluggedIn,
                 requestedCaptureEndpointId, requestedSpeakerEndpointId));
         }
 
         // Audio endpoint shutdown can wait on the WASAPI capture thread. Never do that from
         // a controller input thread or an unplug can no longer be observed by the HID reader.
         private void StartCore(int slot, int generation, DualSenseDevice dualSenseDevice, byte speakerVolume,
-            string requestedCaptureEndpointId, string requestedSpeakerEndpointId)
+            byte headphoneVolume, bool headsetPluggedIn, string requestedCaptureEndpointId,
+            string requestedSpeakerEndpointId)
         {
             if (generation != Volatile.Read(ref operationGeneration[slot]))
             {
@@ -48,7 +50,8 @@ namespace DS4Windows
 
             if (dualSenseDevice?.ConnectionType == ConnectionType.BT)
             {
-                StartBluetooth(slot, dualSenseDevice, speakerVolume, requestedCaptureEndpointId);
+                StartBluetooth(slot, dualSenseDevice, speakerVolume, headphoneVolume, headsetPluggedIn,
+                    requestedCaptureEndpointId);
                 return;
             }
 
@@ -174,12 +177,14 @@ namespace DS4Windows
             }
         }
 
-        private void StartBluetooth(int slot, DualSenseDevice device, byte speakerVolume, string requestedCaptureEndpointId)
+        private void StartBluetooth(int slot, DualSenseDevice device, byte speakerVolume, byte headphoneVolume,
+            bool headsetPluggedIn, string requestedCaptureEndpointId)
         {
             requestedCaptureEndpointId ??= string.Empty;
             lock (syncRoot)
             {
-                if (bluetoothSlots[slot]?.Matches(device, speakerVolume, requestedCaptureEndpointId) == true)
+                if (bluetoothSlots[slot]?.Matches(device, speakerVolume, headphoneVolume, headsetPluggedIn,
+                    requestedCaptureEndpointId) == true)
                 {
                     return;
                 }
@@ -196,13 +201,13 @@ namespace DS4Windows
                 bluetoothSlots[slot] = null;
                 previous?.Dispose();
                 int generation = ++bluetoothStartGeneration[slot];
-                _ = Task.Run(() => StartBluetoothWithRetry(slot, device, speakerVolume,
-                    requestedCaptureEndpointId, generation));
+                _ = Task.Run(() => StartBluetoothWithRetry(slot, device, speakerVolume, headphoneVolume,
+                    headsetPluggedIn, requestedCaptureEndpointId, generation));
             }
         }
 
         private void StartBluetoothWithRetry(int slot, DualSenseDevice device, byte speakerVolume,
-            string requestedCaptureEndpointId, int generation)
+            byte headphoneVolume, bool headsetPluggedIn, string requestedCaptureEndpointId, int generation)
         {
             const int attempts = 10;
             Exception lastError = null;
@@ -218,7 +223,7 @@ namespace DS4Windows
                 }
 
                 var bluetoothPlayback = new DualSenseBluetoothSpeakerPassthrough(device, speakerVolume,
-                    requestedCaptureEndpointId);
+                    headphoneVolume, headsetPluggedIn, requestedCaptureEndpointId);
                 try
                 {
                     bluetoothPlayback.Start();

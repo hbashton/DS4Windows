@@ -29,9 +29,9 @@ namespace DS4Windows
         private const int OpusBytes = 200;
         private const int ReportLength = 334;
         private const int CaptureBufferMilliseconds = 240;
-        private const int InitialBufferMilliseconds = 32;
-        private const int TargetBufferMilliseconds = 24;
-        private const int BufferDeadbandMilliseconds = 5;
+        private const int InitialBufferMilliseconds = 48;
+        private const int TargetBufferMilliseconds = 32;
+        private const int BufferDeadbandMilliseconds = 8;
         private const int DriftAdjustmentFrames = 4;
         private const int CaptureRingFrames = (SampleRate * CaptureBufferMilliseconds) / 1000;
         private const int CapturePumpBufferFrames = 2048;
@@ -58,6 +58,9 @@ namespace DS4Windows
         private int captureRingWriteIndex;
         private int captureRingBufferedFrames;
         private bool capturePrimed;
+        private bool fadeInAfterCaptureUnderrun;
+        private float previousOutputLeft;
+        private float previousOutputRight;
         private int reportSequence;
         private byte packetCounter;
         private int loggedWriteFailure;
@@ -311,7 +314,6 @@ namespace DS4Windows
 
                 if (captureRingBufferedFrames < frameCount)
                 {
-                    capturePrimed = false;
                     return 0;
                 }
 
@@ -351,6 +353,7 @@ namespace DS4Windows
                 Array.Clear(frame, 0, frame.Length);
                 int sourceFramesPerTick = GetSourceFramesPerTick();
                 int capturedFrames = ReadCaptureFrames(sourceFramesPerTick);
+                bool captureUnderrun = capturedFrames < sourceFramesPerTick;
                 if (capturedFrames < sourceFramesPerTick)
                 {
                     Interlocked.Increment(ref shortCaptureReads);
@@ -393,6 +396,21 @@ namespace DS4Windows
                     frame[outputOffset + 1] = (float)(sourceFrame[firstOffset + 1] * (1.0 - fraction) + sourceFrame[secondOffset + 1] * fraction);
                 }
 
+                if (captureUnderrun)
+                {
+                    FadeOutCaptureUnderrun();
+                    fadeInAfterCaptureUnderrun = true;
+                }
+                else if (fadeInAfterCaptureUnderrun)
+                {
+                    FadeInRecoveredCapture();
+                    fadeInAfterCaptureUnderrun = false;
+                }
+
+                int tailOffset = (FrameSamples - 1) * Channels;
+                previousOutputLeft = frame[tailOffset];
+                previousOutputRight = frame[tailOffset + 1];
+
                 SendFrame();
                 Interlocked.Increment(ref framesSent);
                 LogStreamDiagnosticsIfVerbose();
@@ -419,6 +437,31 @@ namespace DS4Windows
                     Interlocked.Increment(ref skippedScheduleSlots);
                     nextFrame = Stopwatch.GetTimestamp() + frameTicks;
                 }
+            }
+        }
+
+        private void FadeOutCaptureUnderrun()
+        {
+            const int fadeFrames = 48;
+            for (int outputFrame = 0; outputFrame < FrameSamples; outputFrame++)
+            {
+                float gain = outputFrame < fadeFrames ?
+                    1.0f - ((outputFrame + 1) / (float)fadeFrames) : 0.0f;
+                int offset = outputFrame * Channels;
+                frame[offset] = previousOutputLeft * gain;
+                frame[offset + 1] = previousOutputRight * gain;
+            }
+        }
+
+        private void FadeInRecoveredCapture()
+        {
+            const int fadeFrames = 48;
+            for (int outputFrame = 0; outputFrame < fadeFrames; outputFrame++)
+            {
+                float gain = (outputFrame + 1) / (float)fadeFrames;
+                int offset = outputFrame * Channels;
+                frame[offset] = previousOutputLeft * (1.0f - gain) + frame[offset] * gain;
+                frame[offset + 1] = previousOutputRight * (1.0f - gain) + frame[offset + 1] * gain;
             }
         }
 

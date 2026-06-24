@@ -3155,7 +3155,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                         string name = endpoint.FriendlyName;
                         if (DualSenseAudioPassthrough.IsDualSenseEndpoint(endpoint))
                         {
-                            name += " (controller or VIIPER audio)";
+                            name += " (DualSense/Game Audio)";
                         }
 
                         choices.Add(new AudioEndpointChoice(name, endpoint.ID));

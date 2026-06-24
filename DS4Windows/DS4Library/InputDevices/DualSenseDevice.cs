@@ -363,6 +363,14 @@ namespace DS4Windows.InputDevices
         private const int BluetoothCombinedStateSpeakerVolumeOffset = BluetoothCombinedStateOffset + 5;
         private const int BluetoothCombinedStateAudioControlOffset = BluetoothCombinedStateOffset + 7;
         private const int BluetoothCombinedStateAudioControl2Offset = BluetoothCombinedStateOffset + 37;
+        private const int BluetoothCombinedStateMuteLedOffset = BluetoothCombinedStateOffset + 8;
+        private const int BluetoothCombinedStateAudioMuteOffset = BluetoothCombinedStateOffset + 9;
+        private const int BluetoothCombinedStateLedFadeOffset = BluetoothCombinedStateOffset + 41;
+        private const int BluetoothCombinedStateLedBrightnessOffset = BluetoothCombinedStateOffset + 42;
+        private const int BluetoothCombinedStatePlayerLedOffset = BluetoothCombinedStateOffset + 43;
+        private const int BluetoothCombinedStateLightbarRedOffset = BluetoothCombinedStateOffset + 44;
+        private const int BluetoothCombinedStateLightbarGreenOffset = BluetoothCombinedStateOffset + 45;
+        private const int BluetoothCombinedStateLightbarBlueOffset = BluetoothCombinedStateOffset + 46;
         private const int BluetoothCombinedHapticsFreshnessMilliseconds = 30;
         private const int MaxBluetoothSpeakerFrames = 4;
         private readonly object bluetoothSpeakerFrameLock = new object();
@@ -1997,6 +2005,7 @@ namespace DS4Windows.InputDevices
             }
 
             ApplyBluetoothSpeakerRouting(combined);
+            ApplyBluetoothSpeakerLocalLedState(combined);
             bool hapticsFresh = cachedTimestamp > 0 &&
                 Stopwatch.GetTimestamp() - cachedTimestamp <=
                 (Stopwatch.Frequency * BluetoothCombinedHapticsFreshnessMilliseconds) / 1000;
@@ -2179,6 +2188,47 @@ namespace DS4Windows.InputDevices
                 (byte)Math.Min(0x7F, (int)speakerVolume);
             combined[BluetoothCombinedStateAudioControlOffset] = 0x30;
             combined[BluetoothCombinedStateAudioControl2Offset] = 0x03;
+        }
+
+        private void ApplyBluetoothSpeakerLocalLedState(byte[] combined)
+        {
+            // The 0x36 packet carries a complete copy of the virtual controller's
+            // USB output state. A game may leave its LED bytes at zero while only
+            // sending haptics, which would otherwise change the physical lightbar
+            // as soon as speaker audio starts using this transport.
+            const byte muteControlMask = 0x03;
+            byte localMuteFlags = (byte)(0x01 |
+                (microphoneMuteOverride ? 0x02 : 0x00));
+            combined[BluetoothCombinedStateFlag1Offset] =
+                (byte)((combined[BluetoothCombinedStateFlag1Offset] & ~muteControlMask) |
+                    localMuteFlags);
+            combined[BluetoothCombinedStateMuteLedOffset] = muteLedOverride ?
+                (muteLedOn ? (byte)0x01 : (byte)0x00) :
+                microphoneMuteOverride ? (microphoneMuted ? (byte)0x01 : (byte)0x00) : muteLEDByte;
+            combined[BluetoothCombinedStateAudioMuteOffset] =
+                microphoneMuteOverride && microphoneMuted ? (byte)0x10 : (byte)0x00;
+
+            int slot = DeviceSlotNumber;
+            if (slot < 0 || slot >= Global.LightbarSettingsInfo.Length ||
+                Global.LightbarSettingsInfo[slot].mode != LightbarMode.DS4Win)
+            {
+                return;
+            }
+
+            // Retain game-controlled LEDs only for an explicit passthrough
+            // profile. In the normal DS4Windows mode, keep the local LED state
+            // stable while still forwarding the game's rumble and haptics data.
+            const byte ledControlMask = 0x1C;
+            const byte localLedControlFlags = 0x14;
+            combined[BluetoothCombinedStateFlag1Offset] =
+                (byte)((combined[BluetoothCombinedStateFlag1Offset] & ~ledControlMask) |
+                    localLedControlFlags);
+            combined[BluetoothCombinedStateLedFadeOffset] = 0x02;
+            combined[BluetoothCombinedStateLedBrightnessOffset] = 0x02;
+            combined[BluetoothCombinedStatePlayerLedOffset] = activePlayerLEDMask;
+            combined[BluetoothCombinedStateLightbarRedOffset] = currentHap.lightbarState.LightBarColor.red;
+            combined[BluetoothCombinedStateLightbarGreenOffset] = currentHap.lightbarState.LightBarColor.green;
+            combined[BluetoothCombinedStateLightbarBlueOffset] = currentHap.lightbarState.LightBarColor.blue;
         }
 
         /// <summary>

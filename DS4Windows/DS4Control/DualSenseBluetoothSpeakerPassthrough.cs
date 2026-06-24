@@ -29,8 +29,8 @@ namespace DS4Windows
         private const int OpusBytes = 200;
         private const int ReportLength = 334;
         private const int CaptureBufferMilliseconds = 240;
-        private const int InitialBufferMilliseconds = 24;
-        private const int TargetBufferMilliseconds = 20;
+        private const int InitialBufferMilliseconds = 32;
+        private const int TargetBufferMilliseconds = 24;
         private const int BufferDeadbandMilliseconds = 5;
         private const int DriftAdjustmentFrames = 4;
         private const int CaptureRingFrames = (SampleRate * CaptureBufferMilliseconds) / 1000;
@@ -42,7 +42,6 @@ namespace DS4Windows
         private readonly byte speakerVolume;
         private readonly float[] frame = new float[FrameSamples * Channels];
         private readonly float[] sourceFrame = new float[(512 + DriftAdjustmentFrames) * Channels];
-        private readonly float[] lastSourceFrame = new float[(512 + DriftAdjustmentFrames) * Channels];
         private readonly byte[] opusFrame = new byte[OpusBytes];
         private readonly byte[] report = new byte[ReportLength];
         private readonly float[] captureRing = new float[CaptureRingFrames * Channels];
@@ -58,7 +57,7 @@ namespace DS4Windows
         private int captureRingReadIndex;
         private int captureRingWriteIndex;
         private int captureRingBufferedFrames;
-        private bool hasLastSourceFrame;
+        private bool capturePrimed;
         private int reportSequence;
         private byte packetCounter;
         private int loggedWriteFailure;
@@ -113,19 +112,14 @@ namespace DS4Windows
                     source = new WdlResamplingSampleProvider(source, SampleRate);
                 }
 
-                // DS5Dongle uses restricted low-delay Opus for this exact
-                // Bluetooth speaker lane. The Opus API documents that this
-                // removes speech-optimized codec delay, which is appropriate
-                // for controller program audio where transport latency matters.
+                // The Bluetooth transport itself dominates latency. Use Opus's
+                // program-audio tuning here: PadForge and the standalone BT
+                // speaker reference both use it, and it preserves speech better
+                // than the restricted low-delay mode at this fixed 10 ms cadence.
                 opusEncoder = OpusCodecFactory.CreateEncoder(SampleRate, Channels,
-                    OpusApplication.OPUS_APPLICATION_RESTRICTED_LOWDELAY);
+                    OpusApplication.OPUS_APPLICATION_AUDIO);
                 opusEncoder.Bitrate = OpusBytes * 8 * 100;
                 opusEncoder.UseVBR = false;
-                // Match the hardware-focused reference encoders. The Bluetooth
-                // speaker lane accepts fixed 10 ms CBR frames; spending extra
-                // CPU choosing a larger frame only makes a late frame more
-                // likely on the audio worker.
-                opusEncoder.Complexity = 0;
                 opusEncoder.ExpertFrameDuration = OpusFramesize.OPUS_FRAMESIZE_10_MS;
 
                 capturePump = new Thread(() => CapturePumpLoop(source))
@@ -158,7 +152,7 @@ namespace DS4Windows
             {
                 sourceName = "Default audio endpoint";
                 using var defaultEnumerator = new MMDeviceEnumerator();
-                return new LowLatencyLoopbackCapture(defaultEnumerator.GetDefaultAudioEndpoint(
+                return new StableLoopbackCapture(defaultEnumerator.GetDefaultAudioEndpoint(
                     DataFlow.Render, Role.Multimedia));
             }
 
@@ -170,21 +164,18 @@ namespace DS4Windows
             }
 
             sourceName = endpoint.FriendlyName;
-            return new LowLatencyLoopbackCapture(endpoint);
+            return new StableLoopbackCapture(endpoint);
         }
 
         /// <summary>
-        /// NAudio's convenience loopback capture defaults to a 100 ms polling
-        /// buffer. The Bluetooth speaker path cannot recover that latency later,
-        /// so use the same 1 ms loopback capture configuration that PadForge uses
-        /// for low-latency controller audio processing. Shared mode still selects
-        /// the endpoint's supported engine period; the 1 ms request only prevents
-        /// the capture layer from asking WASAPI for a 100 ms buffer.
+        /// A 10 ms WASAPI buffer follows the Windows audio engine cadence without
+        /// the 100 ms default capture latency or the unstable 1 ms request that
+        /// caused frequent partial callbacks on the virtual controller endpoint.
         /// </summary>
-        private sealed class LowLatencyLoopbackCapture : WasapiCapture
+        private sealed class StableLoopbackCapture : WasapiCapture
         {
-            public LowLatencyLoopbackCapture(MMDevice captureDevice)
-                : base(captureDevice, false, 1)
+            public StableLoopbackCapture(MMDevice captureDevice)
+                : base(captureDevice, false, 10)
             {
                 ShareMode = AudioClientShareMode.Shared;
             }
@@ -302,68 +293,49 @@ namespace DS4Windows
 
         private int ReadCaptureFrames(int frameCount)
         {
-            long deadline = Stopwatch.GetTimestamp() + (Stopwatch.Frequency / 200);
-            int copiedFrames = 0;
-            while (!stopping)
+            lock (syncRoot)
             {
-                lock (syncRoot)
+                // Do not start consuming an endpoint in the middle of an audio
+                // callback. Keeping a small cushion means one late callback does
+                // not splice held samples into speech and make it sound robotic.
+                if (!capturePrimed)
                 {
-                    int availableFrames = Math.Min(frameCount - copiedFrames,
-                        captureRingBufferedFrames);
-                    for (int frameIndex = 0; frameIndex < availableFrames; frameIndex++)
+                    int initialFrames = (SampleRate * InitialBufferMilliseconds) / 1000;
+                    if (captureRingBufferedFrames < initialFrames)
                     {
-                        int sourceOffset = captureRingReadIndex * Channels;
-                        int destinationOffset = (copiedFrames + frameIndex) * Channels;
-                        sourceFrame[destinationOffset] = captureRing[sourceOffset];
-                        sourceFrame[destinationOffset + 1] = captureRing[sourceOffset + 1];
-                        captureRingReadIndex = (captureRingReadIndex + 1) % CaptureRingFrames;
+                        return 0;
                     }
 
-                    captureRingBufferedFrames -= availableFrames;
-                    copiedFrames += availableFrames;
-                    if (copiedFrames == frameCount)
-                    {
-                        return copiedFrames;
-                    }
+                    capturePrimed = true;
                 }
 
-                if (Stopwatch.GetTimestamp() >= deadline)
+                if (captureRingBufferedFrames < frameCount)
                 {
-                    return copiedFrames;
+                    capturePrimed = false;
+                    return 0;
                 }
 
-                captureFramesAvailable.WaitOne(1);
+                for (int frameIndex = 0; frameIndex < frameCount; frameIndex++)
+                {
+                    int sourceOffset = captureRingReadIndex * Channels;
+                    int destinationOffset = frameIndex * Channels;
+                    sourceFrame[destinationOffset] = captureRing[sourceOffset];
+                    sourceFrame[destinationOffset + 1] = captureRing[sourceOffset + 1];
+                    captureRingReadIndex = (captureRingReadIndex + 1) % CaptureRingFrames;
+                }
+
+                captureRingBufferedFrames -= frameCount;
+                return frameCount;
             }
-
-            return copiedFrames;
         }
 
-        private void ConcealMissingCaptureFrames(int capturedFrames, int frameCount)
+        private void RecordCaptureUnderrun()
         {
-            if (capturedFrames <= 0)
-            {
-                Interlocked.Increment(ref emptyCaptureReads);
-                if (hasLastSourceFrame)
-                {
-                    Array.Copy(lastSourceFrame, sourceFrame, frameCount * Channels);
-                }
-
-                return;
-            }
-
-            // Preserve the fresh portion of a short read. Replaying an entire
-            // old 10 ms block creates an audible periodic crackle; holding only
-            // the final fresh sample makes the missing tail continuous until the
-            // next WASAPI callback arrives.
-            int lastSampleOffset = (capturedFrames - 1) * Channels;
-            float left = sourceFrame[lastSampleOffset];
-            float right = sourceFrame[lastSampleOffset + 1];
-            for (int frameIndex = capturedFrames; frameIndex < frameCount; frameIndex++)
-            {
-                int offset = frameIndex * Channels;
-                sourceFrame[offset] = left;
-                sourceFrame[offset + 1] = right;
-            }
+            // ReadCaptureFrames returns either one complete packet or no packet.
+            // sourceFrame is cleared before every read, so an underflow emits a
+            // clean silent packet while the ring re-primes instead of repeating
+            // stale waveform fragments into the next spoken word.
+            Interlocked.Increment(ref emptyCaptureReads);
         }
 
         private void StreamLoop()
@@ -384,11 +356,8 @@ namespace DS4Windows
                     Interlocked.Increment(ref shortCaptureReads);
                     Interlocked.Add(ref concealedCaptureFrames,
                         sourceFramesPerTick - capturedFrames);
-                    ConcealMissingCaptureFrames(capturedFrames, sourceFramesPerTick);
+                    RecordCaptureUnderrun();
                 }
-
-                Array.Copy(sourceFrame, lastSourceFrame, sourceFramesPerTick * Channels);
-                hasLastSourceFrame = true;
 
                 if (stopping)
                 {
@@ -520,7 +489,23 @@ namespace DS4Windows
                 return;
             }
 
-            AppLogger.LogToGui($"DualSense Bluetooth speaker stats: frames={Interlocked.Read(ref framesSent)} shortCaptureReads={Interlocked.Read(ref shortCaptureReads)} emptyCaptureReads={Interlocked.Read(ref emptyCaptureReads)} concealedCaptureFrames={Interlocked.Read(ref concealedCaptureFrames)} driftAdjustments={Interlocked.Read(ref captureDriftAdjustments)} skippedSlots={Interlocked.Read(ref skippedScheduleSlots)} queued={device.PendingBluetoothSpeakerFrames} queueDrops={device.BluetoothSpeakerFramesDropped} queueUnderruns={device.BluetoothSpeakerFramesUnderrun} realtimeQueueDrops={device.BluetoothRealtimeWriterDroppedReports} combinedReports={device.BluetoothCombinedOutputReportCount} combinedLate={device.BluetoothCombinedOutputLateReportCount} combinedMaxGapMs={device.BluetoothCombinedOutputMaxGapMilliseconds:F1} combinedCacheAverageMs={device.BluetoothCombinedSpeakerCacheAverageDelayMilliseconds:F1} combinedCacheMaximumMs={device.BluetoothCombinedSpeakerCacheMaximumDelayMilliseconds:F1} staleHapticsSilenced={device.BluetoothCombinedSpeakerStaleHapticsSilenced} speakerWrites={device.BluetoothCombinedSpeakerReportsWritten} speakerWriteFailures={device.BluetoothCombinedSpeakerWriteFailures} suppressed0x31={device.BluetoothNormalOutputWritesSuppressed} status={device.LastBluetoothHapticsWriteStatus}", false);
+            AppLogger.LogToGui($"DualSense Bluetooth speaker stats: frames={Interlocked.Read(ref framesSent)} shortCaptureReads={Interlocked.Read(ref shortCaptureReads)} emptyCaptureReads={Interlocked.Read(ref emptyCaptureReads)} concealedCaptureFrames={Interlocked.Read(ref concealedCaptureFrames)} captureBufferedFrames={GetCaptureBufferedFrames()} capturePrimed={IsCapturePrimed()} driftAdjustments={Interlocked.Read(ref captureDriftAdjustments)} skippedSlots={Interlocked.Read(ref skippedScheduleSlots)} queued={device.PendingBluetoothSpeakerFrames} queueDrops={device.BluetoothSpeakerFramesDropped} queueUnderruns={device.BluetoothSpeakerFramesUnderrun} realtimeQueueDrops={device.BluetoothRealtimeWriterDroppedReports} combinedReports={device.BluetoothCombinedOutputReportCount} combinedLate={device.BluetoothCombinedOutputLateReportCount} combinedMaxGapMs={device.BluetoothCombinedOutputMaxGapMilliseconds:F1} combinedCacheAverageMs={device.BluetoothCombinedSpeakerCacheAverageDelayMilliseconds:F1} combinedCacheMaximumMs={device.BluetoothCombinedSpeakerCacheMaximumDelayMilliseconds:F1} staleHapticsSilenced={device.BluetoothCombinedSpeakerStaleHapticsSilenced} speakerWrites={device.BluetoothCombinedSpeakerReportsWritten} speakerWriteFailures={device.BluetoothCombinedSpeakerWriteFailures} suppressed0x31={device.BluetoothNormalOutputWritesSuppressed} status={device.LastBluetoothHapticsWriteStatus}", false);
+        }
+
+        private int GetCaptureBufferedFrames()
+        {
+            lock (syncRoot)
+            {
+                return captureRingBufferedFrames;
+            }
+        }
+
+        private bool IsCapturePrimed()
+        {
+            lock (syncRoot)
+            {
+                return capturePrimed;
+            }
         }
 
         private void SendFrame()
@@ -638,6 +623,7 @@ namespace DS4Windows
                 oldCapture = capture;
                 capture = null;
                 captureBuffer = null;
+                capturePrimed = false;
             }
 
             if (oldCapture != null)

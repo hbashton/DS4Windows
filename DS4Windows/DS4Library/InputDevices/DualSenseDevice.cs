@@ -356,6 +356,7 @@ namespace DS4Windows.InputDevices
         private const int BluetoothCombinedSpeakerOffset = 142;
         private const int BluetoothCombinedSpeakerDataOffset = 144;
         private const int BluetoothCombinedSpeakerFrameLength = 200;
+        private const byte BluetoothCombinedSpeakerBufferLength = 64;
         private const int BluetoothCombinedStateOffset = 13;
         private const int BluetoothCombinedStateFlag0Offset = BluetoothCombinedStateOffset;
         private const int BluetoothCombinedStateFlag1Offset = BluetoothCombinedStateOffset + 1;
@@ -2157,6 +2158,16 @@ namespace DS4Windows.InputDevices
             // volume, and pre-gain asserted on every combined packet while
             // audio is active so a game's feedback cannot flip the route
             // mid-stream and corrupt an otherwise valid Opus frame.
+            // VIIPER can request a small haptics-only buffer for lower effect
+            // latency. These same 0x11 bytes are the controller's speaker
+            // audio buffer controls, though, and the DS5Dongle reference uses
+            // 64 for clean Opus playback. Restore that stable value whenever
+            // this packet carries an actual speaker frame.
+            combined[5] = BluetoothCombinedSpeakerBufferLength;
+            combined[6] = BluetoothCombinedSpeakerBufferLength;
+            combined[7] = BluetoothCombinedSpeakerBufferLength;
+            combined[8] = BluetoothCombinedSpeakerBufferLength;
+            combined[9] = BluetoothCombinedSpeakerBufferLength;
             combined[BluetoothCombinedStateFlag0Offset] |= 0xA0;
             combined[BluetoothCombinedStateFlag1Offset] |= 0x80;
             // DS5Dongle documents speaker volume up to 0x7F and the low three

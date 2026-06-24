@@ -421,6 +421,56 @@ namespace DS4Windows.InputDevices
             Interlocked.Read(ref bluetoothCombinedOutputMaxGapTicks) * 1000.0 / Stopwatch.Frequency;
         public long BluetoothRealtimeWriterDroppedReports =>
             Interlocked.Read(ref bluetoothRealtimeWriterDroppedReports);
+        public long BluetoothRealtimeWriterCompletedReports
+        {
+            get
+            {
+                lock (bluetoothRealtimeWriterLock)
+                {
+                    return bluetoothRealtimeWriter?.CompletedWrites ?? 0;
+                }
+            }
+        }
+        public long BluetoothRealtimeWriterSlowCompletionCount
+        {
+            get
+            {
+                lock (bluetoothRealtimeWriterLock)
+                {
+                    return bluetoothRealtimeWriter?.SlowCompletionCount ?? 0;
+                }
+            }
+        }
+        public long BluetoothRealtimeWriterLateSubmissionCount
+        {
+            get
+            {
+                lock (bluetoothRealtimeWriterLock)
+                {
+                    return bluetoothRealtimeWriter?.LateSubmissionCount ?? 0;
+                }
+            }
+        }
+        public double BluetoothRealtimeWriterMaximumCompletionMilliseconds
+        {
+            get
+            {
+                lock (bluetoothRealtimeWriterLock)
+                {
+                    return bluetoothRealtimeWriter?.MaximumCompletionMilliseconds ?? 0.0;
+                }
+            }
+        }
+        public double BluetoothRealtimeWriterMaximumSubmissionGapMilliseconds
+        {
+            get
+            {
+                lock (bluetoothRealtimeWriterLock)
+                {
+                    return bluetoothRealtimeWriter?.MaximumSubmissionGapMilliseconds ?? 0.0;
+                }
+            }
+        }
         public long BluetoothSpeakerFramesDropped => Interlocked.Read(ref bluetoothSpeakerFramesDropped);
         public long BluetoothSpeakerFramesUnderrun => Interlocked.Read(ref bluetoothSpeakerFramesUnderrun);
         public long BluetoothCombinedSpeakerReportsWritten =>

@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using Microsoft.Win32.SafeHandles;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -22,6 +23,8 @@ namespace DS4Windows.InputDevices
         private const uint WAIT_FAILED = 0xFFFFFFFF;
         private const uint INFINITE = 0xFFFFFFFF;
         private const int ERROR_IO_PENDING = 997;
+        private const int LateSubmissionMilliseconds = 15;
+        private const int SlowCompletionMilliseconds = 20;
 
         [StructLayout(LayoutKind.Sequential)]
         private struct NativeOverlappedData
@@ -40,6 +43,7 @@ namespace DS4Windows.InputDevices
             public readonly IntPtr EventHandle;
             public readonly IntPtr Overlapped;
             public bool Pending;
+            public long SubmittedTimestamp;
 
             public WriteSlot(int reportLength)
             {
@@ -84,6 +88,20 @@ namespace DS4Windows.InputDevices
         private int nextSlot;
         private bool disposed;
         private bool nativeResourcesReleased;
+        private long completedWrites;
+        private long slowCompletionCount;
+        private long maximumCompletionTicks;
+        private long lateSubmissionCount;
+        private long maximumSubmissionGapTicks;
+        private long lastSubmissionTimestamp;
+
+        public long CompletedWrites => Interlocked.Read(ref completedWrites);
+        public long SlowCompletionCount => Interlocked.Read(ref slowCompletionCount);
+        public long LateSubmissionCount => Interlocked.Read(ref lateSubmissionCount);
+        public double MaximumCompletionMilliseconds =>
+            Interlocked.Read(ref maximumCompletionTicks) * 1000.0 / Stopwatch.Frequency;
+        public double MaximumSubmissionGapMilliseconds =>
+            Interlocked.Read(ref maximumSubmissionGapTicks) * 1000.0 / Stopwatch.Frequency;
 
         private DualSenseBluetoothRealtimeWriter(IntPtr deviceHandle, int reportLength, int slotCount)
         {
@@ -226,6 +244,8 @@ namespace DS4Windows.InputDevices
                     return false;
                 }
 
+                ObserveCompletedWrites();
+                long now = Stopwatch.GetTimestamp();
                 WriteSlot slot = slots[nextSlot];
                 uint waitResult = WaitForSingleObject(slot.EventHandle, 0);
                 if (waitResult != WAIT_OBJECT_0)
@@ -242,7 +262,9 @@ namespace DS4Windows.InputDevices
                         return false;
                     }
 
+                    RecordCompletion(now - slot.SubmittedTimestamp);
                     slot.Pending = false;
+                    slot.SubmittedTimestamp = 0;
                 }
 
                 Buffer.BlockCopy(report, 0, slot.Buffer, 0, report.Length);
@@ -263,16 +285,82 @@ namespace DS4Windows.InputDevices
                     }
 
                     slot.Pending = true;
+                    slot.SubmittedTimestamp = now;
                 }
                 else
                 {
                     SetEvent(slot.EventHandle);
                     slot.Pending = false;
+                    slot.SubmittedTimestamp = 0;
+                    Interlocked.Increment(ref completedWrites);
                 }
 
+                RecordSubmissionGap(now);
                 nextSlot = (nextSlot + 1) % slots.Length;
                 return true;
             }
+        }
+
+        private void ObserveCompletedWrites()
+        {
+            long now = Stopwatch.GetTimestamp();
+            foreach (WriteSlot slot in slots)
+            {
+                if (!slot.Pending || WaitForSingleObject(slot.EventHandle, 0) != WAIT_OBJECT_0)
+                {
+                    continue;
+                }
+
+                if (!GetOverlappedResult(deviceHandle, slot.Overlapped, out _, false))
+                {
+                    continue;
+                }
+
+                RecordCompletion(now - slot.SubmittedTimestamp);
+                slot.Pending = false;
+                slot.SubmittedTimestamp = 0;
+            }
+        }
+
+        private void RecordSubmissionGap(long now)
+        {
+            long previous = Interlocked.Exchange(ref lastSubmissionTimestamp, now);
+            if (previous == 0)
+            {
+                return;
+            }
+
+            long gap = Math.Max(0, now - previous);
+            UpdateMaximum(ref maximumSubmissionGapTicks, gap);
+            if (gap > Stopwatch.Frequency * LateSubmissionMilliseconds / 1000)
+            {
+                Interlocked.Increment(ref lateSubmissionCount);
+            }
+        }
+
+        private void RecordCompletion(long elapsedTicks)
+        {
+            Interlocked.Increment(ref completedWrites);
+            elapsedTicks = Math.Max(0, elapsedTicks);
+            UpdateMaximum(ref maximumCompletionTicks, elapsedTicks);
+            if (elapsedTicks > Stopwatch.Frequency * SlowCompletionMilliseconds / 1000)
+            {
+                Interlocked.Increment(ref slowCompletionCount);
+            }
+        }
+
+        private static void UpdateMaximum(ref long target, long value)
+        {
+            long current;
+            do
+            {
+                current = Interlocked.Read(ref target);
+                if (value <= current)
+                {
+                    return;
+                }
+            }
+            while (Interlocked.CompareExchange(ref target, value, current) != current);
         }
 
         public void Dispose()

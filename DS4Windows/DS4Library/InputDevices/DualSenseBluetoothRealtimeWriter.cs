@@ -20,6 +20,7 @@ namespace DS4Windows.InputDevices
         private const uint FILE_FLAG_OVERLAPPED = 0x40000000;
         private const uint WAIT_OBJECT_0 = 0;
         private const uint WAIT_FAILED = 0xFFFFFFFF;
+        private const uint INFINITE = 0xFFFFFFFF;
         private const int ERROR_IO_PENDING = 997;
 
         [StructLayout(LayoutKind.Sequential)]
@@ -82,6 +83,7 @@ namespace DS4Windows.InputDevices
         private readonly WriteSlot[] slots;
         private int nextSlot;
         private bool disposed;
+        private bool nativeResourcesReleased;
 
         private DualSenseBluetoothRealtimeWriter(IntPtr deviceHandle, int reportLength, int slotCount)
         {
@@ -283,30 +285,86 @@ namespace DS4Windows.InputDevices
                 }
 
                 disposed = true;
-                if (ownsDeviceHandle)
+                if (!CancelAndWaitForPendingWrites(1000))
                 {
-                    CancelIoEx(deviceHandle, IntPtr.Zero);
+                    // Do not free a pinned buffer or OVERLAPPED structure until
+                    // Windows has completed its I/O. A Bluetooth disconnect can
+                    // delay that completion; freeing it early corrupts native
+                    // memory and can terminate CoreCLR later on reconnect.
+                    ThreadPool.QueueUserWorkItem(_ => FinishDeferredDispose());
+                    return;
                 }
 
-                foreach (WriteSlot slot in slots)
-                {
-                    if (slot.Pending)
-                    {
-                        WaitForSingleObject(slot.EventHandle, ownsDeviceHandle ? 100u : 1000u);
-                    }
+                ReleaseNativeResources();
+            }
+        }
 
-                    slot.Dispose();
+        private bool CancelAndWaitForPendingWrites(uint timeoutMilliseconds)
+        {
+            bool allCompleted = true;
+            foreach (WriteSlot slot in slots)
+            {
+                if (!slot.Pending)
+                {
+                    continue;
                 }
 
-                if (ownsDeviceHandle)
+                // This writer always supplies its own OVERLAPPED pointer, so
+                // targeted cancellation is safe even when the HID handle is
+                // shared with DS4Windows' input reader.
+                CancelIoEx(deviceHandle, slot.Overlapped);
+                if (WaitForSingleObject(slot.EventHandle, timeoutMilliseconds) != WAIT_OBJECT_0)
                 {
-                    CloseHandle(deviceHandle);
+                    allCompleted = false;
+                    continue;
                 }
-                else if (sharedHandleReferenceAdded)
+
+                slot.Pending = false;
+            }
+
+            return allCompleted;
+        }
+
+        private void FinishDeferredDispose()
+        {
+            lock (syncRoot)
+            {
+                if (nativeResourcesReleased)
                 {
-                    sharedHandleReferenceAdded = false;
-                    sharedDeviceHandle.DangerousRelease();
+                    return;
                 }
+
+                // The UI and controller shutdown path must not hang on a bad
+                // Bluetooth stack. This background cleanup may wait, but it is
+                // the only safe place to release native overlapped buffers.
+                if (CancelAndWaitForPendingWrites(INFINITE))
+                {
+                    ReleaseNativeResources();
+                }
+            }
+        }
+
+        private void ReleaseNativeResources()
+        {
+            if (nativeResourcesReleased)
+            {
+                return;
+            }
+
+            nativeResourcesReleased = true;
+            foreach (WriteSlot slot in slots)
+            {
+                slot.Dispose();
+            }
+
+            if (ownsDeviceHandle)
+            {
+                CloseHandle(deviceHandle);
+            }
+            else if (sharedHandleReferenceAdded)
+            {
+                sharedHandleReferenceAdded = false;
+                sharedDeviceHandle.DangerousRelease();
             }
         }
 

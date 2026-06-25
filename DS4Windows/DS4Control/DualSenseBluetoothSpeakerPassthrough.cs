@@ -78,7 +78,33 @@ namespace DS4Windows
         private long lastCaptureCallbackTicks;
         private long captureCallbackGapsOverTwelveMilliseconds;
         private long captureMaximumCallbackGapTicks;
+        private long captureIntervalMaximumCallbackGapTicks;
+        private long previousFrameDispatchTicks;
+        private long frameDispatchGapsOverTwelveMilliseconds;
+        private long frameDispatchMaximumGapTicks;
+        private long frameDispatchMinimumGapTicks;
+        private long frameDispatchIntervalMaximumGapTicks;
+        private long frameDispatchIntervalMinimumGapTicks;
+        private long streamScheduleLateIntervalMaximumTicks;
         private long lastDiagnosticUtcTicks;
+        private long lastDiagnosticFramesSent;
+        private long lastDiagnosticShortCaptureReads;
+        private long lastDiagnosticEmptyCaptureReads;
+        private long lastDiagnosticCaptureCallbacks;
+        private long lastDiagnosticCaptureInputFrames;
+        private long lastDiagnosticCaptureCallbackGapsOverTwelveMilliseconds;
+        private long lastDiagnosticCaptureDriftAdjustments;
+        private long lastDiagnosticSkippedScheduleSlots;
+        private long lastDiagnosticFrameDispatchGapsOverTwelveMilliseconds;
+        private long lastDiagnosticQueueDrops;
+        private long lastDiagnosticQueueUnderruns;
+        private long lastDiagnosticRealtimeQueueDrops;
+        private long lastDiagnosticCombinedReports;
+        private long lastDiagnosticCombinedLateReports;
+        private long lastDiagnosticStaleHapticsSilenced;
+        private long lastDiagnosticSpeakerWrites;
+        private long lastDiagnosticSpeakerWriteFailures;
+        private long lastDiagnosticSuppressed0x31;
 
         public DualSenseBluetoothSpeakerPassthrough(DualSenseDevice device, byte speakerVolume,
             byte headphoneVolume, bool headsetPluggedIn, string sourceEndpointId)
@@ -267,6 +293,7 @@ namespace DS4Windows
             }
 
             UpdateMaximum(ref captureMaximumCallbackGapTicks, elapsedTicks);
+            UpdateMaximum(ref captureIntervalMaximumCallbackGapTicks, elapsedTicks);
         }
 
         private static void UpdateMaximum(ref long destination, long candidate)
@@ -276,6 +303,20 @@ namespace DS4Windows
                 Interlocked.CompareExchange(ref destination, candidate, current) != current)
             {
             }
+        }
+
+        private static void UpdateMinimum(ref long destination, long candidate)
+        {
+            long current;
+            do
+            {
+                current = Interlocked.Read(ref destination);
+                if (current != 0 && candidate >= current)
+                {
+                    return;
+                }
+            }
+            while (Interlocked.CompareExchange(ref destination, candidate, current) != current);
         }
 
         private void Capture_RecordingStopped(object sender, StoppedEventArgs e)
@@ -458,6 +499,7 @@ namespace DS4Windows
                 previousOutputLeft = frame[tailOffset];
                 previousOutputRight = frame[tailOffset + 1];
 
+                RecordFrameDispatch();
                 SendFrame();
                 Interlocked.Increment(ref framesSent);
                 LogStreamDiagnosticsIfVerbose();
@@ -481,10 +523,33 @@ namespace DS4Windows
                 {
                     // Never emit catch-up bursts. Missing one audio slot is
                     // preferable to overflowing the controller receive queue.
+                    UpdateMaximum(ref streamScheduleLateIntervalMaximumTicks,
+                        (long)Math.Abs(remainingTicks));
                     Interlocked.Increment(ref skippedScheduleSlots);
                     nextFrame = Stopwatch.GetTimestamp() + frameTicks;
                 }
             }
+        }
+
+        private void RecordFrameDispatch()
+        {
+            long now = Stopwatch.GetTimestamp();
+            long previous = Interlocked.Exchange(ref previousFrameDispatchTicks, now);
+            if (previous == 0)
+            {
+                return;
+            }
+
+            long gap = now - previous;
+            if (gap > Stopwatch.Frequency * 12 / 1000)
+            {
+                Interlocked.Increment(ref frameDispatchGapsOverTwelveMilliseconds);
+            }
+
+            UpdateMaximum(ref frameDispatchMaximumGapTicks, gap);
+            UpdateMaximum(ref frameDispatchIntervalMaximumGapTicks, gap);
+            UpdateMinimum(ref frameDispatchMinimumGapTicks, gap);
+            UpdateMinimum(ref frameDispatchIntervalMinimumGapTicks, gap);
         }
 
         private void FadeOutCaptureUnderrun()
@@ -585,8 +650,53 @@ namespace DS4Windows
                 capturedFrames * (double)Stopwatch.Frequency / elapsedTicks : 0.0;
             double captureMaximumCallbackGapMilliseconds =
                 Interlocked.Read(ref captureMaximumCallbackGapTicks) * 1000.0 / Stopwatch.Frequency;
+            double captureIntervalMaximumCallbackGapMilliseconds =
+                Interlocked.Exchange(ref captureIntervalMaximumCallbackGapTicks, 0) *
+                1000.0 / Stopwatch.Frequency;
+            double frameDispatchIntervalMaximumGapMilliseconds =
+                Interlocked.Exchange(ref frameDispatchIntervalMaximumGapTicks, 0) *
+                1000.0 / Stopwatch.Frequency;
+            long frameDispatchIntervalMinimumGapTicksValue =
+                Interlocked.Exchange(ref frameDispatchIntervalMinimumGapTicks, 0);
+            double frameDispatchIntervalMinimumGapMilliseconds =
+                frameDispatchIntervalMinimumGapTicksValue == 0 ? 0.0 :
+                frameDispatchIntervalMinimumGapTicksValue * 1000.0 / Stopwatch.Frequency;
+            double frameDispatchMaximumGapMilliseconds =
+                Interlocked.Read(ref frameDispatchMaximumGapTicks) * 1000.0 / Stopwatch.Frequency;
+            double frameDispatchMinimumGapMilliseconds =
+                Interlocked.Read(ref frameDispatchMinimumGapTicks) * 1000.0 / Stopwatch.Frequency;
+            double streamScheduleLateIntervalMaximumMilliseconds =
+                Interlocked.Exchange(ref streamScheduleLateIntervalMaximumTicks, 0) *
+                1000.0 / Stopwatch.Frequency;
+            long framesSentValue = Interlocked.Read(ref framesSent);
+            long shortCaptureReadsValue = Interlocked.Read(ref shortCaptureReads);
+            long emptyCaptureReadsValue = Interlocked.Read(ref emptyCaptureReads);
+            long captureCallbacksValue = Interlocked.Read(ref captureCallbackCount);
+            long captureCallbackGapsValue = Interlocked.Read(ref captureCallbackGapsOverTwelveMilliseconds);
+            long captureDriftAdjustmentsValue = Interlocked.Read(ref captureDriftAdjustments);
+            long skippedSlotsValue = Interlocked.Read(ref skippedScheduleSlots);
+            long dispatchGapsValue = Interlocked.Read(ref frameDispatchGapsOverTwelveMilliseconds);
+            long queueDropsValue = device.BluetoothSpeakerFramesDropped;
+            long queueUnderrunsValue = device.BluetoothSpeakerFramesUnderrun;
+            long realtimeQueueDropsValue = device.BluetoothRealtimeWriterDroppedReports;
+            long combinedReportsValue = device.BluetoothCombinedOutputReportCount;
+            long combinedLateValue = device.BluetoothCombinedOutputLateReportCount;
+            long staleHapticsSilencedValue = device.BluetoothCombinedSpeakerStaleHapticsSilenced;
+            long speakerWritesValue = device.BluetoothCombinedSpeakerReportsWritten;
+            long speakerWriteFailuresValue = device.BluetoothCombinedSpeakerWriteFailures;
+            long suppressed0x31Value = device.BluetoothNormalOutputWritesSuppressed;
+            device.ConsumeBluetoothRealtimeWriterIntervalStats(out long writerIntervalCompletions,
+                out long writerIntervalSlowCompletions, out double writerIntervalMaximumCompletionMilliseconds,
+                out long writerIntervalLateSubmissions,
+                out double writerIntervalMaximumSubmissionGapMilliseconds);
 
-            AppLogger.LogToGui($"DualSense Bluetooth speaker stats: frames={Interlocked.Read(ref framesSent)} shortCaptureReads={Interlocked.Read(ref shortCaptureReads)} emptyCaptureReads={Interlocked.Read(ref emptyCaptureReads)} concealedCaptureFrames={Interlocked.Read(ref concealedCaptureFrames)} captureCallbacks={Interlocked.Read(ref captureCallbackCount)} captureInputFrames={capturedFrames} captureInputFramesPerSecond={captureInputFramesPerSecond:F1} captureCallbacksOver12Ms={Interlocked.Read(ref captureCallbackGapsOverTwelveMilliseconds)} captureMaximumCallbackGapMs={captureMaximumCallbackGapMilliseconds:F1} captureBufferedFrames={GetCaptureBufferedFrames()} capturePrimed={IsCapturePrimed()} driftAdjustments={Interlocked.Read(ref captureDriftAdjustments)} skippedSlots={Interlocked.Read(ref skippedScheduleSlots)} queued={device.PendingBluetoothSpeakerFrames} queueDrops={device.BluetoothSpeakerFramesDropped} queueUnderruns={device.BluetoothSpeakerFramesUnderrun} realtimeQueueDrops={device.BluetoothRealtimeWriterDroppedReports} writerCompletions={device.BluetoothRealtimeWriterCompletedReports} writerSlowCompletions={device.BluetoothRealtimeWriterSlowCompletionCount} writerMaximumCompletionMs={device.BluetoothRealtimeWriterMaximumCompletionMilliseconds:F1} writerLateSubmissions={device.BluetoothRealtimeWriterLateSubmissionCount} writerMaximumSubmissionGapMs={device.BluetoothRealtimeWriterMaximumSubmissionGapMilliseconds:F1} combinedReports={device.BluetoothCombinedOutputReportCount} combinedLate={device.BluetoothCombinedOutputLateReportCount} combinedMaxGapMs={device.BluetoothCombinedOutputMaxGapMilliseconds:F1} combinedCacheAverageMs={device.BluetoothCombinedSpeakerCacheAverageDelayMilliseconds:F1} combinedCacheMaximumMs={device.BluetoothCombinedSpeakerCacheMaximumDelayMilliseconds:F1} staleHapticsSilenced={device.BluetoothCombinedSpeakerStaleHapticsSilenced} speakerWrites={device.BluetoothCombinedSpeakerReportsWritten} speakerWriteFailures={device.BluetoothCombinedSpeakerWriteFailures} suppressed0x31={device.BluetoothNormalOutputWritesSuppressed} status={device.LastBluetoothHapticsWriteStatus}", false);
+            AppLogger.LogToGui($"DualSense Bluetooth speaker stats: frames={framesSentValue} deltaFrames={Delta(ref lastDiagnosticFramesSent, framesSentValue)} shortCaptureReads={shortCaptureReadsValue} deltaShortReads={Delta(ref lastDiagnosticShortCaptureReads, shortCaptureReadsValue)} emptyCaptureReads={emptyCaptureReadsValue} deltaEmptyReads={Delta(ref lastDiagnosticEmptyCaptureReads, emptyCaptureReadsValue)} concealedCaptureFrames={Interlocked.Read(ref concealedCaptureFrames)} captureCallbacks={captureCallbacksValue} deltaCaptureCallbacks={Delta(ref lastDiagnosticCaptureCallbacks, captureCallbacksValue)} captureInputFrames={capturedFrames} deltaCaptureInputFrames={Delta(ref lastDiagnosticCaptureInputFrames, capturedFrames)} captureInputFramesPerSecond={captureInputFramesPerSecond:F1} captureCallbacksOver12Ms={captureCallbackGapsValue} deltaCaptureCallbacksOver12Ms={Delta(ref lastDiagnosticCaptureCallbackGapsOverTwelveMilliseconds, captureCallbackGapsValue)} captureMaximumCallbackGapMs={captureMaximumCallbackGapMilliseconds:F1} intervalCaptureMaximumCallbackGapMs={captureIntervalMaximumCallbackGapMilliseconds:F1} captureBufferedFrames={GetCaptureBufferedFrames()} capturePrimed={IsCapturePrimed()} driftAdjustments={captureDriftAdjustmentsValue} deltaDriftAdjustments={Delta(ref lastDiagnosticCaptureDriftAdjustments, captureDriftAdjustmentsValue)} skippedSlots={skippedSlotsValue} deltaSkippedSlots={Delta(ref lastDiagnosticSkippedScheduleSlots, skippedSlotsValue)} dispatchGapsOver12Ms={dispatchGapsValue} deltaDispatchGapsOver12Ms={Delta(ref lastDiagnosticFrameDispatchGapsOverTwelveMilliseconds, dispatchGapsValue)} dispatchMinMs={frameDispatchMinimumGapMilliseconds:F1} dispatchMaxMs={frameDispatchMaximumGapMilliseconds:F1} intervalDispatchMinMs={frameDispatchIntervalMinimumGapMilliseconds:F1} intervalDispatchMaxMs={frameDispatchIntervalMaximumGapMilliseconds:F1} intervalScheduleLateMaxMs={streamScheduleLateIntervalMaximumMilliseconds:F1} queued={device.PendingBluetoothSpeakerFrames} queueDrops={queueDropsValue} deltaQueueDrops={Delta(ref lastDiagnosticQueueDrops, queueDropsValue)} queueUnderruns={queueUnderrunsValue} deltaQueueUnderruns={Delta(ref lastDiagnosticQueueUnderruns, queueUnderrunsValue)} realtimeQueueDrops={realtimeQueueDropsValue} deltaRealtimeQueueDrops={Delta(ref lastDiagnosticRealtimeQueueDrops, realtimeQueueDropsValue)} writerCompletions={device.BluetoothRealtimeWriterCompletedReports} intervalWriterCompletions={writerIntervalCompletions} writerSlowCompletions={device.BluetoothRealtimeWriterSlowCompletionCount} intervalWriterSlowCompletions={writerIntervalSlowCompletions} writerMaximumCompletionMs={device.BluetoothRealtimeWriterMaximumCompletionMilliseconds:F1} intervalWriterMaximumCompletionMs={writerIntervalMaximumCompletionMilliseconds:F1} writerLateSubmissions={device.BluetoothRealtimeWriterLateSubmissionCount} intervalWriterLateSubmissions={writerIntervalLateSubmissions} writerMaximumSubmissionGapMs={device.BluetoothRealtimeWriterMaximumSubmissionGapMilliseconds:F1} intervalWriterMaximumSubmissionGapMs={writerIntervalMaximumSubmissionGapMilliseconds:F1} combinedReports={combinedReportsValue} deltaCombinedReports={Delta(ref lastDiagnosticCombinedReports, combinedReportsValue)} combinedLate={combinedLateValue} deltaCombinedLate={Delta(ref lastDiagnosticCombinedLateReports, combinedLateValue)} combinedMaxGapMs={device.BluetoothCombinedOutputMaxGapMilliseconds:F1} combinedCacheAverageMs={device.BluetoothCombinedSpeakerCacheAverageDelayMilliseconds:F1} combinedCacheMaximumMs={device.BluetoothCombinedSpeakerCacheMaximumDelayMilliseconds:F1} staleHapticsSilenced={staleHapticsSilencedValue} deltaStaleHapticsSilenced={Delta(ref lastDiagnosticStaleHapticsSilenced, staleHapticsSilencedValue)} speakerWrites={speakerWritesValue} deltaSpeakerWrites={Delta(ref lastDiagnosticSpeakerWrites, speakerWritesValue)} speakerWriteFailures={speakerWriteFailuresValue} deltaSpeakerWriteFailures={Delta(ref lastDiagnosticSpeakerWriteFailures, speakerWriteFailuresValue)} suppressed0x31={suppressed0x31Value} deltaSuppressed0x31={Delta(ref lastDiagnosticSuppressed0x31, suppressed0x31Value)} status={device.LastBluetoothHapticsWriteStatus}", false);
+        }
+
+        private static long Delta(ref long previous, long current)
+        {
+            long old = Interlocked.Exchange(ref previous, current);
+            return old == 0 ? 0 : current - old;
         }
 
         private int GetCaptureBufferedFrames()

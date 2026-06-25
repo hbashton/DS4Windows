@@ -373,6 +373,8 @@ namespace DS4Windows.InputDevices
         private const int BluetoothCombinedStateLightbarGreenOffset = BluetoothCombinedStateOffset + 45;
         private const int BluetoothCombinedStateLightbarBlueOffset = BluetoothCombinedStateOffset + 46;
         private const int BluetoothCombinedHapticsFreshnessMilliseconds = 30;
+        private const int BluetoothMicrophonePayloadOffset = 3;
+        private const int BluetoothMicrophonePayloadLength = 71;
         private const int MaxBluetoothSpeakerFrames = 4;
         private readonly object bluetoothSpeakerFrameLock = new object();
         private readonly Queue<BluetoothSpeakerFrame> bluetoothSpeakerFrames =
@@ -405,8 +407,11 @@ namespace DS4Windows.InputDevices
         private long bluetoothCombinedOutputLateReportCount;
         private long bluetoothNormalOutputWritesSuppressed;
         private int bluetoothCombinedOutputTransportEnabled;
+        private int bluetoothMicrophoneStreamingRequested;
         private long bluetoothMicrophoneFrameCount;
         private long bluetoothMicrophoneLastFrameUtcTicks;
+
+        public event Action<DualSenseDevice, byte[]> BluetoothMicrophoneOpusFrameReceived;
 
         public long BluetoothMicrophoneFrameCount => Interlocked.Read(ref bluetoothMicrophoneFrameCount);
         public long BluetoothCombinedOutputReportsCoalesced =>
@@ -469,6 +474,27 @@ namespace DS4Windows.InputDevices
                 {
                     return bluetoothRealtimeWriter?.MaximumSubmissionGapMilliseconds ?? 0.0;
                 }
+            }
+        }
+        public void ConsumeBluetoothRealtimeWriterIntervalStats(out long completedWrites,
+            out long slowCompletions, out double maximumCompletionMilliseconds,
+            out long lateSubmissions, out double maximumSubmissionGapMilliseconds)
+        {
+            lock (bluetoothRealtimeWriterLock)
+            {
+                if (bluetoothRealtimeWriter == null)
+                {
+                    completedWrites = 0;
+                    slowCompletions = 0;
+                    maximumCompletionMilliseconds = 0.0;
+                    lateSubmissions = 0;
+                    maximumSubmissionGapMilliseconds = 0.0;
+                    return;
+                }
+
+                bluetoothRealtimeWriter.ConsumeIntervalStats(out completedWrites,
+                    out slowCompletions, out maximumCompletionMilliseconds,
+                    out lateSubmissions, out maximumSubmissionGapMilliseconds);
             }
         }
         public long BluetoothSpeakerFramesDropped => Interlocked.Read(ref bluetoothSpeakerFramesDropped);
@@ -993,7 +1019,7 @@ namespace DS4Windows.InputDevices
                                 // input packet, so it must clear any previous
                                 // normal-input CRC error streak.
                                 this.inputReportErrorCount = 0;
-                                RecordBluetoothMicrophoneFrame();
+                                RecordBluetoothMicrophoneFrame(inputReport);
                             }
                             else
                             {
@@ -1442,10 +1468,21 @@ namespace DS4Windows.InputDevices
                 (report[1] & 0x02) != 0;
         }
 
-        private void RecordBluetoothMicrophoneFrame()
+        private void RecordBluetoothMicrophoneFrame(byte[] report)
         {
             Interlocked.Increment(ref bluetoothMicrophoneFrameCount);
             Interlocked.Exchange(ref bluetoothMicrophoneLastFrameUtcTicks, DateTime.UtcNow.Ticks);
+
+            if (Volatile.Read(ref bluetoothMicrophoneStreamingRequested) == 0 ||
+                report == null ||
+                report.Length < BluetoothMicrophonePayloadOffset + BluetoothMicrophonePayloadLength)
+            {
+                return;
+            }
+
+            byte[] payload = new byte[BluetoothMicrophonePayloadLength];
+            Array.Copy(report, BluetoothMicrophonePayloadOffset, payload, 0, payload.Length);
+            BluetoothMicrophoneOpusFrameReceived?.Invoke(this, payload);
         }
 
         private void ProcessQueuedEvents()
@@ -1958,6 +1995,7 @@ namespace DS4Windows.InputDevices
 
             byte[] combined = new byte[BluetoothCombinedOutputReportLength];
             Array.Copy(report, offset, combined, 0, combined.Length);
+            ApplyBluetoothMicrophoneStreamingRequest(combined);
             RecordBluetoothCombinedOutputTiming();
 
             Interlocked.Exchange(ref bluetoothCombinedOutputTransportEnabled, 1);
@@ -2071,6 +2109,7 @@ namespace DS4Windows.InputDevices
                 combined[10] = bluetoothCombinedSpeakerPacketSequence;
             }
 
+            ApplyBluetoothMicrophoneStreamingRequest(combined);
             ApplyBluetoothSpeakerLocalLedState(combined);
             bool hapticsFresh = cachedTimestamp > 0 &&
                 Stopwatch.GetTimestamp() - cachedTimestamp <=
@@ -2227,6 +2266,17 @@ namespace DS4Windows.InputDevices
 
                 return false;
             }
+        }
+
+        private void ApplyBluetoothMicrophoneStreamingRequest(byte[] combined)
+        {
+            if (combined == null || combined.Length <= 4)
+            {
+                return;
+            }
+
+            combined[4] = Volatile.Read(ref bluetoothMicrophoneStreamingRequested) != 0 ?
+                (byte)0xFF : (byte)0xFE;
         }
 
         private void ApplyBluetoothSpeakerRouting(byte[] combined, bool headsetOutput)
@@ -2389,6 +2439,7 @@ namespace DS4Windows.InputDevices
         /// </summary>
         public bool SetBluetoothMicrophoneStreaming(bool enabled, bool waitForWrite = false)
         {
+            Volatile.Write(ref bluetoothMicrophoneStreamingRequested, enabled ? 1 : 0);
             byte[] report = BuildBluetoothMicrophoneControlReport(enabled);
             bool result = WriteBluetoothAudioOutputReport(report, 0, report.Length, 0x36, 398,
                 enabled ? "microphone enable" : "microphone disable", waitForWrite);

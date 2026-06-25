@@ -2181,6 +2181,7 @@
                                                     <RowDefinition Height="30" />
                                                     <RowDefinition Height="30" />
                                                     <RowDefinition Height="30" />
+                                                    <RowDefinition Height="30" />
                                                 </Grid.RowDefinitions>
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto" />
@@ -2192,6 +2193,8 @@
                                                               ToolTip="Mirrors the selected Windows playback endpoint to a physical DualSense. Bluetooth uses the controller audio stream; USB uses its Windows audio endpoint." />
                                                     <CheckBox Content="Headset plugged in" IsChecked="{Binding DualSenseHeadsetPluggedIn}" Margin="18,0,0,0"
                                                               ToolTip="Routes Bluetooth DualSense audio to the 3.5 mm headset jack instead of the controller speaker. Enable this only while a headset is connected." />
+                                                    <CheckBox Content="Mic in" IsChecked="{Binding DualSenseEnableMicrophonePassthrough}" Margin="18,0,0,0"
+                                                              ToolTip="Feeds the physical Bluetooth DualSense microphone into the VIIPER virtual DualSense microphone endpoint. Requires a VIIPER build with mic-in support; mic volume controls the capture gain." />
                                                 </StackPanel>
                                                 <Label Content="Audio source:" Grid.Row="1" Grid.Column="0"
                                                        ToolTip="For VIIPER game audio, select the virtual Wireless Controller endpoint created by a DualSense VIIPER profile. The first stereo pair is mirrored to the physical controller speaker." />
@@ -2208,6 +2211,9 @@
                                                                     Margin="{StaticResource spaceMargin}" />
                                                 <Label Content="Headset volume:" Grid.Row="4" Grid.Column="0" />
                                                 <xctk:IntegerUpDown Value="{Binding DualSenseHeadphoneVolume}" Minimum="0" Maximum="255" Grid.Row="4" Grid.Column="1"
+                                                                    Margin="{StaticResource spaceMargin}" />
+                                                <Label Content="Mic volume:" Grid.Row="5" Grid.Column="0" />
+                                                <xctk:IntegerUpDown Value="{Binding DualSenseMicrophoneVolume}" Minimum="0" Maximum="255" Grid.Row="5" Grid.Column="1"
                                                                     Margin="{StaticResource spaceMargin}" />
                                             </Grid>
                                         </GroupBox>

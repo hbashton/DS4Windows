@@ -94,6 +94,11 @@ namespace DS4Windows.InputDevices
         private long lateSubmissionCount;
         private long maximumSubmissionGapTicks;
         private long lastSubmissionTimestamp;
+        private long intervalCompletedWrites;
+        private long intervalSlowCompletionCount;
+        private long intervalMaximumCompletionTicks;
+        private long intervalLateSubmissionCount;
+        private long intervalMaximumSubmissionGapTicks;
 
         public long CompletedWrites => Interlocked.Read(ref completedWrites);
         public long SlowCompletionCount => Interlocked.Read(ref slowCompletionCount);
@@ -102,6 +107,18 @@ namespace DS4Windows.InputDevices
             Interlocked.Read(ref maximumCompletionTicks) * 1000.0 / Stopwatch.Frequency;
         public double MaximumSubmissionGapMilliseconds =>
             Interlocked.Read(ref maximumSubmissionGapTicks) * 1000.0 / Stopwatch.Frequency;
+        public void ConsumeIntervalStats(out long completedWrites, out long slowCompletions,
+            out double maximumCompletionMilliseconds, out long lateSubmissions,
+            out double maximumSubmissionGapMilliseconds)
+        {
+            completedWrites = Interlocked.Exchange(ref intervalCompletedWrites, 0);
+            slowCompletions = Interlocked.Exchange(ref intervalSlowCompletionCount, 0);
+            long maximumCompletion = Interlocked.Exchange(ref intervalMaximumCompletionTicks, 0);
+            lateSubmissions = Interlocked.Exchange(ref intervalLateSubmissionCount, 0);
+            long maximumSubmissionGap = Interlocked.Exchange(ref intervalMaximumSubmissionGapTicks, 0);
+            maximumCompletionMilliseconds = maximumCompletion * 1000.0 / Stopwatch.Frequency;
+            maximumSubmissionGapMilliseconds = maximumSubmissionGap * 1000.0 / Stopwatch.Frequency;
+        }
 
         private DualSenseBluetoothRealtimeWriter(IntPtr deviceHandle, int reportLength, int slotCount)
         {
@@ -292,7 +309,7 @@ namespace DS4Windows.InputDevices
                     SetEvent(slot.EventHandle);
                     slot.Pending = false;
                     slot.SubmittedTimestamp = 0;
-                    Interlocked.Increment(ref completedWrites);
+                    RecordCompletion(0);
                 }
 
                 RecordSubmissionGap(now);
@@ -332,20 +349,25 @@ namespace DS4Windows.InputDevices
 
             long gap = Math.Max(0, now - previous);
             UpdateMaximum(ref maximumSubmissionGapTicks, gap);
+            UpdateMaximum(ref intervalMaximumSubmissionGapTicks, gap);
             if (gap > Stopwatch.Frequency * LateSubmissionMilliseconds / 1000)
             {
                 Interlocked.Increment(ref lateSubmissionCount);
+                Interlocked.Increment(ref intervalLateSubmissionCount);
             }
         }
 
         private void RecordCompletion(long elapsedTicks)
         {
             Interlocked.Increment(ref completedWrites);
+            Interlocked.Increment(ref intervalCompletedWrites);
             elapsedTicks = Math.Max(0, elapsedTicks);
             UpdateMaximum(ref maximumCompletionTicks, elapsedTicks);
+            UpdateMaximum(ref intervalMaximumCompletionTicks, elapsedTicks);
             if (elapsedTicks > Stopwatch.Frequency * SlowCompletionMilliseconds / 1000)
             {
                 Interlocked.Increment(ref slowCompletionCount);
+                Interlocked.Increment(ref intervalSlowCompletionCount);
             }
         }
 

@@ -2781,8 +2781,8 @@ namespace DS4Windows
 
                 bool useViiperDualSenseMicrophone =
                     DualSenseEnableMicrophonePassthrough[ind] &&
-                    (OutContType[ind] == OutContType.ViiperDualSense ||
-                    OutContType[ind] == OutContType.ViiperDualSenseEdge);
+                    (Global.OutContType[ind] == OutContType.ViiperDualSense ||
+                    Global.OutContType[ind] == OutContType.ViiperDualSenseEdge);
 
                 if (DualSenseEnableMicrophonePassthrough[ind] && !useViiperDualSenseMicrophone)
                 {

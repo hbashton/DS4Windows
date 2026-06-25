@@ -23,6 +23,14 @@ The channels are intentionally not mixed. In particular, the advanced-haptics PC
 
 The VIIPER virtual audio endpoint is created by VIIPER's USB Audio Class function. DS4Windows does not create a fake Windows audio endpoint in user mode. Windows audio endpoints require a driver-backed device interface; creating one separately would require an installed, signed virtual audio driver.
 
+## Microphone input safety contract
+
+DualSense Bluetooth microphone packets share HID report ID `0x31` with normal controller input. Direct L2CAP references see `A1 31 flags ...`; Windows HidBth strips the `A1`, so DS4Windows sees `31 flags ...`. Bit 1 in the flags byte identifies a 71-byte Opus microphone payload. Mic packets must be handled as audio only and must never be parsed as buttons, sticks, touchpad, or gyro.
+
+The microphone enable bit lives in the `0x36` combined Bluetooth audio-control sub-report byte. DS4Windows toggles only bit 0 and preserves all other bits from the latest native combined report. It deliberately does not build a sparse synthetic `0x36` packet, because those packets also carry state, haptics, route, volume, and sequence fields that can affect normal input and speaker behavior.
+
+If microphone packets flood the input path and normal controller frames stop arriving, DS4Windows disables mic-in locally and continues dropping mic-tagged frames. Controller input has priority over microphone capture.
+
 ## Implementation references
 
 This is an independent implementation based on publicly documented packet behavior, not a copy of PadForge source code.
@@ -30,6 +38,7 @@ This is an independent implementation based on publicly documented packet behavi
 - [SAxense](https://apps.sdore.me/SAxense) documents the Bluetooth `0x32` haptics transport. Its source is MPL-2.0.
 - [dualsense-bt-haptics](https://github.com/awalol/dualsense-bt-haptics) documents the Bluetooth controller speaker packet grammar and Opus framing. It is MIT licensed.
 - [PadForge](https://github.com/hifihedgehog/PadForge) was used as a behavioral reference for per-controller sequencing, separate haptics and speaker lanes, and WASAPI loopback architecture. PadForge is CC BY-NC-SA 4.0, so its source code is not included here.
+- DS5Dongle and DS5_Bridge were used as behavioral references for microphone packet identification, Opus frame sizing, and the rule that host mic ownership must not stomp mute LED or unrelated audio-control bits.
 
 ## Diagnostics
 

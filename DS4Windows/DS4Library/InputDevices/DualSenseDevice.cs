@@ -380,6 +380,7 @@ namespace DS4Windows.InputDevices
         private const int BluetoothMicrophonePayloadLength = 71;
         private const int BluetoothMicrophoneFloodFrameLimit = 32;
         private const int BluetoothMicrophoneFloodMilliseconds = 250;
+        private const bool BluetoothMicrophoneInputTransportEnabled = false;
         private const byte DualSenseOutputFlag0MicrophoneVolumeEnable = 0x40;
         private const byte DualSenseOutputFlag1MicrophoneMuteLedEnable = 0x01;
         private const byte DualSenseOutputFlag1PowerSaveControlEnable = 0x02;
@@ -432,6 +433,8 @@ namespace DS4Windows.InputDevices
             Interlocked.Read(ref bluetoothMicrophoneSuppressedFrameCount);
         public bool BluetoothMicrophoneInputSuppressed =>
             Volatile.Read(ref bluetoothMicrophoneInputSuppressed) != 0;
+        public static bool BluetoothMicrophoneInputTransportAvailable =>
+            BluetoothMicrophoneInputTransportEnabled;
         public long BluetoothCombinedOutputReportsCoalesced =>
             Interlocked.Read(ref bluetoothCombinedOutputReportsCoalesced);
         public long BluetoothCombinedOutputReportCount =>
@@ -2556,6 +2559,15 @@ namespace DS4Windows.InputDevices
         /// </summary>
         public bool SetBluetoothMicrophoneStreaming(bool enabled, bool waitForWrite = false)
         {
+            if (enabled && !BluetoothMicrophoneInputTransportAvailable)
+            {
+                Volatile.Write(ref bluetoothMicrophoneStreamingRequested, 0);
+                Interlocked.Exchange(ref bluetoothMicrophoneInputSuppressed, 1);
+                LastBluetoothMicrophoneWriteStatus =
+                    "Rejected: physical Bluetooth mic capture is disabled because it can corrupt DS4Windows controller input parsing.";
+                return false;
+            }
+
             Volatile.Write(ref bluetoothMicrophoneStreamingRequested, enabled ? 1 : 0);
             if (enabled)
             {

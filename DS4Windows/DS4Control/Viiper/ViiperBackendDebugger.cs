@@ -337,6 +337,13 @@ namespace DS4Windows
 
         private void RunBluetoothMicrophoneProbe()
         {
+            if (!DualSenseDevice.BluetoothMicrophoneInputTransportAvailable)
+            {
+                Log("Integrated Bluetooth microphone probing is disabled in this build because mic-tagged 0x31 packets can corrupt the mapper input path.");
+                Log("Use extras\\dualsense-bt-mic-probe.ps1 to run raw HID microphone diagnostics outside DS4Windows.");
+                return;
+            }
+
             Log("Arming physical Bluetooth DualSense microphone streaming with standard report 0x31. This probe records packet counts only; it does not log voice data or expose an audio endpoint.");
             bool anyEnabled = false;
 

@@ -3222,9 +3222,14 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public bool DualSenseEnableMicrophonePassthrough
         {
-            get => Global.DualSenseEnableMicrophonePassthrough[device];
-            set => Global.DualSenseEnableMicrophonePassthrough[device] = value;
+            get => DualSenseMicrophonePassthroughAvailable &&
+                Global.DualSenseEnableMicrophonePassthrough[device];
+            set => Global.DualSenseEnableMicrophonePassthrough[device] =
+                value && DualSenseMicrophonePassthroughAvailable;
         }
+
+        public bool DualSenseMicrophonePassthroughAvailable =>
+            DualSenseDevice.BluetoothMicrophoneInputTransportAvailable;
 
         public List<AudioEndpointChoice> MicrophoneCaptureEndpointChoices
         {

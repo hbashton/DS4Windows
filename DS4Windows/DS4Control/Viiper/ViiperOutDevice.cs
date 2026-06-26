@@ -805,12 +805,29 @@ namespace DS4Windows
                 return;
             }
 
+            bool microphoneRequested = deviceIndex >= 0 &&
+                deviceIndex < Global.DualSenseEnableMicrophonePassthrough.Length &&
+                Global.DualSenseEnableMicrophonePassthrough[deviceIndex];
+
+            if (IsDualSenseType() &&
+                microphoneRequested &&
+                !DualSenseDevice.BluetoothMicrophoneInputTransportAvailable)
+            {
+                if (Interlocked.Exchange(ref microphoneUnavailableLogged, 1) == 0)
+                {
+                    AppLogger.LogToGui(
+                        "VIIPER DualSense mic-in is disabled in this build because physical Bluetooth mic packets can corrupt controller input parsing. Use extras\\dualsense-bt-mic-probe.ps1 for raw transport diagnostics.",
+                        true);
+                }
+
+                DetachBluetoothMicrophoneSource();
+                return;
+            }
+
             if (!IsDualSenseType() || !activeStreamSupportsMicrophone)
             {
                 if (IsDualSenseType() &&
-                    deviceIndex >= 0 &&
-                    deviceIndex < Global.DualSenseEnableMicrophonePassthrough.Length &&
-                    Global.DualSenseEnableMicrophonePassthrough[deviceIndex] &&
+                    microphoneRequested &&
                     Interlocked.Exchange(ref microphoneUnavailableLogged, 1) == 0)
                 {
                     AppLogger.LogToGui("VIIPER DualSense mic-in needs a newer VIIPER build with dualsensecombinedmicext support.", true);
@@ -820,9 +837,7 @@ namespace DS4Windows
                 return;
             }
 
-            if (deviceIndex < 0 ||
-                deviceIndex >= Global.DualSenseEnableMicrophonePassthrough.Length ||
-                !Global.DualSenseEnableMicrophonePassthrough[deviceIndex])
+            if (!microphoneRequested)
             {
                 DetachBluetoothMicrophoneSource();
                 return;

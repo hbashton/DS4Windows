@@ -27,11 +27,11 @@ The VIIPER virtual audio endpoint is created by VIIPER's USB Audio Class functio
 
 DualSense Bluetooth microphone packets share HID report ID `0x31` with normal controller input. Direct L2CAP references see `A1 31 flags ...`; Windows HidBth strips the `A1`, so DS4Windows sees `31 flags ...`. Bit 1 in the flags byte identifies a 71-byte Opus microphone payload. Mic packets must be handled as audio only and must never be parsed as buttons, sticks, touchpad, or gyro.
 
-Microphone ownership is armed through the standard DualSense Bluetooth output report `0x31`. Public references agree on the relevant fields: set mic-volume enable in flag0 (`0x40`), set mute-LED control (`0x01`) and power-save control (`0x02`) in flag1, write microphone volume in the common output payload's mic-volume byte, then clear or set power-save mic mute (`0x10`). DS4Windows uses its existing Windows HidBth `0x31` layout and CRC path so this state report matches the already working lightbar, rumble, and trigger output transport.
+Production DS4Windows currently does not arm the physical Bluetooth mic stream from the mapper loop. The first integrated attempt proved that an unverified mic packet path can corrupt normal input parsing, causing Opus bytes to be interpreted as buttons, sticks, touchpad, or desktop mouse actions. Until the Windows HidBth prefixes and enable report are proven on real hardware, the profile checkbox is disabled and runtime code rejects physical Bluetooth mic capture.
 
-When VIIPER's combined Bluetooth audio/haptics report `0x36` is active, DS4Windows mirrors the same mic-volume and power-save state into the embedded DualSense output-state block. It does not toggle unrelated top-level `0x36` bytes.
+Use `extras\dualsense-bt-mic-probe.ps1` for isolated diagnostics. It opens the controller HID path outside DS4Windows, can compare the DS5Dongle-style combined `0x36` enable bit against the earlier standard `0x31` state attempt, and logs raw report prefixes/counts without feeding packets into the mapper.
 
-If microphone packets flood the input path and normal controller frames stop arriving, DS4Windows disables mic-in locally and continues dropping mic-tagged frames. Controller input has priority over microphone capture.
+Reference behavior from DS5Dongle/DS5_Bridge indicates the mature path enables mic streaming with bit 0 of the outbound combined Bluetooth audio report's control byte, then diverts mic-tagged `0x31` input frames before normal input parsing. That isolation rule is mandatory before this feature can be safely re-enabled in DS4Windows.
 
 ## Implementation references
 
@@ -50,3 +50,11 @@ When the virtual audio interface is active, a VIIPER traffic capture should cont
 - `saxense-hid-0x32` for the generated Bluetooth haptics report.
 
 If the Windows `Wireless Controller` audio endpoint has an error state, remove stale VIIPER DualSense devices, restart VIIPER, then recreate the output. The endpoint descriptor changed after the initial experimental build, so Windows can retain an old failed device instance until the virtual device is recreated.
+
+For microphone work, run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\extras\dualsense-bt-mic-probe.ps1 -Seconds 10 -Mode Combined36
+```
+
+Use `-Mode Both` to compare combined `0x36` and standard `0x31` arming attempts, and `-RawHex` only when raw packet bytes are needed for protocol analysis.

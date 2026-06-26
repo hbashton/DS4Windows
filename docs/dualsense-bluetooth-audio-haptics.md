@@ -27,11 +27,13 @@ The VIIPER virtual audio endpoint is created by VIIPER's USB Audio Class functio
 
 DualSense Bluetooth microphone packets share HID report ID `0x31` with normal controller input. Direct L2CAP references see `A1 31 flags ...`; Windows HidBth strips the `A1`, so DS4Windows sees `31 flags ...`. Bit 1 in the flags byte identifies a 71-byte Opus microphone payload. Mic packets must be handled as audio only and must never be parsed as buttons, sticks, touchpad, or gyro.
 
-Production DS4Windows currently does not arm the physical Bluetooth mic stream from the mapper loop. The first integrated attempt proved that an unverified mic packet path can corrupt normal input parsing, causing Opus bytes to be interpreted as buttons, sticks, touchpad, or desktop mouse actions. Until the Windows HidBth prefixes and enable report are proven on real hardware, the profile checkbox is disabled and runtime code rejects physical Bluetooth mic capture.
+DS4Windows arms the physical Bluetooth mic stream through the verified combined Bluetooth audio report `0x36`, not the earlier standalone `0x31` state-report attempt. The top-level combined audio-control byte is `0xFE` without mic input and `0xFF` with mic input; bit 0 is the mic enable. A control-only `0x36` packet is sent when mic-in starts, and every later combined speaker/haptics packet keeps that byte asserted while mic-in is requested.
 
-Use `extras\dualsense-bt-mic-probe.ps1` for isolated diagnostics. It opens the controller HID path outside DS4Windows, can compare the DS5Dongle-style combined `0x36` enable bit against the earlier standard `0x31` state attempt, and logs raw report prefixes/counts without feeding packets into the mapper.
+`extras\dualsense-bt-mic-probe.ps1` is the isolated diagnostic path. It opens the controller HID path outside DS4Windows, can compare the DS5Dongle-style combined `0x36` enable bit against the earlier standard `0x31` state attempt, and logs raw report prefixes/counts without feeding packets into the mapper.
 
-Reference behavior from DS5Dongle/DS5_Bridge indicates the mature path enables mic streaming with bit 0 of the outbound combined Bluetooth audio report's control byte, then diverts mic-tagged `0x31` input frames before normal input parsing. That isolation rule is mandatory before this feature can be safely re-enabled in DS4Windows.
+Reference behavior from DS5Dongle/DS5_Bridge indicates the mature path enables mic streaming with bit 0 of the outbound combined Bluetooth audio report's control byte, then diverts mic-tagged `0x31` input frames before normal input parsing. DS4Windows follows that isolation rule: mic-tagged frames are dropped or decoded as audio and never parsed as controller buttons, sticks, touchpad, gyro, or desktop mouse actions.
+
+The stream can be sticky on controller firmware. Turning the DS4Windows checkbox off stops routing/decoding mic packets and stops asserting the enable bit, but a full controller reconnect may be required to stop the controller from sending mic-tagged frames during that Bluetooth session.
 
 ## Implementation references
 

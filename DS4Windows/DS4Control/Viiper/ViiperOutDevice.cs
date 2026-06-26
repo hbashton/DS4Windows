@@ -816,7 +816,7 @@ namespace DS4Windows
                 if (Interlocked.Exchange(ref microphoneUnavailableLogged, 1) == 0)
                 {
                     AppLogger.LogToGui(
-                        "VIIPER DualSense mic-in is disabled in this build because physical Bluetooth mic packets can corrupt controller input parsing. Use extras\\dualsense-bt-mic-probe.ps1 for raw transport diagnostics.",
+                        "VIIPER DualSense mic-in is not available in this build.",
                         true);
                 }
 

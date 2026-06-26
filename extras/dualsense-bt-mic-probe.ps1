@@ -4,6 +4,7 @@ param(
     [ValidateSet("Combined36", "Standard31", "Both", "ReadOnly")]
     [string]$Mode = "Combined36",
     [string]$LogPath = "$env:USERPROFILE\Desktop\dualsense-bt-mic-probe.log",
+    [string]$OpusPayloadPath = "$env:USERPROFILE\Desktop\dualsense-bt-mic-opus.bin",
     [switch]$RawHex
 )
 
@@ -89,8 +90,8 @@ namespace DS4WindowsDiagnostics
         {
             public long Total;
             public long Report31;
-            public long HidBthMic;
-            public long DirectPrefixMic;
+            public long Microphone;
+            public long NormalInput;
             public long Other;
             public long ReadErrors;
             public long Writes;
@@ -132,7 +133,7 @@ namespace DS4WindowsDiagnostics
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool WriteFile(SafeFileHandle handle, byte[] buffer, int bytesToWrite, out int bytesWritten, IntPtr overlapped);
 
-        public static int Run(int seconds, int deviceIndex, string mode, string logPath, bool rawHex)
+        public static int Run(int seconds, int deviceIndex, string mode, string logPath, string opusPayloadPath, bool rawHex)
         {
             if (seconds < 1)
             {
@@ -140,11 +141,16 @@ namespace DS4WindowsDiagnostics
             }
 
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(logPath)));
+            if (!string.IsNullOrWhiteSpace(opusPayloadPath))
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(opusPayloadPath)));
+            }
+
             using (StreamWriter log = new StreamWriter(logPath, true, Encoding.UTF8))
             {
                 Log(log, "============================================================");
                 Log(log, "DualSense Bluetooth microphone raw probe start");
-                Log(log, "utc=" + DateTime.UtcNow.ToString("O") + " seconds=" + seconds + " mode=" + mode + " rawHex=" + rawHex);
+                Log(log, "utc=" + DateTime.UtcNow.ToString("O") + " seconds=" + seconds + " mode=" + mode + " rawHex=" + rawHex + " opusPayloadPath=" + opusPayloadPath);
                 Log(log, "Close DS4Windows before using this probe if the controller HID path is already open.");
                 Log(log, "Note: references report mic enable can be sticky until the controller reconnects.");
 
@@ -177,7 +183,7 @@ namespace DS4WindowsDiagnostics
                 int result = 0;
                 for (int i = first; i <= last; i++)
                 {
-                    result = Math.Max(result, ProbeDevice(devices[i], i, seconds, mode, rawHex, log));
+                    result = Math.Max(result, ProbeDevice(devices[i], i, seconds, mode, opusPayloadPath, rawHex, log));
                 }
 
                 Log(log, "DualSense Bluetooth microphone raw probe end");
@@ -230,10 +236,16 @@ namespace DS4WindowsDiagnostics
                             continue;
                         }
 
+                        bool sonyPath = LooksLikeDualSensePath(path);
                         DeviceInfo info = ReadDeviceInfo(path);
-                        if (info != null &&
-                            info.VendorId == SonyVid &&
-                            (info.ProductId == DualSensePid || info.ProductId == DualSenseEdgePid))
+                        if (info == null && sonyPath)
+                        {
+                            info = new DeviceInfo();
+                            info.Path = path;
+                            TryParseSonyIdsFromBluetoothPath(path, info);
+                        }
+
+                        if (info != null && (sonyPath || IsDualSenseDevice(info)))
                         {
                             result.Add(info);
                         }
@@ -261,17 +273,20 @@ namespace DS4WindowsDiagnostics
                     return null;
                 }
 
-                HIDD_ATTRIBUTES attributes = new HIDD_ATTRIBUTES();
-                attributes.Size = Marshal.SizeOf(typeof(HIDD_ATTRIBUTES));
-                if (!HidD_GetAttributes(handle, ref attributes))
-                {
-                    return null;
-                }
-
                 DeviceInfo info = new DeviceInfo();
                 info.Path = path;
-                info.VendorId = attributes.VendorID;
-                info.ProductId = attributes.ProductID;
+
+                HIDD_ATTRIBUTES attributes = new HIDD_ATTRIBUTES();
+                attributes.Size = Marshal.SizeOf(typeof(HIDD_ATTRIBUTES));
+                if (HidD_GetAttributes(handle, ref attributes))
+                {
+                    info.VendorId = attributes.VendorID;
+                    info.ProductId = attributes.ProductID;
+                }
+                else
+                {
+                    TryParseSonyIdsFromBluetoothPath(path, info);
+                }
 
                 IntPtr preparsed;
                 if (HidD_GetPreparsedData(handle, out preparsed))
@@ -296,10 +311,50 @@ namespace DS4WindowsDiagnostics
             }
         }
 
-        private static int ProbeDevice(DeviceInfo device, int index, int seconds, string mode, bool rawHex, StreamWriter log)
+        private static bool IsDualSenseDevice(DeviceInfo info)
+        {
+            if (info.VendorId == SonyVid &&
+                (info.ProductId == DualSensePid || info.ProductId == DualSenseEdgePid))
+            {
+                return true;
+            }
+
+            return LooksLikeDualSensePath(info.Path);
+        }
+
+        private static bool LooksLikeDualSensePath(string value)
+        {
+            string path = value == null ? string.Empty : value.ToLowerInvariant();
+            return path.Contains("vid&0002054c_pid&0ce6") ||
+                path.Contains("vid&0002054c_pid&0df2") ||
+                path.Contains("vid_054c&pid_0ce6") ||
+                path.Contains("vid_054c&pid_0df2");
+        }
+
+        private static void TryParseSonyIdsFromBluetoothPath(string path, DeviceInfo info)
+        {
+            string lower = path == null ? string.Empty : path.ToLowerInvariant();
+            if (lower.Contains("vid&0002054c"))
+            {
+                info.VendorId = SonyVid;
+            }
+
+            if (lower.Contains("pid&0ce6"))
+            {
+                info.ProductId = DualSensePid;
+            }
+            else if (lower.Contains("pid&0df2"))
+            {
+                info.ProductId = DualSenseEdgePid;
+            }
+        }
+
+        private static int ProbeDevice(DeviceInfo device, int index, int seconds, string mode, string opusPayloadPath, bool rawHex, StreamWriter log)
         {
             Log(log, "---- probe device " + index + " ----");
             using (SafeFileHandle handle = OpenDevice(device.Path))
+            using (FileStream opusPayload = string.IsNullOrWhiteSpace(opusPayloadPath) ? null :
+                new FileStream(opusPayloadPath, FileMode.Create, FileAccess.Write, FileShare.Read))
             {
                 if (handle.IsInvalid)
                 {
@@ -312,7 +367,7 @@ namespace DS4WindowsDiagnostics
                 bool stop = false;
                 Thread reader = new Thread(delegate()
                 {
-                    ReadLoop(handle, inputLength, counters, rawHex, log, ref stop);
+                    ReadLoop(handle, inputLength, counters, opusPayload, rawHex, log, ref stop);
                 });
                 reader.IsBackground = true;
                 reader.Start();
@@ -353,16 +408,17 @@ namespace DS4WindowsDiagnostics
 
                 Log(log, "summary total=" + counters.Total +
                     " report31=" + counters.Report31 +
-                    " hidbthMicFlagByte1=" + counters.HidBthMic +
-                    " directMicFlagByte2=" + counters.DirectPrefixMic +
+                    " microphone=" + counters.Microphone +
+                    " normalInput=" + counters.NormalInput +
                     " other=" + counters.Other +
                     " readErrors=" + counters.ReadErrors +
                     " writes=" + counters.Writes +
                     " writeErrors=" + counters.WriteErrors +
+                    " opusPayloadBytes=" + (opusPayload == null ? 0 : opusPayload.Length) +
                     " lastByte1=0x" + counters.LastFlags1.ToString("X2") +
                     " lastByte2=0x" + counters.LastFlags2.ToString("X2"));
 
-                return counters.HidBthMic > 0 || counters.DirectPrefixMic > 0 ? 0 : 1;
+                return counters.Microphone > 0 ? 0 : 1;
             }
         }
 
@@ -378,7 +434,7 @@ namespace DS4WindowsDiagnostics
                 IntPtr.Zero, OpenExisting, FileAttributeNormal, IntPtr.Zero);
         }
 
-        private static void ReadLoop(SafeFileHandle handle, int inputLength, Counters counters, bool rawHex, StreamWriter log, ref bool stop)
+        private static void ReadLoop(SafeFileHandle handle, int inputLength, Counters counters, FileStream opusPayload, bool rawHex, StreamWriter log, ref bool stop)
         {
             byte[] buffer = new byte[inputLength];
             using (FileStream stream = new FileStream(handle, FileAccess.Read, inputLength, false))
@@ -408,22 +464,24 @@ namespace DS4WindowsDiagnostics
                     counters.Total++;
                     bool report31 = buffer[0] == 0x31;
                     bool hidBthMic = report31 && read >= 74 && (buffer[1] & 0x02) != 0;
-                    bool directPrefixMic = report31 && read >= 75 && (buffer[2] & 0x02) != 0;
                     counters.LastFlags1 = read > 1 ? buffer[1] : (byte)0;
                     counters.LastFlags2 = read > 2 ? buffer[2] : (byte)0;
                     if (report31) counters.Report31++;
-                    if (hidBthMic) counters.HidBthMic++;
-                    if (directPrefixMic) counters.DirectPrefixMic++;
+                    if (hidBthMic) counters.Microphone++;
+                    else if (report31) counters.NormalInput++;
                     if (!report31) counters.Other++;
 
+                    if (hidBthMic && read >= 74 && opusPayload != null)
+                    {
+                        opusPayload.Write(buffer, 3, 71);
+                    }
+
                     if (counters.Total <= 40 ||
-                        hidBthMic ||
-                        directPrefixMic ||
+                        (hidBthMic && (rawHex || counters.Microphone <= 40 || counters.Microphone % 100 == 0)) ||
                         counters.Total % 100 == 0)
                     {
                         string label = hidBthMic ? "MIC_HIDBTH" :
-                            (directPrefixMic ? "MIC_DIRECT_PREFIX" :
-                            (report31 ? "INPUT_31" : "OTHER"));
+                            (report31 ? "INPUT_31" : "OTHER");
                         string line = "read " + counters.Total +
                             " len=" + read +
                             " kind=" + label +
@@ -446,9 +504,15 @@ namespace DS4WindowsDiagnostics
         {
             int written;
             bool ok = WriteFile(handle, report, report.Length, out written, IntPtr.Zero);
-            if (ok && written == report.Length)
+            if (ok)
             {
                 counters.Writes++;
+                if (written > 0 && written != report.Length)
+                {
+                    Log(log, "write completed description=\"" + description +
+                        "\" bytesReported=" + written + "/" + report.Length +
+                        " note=Windows HidBth can report transport bytes rather than payload bytes.");
+                }
             }
             else
             {
@@ -583,4 +647,4 @@ try {
     Add-Type -TypeDefinition $source -Language CSharp
 }
 
-[int][DS4WindowsDiagnostics.DualSenseBtMicProbe]::Run($Seconds, $DeviceIndex, $Mode, $LogPath, [bool]$RawHex)
+[int][DS4WindowsDiagnostics.DualSenseBtMicProbe]::Run($Seconds, $DeviceIndex, $Mode, $LogPath, $OpusPayloadPath, [bool]$RawHex)

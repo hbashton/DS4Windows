@@ -2195,7 +2195,7 @@
                                                               ToolTip="Routes Bluetooth DualSense audio to the 3.5 mm headset jack instead of the controller speaker. Enable this only while a headset is connected." />
                                                     <CheckBox Content="Mic in" IsChecked="{Binding DualSenseEnableMicrophonePassthrough}"
                                                               IsEnabled="{Binding DualSenseMicrophonePassthroughAvailable}" Margin="18,0,0,0"
-                                                              ToolTip="Disabled in this build while the Bluetooth mic transport is being isolated. Use extras\dualsense-bt-mic-probe.ps1 for raw packet diagnostics." />
+                                                              ToolTip="Feeds the physical Bluetooth DualSense microphone into the VIIPER virtual DualSense microphone endpoint. Uses the verified combined Bluetooth audio control packet; reconnect the controller if the mic stream needs to be fully stopped." />
                                                 </StackPanel>
                                                 <Label Content="Audio source:" Grid.Row="1" Grid.Column="0"
                                                        ToolTip="For VIIPER game audio, select the virtual Wireless Controller endpoint created by a DualSense VIIPER profile. The first stereo pair is mirrored to the physical controller speaker." />

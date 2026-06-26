@@ -56,6 +56,7 @@ namespace DS4Windows
         private const int DualSenseMicrophonePcmFrameLength = DualSenseMicrophoneFramesPerPacket *
             DualSenseMicrophoneChannels * sizeof(short);
         private const int MaxPendingMicrophoneFrames = 8;
+        private const int MaxMicrophoneDiagnosticFrames = 40000;
         private const int MaxStreamRecoveryAttempts = 2;
         private const byte ViiperStreamFrameInputState = 0x01;
         private const byte ViiperStreamFrameMicrophonePcm = 0x02;
@@ -651,13 +652,13 @@ namespace DS4Windows
             }
 
             long count = Interlocked.Increment(ref microphonePacketDiagnosticCount);
-            if (count > 128)
+            if (count > MaxMicrophoneDiagnosticFrames)
             {
                 return;
             }
 
             AppLogger.LogToGui(
-                $"VIIPER_MIC_DIAG type={viiperType} count={count} opusLen={opusFrame?.Length ?? 0} decodedSamples={decodedSamples} pcmFrames={pcmFrames} pcmBytes={DualSenseMicrophonePcmFrameLength} opusFirst24={FormatBytes(opusFrame, 24)} pcmFirst32={FormatBytes(microphoneStereoPcm, 32)}",
+                $"VIIPER_MIC_DIAG type={viiperType} utc={DateTime.UtcNow:O} ticks={Stopwatch.GetTimestamp()} count={count} opusLen={opusFrame?.Length ?? 0} decodedSamples={decodedSamples} pcmFrames={pcmFrames} pcmBytes={DualSenseMicrophonePcmFrameLength} queued={Interlocked.Read(ref queuedMicrophoneFrameCount)} written={Interlocked.Read(ref writtenMicrophoneFrameCount)} dropped={Interlocked.Read(ref droppedMicrophoneFrameCount)} decodeFailures={Interlocked.Read(ref microphoneDecodeFailureCount)} opus={FormatBytes(opusFrame, 71)} pcmFirst64={FormatBytes(microphoneStereoPcm, 64)}",
                 false);
         }
 
@@ -970,8 +971,33 @@ namespace DS4Windows
             }
 
             Interlocked.Increment(ref queuedMicrophoneFrameCount);
+            LogMicrophoneQueueDiagnostic(source, copy);
             EnsureStateWriterAlive();
             writerSignal.Set();
+        }
+
+        private void LogMicrophoneQueueDiagnostic(DualSenseDevice source, byte[] opusFrame)
+        {
+            if (!Global.VerboseStartupLogging)
+            {
+                return;
+            }
+
+            long queued = Interlocked.Read(ref queuedMicrophoneFrameCount);
+            if (queued > MaxMicrophoneDiagnosticFrames)
+            {
+                return;
+            }
+
+            int pending;
+            lock (pendingPacketLock)
+            {
+                pending = pendingMicrophoneOpusFrames.Count;
+            }
+
+            AppLogger.LogToGui(
+                $"VIIPER_MIC_QUEUE_DIAG type={viiperType} utc={DateTime.UtcNow:O} ticks={Stopwatch.GetTimestamp()} source={source?.MacAddress} queued={queued} written={Interlocked.Read(ref writtenMicrophoneFrameCount)} dropped={Interlocked.Read(ref droppedMicrophoneFrameCount)} pending={pending} opusLen={opusFrame?.Length ?? 0} opus={FormatBytes(opusFrame, 71)}",
+                false);
         }
 
         private void LogInputPacketDiagnostic(DS4State state, byte[] packet, int device)

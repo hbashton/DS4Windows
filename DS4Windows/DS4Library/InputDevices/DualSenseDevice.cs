@@ -380,6 +380,7 @@ namespace DS4Windows.InputDevices
         private const int BluetoothMicrophonePayloadLength = 71;
         private const int BluetoothMicrophoneFloodFrameLimit = 32;
         private const int BluetoothMicrophoneFloodMilliseconds = 250;
+        private const int BluetoothMicrophoneFullDiagnosticLimit = 40000;
         private const bool BluetoothMicrophoneInputTransportEnabled = true;
         private const byte DualSenseOutputFlag0MicrophoneVolumeEnable = 0x40;
         private const byte DualSenseOutputFlag1MicrophoneMuteLedEnable = 0x01;
@@ -430,6 +431,7 @@ namespace DS4Windows.InputDevices
         private long bluetoothLastNormalInputTimestamp;
         private long bluetoothMicInputDiagnosticCount;
         private long bluetoothNormalInputDiagnosticCount;
+        private long bluetoothParsedInputDiagnosticCount;
 
         public event Action<DualSenseDevice, byte[]> BluetoothMicrophoneOpusFrameReceived;
 
@@ -1068,6 +1070,7 @@ namespace DS4Windows.InputDevices
                                 uint calcCrc32 = ~Crc32Algorithm.CalculateFasterBT78Hash(ref HamSeed, ref inputReport, ref crcoffset, ref crcpos);
                                 if (recvCrc32 != calcCrc32)
                                 {
+                                    LogBluetoothInputIntegrityDiagnostic("CRC_FAIL", inputReport, recvCrc32, calcCrc32);
                                     cState.PacketCounter = pState.PacketCounter + 1; //still increase so we know there were lost packets
                                     if (this.inputReportErrorCount >= 10)
                                     {
@@ -1173,6 +1176,7 @@ namespace DS4Windows.InputDevices
                     if (conType == ConnectionType.BT && inputReport[0] != 0x31)
                     {
                         // Received incorrect report, skip it
+                        LogBluetoothInputIntegrityDiagnostic("NON_0X31_REPORT", inputReport, 0, 0);
                         continue;
                     }
 
@@ -1366,6 +1370,8 @@ namespace DS4Windows.InputDevices
                         }
                     }
                     catch (Exception ex) { currerror = $"Touchpad: {ex.Message}"; }
+
+                    LogBluetoothParsedStateDiagnostic(inputReport, cState, reportOffset);
 
                     fixed (byte* pbInput = &inputReport[16+reportOffset], pbGyro = gyro, pbAccel = accel)
                     {
@@ -2609,6 +2615,7 @@ namespace DS4Windows.InputDevices
             }
 
             byte[] report = BuildBluetoothMicrophoneCombinedReport(enabled);
+            LogBluetoothMicrophoneControlReport(enabled, report);
             bool result = WriteBluetoothAudioOutputReport(report, 0, report.Length, 0x36,
                 BluetoothCombinedOutputReportLength,
                 enabled ? "combined microphone enable" : "combined microphone disable hint",
@@ -2627,6 +2634,7 @@ namespace DS4Windows.InputDevices
             Interlocked.Exchange(ref bluetoothLastNormalInputTimestamp, Stopwatch.GetTimestamp());
             Interlocked.Exchange(ref bluetoothMicInputDiagnosticCount, 0);
             Interlocked.Exchange(ref bluetoothNormalInputDiagnosticCount, 0);
+            Interlocked.Exchange(ref bluetoothParsedInputDiagnosticCount, 0);
         }
 
         private void LogBluetoothInputDiagnostic(byte[] report, bool microphoneFrame)
@@ -2639,16 +2647,21 @@ namespace DS4Windows.InputDevices
             long count = microphoneFrame ?
                 Interlocked.Increment(ref bluetoothMicInputDiagnosticCount) :
                 Interlocked.Increment(ref bluetoothNormalInputDiagnosticCount);
+            bool microphoneRequested = Volatile.Read(ref bluetoothMicrophoneStreamingRequested) != 0;
             bool suspiciousNormal = !microphoneFrame && report != null && report.Length == BluetoothMicrophoneReportLength &&
                 report[0] == 0x31 && (report[1] & 0x0F) != 0x01;
+            bool fullMicDiagnostic = microphoneRequested && count <= BluetoothMicrophoneFullDiagnosticLimit;
 
-            if (count > 128 && !suspiciousNormal)
+            if (!fullMicDiagnostic && count > 128 && !suspiciousNormal)
             {
                 return;
             }
 
             byte flags = report != null && report.Length > 1 ? report[1] : (byte)0;
             byte tagNibble = (byte)(flags & 0x0F);
+            byte buttonByte0 = report != null && report.Length > 9 ? report[9] : (byte)0;
+            byte buttonByte1 = report != null && report.Length > 10 ? report[10] : (byte)0;
+            byte buttonByte2 = report != null && report.Length > 11 ? report[11] : (byte)0;
             string prefix = microphoneFrame ?
                 "DualSenseMicDiag MIC_FRAME_CAPTURED_DIVERTED_FROM_HID_PARSER" :
                 suspiciousNormal ?
@@ -2656,7 +2669,62 @@ namespace DS4Windows.InputDevices
                     "DualSenseMicDiag NORMAL_FRAME";
 
             AppLogger.LogToGui(
-                $"{prefix} mac={Mac} micCount={Interlocked.Read(ref bluetoothMicInputDiagnosticCount)} normalCount={Interlocked.Read(ref bluetoothNormalInputDiagnosticCount)} len={report?.Length ?? 0} reportId=0x{(report != null && report.Length > 0 ? report[0] : 0):X2} flags=0x{flags:X2} tagNibble=0x{tagNibble:X1} requested={Volatile.Read(ref bluetoothMicrophoneStreamingRequested)} suppressed={Volatile.Read(ref bluetoothMicrophoneInputSuppressed)} first24={FormatBytes(report, 24)}",
+                $"{prefix} mac={Mac} utc={DateTime.UtcNow:O} ticks={Stopwatch.GetTimestamp()} micCount={Interlocked.Read(ref bluetoothMicInputDiagnosticCount)} normalCount={Interlocked.Read(ref bluetoothNormalInputDiagnosticCount)} len={report?.Length ?? 0} reportId=0x{(report != null && report.Length > 0 ? report[0] : 0):X2} flags=0x{flags:X2} tagNibble=0x{tagNibble:X1} byte9=0x{buttonByte0:X2} byte10=0x{buttonByte1:X2} byte11=0x{buttonByte2:X2} requested={Volatile.Read(ref bluetoothMicrophoneStreamingRequested)} suppressed={Volatile.Read(ref bluetoothMicrophoneInputSuppressed)} bytes={FormatBytes(report, fullMicDiagnostic ? 78 : 24)}",
+                false);
+        }
+
+        private void LogBluetoothParsedStateDiagnostic(byte[] report, DS4State state, int reportOffset)
+        {
+            if (!Global.VerboseStartupLogging ||
+                conType != ConnectionType.BT ||
+                Volatile.Read(ref bluetoothMicrophoneStreamingRequested) == 0)
+            {
+                return;
+            }
+
+            long count = Interlocked.Increment(ref bluetoothParsedInputDiagnosticCount);
+            if (count > BluetoothMicrophoneFullDiagnosticLimit)
+            {
+                return;
+            }
+
+            byte dpadFace = report != null && report.Length > 8 + reportOffset ?
+                report[8 + reportOffset] : (byte)0;
+            byte shoulderSystem = report != null && report.Length > 9 + reportOffset ?
+                report[9 + reportOffset] : (byte)0;
+            byte system2 = report != null && report.Length > 10 + reportOffset ?
+                report[10 + reportOffset] : (byte)0;
+            byte flags = report != null && report.Length > 1 ? report[1] : (byte)0;
+
+            AppLogger.LogToGui(
+                $"DualSenseMicDiag PARSED_NORMAL_STATE mac={Mac} utc={DateTime.UtcNow:O} ticks={Stopwatch.GetTimestamp()} count={count} reportId=0x{(report != null && report.Length > 0 ? report[0] : 0):X2} flags=0x{flags:X2} tagNibble=0x{(flags & 0x0F):X1} frame={state.FrameCounter} raw8=0x{dpadFace:X2} raw9=0x{shoulderSystem:X2} raw10=0x{system2:X2} lx={state.LX} ly={state.LY} rx={state.RX} ry={state.RY} l2={state.L2}/{state.L2Btn} r2={state.R2}/{state.R2Btn} dpad=U{state.DpadUp}D{state.DpadDown}L{state.DpadLeft}R{state.DpadRight} face=X{state.Cross}O{state.Circle}Sq{state.Square}Tr{state.Triangle} shoulders=L1{state.L1}R1{state.R1}L3{state.L3}R3{state.R3} sys=Sh{state.Share}Op{state.Options}PS{state.PS}Mute{state.Mute} touchBtn={state.TouchButton}/{state.OutputTouchButton} touch={state.Touch1}/{state.Touch2}/{state.TrackPadTouch0.IsActive}/{state.TrackPadTouch1.IsActive} t0={state.TrackPadTouch0.Id}:{state.TrackPadTouch0.X},{state.TrackPadTouch0.Y} t1={state.TrackPadTouch1.Id}:{state.TrackPadTouch1.X},{state.TrackPadTouch1.Y} battery={state.Battery}",
+                false);
+        }
+
+        private void LogBluetoothInputIntegrityDiagnostic(string reason, byte[] report, uint receivedCrc, uint calculatedCrc)
+        {
+            if (!Global.VerboseStartupLogging ||
+                conType != ConnectionType.BT ||
+                Volatile.Read(ref bluetoothMicrophoneStreamingRequested) == 0)
+            {
+                return;
+            }
+
+            byte flags = report != null && report.Length > 1 ? report[1] : (byte)0;
+            AppLogger.LogToGui(
+                $"DualSenseMicDiag INPUT_INTEGRITY reason={reason} mac={Mac} utc={DateTime.UtcNow:O} ticks={Stopwatch.GetTimestamp()} len={report?.Length ?? 0} reportId=0x{(report != null && report.Length > 0 ? report[0] : 0):X2} flags=0x{flags:X2} tagNibble=0x{(flags & 0x0F):X1} recvCrc=0x{receivedCrc:X8} calcCrc=0x{calculatedCrc:X8} errorCount={inputReportErrorCount} bytes={FormatBytes(report, 78)}",
+                true);
+        }
+
+        private void LogBluetoothMicrophoneControlReport(bool enabled, byte[] report)
+        {
+            if (!Global.VerboseStartupLogging)
+            {
+                return;
+            }
+
+            AppLogger.LogToGui(
+                $"DualSenseMicDiag CONTROL_REPORT enabled={enabled} mac={Mac} utc={DateTime.UtcNow:O} ticks={Stopwatch.GetTimestamp()} len={report?.Length ?? 0} reportId=0x{(report != null && report.Length > 0 ? report[0] : 0):X2} audioFlags=0x{(report != null && report.Length > BluetoothCombinedAudioControlFlagsOffset ? report[BluetoothCombinedAudioControlFlagsOffset] : 0):X2} flag0=0x{(report != null && report.Length > BluetoothCombinedStateFlag0Offset ? report[BluetoothCombinedStateFlag0Offset] : 0):X2} flag1=0x{(report != null && report.Length > BluetoothCombinedStateFlag1Offset ? report[BluetoothCombinedStateFlag1Offset] : 0):X2} micVol=0x{(report != null && report.Length > BluetoothCombinedStateMicrophoneVolumeOffset ? report[BluetoothCombinedStateMicrophoneVolumeOffset] : 0):X2} audioCtrl=0x{(report != null && report.Length > BluetoothCombinedStateAudioControlOffset ? report[BluetoothCombinedStateAudioControlOffset] : 0):X2} muteLed=0x{(report != null && report.Length > BluetoothCombinedStateMuteLedOffset ? report[BluetoothCombinedStateMuteLedOffset] : 0):X2} audioMute=0x{(report != null && report.Length > BluetoothCombinedStateAudioMuteOffset ? report[BluetoothCombinedStateAudioMuteOffset] : 0):X2} bytes={FormatBytes(report, report?.Length ?? 0)}",
                 false);
         }
 

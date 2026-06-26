@@ -80,7 +80,11 @@ namespace DS4Windows
         private int[] viiperMappedLayerDiagCounts = new int[MAX_DS4_CONTROLLER_COUNT];
         private int[] viiperOutputLayerDiagCounts = new int[MAX_DS4_CONTROLLER_COUNT];
         private System.Threading.Timer gameBarProfileTimer;
+        private System.Threading.Timer diagnosticAutoShutdownTimer;
         private int gameBarProfileUpdateGate = 0;
+        private int diagnosticAutoShutdownGate = 0;
+        private const bool DiagnosticAutoShutdownEnabled = true;
+        private static readonly TimeSpan DiagnosticAutoShutdownDelay = TimeSpan.FromMinutes(2);
         public OutputDevice[] outputDevices = new OutputDevice[MAX_DS4_CONTROLLER_COUNT] { null, null, null, null, null, null, null, null };
         private OneEuroFilter3D[] udpEuroPairAccel = new OneEuroFilter3D[UdpServer.NUMBER_SLOTS]
         {
@@ -2127,6 +2131,7 @@ namespace DS4Windows
 
                 StartupDiag("ControlService.Start setting running=true");
                 running = true;
+                StartDiagnosticAutoShutdownTimer();
                 StartGameBarProfileTimer();
 
                 if (_udpServer != null)
@@ -2183,6 +2188,51 @@ namespace DS4Windows
             process.PriorityClass = MainWindow.ProcessPriorityClasses[Global.ProcessPriority];
             StartupDiag($"ControlService.Start exit priority={process.PriorityClass}");
             return true;
+        }
+
+        private void StartDiagnosticAutoShutdownTimer()
+        {
+            if (!DiagnosticAutoShutdownEnabled)
+            {
+                return;
+            }
+
+            Interlocked.Exchange(ref diagnosticAutoShutdownGate, 0);
+            diagnosticAutoShutdownTimer?.Dispose();
+            diagnosticAutoShutdownTimer = new System.Threading.Timer(_ =>
+            {
+                if (Interlocked.Exchange(ref diagnosticAutoShutdownGate, 1) != 0)
+                {
+                    return;
+                }
+
+                Task.Run(() =>
+                {
+                    try
+                    {
+                        AppLogger.LogToGui(
+                            $"MIC_DIAG_AUTO_SHUTDOWN firing after {DiagnosticAutoShutdownDelay.TotalSeconds:0}s; stopping DS4Windows diagnostic build.",
+                            true);
+                        StartupDiag("MIC_DIAG_AUTO_SHUTDOWN Stop begin");
+                        Stop(showlog: true, immediateUnplug: true, disposeViGEm: true);
+                        StartupDiag("MIC_DIAG_AUTO_SHUTDOWN Stop end");
+                    }
+                    catch (Exception ex)
+                    {
+                        StartupDiag($"MIC_DIAG_AUTO_SHUTDOWN exception {ex.GetType().Name}: {ex.Message}");
+                    }
+                    finally
+                    {
+                        try { LogManager.Flush(TimeSpan.FromSeconds(2)); } catch { }
+                        Environment.Exit(0);
+                    }
+                });
+            }, null, DiagnosticAutoShutdownDelay, Timeout.InfiniteTimeSpan);
+
+            AppLogger.LogToGui(
+                $"MIC_DIAG_AUTO_SHUTDOWN armed for {DiagnosticAutoShutdownDelay.TotalSeconds:0}s. This diagnostic build will stop DS4Windows automatically.",
+                true);
+            StartupDiag($"MIC_DIAG_AUTO_SHUTDOWN armed delayMs={DiagnosticAutoShutdownDelay.TotalMilliseconds:0}");
         }
 
         private void PrepareDevUDPMotion(DS4Device device, int index)
@@ -2249,6 +2299,8 @@ namespace DS4Windows
         public bool Stop(bool showlog = true, bool immediateUnplug = false, bool disposeViGEm = true)
         {
             StartupDiag($"ControlService.Stop enter showlog={showlog} immediate={immediateUnplug} disposeViGEm={disposeViGEm} running={running}");
+            diagnosticAutoShutdownTimer?.Dispose();
+            diagnosticAutoShutdownTimer = null;
             if (running)
             {
                 if (OpenRGBServer.Instance.IsRunning)

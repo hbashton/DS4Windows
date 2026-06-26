@@ -1857,7 +1857,7 @@ namespace DS4Windows
             active = false;
             status = string.Empty;
 
-            ViiperDevicesListResponse response = SendRequest<ViiperDevicesListResponse>($"bus/{busId}/devices");
+            ViiperDevicesListResponse response = SendRequest<ViiperDevicesListResponse>($"bus/{busId}/list");
             if (response?.Devices == null)
             {
                 status = "VIIPER returned no devices.";
@@ -2366,6 +2366,7 @@ namespace DS4Windows
         private readonly string devId;
         private readonly int usbipPort;
         private readonly Action<uint, string> removeDevice;
+        private readonly object writeLock = new object();
         private int disposed;
         // Mic-capable VIIPER streams need a real packet boundary so PCM can never be parsed as controller input.
         private const int FrameHeaderLength = 8;
@@ -2396,7 +2397,15 @@ namespace DS4Windows
                 throw new ObjectDisposedException(nameof(ViiperDeviceStream));
             }
 
-            stream.Write(data, 0, data.Length);
+            lock (writeLock)
+            {
+                if (Volatile.Read(ref disposed) == 1)
+                {
+                    throw new ObjectDisposedException(nameof(ViiperDeviceStream));
+                }
+
+                stream.Write(data, 0, data.Length);
+            }
         }
 
         public void WriteFrame(byte frameType, byte[] data)
@@ -2485,15 +2494,18 @@ namespace DS4Windows
         private const int DualSenseGyroRestDeadband = 32;
         private const int DualSenseAccelRestZ = -8192;
         private const int DualSenseMotionOffset = 21;
-        private const int DualSenseMotionLength = 12;
+        private const int ViiperStreamFrameHeaderLength = 8;
         private const byte ViiperStreamMagic0 = 0x56;
         private const byte ViiperStreamMagic1 = 0x50;
         private const byte ViiperStreamMagic2 = 0x43;
         private const byte ViiperStreamMagic3 = 0x4D;
+        private const byte ViiperStreamVersion = 0x01;
+        private const byte ViiperInputStateFrameType = 0x01;
+        private const byte ViiperMicrophonePcmFrameType = 0x02;
         private const float X360RecipInputPosResolution = 1 / 127f;
         private const float X360RecipInputNegResolution = 1 / 128f;
         private const int X360OutputResolution = 32767 - (-32768);
-        private static long dualSenseMotionTransportSignatureDropCount;
+        private static long dualSenseTransportSignatureDropCount;
 
         public static string GetViiperDeviceName(ViiperVirtualDeviceType type)
         {
@@ -2620,8 +2632,7 @@ namespace DS4Windows
             WriteDualSenseTouch(packet, 11, state.TrackPadTouch0, 1920, 1080);
             WriteDualSenseTouch(packet, 16, state.TrackPadTouch1, 1920, 1080);
             WriteSonyMotion(packet, DualSenseMotionOffset, state, DualSenseGyroRestDeadband, DualSenseAccelRestZ);
-            SanitizeDualSenseMotionTransportSignature(packet);
-            return packet;
+            return SanitizeDualSenseTransportSignature(packet);
         }
 
         private static byte[] BuildSwitch2Pro(DS4State state, int device)
@@ -2796,48 +2807,67 @@ namespace DS4Windows
             WriteInt16(packet, offset + 10, ClampShort(restAccelZ));
         }
 
-        private static void SanitizeDualSenseMotionTransportSignature(byte[] packet)
+        private static byte[] SanitizeDualSenseTransportSignature(byte[] packet)
         {
-            if (!ContainsViiperStreamMagic(packet, DualSenseMotionOffset, DualSenseMotionLength))
+            if (!ContainsViiperStreamFrameHeader(packet, 0, packet.Length))
             {
-                return;
+                return packet;
             }
 
             string before = Global.VerboseStartupLogging ?
-                FormatPacketBytes(packet, DualSenseMotionOffset, DualSenseMotionLength) :
+                FormatPacketBytes(packet, 0, packet.Length) :
                 string.Empty;
-            WriteNeutralSonyMotion(packet, DualSenseMotionOffset, DualSenseAccelRestZ);
+            byte[] neutral = BuildNeutralDualSensePacket();
 
-            long count = Interlocked.Increment(ref dualSenseMotionTransportSignatureDropCount);
+            long count = Interlocked.Increment(ref dualSenseTransportSignatureDropCount);
             if (Global.VerboseStartupLogging && (count <= 128 || IsPowerOfTwo(count)))
             {
                 AppLogger.LogToGui(
-                    $"VIIPER_INPUT_CORRUPT_MOTION_DROPPED count={count} reason=transport_magic_in_dualsense_motion before={before} after={FormatPacketBytes(packet, DualSenseMotionOffset, DualSenseMotionLength)}",
+                    $"VIIPER_INPUT_CORRUPT_PACKET_DROPPED count={count} reason=transport_magic_in_dualsense_input before={before} after={FormatPacketBytes(neutral, 0, neutral.Length)}",
                     false);
             }
+
+            return neutral;
         }
 
-        private static bool ContainsViiperStreamMagic(byte[] packet, int offset, int length)
+        private static byte[] BuildNeutralDualSensePacket()
         {
-            if (packet == null || length < 4)
+            byte[] packet = new byte[DualSensePacketSize];
+            packet[15] = 0x80;
+            packet[20] = 0x80;
+            WriteNeutralSonyMotion(packet, DualSenseMotionOffset, DualSenseAccelRestZ);
+            return packet;
+        }
+
+        private static bool ContainsViiperStreamFrameHeader(byte[] packet, int offset, int length)
+        {
+            if (packet == null || length < ViiperStreamFrameHeaderLength)
             {
                 return false;
             }
 
             int start = Math.Max(0, offset);
             int end = Math.Min(packet.Length, offset + length);
-            for (int i = start; i + 3 < end; i++)
+            for (int i = start; i + ViiperStreamFrameHeaderLength <= end; i++)
             {
                 if (packet[i] == ViiperStreamMagic0 &&
                     packet[i + 1] == ViiperStreamMagic1 &&
                     packet[i + 2] == ViiperStreamMagic2 &&
-                    packet[i + 3] == ViiperStreamMagic3)
+                    packet[i + 3] == ViiperStreamMagic3 &&
+                    packet[i + 4] == ViiperStreamVersion &&
+                    IsKnownViiperStreamFrame(packet[i + 5], packet[i + 6] | (packet[i + 7] << 8)))
                 {
                     return true;
                 }
             }
 
             return false;
+        }
+
+        private static bool IsKnownViiperStreamFrame(byte frameType, int payloadLength)
+        {
+            return (frameType == ViiperInputStateFrameType && payloadLength == DualSensePacketSize) ||
+                (frameType == ViiperMicrophonePcmFrameType && payloadLength == DualSenseMicrophonePcmFrameLength);
         }
 
         private static bool IsPowerOfTwo(long value)

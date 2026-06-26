@@ -362,6 +362,7 @@ namespace DS4Windows.InputDevices
         private const int BluetoothCombinedStateFlag1Offset = BluetoothCombinedStateOffset + 1;
         private const int BluetoothCombinedStateHeadphoneVolumeOffset = BluetoothCombinedStateOffset + 4;
         private const int BluetoothCombinedStateSpeakerVolumeOffset = BluetoothCombinedStateOffset + 5;
+        private const int BluetoothCombinedStateMicrophoneVolumeOffset = BluetoothCombinedStateOffset + 6;
         private const int BluetoothCombinedStateAudioControlOffset = BluetoothCombinedStateOffset + 7;
         private const int BluetoothCombinedStateAudioControl2Offset = BluetoothCombinedStateOffset + 37;
         private const int BluetoothCombinedStateMuteLedOffset = BluetoothCombinedStateOffset + 8;
@@ -379,6 +380,11 @@ namespace DS4Windows.InputDevices
         private const int BluetoothMicrophonePayloadLength = 71;
         private const int BluetoothMicrophoneFloodFrameLimit = 32;
         private const int BluetoothMicrophoneFloodMilliseconds = 250;
+        private const byte DualSenseOutputFlag0MicrophoneVolumeEnable = 0x40;
+        private const byte DualSenseOutputFlag1MicrophoneMuteLedEnable = 0x01;
+        private const byte DualSenseOutputFlag1PowerSaveControlEnable = 0x02;
+        private const byte DualSensePowerSaveControlMicrophoneMute = 0x10;
+        private const byte DualSenseMicrophoneVolumeMax = 0x40;
         private const int MaxBluetoothSpeakerFrames = 4;
         private readonly object bluetoothSpeakerFrameLock = new object();
         private readonly Queue<BluetoothSpeakerFrame> bluetoothSpeakerFrames =
@@ -1559,6 +1565,19 @@ namespace DS4Windows.InputDevices
             Volatile.Write(ref bluetoothMicrophoneStreamingRequested, 0);
             LastBluetoothMicrophoneWriteStatus = reason;
             AppLogger.LogToGui(reason, true);
+
+            try
+            {
+                byte[] report = BuildBluetoothMicrophoneStateReport(enabled: false);
+                WriteBluetoothAudioOutputReport(report, 0, report.Length, OUTPUT_REPORT_ID_BT,
+                    BT_OUTPUT_REPORT_LENGTH, "microphone disable after suppression", waitForWrite: false);
+                LastBluetoothMicrophoneWriteStatus = LastBluetoothHapticsWriteStatus;
+            }
+            catch (Exception ex)
+            {
+                LastBluetoothMicrophoneWriteStatus =
+                    $"Microphone suppression could not send disable report: {ex.GetType().Name}: {ex.Message}";
+            }
         }
 
         private void ProcessQueuedEvents()
@@ -1690,7 +1709,7 @@ namespace DS4Windows.InputDevices
                 // Internal speaker volume
                 outputReport[6] = speakerVolume;
                 // Internal microphone volume
-                outputReport[7] = microphoneVolume;
+                outputReport[7] = GetDualSenseMicrophoneVolumeByte();
                 // 0x01 Enable internal microphone, 0x10 Disable attached headphones (must set 0x20 as well)
                 // 0x20 Enable internal speaker
                 outputReport[8] = enableSpeakerOutput ? (byte)0x20 : (byte)0x00;
@@ -1826,7 +1845,7 @@ namespace DS4Windows.InputDevices
                 // Internal speaker volume
                 outputReport[7] = speakerVolume;
                 // Internal microphone volume
-                outputReport[8] = microphoneVolume;
+                outputReport[8] = GetDualSenseMicrophoneVolumeByte();
                 // 0x01 Enable internal microphone, 0x10 Disable attached headphones (must set 0x20 as well)
                 // 0x20 Enable internal speaker
                 outputReport[9] = enableSpeakerOutput ? (byte)0x20 : (byte)0x00;
@@ -2346,7 +2365,8 @@ namespace DS4Windows.InputDevices
 
         private void ApplyBluetoothMicrophoneStreamingRequest(byte[] combined)
         {
-            if (combined == null || combined.Length <= 4)
+            if (combined == null ||
+                combined.Length <= BluetoothCombinedStateAudioMuteOffset)
             {
                 return;
             }
@@ -2354,12 +2374,23 @@ namespace DS4Windows.InputDevices
             if (Volatile.Read(ref bluetoothMicrophoneStreamingRequested) != 0 &&
                 Volatile.Read(ref bluetoothMicrophoneInputSuppressed) == 0)
             {
-                combined[4] |= 0x01;
+                combined[BluetoothCombinedStateFlag0Offset] |=
+                    DualSenseOutputFlag0MicrophoneVolumeEnable;
+                combined[BluetoothCombinedStateFlag1Offset] |=
+                    DualSenseOutputFlag1MicrophoneMuteLedEnable |
+                    DualSenseOutputFlag1PowerSaveControlEnable;
+                combined[BluetoothCombinedStateMicrophoneVolumeOffset] =
+                    GetDualSenseMicrophoneVolumeByte();
+                combined[BluetoothCombinedStateAudioMuteOffset] =
+                    (byte)(combined[BluetoothCombinedStateAudioMuteOffset] &
+                        ~DualSensePowerSaveControlMicrophoneMute);
             }
-            else
-            {
-                combined[4] &= 0xFE;
-            }
+        }
+
+        private byte GetDualSenseMicrophoneVolumeByte()
+        {
+            return (byte)Math.Min(DualSenseMicrophoneVolumeMax,
+                ((int)microphoneVolume * DualSenseMicrophoneVolumeMax + 127) / 255);
         }
 
         private void ApplyBluetoothSpeakerRouting(byte[] combined, bool headsetOutput)
@@ -2406,8 +2437,11 @@ namespace DS4Windows.InputDevices
             // sending haptics, which would otherwise change the physical lightbar
             // as soon as speaker audio starts using this transport.
             const byte muteControlMask = 0x03;
+            bool bluetoothMicrophoneActive =
+                Volatile.Read(ref bluetoothMicrophoneStreamingRequested) != 0 &&
+                Volatile.Read(ref bluetoothMicrophoneInputSuppressed) == 0;
             byte localMuteFlags = (byte)(0x01 |
-                (microphoneMuteOverride ? 0x02 : 0x00));
+                (microphoneMuteOverride || bluetoothMicrophoneActive ? 0x02 : 0x00));
             combined[BluetoothCombinedStateFlag1Offset] =
                 (byte)((combined[BluetoothCombinedStateFlag1Offset] & ~muteControlMask) |
                     localMuteFlags);
@@ -2530,17 +2564,9 @@ namespace DS4Windows.InputDevices
                 Interlocked.Exchange(ref bluetoothLastNormalInputTimestamp, Stopwatch.GetTimestamp());
             }
 
-            byte[] report = BuildBluetoothMicrophoneControlReport(enabled);
-            if (report == null)
-            {
-                LastBluetoothMicrophoneWriteStatus = enabled ?
-                    "Microphone input requested; waiting for the next native DualSense Bluetooth output report before arming." :
-                    "Microphone input disabled; no native DualSense Bluetooth output report is cached.";
-                return !enabled;
-            }
-
-            bool result = WriteBluetoothAudioOutputReport(report, 0, report.Length, 0x36, 398,
-                enabled ? "microphone enable" : "microphone disable", waitForWrite);
+            byte[] report = BuildBluetoothMicrophoneStateReport(enabled);
+            bool result = WriteBluetoothAudioOutputReport(report, 0, report.Length, OUTPUT_REPORT_ID_BT,
+                BT_OUTPUT_REPORT_LENGTH, enabled ? "microphone enable" : "microphone disable", waitForWrite);
             LastBluetoothMicrophoneWriteStatus = LastBluetoothHapticsWriteStatus;
             return result;
         }
@@ -2553,6 +2579,33 @@ namespace DS4Windows.InputDevices
             Interlocked.Exchange(ref bluetoothConsecutiveMicrophoneFrames, 0);
             Interlocked.Exchange(ref bluetoothMicrophoneInputSuppressed, 0);
             Interlocked.Exchange(ref bluetoothLastNormalInputTimestamp, Stopwatch.GetTimestamp());
+        }
+
+        private byte[] BuildBluetoothMicrophoneStateReport(bool enabled)
+        {
+            byte[] report = new byte[BT_OUTPUT_REPORT_LENGTH];
+            report[0] = OUTPUT_REPORT_ID_BT;
+            report[1] = OUTPUT_REPORT_ID_DATA;
+
+            // Windows HidBth uses DS4Windows' existing 0x31 report layout here:
+            // byte 1 is the data tag and the DualSense common output payload
+            // starts at byte 2. DS5_Bridge's direct-L2CAP path has one extra
+            // sequence/tag byte, but the flag meanings are the same.
+            report[2] = DualSenseOutputFlag0MicrophoneVolumeEnable;
+            report[3] = (byte)(DualSenseOutputFlag1MicrophoneMuteLedEnable |
+                DualSenseOutputFlag1PowerSaveControlEnable);
+            report[8] = enabled ? GetDualSenseMicrophoneVolumeByte() : (byte)0x00;
+            report[10] = 0x00;
+            report[11] = enabled ? (byte)0x00 : DualSensePowerSaveControlMicrophoneMute;
+
+            uint calcCrc32 = ~Crc32Algorithm.Compute(outputBTCrc32Head);
+            calcCrc32 = ~Crc32Algorithm.CalculateBasicHash(ref calcCrc32, ref report,
+                0, BT_OUTPUT_REPORT_LENGTH - 4);
+            report[74] = (byte)calcCrc32;
+            report[75] = (byte)(calcCrc32 >> 8);
+            report[76] = (byte)(calcCrc32 >> 16);
+            report[77] = (byte)(calcCrc32 >> 24);
+            return report;
         }
 
         private bool WriteBluetoothAudioOutputReport(byte[] report, int offset, int length,
@@ -2709,45 +2762,6 @@ namespace DS4Windows.InputDevices
             report[reportSize - 3] = (byte)(crc >> 8);
             report[reportSize - 2] = (byte)(crc >> 16);
             report[reportSize - 1] = (byte)(crc >> 24);
-            return report;
-        }
-
-        private byte[] BuildBluetoothMicrophoneControlReport(bool enabled)
-        {
-            byte[] report;
-            lock (bluetoothCombinedSpeakerReportLock)
-            {
-                if (latestBluetoothCombinedSpeakerReport == null)
-                {
-                    return null;
-                }
-
-                report = new byte[BluetoothCombinedOutputReportLength];
-                Array.Copy(latestBluetoothCombinedSpeakerReport, report, report.Length);
-                report[1] = (byte)((bluetoothCombinedSpeakerReportSequence & 0x0F) << 4);
-                report[10] = bluetoothCombinedSpeakerPacketSequence;
-            }
-
-            // This report only changes microphone ownership. Keep the native
-            // state and silent haptics lanes intact, but do not replay a stale
-            // Opus speaker frame while arming or disarming microphone capture.
-            report[BluetoothCombinedSpeakerOffset] = 0;
-            report[BluetoothCombinedSpeakerOffset + 1] = 0;
-            Array.Clear(report, BluetoothCombinedSpeakerDataOffset,
-                BluetoothCombinedSpeakerFrameLength);
-            report[BluetoothCombinedHapticsOffset] = 0x92;
-            report[BluetoothCombinedHapticsOffset + 1] = BluetoothCombinedHapticsDataLength;
-            Array.Clear(report, BluetoothCombinedHapticsDataOffset,
-                BluetoothCombinedHapticsDataLength);
-
-            ApplyBluetoothMicrophoneStreamingRequest(report);
-            ApplyBluetoothSpeakerLocalLedState(report);
-
-            uint crc = DualSenseBluetoothCrc32(report, report.Length - 4);
-            report[report.Length - 4] = (byte)crc;
-            report[report.Length - 3] = (byte)(crc >> 8);
-            report[report.Length - 2] = (byte)(crc >> 16);
-            report[report.Length - 1] = (byte)(crc >> 24);
             return report;
         }
 

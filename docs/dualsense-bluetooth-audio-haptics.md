@@ -23,11 +23,13 @@ The channels are intentionally not mixed. In particular, the advanced-haptics PC
 
 The VIIPER virtual audio endpoint is created by VIIPER's USB Audio Class function. DS4Windows does not create a fake Windows audio endpoint in user mode. Windows audio endpoints require a driver-backed device interface; creating one separately would require an installed, signed virtual audio driver.
 
-## Microphone input safety contract
+## Microphone input contract
 
 DualSense Bluetooth microphone packets share HID report ID `0x31` with normal controller input. Direct L2CAP references see `A1 31 flags ...`; Windows HidBth strips the `A1`, so DS4Windows sees `31 flags ...`. Bit 1 in the flags byte identifies a 71-byte Opus microphone payload. Mic packets must be handled as audio only and must never be parsed as buttons, sticks, touchpad, or gyro.
 
-The microphone enable bit lives in the `0x36` combined Bluetooth audio-control sub-report byte. DS4Windows toggles only bit 0 and preserves all other bits from the latest native combined report. It deliberately does not build a sparse synthetic `0x36` packet, because those packets also carry state, haptics, route, volume, and sequence fields that can affect normal input and speaker behavior.
+Microphone ownership is armed through the standard DualSense Bluetooth output report `0x31`. Public references agree on the relevant fields: set mic-volume enable in flag0 (`0x40`), set mute-LED control (`0x01`) and power-save control (`0x02`) in flag1, write microphone volume in the common output payload's mic-volume byte, then clear or set power-save mic mute (`0x10`). DS4Windows uses its existing Windows HidBth `0x31` layout and CRC path so this state report matches the already working lightbar, rumble, and trigger output transport.
+
+When VIIPER's combined Bluetooth audio/haptics report `0x36` is active, DS4Windows mirrors the same mic-volume and power-save state into the embedded DualSense output-state block. It does not toggle unrelated top-level `0x36` bytes.
 
 If microphone packets flood the input path and normal controller frames stop arriving, DS4Windows disables mic-in locally and continues dropping mic-tagged frames. Controller input has priority over microphone capture.
 

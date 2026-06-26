@@ -337,7 +337,7 @@ namespace DS4Windows
 
         private void RunBluetoothMicrophoneProbe()
         {
-            Log("Arming physical Bluetooth DualSense microphone streaming with report 0x36. This probe records packet counts only; it does not log voice data or expose an audio endpoint.");
+            Log("Arming physical Bluetooth DualSense microphone streaming with standard report 0x31. This probe records packet counts only; it does not log voice data or expose an audio endpoint.");
             bool anyEnabled = false;
 
             if (Program.rootHub == null)

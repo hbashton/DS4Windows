@@ -1060,6 +1060,18 @@ namespace DS4Windows.InputDevices
                                 readWaitEv.Reset();
                                 continue;
                             }
+                            else if (!IsBluetoothNormalInputFrame(inputReport))
+                            {
+                                // DualSense Bluetooth report 0x31 is shared by
+                                // multiple transport payloads. Only tag 0x1 is
+                                // the normal gamepad state packet; everything
+                                // else must stay out of the controller mapper.
+                                this.inputReportErrorCount = 0;
+                                LogBluetoothInputDiagnostic(inputReport, microphoneFrame: false);
+                                LogBluetoothInputIntegrityDiagnostic("NON_GAMEPAD_BT_0X31_DROPPED", inputReport, 0, 0);
+                                readWaitEv.Reset();
+                                continue;
+                            }
                             else
                             {
                                 LogBluetoothInputDiagnostic(inputReport, microphoneFrame: false);
@@ -1174,10 +1186,10 @@ namespace DS4Windows.InputDevices
                         continue;
                     }
 
-                    if (conType == ConnectionType.BT && inputReport[0] != 0x31)
+                    if (conType == ConnectionType.BT && !IsBluetoothNormalInputFrame(inputReport))
                     {
                         // Received incorrect report, skip it
-                        LogBluetoothInputIntegrityDiagnostic("NON_0X31_REPORT", inputReport, 0, 0);
+                        LogBluetoothInputIntegrityDiagnostic("NON_GAMEPAD_BT_REPORT", inputReport, 0, 0);
                         continue;
                     }
 
@@ -1515,6 +1527,13 @@ namespace DS4Windows.InputDevices
             return report != null && report.Length == BluetoothMicrophoneReportLength &&
                 report[0] == 0x31 &&
                 (report[1] & 0x0F) == 0x02;
+        }
+
+        private static bool IsBluetoothNormalInputFrame(byte[] report)
+        {
+            return report != null && report.Length == BluetoothMicrophoneReportLength &&
+                report[0] == 0x31 &&
+                (report[1] & 0x0F) == 0x01;
         }
 
         private void RecordBluetoothMicrophoneFrame(byte[] report)

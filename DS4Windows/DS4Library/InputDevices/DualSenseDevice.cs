@@ -1054,6 +1054,8 @@ namespace DS4Windows.InputDevices
                                 this.inputReportErrorCount = 0;
                                 LogBluetoothInputDiagnostic(inputReport, microphoneFrame: true);
                                 RecordBluetoothMicrophoneFrame(inputReport);
+                                readWaitEv.Reset();
+                                continue;
                             }
                             else
                             {
@@ -2647,7 +2649,7 @@ namespace DS4Windows.InputDevices
             byte flags = report != null && report.Length > 1 ? report[1] : (byte)0;
             byte tagNibble = (byte)(flags & 0x0F);
             string prefix = microphoneFrame ?
-                "DualSenseMicDiag MIC_FRAME_CAPTURED_WILL_FALL_THROUGH_TO_HID_PARSER" :
+                "DualSenseMicDiag MIC_FRAME_CAPTURED_DIVERTED_FROM_HID_PARSER" :
                 suspiciousNormal ?
                     "DualSenseMicDiag SUSPICIOUS_NORMAL_FRAME" :
                     "DualSenseMicDiag NORMAL_FRAME";

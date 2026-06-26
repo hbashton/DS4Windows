@@ -84,7 +84,7 @@ namespace DS4Windows
         private int gameBarProfileUpdateGate = 0;
         private int diagnosticAutoShutdownGate = 0;
         private const bool DiagnosticAutoShutdownEnabled = true;
-        private static readonly TimeSpan DiagnosticAutoShutdownDelay = TimeSpan.FromMinutes(2);
+        private static readonly TimeSpan DiagnosticAutoShutdownDelay = TimeSpan.FromMinutes(1);
         public OutputDevice[] outputDevices = new OutputDevice[MAX_DS4_CONTROLLER_COUNT] { null, null, null, null, null, null, null, null };
         private OneEuroFilter3D[] udpEuroPairAccel = new OneEuroFilter3D[UdpServer.NUMBER_SLOTS]
         {

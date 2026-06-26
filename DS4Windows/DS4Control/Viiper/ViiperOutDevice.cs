@@ -1159,20 +1159,20 @@ namespace DS4Windows
                     }
 
                     Interlocked.Exchange(ref lastMicrophoneRearmAttemptUtcTicks, now.Ticks);
-                    long attempt = Interlocked.Increment(ref microphoneRearmAttemptCount);
-                    bool accepted = false;
-                    string status = string.Empty;
+                    long activationAttempt = Interlocked.Increment(ref microphoneRearmAttemptCount);
+                    bool activationAccepted = false;
+                    string activationStatus = string.Empty;
                     try
                     {
-                        accepted = source.SetBluetoothMicrophoneStreaming(true);
-                        status = source.LastBluetoothMicrophoneWriteStatus;
+                        activationAccepted = source.SetBluetoothMicrophoneStreaming(true);
+                        activationStatus = source.LastBluetoothMicrophoneWriteStatus;
                     }
                     catch (Exception ex)
                     {
-                        status = $"{ex.GetType().Name}: {ex.Message}";
+                        activationStatus = $"{ex.GetType().Name}: {ex.Message}";
                     }
 
-                    if (accepted)
+                    if (activationAccepted)
                     {
                         Interlocked.Exchange(ref microphonePhysicalStreamingEnabled, 1);
                     }
@@ -1180,7 +1180,7 @@ namespace DS4Windows
                     if (Global.VerboseStartupLogging)
                     {
                         viiperMicDiagLogger.Info(
-                            $"VIIPER_MIC_ACTIVATE type={viiperType} utc={now:O} attempt={attempt} endpointActive=True accepted={accepted} status={status}");
+                            $"VIIPER_MIC_ACTIVATE type={viiperType} utc={now:O} attempt={activationAttempt} endpointActive=True accepted={activationAccepted} status={activationStatus}");
                     }
 
                     continue;

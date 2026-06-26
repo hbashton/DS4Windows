@@ -1776,6 +1776,13 @@ namespace DS4Windows
         private readonly int usbipPort;
         private readonly Action<uint, string> removeDevice;
         private int disposed;
+        // Mic-capable VIIPER streams need a real packet boundary so PCM can never be parsed as controller input.
+        private const int FrameHeaderLength = 8;
+        private const byte FrameMagic0 = (byte)'V';
+        private const byte FrameMagic1 = (byte)'P';
+        private const byte FrameMagic2 = (byte)'C';
+        private const byte FrameMagic3 = (byte)'M';
+        private const byte FrameVersion = 0x01;
 
         public ViiperDeviceStream(TcpClient tcp, uint busId, string devId, int usbipPort, Action<uint, string> removeDevice)
         {
@@ -1804,9 +1811,21 @@ namespace DS4Windows
                 throw new ArgumentNullException(nameof(data));
             }
 
-            byte[] frame = new byte[data.Length + 1];
-            frame[0] = frameType;
-            Buffer.BlockCopy(data, 0, frame, 1, data.Length);
+            if (data.Length > ushort.MaxValue)
+            {
+                throw new ArgumentOutOfRangeException(nameof(data), "VIIPER framed stream payload is too large.");
+            }
+
+            byte[] frame = new byte[data.Length + FrameHeaderLength];
+            frame[0] = FrameMagic0;
+            frame[1] = FrameMagic1;
+            frame[2] = FrameMagic2;
+            frame[3] = FrameMagic3;
+            frame[4] = FrameVersion;
+            frame[5] = frameType;
+            frame[6] = (byte)(data.Length & 0xFF);
+            frame[7] = (byte)((data.Length >> 8) & 0xFF);
+            Buffer.BlockCopy(data, 0, frame, FrameHeaderLength, data.Length);
             Write(frame);
         }
 

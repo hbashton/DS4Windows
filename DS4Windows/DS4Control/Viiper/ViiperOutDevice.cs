@@ -108,6 +108,7 @@ namespace DS4Windows
         private volatile bool microphoneRearmStopRequested;
         private int microphoneEndpointActive;
         private int microphonePhysicalStreamingEnabled;
+        private int microphoneVerboseGateOverrideLogged;
         private long lastMicrophoneOpusFrameUtcTicks;
         private long lastMicrophoneRearmAttemptUtcTicks;
         private DateTime lastMicrophoneRearmLogUtc = DateTime.MinValue;
@@ -157,6 +158,7 @@ namespace DS4Windows
             Interlocked.Exchange(ref microphoneRearmAttemptCount, 0);
             Interlocked.Exchange(ref microphoneEndpointActive, 0);
             Interlocked.Exchange(ref microphonePhysicalStreamingEnabled, 0);
+            Interlocked.Exchange(ref microphoneVerboseGateOverrideLogged, 0);
             Volatile.Write(ref edgePhysicalMismatchLogged, 0);
             Volatile.Write(ref microphoneUnavailableLogged, 0);
             lock (physicalDualSenseIdentityLock)
@@ -995,6 +997,7 @@ namespace DS4Windows
             Interlocked.Exchange(ref microphoneRearmAttemptCount, 0);
             Interlocked.Exchange(ref microphoneEndpointActive, 0);
             Interlocked.Exchange(ref microphonePhysicalStreamingEnabled, 0);
+            Interlocked.Exchange(ref microphoneVerboseGateOverrideLogged, 0);
             StopMicrophoneRearmThread();
 
             if (oldSource != null)
@@ -1027,7 +1030,8 @@ namespace DS4Windows
             {
                 return;
             }
-            if (Volatile.Read(ref microphoneEndpointActive) == 0)
+            if (Volatile.Read(ref microphoneEndpointActive) == 0 &&
+                !IsVerboseMicrophoneGateOverrideEnabled())
             {
                 return;
             }
@@ -1112,7 +1116,20 @@ namespace DS4Windows
 
                 DateTime now = DateTime.UtcNow;
                 bool endpointStateKnown = TryGetVirtualMicrophoneInterfaceActive(out bool endpointActive, out string endpointStatus);
-                if (!endpointStateKnown || !endpointActive)
+                bool verboseGateOverride = IsVerboseMicrophoneGateOverrideEnabled();
+                bool endpointGateOpen = endpointStateKnown && endpointActive;
+                if (verboseGateOverride && !endpointGateOpen &&
+                    Interlocked.Exchange(ref microphoneVerboseGateOverrideLogged, 1) == 0)
+                {
+                    viiperMicDiagLogger.Info(
+                        $"VIIPER_MIC_VERBOSE_GATE_OVERRIDE type={viiperType} utc={now:O} actualActive={endpointActive} actualKnown={endpointStateKnown} status={endpointStatus} note=temporary_testing_override_remove_with_verbose_mic_logging");
+                }
+                else if (!verboseGateOverride)
+                {
+                    Interlocked.Exchange(ref microphoneVerboseGateOverrideLogged, 0);
+                }
+
+                if (!endpointGateOpen && !verboseGateOverride)
                 {
                     bool wasEndpointActive = Interlocked.Exchange(ref microphoneEndpointActive, 0) == 1;
                     bool wasStreaming = Interlocked.Exchange(ref microphonePhysicalStreamingEnabled, 0) == 1;
@@ -1144,7 +1161,7 @@ namespace DS4Windows
                     Global.VerboseStartupLogging)
                 {
                     viiperMicDiagLogger.Info(
-                        $"VIIPER_MIC_ENDPOINT type={viiperType} utc={now:O} active=True known=True physicalStreaming={Volatile.Read(ref microphonePhysicalStreamingEnabled) == 1} status={endpointStatus}");
+                        $"VIIPER_MIC_ENDPOINT type={viiperType} utc={now:O} active={endpointGateOpen} known={endpointStateKnown} verboseGateOverride={verboseGateOverride} physicalStreaming={Volatile.Read(ref microphonePhysicalStreamingEnabled) == 1} status={endpointStatus}");
                 }
 
                 if (Volatile.Read(ref microphonePhysicalStreamingEnabled) == 0)
@@ -1180,7 +1197,7 @@ namespace DS4Windows
                     if (Global.VerboseStartupLogging)
                     {
                         viiperMicDiagLogger.Info(
-                            $"VIIPER_MIC_ACTIVATE type={viiperType} utc={now:O} attempt={activationAttempt} endpointActive=True accepted={activationAccepted} status={activationStatus}");
+                            $"VIIPER_MIC_ACTIVATE type={viiperType} utc={now:O} attempt={activationAttempt} endpointActive={endpointGateOpen} verboseGateOverride={verboseGateOverride} accepted={activationAccepted} status={activationStatus}");
                     }
 
                     continue;
@@ -1252,6 +1269,11 @@ namespace DS4Windows
             }
         }
 
+        private static bool IsVerboseMicrophoneGateOverrideEnabled()
+        {
+            return Global.VerboseStartupLogging;
+        }
+
         private void LogMicrophoneHealthIfNeeded(DateTime now, DateTime lastFrameUtc)
         {
             if (!Global.VerboseStartupLogging ||
@@ -1273,7 +1295,7 @@ namespace DS4Windows
             double nextRearmEligibleMs = lastAttemptUtc == DateTime.MinValue ?
                 0.0 : Math.Max(0.0, (MicrophoneRearmAttemptInterval - (now - lastAttemptUtc)).TotalMilliseconds);
             viiperMicDiagLogger.Info(
-                $"VIIPER_MIC_HEALTH type={viiperType} utc={now:O} endpointActive={Volatile.Read(ref microphoneEndpointActive) == 1} physicalStreaming={Volatile.Read(ref microphonePhysicalStreamingEnabled) == 1} lastFrameAgeMs={lastFrameAgeMs:F0} queued={Interlocked.Read(ref queuedMicrophoneFrameCount)} written={Interlocked.Read(ref writtenMicrophoneFrameCount)} dropped={Interlocked.Read(ref droppedMicrophoneFrameCount)} pending={GetPendingMicrophoneFrameCount()} rearmAttempts={Interlocked.Read(ref microphoneRearmAttemptCount)} nextRearmEligibleMs={nextRearmEligibleMs:F0}");
+                $"VIIPER_MIC_HEALTH type={viiperType} utc={now:O} endpointActive={Volatile.Read(ref microphoneEndpointActive) == 1} verboseGateOverride={IsVerboseMicrophoneGateOverrideEnabled()} physicalStreaming={Volatile.Read(ref microphonePhysicalStreamingEnabled) == 1} lastFrameAgeMs={lastFrameAgeMs:F0} queued={Interlocked.Read(ref queuedMicrophoneFrameCount)} written={Interlocked.Read(ref writtenMicrophoneFrameCount)} dropped={Interlocked.Read(ref droppedMicrophoneFrameCount)} pending={GetPendingMicrophoneFrameCount()} rearmAttempts={Interlocked.Read(ref microphoneRearmAttemptCount)} nextRearmEligibleMs={nextRearmEligibleMs:F0}");
         }
 
         private void LogMicrophoneQueueDiagnostic(DualSenseDevice source, byte[] opusFrame)

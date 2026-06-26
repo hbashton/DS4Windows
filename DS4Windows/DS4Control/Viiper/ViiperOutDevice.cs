@@ -2490,6 +2490,7 @@ namespace DS4Windows
         private const int DS4PacketSize = 31;
         private const int DualSensePacketSize = 33;
         private const int Switch2PacketSize = 24;
+        private const int DualSenseMicrophonePcmPayloadLength = 480 * 2 * 2;
         private const int DualSenseFeedbackPacketSize = 76;
         private const int DualSenseGyroRestDeadband = 32;
         private const int DualSenseAccelRestZ = -8192;
@@ -2867,7 +2868,7 @@ namespace DS4Windows
         private static bool IsKnownViiperStreamFrame(byte frameType, int payloadLength)
         {
             return (frameType == ViiperInputStateFrameType && payloadLength == DualSensePacketSize) ||
-                (frameType == ViiperMicrophonePcmFrameType && payloadLength == DualSenseMicrophonePcmFrameLength);
+                (frameType == ViiperMicrophonePcmFrameType && payloadLength == DualSenseMicrophonePcmPayloadLength);
         }
 
         private static bool IsPowerOfTwo(long value)

@@ -74,7 +74,11 @@ namespace DS4Windows
         bool[] held = new bool[MAX_DS4_CONTROLLER_COUNT];
         int[] oldmouse = new int[MAX_DS4_CONTROLLER_COUNT] { -1, -1, -1, -1, -1, -1, -1, -1 };
         private int[] startupReportDiagCounts = new int[MAX_DS4_CONTROLLER_COUNT];
-        private int[] viiperInputLayerDiagCounts = new int[MAX_DS4_CONTROLLER_COUNT];
+        private int[] viiperRawLayerDiagCounts = new int[MAX_DS4_CONTROLLER_COUNT];
+        private int[] viiperDebouncedLayerDiagCounts = new int[MAX_DS4_CONTROLLER_COUNT];
+        private int[] viiperCurvedLayerDiagCounts = new int[MAX_DS4_CONTROLLER_COUNT];
+        private int[] viiperMappedLayerDiagCounts = new int[MAX_DS4_CONTROLLER_COUNT];
+        private int[] viiperOutputLayerDiagCounts = new int[MAX_DS4_CONTROLLER_COUNT];
         private System.Threading.Timer gameBarProfileTimer;
         private int gameBarProfileUpdateGate = 0;
         public OutputDevice[] outputDevices = new OutputDevice[MAX_DS4_CONTROLLER_COUNT] { null, null, null, null, null, null, null, null };
@@ -4174,13 +4178,13 @@ namespace DS4Windows
                 ind >= MAX_DS4_CONTROLLER_COUNT ||
                 state == null ||
                 !ViiperOutDevice.IsViiperType(activeOutDevType[ind]) ||
-                !IsInputStateNonNeutralForDiag(state))
+                !IsInputStateSignificantForDiag(state, stage))
             {
                 return;
             }
 
-            int count = Interlocked.Increment(ref viiperInputLayerDiagCounts[ind]);
-            if (count > 800)
+            int count = IncrementViiperLayerDiagCount(ind, stage);
+            if (count > 250)
             {
                 return;
             }
@@ -4190,12 +4194,44 @@ namespace DS4Windows
                 false);
         }
 
-        private static bool IsInputStateNonNeutralForDiag(DS4State state)
+        private int IncrementViiperLayerDiagCount(int ind, string stage)
         {
-            return state.LX != 128 || state.LY != 128 ||
-                state.RX != 128 || state.RY != 128 ||
-                state.L2 != 0 || state.R2 != 0 ||
-                state.L2Btn || state.R2Btn ||
+            switch (stage)
+            {
+                case "raw":
+                    return Interlocked.Increment(ref viiperRawLayerDiagCounts[ind]);
+                case "debounced":
+                    return Interlocked.Increment(ref viiperDebouncedLayerDiagCounts[ind]);
+                case "curved":
+                    return Interlocked.Increment(ref viiperCurvedLayerDiagCounts[ind]);
+                case "mapped":
+                    return Interlocked.Increment(ref viiperMappedLayerDiagCounts[ind]);
+                case "output":
+                    return Interlocked.Increment(ref viiperOutputLayerDiagCounts[ind]);
+                default:
+                    return 251;
+            }
+        }
+
+        private static bool IsInputStateSignificantForDiag(DS4State state, string stage)
+        {
+            if (HasInputStateButtonOrTouchForDiag(state))
+            {
+                return true;
+            }
+
+            int analogThreshold = stage == "raw" || stage == "debounced" ? 18 : 6;
+            return Math.Abs(state.LX - 128) > analogThreshold ||
+                Math.Abs(state.LY - 128) > analogThreshold ||
+                Math.Abs(state.RX - 128) > analogThreshold ||
+                Math.Abs(state.RY - 128) > analogThreshold ||
+                state.L2 > analogThreshold ||
+                state.R2 > analogThreshold;
+        }
+
+        private static bool HasInputStateButtonOrTouchForDiag(DS4State state)
+        {
+            return state.L2Btn || state.R2Btn ||
                 state.DpadUp || state.DpadDown || state.DpadLeft || state.DpadRight ||
                 state.Cross || state.Circle || state.Square || state.Triangle ||
                 state.L1 || state.R1 || state.L3 || state.R3 ||

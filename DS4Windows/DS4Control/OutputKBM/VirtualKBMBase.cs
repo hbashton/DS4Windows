@@ -21,11 +21,15 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Threading;
 
 namespace DS4Windows.DS4Control
 {
     public abstract class VirtualKBMBase
     {
+        private static int kbmOutputDiagCount;
+        private const int KBM_OUTPUT_DIAG_LIMIT = 500;
+
         protected string errorMessage = string.Empty;
         public string ErrorMessage { get => errorMessage; }
 
@@ -68,5 +72,21 @@ namespace DS4Windows.DS4Control
         public abstract string GetIdentifier();
 
         public abstract string GetFullDisplayName();
+
+        protected void LogKbmOutputDiag(string action, string detail)
+        {
+            if (!Global.VerboseStartupLogging)
+            {
+                return;
+            }
+
+            int count = Interlocked.Increment(ref kbmOutputDiagCount);
+            if (count > KBM_OUTPUT_DIAG_LIMIT)
+            {
+                return;
+            }
+
+            AppLogger.LogToGui($"KBM_OUTPUT_DIAG count={count} handler={GetIdentifier()} action={action} {detail}", false, true);
+        }
     }
 }

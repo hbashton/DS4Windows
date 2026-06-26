@@ -124,6 +124,11 @@ namespace DS4Windows.DS4Control
         {
             const int MOUSE_MIN = -32767;
             const int MOUSE_MAX = 32767;
+            if (x != 0 || y != 0)
+            {
+                LogKbmOutputDiag("MoveRelativeMouse", $"x={x} y={y}");
+            }
+
             //Console.WriteLine("RAW MOUSE {0} {1}", x, y);
             eventLock.EnterWriteLock();
 
@@ -146,6 +151,7 @@ namespace DS4Windows.DS4Control
         /// <param name="y">Y coordinate in range of [0.0, 1.0]. 0.0 for top. 1.0 for bottom</param>
         public override void MoveAbsoluteMouse(double x, double y)
         {
+            LogKbmOutputDiag("MoveAbsoluteMouse", $"x={x:0.0000} y={y:0.0000}");
             eventLock.EnterWriteLock();
 
             absoluteMouseReport.MouseX = (ushort)(x * ABSOLUTE_MOUSE_COOR_MAX);
@@ -157,6 +163,7 @@ namespace DS4Windows.DS4Control
 
         public override void PerformKeyPress(uint key)
         {
+            LogKbmOutputDiag("KeyPress", $"key=0x{key:X}");
             //Console.WriteLine("PerformKeyPress {0}", key);
             eventLock.EnterWriteLock();
 
@@ -196,6 +203,7 @@ namespace DS4Windows.DS4Control
         /// <param name="key"></param>
         public override void PerformKeyPressAlt(uint key)
         {
+            LogKbmOutputDiag("KeyPressAlt", $"key=0x{key:X}");
             //Console.WriteLine("PerformKeyPressAlt {0}", key);
             eventLock.EnterWriteLock();
 
@@ -231,6 +239,7 @@ namespace DS4Windows.DS4Control
 
         public override void PerformKeyRelease(uint key)
         {
+            LogKbmOutputDiag("KeyRelease", $"key=0x{key:X}");
             //Console.WriteLine("PerformKeyRelease {0}", key);
             eventLock.EnterWriteLock();
 
@@ -270,6 +279,7 @@ namespace DS4Windows.DS4Control
         /// <param name="key"></param>
         public override void PerformKeyReleaseAlt(uint key)
         {
+            LogKbmOutputDiag("KeyReleaseAlt", $"key=0x{key:X}");
             //Console.WriteLine("PerformKeyReleaseAlt {0}", key);
             eventLock.EnterWriteLock();
 
@@ -305,6 +315,7 @@ namespace DS4Windows.DS4Control
 
         public override void PerformMouseButtonEvent(uint mouseButton)
         {
+            LogKbmOutputDiag("MouseButtonEvent", $"button=0x{mouseButton:X}");
             MouseButton temp = (MouseButton)mouseButton;
             eventLock.EnterWriteLock();
 
@@ -331,6 +342,7 @@ namespace DS4Windows.DS4Control
         /// <param name="type"></param>
         public override void PerformMouseButtonEventAlt(uint mouseButton, int type)
         {
+            LogKbmOutputDiag("MouseButtonEventAlt", $"button=0x{mouseButton:X} type={type}");
             MouseButton temp = (MouseButton)mouseButton;
             eventLock.EnterWriteLock();
 
@@ -357,6 +369,11 @@ namespace DS4Windows.DS4Control
         /// <param name="horizontal"></param>
         public override void PerformMouseWheelEvent(int vertical, int horizontal)
         {
+            if (vertical != 0 || horizontal != 0)
+            {
+                LogKbmOutputDiag("MouseWheel", $"vertical={vertical} horizontal={horizontal}");
+            }
+
             eventLock.EnterWriteLock();
             //mouseReport.ResetMousePos();
             mouseReport.WheelPosition = (byte)vertical;
@@ -383,6 +400,7 @@ namespace DS4Windows.DS4Control
 
         public override void PerformMouseButtonPress(uint mouseButton)
         {
+            LogKbmOutputDiag("MouseButtonPress", $"button=0x{mouseButton:X}");
             eventLock.EnterWriteLock();
 
             MouseButton tempButton = (MouseButton)mouseButton;
@@ -398,6 +416,7 @@ namespace DS4Windows.DS4Control
 
         public override void PerformMouseButtonRelease(uint mouseButton)
         {
+            LogKbmOutputDiag("MouseButtonRelease", $"button=0x{mouseButton:X}");
             eventLock.EnterWriteLock();
 
             MouseButton tempButton = (MouseButton)mouseButton;

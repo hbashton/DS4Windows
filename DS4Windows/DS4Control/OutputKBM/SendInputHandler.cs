@@ -48,6 +48,7 @@ namespace DS4Windows.DS4Control
         {
             if (x != 0 || y != 0)
             {
+                LogKbmOutputDiag("MoveRelativeMouse", $"x={x} y={y}");
                 INPUT[] tempInput = new INPUT[1];
                 ref INPUT temp = ref tempInput[0];
                 temp.Type = INPUT_MOUSE;
@@ -68,6 +69,7 @@ namespace DS4Windows.DS4Control
         /// <param name="y">Y coordinate in range of [0.0, 1.0]. 0.0 for top. 1.0 for bottom</param>
         public override void MoveAbsoluteMouse(double x, double y)
         {
+            LogKbmOutputDiag("MoveAbsoluteMouse", $"x={x:0.0000} y={y:0.0000}");
             INPUT[] tempInput = new INPUT[1];
             ref INPUT temp = ref tempInput[0];
             temp.Type = INPUT_MOUSE;
@@ -82,6 +84,7 @@ namespace DS4Windows.DS4Control
 
         public override void PerformMouseButtonEvent(uint mouseButton)
         {
+            LogKbmOutputDiag("MouseButtonEvent", $"button=0x{mouseButton:X}");
             INPUT[] tempInput = new INPUT[1];
             ref INPUT temp = ref tempInput[0];
             temp.Type = INPUT_MOUSE;
@@ -96,6 +99,11 @@ namespace DS4Windows.DS4Control
 
         public override void PerformMouseWheelEvent(int vertical, int horizontal)
         {
+            if (vertical != 0 || horizontal != 0)
+            {
+                LogKbmOutputDiag("MouseWheel", $"vertical={vertical} horizontal={horizontal}");
+            }
+
             INPUT[] tempInput = new INPUT[2];
             uint inputs = 0;
             ref INPUT temp = ref tempInput[inputs];
@@ -129,6 +137,7 @@ namespace DS4Windows.DS4Control
 
         public override void PerformMouseButtonEventAlt(uint mouseButton, int type)
         {
+            LogKbmOutputDiag("MouseButtonEventAlt", $"button=0x{mouseButton:X} type={type}");
             INPUT[] tempInput = new INPUT[1];
             ref INPUT temp = ref tempInput[0];
             temp.Type = INPUT_MOUSE;
@@ -143,6 +152,7 @@ namespace DS4Windows.DS4Control
 
         public override void PerformMouseButtonPress(uint mouseButton)
         {
+            LogKbmOutputDiag("MouseButtonPress", $"button=0x{mouseButton:X}");
             INPUT[] tempInput = new INPUT[1];
             ref INPUT temp = ref tempInput[0];
             temp.Type = INPUT_MOUSE;
@@ -157,6 +167,7 @@ namespace DS4Windows.DS4Control
 
         public override void PerformMouseButtonRelease(uint mouseButton)
         {
+            LogKbmOutputDiag("MouseButtonRelease", $"button=0x{mouseButton:X}");
             INPUT[] tempInput = new INPUT[1];
             ref INPUT temp = ref tempInput[0];
             temp.Type = INPUT_MOUSE;
@@ -171,6 +182,7 @@ namespace DS4Windows.DS4Control
 
         public override void PerformKeyPress(uint key)
         {
+            LogKbmOutputDiag("KeyPress", $"key=0x{key:X}");
             INPUT[] tempInput = new INPUT[1];
             ref INPUT temp = ref tempInput[0];
             ushort scancode = scancodeFromVK(key);
@@ -194,6 +206,7 @@ namespace DS4Windows.DS4Control
         /// <param name="key">Windows VK value to convert</param>
         public override void PerformKeyPressAlt(uint key)
         {
+            LogKbmOutputDiag("KeyPressAlt", $"key=0x{key:X}");
             INPUT[] tempInput = new INPUT[1];
             ref INPUT temp = ref tempInput[0];
             ushort scancode = scancodeFromVK(key);
@@ -211,6 +224,7 @@ namespace DS4Windows.DS4Control
 
         public override void PerformKeyRelease(uint key)
         {
+            LogKbmOutputDiag("KeyRelease", $"key=0x{key:X}");
             INPUT[] tempInput = new INPUT[1];
             ref INPUT temp = ref tempInput[0];
             ushort scancode = scancodeFromVK(key);
@@ -234,6 +248,7 @@ namespace DS4Windows.DS4Control
         /// <param name="key">Windows VK value to convert</param>
         public override void PerformKeyReleaseAlt(uint key)
         {
+            LogKbmOutputDiag("KeyReleaseAlt", $"key=0x{key:X}");
             INPUT[] tempInput = new INPUT[1];
             ref INPUT temp = ref tempInput[0];
             ushort scancode = scancodeFromVK(key);

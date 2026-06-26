@@ -2780,7 +2780,7 @@ namespace DS4Windows
                 }
 
                 bool dualSenseMicrophoneRuntimeAvailable =
-                    DualSenseDevice.BluetoothMicrophoneInputTransportAvailable;
+                    InputDevices.DualSenseDevice.BluetoothMicrophoneInputTransportAvailable;
                 bool useViiperDualSenseMicrophone =
                     DualSenseEnableMicrophonePassthrough[ind] &&
                     dualSenseMicrophoneRuntimeAvailable &&

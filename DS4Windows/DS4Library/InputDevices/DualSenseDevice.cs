@@ -428,6 +428,8 @@ namespace DS4Windows.InputDevices
         private long bluetoothMicrophoneLastFrameUtcTicks;
         private long bluetoothMicrophoneSuppressedFrameCount;
         private long bluetoothLastNormalInputTimestamp;
+        private long bluetoothMicInputDiagnosticCount;
+        private long bluetoothNormalInputDiagnosticCount;
 
         public event Action<DualSenseDevice, byte[]> BluetoothMicrophoneOpusFrameReceived;
 
@@ -1050,10 +1052,12 @@ namespace DS4Windows.InputDevices
                                 // input packet, so it must clear any previous
                                 // normal-input CRC error streak.
                                 this.inputReportErrorCount = 0;
+                                LogBluetoothInputDiagnostic(inputReport, microphoneFrame: true);
                                 RecordBluetoothMicrophoneFrame(inputReport);
                             }
                             else
                             {
+                                LogBluetoothInputDiagnostic(inputReport, microphoneFrame: false);
                                 uint recvCrc32 = inputReport[BT_INPUT_REPORT_CRC32_POS] |
                                     (uint)(inputReport[CRC32_POS_1] << 8) |
                                     (uint)(inputReport[CRC32_POS_2] << 16) |
@@ -2618,6 +2622,66 @@ namespace DS4Windows.InputDevices
             Interlocked.Exchange(ref bluetoothConsecutiveMicrophoneFrames, 0);
             Interlocked.Exchange(ref bluetoothMicrophoneInputSuppressed, 0);
             Interlocked.Exchange(ref bluetoothLastNormalInputTimestamp, Stopwatch.GetTimestamp());
+            Interlocked.Exchange(ref bluetoothMicInputDiagnosticCount, 0);
+            Interlocked.Exchange(ref bluetoothNormalInputDiagnosticCount, 0);
+        }
+
+        private void LogBluetoothInputDiagnostic(byte[] report, bool microphoneFrame)
+        {
+            if (!Global.VerboseStartupLogging)
+            {
+                return;
+            }
+
+            long count = microphoneFrame ?
+                Interlocked.Increment(ref bluetoothMicInputDiagnosticCount) :
+                Interlocked.Increment(ref bluetoothNormalInputDiagnosticCount);
+            bool suspiciousNormal = !microphoneFrame && report != null && report.Length == BluetoothMicrophoneReportLength &&
+                report[0] == 0x31 && (report[1] & 0x0F) != 0x01;
+
+            if (count > 128 && !suspiciousNormal)
+            {
+                return;
+            }
+
+            byte flags = report != null && report.Length > 1 ? report[1] : (byte)0;
+            byte tagNibble = (byte)(flags & 0x0F);
+            string prefix = microphoneFrame ?
+                "DualSenseMicDiag MIC_FRAME_CAPTURED_WILL_FALL_THROUGH_TO_HID_PARSER" :
+                suspiciousNormal ?
+                    "DualSenseMicDiag SUSPICIOUS_NORMAL_FRAME" :
+                    "DualSenseMicDiag NORMAL_FRAME";
+
+            AppLogger.LogToGui(
+                $"{prefix} mac={Mac} micCount={Interlocked.Read(ref bluetoothMicInputDiagnosticCount)} normalCount={Interlocked.Read(ref bluetoothNormalInputDiagnosticCount)} len={report?.Length ?? 0} reportId=0x{(report != null && report.Length > 0 ? report[0] : 0):X2} flags=0x{flags:X2} tagNibble=0x{tagNibble:X1} requested={Volatile.Read(ref bluetoothMicrophoneStreamingRequested)} suppressed={Volatile.Read(ref bluetoothMicrophoneInputSuppressed)} first24={FormatBytes(report, 24)}",
+                false);
+        }
+
+        private static string FormatBytes(byte[] bytes, int count)
+        {
+            if (bytes == null)
+            {
+                return "<null>";
+            }
+
+            int length = Math.Min(bytes.Length, count);
+            if (length <= 0)
+            {
+                return string.Empty;
+            }
+
+            StringBuilder builder = new StringBuilder(length * 3);
+            for (int i = 0; i < length; i++)
+            {
+                if (i > 0)
+                {
+                    builder.Append(' ');
+                }
+
+                builder.Append(bytes[i].ToString("X2"));
+            }
+
+            return builder.ToString();
         }
 
         private byte[] BuildBluetoothMicrophoneCombinedReport(bool enabled)

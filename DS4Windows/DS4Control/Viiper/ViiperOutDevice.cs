@@ -99,6 +99,8 @@ namespace DS4Windows
         private long droppedMicrophoneFrameCount;
         private long writtenMicrophoneFrameCount;
         private long microphoneDecodeFailureCount;
+        private long inputPacketDiagnosticCount;
+        private long microphonePacketDiagnosticCount;
         private readonly byte[] lastR2TriggerFeedback = new byte[DualSenseTriggerEffectLength];
         private readonly byte[] lastL2TriggerFeedback = new byte[DualSenseTriggerEffectLength];
 
@@ -309,7 +311,9 @@ namespace DS4Windows
 
             try
             {
-                QueueStatePacket(ViiperStatePacketBuilder.Build(viiperType, state, device));
+                byte[] packet = ViiperStatePacketBuilder.Build(viiperType, state, device);
+                LogInputPacketDiagnostic(state, packet, device);
+                QueueStatePacket(packet);
             }
             catch (IOException ex)
             {
@@ -634,8 +638,27 @@ namespace DS4Windows
                 microphoneStereoPcm[offset + 3] = (byte)(sample >> 8);
             }
 
+            LogMicrophonePacketDiagnostic(opusFrame, decodedSamples, frames);
             stream.WriteFrame(ViiperStreamFrameMicrophonePcm, microphoneStereoPcm);
             Interlocked.Increment(ref writtenMicrophoneFrameCount);
+        }
+
+        private void LogMicrophonePacketDiagnostic(byte[] opusFrame, int decodedSamples, int pcmFrames)
+        {
+            if (!Global.VerboseStartupLogging)
+            {
+                return;
+            }
+
+            long count = Interlocked.Increment(ref microphonePacketDiagnosticCount);
+            if (count > 128)
+            {
+                return;
+            }
+
+            AppLogger.LogToGui(
+                $"VIIPER_MIC_DIAG type={viiperType} count={count} opusLen={opusFrame?.Length ?? 0} decodedSamples={decodedSamples} pcmFrames={pcmFrames} pcmBytes={DualSenseMicrophonePcmFrameLength} opusFirst24={FormatBytes(opusFrame, 24)} pcmFirst32={FormatBytes(microphoneStereoPcm, 32)}",
+                false);
         }
 
         private void LogWriterHealthIfNeeded()
@@ -949,6 +972,109 @@ namespace DS4Windows
             Interlocked.Increment(ref queuedMicrophoneFrameCount);
             EnsureStateWriterAlive();
             writerSignal.Set();
+        }
+
+        private void LogInputPacketDiagnostic(DS4State state, byte[] packet, int device)
+        {
+            if (!Global.VerboseStartupLogging)
+            {
+                return;
+            }
+
+            long count = Interlocked.Increment(ref inputPacketDiagnosticCount);
+            bool sonyPacket = viiperType == ViiperVirtualDeviceType.DualSense ||
+                viiperType == ViiperVirtualDeviceType.DualSenseEdge ||
+                viiperType == ViiperVirtualDeviceType.DualShock4;
+            bool nonNeutral = IsNonNeutralState(state, packet);
+            if (count > 512 && !nonNeutral)
+            {
+                return;
+            }
+
+            AppLogger.LogToGui(
+                $"VIIPER_INPUT_DIAG type={viiperType} device={device + 1} count={count} nonNeutral={nonNeutral} stateButtons={SummarizeDs4State(state)} packet={SummarizeViiperPacket(packet)} first40={FormatBytes(packet, 40)} sonyPacket={sonyPacket}",
+                false);
+        }
+
+        private static bool IsNonNeutralState(DS4State state, byte[] packet)
+        {
+            if (state == null)
+            {
+                return packet != null && packet.Length > 0;
+            }
+
+            return state.Cross || state.Circle || state.Square || state.Triangle ||
+                state.DpadUp || state.DpadDown || state.DpadLeft || state.DpadRight ||
+                state.L1 || state.R1 || state.L2Btn || state.R2Btn ||
+                state.Share || state.Options || state.PS || state.Mute ||
+                state.TouchButton || state.OutputTouchButton ||
+                state.L3 || state.R3 ||
+                state.L2 != 0 || state.R2 != 0 ||
+                Math.Abs(state.LX - 128) > 4 || Math.Abs(state.LY - 128) > 4 ||
+                Math.Abs(state.RX - 128) > 4 || Math.Abs(state.RY - 128) > 4 ||
+                state.TrackPadTouch0.IsActive ||
+                state.TrackPadTouch1.IsActive;
+        }
+
+        private static string SummarizeDs4State(DS4State state)
+        {
+            if (state == null)
+            {
+                return "<null>";
+            }
+
+            return $"lx={state.LX} ly={state.LY} rx={state.RX} ry={state.RY} l2={state.L2}/{state.L2Btn} r2={state.R2}/{state.R2Btn} dpad=U{state.DpadUp}D{state.DpadDown}L{state.DpadLeft}R{state.DpadRight} face=X{state.Cross}O{state.Circle}Sq{state.Square}Tr{state.Triangle} shoulders=L1{state.L1}R1{state.R1} sys=Sh{state.Share}Op{state.Options}PS{state.PS}Mute{state.Mute} touchBtn={state.TouchButton}/{state.OutputTouchButton} t0={state.TrackPadTouch0.IsActive}:{state.TrackPadTouch0.X},{state.TrackPadTouch0.Y} t1={state.TrackPadTouch1.IsActive}:{state.TrackPadTouch1.X},{state.TrackPadTouch1.Y}";
+        }
+
+        private string SummarizeViiperPacket(byte[] packet)
+        {
+            if (packet == null)
+            {
+                return "<null>";
+            }
+
+            if ((viiperType == ViiperVirtualDeviceType.DualSense ||
+                    viiperType == ViiperVirtualDeviceType.DualSenseEdge) &&
+                packet.Length >= 33)
+            {
+                uint buttons = BitConverter.ToUInt32(packet, 4);
+                return $"ds lx={packet[0]} ly={packet[1]} rx={packet[2]} ry={packet[3]} buttons=0x{buttons:X8} dpad=0x{packet[8]:X2} l2={packet[9]} r2={packet[10]} touch0Status=0x{packet[15]:X2} touch1Status=0x{packet[20]:X2} gyro={BitConverter.ToInt16(packet, 21)},{BitConverter.ToInt16(packet, 23)},{BitConverter.ToInt16(packet, 25)} accel={BitConverter.ToInt16(packet, 27)},{BitConverter.ToInt16(packet, 29)},{BitConverter.ToInt16(packet, 31)}";
+            }
+
+            if (viiperType == ViiperVirtualDeviceType.DualShock4 && packet.Length >= 25)
+            {
+                ushort buttons = BitConverter.ToUInt16(packet, 4);
+                return $"ds4 lx={packet[0]} ly={packet[1]} rx={packet[2]} ry={packet[3]} buttons=0x{buttons:X4} dpad=0x{packet[6]:X2} l2={packet[7]} r2={packet[8]}";
+            }
+
+            return $"len={packet.Length}";
+        }
+
+        private static string FormatBytes(byte[] bytes, int count)
+        {
+            if (bytes == null)
+            {
+                return "<null>";
+            }
+
+            int length = Math.Min(bytes.Length, count);
+            if (length <= 0)
+            {
+                return string.Empty;
+            }
+
+            StringBuilder builder = new StringBuilder(length * 3);
+            for (int i = 0; i < length; i++)
+            {
+                if (i > 0)
+                {
+                    builder.Append(' ');
+                }
+
+                builder.Append(bytes[i].ToString("X2"));
+            }
+
+            return builder.ToString();
         }
 
         private void ApplyDualSenseTriggerFeedback(DS4Device device, byte[] feedback, int feedbackLength)

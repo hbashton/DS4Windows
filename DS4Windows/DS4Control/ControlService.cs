@@ -976,10 +976,18 @@ namespace DS4Windows
         /// </summary>
         private bool EnsureHidHideSessionForDevice(DS4Device dev)
         {
-            if (!Global.hidHideInstalled || dev == null) return false;
+            if (!Global.hidHideInstalled || dev == null)
+            {
+                StartupDiag($"HidHide session skipped installed={Global.hidHideInstalled} devNull={dev == null}");
+                return false;
+            }
 
             string instanceId = Global.GetInstanceIdFromDevicePath(dev.HidDevice.DevicePath);
-            if (string.IsNullOrEmpty(instanceId)) return false;
+            if (string.IsNullOrEmpty(instanceId))
+            {
+                StartupDiag($"HidHide session skipped for {dev.DisplayName}: empty instance id path={dev.HidDevice.DevicePath}");
+                return false;
+            }
 
             bool alreadyManaged;
             lock (hidHideSessionLock)
@@ -992,7 +1000,11 @@ namespace DS4Windows
             {
                 using (HidHideAPIDevice hidHideDevice = new HidHideAPIDevice())
                 {
-                    if (!hidHideDevice.IsOpen()) return false;
+                    if (!hidHideDevice.IsOpen())
+                    {
+                        StartupDiag($"HidHide session skipped for {dev.DisplayName}: API device did not open");
+                        return false;
+                    }
 
                     bool active = hidHideDevice.GetActiveState();
                     lock (hidHideSessionLock)
@@ -1114,8 +1126,15 @@ namespace DS4Windows
 
         private void EnsureHidHideForVirtualOutput(int index, DS4Device device, OutContType contType)
         {
-            if (device == null || !DS4Devices.isExclusiveMode)
+            if (device == null)
             {
+                StartupDiag($"HidHide virtual-output containment skipped index={index} type={contType}: device null");
+                return;
+            }
+
+            if (!DS4Devices.isExclusiveMode)
+            {
+                StartupDiag($"HidHide virtual-output containment skipped index={index} type={contType}: exclusive mode false");
                 return;
             }
 
@@ -1123,6 +1142,7 @@ namespace DS4Windows
                 contType != OutContType.DS4 &&
                 !ViiperOutDevice.IsViiperType(contType))
             {
+                StartupDiag($"HidHide virtual-output containment skipped index={index} type={contType}: unsupported output type");
                 return;
             }
 

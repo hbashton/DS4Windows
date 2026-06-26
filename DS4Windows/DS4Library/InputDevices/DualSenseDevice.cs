@@ -428,6 +428,8 @@ namespace DS4Windows.InputDevices
         private long bluetoothMicrophoneLastFrameUtcTicks;
         private long bluetoothMicrophoneSuppressedFrameCount;
         private long bluetoothLastNormalInputTimestamp;
+        private long bluetoothMicrophoneLastSystemButtonSuppressTicks;
+        private long bluetoothMicrophoneSystemButtonSuppressCount;
         private long bluetoothMicInputDiagnosticCount;
         private long bluetoothNormalInputDiagnosticCount;
 
@@ -1060,6 +1062,12 @@ namespace DS4Windows.InputDevices
                             else
                             {
                                 LogBluetoothInputDiagnostic(inputReport, microphoneFrame: false);
+                                if (!IsBluetoothNormalInputFrame(inputReport))
+                                {
+                                    readWaitEv.Reset();
+                                    continue;
+                                }
+
                                 uint recvCrc32 = inputReport[BT_INPUT_REPORT_CRC32_POS] |
                                     (uint)(inputReport[CRC32_POS_1] << 8) |
                                     (uint)(inputReport[CRC32_POS_2] << 16) |
@@ -1358,6 +1366,15 @@ namespace DS4Windows.InputDevices
                         int touchX = (((inputReport[2 + TOUCHPAD_DATA_OFFSET + reportOffset + touchOffset] & 0xF) << 8) | inputReport[1 + TOUCHPAD_DATA_OFFSET + reportOffset + touchOffset]);
                         cState.TouchLeft = touchX >= DS4Touchpad.RESOLUTION_X_MAX * 2 / 5 ? false : true;
                         cState.TouchRight = touchX < DS4Touchpad.RESOLUTION_X_MAX * 2 / 5 ? false : true;
+                        if (ShouldSuppressBluetoothMicrophoneSystemButtons(inputReport, cState, reportOffset))
+                        {
+                            cState.Share = false;
+                            cState.Options = false;
+                            cState.PS = false;
+                            cState.TouchButton = false;
+                            cState.OutputTouchButton = false;
+                        }
+
                         // Even when idling there is still a touch packet indicating no touch 1 or 2
                         if (synced)
                         {
@@ -1507,6 +1524,72 @@ namespace DS4Windows.InputDevices
             return report != null && report.Length == BluetoothMicrophoneReportLength &&
                 report[0] == 0x31 &&
                 (report[1] & 0x0F) == 0x02;
+        }
+
+        private static bool IsBluetoothNormalInputFrame(byte[] report)
+        {
+            return report != null && report.Length == BluetoothMicrophoneReportLength &&
+                report[0] == 0x31 &&
+                (report[1] & 0x0F) == 0x01;
+        }
+
+        private bool ShouldSuppressBluetoothMicrophoneSystemButtons(byte[] report, DS4State state, int reportOffset)
+        {
+            if (conType != ConnectionType.BT ||
+                Volatile.Read(ref bluetoothMicrophoneStreamingRequested) == 0 ||
+                Volatile.Read(ref bluetoothMicrophoneInputSuppressed) != 0 ||
+                report == null ||
+                report.Length <= 10 + reportOffset)
+            {
+                return false;
+            }
+
+            bool systemButtonActive = state.Share || state.Options || state.PS ||
+                state.TouchButton;
+            if (!systemButtonActive)
+            {
+                return false;
+            }
+
+            if (state.PS && state.Options)
+            {
+                return false;
+            }
+
+            bool gameplayButtonActive = state.Square || state.Triangle || state.Circle || state.Cross ||
+                state.DpadUp || state.DpadDown || state.DpadLeft || state.DpadRight ||
+                state.L1 || state.L2Btn || state.L3 || state.R1 || state.R2Btn || state.R3 ||
+                state.FnL || state.FnR || state.BLP || state.BRP;
+            bool triggerActive = state.L2 > 8 || state.R2 > 8;
+            bool touchActive = state.Touch1 || state.Touch2 ||
+                state.TrackPadTouch0.IsActive || state.TrackPadTouch1.IsActive;
+            bool stickActive = Math.Abs(state.LX - 128) > 28 ||
+                Math.Abs(state.LY - 128) > 28 ||
+                Math.Abs(state.RX - 128) > 28 ||
+                Math.Abs(state.RY - 128) > 28;
+
+            if (gameplayButtonActive || triggerActive || touchActive || stickActive)
+            {
+                return false;
+            }
+
+            long now = Stopwatch.GetTimestamp();
+            long lastSuppress = Interlocked.Read(ref bluetoothMicrophoneLastSystemButtonSuppressTicks);
+            bool logThis = lastSuppress == 0 ||
+                now - lastSuppress >= Stopwatch.Frequency / 2;
+            Interlocked.Exchange(ref bluetoothMicrophoneLastSystemButtonSuppressTicks, now);
+            long count = Interlocked.Increment(ref bluetoothMicrophoneSystemButtonSuppressCount);
+
+            if (logThis)
+            {
+                byte buttonByte1 = report[9 + reportOffset];
+                byte buttonByte2 = report[10 + reportOffset];
+                AppLogger.LogToGui(
+                    $"DualSenseMicDiag SYSTEM_BUTTON_GUARD mac={Mac} count={count} byte9=0x{buttonByte1:X2} byte10=0x{buttonByte2:X2} share={state.Share} options={state.Options} ps={state.PS} touch={state.TouchButton} mute={state.Mute} first32={FormatBytes(report, 32)}",
+                    false);
+            }
+
+            return true;
         }
 
         private void RecordBluetoothMicrophoneFrame(byte[] report)
@@ -2605,6 +2688,8 @@ namespace DS4Windows.InputDevices
                 Interlocked.Exchange(ref bluetoothMicrophoneInputSuppressed, 0);
                 Interlocked.Exchange(ref bluetoothConsecutiveMicrophoneFrames, 0);
                 Interlocked.Exchange(ref bluetoothLastNormalInputTimestamp, Stopwatch.GetTimestamp());
+                Interlocked.Exchange(ref bluetoothMicrophoneLastSystemButtonSuppressTicks, 0);
+                Interlocked.Exchange(ref bluetoothMicrophoneSystemButtonSuppressCount, 0);
             }
 
             byte[] report = BuildBluetoothMicrophoneCombinedReport(enabled);
@@ -2624,6 +2709,8 @@ namespace DS4Windows.InputDevices
             Interlocked.Exchange(ref bluetoothConsecutiveMicrophoneFrames, 0);
             Interlocked.Exchange(ref bluetoothMicrophoneInputSuppressed, 0);
             Interlocked.Exchange(ref bluetoothLastNormalInputTimestamp, Stopwatch.GetTimestamp());
+            Interlocked.Exchange(ref bluetoothMicrophoneLastSystemButtonSuppressTicks, 0);
+            Interlocked.Exchange(ref bluetoothMicrophoneSystemButtonSuppressCount, 0);
             Interlocked.Exchange(ref bluetoothMicInputDiagnosticCount, 0);
             Interlocked.Exchange(ref bluetoothNormalInputDiagnosticCount, 0);
         }

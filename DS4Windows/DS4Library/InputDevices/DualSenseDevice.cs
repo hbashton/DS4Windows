@@ -1495,10 +1495,12 @@ namespace DS4Windows.InputDevices
         {
             // HidBth strips the HIDP 0xA1 transaction prefix. Direct-L2CAP
             // references therefore see A1 31 flags, while this handle exposes
-            // 31 flags. Bit 1 in flags marks a 71-byte Opus mic frame.
+            // 31 flags. Normal input frames use low tag nibble 0x1; mic input
+            // frames use low tag nibble 0x2 and carry a 71-byte Opus payload
+            // after the mic sequence byte.
             return report != null && report.Length == BluetoothMicrophoneReportLength &&
                 report[0] == 0x31 &&
-                (report[1] & 0x02) != 0;
+                (report[1] & 0x0F) == 0x02;
         }
 
         private void RecordBluetoothMicrophoneFrame(byte[] report)

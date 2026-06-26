@@ -463,7 +463,7 @@ namespace DS4WindowsDiagnostics
 
                     counters.Total++;
                     bool report31 = buffer[0] == 0x31;
-                    bool hidBthMic = report31 && read >= 74 && (buffer[1] & 0x02) != 0;
+                    bool hidBthMic = report31 && read >= 74 && (buffer[1] & 0x0F) == 0x02;
                     counters.LastFlags1 = read > 1 ? buffer[1] : (byte)0;
                     counters.LastFlags2 = read > 2 ? buffer[2] : (byte)0;
                     if (report31) counters.Report31++;

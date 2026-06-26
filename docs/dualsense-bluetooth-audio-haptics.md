@@ -25,7 +25,7 @@ The VIIPER virtual audio endpoint is created by VIIPER's USB Audio Class functio
 
 ## Microphone input contract
 
-DualSense Bluetooth microphone packets share HID report ID `0x31` with normal controller input. Direct L2CAP references see `A1 31 flags ...`; Windows HidBth strips the `A1`, so DS4Windows sees `31 flags ...`. Bit 1 in the flags byte identifies a 71-byte Opus microphone payload. Mic packets must be handled as audio only and must never be parsed as buttons, sticks, touchpad, or gyro.
+DualSense Bluetooth microphone packets share HID report ID `0x31` with normal controller input. Direct L2CAP references see `A1 31 flags ...`; Windows HidBth strips the `A1`, so DS4Windows sees `31 flags ...`. The low tag nibble in the flags byte identifies the payload lane: normal gamepad input uses tag `0x1`, while microphone frames use tag `0x2` and carry a 71-byte Opus payload after the mic sequence byte. Mic packets must be handled as audio only and must never be parsed as buttons, sticks, touchpad, or gyro.
 
 DS4Windows arms the physical Bluetooth mic stream through the verified combined Bluetooth audio report `0x36`, not the earlier standalone `0x31` state-report attempt. The top-level combined audio-control byte is `0xFE` without mic input and `0xFF` with mic input; bit 0 is the mic enable. A control-only `0x36` packet is sent when mic-in starts, and every later combined speaker/haptics packet keeps that byte asserted while mic-in is requested.
 

@@ -61,9 +61,11 @@ namespace DS4Windows
         private const int MaxPendingMicrophoneFrames = 8;
         private const int MaxMicrophoneDiagnosticFrames = 40000;
         private const int MaxStreamRecoveryAttempts = 2;
-        private static readonly TimeSpan MicrophoneRearmCheckInterval = TimeSpan.FromMilliseconds(250);
-        private static readonly TimeSpan MicrophoneStallRearmThreshold = TimeSpan.FromMilliseconds(750);
+        private static readonly TimeSpan MicrophoneRearmCheckInterval = TimeSpan.FromMilliseconds(500);
+        private static readonly TimeSpan MicrophoneStallRearmThreshold = TimeSpan.FromSeconds(2);
+        private static readonly TimeSpan MicrophoneRearmAttemptInterval = TimeSpan.FromSeconds(5);
         private static readonly TimeSpan MicrophoneRearmLogInterval = TimeSpan.FromSeconds(2);
+        private static readonly TimeSpan MicrophoneHealthLogInterval = TimeSpan.FromSeconds(2);
         private const byte ViiperStreamFrameInputState = 0x01;
         private const byte ViiperStreamFrameMicrophonePcm = 0x02;
 
@@ -104,12 +106,16 @@ namespace DS4Windows
         private string physicalDualSenseIdentityPath;
         private bool physicalDualSenseIdentityVerified;
         private volatile bool microphoneRearmStopRequested;
+        private int microphoneEndpointActive;
+        private int microphonePhysicalStreamingEnabled;
         private long lastMicrophoneOpusFrameUtcTicks;
         private long lastMicrophoneRearmAttemptUtcTicks;
         private DateTime lastMicrophoneRearmLogUtc = DateTime.MinValue;
+        private DateTime lastMicrophoneHealthLogUtc = DateTime.MinValue;
         private long queuedMicrophoneFrameCount;
         private long droppedMicrophoneFrameCount;
         private long writtenMicrophoneFrameCount;
+        private long microphoneRearmAttemptCount;
         private long microphoneDecodeFailureCount;
         private long inputPacketDiagnosticCount;
         private long microphonePacketDiagnosticCount;
@@ -148,6 +154,9 @@ namespace DS4Windows
             Interlocked.Exchange(ref microphoneDecodeFailureCount, 0);
             Interlocked.Exchange(ref lastMicrophoneOpusFrameUtcTicks, 0);
             Interlocked.Exchange(ref lastMicrophoneRearmAttemptUtcTicks, 0);
+            Interlocked.Exchange(ref microphoneRearmAttemptCount, 0);
+            Interlocked.Exchange(ref microphoneEndpointActive, 0);
+            Interlocked.Exchange(ref microphonePhysicalStreamingEnabled, 0);
             Volatile.Write(ref edgePhysicalMismatchLogged, 0);
             Volatile.Write(ref microphoneUnavailableLogged, 0);
             lock (physicalDualSenseIdentityLock)
@@ -157,6 +166,7 @@ namespace DS4Windows
             }
             lastWriterHealthLogUtc = DateTime.MinValue;
             lastMicrophoneRearmLogUtc = DateTime.MinValue;
+            lastMicrophoneHealthLogUtc = DateTime.MinValue;
             microphoneRearmStopRequested = false;
             writerStopRequested = false;
             connected = true;
@@ -942,13 +952,21 @@ namespace DS4Windows
 
             dualSenseDevice.ResetBluetoothMicrophoneProbeStatistics();
             Interlocked.Exchange(ref lastMicrophoneOpusFrameUtcTicks, 0);
-            Interlocked.Exchange(ref lastMicrophoneRearmAttemptUtcTicks, DateTime.UtcNow.Ticks);
-            bool accepted = dualSenseDevice.SetBluetoothMicrophoneStreaming(true);
+            Interlocked.Exchange(ref lastMicrophoneRearmAttemptUtcTicks, 0);
+            Interlocked.Exchange(ref microphoneRearmAttemptCount, 0);
+            Interlocked.Exchange(ref microphoneEndpointActive, 0);
+            Interlocked.Exchange(ref microphonePhysicalStreamingEnabled, 0);
+            try
+            {
+                dualSenseDevice.SetBluetoothMicrophoneStreaming(false);
+            }
+            catch { }
+
             StartMicrophoneRearmThread();
             if (Global.VerboseStartupLogging)
             {
                 AppLogger.LogToGui(
-                    $"VIIPER DualSense mic-in enabled on controller {deviceIndex + 1}: accepted={accepted} status={dualSenseDevice.LastBluetoothMicrophoneWriteStatus}",
+                    $"VIIPER DualSense mic-in armed on controller {deviceIndex + 1}; waiting for Windows to open the virtual microphone endpoint.",
                     false);
             }
         }
@@ -974,6 +992,9 @@ namespace DS4Windows
             microphoneDecoder = null;
             Interlocked.Exchange(ref lastMicrophoneOpusFrameUtcTicks, 0);
             Interlocked.Exchange(ref lastMicrophoneRearmAttemptUtcTicks, 0);
+            Interlocked.Exchange(ref microphoneRearmAttemptCount, 0);
+            Interlocked.Exchange(ref microphoneEndpointActive, 0);
+            Interlocked.Exchange(ref microphonePhysicalStreamingEnabled, 0);
             StopMicrophoneRearmThread();
 
             if (oldSource != null)
@@ -1003,6 +1024,10 @@ namespace DS4Windows
             }
 
             if (opusFrame == null || opusFrame.Length != DualSenseMicrophoneOpusFrameLength)
+            {
+                return;
+            }
+            if (Volatile.Read(ref microphoneEndpointActive) == 0)
             {
                 return;
             }
@@ -1085,10 +1110,86 @@ namespace DS4Windows
                     return;
                 }
 
-                long lastFrameTicks = Interlocked.Read(ref lastMicrophoneOpusFrameUtcTicks);
                 DateTime now = DateTime.UtcNow;
+                bool endpointStateKnown = TryGetVirtualMicrophoneInterfaceActive(out bool endpointActive, out string endpointStatus);
+                if (!endpointStateKnown || !endpointActive)
+                {
+                    bool wasEndpointActive = Interlocked.Exchange(ref microphoneEndpointActive, 0) == 1;
+                    bool wasStreaming = Interlocked.Exchange(ref microphonePhysicalStreamingEnabled, 0) == 1;
+                    Interlocked.Exchange(ref lastMicrophoneRearmAttemptUtcTicks, 0);
+                    ClearPendingMicrophoneFrames();
+                    if (wasStreaming)
+                    {
+                        try
+                        {
+                            source.SetBluetoothMicrophoneStreaming(false);
+                        }
+                        catch { }
+                    }
+
+                    LogMicrophoneHealthIfNeeded(now, DateTime.MinValue);
+                    if (Global.VerboseStartupLogging &&
+                        (wasEndpointActive || wasStreaming || !endpointStateKnown) &&
+                        now - lastMicrophoneRearmLogUtc >= MicrophoneRearmLogInterval)
+                    {
+                        lastMicrophoneRearmLogUtc = now;
+                        viiperMicDiagLogger.Info(
+                            $"VIIPER_MIC_ENDPOINT type={viiperType} utc={now:O} active={endpointActive} known={endpointStateKnown} physicalStreaming=False status={endpointStatus}");
+                    }
+
+                    continue;
+                }
+
+                if (Interlocked.Exchange(ref microphoneEndpointActive, 1) == 0 &&
+                    Global.VerboseStartupLogging)
+                {
+                    viiperMicDiagLogger.Info(
+                        $"VIIPER_MIC_ENDPOINT type={viiperType} utc={now:O} active=True known=True physicalStreaming={Volatile.Read(ref microphonePhysicalStreamingEnabled) == 1} status={endpointStatus}");
+                }
+
+                if (Volatile.Read(ref microphonePhysicalStreamingEnabled) == 0)
+                {
+                    long previousAttemptTicks = Interlocked.Read(ref lastMicrophoneRearmAttemptUtcTicks);
+                    DateTime previousAttemptUtc = previousAttemptTicks > 0 ?
+                        new DateTime(previousAttemptTicks, DateTimeKind.Utc) : DateTime.MinValue;
+                    if (previousAttemptUtc != DateTime.MinValue &&
+                        now - previousAttemptUtc < MicrophoneRearmAttemptInterval)
+                    {
+                        continue;
+                    }
+
+                    Interlocked.Exchange(ref lastMicrophoneRearmAttemptUtcTicks, now.Ticks);
+                    long attempt = Interlocked.Increment(ref microphoneRearmAttemptCount);
+                    bool accepted = false;
+                    string status = string.Empty;
+                    try
+                    {
+                        accepted = source.SetBluetoothMicrophoneStreaming(true);
+                        status = source.LastBluetoothMicrophoneWriteStatus;
+                    }
+                    catch (Exception ex)
+                    {
+                        status = $"{ex.GetType().Name}: {ex.Message}";
+                    }
+
+                    if (accepted)
+                    {
+                        Interlocked.Exchange(ref microphonePhysicalStreamingEnabled, 1);
+                    }
+
+                    if (Global.VerboseStartupLogging)
+                    {
+                        viiperMicDiagLogger.Info(
+                            $"VIIPER_MIC_ACTIVATE type={viiperType} utc={now:O} attempt={attempt} endpointActive=True accepted={accepted} status={status}");
+                    }
+
+                    continue;
+                }
+
+                long lastFrameTicks = Interlocked.Read(ref lastMicrophoneOpusFrameUtcTicks);
                 DateTime lastFrameUtc = lastFrameTicks > 0 ?
                     new DateTime(lastFrameTicks, DateTimeKind.Utc) : DateTime.MinValue;
+                LogMicrophoneHealthIfNeeded(now, lastFrameUtc);
                 if (lastFrameUtc != DateTime.MinValue &&
                     now - lastFrameUtc < MicrophoneStallRearmThreshold)
                 {
@@ -1099,12 +1200,13 @@ namespace DS4Windows
                 DateTime lastAttemptUtc = lastAttemptTicks > 0 ?
                     new DateTime(lastAttemptTicks, DateTimeKind.Utc) : DateTime.MinValue;
                 if (lastAttemptUtc != DateTime.MinValue &&
-                    now - lastAttemptUtc < MicrophoneRearmCheckInterval)
+                    now - lastAttemptUtc < MicrophoneRearmAttemptInterval)
                 {
                     continue;
                 }
 
                 Interlocked.Exchange(ref lastMicrophoneRearmAttemptUtcTicks, now.Ticks);
+                long attempt = Interlocked.Increment(ref microphoneRearmAttemptCount);
                 bool accepted = false;
                 string status = string.Empty;
                 try
@@ -1122,9 +1224,56 @@ namespace DS4Windows
                 {
                     lastMicrophoneRearmLogUtc = now;
                     viiperMicDiagLogger.Info(
-                        $"VIIPER_MIC_REARM type={viiperType} utc={now:O} accepted={accepted} lastFrameUtc={(lastFrameUtc == DateTime.MinValue ? "<none>" : lastFrameUtc.ToString("O"))} queued={Interlocked.Read(ref queuedMicrophoneFrameCount)} written={Interlocked.Read(ref writtenMicrophoneFrameCount)} status={status}");
+                        $"VIIPER_MIC_REARM type={viiperType} utc={now:O} attempt={attempt} accepted={accepted} lastFrameUtc={(lastFrameUtc == DateTime.MinValue ? "<none>" : lastFrameUtc.ToString("O"))} queued={Interlocked.Read(ref queuedMicrophoneFrameCount)} written={Interlocked.Read(ref writtenMicrophoneFrameCount)} dropped={Interlocked.Read(ref droppedMicrophoneFrameCount)} pending={GetPendingMicrophoneFrameCount()} status={status}");
                 }
             }
+        }
+
+        private bool TryGetVirtualMicrophoneInterfaceActive(out bool active, out string status)
+        {
+            active = false;
+            status = string.Empty;
+
+            ViiperDeviceStream stream = deviceStream;
+            if (stream == null)
+            {
+                status = "no active VIIPER stream";
+                return false;
+            }
+
+            try
+            {
+                return client.TryGetDualSenseMicrophoneInterfaceActive(stream.BusId, stream.DevId, out active, out status);
+            }
+            catch (Exception ex)
+            {
+                status = $"{ex.GetType().Name}: {ex.Message}";
+                return false;
+            }
+        }
+
+        private void LogMicrophoneHealthIfNeeded(DateTime now, DateTime lastFrameUtc)
+        {
+            if (!Global.VerboseStartupLogging ||
+                now - lastMicrophoneHealthLogUtc < MicrophoneHealthLogInterval)
+            {
+                return;
+            }
+
+            lastMicrophoneHealthLogUtc = now;
+            double lastFrameAgeMs = lastFrameUtc == DateTime.MinValue ?
+                -1.0 : (now - lastFrameUtc).TotalMilliseconds;
+            DateTime lastAttemptUtc = DateTime.MinValue;
+            long lastAttemptTicks = Interlocked.Read(ref lastMicrophoneRearmAttemptUtcTicks);
+            if (lastAttemptTicks > 0)
+            {
+                lastAttemptUtc = new DateTime(lastAttemptTicks, DateTimeKind.Utc);
+            }
+
+            double nextRearmEligibleMs = lastAttemptUtc == DateTime.MinValue ?
+                0.0 : Math.Max(0.0, (MicrophoneRearmAttemptInterval - (now - lastAttemptUtc)).TotalMilliseconds);
+            viiperMicDiagLogger.Info(
+                $"VIIPER_MIC_HEALTH type={viiperType} utc={now:O} endpointActive={Volatile.Read(ref microphoneEndpointActive) == 1} physicalStreaming={Volatile.Read(ref microphonePhysicalStreamingEnabled) == 1} lastFrameAgeMs={lastFrameAgeMs:F0} queued={Interlocked.Read(ref queuedMicrophoneFrameCount)} written={Interlocked.Read(ref writtenMicrophoneFrameCount)} dropped={Interlocked.Read(ref droppedMicrophoneFrameCount)} pending={GetPendingMicrophoneFrameCount()} rearmAttempts={Interlocked.Read(ref microphoneRearmAttemptCount)} nextRearmEligibleMs={nextRearmEligibleMs:F0}");
         }
 
         private void LogMicrophoneQueueDiagnostic(DualSenseDevice source, byte[] opusFrame)
@@ -1155,6 +1304,14 @@ namespace DS4Windows
             lock (pendingPacketLock)
             {
                 return pendingMicrophoneOpusFrames.Count;
+            }
+        }
+
+        private void ClearPendingMicrophoneFrames()
+        {
+            lock (pendingPacketLock)
+            {
+                pendingMicrophoneOpusFrames.Clear();
             }
         }
 
@@ -1673,6 +1830,42 @@ namespace DS4Windows
             return SendRequestRaw("debug/dualsense-traffic/clear");
         }
 
+        public bool TryGetDualSenseMicrophoneInterfaceActive(uint busId, string devId, out bool active, out string status)
+        {
+            active = false;
+            status = string.Empty;
+
+            ViiperDevicesListResponse response = SendRequest<ViiperDevicesListResponse>($"bus/{busId}/devices");
+            if (response?.Devices == null)
+            {
+                status = "VIIPER returned no devices.";
+                return false;
+            }
+
+            foreach (ViiperDeviceResponse device in response.Devices)
+            {
+                if (!string.Equals(device.DevId, devId, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (device.DeviceSpecific.ValueKind == JsonValueKind.Object &&
+                    device.DeviceSpecific.TryGetProperty("microphoneInterfaceActive", out JsonElement value) &&
+                    (value.ValueKind == JsonValueKind.True || value.ValueKind == JsonValueKind.False))
+                {
+                    active = value.GetBoolean();
+                    status = "ok";
+                    return true;
+                }
+
+                status = "VIIPER device did not expose microphoneInterfaceActive.";
+                return false;
+            }
+
+            status = $"VIIPER device {devId} was not found on bus {busId}.";
+            return false;
+        }
+
         private ViiperDeviceStream OpenStream(uint busId, string devId, int usbipPort)
         {
             TcpClient tcp = Connect(StreamReceiveTimeoutMs);
@@ -1791,8 +1984,23 @@ namespace DS4Windows
 
         private sealed class ViiperDeviceResponse
         {
+            [JsonPropertyName("busId")]
+            public uint BusId { get; set; }
+
             [JsonPropertyName("devId")]
             public string DevId { get; set; }
+
+            [JsonPropertyName("type")]
+            public string Type { get; set; }
+
+            [JsonPropertyName("deviceSpecific")]
+            public JsonElement DeviceSpecific { get; set; }
+        }
+
+        private sealed class ViiperDevicesListResponse
+        {
+            [JsonPropertyName("devices")]
+            public List<ViiperDeviceResponse> Devices { get; set; }
         }
 
         private sealed class ViiperDeviceCreateRequest
@@ -2155,6 +2363,10 @@ namespace DS4Windows
             this.removeDevice = removeDevice;
         }
 
+        public uint BusId => busId;
+
+        public string DevId => devId;
+
         public void Write(byte[] data)
         {
             if (Volatile.Read(ref disposed) == 1)
@@ -2250,9 +2462,16 @@ namespace DS4Windows
         private const int DualSenseFeedbackPacketSize = 76;
         private const int DualSenseGyroRestDeadband = 32;
         private const int DualSenseAccelRestZ = -8192;
+        private const int DualSenseMotionOffset = 21;
+        private const int DualSenseMotionLength = 12;
+        private const byte ViiperStreamMagic0 = 0x56;
+        private const byte ViiperStreamMagic1 = 0x50;
+        private const byte ViiperStreamMagic2 = 0x43;
+        private const byte ViiperStreamMagic3 = 0x4D;
         private const float X360RecipInputPosResolution = 1 / 127f;
         private const float X360RecipInputNegResolution = 1 / 128f;
         private const int X360OutputResolution = 32767 - (-32768);
+        private static long dualSenseMotionTransportSignatureDropCount;
 
         public static string GetViiperDeviceName(ViiperVirtualDeviceType type)
         {
@@ -2378,7 +2597,8 @@ namespace DS4Windows
             packet[10] = r2;
             WriteDualSenseTouch(packet, 11, state.TrackPadTouch0, 1920, 1080);
             WriteDualSenseTouch(packet, 16, state.TrackPadTouch1, 1920, 1080);
-            WriteSonyMotion(packet, 21, state, DualSenseGyroRestDeadband, DualSenseAccelRestZ);
+            WriteSonyMotion(packet, DualSenseMotionOffset, state, DualSenseGyroRestDeadband, DualSenseAccelRestZ);
+            SanitizeDualSenseMotionTransportSignature(packet);
             return packet;
         }
 
@@ -2521,12 +2741,7 @@ namespace DS4Windows
             SixAxis motion = state.Motion;
             if (motion == null)
             {
-                WriteInt16(packet, offset, 0);
-                WriteInt16(packet, offset + 2, 0);
-                WriteInt16(packet, offset + 4, 0);
-                WriteInt16(packet, offset + 6, 0);
-                WriteInt16(packet, offset + 8, 0);
-                WriteInt16(packet, offset + 10, ClampShort(restAccelZ));
+                WriteNeutralSonyMotion(packet, offset, restAccelZ);
                 return;
             }
 
@@ -2547,6 +2762,88 @@ namespace DS4Windows
             WriteInt16(packet, offset + 6, ClampShort(accelX));
             WriteInt16(packet, offset + 8, ClampShort(accelY));
             WriteInt16(packet, offset + 10, ClampShort(accelZ));
+        }
+
+        private static void WriteNeutralSonyMotion(byte[] packet, int offset, int restAccelZ)
+        {
+            WriteInt16(packet, offset, 0);
+            WriteInt16(packet, offset + 2, 0);
+            WriteInt16(packet, offset + 4, 0);
+            WriteInt16(packet, offset + 6, 0);
+            WriteInt16(packet, offset + 8, 0);
+            WriteInt16(packet, offset + 10, ClampShort(restAccelZ));
+        }
+
+        private static void SanitizeDualSenseMotionTransportSignature(byte[] packet)
+        {
+            if (!ContainsViiperStreamMagic(packet, DualSenseMotionOffset, DualSenseMotionLength))
+            {
+                return;
+            }
+
+            string before = Global.VerboseStartupLogging ?
+                FormatPacketBytes(packet, DualSenseMotionOffset, DualSenseMotionLength) :
+                string.Empty;
+            WriteNeutralSonyMotion(packet, DualSenseMotionOffset, DualSenseAccelRestZ);
+
+            long count = Interlocked.Increment(ref dualSenseMotionTransportSignatureDropCount);
+            if (Global.VerboseStartupLogging && (count <= 128 || IsPowerOfTwo(count)))
+            {
+                AppLogger.LogToGui(
+                    $"VIIPER_INPUT_CORRUPT_MOTION_DROPPED count={count} reason=transport_magic_in_dualsense_motion before={before} after={FormatPacketBytes(packet, DualSenseMotionOffset, DualSenseMotionLength)}",
+                    false);
+            }
+        }
+
+        private static bool ContainsViiperStreamMagic(byte[] packet, int offset, int length)
+        {
+            if (packet == null || length < 4)
+            {
+                return false;
+            }
+
+            int start = Math.Max(0, offset);
+            int end = Math.Min(packet.Length, offset + length);
+            for (int i = start; i + 3 < end; i++)
+            {
+                if (packet[i] == ViiperStreamMagic0 &&
+                    packet[i + 1] == ViiperStreamMagic1 &&
+                    packet[i + 2] == ViiperStreamMagic2 &&
+                    packet[i + 3] == ViiperStreamMagic3)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsPowerOfTwo(long value)
+        {
+            return value > 0 && (value & (value - 1)) == 0;
+        }
+
+        private static string FormatPacketBytes(byte[] data, int offset, int length)
+        {
+            if (data == null)
+            {
+                return "<null>";
+            }
+
+            int start = Math.Max(0, offset);
+            int end = Math.Min(data.Length, offset + length);
+            StringBuilder builder = new StringBuilder(Math.Max(0, end - start) * 3);
+            for (int i = start; i < end; i++)
+            {
+                if (builder.Length > 0)
+                {
+                    builder.Append(' ');
+                }
+
+                builder.Append(data[i].ToString("X2"));
+            }
+
+            return builder.ToString();
         }
 
         private static int SnapToZero(int value, int deadband)

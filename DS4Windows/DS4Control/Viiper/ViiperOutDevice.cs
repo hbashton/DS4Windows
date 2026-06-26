@@ -19,6 +19,7 @@ using System.Text.Json.Serialization;
 using System.Threading;
 using Concentus;
 using DS4Windows.InputDevices;
+using NLog;
 
 namespace DS4Windows
 {
@@ -33,6 +34,8 @@ namespace DS4Windows
 
     public sealed class ViiperOutDevice : OutputDevice
     {
+        private static readonly Logger viiperMicDiagLogger = LogManager.GetLogger("ViiperMicDiag");
+
         private const string DefaultHost = "127.0.0.1";
         private const int DefaultPort = 3242;
         private const int DualSenseBaseFeedbackLength = 6;
@@ -640,8 +643,18 @@ namespace DS4Windows
             }
 
             LogMicrophonePacketDiagnostic(opusFrame, decodedSamples, frames);
-            stream.WriteFrame(ViiperStreamFrameMicrophonePcm, microphoneStereoPcm);
-            Interlocked.Increment(ref writtenMicrophoneFrameCount);
+            long writeStartTicks = Stopwatch.GetTimestamp();
+            try
+            {
+                stream.WriteFrame(ViiperStreamFrameMicrophonePcm, microphoneStereoPcm);
+                Interlocked.Increment(ref writtenMicrophoneFrameCount);
+                LogMicrophonePcmWriteDiagnostic(writeStartTicks, null);
+            }
+            catch (Exception ex) when (ex is IOException || ex is SocketException || ex is ObjectDisposedException)
+            {
+                LogMicrophonePcmWriteDiagnostic(writeStartTicks, ex);
+                throw;
+            }
         }
 
         private void LogMicrophonePacketDiagnostic(byte[] opusFrame, int decodedSamples, int pcmFrames)
@@ -657,9 +670,26 @@ namespace DS4Windows
                 return;
             }
 
-            AppLogger.LogToGui(
-                $"VIIPER_MIC_DIAG type={viiperType} utc={DateTime.UtcNow:O} ticks={Stopwatch.GetTimestamp()} count={count} opusLen={opusFrame?.Length ?? 0} decodedSamples={decodedSamples} pcmFrames={pcmFrames} pcmBytes={DualSenseMicrophonePcmFrameLength} queued={Interlocked.Read(ref queuedMicrophoneFrameCount)} written={Interlocked.Read(ref writtenMicrophoneFrameCount)} dropped={Interlocked.Read(ref droppedMicrophoneFrameCount)} decodeFailures={Interlocked.Read(ref microphoneDecodeFailureCount)} opus={FormatBytes(opusFrame, 71)} pcmFirst64={FormatBytes(microphoneStereoPcm, 64)}",
-                false);
+            viiperMicDiagLogger.Info(
+                $"VIIPER_MIC_DIAG type={viiperType} utc={DateTime.UtcNow:O} ticks={Stopwatch.GetTimestamp()} count={count} opusLen={opusFrame?.Length ?? 0} decodedSamples={decodedSamples} pcmFrames={pcmFrames} pcmBytes={DualSenseMicrophonePcmFrameLength} queued={Interlocked.Read(ref queuedMicrophoneFrameCount)} written={Interlocked.Read(ref writtenMicrophoneFrameCount)} dropped={Interlocked.Read(ref droppedMicrophoneFrameCount)} decodeFailures={Interlocked.Read(ref microphoneDecodeFailureCount)} pcmStats={SummarizePcm16Stereo(microphoneStereoPcm, pcmFrames)} opus={FormatBytes(opusFrame, 71)} pcmFirst64={FormatBytes(microphoneStereoPcm, 64)}");
+        }
+
+        private void LogMicrophonePcmWriteDiagnostic(long writeStartTicks, Exception exception)
+        {
+            if (!Global.VerboseStartupLogging)
+            {
+                return;
+            }
+
+            long written = Interlocked.Read(ref writtenMicrophoneFrameCount);
+            if (written > MaxMicrophoneDiagnosticFrames)
+            {
+                return;
+            }
+
+            double elapsedMs = (Stopwatch.GetTimestamp() - writeStartTicks) * 1000.0 / Stopwatch.Frequency;
+            viiperMicDiagLogger.Info(
+                $"VIIPER_MIC_PCM_WRITE type={viiperType} utc={DateTime.UtcNow:O} ticks={Stopwatch.GetTimestamp()} frameType=0x{ViiperStreamFrameMicrophonePcm:X2} payloadBytes={microphoneStereoPcm.Length} headerBytes=8 queued={Interlocked.Read(ref queuedMicrophoneFrameCount)} written={written} dropped={Interlocked.Read(ref droppedMicrophoneFrameCount)} pending={GetPendingMicrophoneFrameCount()} elapsedMs={elapsedMs:F3} success={exception == null} exception={exception?.GetType().Name}:{exception?.Message} pcmStats={SummarizePcm16Stereo(microphoneStereoPcm, DualSenseMicrophoneFramesPerPacket)}");
         }
 
         private void LogWriterHealthIfNeeded()
@@ -995,9 +1025,16 @@ namespace DS4Windows
                 pending = pendingMicrophoneOpusFrames.Count;
             }
 
-            AppLogger.LogToGui(
-                $"VIIPER_MIC_QUEUE_DIAG type={viiperType} utc={DateTime.UtcNow:O} ticks={Stopwatch.GetTimestamp()} source={source?.MacAddress} queued={queued} written={Interlocked.Read(ref writtenMicrophoneFrameCount)} dropped={Interlocked.Read(ref droppedMicrophoneFrameCount)} pending={pending} opusLen={opusFrame?.Length ?? 0} opus={FormatBytes(opusFrame, 71)}",
-                false);
+            viiperMicDiagLogger.Info(
+                $"VIIPER_MIC_QUEUE_DIAG type={viiperType} utc={DateTime.UtcNow:O} ticks={Stopwatch.GetTimestamp()} source={source?.MacAddress} queued={queued} written={Interlocked.Read(ref writtenMicrophoneFrameCount)} dropped={Interlocked.Read(ref droppedMicrophoneFrameCount)} pending={pending} opusLen={opusFrame?.Length ?? 0} opus={FormatBytes(opusFrame, 71)}");
+        }
+
+        private int GetPendingMicrophoneFrameCount()
+        {
+            lock (pendingPacketLock)
+            {
+                return pendingMicrophoneOpusFrames.Count;
+            }
         }
 
         private void LogInputPacketDiagnostic(DS4State state, byte[] packet, int device)
@@ -1074,6 +1111,57 @@ namespace DS4Windows
             }
 
             return $"len={packet.Length}";
+        }
+
+        private static string SummarizePcm16Stereo(byte[] pcmBytes, int pcmFrames)
+        {
+            if (pcmBytes == null || pcmFrames <= 0)
+            {
+                return "frames=0";
+            }
+
+            int frames = Math.Min(pcmFrames, pcmBytes.Length / (DualSenseMicrophoneChannels * sizeof(short)));
+            long sumLeft = 0;
+            long sumRight = 0;
+            long sumSqLeft = 0;
+            long sumSqRight = 0;
+            int peakLeft = 0;
+            int peakRight = 0;
+            int nonZeroFrames = 0;
+            int clippedSamples = 0;
+
+            for (int frame = 0; frame < frames; frame++)
+            {
+                int offset = frame * DualSenseMicrophoneChannels * sizeof(short);
+                short left = BitConverter.ToInt16(pcmBytes, offset);
+                short right = BitConverter.ToInt16(pcmBytes, offset + sizeof(short));
+                int absLeft = Math.Abs((int)left);
+                int absRight = Math.Abs((int)right);
+                peakLeft = Math.Max(peakLeft, absLeft);
+                peakRight = Math.Max(peakRight, absRight);
+                sumLeft += left;
+                sumRight += right;
+                sumSqLeft += (long)left * left;
+                sumSqRight += (long)right * right;
+
+                if (left != 0 || right != 0)
+                {
+                    nonZeroFrames++;
+                }
+
+                if (left == short.MinValue || left == short.MaxValue ||
+                    right == short.MinValue || right == short.MaxValue)
+                {
+                    clippedSamples++;
+                }
+            }
+
+            double invFrames = frames > 0 ? 1.0 / frames : 0.0;
+            double dcLeft = sumLeft * invFrames;
+            double dcRight = sumRight * invFrames;
+            double rmsLeft = Math.Sqrt(sumSqLeft * invFrames);
+            double rmsRight = Math.Sqrt(sumSqRight * invFrames);
+            return $"frames={frames} nonZero={nonZeroFrames} peakL={peakLeft} peakR={peakRight} rmsL={rmsLeft:F1} rmsR={rmsRight:F1} dcL={dcLeft:F1} dcR={dcRight:F1} clipped={clippedSamples}";
         }
 
         private static string FormatBytes(byte[] bytes, int count)

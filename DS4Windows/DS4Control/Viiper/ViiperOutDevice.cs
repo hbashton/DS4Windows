@@ -2490,19 +2490,14 @@ namespace DS4Windows
         private const int DS4PacketSize = 31;
         private const int DualSensePacketSize = 33;
         private const int Switch2PacketSize = 24;
-        private const int DualSenseMicrophonePcmPayloadLength = 480 * 2 * 2;
         private const int DualSenseFeedbackPacketSize = 76;
         private const int DualSenseGyroRestDeadband = 32;
         private const int DualSenseAccelRestZ = -8192;
         private const int DualSenseMotionOffset = 21;
-        private const int ViiperStreamFrameHeaderLength = 8;
         private const byte ViiperStreamMagic0 = 0x56;
         private const byte ViiperStreamMagic1 = 0x50;
         private const byte ViiperStreamMagic2 = 0x43;
         private const byte ViiperStreamMagic3 = 0x4D;
-        private const byte ViiperStreamVersion = 0x01;
-        private const byte ViiperInputStateFrameType = 0x01;
-        private const byte ViiperMicrophonePcmFrameType = 0x02;
         private const float X360RecipInputPosResolution = 1 / 127f;
         private const float X360RecipInputNegResolution = 1 / 128f;
         private const int X360OutputResolution = 32767 - (-32768);
@@ -2810,7 +2805,7 @@ namespace DS4Windows
 
         private static byte[] SanitizeDualSenseTransportSignature(byte[] packet)
         {
-            if (!ContainsViiperStreamFrameHeader(packet, 0, packet.Length))
+            if (!ContainsViiperStreamMagic(packet, 0, packet.Length))
             {
                 return packet;
             }
@@ -2840,35 +2835,28 @@ namespace DS4Windows
             return packet;
         }
 
-        private static bool ContainsViiperStreamFrameHeader(byte[] packet, int offset, int length)
+        private static bool ContainsViiperStreamMagic(byte[] packet, int offset, int length)
         {
-            if (packet == null || length < ViiperStreamFrameHeaderLength)
+            const int magicLength = 4;
+            if (packet == null || length < magicLength)
             {
                 return false;
             }
 
             int start = Math.Max(0, offset);
             int end = Math.Min(packet.Length, offset + length);
-            for (int i = start; i + ViiperStreamFrameHeaderLength <= end; i++)
+            for (int i = start; i + magicLength <= end; i++)
             {
                 if (packet[i] == ViiperStreamMagic0 &&
                     packet[i + 1] == ViiperStreamMagic1 &&
                     packet[i + 2] == ViiperStreamMagic2 &&
-                    packet[i + 3] == ViiperStreamMagic3 &&
-                    packet[i + 4] == ViiperStreamVersion &&
-                    IsKnownViiperStreamFrame(packet[i + 5], packet[i + 6] | (packet[i + 7] << 8)))
+                    packet[i + 3] == ViiperStreamMagic3)
                 {
                     return true;
                 }
             }
 
             return false;
-        }
-
-        private static bool IsKnownViiperStreamFrame(byte frameType, int payloadLength)
-        {
-            return (frameType == ViiperInputStateFrameType && payloadLength == DualSensePacketSize) ||
-                (frameType == ViiperMicrophonePcmFrameType && payloadLength == DualSenseMicrophonePcmPayloadLength);
         }
 
         private static bool IsPowerOfTwo(long value)

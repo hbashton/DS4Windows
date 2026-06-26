@@ -381,8 +381,6 @@ namespace DS4Windows.InputDevices
         private const int BluetoothMicrophoneReportLength = 78;
         private const int BluetoothMicrophonePayloadOffset = 3;
         private const int BluetoothMicrophonePayloadLength = 71;
-        private const int BluetoothMicrophoneFloodFrameLimit = 32;
-        private const int BluetoothMicrophoneFloodMilliseconds = 250;
         private const int BluetoothMicrophoneFullDiagnosticLimit = 40000;
         private const bool BluetoothMicrophoneInputTransportEnabled = true;
         private const byte DualSenseOutputFlag0MicrophoneVolumeEnable = 0x40;
@@ -1523,13 +1521,7 @@ namespace DS4Windows.InputDevices
         {
             Interlocked.Increment(ref bluetoothMicrophoneFrameCount);
             Interlocked.Exchange(ref bluetoothMicrophoneLastFrameUtcTicks, DateTime.UtcNow.Ticks);
-            int consecutiveMicFrames = Interlocked.Increment(ref bluetoothConsecutiveMicrophoneFrames);
-
-            if (ShouldSuppressBluetoothMicrophoneInput(consecutiveMicFrames))
-            {
-                SuppressBluetoothMicrophoneInput(
-                    "DualSense microphone input was disabled because microphone packets starved normal controller input.");
-            }
+            Interlocked.Increment(ref bluetoothConsecutiveMicrophoneFrames);
 
             if (Volatile.Read(ref bluetoothMicrophoneStreamingRequested) == 0 ||
                 Volatile.Read(ref bluetoothMicrophoneInputSuppressed) != 0 ||
@@ -1548,8 +1540,14 @@ namespace DS4Windows.InputDevices
             }
             catch (Exception ex)
             {
-                SuppressBluetoothMicrophoneInput(
-                    $"DualSense microphone input was disabled because the microphone handler threw {ex.GetType().Name}: {ex.Message}");
+                Interlocked.Increment(ref bluetoothMicrophoneSuppressedFrameCount);
+                LastBluetoothMicrophoneWriteStatus =
+                    $"Microphone handler exception: {ex.GetType().Name}: {ex.Message}";
+                if (Global.VerboseStartupLogging)
+                {
+                    micDiagLogger.Warn(
+                        $"MIC_HANDLER_EXCEPTION mac={MacAddress} utc={DateTime.UtcNow:O} {ex.GetType().Name}: {ex.Message}");
+                }
             }
         }
 
@@ -1557,52 +1555,6 @@ namespace DS4Windows.InputDevices
         {
             Interlocked.Exchange(ref bluetoothConsecutiveMicrophoneFrames, 0);
             Interlocked.Exchange(ref bluetoothLastNormalInputTimestamp, Stopwatch.GetTimestamp());
-        }
-
-        private bool ShouldSuppressBluetoothMicrophoneInput(int consecutiveMicFrames)
-        {
-            if (Volatile.Read(ref bluetoothMicrophoneStreamingRequested) == 0 ||
-                Volatile.Read(ref bluetoothMicrophoneInputSuppressed) != 0 ||
-                consecutiveMicFrames < BluetoothMicrophoneFloodFrameLimit)
-            {
-                return false;
-            }
-
-            long lastNormalInput = Interlocked.Read(ref bluetoothLastNormalInputTimestamp);
-            if (lastNormalInput == 0)
-            {
-                return true;
-            }
-
-            long elapsedTicks = Stopwatch.GetTimestamp() - lastNormalInput;
-            return elapsedTicks >=
-                (Stopwatch.Frequency * BluetoothMicrophoneFloodMilliseconds) / 1000;
-        }
-
-        private void SuppressBluetoothMicrophoneInput(string reason)
-        {
-            if (Interlocked.Exchange(ref bluetoothMicrophoneInputSuppressed, 1) != 0)
-            {
-                return;
-            }
-
-            Volatile.Write(ref bluetoothMicrophoneStreamingRequested, 0);
-            LastBluetoothMicrophoneWriteStatus = reason;
-            AppLogger.LogToGui(reason, true);
-
-            try
-            {
-                byte[] report = BuildBluetoothMicrophoneCombinedReport(enabled: false);
-                WriteBluetoothAudioOutputReport(report, 0, report.Length, 0x36,
-                    BluetoothCombinedOutputReportLength,
-                    "combined microphone disable after suppression", waitForWrite: false);
-                LastBluetoothMicrophoneWriteStatus = LastBluetoothHapticsWriteStatus;
-            }
-            catch (Exception ex)
-            {
-                LastBluetoothMicrophoneWriteStatus =
-                    $"Microphone suppression could not send disable report: {ex.GetType().Name}: {ex.Message}";
-            }
         }
 
         private void ProcessQueuedEvents()

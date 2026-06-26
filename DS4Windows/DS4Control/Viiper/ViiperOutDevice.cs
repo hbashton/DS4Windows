@@ -61,6 +61,9 @@ namespace DS4Windows
         private const int MaxPendingMicrophoneFrames = 8;
         private const int MaxMicrophoneDiagnosticFrames = 40000;
         private const int MaxStreamRecoveryAttempts = 2;
+        private static readonly TimeSpan MicrophoneRearmCheckInterval = TimeSpan.FromMilliseconds(250);
+        private static readonly TimeSpan MicrophoneStallRearmThreshold = TimeSpan.FromMilliseconds(750);
+        private static readonly TimeSpan MicrophoneRearmLogInterval = TimeSpan.FromSeconds(2);
         private const byte ViiperStreamFrameInputState = 0x01;
         private const byte ViiperStreamFrameMicrophonePcm = 0x02;
 
@@ -79,6 +82,7 @@ namespace DS4Windows
         private ViiperDeviceStream deviceStream;
         private Thread feedbackThread;
         private Thread stateWriterThread;
+        private Thread microphoneRearmThread;
         private IOpusDecoder microphoneDecoder;
         private DualSenseDevice microphoneSourceDevice;
         private byte[] pendingStatePacket;
@@ -99,6 +103,10 @@ namespace DS4Windows
         private int microphoneVolume = 128;
         private string physicalDualSenseIdentityPath;
         private bool physicalDualSenseIdentityVerified;
+        private volatile bool microphoneRearmStopRequested;
+        private long lastMicrophoneOpusFrameUtcTicks;
+        private long lastMicrophoneRearmAttemptUtcTicks;
+        private DateTime lastMicrophoneRearmLogUtc = DateTime.MinValue;
         private long queuedMicrophoneFrameCount;
         private long droppedMicrophoneFrameCount;
         private long writtenMicrophoneFrameCount;
@@ -138,6 +146,8 @@ namespace DS4Windows
             Interlocked.Exchange(ref droppedMicrophoneFrameCount, 0);
             Interlocked.Exchange(ref writtenMicrophoneFrameCount, 0);
             Interlocked.Exchange(ref microphoneDecodeFailureCount, 0);
+            Interlocked.Exchange(ref lastMicrophoneOpusFrameUtcTicks, 0);
+            Interlocked.Exchange(ref lastMicrophoneRearmAttemptUtcTicks, 0);
             Volatile.Write(ref edgePhysicalMismatchLogged, 0);
             Volatile.Write(ref microphoneUnavailableLogged, 0);
             lock (physicalDualSenseIdentityLock)
@@ -146,6 +156,8 @@ namespace DS4Windows
                 physicalDualSenseIdentityVerified = false;
             }
             lastWriterHealthLogUtc = DateTime.MinValue;
+            lastMicrophoneRearmLogUtc = DateTime.MinValue;
+            microphoneRearmStopRequested = false;
             writerStopRequested = false;
             connected = true;
             StartStateWriter();
@@ -264,6 +276,7 @@ namespace DS4Windows
         {
             connected = false;
             writerStopRequested = true;
+            microphoneRearmStopRequested = true;
             writerSignal.Set();
             DetachBluetoothMicrophoneSource();
             lock (pendingPacketLock)
@@ -287,6 +300,7 @@ namespace DS4Windows
             }
 
             stateWriterThread = null;
+            StopMicrophoneRearmThread();
             StopFeedbackReader();
             ViiperUsbipPortManager.DetachStaleLocalViiperPorts();
         }
@@ -927,7 +941,10 @@ namespace DS4Windows
             }
 
             dualSenseDevice.ResetBluetoothMicrophoneProbeStatistics();
+            Interlocked.Exchange(ref lastMicrophoneOpusFrameUtcTicks, 0);
+            Interlocked.Exchange(ref lastMicrophoneRearmAttemptUtcTicks, DateTime.UtcNow.Ticks);
             bool accepted = dualSenseDevice.SetBluetoothMicrophoneStreaming(true);
+            StartMicrophoneRearmThread();
             if (Global.VerboseStartupLogging)
             {
                 AppLogger.LogToGui(
@@ -955,6 +972,9 @@ namespace DS4Windows
             }
 
             microphoneDecoder = null;
+            Interlocked.Exchange(ref lastMicrophoneOpusFrameUtcTicks, 0);
+            Interlocked.Exchange(ref lastMicrophoneRearmAttemptUtcTicks, 0);
+            StopMicrophoneRearmThread();
 
             if (oldSource != null)
             {
@@ -987,6 +1007,7 @@ namespace DS4Windows
                 return;
             }
 
+            Interlocked.Exchange(ref lastMicrophoneOpusFrameUtcTicks, DateTime.UtcNow.Ticks);
             byte[] copy = new byte[DualSenseMicrophoneOpusFrameLength];
             Buffer.BlockCopy(opusFrame, 0, copy, 0, copy.Length);
             lock (pendingPacketLock)
@@ -1004,6 +1025,106 @@ namespace DS4Windows
             LogMicrophoneQueueDiagnostic(source, copy);
             EnsureStateWriterAlive();
             writerSignal.Set();
+        }
+
+        private void StartMicrophoneRearmThread()
+        {
+            lock (microphoneSourceLock)
+            {
+                if (microphoneRearmThread != null && microphoneRearmThread.IsAlive)
+                {
+                    return;
+                }
+
+                microphoneRearmStopRequested = false;
+                microphoneRearmThread = new Thread(MicrophoneRearmLoop)
+                {
+                    IsBackground = true,
+                    Name = $"VIIPER {viiperType} mic rearm",
+                };
+                microphoneRearmThread.Start();
+            }
+        }
+
+        private void StopMicrophoneRearmThread()
+        {
+            Thread thread = null;
+            lock (microphoneSourceLock)
+            {
+                microphoneRearmStopRequested = true;
+                thread = microphoneRearmThread;
+                microphoneRearmThread = null;
+            }
+
+            if (thread != null &&
+                thread.IsAlive &&
+                Thread.CurrentThread.ManagedThreadId != thread.ManagedThreadId)
+            {
+                thread.Join(500);
+            }
+        }
+
+        private void MicrophoneRearmLoop()
+        {
+            while (!microphoneRearmStopRequested && connected)
+            {
+                Thread.Sleep(MicrophoneRearmCheckInterval);
+                if (microphoneRearmStopRequested || !connected)
+                {
+                    return;
+                }
+
+                DualSenseDevice source;
+                lock (microphoneSourceLock)
+                {
+                    source = microphoneSourceDevice;
+                }
+
+                if (source == null)
+                {
+                    return;
+                }
+
+                long lastFrameTicks = Interlocked.Read(ref lastMicrophoneOpusFrameUtcTicks);
+                DateTime now = DateTime.UtcNow;
+                DateTime lastFrameUtc = lastFrameTicks > 0 ?
+                    new DateTime(lastFrameTicks, DateTimeKind.Utc) : DateTime.MinValue;
+                if (lastFrameUtc != DateTime.MinValue &&
+                    now - lastFrameUtc < MicrophoneStallRearmThreshold)
+                {
+                    continue;
+                }
+
+                long lastAttemptTicks = Interlocked.Read(ref lastMicrophoneRearmAttemptUtcTicks);
+                DateTime lastAttemptUtc = lastAttemptTicks > 0 ?
+                    new DateTime(lastAttemptTicks, DateTimeKind.Utc) : DateTime.MinValue;
+                if (lastAttemptUtc != DateTime.MinValue &&
+                    now - lastAttemptUtc < MicrophoneRearmCheckInterval)
+                {
+                    continue;
+                }
+
+                Interlocked.Exchange(ref lastMicrophoneRearmAttemptUtcTicks, now.Ticks);
+                bool accepted = false;
+                string status = string.Empty;
+                try
+                {
+                    accepted = source.SetBluetoothMicrophoneStreaming(true);
+                    status = source.LastBluetoothMicrophoneWriteStatus;
+                }
+                catch (Exception ex)
+                {
+                    status = $"{ex.GetType().Name}: {ex.Message}";
+                }
+
+                if (Global.VerboseStartupLogging &&
+                    now - lastMicrophoneRearmLogUtc >= MicrophoneRearmLogInterval)
+                {
+                    lastMicrophoneRearmLogUtc = now;
+                    viiperMicDiagLogger.Info(
+                        $"VIIPER_MIC_REARM type={viiperType} utc={now:O} accepted={accepted} lastFrameUtc={(lastFrameUtc == DateTime.MinValue ? "<none>" : lastFrameUtc.ToString("O"))} queued={Interlocked.Read(ref queuedMicrophoneFrameCount)} written={Interlocked.Read(ref writtenMicrophoneFrameCount)} status={status}");
+                }
+            }
         }
 
         private void LogMicrophoneQueueDiagnostic(DualSenseDevice source, byte[] opusFrame)

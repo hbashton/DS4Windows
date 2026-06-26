@@ -74,6 +74,7 @@ namespace DS4Windows
         bool[] held = new bool[MAX_DS4_CONTROLLER_COUNT];
         int[] oldmouse = new int[MAX_DS4_CONTROLLER_COUNT] { -1, -1, -1, -1, -1, -1, -1, -1 };
         private int[] startupReportDiagCounts = new int[MAX_DS4_CONTROLLER_COUNT];
+        private int[] viiperInputLayerDiagCounts = new int[MAX_DS4_CONTROLLER_COUNT];
         private System.Threading.Timer gameBarProfileTimer;
         private int gameBarProfileUpdateGate = 0;
         public OutputDevice[] outputDevices = new OutputDevice[MAX_DS4_CONTROLLER_COUNT] { null, null, null, null, null, null, null, null };
@@ -3918,6 +3919,8 @@ namespace DS4Windows
                     tempControlState = CurrentState[ind];
                 }
 
+                LogViiperInputLayerDiag(ind, "raw", cState);
+
                 DS4State pState = device.getPreviousStateRef();
                 //device.getPreviousState(PreviousState[ind]);
                 //DS4State pState = PreviousState[ind];
@@ -3996,6 +3999,7 @@ namespace DS4Windows
                 }
 
                 cState = device.Debouncer.ProcessInput(cState);
+                LogViiperInputLayerDiag(ind, "debounced", cState);
 
                 if (startupReportDiag)
                 {
@@ -4003,6 +4007,7 @@ namespace DS4Windows
                 }
 
                 cState = Mapping.SetCurveAndDeadzone(ind, cState, TempState[ind]);
+                LogViiperInputLayerDiag(ind, "curved", cState);
 
                 if (!recordingMacro && (useTempProfile[ind] ||
                     containsCustomAction(ind) || containsCustomExtras(ind) ||
@@ -4041,6 +4046,7 @@ namespace DS4Windows
                     }
 
                     cState = tempMapState;
+                    LogViiperInputLayerDiag(ind, "mapped", cState);
 
                 }
 
@@ -4069,6 +4075,7 @@ namespace DS4Windows
                     {
                         StartupDiag($"On_Report ConvertandSendReport begin index={ind} count={startupReportCount} outDev={outputDevices[ind]?.GetDeviceType() ?? "null"}");
                     }
+                    LogViiperInputLayerDiag(ind, "output", cState);
                     outputDevices[ind]?.ConvertandSendReport(cState, ind);
                     if (startupReportDiag)
                     {
@@ -4158,6 +4165,61 @@ namespace DS4Windows
                     StartupDiag($"On_Report exit index={ind} count={startupReportCount}");
                 }
             }
+        }
+
+        private void LogViiperInputLayerDiag(int ind, string stage, DS4State state)
+        {
+            if (!Global.VerboseStartupLogging ||
+                ind < 0 ||
+                ind >= MAX_DS4_CONTROLLER_COUNT ||
+                state == null ||
+                !ViiperOutDevice.IsViiperType(activeOutDevType[ind]) ||
+                !IsInputStateNonNeutralForDiag(state))
+            {
+                return;
+            }
+
+            int count = Interlocked.Increment(ref viiperInputLayerDiagCounts[ind]);
+            if (count > 800)
+            {
+                return;
+            }
+
+            LogDebug(
+                $"VIIPER_LAYER_DIAG stage={stage} device={ind + 1} count={count} profile=\"{ProfilePath[ind]}\" out={activeOutDevType[ind]} {SummarizeInputStateForDiag(state)}",
+                false);
+        }
+
+        private static bool IsInputStateNonNeutralForDiag(DS4State state)
+        {
+            return state.LX != 128 || state.LY != 128 ||
+                state.RX != 128 || state.RY != 128 ||
+                state.L2 != 0 || state.R2 != 0 ||
+                state.L2Btn || state.R2Btn ||
+                state.DpadUp || state.DpadDown || state.DpadLeft || state.DpadRight ||
+                state.Cross || state.Circle || state.Square || state.Triangle ||
+                state.L1 || state.R1 || state.L3 || state.R3 ||
+                state.Share || state.Options || state.PS || state.Mute ||
+                state.TouchButton || state.OutputTouchButton ||
+                state.Touch1 || state.Touch2 ||
+                state.Touch1Finger || state.Touch2Fingers ||
+                state.TrackPadTouch0.IsActive || state.TrackPadTouch1.IsActive ||
+                state.FnL || state.FnR || state.BLP || state.BRP ||
+                state.Capture || state.SideL || state.SideR;
+        }
+
+        private static string SummarizeInputStateForDiag(DS4State state)
+        {
+            return $"packet={state.PacketCounter} frame={state.FrameCounter} lx={state.LX} ly={state.LY} rx={state.RX} ry={state.RY} " +
+                $"l2={state.L2}/{state.L2Btn} r2={state.R2}/{state.R2Btn} " +
+                $"dpad=U{state.DpadUp}D{state.DpadDown}L{state.DpadLeft}R{state.DpadRight} " +
+                $"face=X{state.Cross}O{state.Circle}Sq{state.Square}Tr{state.Triangle} " +
+                $"shoulders=L1{state.L1}R1{state.R1}L3{state.L3}R3{state.R3} " +
+                $"sys=Sh{state.Share}Op{state.Options}PS{state.PS}Mute{state.Mute} " +
+                $"touchBtn={state.TouchButton}/{state.OutputTouchButton} touch={state.Touch1}/{state.Touch2}/{state.Touch1Finger}/{state.Touch2Fingers} " +
+                $"t0={state.TrackPadTouch0.IsActive}:{state.TrackPadTouch0.X},{state.TrackPadTouch0.Y}:{state.TrackPadTouch0.RawTrackingNum} " +
+                $"t1={state.TrackPadTouch1.IsActive}:{state.TrackPadTouch1.X},{state.TrackPadTouch1.Y}:{state.TrackPadTouch1.RawTrackingNum} " +
+                $"extra=FnL{state.FnL}FnR{state.FnR}BLP{state.BLP}BRP{state.BRP}Cap{state.Capture}SideL{state.SideL}SideR{state.SideR}";
         }
 
         private static void OSCPostMappingStep(DS4State tempMapState, DS4State oscMapState)

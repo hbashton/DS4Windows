@@ -97,6 +97,16 @@ namespace DS4WindowsTests
             }
         }
 
+        [TestMethod]
+        public void DualSenseDetectsShiftedMicTransportScars()
+        {
+            AssertMicTransportScarDetected(new byte[] { 0x4D, 0x01, 0x01, 0x21 });
+            AssertMicTransportScarDetected(new byte[] { 0x01, 0x01, 0x21 });
+            AssertMicTransportScarDetected(new byte[] { 0x50, 0x80, 0x87, 0x43 });
+            AssertMicTransportScarDetected(new byte[] { 0x80, 0x87, 0x43 });
+            Assert.IsFalse(ContainsMicTransportScar(new byte[] { 0x80, 0x87, 0x42 }));
+        }
+
         private static DS4State CreateMotionState()
         {
             DS4State state = new DS4State();
@@ -139,6 +149,26 @@ namespace DS4WindowsTests
         private static short ReadInt16(byte[] data, int offset)
         {
             return unchecked((short)(data[offset] | (data[offset + 1] << 8)));
+        }
+
+        private static void AssertMicTransportScarDetected(byte[] pattern)
+        {
+            byte[] packet = new byte[33];
+            Array.Copy(pattern, 0, packet, 11, pattern.Length);
+            Assert.IsTrue(ContainsMicTransportScar(packet),
+                $"expected shifted mic transport scar to be detected: {BitConverter.ToString(pattern)}");
+        }
+
+        private static bool ContainsMicTransportScar(byte[] packet)
+        {
+            Type builderType = typeof(ViiperVirtualDeviceType).Assembly.GetType(
+                "DS4Windows.ViiperStatePacketBuilder",
+                throwOnError: true);
+            MethodInfo containsMethod = builderType.GetMethod(
+                "ContainsViiperMicTransportLeakPattern",
+                BindingFlags.NonPublic | BindingFlags.Static);
+
+            return (bool)containsMethod.Invoke(null, new object[] { packet, 11, packet.Length - 11 });
         }
     }
 }

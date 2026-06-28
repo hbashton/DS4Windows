@@ -387,13 +387,17 @@ namespace DS4Windows.InputDevices
         private const byte DualSenseOutputFlag0AudioControlEnable = 0x80;
         private const byte DualSenseOutputFlag1MicrophoneMuteLedEnable = 0x01;
         private const byte DualSenseOutputFlag1PowerSaveControlEnable = 0x02;
+        private const byte DualSenseOutputFlag1AudioControl2Enable = 0x80;
+        private const byte DualSenseAudioControlNoiseCancelEnable = 0x08;
         private const byte DualSensePowerSaveControlMicrophoneMute = 0x10;
+        private const byte DualSensePowerSaveControlActiveBaseline = 0x0F;
         private const byte DualSenseMicrophoneVolumeMax = 0x40;
         private const byte DualSenseAudioControlMicSelectMask = 0x03;
         private const byte DualSenseAudioControlMicInternal = 0x01;
         private const byte DualSenseAudioControlOutputPathMask = 0x30;
         private const byte DualSenseAudioControlOutputHeadset = 0x20;
         private const byte DualSenseAudioControlOutputSpeaker = 0x30;
+        private const byte DualSenseAudioControl2SpeakerCompPreGain = 0x01;
         private const int BluetoothCombinedAudioControlFlagsOffset = 4;
         private const byte BluetoothCombinedAudioControlFlagsBase = 0xFE;
         private const byte BluetoothCombinedAudioControlMicrophoneEnable = 0x01;
@@ -2392,15 +2396,24 @@ namespace DS4Windows.InputDevices
                     DualSenseOutputFlag0AudioControlEnable;
                 combined[BluetoothCombinedStateFlag1Offset] |=
                     DualSenseOutputFlag1MicrophoneMuteLedEnable |
-                    DualSenseOutputFlag1PowerSaveControlEnable;
+                    DualSenseOutputFlag1PowerSaveControlEnable |
+                    DualSenseOutputFlag1AudioControl2Enable;
                 combined[BluetoothCombinedStateMicrophoneVolumeOffset] =
                     GetDualSenseMicrophoneVolumeByte();
                 combined[BluetoothCombinedStateAudioControlOffset] =
                     (byte)((combined[BluetoothCombinedStateAudioControlOffset] &
                         ~DualSenseAudioControlMicSelectMask) |
-                        DualSenseAudioControlMicInternal);
+                        DualSenseAudioControlMicInternal |
+                        DualSenseAudioControlNoiseCancelEnable);
+                if (combined.Length > BluetoothCombinedStateAudioControl2Offset)
+                {
+                    combined[BluetoothCombinedStateAudioControl2Offset] |=
+                        DualSenseAudioControl2SpeakerCompPreGain;
+                }
+
                 combined[BluetoothCombinedStateAudioMuteOffset] =
-                    (byte)(combined[BluetoothCombinedStateAudioMuteOffset] &
+                    (byte)((combined[BluetoothCombinedStateAudioMuteOffset] |
+                        DualSensePowerSaveControlActiveBaseline) &
                         ~DualSensePowerSaveControlMicrophoneMute);
             }
             else if (combined.Length > BluetoothCombinedAudioControlFlagsOffset)
@@ -2412,12 +2425,20 @@ namespace DS4Windows.InputDevices
                 combined[BluetoothCombinedStateFlag0Offset] |=
                     DualSenseOutputFlag0AudioControlEnable;
                 combined[BluetoothCombinedStateFlag1Offset] |=
-                    DualSenseOutputFlag1PowerSaveControlEnable;
+                    DualSenseOutputFlag1PowerSaveControlEnable |
+                    DualSenseOutputFlag1AudioControl2Enable;
                 combined[BluetoothCombinedStateAudioControlOffset] =
                     (byte)(combined[BluetoothCombinedStateAudioControlOffset] &
                         ~DualSenseAudioControlMicSelectMask);
+                if (combined.Length > BluetoothCombinedStateAudioControl2Offset)
+                {
+                    combined[BluetoothCombinedStateAudioControl2Offset] |=
+                        DualSenseAudioControl2SpeakerCompPreGain;
+                }
+
                 combined[BluetoothCombinedStateAudioMuteOffset] =
                     (byte)(combined[BluetoothCombinedStateAudioMuteOffset] |
+                        DualSensePowerSaveControlActiveBaseline |
                         DualSensePowerSaveControlMicrophoneMute);
             }
         }
@@ -2489,8 +2510,15 @@ namespace DS4Windows.InputDevices
             combined[BluetoothCombinedStateMuteLedOffset] = muteLedOverride ?
                 (muteLedOn ? (byte)0x01 : (byte)0x00) :
                 microphoneMuteOverride ? (microphoneMuted ? (byte)0x01 : (byte)0x00) : muteLEDByte;
+            byte audioPowerState = (byte)((combined[BluetoothCombinedStateAudioMuteOffset] |
+                DualSensePowerSaveControlActiveBaseline) & ~DualSensePowerSaveControlMicrophoneMute);
+            if (microphoneMuteOverride && microphoneMuted)
+            {
+                audioPowerState |= DualSensePowerSaveControlMicrophoneMute;
+            }
+
             combined[BluetoothCombinedStateAudioMuteOffset] =
-                microphoneMuteOverride && microphoneMuted ? (byte)0x10 : (byte)0x00;
+                audioPowerState;
 
             int slot = DeviceSlotNumber;
             if (slot < 0 || slot >= Global.LightbarSettingsInfo.Length ||
@@ -2722,7 +2750,7 @@ namespace DS4Windows.InputDevices
             }
 
             micDiagLogger.Info(
-                $"DualSenseMicDiag CONTROL_REPORT enabled={enabled} mac={Mac} utc={DateTime.UtcNow:O} ticks={Stopwatch.GetTimestamp()} len={report?.Length ?? 0} reportId=0x{(report != null && report.Length > 0 ? report[0] : 0):X2} audioFlags=0x{(report != null && report.Length > BluetoothCombinedAudioControlFlagsOffset ? report[BluetoothCombinedAudioControlFlagsOffset] : 0):X2} flag0=0x{(report != null && report.Length > BluetoothCombinedStateFlag0Offset ? report[BluetoothCombinedStateFlag0Offset] : 0):X2} flag1=0x{(report != null && report.Length > BluetoothCombinedStateFlag1Offset ? report[BluetoothCombinedStateFlag1Offset] : 0):X2} micVol=0x{(report != null && report.Length > BluetoothCombinedStateMicrophoneVolumeOffset ? report[BluetoothCombinedStateMicrophoneVolumeOffset] : 0):X2} audioCtrl=0x{(report != null && report.Length > BluetoothCombinedStateAudioControlOffset ? report[BluetoothCombinedStateAudioControlOffset] : 0):X2} muteLed=0x{(report != null && report.Length > BluetoothCombinedStateMuteLedOffset ? report[BluetoothCombinedStateMuteLedOffset] : 0):X2} audioMute=0x{(report != null && report.Length > BluetoothCombinedStateAudioMuteOffset ? report[BluetoothCombinedStateAudioMuteOffset] : 0):X2} bytes={FormatBytes(report, report?.Length ?? 0)}");
+                $"DualSenseMicDiag CONTROL_REPORT enabled={enabled} mac={Mac} utc={DateTime.UtcNow:O} ticks={Stopwatch.GetTimestamp()} len={report?.Length ?? 0} reportId=0x{(report != null && report.Length > 0 ? report[0] : 0):X2} audioFlags=0x{(report != null && report.Length > BluetoothCombinedAudioControlFlagsOffset ? report[BluetoothCombinedAudioControlFlagsOffset] : 0):X2} flag0=0x{(report != null && report.Length > BluetoothCombinedStateFlag0Offset ? report[BluetoothCombinedStateFlag0Offset] : 0):X2} flag1=0x{(report != null && report.Length > BluetoothCombinedStateFlag1Offset ? report[BluetoothCombinedStateFlag1Offset] : 0):X2} micVol=0x{(report != null && report.Length > BluetoothCombinedStateMicrophoneVolumeOffset ? report[BluetoothCombinedStateMicrophoneVolumeOffset] : 0):X2} audioCtrl=0x{(report != null && report.Length > BluetoothCombinedStateAudioControlOffset ? report[BluetoothCombinedStateAudioControlOffset] : 0):X2} audioCtrl2=0x{(report != null && report.Length > BluetoothCombinedStateAudioControl2Offset ? report[BluetoothCombinedStateAudioControl2Offset] : 0):X2} muteLed=0x{(report != null && report.Length > BluetoothCombinedStateMuteLedOffset ? report[BluetoothCombinedStateMuteLedOffset] : 0):X2} audioMute=0x{(report != null && report.Length > BluetoothCombinedStateAudioMuteOffset ? report[BluetoothCombinedStateAudioMuteOffset] : 0):X2} bytes={FormatBytes(report, report?.Length ?? 0)}");
         }
 
         private static string FormatBytes(byte[] bytes, int count)

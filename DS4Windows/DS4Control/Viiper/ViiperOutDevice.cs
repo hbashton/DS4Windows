@@ -61,9 +61,9 @@ namespace DS4Windows
         private const int MaxPendingMicrophoneFrames = 8;
         private const int MaxMicrophoneDiagnosticFrames = 40000;
         private const int MaxStreamRecoveryAttempts = 2;
-        private static readonly TimeSpan MicrophoneRearmCheckInterval = TimeSpan.FromMilliseconds(500);
-        private static readonly TimeSpan MicrophoneStallRearmThreshold = TimeSpan.FromSeconds(2);
-        private static readonly TimeSpan MicrophoneRearmAttemptInterval = TimeSpan.FromSeconds(5);
+        private static readonly TimeSpan MicrophoneRearmCheckInterval = TimeSpan.FromMilliseconds(100);
+        private static readonly TimeSpan MicrophoneStallRearmThreshold = TimeSpan.FromMilliseconds(500);
+        private static readonly TimeSpan MicrophoneRearmAttemptInterval = TimeSpan.FromMilliseconds(250);
         private static readonly TimeSpan MicrophoneRearmLogInterval = TimeSpan.FromSeconds(2);
         private static readonly TimeSpan MicrophoneHealthLogInterval = TimeSpan.FromSeconds(2);
         private const byte ViiperStreamFrameInputState = 0x01;
@@ -2500,8 +2500,16 @@ namespace DS4Windows
         private const byte ViiperStreamMagic3 = 0x4D;
         private static readonly byte[] ViiperMicTransportScarCM =
             { ViiperStreamMagic2, ViiperStreamMagic3, 0x01, 0x01, 0x21 };
+        private static readonly byte[] ViiperMicTransportScarCMShift1 =
+            { ViiperStreamMagic3, 0x01, 0x01, 0x21 };
+        private static readonly byte[] ViiperMicTransportScarCMShift2 =
+            { 0x01, 0x01, 0x21 };
         private static readonly byte[] ViiperMicTransportScarCP =
             { ViiperStreamMagic2, ViiperStreamMagic1, 0x80, 0x87, ViiperStreamMagic2 };
+        private static readonly byte[] ViiperMicTransportScarCPShift1 =
+            { ViiperStreamMagic1, 0x80, 0x87, ViiperStreamMagic2 };
+        private static readonly byte[] ViiperMicTransportScarCPShift2 =
+            { 0x80, 0x87, ViiperStreamMagic2 };
         private const float X360RecipInputPosResolution = 1 / 127f;
         private const float X360RecipInputNegResolution = 1 / 128f;
         private const int X360OutputResolution = 32767 - (-32768);
@@ -2932,7 +2940,11 @@ namespace DS4Windows
             }
 
             return ContainsByteSequence(packet, start, end, ViiperMicTransportScarCM) ||
-                ContainsByteSequence(packet, start, end, ViiperMicTransportScarCP);
+                ContainsByteSequence(packet, start, end, ViiperMicTransportScarCMShift1) ||
+                ContainsByteSequence(packet, start, end, ViiperMicTransportScarCMShift2) ||
+                ContainsByteSequence(packet, start, end, ViiperMicTransportScarCP) ||
+                ContainsByteSequence(packet, start, end, ViiperMicTransportScarCPShift1) ||
+                ContainsByteSequence(packet, start, end, ViiperMicTransportScarCPShift2);
         }
 
         private static bool ContainsByteSequence(byte[] packet, int start, int end, byte[] sequence)

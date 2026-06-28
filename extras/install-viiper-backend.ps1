@@ -47,6 +47,113 @@ function Invoke-Download($url, $outFile) {
     Invoke-WebRequest -Uri $url -OutFile $outFile -UseBasicParsing
 }
 
+function Get-ViiperProcesses($installPath) {
+    $resolvedInstallPath = $null
+    if ($installPath) {
+        try {
+            $resolvedInstallPath = [IO.Path]::GetFullPath($installPath)
+        }
+        catch { }
+    }
+
+    $processMatches = @()
+    $wmiSucceeded = $false
+    try {
+        $candidates = Get-CimInstance Win32_Process -Filter "Name = 'viiper.exe'" -ErrorAction Stop
+        $wmiSucceeded = $true
+        foreach ($candidate in @($candidates)) {
+            $exePath = $candidate.ExecutablePath
+            if ($resolvedInstallPath -and $exePath) {
+                try {
+                    $candidatePath = [IO.Path]::GetFullPath($exePath)
+                    if ([String]::Equals($candidatePath, $resolvedInstallPath, [StringComparison]::OrdinalIgnoreCase)) {
+                        $processMatches += $candidate
+                    }
+                }
+                catch { }
+            }
+            elseif (-not $resolvedInstallPath) {
+                $processMatches += $candidate
+            }
+        }
+    }
+    catch {
+        Write-Host "Could not inspect VIIPER process paths via WMI: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+
+    if ($processMatches.Count -eq 0) {
+        foreach ($process in @(Get-Process -Name "viiper" -ErrorAction SilentlyContinue)) {
+            if (-not $resolvedInstallPath) {
+                $processMatches += $process
+                continue
+            }
+
+            try {
+                if ($process.Path) {
+                    $processPath = [IO.Path]::GetFullPath($process.Path)
+                    if ([String]::Equals($processPath, $resolvedInstallPath, [StringComparison]::OrdinalIgnoreCase)) {
+                        $processMatches += $process
+                    }
+                }
+                elseif (-not $wmiSucceeded) {
+                    $processMatches += $process
+                }
+            }
+            catch {
+                if (-not $wmiSucceeded) {
+                    $processMatches += $process
+                }
+            }
+        }
+    }
+
+    return @($processMatches)
+}
+
+function Stop-ViiperProcesses($installPath) {
+    $processes = @(Get-ViiperProcesses $installPath)
+    if ($processes.Count -eq 0) {
+        return
+    }
+
+    Write-Host "Stopping existing VIIPER process(es) so the executable can be updated." -ForegroundColor Yellow
+    foreach ($processInfo in $processes) {
+        $processId = if ($processInfo.ProcessId) { [int]$processInfo.ProcessId } else { [int]$processInfo.Id }
+        try {
+            $process = Get-Process -Id $processId -ErrorAction Stop
+            Write-Host "Stopping viiper.exe pid=$processId"
+            if ($process.MainWindowHandle -ne 0) {
+                [void]$process.CloseMainWindow()
+                if ($process.WaitForExit(2000)) {
+                    continue
+                }
+            }
+
+            Stop-Process -Id $processId -Force -ErrorAction Stop
+            [void]$process.WaitForExit(5000)
+        }
+        catch {
+            if (Get-Process -Id $processId -ErrorAction SilentlyContinue) {
+                throw "Could not stop viiper.exe pid=$processId. Close it manually and run setup again. $($_.Exception.Message)"
+            }
+        }
+    }
+}
+
+function Copy-ViiperExecutable($sourcePath, $installPath) {
+    try {
+        Copy-Item -LiteralPath $sourcePath -Destination $installPath -Force
+        return
+    }
+    catch [System.IO.IOException] {
+        Write-Host "VIIPER executable is busy; stopping the existing server and retrying." -ForegroundColor Yellow
+        Stop-ViiperProcesses $installPath
+        Start-Sleep -Milliseconds 500
+        Copy-Item -LiteralPath $sourcePath -Destination $installPath -Force
+        return
+    }
+}
+
 function Get-GithubReleaseAsset($repo, $assetPattern) {
     $apiUrl = "https://api.github.com/repos/$repo/releases?per_page=20"
     $releases = Invoke-RestMethod -Uri $apiUrl -Headers @{ "User-Agent" = "DS4Windows-VIIPER-Setup" }
@@ -100,7 +207,7 @@ function Install-ViiperAsset($assetUrl, $installPath, $tempDir) {
     Invoke-Download $assetUrl $downloadPath
 
     if ($extension -ieq ".exe") {
-        Copy-Item $downloadPath $installPath -Force
+        Copy-ViiperExecutable $downloadPath $installPath
         return
     }
 
@@ -118,7 +225,7 @@ function Install-ViiperAsset($assetUrl, $installPath, $tempDir) {
             throw "Downloaded VIIPER archive did not contain viiper.exe."
         }
 
-        Copy-Item $executable.FullName $installPath -Force
+        Copy-ViiperExecutable $executable.FullName $installPath
         return
     }
 
@@ -164,6 +271,7 @@ $viiperRepos = @(
     "hbashton/VIIPER"
 )
 $viiperAssetUrl = Get-GithubLatestAssetWithFallback $viiperRepos "(?i)^(?!.*(libviiper|client|headers|linux|arm64|\.nupkg|\.crate|\.tgz)).*\.(exe|zip)$"
+Stop-ViiperProcesses $viiperPath
 Install-ViiperAsset $viiperAssetUrl $viiperPath $tempDir
 Write-Host "VIIPER installed to $viiperPath" -ForegroundColor Green
 

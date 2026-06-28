@@ -61,6 +61,42 @@ namespace DS4WindowsTests
             }
         }
 
+        [TestMethod]
+        public void DualSenseDropsMicTransportScarInMotionFields()
+        {
+            DS4State state = new DS4State
+            {
+                LX = 255,
+            };
+            state.Motion.gyroPitchFull = 0x4D43;
+            state.Motion.gyroYawFull = -0x0101;
+            state.Motion.gyroRollFull = -0x0021;
+
+            bool[] previous = Global.DualSenseEnableMicrophonePassthrough;
+            try
+            {
+                bool[] enabled = new bool[Math.Max(previous?.Length ?? 0, 1)];
+                if (previous != null)
+                {
+                    Array.Copy(previous, enabled, previous.Length);
+                }
+
+                enabled[0] = true;
+                Global.DualSenseEnableMicrophonePassthrough = enabled;
+
+                byte[] packet = BuildViiperStatePacket(ViiperVirtualDeviceType.DualSense, state, 0);
+
+                Assert.AreEqual(0, packet[0], "neutral packet should replace the left stick X value");
+                Assert.AreEqual(0x80, packet[15], "neutral packet should mark touch 1 inactive");
+                Assert.AreEqual(0x80, packet[20], "neutral packet should mark touch 2 inactive");
+                Assert.AreEqual((short)-8192, ReadInt16(packet, 31), "neutral packet should preserve rest accel Z");
+            }
+            finally
+            {
+                Global.DualSenseEnableMicrophonePassthrough = previous;
+            }
+        }
+
         private static DS4State CreateMotionState()
         {
             DS4State state = new DS4State();

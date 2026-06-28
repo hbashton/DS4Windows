@@ -2498,6 +2498,10 @@ namespace DS4Windows
         private const byte ViiperStreamMagic1 = 0x50;
         private const byte ViiperStreamMagic2 = 0x43;
         private const byte ViiperStreamMagic3 = 0x4D;
+        private static readonly byte[] ViiperMicTransportScarCM =
+            { ViiperStreamMagic2, ViiperStreamMagic3, 0x01, 0x01, 0x21 };
+        private static readonly byte[] ViiperMicTransportScarCP =
+            { ViiperStreamMagic2, ViiperStreamMagic1, 0x80, 0x87, ViiperStreamMagic2 };
         private const float X360RecipInputPosResolution = 1 / 127f;
         private const float X360RecipInputNegResolution = 1 / 128f;
         private const int X360OutputResolution = 32767 - (-32768);
@@ -2815,6 +2819,11 @@ namespace DS4Windows
             {
                 reason = "transport_marker_fragment_in_dualsense_input";
             }
+            else if (DualSenseMicrophoneGuardEnabled(device) &&
+                ContainsViiperMicTransportLeakPattern(packet, 11, packet.Length - 11))
+            {
+                reason = "mic_transport_leak_pattern_in_dualsense_touch_motion";
+            }
 
             if (string.IsNullOrEmpty(reason))
             {
@@ -2900,6 +2909,53 @@ namespace DS4Windows
                 if (packet[i] == ViiperStreamMagic1 &&
                     packet[i + 1] == ViiperStreamMagic2 &&
                     packet[i + 2] == ViiperStreamMagic3)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool ContainsViiperMicTransportLeakPattern(byte[] packet, int offset, int length)
+        {
+            if (packet == null || length <= 0)
+            {
+                return false;
+            }
+
+            int start = Math.Max(0, offset);
+            int end = Math.Min(packet.Length, offset + length);
+            if (end <= start)
+            {
+                return false;
+            }
+
+            return ContainsByteSequence(packet, start, end, ViiperMicTransportScarCM) ||
+                ContainsByteSequence(packet, start, end, ViiperMicTransportScarCP);
+        }
+
+        private static bool ContainsByteSequence(byte[] packet, int start, int end, byte[] sequence)
+        {
+            if (packet == null || sequence == null || sequence.Length == 0 ||
+                end - start < sequence.Length)
+            {
+                return false;
+            }
+
+            for (int i = start; i + sequence.Length <= end; i++)
+            {
+                bool found = true;
+                for (int j = 0; j < sequence.Length; j++)
+                {
+                    if (packet[i + j] != sequence[j])
+                    {
+                        found = false;
+                        break;
+                    }
+                }
+
+                if (found)
                 {
                     return true;
                 }

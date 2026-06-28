@@ -26,6 +26,41 @@ namespace DS4WindowsTests
             AssertSonyMotion(packet, 19);
         }
 
+        [TestMethod]
+        public void DualSenseDropsTransportMarkerFragmentInMotionFields()
+        {
+            DS4State state = new DS4State
+            {
+                LX = 255,
+            };
+            state.Motion.gyroPitchFull = 0x5056;
+            state.Motion.gyroYawFull = -0x43;
+
+            bool[] previous = Global.DualSenseEnableMicrophonePassthrough;
+            try
+            {
+                bool[] enabled = new bool[Math.Max(previous?.Length ?? 0, 1)];
+                if (previous != null)
+                {
+                    Array.Copy(previous, enabled, previous.Length);
+                }
+
+                enabled[0] = true;
+                Global.DualSenseEnableMicrophonePassthrough = enabled;
+
+                byte[] packet = BuildViiperStatePacket(ViiperVirtualDeviceType.DualSense, state, 0);
+
+                Assert.AreEqual(0, packet[0], "neutral packet should replace the left stick X value");
+                Assert.AreEqual(0x80, packet[15], "neutral packet should mark touch 1 inactive");
+                Assert.AreEqual(0x80, packet[20], "neutral packet should mark touch 2 inactive");
+                Assert.AreEqual((short)-8192, ReadInt16(packet, 31), "neutral packet should preserve rest accel Z");
+            }
+            finally
+            {
+                Global.DualSenseEnableMicrophonePassthrough = previous;
+            }
+        }
+
         private static DS4State CreateMotionState()
         {
             DS4State state = new DS4State();
@@ -50,6 +85,11 @@ namespace DS4WindowsTests
 
         private static byte[] BuildViiperStatePacket(ViiperVirtualDeviceType type, DS4State state)
         {
+            return BuildViiperStatePacket(type, state, -1);
+        }
+
+        private static byte[] BuildViiperStatePacket(ViiperVirtualDeviceType type, DS4State state, int device)
+        {
             Type builderType = typeof(ViiperVirtualDeviceType).Assembly.GetType(
                 "DS4Windows.ViiperStatePacketBuilder",
                 throwOnError: true);
@@ -57,7 +97,7 @@ namespace DS4WindowsTests
                 "Build",
                 BindingFlags.Public | BindingFlags.Static);
 
-            return (byte[])buildMethod.Invoke(null, new object[] { type, state, -1 });
+            return (byte[])buildMethod.Invoke(null, new object[] { type, state, device });
         }
 
         private static short ReadInt16(byte[] data, int offset)

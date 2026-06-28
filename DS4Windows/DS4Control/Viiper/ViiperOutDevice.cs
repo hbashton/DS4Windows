@@ -2628,7 +2628,7 @@ namespace DS4Windows
             WriteDualSenseTouch(packet, 11, state.TrackPadTouch0, 1920, 1080);
             WriteDualSenseTouch(packet, 16, state.TrackPadTouch1, 1920, 1080);
             WriteSonyMotion(packet, DualSenseMotionOffset, state, DualSenseGyroRestDeadband, DualSenseAccelRestZ);
-            return SanitizeDualSenseTransportSignature(packet);
+            return SanitizeDualSenseTransportSignature(packet, device);
         }
 
         private static byte[] BuildSwitch2Pro(DS4State state, int device)
@@ -2803,9 +2803,20 @@ namespace DS4Windows
             WriteInt16(packet, offset + 10, ClampShort(restAccelZ));
         }
 
-        private static byte[] SanitizeDualSenseTransportSignature(byte[] packet)
+        private static byte[] SanitizeDualSenseTransportSignature(byte[] packet, int device)
         {
-            if (!ContainsViiperStreamMagic(packet, 0, packet.Length))
+            string reason = string.Empty;
+            if (ContainsViiperStreamMagic(packet, 0, packet.Length))
+            {
+                reason = "transport_magic_in_dualsense_input";
+            }
+            else if (DualSenseMicrophoneGuardEnabled(device) &&
+                ContainsViiperStreamMarkerFragment(packet, 0, packet.Length))
+            {
+                reason = "transport_marker_fragment_in_dualsense_input";
+            }
+
+            if (string.IsNullOrEmpty(reason))
             {
                 return packet;
             }
@@ -2819,11 +2830,19 @@ namespace DS4Windows
             if (Global.VerboseStartupLogging && (count <= 128 || IsPowerOfTwo(count)))
             {
                 AppLogger.LogToGui(
-                    $"VIIPER_INPUT_CORRUPT_PACKET_DROPPED count={count} reason=transport_magic_in_dualsense_input before={before} after={FormatPacketBytes(neutral, 0, neutral.Length)}",
+                    $"VIIPER_INPUT_CORRUPT_PACKET_DROPPED count={count} reason={reason} before={before} after={FormatPacketBytes(neutral, 0, neutral.Length)}",
                     false);
             }
 
             return neutral;
+        }
+
+        private static bool DualSenseMicrophoneGuardEnabled(int device)
+        {
+            return device >= 0 &&
+                Global.DualSenseEnableMicrophonePassthrough != null &&
+                device < Global.DualSenseEnableMicrophonePassthrough.Length &&
+                Global.DualSenseEnableMicrophonePassthrough[device];
         }
 
         private static byte[] BuildNeutralDualSensePacket()
@@ -2851,6 +2870,36 @@ namespace DS4Windows
                     packet[i + 1] == ViiperStreamMagic1 &&
                     packet[i + 2] == ViiperStreamMagic2 &&
                     packet[i + 3] == ViiperStreamMagic3)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool ContainsViiperStreamMarkerFragment(byte[] packet, int offset, int length)
+        {
+            const int markerLength = 3;
+            if (packet == null || length < markerLength)
+            {
+                return false;
+            }
+
+            int start = Math.Max(0, offset);
+            int end = Math.Min(packet.Length, offset + length);
+            for (int i = start; i + markerLength <= end; i++)
+            {
+                if (packet[i] == ViiperStreamMagic0 &&
+                    packet[i + 1] == ViiperStreamMagic1 &&
+                    packet[i + 2] == ViiperStreamMagic2)
+                {
+                    return true;
+                }
+
+                if (packet[i] == ViiperStreamMagic1 &&
+                    packet[i + 1] == ViiperStreamMagic2 &&
+                    packet[i + 2] == ViiperStreamMagic3)
                 {
                     return true;
                 }

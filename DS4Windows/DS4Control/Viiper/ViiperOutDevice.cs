@@ -62,7 +62,7 @@ namespace DS4Windows
         private const int MaxMicrophoneDiagnosticFrames = 40000;
         private const int MaxStreamRecoveryAttempts = 2;
         private static readonly TimeSpan MicrophoneRearmCheckInterval = TimeSpan.FromMilliseconds(100);
-        private static readonly TimeSpan MicrophoneStallRearmThreshold = TimeSpan.FromMilliseconds(500);
+        private static readonly TimeSpan MicrophoneStallRearmThreshold = TimeSpan.FromSeconds(1);
         private static readonly TimeSpan MicrophoneRearmAttemptInterval = TimeSpan.FromMilliseconds(250);
         private static readonly TimeSpan MicrophoneRearmLogInterval = TimeSpan.FromSeconds(2);
         private static readonly TimeSpan MicrophoneHealthLogInterval = TimeSpan.FromSeconds(2);

@@ -3427,7 +3427,7 @@ namespace DS4Windows
             gameBarVerboseDetectionLogInitialized = true;
             gameBarVerboseLastVisible = gameBarVisible;
             gameBarVerboseLastDetectionLogUtc = now;
-            StartupDiag($"GameBar detection visible={gameBarVisible} anyConfigured={anyConfigured} anyActiveOrPending={anyActiveOrPending} {gameBarIntegration.LastDetectionSummary} controllers={BuildGameBarPriorityStateSummary()}");
+            StartupDiag($"GameBar detection visible={gameBarVisible} anyConfigured={anyConfigured} anyActiveOrPending={anyActiveOrPending} {gameBarIntegration.CaptureLastDetectionSummary()} controllers={BuildGameBarPriorityStateSummary()}");
         }
 
         private string BuildGameBarPriorityStateSummary()

@@ -298,20 +298,30 @@ namespace DS4Windows
 
         public bool IsGameBarVisible()
         {
-            bool apiVisible = IsGameBarVisibleByCachedGameBarApi(out string apiSummary);
+            bool apiVisible = IsGameBarVisibleByCachedGameBarApi(false, out _);
+            bool windowVisible = IsGameBarVisibleByWindowEnumeration();
+            bool visible = apiVisible || windowVisible;
+            string source = apiVisible ? "api" : windowVisible ? "window" : "none";
+            UpdateLastDetectionSummary(visible, source, "details=not-captured");
+            return visible;
+        }
+
+        public string CaptureLastDetectionSummary()
+        {
+            bool apiVisible = IsGameBarVisibleByCachedGameBarApi(true, out string apiSummary);
             bool windowVisible = IsGameBarVisibleByWindowEnumeration(out string windowSummary);
             bool visible = apiVisible || windowVisible;
             string source = apiVisible ? "api" : windowVisible ? "window" : "none";
             UpdateLastDetectionSummary(visible, source,
-                $"api={apiSummary}; window={windowSummary}; uia=diagnostic-only");
-            return visible;
+                string.Concat("api=", apiSummary, "; window=", windowSummary, "; uia=diagnostic-only"));
+            return LastDetectionSummary;
         }
 
         private static void UpdateLastDetectionSummary(bool visible, string source, string details)
         {
             lock (detectionStatusLock)
             {
-                lastDetectionSummary = $"source={source} visible={visible} {details}";
+                lastDetectionSummary = string.Concat("source=", source, " visible=", visible, " ", details);
             }
         }
 
@@ -361,7 +371,7 @@ namespace DS4Windows
             return false;
         }
 
-        private static bool IsGameBarVisibleByCachedGameBarApi(out string summary)
+        private static bool IsGameBarVisibleByCachedGameBarApi(bool includeDiagnostics, out string summary)
         {
             DateTime now = DateTime.UtcNow;
             lock (gameBarApiPollLock)
@@ -428,25 +438,61 @@ namespace DS4Windows
                     worker.Start();
                 }
 
-                summary = BuildCachedGameBarApiSummary(now, cachedResultIsFresh, pollIsStale);
+                summary = includeDiagnostics ?
+                    BuildCachedGameBarApiSummary(now, cachedResultIsFresh, pollIsStale) :
+                    string.Empty;
                 return cachedResultIsFresh;
             }
         }
 
         private static string BuildCachedGameBarApiSummary(DateTime now, bool cachedResultIsFresh, bool pollIsStale)
         {
-            string completedAge = gameBarApiPollLastCompletedUtc == DateTime.MinValue ?
-                "never" :
-                ((int)(now - gameBarApiPollLastCompletedUtc).TotalMilliseconds).ToString() + "ms";
-            string startedAge = gameBarApiPollLastStartedUtc == DateTime.MinValue ?
-                "never" :
-                ((int)(now - gameBarApiPollLastStartedUtc).TotalMilliseconds).ToString() + "ms";
+            try
+            {
+                StringBuilder builder = new StringBuilder(256);
+                builder.Append("cachedFresh=").Append(cachedResultIsFresh)
+                    .Append(" cachedVisible=").Append(gameBarApiPollCachedVisible)
+                    .Append(" running=").Append(gameBarApiPollRunning)
+                    .Append(" stale=").Append(pollIsStale)
+                    .Append(" startedAge=").Append(FormatDiagnosticAge(now, gameBarApiPollLastStartedUtc))
+                    .Append(" completedAge=").Append(FormatDiagnosticAge(now, gameBarApiPollLastCompletedUtc))
+                    .Append(" lastSupported=").Append(gameBarApiPollLastSupported)
+                    .Append(" lastVisible=").Append(gameBarApiPollLastVisible)
+                    .Append(" lastInputRedirected=").Append(gameBarApiPollLastInputRedirected)
+                    .Append(" lastElapsedMs=").Append(gameBarApiPollLastElapsedMs)
+                    .Append(" lastStatus='").Append(TruncateDiagnosticText(gameBarApiPollLastStatus)).Append("'");
+                return builder.ToString();
+            }
+            catch (Exception ex)
+            {
+                return string.Concat("summary unavailable: ", ex.GetType().Name);
+            }
+        }
 
-            return $"cachedFresh={cachedResultIsFresh} cachedVisible={gameBarApiPollCachedVisible} " +
-                $"running={gameBarApiPollRunning} stale={pollIsStale} startedAge={startedAge} completedAge={completedAge} " +
-                $"lastSupported={gameBarApiPollLastSupported} lastVisible={gameBarApiPollLastVisible} " +
-                $"lastInputRedirected={gameBarApiPollLastInputRedirected} lastElapsedMs={gameBarApiPollLastElapsedMs} " +
-                $"lastStatus='{TruncateDiagnosticText(gameBarApiPollLastStatus)}'";
+        private static string FormatDiagnosticAge(DateTime now, DateTime timestampUtc)
+        {
+            if (timestampUtc == DateTime.MinValue)
+            {
+                return "never";
+            }
+
+            double totalMilliseconds = (now - timestampUtc).TotalMilliseconds;
+            if (double.IsNaN(totalMilliseconds) || double.IsInfinity(totalMilliseconds))
+            {
+                return "unknown";
+            }
+
+            if (totalMilliseconds < 0)
+            {
+                totalMilliseconds = 0;
+            }
+
+            if (totalMilliseconds > int.MaxValue)
+            {
+                totalMilliseconds = int.MaxValue;
+            }
+
+            return string.Concat(((int)totalMilliseconds).ToString(), "ms");
         }
 
         private static bool IsGameBarVisibleByCachedAutomation()
@@ -1056,8 +1102,20 @@ namespace DS4Windows
                 return string.Empty;
             }
 
-            text = text.Replace('\r', ' ').Replace('\n', ' ');
-            return text.Length <= MaxDiagnosticTextLength ? text : text.Substring(0, MaxDiagnosticTextLength) + "...";
+            int length = Math.Min(text.Length, MaxDiagnosticTextLength);
+            StringBuilder builder = new StringBuilder(length + 3);
+            for (int i = 0; i < length; i++)
+            {
+                char value = text[i];
+                builder.Append(value == '\r' || value == '\n' ? ' ' : value);
+            }
+
+            if (text.Length > MaxDiagnosticTextLength)
+            {
+                builder.Append("...");
+            }
+
+            return builder.ToString();
         }
 
         private static bool SafeGetResponding(Process process)

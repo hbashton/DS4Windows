@@ -30,7 +30,6 @@ using System.Drawing; // Point struct
 using Sensorit.Base;
 using DS4WinWPF.DS4Control;
 using DS4WinWPF.DS4Forms.ViewModels;
-using ThreadState = System.Threading.ThreadState;
 
 namespace DS4Windows
 {

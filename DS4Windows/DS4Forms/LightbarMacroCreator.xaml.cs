@@ -1,9 +1,7 @@
 using System;
-using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading;
 using System.Windows;
-using System.Windows.Media;
 using DS4Windows;
 using DS4WinWPF.DS4Forms.ViewModels;
 

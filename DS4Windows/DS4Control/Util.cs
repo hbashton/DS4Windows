@@ -21,7 +21,6 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security;
 using System.Threading.Tasks;
-using System.Text;
 using System.IO;
 using Microsoft.Win32;
 

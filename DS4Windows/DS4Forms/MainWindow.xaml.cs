@@ -35,13 +35,11 @@ using System.Management;
 using NonFormTimer = System.Timers.Timer;
 using System.Runtime.InteropServices;
 using System.ComponentModel;
-using HttpProgress;
 
 using DS4WinWPF.DS4Forms.ViewModels;
 using DS4Windows;
 using DS4WinWPF.DS4Control;
 using DS4WinWPF.Translations;
-using H.NotifyIcon.Core;
 
 namespace DS4WinWPF.DS4Forms
 {

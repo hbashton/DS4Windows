@@ -18,13 +18,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Threading;
 
 using System.Runtime.InteropServices;
 using System.Diagnostics;
 
-using System.Linq;
 using System.Drawing;
 
 using DS4WinWPF.DS4Control;

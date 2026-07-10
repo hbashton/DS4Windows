@@ -16,11 +16,9 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-using System;
 using System.Xml;
 using System.Xml.Serialization;
 using DS4Windows;
-using DS4Windows.InputDevices;
 using static DS4Windows.DualSenseControllerOptions;
 
 namespace DS4WinWPF.DS4Control.DTOXml

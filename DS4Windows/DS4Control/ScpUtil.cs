@@ -20,7 +20,6 @@ using DS4Windows.DS4Control;
 using DS4Windows.InputDevices;
 using DS4Windows.StickModifiers;
 using DS4WinWPF.DS4Control.DTOXml;
-using DS4WinWPF.DS4Forms.ViewModels;
 using Sensorit.Base;
 using System;
 using System.Collections.Generic;

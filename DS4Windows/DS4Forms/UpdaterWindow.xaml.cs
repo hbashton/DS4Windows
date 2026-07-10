@@ -20,7 +20,6 @@ using DS4WinWPF.DS4Forms.ViewModels;
 using System;
 using System.Threading.Tasks;
 using System.Windows;
-using DS4Windows;
 
 namespace DS4WinWPF.DS4Forms
 {

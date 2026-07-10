@@ -19,14 +19,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Text;
 using System.Xml;
 using System.Xml.Schema;
 using System.Xml.Serialization;
 using DS4Windows;
 using DS4Windows.InputDevices;
 using DS4Windows.StickModifiers;
-using DS4WinWPF.DS4Forms.ViewModels;
 using static DS4Windows.Mouse;
 
 namespace DS4WinWPF.DS4Control.DTOXml

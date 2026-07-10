@@ -24,10 +24,8 @@ using System.Security;
 using System.Text;
 using System.Diagnostics; // StopWatch
 using System.Threading; // Sleep
-using System.Threading.Tasks;
 using Windows.Win32;
 using Windows.Win32.Foundation;
-using Windows.Win32.UI.Accessibility;
 using DS4Windows;
 
 namespace DS4WinWPF

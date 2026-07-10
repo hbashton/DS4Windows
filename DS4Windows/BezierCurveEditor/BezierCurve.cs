@@ -32,7 +32,6 @@
 * 
 */
 using System;
-using System.Globalization;
 
 namespace DS4Windows
 {

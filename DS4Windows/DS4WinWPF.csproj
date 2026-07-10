@@ -22,6 +22,11 @@
 		<IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 		<Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
 		<Platform Condition=" '$(Platform)' == '' ">x64</Platform>
+		<!-- The bundled wrapper libs only ship for x64/x86 (libs\x64, libs\x86). Design-time and
+		     analysis builds (e.g. Buildalyzer) force Platform=AnyCPU, which has no libs folder, so
+		     map it to x64 to keep the <Reference> HintPaths below resolvable. -->
+		<NativeLibPlatform Condition=" '$(Platform)' == 'x86' ">x86</NativeLibPlatform>
+		<NativeLibPlatform Condition=" '$(NativeLibPlatform)' == '' ">x64</NativeLibPlatform>
 		<Copyright>Copyright © Scarlet.Crush Productions 2012, 2013; InhexSTER, HecticSeptic, electrobrains 2013, 2014; Jays2Kings 2013, 2014, 2015, 2016; Ryochan7 2017-2023, schmaldeo 2024</Copyright>
 		<Description>Sony DualShock 4 to Microsoft Xinput controller mapper</Description>
 		<Authors>hbashton</Authors>
@@ -95,15 +100,15 @@
 		<PackageReference Include="WpfScreenHelper" Version="2.1.0" />
 
 		<Reference Include="FakerInputWrapper">
-			<HintPath>..\libs\$(Platform)\FakerInputWrapper\FakerInputWrapper.dll</HintPath>
+			<HintPath>libs\$(NativeLibPlatform)\FakerInputWrapper\FakerInputWrapper.dll</HintPath>
 		</Reference>
 
 		<Reference Include="SharpOSC">
-			<HintPath>..\libs\$(Platform)\SharpOSC\SharpOSC.dll</HintPath>
+			<HintPath>libs\$(NativeLibPlatform)\SharpOSC\SharpOSC.dll</HintPath>
 		</Reference>
 
 		<Reference Include="Nefarius.ViGEm.Client">
-			<HintPath>..\libs\$(Platform)\Nefarius.ViGEm.Client\Nefarius.ViGEm.Client.dll</HintPath>
+			<HintPath>libs\$(NativeLibPlatform)\Nefarius.ViGEm.Client\Nefarius.ViGEm.Client.dll</HintPath>
 		</Reference>
 	</ItemGroup>
 

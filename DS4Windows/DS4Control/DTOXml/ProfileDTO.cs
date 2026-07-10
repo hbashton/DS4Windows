@@ -2769,12 +2769,12 @@ namespace DS4WinWPF.DS4Control.DTOXml
 
                 if (!string.IsNullOrEmpty(GreenColorString))
                 {
-                    byte.TryParse(RedColorString, out _ledColor.green);
+                    byte.TryParse(GreenColorString, out _ledColor.green);
                 }
 
                 if (!string.IsNullOrEmpty(BlueColorString))
                 {
-                    byte.TryParse(RedColorString, out _ledColor.blue);
+                    byte.TryParse(BlueColorString, out _ledColor.blue);
                 }
             }
 

@@ -8505,7 +8505,7 @@ namespace DS4Windows
 
                     PostProcessLoad();
                 }
-                catch (InvalidOperationException e)
+                catch (InvalidOperationException)
                 {
                     AppLogger.LogToGui("Failed to load Profiles.xml.", false);
                     loaded = false;

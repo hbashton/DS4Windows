@@ -432,17 +432,6 @@ namespace DS4WinWPF.DS4Forms
             }
         }
 
-        private void RevertListItemTemplate()
-        {
-            if (recordBoxVM.EditMacroIndex >= 0)
-            {
-                ListBoxItem lbitem = macroListBox.ItemContainerGenerator.ContainerFromIndex(recordBoxVM.EditMacroIndex)
-                        as ListBoxItem;
-                lbitem.ContentTemplate = this.FindResource("DisplayTemplate") as DataTemplate;
-                recordBoxVM.EditMacroIndex = -1;
-            }
-        }
-
         private void UpdateDataRevertTemplate()
         {
             ListBoxItem lbitem = macroListBox.ItemContainerGenerator.ContainerFromIndex(recordBoxVM.EditMacroIndex)

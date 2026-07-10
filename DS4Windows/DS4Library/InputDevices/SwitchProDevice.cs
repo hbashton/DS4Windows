@@ -55,7 +55,6 @@ namespace DS4Windows.InputDevices
             public const byte ENABLE_VIBRATION = 0x48;
         }
 
-        private const int AMP_REAL_MIN = 0;
         //private const int AMP_REAL_MAX = 1003;
         //private const int AMP_LIMIT_MAX = 404;
         private const int AMP_LIMIT_MAX = 800;
@@ -820,10 +819,6 @@ namespace DS4Windows.InputDevices
             //result = hidDevice.WriteOutputReportViaInterrupt(command, 500);
         }
 
-        // Deprecated method. Leave a stub for now
-        private void RunBluetoothSetup()
-        {
-        }
 
         private void EnableFastPollRate()
         {

@@ -88,7 +88,6 @@ namespace DS4Windows
             new OneEuroFilter3D(), new OneEuroFilter3D(),
         };
         Thread tempThread;
-        Thread tempBusThread;
         Thread eventDispatchThread;
         Dispatcher eventDispatcher;
         public bool suspending;

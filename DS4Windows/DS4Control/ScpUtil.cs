@@ -3138,27 +3138,6 @@ namespace DS4Windows
             return cs;
         }
 
-        private static Color applyRatio(Color c1, Color c2, uint r)
-        {
-            float ratio = r / 100f;
-            float hue1 = c1.GetHue();
-            float hue2 = c2.GetHue();
-            float bri1 = c1.GetBrightness();
-            float bri2 = c2.GetBrightness();
-            float sat1 = c1.GetSaturation();
-            float sat2 = c2.GetSaturation();
-            float hr = hue2 - hue1;
-            float br = bri2 - bri1;
-            float sr = sat2 - sat1;
-            Color csR;
-            if (bri1 == 0)
-                csR = HuetoRGB(hue2, sat2, bri2 - br * ratio);
-            else
-                csR = HuetoRGB(hue2 - hr * ratio, sat2 - sr * ratio, bri2 - br * ratio);
-
-            return csR;
-        }
-
         public static Color HuetoRGB(float hue, float sat, float bri)
         {
             float C = (1 - Math.Abs(2 * bri) - 1) * sat;
@@ -3204,10 +3183,6 @@ namespace DS4Windows
             return (value < min) ? min : (value > max) ? max : value;
         }
 
-        private static int ClampInt(int min, int value, int max)
-        {
-            return (value < min) ? min : (value > max) ? max : value;
-        }
 
         public static void InitOutputKBMHandler(string identifier)
         {
@@ -4402,54 +4377,6 @@ namespace DS4Windows
             {
                 gyroOutMode[device] = GyroOutMode.Controls;
             }
-        }
-
-        private string GetGyroOutModeString(GyroOutMode mode)
-        {
-            string result = "None";
-            switch (mode)
-            {
-                case GyroOutMode.Controls:
-                    result = "Controls";
-                    break;
-                case GyroOutMode.Mouse:
-                    result = "Mouse";
-                    break;
-                case GyroOutMode.MouseJoystick:
-                    result = "MouseJoystick";
-                    break;
-                case GyroOutMode.Passthru:
-                    result = "Passthru";
-                    break;
-                default:
-                    break;
-            }
-
-            return result;
-        }
-
-        private GyroOutMode GetGyroOutModeType(string modeString)
-        {
-            GyroOutMode result = GyroOutMode.None;
-            switch (modeString)
-            {
-                case "Controls":
-                    result = GyroOutMode.Controls;
-                    break;
-                case "Mouse":
-                    result = GyroOutMode.Mouse;
-                    break;
-                case "MouseJoystick":
-                    result = GyroOutMode.MouseJoystick;
-                    break;
-                case "Passthru":
-                    result = GyroOutMode.Passthru;
-                    break;
-                default:
-                    break;
-            }
-
-            return result;
         }
 
         private string GetLightbarModeString(LightbarMode mode)

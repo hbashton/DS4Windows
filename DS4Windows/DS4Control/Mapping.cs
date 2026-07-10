@@ -836,7 +836,6 @@ namespace DS4Windows
             50, // DS4Controls.BLP
             51, // DS4Controls.BRP
         };
-        private static int macroEndIndex = DS4_CONTROL_MACRO_ARRAY_LEN - 1;
 
         // Special macros
         static bool altTabDone = true;
@@ -849,9 +848,6 @@ namespace DS4Windows
         public static int prevmouseaccel = 0;
         private static double horizontalRemainder = 0.0, verticalRemainder = 0.0;
         public const int MOUSESPEEDFACTOR = 48;
-        private const double MOUSESTICKANTIOFFSET = 0.0128;
-        private const double MOUSESTICKMINVELOCITY = 67.5;
-        //private const double MOUSESTICKMINVELOCITY = 40.0;
 
         private static void RequestProfileSwitch(int device, string profileName, bool tempProfile,
             bool launchProgram, ControlService ctrl, Action<bool> afterLoad = null)
@@ -1184,12 +1180,6 @@ namespace DS4Windows
             }
 
             return result;
-        }
-
-        static double TValue(double value1, double value2, double percent)
-        {
-            percent /= 100f;
-            return value1 * percent + value2 * (1 - percent);
         }
 
         private static int ClampInt(int min, int value, int max)
@@ -4044,11 +4034,6 @@ namespace DS4Windows
             }
         }
 
-        private static bool IfAxisIsNotModified(int device, bool shift, DS4Controls dc)
-        {
-            return shift ? false : GetDS4CSetting(device, dc).actionType == DS4ControlSettings.ActionType.Default;
-        }
-
         private static async void MapCustomAction(int device, DS4State cState, DS4State MappedState,
             DS4StateExposed eState, Mouse tp, ControlService ctrl, DS4StateFieldMapping fieldMapping, DS4StateFieldMapping outputfieldMapping)
         {
@@ -5054,14 +5039,6 @@ namespace DS4Windows
             return doDelayOnCaller;
         }
 
-        private static void EndMacro(int device, bool[] macrocontrol, string macro, DS4Controls control)
-        {
-            if ((macro.StartsWith("164/9/9/164") || macro.StartsWith("18/9/9/18")) && !altTabDone)
-                AltTabSwappingRelease();
-
-            if (control != DS4Controls.None)
-                macrodone[DS4ControltoInt(control)] = false;
-        }
 
         private static void EndMacro(int device, bool[] macrocontrol, List<int> macro, DS4Controls control)
         {

@@ -39,8 +39,6 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         private MenuItem minimizeItem;
         private MenuItem openProgramItem;
         private MenuItem closeItem;
-        private int? prevBattery = null;
-
 
         public string TooltipText
         {

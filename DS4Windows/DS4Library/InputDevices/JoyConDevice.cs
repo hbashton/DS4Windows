@@ -62,12 +62,8 @@ namespace DS4Windows.InputDevices
             Right,
         }
 
-        private const int AMP_REAL_MIN = 0;
         //private const int AMP_REAL_MAX = 1003;
         private const int AMP_LIMIT_MAX = 404;
-        private const int AMP_LIMIT_L_MAX = 404;
-        //private const int AMP_LIMIT_R_MAX = 206;
-        private const int AMP_LIMIT_R_MAX = 404;
 
         private static RumbleTableData[] fixedRumbleTable = new RumbleTableData[]
         {
@@ -161,8 +157,6 @@ namespace DS4Windows.InputDevices
         public const int IMU_YAXIS_IDX = 1, IMU_PITCH_IDX = 1;
         public const int IMU_ZAXIS_IDX = 2, IMU_ROLL_IDX = 2;
 
-        private const double STICK_AXIS_MAX_CUTOFF = 0.96;
-        private const double STICK_AXIS_MIN_CUTOFF = 1.04;
 
         private const double STICK_AXIS_LS_X_MAX_CUTOFF = 0.96;
         private const double STICK_AXIS_LS_X_MIN_CUTOFF = 1.04;
@@ -175,7 +169,6 @@ namespace DS4Windows.InputDevices
         private const double STICK_AXIS_RS_Y_MAX_CUTOFF = 0.96;
         private const double STICK_AXIS_RS_Y_MIN_CUTOFF = 1.14;
 
-        private const string BLUETOOTH_HID_GUID = "{00001124-0000-1000-8000-00805F9B34FB}";
 
         private byte frameCount = 0;
         public byte FrameCount { get => frameCount; set => frameCount = value; }
@@ -213,7 +206,6 @@ namespace DS4Windows.InputDevices
         // Converts raw gyro input value to dps. Equal to (4588/65535)
         private const float GYRO_IN_DEG_SEC_FACTOR = 0.070f;
         private new const int WARN_INTERVAL_BT = 40;
-        private new const int WARN_INTERVAL_USB = 30;
         private byte[] inputReportBuffer;
         private byte[] outputReportBuffer;
         private byte[] rumbleReportBuffer;

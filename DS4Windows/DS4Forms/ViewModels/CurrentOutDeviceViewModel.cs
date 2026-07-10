@@ -372,26 +372,6 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             Dirty = true;
         }
 
-        private int DetermineDesiredChoiceIdx()
-        {
-            int result = 0;
-            switch (outSlotDevice.PermanentType)
-            {
-                case OutContType.None:
-                    result = 0;
-                    break;
-                case OutContType.X360:
-                    result = 1;
-                    break;
-                case OutContType.DS4:
-                    result = 2;
-                    break;
-                default:
-                    break;
-            }
-            return result;
-        }
-
         private int DetermineReserveChoiceIdx()
         {
             int result = 0;
@@ -402,27 +382,6 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     break;
                 case OutSlotDevice.ReserveStatus.Permanent:
                     result = 1;
-                    break;
-                default:
-                    break;
-            }
-
-            return result;
-        }
-
-        private OutContType DetermineDesiredTypeFromIdx()
-        {
-            OutContType result = OutContType.None;
-            switch (desiredTypeChoiceIndex)
-            {
-                case 0:
-                    result = OutContType.None;
-                    break;
-                case 1:
-                    result = OutContType.X360;
-                    break;
-                case 2:
-                    result = OutContType.DS4;
                     break;
                 default:
                     break;

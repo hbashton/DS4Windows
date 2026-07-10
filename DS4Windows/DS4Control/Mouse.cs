@@ -1515,16 +1515,6 @@ namespace DS4Windows
             return t.HwX >= 1920 * 2 / 5;
         }
 
-        private void AddEmptyTrackballEntry()
-        {
-            int iIndex = trackballBufferTail;
-            trackballXBuffer[iIndex] = 0;
-            trackballYBuffer[iIndex] = 0;
-            trackballBufferTail = (iIndex + 1) % TRACKBALL_BUFFER_LEN;
-            if (trackballBufferHead == trackballBufferTail)
-                trackballBufferHead = (trackballBufferHead + 1) % TRACKBALL_BUFFER_LEN;
-        }
-
         private void ClearTouchMouseTrackballData()
         {
             Array.Clear(trackballXBuffer, 0, TRACKBALL_BUFFER_LEN);

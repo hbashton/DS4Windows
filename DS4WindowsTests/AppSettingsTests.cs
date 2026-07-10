@@ -184,5 +184,77 @@ namespace DS4WindowsTests
 
             Assert.AreEqual(appSettingsXml, testStr);
         }
+
+        [TestMethod]
+        public void CheckSettingsDeserializeNonDefaultValues()
+        {
+            var nonDefaultSettingsXml = @"<?xml version=""1.0"" encoding=""utf-8""?>
+
+<Profile>
+  <Notifications>1</Notifications>
+  <ProfileChangedNotification>True</ProfileChangedNotification>
+  <DisconnectBTAtStop>True</DisconnectBTAtStop>
+  <SwipeProfiles>False</SwipeProfiles>
+  <QuickCharge>True</QuickCharge>
+  <CloseMinimizes>True</CloseMinimizes>
+  <DownloadLang>True</DownloadLang>
+  <FlashWhenLate>False</FlashWhenLate>
+  <AppIcon>Colored</AppIcon>
+  <AppTheme>Dark</AppTheme>
+  <UseOSCServer>True</UseOSCServer>
+  <InterpretingOscMonitoring>True</InterpretingOscMonitoring>
+  <UseOSCSender>True</UseOSCSender>
+  <UseUDPServer>True</UseUDPServer>
+  <UseCustomSteamFolder>True</UseCustomSteamFolder>
+  <AutoProfileRevertDefaultProfile>False</AutoProfileRevertDefaultProfile>
+  <UDPServerSmoothingOptions>
+    <UseSmoothing>True</UseSmoothing>
+  </UDPServerSmoothingOptions>
+  <DeviceOptions>
+    <DS4SupportSettings>
+      <Enabled>False</Enabled>
+    </DS4SupportSettings>
+    <DualSenseSupportSettings>
+      <Enabled>True</Enabled>
+    </DualSenseSupportSettings>
+    <SwitchProSupportSettings>
+      <Enabled>True</Enabled>
+    </SwitchProSupportSettings>
+    <JoyConSupportSettings>
+      <Enabled>True</Enabled>
+    </JoyConSupportSettings>
+    <DS3SupportSettings>
+      <Enabled>True</Enabled>
+    </DS3SupportSettings>
+  </DeviceOptions>
+</Profile>";
+
+            XmlSerializer serializer = new XmlSerializer(typeof(AppSettingsDTO));
+            using StringReader sr = new StringReader(nonDefaultSettingsXml);
+            AppSettingsDTO dto = serializer.Deserialize(sr) as AppSettingsDTO;
+
+            Assert.AreEqual(1, dto.Notifications);
+            Assert.AreEqual(true, dto.ProfileChangedNotification);
+            Assert.AreEqual(true, dto.DisconnectBTAtStop);
+            Assert.AreEqual(false, dto.SwipeProfiles);
+            Assert.AreEqual(true, dto.QuickCharge);
+            Assert.AreEqual(true, dto.CloseMinimizes);
+            Assert.AreEqual(true, dto.DownloadLang);
+            Assert.AreEqual(false, dto.FlashWhenLate);
+            Assert.AreEqual(TrayIconChoice.Colored, dto.AppIcon);
+            Assert.AreEqual(AppThemeChoice.Dark, dto.AppTheme);
+            Assert.AreEqual(true, dto.UseOSCServer);
+            Assert.AreEqual(true, dto.InterpretingOscMonitoring);
+            Assert.AreEqual(true, dto.UseOSCSender);
+            Assert.AreEqual(true, dto.UseUDPServer);
+            Assert.AreEqual(true, dto.UseCustomSteamFolder);
+            Assert.AreEqual(false, dto.AutoProfileRevertDefaultProfile);
+            Assert.AreEqual(true, dto.UDPServerSmoothingOptions.UseSmoothing);
+            Assert.AreEqual(false, dto.DeviceOptions.DS4SupportSettings.Enabled);
+            Assert.AreEqual(true, dto.DeviceOptions.DualSenseSupportSettings.Enabled);
+            Assert.AreEqual(true, dto.DeviceOptions.SwitchProSupportSettings.Enabled);
+            Assert.AreEqual(true, dto.DeviceOptions.JoyConSupportSettings.Enabled);
+            Assert.AreEqual(true, dto.DeviceOptions.DS3SupportSettings.Enabled);
+        }
     }
 }

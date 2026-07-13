@@ -434,7 +434,7 @@ namespace DS4Windows
             }
 
             worker = null;
-            WasapiLoopbackCapture oldCapture;
+            WasapiCapture oldCapture;
             lock (syncRoot)
             {
                 oldCapture = capture;

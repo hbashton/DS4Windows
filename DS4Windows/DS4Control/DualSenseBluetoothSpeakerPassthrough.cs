@@ -5,6 +5,7 @@ using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 using System;
+using System.Runtime.InteropServices;
 using System.Threading;
 
 namespace DS4Windows
@@ -24,18 +25,24 @@ namespace DS4Windows
         private const int SampleRate = 48000;
         private const int Channels = 2;
         private const int FrameSamples = 480;
+        private const int SourcePullFrames = 512;
         private const int OpusBytes = 200;
         private const int ReportLength = 334;
+        private const int LowLatencyCaptureBufferMs = 10;
+        private const int CaptureBufferMs = 60;
+        private const int IdleKeepAliveMs = 2000;
+        private const double BluetoothSpeakerCadenceMs = 10.0 + (2.0 / 3.0);
 
         private readonly object syncRoot = new object();
         private readonly DualSenseDevice device;
         private readonly string sourceEndpointId;
         private readonly byte speakerVolume;
+        private readonly float[] sourceFrame = new float[SourcePullFrames * Channels];
         private readonly float[] frame = new float[FrameSamples * Channels];
         private readonly byte[] opusFrame = new byte[OpusBytes];
         private readonly byte[] report = new byte[ReportLength];
 
-        private WasapiLoopbackCapture capture;
+        private WasapiCapture capture;
         private BufferedWaveProvider captureBuffer;
         private Thread worker;
         private IOpusEncoder opusEncoder;
@@ -43,6 +50,8 @@ namespace DS4Windows
         private int reportSequence;
         private byte packetCounter;
         private int loggedWriteFailure;
+        private bool keepStreamWarm;
+        private DateTime lastAudibleUtc = DateTime.MinValue;
 
         public DualSenseBluetoothSpeakerPassthrough(DualSenseDevice device, byte speakerVolume,
             string sourceEndpointId)
@@ -62,11 +71,12 @@ namespace DS4Windows
             try
             {
                 capture = CreateCapture(sourceEndpointId, out string sourceName);
+                keepStreamWarm = IsLikelyGameAudioEndpoint(sourceName);
                 captureBuffer = new BufferedWaveProvider(capture.WaveFormat)
                 {
-                    BufferDuration = TimeSpan.FromMilliseconds(120),
+                    BufferDuration = TimeSpan.FromMilliseconds(CaptureBufferMs),
                     DiscardOnBufferOverflow = true,
-                    ReadFully = false,
+                    ReadFully = true,
                 };
                 capture.DataAvailable += Capture_DataAvailable;
                 capture.RecordingStopped += Capture_RecordingStopped;
@@ -86,10 +96,14 @@ namespace DS4Windows
                 {
                     IsBackground = true,
                     Name = "DualSense Bluetooth speaker audio",
+                    Priority = ThreadPriority.AboveNormal,
                 };
                 capture.StartRecording();
                 worker.Start();
-                AppLogger.LogToGui($"DualSense Bluetooth speaker passthrough started: {sourceName}", false);
+                AppLogger.LogToGui(
+                    $"DualSense Bluetooth speaker passthrough started: {sourceName}" +
+                    (keepStreamWarm ? " (low latency game-audio mode)" : string.Empty),
+                    false);
             }
             catch
             {
@@ -98,12 +112,14 @@ namespace DS4Windows
             }
         }
 
-        private static WasapiLoopbackCapture CreateCapture(string endpointId, out string sourceName)
+        private static WasapiCapture CreateCapture(string endpointId, out string sourceName)
         {
             if (string.IsNullOrEmpty(endpointId))
             {
                 sourceName = "Default audio endpoint";
-                return new WasapiLoopbackCapture();
+                return new LowLatencyWasapiLoopbackCapture(
+                    WasapiLoopbackCapture.GetDefaultLoopbackCaptureDevice(),
+                    LowLatencyCaptureBufferMs);
             }
 
             using var enumerator = new MMDeviceEnumerator();
@@ -114,7 +130,19 @@ namespace DS4Windows
             }
 
             sourceName = endpoint.FriendlyName;
-            return new WasapiLoopbackCapture(endpoint);
+            return new LowLatencyWasapiLoopbackCapture(endpoint, LowLatencyCaptureBufferMs);
+        }
+
+        private static bool IsLikelyGameAudioEndpoint(string sourceName)
+        {
+            if (string.IsNullOrEmpty(sourceName))
+            {
+                return false;
+            }
+
+            return sourceName.IndexOf("Wireless Controller", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                sourceName.IndexOf("DualSense", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                sourceName.IndexOf("VIIPER", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private static bool IsGenuineBluetoothDualSense(DualSenseDevice device)
@@ -168,29 +196,158 @@ namespace DS4Windows
 
         private void StreamLoop(ISampleProvider source)
         {
-            while (!stopping)
+            timeBeginPeriod(1);
+            IntPtr highResolutionTimer = CreateHighResolutionTimer();
+            long nextTick = DateTime.UtcNow.Ticks;
+            long cadenceTicks = (long)(BluetoothSpeakerCadenceMs * TimeSpan.TicksPerMillisecond);
+            try
             {
-                Array.Clear(frame, 0, frame.Length);
-                int samplesRead;
-                lock (syncRoot)
+                while (!stopping)
                 {
-                    samplesRead = stopping ? 0 : source.Read(frame, 0, frame.Length);
-                }
+                    Array.Clear(sourceFrame, 0, sourceFrame.Length);
+                    int samplesRead;
+                    lock (syncRoot)
+                    {
+                        samplesRead = stopping ? 0 : source.Read(sourceFrame, 0, sourceFrame.Length);
+                    }
 
-                if (samplesRead > 0 && HasAudibleSamples(frame, samplesRead))
-                {
+                    bool audible = samplesRead > 0 && HasAudibleSamples(sourceFrame, samplesRead);
+                    if (audible)
+                    {
+                        lastAudibleUtc = DateTime.UtcNow;
+                    }
+
+                    FillOutputFrame(samplesRead);
                     float volume = speakerVolume / 255.0f;
-                    for (int i = 0; i < samplesRead; i++)
+                    for (int i = 0; i < frame.Length; i++)
                     {
                         frame[i] = Math.Clamp(frame[i] * volume, -1.0f, 1.0f);
                     }
 
-                    SendFrame();
+                    bool recentlyAudible = lastAudibleUtc != DateTime.MinValue &&
+                        DateTime.UtcNow - lastAudibleUtc <= TimeSpan.FromMilliseconds(IdleKeepAliveMs);
+                    if (keepStreamWarm || audible || recentlyAudible)
+                    {
+                        SendFrame();
+                    }
+
+                    nextTick += cadenceTicks;
+                    long nowTicks = DateTime.UtcNow.Ticks;
+                    if (nextTick <= nowTicks)
+                    {
+                        nextTick = nowTicks + cadenceTicks;
+                        continue;
+                    }
+
+                    WaitUntil(highResolutionTimer, nextTick);
+                }
+            }
+            finally
+            {
+                if (highResolutionTimer != IntPtr.Zero)
+                {
+                    CloseHandle(highResolutionTimer);
                 }
 
-                Thread.Sleep(10);
+                timeEndPeriod(1);
             }
         }
+
+        private void FillOutputFrame(int samplesRead)
+        {
+            Array.Clear(frame, 0, frame.Length);
+            int sourceFrames = Math.Min(SourcePullFrames, Math.Max(0, samplesRead / Channels));
+            if (sourceFrames <= 0)
+            {
+                return;
+            }
+
+            double step = sourceFrames / (double)FrameSamples;
+            for (int outputFrame = 0; outputFrame < FrameSamples; outputFrame++)
+            {
+                double position = outputFrame * step;
+                int sourceIndex0 = Math.Min((int)position, sourceFrames - 1);
+                int sourceIndex1 = Math.Min(sourceIndex0 + 1, sourceFrames - 1);
+                double blend = position - sourceIndex0;
+                int outputOffset = outputFrame * Channels;
+                int sourceOffset0 = sourceIndex0 * Channels;
+                int sourceOffset1 = sourceIndex1 * Channels;
+                frame[outputOffset] = (float)(sourceFrame[sourceOffset0] * (1.0 - blend) +
+                    sourceFrame[sourceOffset1] * blend);
+                frame[outputOffset + 1] = (float)(sourceFrame[sourceOffset0 + 1] * (1.0 - blend) +
+                    sourceFrame[sourceOffset1 + 1] * blend);
+            }
+        }
+
+        private static void WaitUntil(IntPtr highResolutionTimer, long targetUtcTicks)
+        {
+            double waitMs = (targetUtcTicks - DateTime.UtcNow.Ticks) / (double)TimeSpan.TicksPerMillisecond;
+            if (waitMs <= 0)
+            {
+                return;
+            }
+
+            if (highResolutionTimer != IntPtr.Zero)
+            {
+                long dueTime = -Math.Max(1, (long)(waitMs * 10000.0));
+                if (SetWaitableTimer(highResolutionTimer, ref dueTime, 0, IntPtr.Zero, IntPtr.Zero, false))
+                {
+                    WaitForSingleObject(highResolutionTimer, Infinite);
+                    return;
+                }
+            }
+
+            Thread.Sleep(Math.Max(1, (int)Math.Round(waitMs)));
+        }
+
+        private static IntPtr CreateHighResolutionTimer()
+        {
+            IntPtr timer = CreateWaitableTimerExW(IntPtr.Zero, null,
+                CreateWaitableTimerHighResolution, TimerAccess);
+            if (timer == IntPtr.Zero)
+            {
+                timer = CreateWaitableTimerExW(IntPtr.Zero, null, 0, TimerAccess);
+            }
+
+            return timer;
+        }
+
+        private sealed class LowLatencyWasapiLoopbackCapture : WasapiCapture
+        {
+            public LowLatencyWasapiLoopbackCapture(MMDevice captureDevice, int audioBufferMilliseconds)
+                : base(captureDevice, true, audioBufferMilliseconds)
+            {
+            }
+
+            protected override AudioClientStreamFlags GetAudioClientStreamFlags()
+            {
+                return AudioClientStreamFlags.Loopback | base.GetAudioClientStreamFlags();
+            }
+        }
+
+        private const uint CreateWaitableTimerHighResolution = 0x00000002;
+        private const uint TimerAccess = 0x00000002 | 0x00100000;
+        private const uint Infinite = 0xFFFFFFFF;
+
+        [DllImport("winmm.dll")]
+        private static extern uint timeBeginPeriod(uint uMilliseconds);
+
+        [DllImport("winmm.dll")]
+        private static extern uint timeEndPeriod(uint uMilliseconds);
+
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern IntPtr CreateWaitableTimerExW(IntPtr lpTimerAttributes, string lpTimerName,
+            uint dwFlags, uint dwDesiredAccess);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool SetWaitableTimer(IntPtr hTimer, ref long lpDueTime, int lPeriod,
+            IntPtr pfnCompletionRoutine, IntPtr lpArgToCompletionRoutine, bool fResume);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CloseHandle(IntPtr hObject);
 
         private static bool HasAudibleSamples(float[] samples, int count)
         {

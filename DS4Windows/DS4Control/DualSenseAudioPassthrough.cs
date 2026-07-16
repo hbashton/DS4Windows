@@ -126,8 +126,14 @@ namespace DS4Windows
 
         private void StartBluetooth(int slot, DualSenseDevice device, byte speakerVolume, string requestedCaptureEndpointId)
         {
+            requestedCaptureEndpointId ??= string.Empty;
             lock (syncRoot)
             {
+                if (bluetoothSlots[slot]?.Matches(device, speakerVolume, requestedCaptureEndpointId) == true)
+                {
+                    return;
+                }
+
                 SlotPlayback usbPlayback = slots[slot];
                 slots[slot] = null;
                 usbPlayback?.Dispose();

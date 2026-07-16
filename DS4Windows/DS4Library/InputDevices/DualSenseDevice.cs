@@ -314,7 +314,25 @@ namespace DS4Windows.InputDevices
         public byte MicrophoneVolume { get => microphoneVolume; set { microphoneVolume = value; outputDirty = true; } }
 
         private bool enableSpeakerOutput;
-        public bool EnableSpeakerOutput { get => enableSpeakerOutput; set { enableSpeakerOutput = value; outputDirty = true; } }
+        public bool EnableSpeakerOutput
+        {
+            get => enableSpeakerOutput;
+            set
+            {
+                if (enableSpeakerOutput == value)
+                {
+                    return;
+                }
+
+                enableSpeakerOutput = value;
+                if (!value)
+                {
+                    ClearBluetoothSpeakerAudioFrame();
+                }
+
+                outputDirty = true;
+            }
+        }
 
         private TriggerEffectData l2EffectData;
         private TriggerEffectData r2EffectData;
@@ -337,6 +355,7 @@ namespace DS4Windows.InputDevices
         private readonly object bluetoothSpeakerFrameLock = new object();
         private readonly byte[] latestBluetoothSpeakerFrame = new byte[BluetoothCombinedSpeakerFrameLength];
         private int latestBluetoothSpeakerFrameLength;
+        private bool bluetoothSpeakerFramePending;
         private int bluetoothCombinedOutputTransportEnabled;
 
         /// <summary>
@@ -365,6 +384,42 @@ namespace DS4Windows.InputDevices
                 int bytesToCopy = Math.Min(Math.Min(length, frame.Length), latestBluetoothSpeakerFrame.Length);
                 Array.Copy(frame, 0, latestBluetoothSpeakerFrame, 0, bytesToCopy);
                 latestBluetoothSpeakerFrameLength = bytesToCopy;
+                bluetoothSpeakerFramePending = bytesToCopy > 0;
+            }
+        }
+
+        /// <summary>
+        /// Drops cached speaker data so an old Opus frame cannot be replayed
+        /// after speaker output stops or its capture source changes.
+        /// </summary>
+        public void ClearBluetoothSpeakerAudioFrame()
+        {
+            lock (bluetoothSpeakerFrameLock)
+            {
+                Array.Clear(latestBluetoothSpeakerFrame, 0, latestBluetoothSpeakerFrame.Length);
+                latestBluetoothSpeakerFrameLength = 0;
+                bluetoothSpeakerFramePending = false;
+            }
+        }
+
+        private bool TryTakeBluetoothSpeakerAudioFrame(byte[] destination, int destinationOffset)
+        {
+            lock (bluetoothSpeakerFrameLock)
+            {
+                if (!enableSpeakerOutput || !bluetoothSpeakerFramePending ||
+                    latestBluetoothSpeakerFrameLength <= 0 || destination == null ||
+                    destinationOffset < 0 ||
+                    destinationOffset + BluetoothCombinedSpeakerFrameLength > destination.Length)
+                {
+                    return false;
+                }
+
+                Array.Copy(latestBluetoothSpeakerFrame, 0, destination, destinationOffset,
+                    BluetoothCombinedSpeakerFrameLength);
+                Array.Clear(latestBluetoothSpeakerFrame, 0, latestBluetoothSpeakerFrame.Length);
+                latestBluetoothSpeakerFrameLength = 0;
+                bluetoothSpeakerFramePending = false;
+                return true;
             }
         }
 
@@ -1633,15 +1688,18 @@ namespace DS4Windows.InputDevices
 
             byte[] combined = new byte[BluetoothCombinedOutputReportLength];
             Array.Copy(report, offset, combined, 0, combined.Length);
-            lock (bluetoothSpeakerFrameLock)
+
+            // A 0x93 packet with a zero payload is not silent Opus. Some
+            // controller firmware emits an alert tone when it sees that shape.
+            // Omit the speaker TLV until one fresh frame is available.
+            combined[BluetoothCombinedSpeakerOffset] = 0;
+            combined[BluetoothCombinedSpeakerOffset + 1] = 0;
+            Array.Clear(combined, BluetoothCombinedSpeakerDataOffset,
+                BluetoothCombinedSpeakerFrameLength);
+            if (TryTakeBluetoothSpeakerAudioFrame(combined, BluetoothCombinedSpeakerDataOffset))
             {
-                if (latestBluetoothSpeakerFrameLength > 0)
-                {
-                    combined[BluetoothCombinedSpeakerOffset] = 0x93;
-                    combined[BluetoothCombinedSpeakerOffset + 1] = BluetoothCombinedSpeakerFrameLength;
-                    Array.Copy(latestBluetoothSpeakerFrame, 0, combined,
-                        BluetoothCombinedSpeakerDataOffset, BluetoothCombinedSpeakerFrameLength);
-                }
+                combined[BluetoothCombinedSpeakerOffset] = 0x93;
+                combined[BluetoothCombinedSpeakerOffset + 1] = BluetoothCombinedSpeakerFrameLength;
             }
 
             uint crc = DualSenseBluetoothCrc32(combined, combined.Length - 4);

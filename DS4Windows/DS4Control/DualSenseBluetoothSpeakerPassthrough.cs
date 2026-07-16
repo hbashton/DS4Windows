@@ -54,6 +54,13 @@ namespace DS4Windows
         private bool isGameAudioEndpoint;
         private bool audioSegmentActive;
         private DateTime lastAudibleUtc = DateTime.MinValue;
+        private long framesSent;
+        private long silentFramesSent;
+        private long skippedScheduleSlots;
+        private long maximumScheduleLatenessTicks;
+        private long audioSegmentStarts;
+        private long audioSegmentStops;
+        private long lastDiagnosticUtcTicks;
 
         public DualSenseBluetoothSpeakerPassthrough(DualSenseDevice device, byte speakerVolume,
             string sourceEndpointId)
@@ -98,7 +105,7 @@ namespace DS4Windows
                 {
                     IsBackground = true,
                     Name = "DualSense Bluetooth speaker audio",
-                    Priority = ThreadPriority.AboveNormal,
+                    Priority = ThreadPriority.Highest,
                 };
                 capture.StartRecording();
                 worker.Start();
@@ -219,14 +226,11 @@ namespace DS4Windows
                     if (audible)
                     {
                         lastAudibleUtc = DateTime.UtcNow;
-                        audioSegmentActive = true;
-                    }
-                    else if (audioSegmentActive)
-                    {
-                        // Do not carry a final encoded fragment across a silent
-                        // boundary and replay it at the start of the next sound.
-                        device.ClearBluetoothSpeakerAudioFrame();
-                        audioSegmentActive = false;
+                        if (!audioSegmentActive)
+                        {
+                            audioSegmentActive = true;
+                            Interlocked.Increment(ref audioSegmentStarts);
+                        }
                     }
 
                     FillOutputFrame(samplesRead);
@@ -238,23 +242,37 @@ namespace DS4Windows
 
                     bool recentlyAudible = lastAudibleUtc != DateTime.MinValue &&
                         DateTime.UtcNow - lastAudibleUtc <= TimeSpan.FromMilliseconds(IdleKeepAliveMs);
-                    // Game-audio endpoints stay captured continuously, but silent
-                    // speaker packets must not occupy the controller's shared Bluetooth
-                    // audio transport while advanced haptics are active.
-                    bool sendIdleKeepAlive = !isGameAudioEndpoint && recentlyAudible;
-                    if (audible || sendIdleKeepAlive)
+                    if (audioSegmentActive && recentlyAudible)
                     {
                         SendFrame();
+                        Interlocked.Increment(ref framesSent);
+                        if (!audible)
+                        {
+                            // This is a real CBR Opus silence frame inside the
+                            // shared 0x36 stream, not an empty speaker TLV.
+                            Interlocked.Increment(ref silentFramesSent);
+                        }
+                    }
+                    else if (audioSegmentActive)
+                    {
+                        device.ClearBluetoothSpeakerAudioFrame();
+                        audioSegmentActive = false;
+                        Interlocked.Increment(ref audioSegmentStops);
                     }
 
                     nextTick += cadenceTicks;
                     long nowTicks = DateTime.UtcNow.Ticks;
                     if (nextTick <= nowTicks)
                     {
+                        long lateness = nowTicks - nextTick;
+                        Interlocked.Increment(ref skippedScheduleSlots);
+                        UpdateMaximum(ref maximumScheduleLatenessTicks, lateness);
                         nextTick = nowTicks + cadenceTicks;
+                        LogStreamDiagnosticsIfVerbose();
                         continue;
                     }
 
+                    LogStreamDiagnosticsIfVerbose();
                     WaitUntil(highResolutionTimer, nextTick);
                 }
             }
@@ -267,6 +285,61 @@ namespace DS4Windows
 
                 timeEndPeriod(1);
             }
+        }
+
+        private void LogStreamDiagnosticsIfVerbose()
+        {
+            if (!Global.VerboseStartupLogging)
+            {
+                return;
+            }
+
+            long now = DateTime.UtcNow.Ticks;
+            long previous = Interlocked.Read(ref lastDiagnosticUtcTicks);
+            if (previous != 0 && now - previous < TimeSpan.FromSeconds(5).Ticks)
+            {
+                return;
+            }
+
+            if (Interlocked.CompareExchange(ref lastDiagnosticUtcTicks, now, previous) != previous)
+            {
+                return;
+            }
+
+            AppLogger.LogToGui(
+                $"DualSense Bluetooth combined stream stats: frames={Interlocked.Read(ref framesSent)} " +
+                $"silentFrames={Interlocked.Read(ref silentFramesSent)} " +
+                $"scheduleMisses={Interlocked.Read(ref skippedScheduleSlots)} " +
+                $"maximumScheduleLatenessMs={Interlocked.Read(ref maximumScheduleLatenessTicks) / (double)TimeSpan.TicksPerMillisecond:F1} " +
+                $"segmentStarts={Interlocked.Read(ref audioSegmentStarts)} " +
+                $"segmentStops={Interlocked.Read(ref audioSegmentStops)} " +
+                $"queuedFrames={device.PendingBluetoothSpeakerFrames} " +
+                $"queueDrops={device.BluetoothSpeakerFramesDropped} " +
+                $"writerDrops={device.BluetoothRealtimeWriterDroppedReports} " +
+                $"writerCompletions={device.BluetoothRealtimeWriterCompletedReports} " +
+                $"writerSlowCompletions={device.BluetoothRealtimeWriterSlowCompletionCount} " +
+                $"writerMaximumCompletionMs={device.BluetoothRealtimeWriterMaximumCompletionMilliseconds:F1} " +
+                $"writerLateSubmissions={device.BluetoothRealtimeWriterLateSubmissionCount} " +
+                $"writerMaximumSubmissionGapMs={device.BluetoothRealtimeWriterMaximumSubmissionGapMilliseconds:F1} " +
+                $"speakerWrites={device.BluetoothCombinedSpeakerReportsWritten} " +
+                $"speakerWriteFailures={device.BluetoothCombinedSpeakerWriteFailures} " +
+                $"staleHapticsSilenced={device.BluetoothCombinedSpeakerStaleHapticsSilenced} " +
+                $"status={device.LastBluetoothHapticsWriteStatus}",
+                false);
+        }
+
+        private static void UpdateMaximum(ref long target, long value)
+        {
+            long current;
+            do
+            {
+                current = Interlocked.Read(ref target);
+                if (value <= current)
+                {
+                    return;
+                }
+            }
+            while (Interlocked.CompareExchange(ref target, value, current) != current);
         }
 
         private void FillOutputFrame(int samplesRead)

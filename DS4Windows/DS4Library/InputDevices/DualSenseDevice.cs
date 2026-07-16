@@ -388,6 +388,66 @@ namespace DS4Windows.InputDevices
             Interlocked.Read(ref bluetoothRealtimeWriterDroppedReports);
         public long BluetoothCombinedSpeakerStaleHapticsSilenced =>
             Interlocked.Read(ref bluetoothCombinedSpeakerStaleHapticsSilenced);
+        public int PendingBluetoothSpeakerFrames
+        {
+            get
+            {
+                lock (bluetoothSpeakerFrameLock)
+                {
+                    return bluetoothSpeakerFrames.Count;
+                }
+            }
+        }
+        public long BluetoothRealtimeWriterCompletedReports
+        {
+            get
+            {
+                lock (bluetoothRealtimeWriterLock)
+                {
+                    return bluetoothRealtimeWriter?.CompletedWrites ?? 0;
+                }
+            }
+        }
+        public long BluetoothRealtimeWriterSlowCompletionCount
+        {
+            get
+            {
+                lock (bluetoothRealtimeWriterLock)
+                {
+                    return bluetoothRealtimeWriter?.SlowCompletionCount ?? 0;
+                }
+            }
+        }
+        public long BluetoothRealtimeWriterLateSubmissionCount
+        {
+            get
+            {
+                lock (bluetoothRealtimeWriterLock)
+                {
+                    return bluetoothRealtimeWriter?.LateSubmissionCount ?? 0;
+                }
+            }
+        }
+        public double BluetoothRealtimeWriterMaximumCompletionMilliseconds
+        {
+            get
+            {
+                lock (bluetoothRealtimeWriterLock)
+                {
+                    return bluetoothRealtimeWriter?.MaximumCompletionMilliseconds ?? 0.0;
+                }
+            }
+        }
+        public double BluetoothRealtimeWriterMaximumSubmissionGapMilliseconds
+        {
+            get
+            {
+                lock (bluetoothRealtimeWriterLock)
+                {
+                    return bluetoothRealtimeWriter?.MaximumSubmissionGapMilliseconds ?? 0.0;
+                }
+            }
+        }
 
         /// <summary>
         /// True after VIIPER has delivered a vDS-compatible combined Bluetooth

@@ -50,7 +50,7 @@ namespace DS4Windows
         private int reportSequence;
         private byte packetCounter;
         private int loggedWriteFailure;
-        private bool keepStreamWarm;
+        private bool isGameAudioEndpoint;
         private DateTime lastAudibleUtc = DateTime.MinValue;
 
         public DualSenseBluetoothSpeakerPassthrough(DualSenseDevice device, byte speakerVolume,
@@ -71,7 +71,7 @@ namespace DS4Windows
             try
             {
                 capture = CreateCapture(sourceEndpointId, out string sourceName);
-                keepStreamWarm = IsLikelyGameAudioEndpoint(sourceName);
+                isGameAudioEndpoint = IsLikelyGameAudioEndpoint(sourceName);
                 captureBuffer = new BufferedWaveProvider(capture.WaveFormat)
                 {
                     BufferDuration = TimeSpan.FromMilliseconds(CaptureBufferMs),
@@ -102,7 +102,7 @@ namespace DS4Windows
                 worker.Start();
                 AppLogger.LogToGui(
                     $"DualSense Bluetooth speaker passthrough started: {sourceName}" +
-                    (keepStreamWarm ? " (low latency game-audio mode)" : string.Empty),
+                    (isGameAudioEndpoint ? " (low latency game-audio mode)" : string.Empty),
                     false);
             }
             catch
@@ -226,7 +226,11 @@ namespace DS4Windows
 
                     bool recentlyAudible = lastAudibleUtc != DateTime.MinValue &&
                         DateTime.UtcNow - lastAudibleUtc <= TimeSpan.FromMilliseconds(IdleKeepAliveMs);
-                    if (keepStreamWarm || audible || recentlyAudible)
+                    // Game-audio endpoints stay captured continuously, but silent
+                    // speaker packets must not occupy the controller's shared Bluetooth
+                    // audio transport while advanced haptics are active.
+                    bool sendIdleKeepAlive = !isGameAudioEndpoint && recentlyAudible;
+                    if (audible || sendIdleKeepAlive)
                     {
                         SendFrame();
                     }

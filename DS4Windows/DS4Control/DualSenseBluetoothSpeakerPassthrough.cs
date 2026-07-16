@@ -52,6 +52,7 @@ namespace DS4Windows
         private byte packetCounter;
         private int loggedWriteFailure;
         private bool isGameAudioEndpoint;
+        private bool audioSegmentActive;
         private DateTime lastAudibleUtc = DateTime.MinValue;
 
         public DualSenseBluetoothSpeakerPassthrough(DualSenseDevice device, byte speakerVolume,
@@ -189,6 +190,8 @@ namespace DS4Windows
 
         private void Capture_RecordingStopped(object sender, StoppedEventArgs e)
         {
+            device.ClearBluetoothSpeakerAudioFrame();
+            audioSegmentActive = false;
             if (!stopping && e.Exception != null)
             {
                 AppLogger.LogToGui($"DualSense Bluetooth speaker capture stopped: {e.Exception.Message}", true);
@@ -216,6 +219,14 @@ namespace DS4Windows
                     if (audible)
                     {
                         lastAudibleUtc = DateTime.UtcNow;
+                        audioSegmentActive = true;
+                    }
+                    else if (audioSegmentActive)
+                    {
+                        // Do not carry a final encoded fragment across a silent
+                        // boundary and replay it at the start of the next sound.
+                        device.ClearBluetoothSpeakerAudioFrame();
+                        audioSegmentActive = false;
                     }
 
                     FillOutputFrame(samplesRead);
@@ -397,9 +408,9 @@ namespace DS4Windows
                 return;
             }
 
-            device.SetBluetoothSpeakerAudioFrame(opusFrame, encoded);
             if (device.BluetoothCombinedOutputTransportEnabled)
             {
+                device.SetBluetoothSpeakerAudioFrame(opusFrame, encoded);
                 return;
             }
 
@@ -478,6 +489,8 @@ namespace DS4Windows
 
                 oldCapture.Dispose();
             }
+
+            device.ClearBluetoothSpeakerAudioFrame();
         }
     }
 }

@@ -356,6 +356,7 @@ namespace DS4Windows.InputDevices
         private const int BluetoothCombinedSpeakerOffset = 142;
         private const int BluetoothCombinedSpeakerDataOffset = 144;
         private const int BluetoothCombinedSpeakerFrameLength = 200;
+        private const byte BluetoothCombinedSpeakerBufferLength = 64;
         private const int BluetoothCombinedHapticsFreshnessMilliseconds = 30;
         private const int BluetoothSpeakerClockActiveMilliseconds = 25;
         private const int MaxBluetoothSpeakerFrames = 4;
@@ -1984,6 +1985,16 @@ namespace DS4Windows.InputDevices
                 return false;
             }
 
+            // VIIPER uses the minimum documented 0x11 buffer depth for
+            // haptics-only traffic. Those same fields control speaker audio,
+            // where the DS5Dongle reference uses 64 to absorb Bluetooth
+            // scheduling jitter. Restore the audio depth only on reports that
+            // actually carry an Opus speaker frame.
+            combined[5] = BluetoothCombinedSpeakerBufferLength;
+            combined[6] = BluetoothCombinedSpeakerBufferLength;
+            combined[7] = BluetoothCombinedSpeakerBufferLength;
+            combined[8] = BluetoothCombinedSpeakerBufferLength;
+            combined[9] = BluetoothCombinedSpeakerBufferLength;
             combined[BluetoothCombinedSpeakerOffset] = 0x93;
             combined[BluetoothCombinedSpeakerOffset + 1] =
                 BluetoothCombinedSpeakerFrameLength;

@@ -530,6 +530,8 @@ namespace DS4Windows
                 $"writerMaximumSubmissionGapMs={device.BluetoothRealtimeWriterMaximumSubmissionGapMilliseconds:F1} " +
                 $"speakerWrites={device.BluetoothCombinedSpeakerReportsWritten} " +
                 $"speakerWriteFailures={device.BluetoothCombinedSpeakerWriteFailures} " +
+                $"hapticsPairedWrites={device.BluetoothCombinedHapticsPairedWrites} " +
+                $"speakerFallbackWrites={device.BluetoothCombinedSpeakerFallbackWrites} " +
                 $"staleHapticsSilenced={device.BluetoothCombinedSpeakerStaleHapticsSilenced} " +
                 $"status={device.LastBluetoothHapticsWriteStatus}",
                 false);

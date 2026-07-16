@@ -359,13 +359,17 @@ namespace DS4Windows.InputDevices
         private const byte BluetoothCombinedSpeakerBufferLength = 64;
         private const int BluetoothCombinedHapticsFreshnessMilliseconds = 30;
         private const int BluetoothSpeakerClockActiveMilliseconds = 25;
+        private const int BluetoothCombinedHapticsClockActiveMilliseconds = 25;
         private const int MaxBluetoothSpeakerFrames = 4;
         private readonly object bluetoothSpeakerFrameLock = new object();
         private readonly Queue<byte[]> bluetoothSpeakerFrames =
             new Queue<byte[]>(MaxBluetoothSpeakerFrames);
         private readonly object bluetoothCombinedSpeakerReportLock = new object();
+        private readonly object bluetoothCombinedTransportWriteLock = new object();
         private byte[] latestBluetoothCombinedSpeakerReport;
         private long latestBluetoothCombinedSpeakerReportTimestamp;
+        private long bluetoothCombinedHapticsGeneration;
+        private long bluetoothCombinedSubmittedHapticsGeneration;
         private byte bluetoothCombinedSpeakerReportSequence;
         private byte bluetoothCombinedSpeakerPacketSequence;
         private bool bluetoothCombinedSpeakerSequenceInitialized;
@@ -377,6 +381,9 @@ namespace DS4Windows.InputDevices
         private long bluetoothRealtimeWriterDroppedReports;
         private long bluetoothCombinedSpeakerStaleHapticsSilenced;
         private long bluetoothSpeakerClockLastFrameTimestamp;
+        private long bluetoothCombinedHapticsClockLastFrameTimestamp;
+        private long bluetoothCombinedHapticsPairedWrites;
+        private long bluetoothCombinedSpeakerFallbackWrites;
         private int bluetoothCombinedOutputTransportEnabled;
 
         public long BluetoothSpeakerFramesDropped =>
@@ -389,6 +396,10 @@ namespace DS4Windows.InputDevices
             Interlocked.Read(ref bluetoothRealtimeWriterDroppedReports);
         public long BluetoothCombinedSpeakerStaleHapticsSilenced =>
             Interlocked.Read(ref bluetoothCombinedSpeakerStaleHapticsSilenced);
+        public long BluetoothCombinedHapticsPairedWrites =>
+            Interlocked.Read(ref bluetoothCombinedHapticsPairedWrites);
+        public long BluetoothCombinedSpeakerFallbackWrites =>
+            Interlocked.Read(ref bluetoothCombinedSpeakerFallbackWrites);
         public int PendingBluetoothSpeakerFrames
         {
             get
@@ -459,9 +470,9 @@ namespace DS4Windows.InputDevices
             Volatile.Read(ref bluetoothCombinedOutputTransportEnabled) != 0;
 
         /// <summary>
-        /// Queues one fixed-size Opus frame, then lets the speaker clock compose
-        /// and submit the final combined Bluetooth report. The bounded queue
-        /// drops stale audio instead of allowing transport latency to grow.
+        /// Queues one fixed-size Opus frame. While VIIPER haptics is active,
+        /// the next fresh haptics block and speaker frame are submitted as one
+        /// packet. Speaker-only playback falls back to the capture clock.
         /// </summary>
         public void SetBluetoothSpeakerAudioFrame(byte[] frame, int length)
         {
@@ -488,7 +499,17 @@ namespace DS4Windows.InputDevices
 
             Interlocked.Exchange(ref bluetoothSpeakerClockLastFrameTimestamp,
                 Stopwatch.GetTimestamp());
-            TryWriteCachedBluetoothCombinedSpeakerReport();
+            if (HasPendingFreshBluetoothCombinedHaptics())
+            {
+                TryWriteCachedBluetoothCombinedSpeakerReport(
+                    hapticsSynchronized: true);
+            }
+            else if (!IsBluetoothCombinedHapticsClockActive())
+            {
+                TrimBluetoothSpeakerFramesToLatest();
+                TryWriteCachedBluetoothCombinedSpeakerReport(
+                    hapticsSynchronized: false);
+            }
         }
 
         /// <summary>
@@ -506,10 +527,13 @@ namespace DS4Windows.InputDevices
             {
                 latestBluetoothCombinedSpeakerReport = null;
                 latestBluetoothCombinedSpeakerReportTimestamp = 0;
+                bluetoothCombinedHapticsGeneration = 0;
+                bluetoothCombinedSubmittedHapticsGeneration = 0;
                 bluetoothCombinedSpeakerSequenceInitialized = false;
             }
 
             Interlocked.Exchange(ref bluetoothSpeakerClockLastFrameTimestamp, 0);
+            Interlocked.Exchange(ref bluetoothCombinedHapticsClockLastFrameTimestamp, 0);
             Interlocked.Exchange(ref bluetoothCombinedOutputTransportEnabled, 0);
         }
 
@@ -519,6 +543,50 @@ namespace DS4Windows.InputDevices
             return lastFrame > 0 &&
                 Stopwatch.GetTimestamp() - lastFrame <=
                 (Stopwatch.Frequency * BluetoothSpeakerClockActiveMilliseconds) / 1000;
+        }
+
+        private bool IsBluetoothCombinedHapticsClockActive()
+        {
+            long lastFrame =
+                Interlocked.Read(ref bluetoothCombinedHapticsClockLastFrameTimestamp);
+            return lastFrame > 0 &&
+                Stopwatch.GetTimestamp() - lastFrame <=
+                (Stopwatch.Frequency *
+                    BluetoothCombinedHapticsClockActiveMilliseconds) / 1000;
+        }
+
+        private bool HasPendingFreshBluetoothCombinedHaptics()
+        {
+            lock (bluetoothCombinedSpeakerReportLock)
+            {
+                return latestBluetoothCombinedSpeakerReport != null &&
+                    bluetoothCombinedHapticsGeneration >
+                        bluetoothCombinedSubmittedHapticsGeneration &&
+                    Stopwatch.GetTimestamp() -
+                        latestBluetoothCombinedSpeakerReportTimestamp <=
+                        (Stopwatch.Frequency *
+                            BluetoothCombinedHapticsFreshnessMilliseconds) / 1000;
+            }
+        }
+
+        private bool HasBluetoothSpeakerAudioFrame()
+        {
+            lock (bluetoothSpeakerFrameLock)
+            {
+                return bluetoothSpeakerFrames.Count > 0;
+            }
+        }
+
+        private void TrimBluetoothSpeakerFramesToLatest()
+        {
+            lock (bluetoothSpeakerFrameLock)
+            {
+                while (bluetoothSpeakerFrames.Count > 1)
+                {
+                    bluetoothSpeakerFrames.Dequeue();
+                    Interlocked.Increment(ref bluetoothSpeakerFramesDropped);
+                }
+            }
         }
 
         private bool TryTakeBluetoothSpeakerAudioFrame(byte[] destination, int destinationOffset)
@@ -1823,8 +1891,8 @@ namespace DS4Windows.InputDevices
 
         /// <summary>
         /// Receives VIIPER's vDS-compatible Bluetooth report 0x36. While
-        /// speaker audio is active, this refreshes the latest native state and
-        /// haptics block; the speaker clock owns the final physical writes.
+        /// speaker audio is active, the newest native haptics block is paired
+        /// with the next Opus frame. Either arrival can complete the pair.
         /// </summary>
         public bool WriteBluetoothCombinedHapticsAudioOutputReport(byte[] report, int offset, int length)
         {
@@ -1837,13 +1905,22 @@ namespace DS4Windows.InputDevices
 
             byte[] combined = new byte[BluetoothCombinedOutputReportLength];
             Array.Copy(report, offset, combined, 0, combined.Length);
-            CacheBluetoothCombinedSpeakerReport(combined);
+            long hapticsGeneration = CacheBluetoothCombinedSpeakerReport(combined);
             Interlocked.Exchange(ref bluetoothCombinedOutputTransportEnabled, 1);
 
             if (enableSpeakerOutput && IsBluetoothSpeakerClockActive())
             {
-                LastBluetoothHapticsWriteStatus =
-                    "Cached Bluetooth combined haptics report for the speaker clock.";
+                if (HasBluetoothSpeakerAudioFrame())
+                {
+                    TryWriteCachedBluetoothCombinedSpeakerReport(
+                        hapticsSynchronized: true);
+                }
+                else
+                {
+                    LastBluetoothHapticsWriteStatus =
+                        "Cached fresh Bluetooth haptics while waiting for the matching speaker frame.";
+                }
+
                 return true;
             }
 
@@ -1858,13 +1935,20 @@ namespace DS4Windows.InputDevices
             combined[combined.Length - 2] = (byte)(crc >> 16);
             combined[combined.Length - 1] = (byte)(crc >> 24);
 
-            return WriteBluetoothAudioOutputReport(combined, 0, combined.Length, 0x36,
+            bool written = WriteBluetoothAudioOutputReport(combined, 0, combined.Length, 0x36,
                 BluetoothCombinedOutputReportLength, "combined haptics/audio", waitForWrite: false);
+            if (written)
+            {
+                MarkBluetoothCombinedHapticsSubmitted(hapticsGeneration);
+            }
+
+            return written;
         }
 
-        private void CacheBluetoothCombinedSpeakerReport(byte[] report)
+        private long CacheBluetoothCombinedSpeakerReport(byte[] report)
         {
             bool initializedNow = false;
+            long hapticsGeneration;
             lock (bluetoothCombinedSpeakerReportLock)
             {
                 latestBluetoothCombinedSpeakerReport =
@@ -1872,6 +1956,8 @@ namespace DS4Windows.InputDevices
                 Array.Copy(report, latestBluetoothCombinedSpeakerReport,
                     BluetoothCombinedOutputReportLength);
                 latestBluetoothCombinedSpeakerReportTimestamp = Stopwatch.GetTimestamp();
+                bluetoothCombinedHapticsGeneration++;
+                hapticsGeneration = bluetoothCombinedHapticsGeneration;
                 if (!bluetoothCombinedSpeakerSequenceInitialized)
                 {
                     bluetoothCombinedSpeakerReportSequence = (byte)(report[1] >> 4);
@@ -1880,6 +1966,9 @@ namespace DS4Windows.InputDevices
                     initializedNow = true;
                 }
             }
+
+            Interlocked.Exchange(ref bluetoothCombinedHapticsClockLastFrameTimestamp,
+                Stopwatch.GetTimestamp());
 
             if (initializedNow)
             {
@@ -1897,6 +1986,8 @@ namespace DS4Windows.InputDevices
                     }
                 }
             }
+
+            return hapticsGeneration;
         }
 
         private void ApplyNextBluetoothCombinedSequence(byte[] report)
@@ -1914,6 +2005,19 @@ namespace DS4Windows.InputDevices
                 bluetoothCombinedSpeakerReportSequence =
                     (byte)((bluetoothCombinedSpeakerReportSequence + 1) & 0x0F);
                 bluetoothCombinedSpeakerPacketSequence++;
+            }
+        }
+
+        private void MarkBluetoothCombinedHapticsSubmitted(long hapticsGeneration)
+        {
+            lock (bluetoothCombinedSpeakerReportLock)
+            {
+                if (hapticsGeneration >
+                    bluetoothCombinedSubmittedHapticsGeneration)
+                {
+                    bluetoothCombinedSubmittedHapticsGeneration =
+                        hapticsGeneration;
+                }
             }
         }
 
@@ -1939,7 +2043,18 @@ namespace DS4Windows.InputDevices
             }
         }
 
-        private bool TryWriteCachedBluetoothCombinedSpeakerReport()
+        private bool TryWriteCachedBluetoothCombinedSpeakerReport(
+            bool hapticsSynchronized)
+        {
+            lock (bluetoothCombinedTransportWriteLock)
+            {
+                return TryWriteCachedBluetoothCombinedSpeakerReportCore(
+                    hapticsSynchronized);
+            }
+        }
+
+        private bool TryWriteCachedBluetoothCombinedSpeakerReportCore(
+            bool hapticsSynchronized)
         {
             if (conType != ConnectionType.BT || !enableSpeakerOutput)
             {
@@ -1948,6 +2063,7 @@ namespace DS4Windows.InputDevices
 
             byte[] combined;
             long cachedTimestamp;
+            long hapticsGeneration;
             lock (bluetoothCombinedSpeakerReportLock)
             {
                 if (latestBluetoothCombinedSpeakerReport == null)
@@ -1958,6 +2074,7 @@ namespace DS4Windows.InputDevices
                 combined = new byte[BluetoothCombinedOutputReportLength];
                 Array.Copy(latestBluetoothCombinedSpeakerReport, combined, combined.Length);
                 cachedTimestamp = latestBluetoothCombinedSpeakerReportTimestamp;
+                hapticsGeneration = bluetoothCombinedHapticsGeneration;
             }
 
             bool hapticsFresh = cachedTimestamp > 0 &&
@@ -2031,9 +2148,22 @@ namespace DS4Windows.InputDevices
                 return false;
             }
 
+            MarkBluetoothCombinedHapticsSubmitted(hapticsGeneration);
+
             Interlocked.Increment(ref bluetoothCombinedSpeakerReportsWritten);
-            LastBluetoothHapticsWriteStatus =
-                "Speaker-clocked combined Bluetooth write accepted.";
+            if (hapticsSynchronized)
+            {
+                Interlocked.Increment(ref bluetoothCombinedHapticsPairedWrites);
+                LastBluetoothHapticsWriteStatus =
+                    "Haptics-synchronized combined Bluetooth write accepted.";
+            }
+            else
+            {
+                Interlocked.Increment(ref bluetoothCombinedSpeakerFallbackWrites);
+                LastBluetoothHapticsWriteStatus =
+                    "Speaker fallback combined Bluetooth write accepted.";
+            }
+
             return true;
         }
 

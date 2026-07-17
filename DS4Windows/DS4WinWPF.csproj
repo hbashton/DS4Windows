@@ -77,6 +77,11 @@
 			<Link>extras\install-viiper-backend.ps1</Link>
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</Content>
+		<Content Include="$(PkgYellowDogMan_RRNoise_NET)\runtimes\win-x64\native\rnnoise.dll" Condition="'$(Platform)' == 'x64'">
+			<Link>rnnoise.dll</Link>
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+		</Content>
 	</ItemGroup>
 
 	<ItemGroup>
@@ -91,6 +96,7 @@
 		</PackageReference>
 		<PackageReference Include="NAudio" Version="2.2.1" />
 		<PackageReference Include="NLog" Version="5.1.1" />
+		<PackageReference Include="YellowDogMan.RRNoise.NET" Version="0.1.9" GeneratePathProperty="true" PrivateAssets="all" ExcludeAssets="all" />
 		<!--<PackageReference Include="Nefarius.ViGEm.Client" Version="1.21.230" />-->
 		<PackageReference Include="Ookii.Dialogs.Wpf" Version="5.0.1" />
 		<PackageReference Include="System.Management" Version="7.0.2" />

@@ -2631,6 +2631,12 @@ namespace DS4Windows
             set => m_Config.dualSenseMicrophoneVolume = value;
         }
 
+        public static byte[] DualSenseMicrophoneNoiseSuppression
+        {
+            get => m_Config.dualSenseMicrophoneNoiseSuppression;
+            set => m_Config.dualSenseMicrophoneNoiseSuppression = value;
+        }
+
         public static string[] DualSenseAudioCaptureEndpointId
         {
             get => m_Config.dualSenseAudioCaptureEndpointId;
@@ -3854,6 +3860,7 @@ namespace DS4Windows
         public byte[] dualSenseSpeakerVolume = new byte[Global.TEST_PROFILE_ITEM_COUNT] { 128, 128, 128, 128, 128, 128, 128, 128, 128 };
         public byte[] dualSenseHeadphoneVolume = new byte[Global.TEST_PROFILE_ITEM_COUNT] { 128, 128, 128, 128, 128, 128, 128, 128, 128 };
         public byte[] dualSenseMicrophoneVolume = new byte[Global.TEST_PROFILE_ITEM_COUNT] { 128, 128, 128, 128, 128, 128, 128, 128, 128 };
+        public byte[] dualSenseMicrophoneNoiseSuppression = new byte[Global.TEST_PROFILE_ITEM_COUNT] { 1, 1, 1, 1, 1, 1, 1, 1, 1 };
         public string[] dualSenseAudioCaptureEndpointId = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
         public string[] dualSenseAudioSpeakerEndpointId = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
         public bool[] dualSenseEnableMicrophonePassthrough = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
@@ -5034,6 +5041,7 @@ namespace DS4Windows
                 XmlNode xmlDSSpeakerVolumeElement = m_Xdoc.CreateNode(XmlNodeType.Element, "SpeakerVolume", null); xmlDSSpeakerVolumeElement.InnerText = dualSenseSpeakerVolume[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSSpeakerVolumeElement);
                 XmlNode xmlDSHeadphoneVolumeElement = m_Xdoc.CreateNode(XmlNodeType.Element, "HeadphoneVolume", null); xmlDSHeadphoneVolumeElement.InnerText = dualSenseHeadphoneVolume[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSHeadphoneVolumeElement);
                 XmlNode xmlDSMicrophoneVolumeElement = m_Xdoc.CreateNode(XmlNodeType.Element, "MicrophoneVolume", null); xmlDSMicrophoneVolumeElement.InnerText = dualSenseMicrophoneVolume[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSMicrophoneVolumeElement);
+                XmlNode xmlDSMicrophoneNoiseSuppressionElement = m_Xdoc.CreateNode(XmlNodeType.Element, "MicrophoneNoiseSuppression", null); xmlDSMicrophoneNoiseSuppressionElement.InnerText = dualSenseMicrophoneNoiseSuppression[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSMicrophoneNoiseSuppressionElement);
                 XmlNode xmlDSAudioCaptureEndpointElement = m_Xdoc.CreateNode(XmlNodeType.Element, "CaptureEndpointId", null); xmlDSAudioCaptureEndpointElement.InnerText = dualSenseAudioCaptureEndpointId[device]; xmlDSAudioGroupElement.AppendChild(xmlDSAudioCaptureEndpointElement);
                 XmlNode xmlDSAudioSpeakerEndpointElement = m_Xdoc.CreateNode(XmlNodeType.Element, "SpeakerEndpointId", null); xmlDSAudioSpeakerEndpointElement.InnerText = dualSenseAudioSpeakerEndpointId[device]; xmlDSAudioGroupElement.AppendChild(xmlDSAudioSpeakerEndpointElement);
                 XmlNode xmlDSEnableMicPassthroughElement = m_Xdoc.CreateNode(XmlNodeType.Element, "EnableMicrophonePassthrough", null); xmlDSEnableMicPassthroughElement.InnerText = dualSenseEnableMicrophonePassthrough[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSEnableMicPassthroughElement);
@@ -7454,6 +7462,14 @@ namespace DS4Windows
                             Item = xmlDSAudioGroupElement.SelectSingleNode("MicrophoneVolume");
                             byte.TryParse(Item.InnerText, out byte temp);
                             dualSenseMicrophoneVolume[device] = temp;
+                        }
+                        catch { missingSetting = true; }
+
+                        try
+                        {
+                            Item = xmlDSAudioGroupElement.SelectSingleNode("MicrophoneNoiseSuppression");
+                            byte.TryParse(Item.InnerText, out byte temp);
+                            dualSenseMicrophoneNoiseSuppression[device] = Math.Min(temp, (byte)2);
                         }
                         catch { missingSetting = true; }
 

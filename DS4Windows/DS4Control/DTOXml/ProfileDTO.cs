@@ -1802,6 +1802,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
                     SpeakerVolume = source.dualSenseSpeakerVolume[deviceIndex],
                     HeadphoneVolume = source.dualSenseHeadphoneVolume[deviceIndex],
                     MicrophoneVolume = source.dualSenseMicrophoneVolume[deviceIndex],
+                    MicrophoneNoiseSuppression = source.dualSenseMicrophoneNoiseSuppression[deviceIndex],
                     CaptureEndpointId = source.dualSenseAudioCaptureEndpointId[deviceIndex],
                     SpeakerEndpointId = source.dualSenseAudioSpeakerEndpointId[deviceIndex],
                     EnableMicrophonePassthrough = source.dualSenseEnableMicrophonePassthrough[deviceIndex],
@@ -2434,6 +2435,9 @@ namespace DS4WinWPF.DS4Control.DTOXml
                     destination.dualSenseSpeakerVolume[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.SpeakerVolume;
                     destination.dualSenseHeadphoneVolume[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.HeadphoneVolume;
                     destination.dualSenseMicrophoneVolume[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.MicrophoneVolume;
+                    destination.dualSenseMicrophoneNoiseSuppression[deviceIndex] = Math.Min(
+                        DualSenseControllerSettings.AudioSettingsGroup.MicrophoneNoiseSuppression,
+                        (byte)DualSenseMicrophoneNoiseSuppression.Strong);
                     destination.dualSenseAudioCaptureEndpointId[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.CaptureEndpointId ?? string.Empty;
                     destination.dualSenseAudioSpeakerEndpointId[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.SpeakerEndpointId ?? string.Empty;
                     destination.dualSenseEnableMicrophonePassthrough[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.EnableMicrophonePassthrough;
@@ -3242,6 +3246,12 @@ namespace DS4WinWPF.DS4Control.DTOXml
             {
                 get; set;
             } = 128;
+
+            [XmlElement("MicrophoneNoiseSuppression")]
+            public byte MicrophoneNoiseSuppression
+            {
+                get; set;
+            } = (byte)DS4Windows.DualSenseMicrophoneNoiseSuppression.Balanced;
 
             [XmlElement("CaptureEndpointId")]
             public string CaptureEndpointId

@@ -3307,6 +3307,13 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             set => Global.DualSenseMicrophoneVolume[device] = (byte)Math.Clamp(value, 0, 255);
         }
 
+        public int DualSenseMicrophoneNoiseSuppressionIndex
+        {
+            get => Global.DualSenseMicrophoneNoiseSuppression[device];
+            set => Global.DualSenseMicrophoneNoiseSuppression[device] =
+                (byte)Math.Clamp(value, 0, 2);
+        }
+
         public bool UsingMinViGEm173333
         {
             get => Global.IsUsingMinViGEm117333();

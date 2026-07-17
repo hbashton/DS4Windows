@@ -2182,6 +2182,7 @@
                                                     <RowDefinition Height="30" />
                                                     <RowDefinition Height="30" />
                                                     <RowDefinition Height="30" />
+                                                    <RowDefinition Height="30" />
                                                 </Grid.RowDefinitions>
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto" />
@@ -2207,9 +2208,18 @@
                                                 <CheckBox Content="Enable controller microphone input" IsChecked="{Binding DualSenseEnableMicrophonePassthrough}"
                                                           Grid.Row="4" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}"
                                                           ToolTip="Streams the microphone from a physical Bluetooth DualSense into the recording endpoint exposed by a VIIPER DualSense profile." />
-                                                <Label Content="Microphone volume:" Grid.Row="5" Grid.Column="0" />
+                                                <Label Content="Microphone level:" Grid.Row="5" Grid.Column="0"
+                                                       ToolTip="Adjusts the physical microphone level and the safely trimmed signal exposed to Windows." />
                                                 <xctk:IntegerUpDown Value="{Binding DualSenseMicrophoneVolume}" Minimum="0" Maximum="255" Grid.Row="5" Grid.Column="1"
                                                                     Margin="{StaticResource spaceMargin}" />
+                                                <Label Content="Noise suppression:" Grid.Row="6" Grid.Column="0"
+                                                       ToolTip="Balanced applies RNNoise speech cleanup. Strong also reduces low-level residual noise. Off retains only gain, high-pass, and clipping protection." />
+                                                <ComboBox SelectedIndex="{Binding DualSenseMicrophoneNoiseSuppressionIndex}" Grid.Row="6" Grid.Column="1"
+                                                          Margin="{StaticResource spaceMargin}">
+                                                    <ComboBoxItem Content="Off" />
+                                                    <ComboBoxItem Content="Balanced" />
+                                                    <ComboBoxItem Content="Strong" />
+                                                </ComboBox>
                                             </Grid>
                                         </GroupBox>
 

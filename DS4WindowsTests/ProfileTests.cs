@@ -355,6 +355,27 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void CheckMicrophoneNoiseSuppressionDefaultsAndRoundTrip()
+        {
+            var store = new BackingStore();
+            var dto = new ProfileDTO
+            {
+                DeviceIndex = 0,
+            };
+
+            dto.MapTo(store);
+            Assert.AreEqual((byte)DualSenseMicrophoneNoiseSuppression.Balanced,
+                store.dualSenseMicrophoneNoiseSuppression[0]);
+
+            store.dualSenseMicrophoneNoiseSuppression[0] =
+                (byte)DualSenseMicrophoneNoiseSuppression.Strong;
+            dto.MapFrom(store);
+
+            Assert.AreEqual((byte)DualSenseMicrophoneNoiseSuppression.Strong,
+                dto.DualSenseControllerSettings.AudioSettingsGroup.MicrophoneNoiseSuppression);
+        }
+
+        [TestMethod]
         public void CheckWriteProfile()
         {
             BackingStore tempStore = new BackingStore();

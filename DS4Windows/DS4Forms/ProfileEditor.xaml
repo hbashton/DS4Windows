@@ -2180,6 +2180,8 @@
                                                     <RowDefinition Height="30" />
                                                     <RowDefinition Height="30" />
                                                     <RowDefinition Height="30" />
+                                                    <RowDefinition Height="30" />
+                                                    <RowDefinition Height="30" />
                                                 </Grid.RowDefinitions>
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto" />
@@ -2201,6 +2203,12 @@
                                                           Margin="{StaticResource spaceMargin}" />
                                                 <Label Content="Speaker volume:" Grid.Row="3" Grid.Column="0" />
                                                 <xctk:IntegerUpDown Value="{Binding DualSenseSpeakerVolume}" Minimum="0" Maximum="255" Grid.Row="3" Grid.Column="1"
+                                                                    Margin="{StaticResource spaceMargin}" />
+                                                <CheckBox Content="Enable controller microphone input" IsChecked="{Binding DualSenseEnableMicrophonePassthrough}"
+                                                          Grid.Row="4" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}"
+                                                          ToolTip="Streams the microphone from a physical Bluetooth DualSense into the recording endpoint exposed by a VIIPER DualSense profile." />
+                                                <Label Content="Microphone volume:" Grid.Row="5" Grid.Column="0" />
+                                                <xctk:IntegerUpDown Value="{Binding DualSenseMicrophoneVolume}" Minimum="0" Maximum="255" Grid.Row="5" Grid.Column="1"
                                                                     Margin="{StaticResource spaceMargin}" />
                                             </Grid>
                                         </GroupBox>

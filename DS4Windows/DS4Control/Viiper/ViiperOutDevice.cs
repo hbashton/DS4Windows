@@ -86,7 +86,15 @@ namespace DS4Windows
         private long replacedPendingPacketCount;
         private long submittedPacketCount;
         private long writtenPacketCount;
+        private long microphoneArmAttempts;
+        private long microphoneArmFailures;
+        private long microphoneOpusFramesReceived;
+        private long microphoneFramesDecoded;
+        private long microphoneFramesSubmitted;
+        private long microphoneFramesDropped;
+        private long microphoneDecodeFailures;
         private DateTime lastWriterHealthLogUtc = DateTime.MinValue;
+        private DateTime lastMicrophoneHealthLogUtc = DateTime.MinValue;
         private int lastInputDeviceIndex = -1;
         private int submitFailureLogged;
         private int microphoneUnavailableLogged;
@@ -126,6 +134,13 @@ namespace DS4Windows
             Interlocked.Exchange(ref writtenPacketCount, 0);
             Interlocked.Exchange(ref lastMicrophoneFrameTimestamp, 0);
             Interlocked.Exchange(ref lastMicrophoneArmTimestamp, 0);
+            Interlocked.Exchange(ref microphoneArmAttempts, 0);
+            Interlocked.Exchange(ref microphoneArmFailures, 0);
+            Interlocked.Exchange(ref microphoneOpusFramesReceived, 0);
+            Interlocked.Exchange(ref microphoneFramesDecoded, 0);
+            Interlocked.Exchange(ref microphoneFramesSubmitted, 0);
+            Interlocked.Exchange(ref microphoneFramesDropped, 0);
+            Interlocked.Exchange(ref microphoneDecodeFailures, 0);
             Volatile.Write(ref edgePhysicalMismatchLogged, 0);
             lock (physicalDualSenseIdentityLock)
             {
@@ -133,6 +148,7 @@ namespace DS4Windows
                 physicalDualSenseIdentityVerified = false;
             }
             lastWriterHealthLogUtc = DateTime.MinValue;
+            lastMicrophoneHealthLogUtc = DateTime.MinValue;
             writerStopRequested = false;
             connected = true;
             StartStateWriter();
@@ -605,8 +621,11 @@ namespace DS4Windows
                 microphoneMonoPcm.AsSpan(), DualSenseMicrophoneFramesPerPacket, false);
             if (decodedSamples <= 0)
             {
+                Interlocked.Increment(ref microphoneDecodeFailures);
                 return;
             }
+
+            Interlocked.Increment(ref microphoneFramesDecoded);
 
             Array.Clear(microphoneStereoPcm, 0, microphoneStereoPcm.Length);
             int frames = Math.Min(decodedSamples, DualSenseMicrophoneFramesPerPacket);
@@ -623,6 +642,7 @@ namespace DS4Windows
             }
 
             stream.WriteFrameV2(ViiperStreamFrameMicrophonePcm, microphoneStereoPcm);
+            Interlocked.Increment(ref microphoneFramesSubmitted);
         }
 
         private void LogWriterHealthIfNeeded()
@@ -849,18 +869,53 @@ namespace DS4Windows
             long lastFrame = Interlocked.Read(ref lastMicrophoneFrameTimestamp);
             long lastArm = Interlocked.Read(ref lastMicrophoneArmTimestamp);
             long oneSecond = Stopwatch.Frequency;
-            long quarterSecond = Stopwatch.Frequency / 4;
+            long retryPeriod = Stopwatch.Frequency * 2;
+            LogMicrophoneHealthIfNeeded(source, now, lastFrame);
             if (lastFrame != 0 && now - lastFrame < oneSecond)
             {
                 return;
             }
-            if (lastArm != 0 && now - lastArm < quarterSecond)
+            if (lastArm != 0 && now - lastArm < retryPeriod)
             {
                 return;
             }
 
             Interlocked.Exchange(ref lastMicrophoneArmTimestamp, now);
-            source.SetBluetoothMicrophoneStreaming(true);
+            Interlocked.Increment(ref microphoneArmAttempts);
+            if (!source.SetBluetoothMicrophoneStreaming(true))
+            {
+                Interlocked.Increment(ref microphoneArmFailures);
+            }
+        }
+
+        private void LogMicrophoneHealthIfNeeded(DualSenseDevice source, long now,
+            long lastFrame)
+        {
+            if (!Global.VerboseStartupLogging ||
+                DateTime.UtcNow - lastMicrophoneHealthLogUtc < TimeSpan.FromSeconds(5))
+            {
+                return;
+            }
+
+            lastMicrophoneHealthLogUtc = DateTime.UtcNow;
+            string frameAge = lastFrame == 0 ? "never" :
+                $"{Math.Max(0, (now - lastFrame) * 1000 / Stopwatch.Frequency)}ms";
+            int rejectedTag = source.BluetoothLastRejectedInputTag;
+            string rejectedTagText = rejectedTag < 0 ? "none" : $"0x{rejectedTag:X2}";
+            AppLogger.LogToGui(
+                $"VIIPER {viiperType} microphone stats: streamV2={activeStreamUsesFramedProtocol} " +
+                $"armAttempts={Interlocked.Read(ref microphoneArmAttempts)} " +
+                $"armFailures={Interlocked.Read(ref microphoneArmFailures)} " +
+                $"physicalFrames={source.BluetoothMicrophoneFramesReceived} " +
+                $"forwardedFrames={Interlocked.Read(ref microphoneOpusFramesReceived)} " +
+                $"decodedFrames={Interlocked.Read(ref microphoneFramesDecoded)} " +
+                $"submittedFrames={Interlocked.Read(ref microphoneFramesSubmitted)} " +
+                $"queueDrops={Interlocked.Read(ref microphoneFramesDropped)} " +
+                $"decodeFailures={Interlocked.Read(ref microphoneDecodeFailures)} " +
+                $"rejectedInputs={source.BluetoothRejectedInputFrames} " +
+                $"lastRejectedTag={rejectedTagText} lastFrameAge={frameAge} " +
+                $"armStatus=\"{source.LastBluetoothMicrophoneWriteStatus}\"",
+                false);
         }
 
         private void DetachBluetoothMicrophoneSource()
@@ -913,6 +968,7 @@ namespace DS4Windows
                 return;
             }
 
+            Interlocked.Increment(ref microphoneOpusFramesReceived);
             Interlocked.Exchange(ref lastMicrophoneFrameTimestamp,
                 Stopwatch.GetTimestamp());
             byte[] copy = new byte[DualSenseMicrophoneOpusFrameLength];
@@ -922,6 +978,7 @@ namespace DS4Windows
                 while (pendingMicrophoneOpusFrames.Count >= MaxPendingMicrophoneFrames)
                 {
                     pendingMicrophoneOpusFrames.Dequeue();
+                    Interlocked.Increment(ref microphoneFramesDropped);
                 }
                 pendingMicrophoneOpusFrames.Enqueue(copy);
             }

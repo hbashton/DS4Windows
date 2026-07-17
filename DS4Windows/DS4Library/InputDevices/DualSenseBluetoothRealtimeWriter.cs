@@ -103,6 +103,11 @@ namespace DS4Windows.InputDevices
         public double MaximumSubmissionGapMilliseconds =>
             Interlocked.Read(ref maximumSubmissionGapTicks) * 1000.0 / Stopwatch.Frequency;
 
+        public void ResetSubmissionClock()
+        {
+            Interlocked.Exchange(ref lastSubmissionTimestamp, 0);
+        }
+
         private DualSenseBluetoothRealtimeWriter(IntPtr deviceHandle, int reportLength, int slotCount)
         {
             this.deviceHandle = deviceHandle;

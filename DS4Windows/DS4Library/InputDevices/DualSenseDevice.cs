@@ -364,7 +364,6 @@ namespace DS4Windows.InputDevices
         private const byte BluetoothCombinedSpeakerBufferLength = 64;
         private const int BluetoothCombinedHapticsFreshnessMilliseconds = 30;
         private const int BluetoothSpeakerClockActiveMilliseconds = 25;
-        private const int BluetoothCombinedHapticsClockActiveMilliseconds = 25;
         private const int MaxBluetoothSpeakerFrames = 4;
         private const byte DualSenseSpeakerVolumeMinimum = 0x3D;
         private const byte DualSenseSpeakerVolumeMaximum = 0x64;
@@ -394,7 +393,6 @@ namespace DS4Windows.InputDevices
         private long bluetoothRealtimeWriterDroppedReports;
         private long bluetoothCombinedSpeakerStaleHapticsSilenced;
         private long bluetoothSpeakerClockLastFrameTimestamp;
-        private long bluetoothCombinedHapticsClockLastFrameTimestamp;
         private long bluetoothCombinedHapticsPairedWrites;
         private long bluetoothCombinedSpeakerFallbackWrites;
         private int bluetoothCombinedOutputTransportEnabled;
@@ -483,9 +481,9 @@ namespace DS4Windows.InputDevices
             Volatile.Read(ref bluetoothCombinedOutputTransportEnabled) != 0;
 
         /// <summary>
-        /// Queues one fixed-size Opus frame. While VIIPER haptics is active,
-        /// the next fresh haptics block and speaker frame are submitted as one
-        /// packet. Speaker-only playback falls back to the capture clock.
+        /// Queues one fixed-size Opus frame and submits it on the speaker
+        /// clock. The newest VIIPER haptics snapshot is merged into that same
+        /// packet without allowing its arrival cadence to stall speaker audio.
         /// </summary>
         public void SetBluetoothSpeakerAudioFrame(byte[] frame, int length)
         {
@@ -512,17 +510,9 @@ namespace DS4Windows.InputDevices
 
             Interlocked.Exchange(ref bluetoothSpeakerClockLastFrameTimestamp,
                 Stopwatch.GetTimestamp());
-            if (HasPendingFreshBluetoothCombinedHaptics())
-            {
-                TryWriteCachedBluetoothCombinedSpeakerReport(
-                    hapticsSynchronized: true);
-            }
-            else if (!IsBluetoothCombinedHapticsClockActive())
-            {
-                TrimBluetoothSpeakerFramesToLatest();
-                TryWriteCachedBluetoothCombinedSpeakerReport(
-                    hapticsSynchronized: false);
-            }
+            bool hapticsSynchronized = HasPendingFreshBluetoothCombinedHaptics();
+            TrimBluetoothSpeakerFramesToLatest();
+            TryWriteCachedBluetoothCombinedSpeakerReport(hapticsSynchronized);
         }
 
         /// <summary>
@@ -546,8 +536,11 @@ namespace DS4Windows.InputDevices
             }
 
             Interlocked.Exchange(ref bluetoothSpeakerClockLastFrameTimestamp, 0);
-            Interlocked.Exchange(ref bluetoothCombinedHapticsClockLastFrameTimestamp, 0);
             Interlocked.Exchange(ref bluetoothCombinedOutputTransportEnabled, 0);
+            lock (bluetoothRealtimeWriterLock)
+            {
+                bluetoothRealtimeWriter?.ResetSubmissionClock();
+            }
         }
 
         private bool IsBluetoothSpeakerClockActive()
@@ -556,16 +549,6 @@ namespace DS4Windows.InputDevices
             return lastFrame > 0 &&
                 Stopwatch.GetTimestamp() - lastFrame <=
                 (Stopwatch.Frequency * BluetoothSpeakerClockActiveMilliseconds) / 1000;
-        }
-
-        private bool IsBluetoothCombinedHapticsClockActive()
-        {
-            long lastFrame =
-                Interlocked.Read(ref bluetoothCombinedHapticsClockLastFrameTimestamp);
-            return lastFrame > 0 &&
-                Stopwatch.GetTimestamp() - lastFrame <=
-                (Stopwatch.Frequency *
-                    BluetoothCombinedHapticsClockActiveMilliseconds) / 1000;
         }
 
         private bool HasPendingFreshBluetoothCombinedHaptics()
@@ -579,14 +562,6 @@ namespace DS4Windows.InputDevices
                         latestBluetoothCombinedSpeakerReportTimestamp <=
                         (Stopwatch.Frequency *
                             BluetoothCombinedHapticsFreshnessMilliseconds) / 1000;
-            }
-        }
-
-        private bool HasBluetoothSpeakerAudioFrame()
-        {
-            lock (bluetoothSpeakerFrameLock)
-            {
-                return bluetoothSpeakerFrames.Count > 0;
             }
         }
 
@@ -1910,8 +1885,8 @@ namespace DS4Windows.InputDevices
 
         /// <summary>
         /// Receives VIIPER's vDS-compatible Bluetooth report 0x36. While
-        /// speaker audio is active, the newest native haptics block is paired
-        /// with the next Opus frame. Either arrival can complete the pair.
+        /// speaker audio is active, this refreshes the newest native state and
+        /// haptics block; the fixed-cadence speaker clock owns physical writes.
         /// </summary>
         public bool WriteBluetoothCombinedHapticsAudioOutputReport(byte[] report, int offset, int length)
         {
@@ -1929,17 +1904,8 @@ namespace DS4Windows.InputDevices
 
             if (enableSpeakerOutput && IsBluetoothSpeakerClockActive())
             {
-                if (HasBluetoothSpeakerAudioFrame())
-                {
-                    TryWriteCachedBluetoothCombinedSpeakerReport(
-                        hapticsSynchronized: true);
-                }
-                else
-                {
-                    LastBluetoothHapticsWriteStatus =
-                        "Cached fresh Bluetooth haptics while waiting for the matching speaker frame.";
-                }
-
+                LastBluetoothHapticsWriteStatus =
+                    "Cached fresh Bluetooth haptics for the next speaker-clocked frame.";
                 return true;
             }
 
@@ -1985,9 +1951,6 @@ namespace DS4Windows.InputDevices
                     initializedNow = true;
                 }
             }
-
-            Interlocked.Exchange(ref bluetoothCombinedHapticsClockLastFrameTimestamp,
-                Stopwatch.GetTimestamp());
 
             if (initializedNow)
             {

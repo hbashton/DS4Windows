@@ -2777,7 +2777,13 @@ namespace DS4Windows
                     dualSenseAudioPassthrough.Stop(ind);
                 }
 
-                if (DualSenseEnableMicrophonePassthrough[ind])
+                bool useViiperDualSenseMicrophone =
+                    DualSenseEnableMicrophonePassthrough[ind] &&
+                    (Global.OutContType[ind] == OutContType.ViiperDualSense ||
+                    Global.OutContType[ind] == OutContType.ViiperDualSenseEdge);
+
+                if (DualSenseEnableMicrophonePassthrough[ind] &&
+                    !useViiperDualSenseMicrophone)
                 {
                     dualSenseMicrophonePassthrough.Start(DualSenseMicrophoneVolume[ind],
                         DualSenseMicrophoneCaptureEndpointId[ind],

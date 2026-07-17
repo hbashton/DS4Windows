@@ -3139,6 +3139,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 var choices = new List<AudioEndpointChoice>()
                 {
                     new AudioEndpointChoice("Default audio endpoint", string.Empty),
+                    new AudioEndpointChoice("DualSense / game audio (auto-detect)",
+                        DualSenseAudioPassthrough.AutoDetectGameAudioEndpointId),
                 };
 
                 try
@@ -3149,7 +3151,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                         string name = endpoint.FriendlyName;
                         if (DualSenseAudioPassthrough.IsDualSenseEndpoint(endpoint))
                         {
-                            name += " (controller or VIIPER audio)";
+                            name += " (DualSense / game audio)";
                         }
 
                         choices.Add(new AudioEndpointChoice(name, endpoint.ID));

@@ -178,10 +178,46 @@ namespace DS4Windows
             }
 
             using var enumerator = new MMDeviceEnumerator();
-            MMDevice endpoint = enumerator.GetDevice(endpointId);
-            if (endpoint == null || endpoint.State != DeviceState.Active)
+            bool autoDetectGameAudio = string.Equals(endpointId,
+                DualSenseAudioPassthrough.AutoDetectGameAudioEndpointId,
+                StringComparison.Ordinal);
+            MMDevice endpoint = null;
+
+            if (!autoDetectGameAudio)
             {
-                throw new InvalidOperationException("Selected Bluetooth speaker audio source is not available.");
+                try
+                {
+                    endpoint = enumerator.GetDevice(endpointId);
+                    if (endpoint?.State != DeviceState.Active)
+                    {
+                        endpoint?.Dispose();
+                        endpoint = null;
+                    }
+                }
+                catch (COMException)
+                {
+                    endpoint = null;
+                }
+            }
+
+            if (endpoint == null)
+            {
+                endpoint = DualSenseAudioPassthrough.FindActiveGameAudioEndpoint(enumerator,
+                    autoDetectGameAudio ? null : endpointId);
+            }
+
+            if (endpoint == null)
+            {
+                throw new InvalidOperationException(autoDetectGameAudio ?
+                    "DualSense / game audio endpoint is not available." :
+                    "Selected Bluetooth speaker audio source is not available and no active DualSense / game audio replacement was found.");
+            }
+
+            if (!autoDetectGameAudio && !string.Equals(endpoint.ID, endpointId, StringComparison.Ordinal))
+            {
+                AppLogger.LogToGui(
+                    $"Selected Bluetooth speaker audio source was recreated; rebound to {endpoint.FriendlyName}.",
+                    false);
             }
 
             sourceName = endpoint.FriendlyName;

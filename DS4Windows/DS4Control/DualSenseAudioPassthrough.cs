@@ -1,6 +1,7 @@
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using DS4Windows.InputDevices;
+using Microsoft.Win32;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -11,6 +12,10 @@ namespace DS4Windows
 {
     public sealed class DualSenseAudioPassthrough : IDisposable
     {
+        public const string AutoDetectGameAudioEndpointId = "DS4Windows:AutoDetectDualSenseGameAudio";
+
+        private const string EndpointHistoryValueName = "{4b416b7d-8501-40c1-acfd-97aa9bdc17c8},1";
+        private const string RenderEndpointRegistryPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Render\";
         private const int ControllerCount = ControlService.MAX_DS4_CONTROLLER_COUNT;
         private readonly object syncRoot = new object();
         private readonly SlotPlayback[] slots = new SlotPlayback[ControllerCount];
@@ -395,6 +400,48 @@ namespace DS4Windows
             return text.IndexOf("DualSense", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 text.IndexOf("Wireless Controller", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 text.IndexOf("PS5", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        internal static MMDevice FindActiveGameAudioEndpoint(MMDeviceEnumerator enumerator,
+            string previousEndpointId = null)
+        {
+            IEnumerable<MMDevice> endpoints = enumerator
+                .EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active)
+                .Where(IsDualSenseEndpoint);
+
+            return string.IsNullOrEmpty(previousEndpointId) ?
+                endpoints.FirstOrDefault() :
+                endpoints.FirstOrDefault(endpoint => EndpointReplaces(endpoint, previousEndpointId));
+        }
+
+        private static bool EndpointReplaces(MMDevice endpoint, string previousEndpointId)
+        {
+            string endpointId = endpoint?.ID ?? string.Empty;
+            int keyStart = endpointId.LastIndexOf(".{", StringComparison.Ordinal);
+            if (keyStart < 0)
+            {
+                return false;
+            }
+
+            try
+            {
+                string endpointKeyName = endpointId.Substring(keyStart + 1);
+                using RegistryKey properties = Registry.LocalMachine.OpenSubKey(
+                    RenderEndpointRegistryPath + endpointKeyName + @"\Properties");
+                object history = properties?.GetValue(EndpointHistoryValueName);
+                if (history is string[] endpointIds)
+                {
+                    return endpointIds.Any(id => string.Equals(id, previousEndpointId,
+                        StringComparison.OrdinalIgnoreCase));
+                }
+
+                return history is string id && string.Equals(id, previousEndpointId,
+                    StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private sealed class SlotPlayback : IDisposable

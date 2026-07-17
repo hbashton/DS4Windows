@@ -83,6 +83,7 @@ namespace DS4Windows
         private long captureUnderruns;
         private long captureDriftAdjustments;
         private long lastDiagnosticUtcTicks;
+        private int diagnosticLogPending;
 
         public DualSenseBluetoothSpeakerPassthrough(DualSenseDevice device, byte speakerVolume,
             string sourceEndpointId)
@@ -391,6 +392,7 @@ namespace DS4Windows
             try
             {
                 WaitForInitialCaptureBuffer();
+                nextTick = DateTime.UtcNow.Ticks;
                 while (!stopping)
                 {
                     Array.Clear(sourceFrame, 0, sourceFrame.Length);
@@ -507,34 +509,49 @@ namespace DS4Windows
                 return;
             }
 
-            AppLogger.LogToGui(
-                $"DualSense Bluetooth combined stream stats: frames={Interlocked.Read(ref framesSent)} " +
-                $"silentFrames={Interlocked.Read(ref silentFramesSent)} " +
-                $"scheduleMisses={Interlocked.Read(ref skippedScheduleSlots)} " +
-                $"maximumScheduleLatenessMs={Interlocked.Read(ref maximumScheduleLatenessTicks) / (double)TimeSpan.TicksPerMillisecond:F1} " +
-                $"segmentStarts={Interlocked.Read(ref audioSegmentStarts)} " +
-                $"segmentStops={Interlocked.Read(ref audioSegmentStops)} " +
-                $"captureCallbacks={Interlocked.Read(ref captureCallbackCount)} " +
-                $"captureInputFrames={Interlocked.Read(ref captureInputFrames)} " +
-                $"captureBufferedFrames={GetCaptureBufferedFrames()} " +
-                $"capturePrimed={IsCapturePrimed()} " +
-                $"captureUnderruns={Interlocked.Read(ref captureUnderruns)} " +
-                $"driftAdjustments={Interlocked.Read(ref captureDriftAdjustments)} " +
-                $"queuedFrames={device.PendingBluetoothSpeakerFrames} " +
-                $"queueDrops={device.BluetoothSpeakerFramesDropped} " +
-                $"writerDrops={device.BluetoothRealtimeWriterDroppedReports} " +
-                $"writerCompletions={device.BluetoothRealtimeWriterCompletedReports} " +
-                $"writerSlowCompletions={device.BluetoothRealtimeWriterSlowCompletionCount} " +
-                $"writerMaximumCompletionMs={device.BluetoothRealtimeWriterMaximumCompletionMilliseconds:F1} " +
-                $"writerLateSubmissions={device.BluetoothRealtimeWriterLateSubmissionCount} " +
-                $"writerMaximumSubmissionGapMs={device.BluetoothRealtimeWriterMaximumSubmissionGapMilliseconds:F1} " +
-                $"speakerWrites={device.BluetoothCombinedSpeakerReportsWritten} " +
-                $"speakerWriteFailures={device.BluetoothCombinedSpeakerWriteFailures} " +
-                $"hapticsPairedWrites={device.BluetoothCombinedHapticsPairedWrites} " +
-                $"speakerFallbackWrites={device.BluetoothCombinedSpeakerFallbackWrites} " +
-                $"staleHapticsSilenced={device.BluetoothCombinedSpeakerStaleHapticsSilenced} " +
-                $"status={device.LastBluetoothHapticsWriteStatus}",
-                false);
+            if (Interlocked.CompareExchange(ref diagnosticLogPending, 1, 0) != 0)
+            {
+                return;
+            }
+
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    AppLogger.LogToGui(
+                        $"DualSense Bluetooth combined stream stats: frames={Interlocked.Read(ref framesSent)} " +
+                        $"silentFrames={Interlocked.Read(ref silentFramesSent)} " +
+                        $"scheduleMisses={Interlocked.Read(ref skippedScheduleSlots)} " +
+                        $"maximumScheduleLatenessMs={Interlocked.Read(ref maximumScheduleLatenessTicks) / (double)TimeSpan.TicksPerMillisecond:F1} " +
+                        $"segmentStarts={Interlocked.Read(ref audioSegmentStarts)} " +
+                        $"segmentStops={Interlocked.Read(ref audioSegmentStops)} " +
+                        $"captureCallbacks={Interlocked.Read(ref captureCallbackCount)} " +
+                        $"captureInputFrames={Interlocked.Read(ref captureInputFrames)} " +
+                        $"captureBufferedFrames={GetCaptureBufferedFrames()} " +
+                        $"capturePrimed={IsCapturePrimed()} " +
+                        $"captureUnderruns={Interlocked.Read(ref captureUnderruns)} " +
+                        $"driftAdjustments={Interlocked.Read(ref captureDriftAdjustments)} " +
+                        $"queuedFrames={device.PendingBluetoothSpeakerFrames} " +
+                        $"queueDrops={device.BluetoothSpeakerFramesDropped} " +
+                        $"writerDrops={device.BluetoothRealtimeWriterDroppedReports} " +
+                        $"writerCompletions={device.BluetoothRealtimeWriterCompletedReports} " +
+                        $"writerSlowCompletions={device.BluetoothRealtimeWriterSlowCompletionCount} " +
+                        $"writerMaximumCompletionMs={device.BluetoothRealtimeWriterMaximumCompletionMilliseconds:F1} " +
+                        $"writerLateSubmissions={device.BluetoothRealtimeWriterLateSubmissionCount} " +
+                        $"writerMaximumSubmissionGapMs={device.BluetoothRealtimeWriterMaximumSubmissionGapMilliseconds:F1} " +
+                        $"speakerWrites={device.BluetoothCombinedSpeakerReportsWritten} " +
+                        $"speakerWriteFailures={device.BluetoothCombinedSpeakerWriteFailures} " +
+                        $"hapticsPairedWrites={device.BluetoothCombinedHapticsPairedWrites} " +
+                        $"speakerFallbackWrites={device.BluetoothCombinedSpeakerFallbackWrites} " +
+                        $"staleHapticsSilenced={device.BluetoothCombinedSpeakerStaleHapticsSilenced} " +
+                        $"status={device.LastBluetoothHapticsWriteStatus}",
+                        false);
+                }
+                finally
+                {
+                    Volatile.Write(ref diagnosticLogPending, 0);
+                }
+            });
         }
 
         private int GetCaptureBufferedFrames()

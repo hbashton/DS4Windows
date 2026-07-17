@@ -222,18 +222,18 @@ namespace DS4Windows
 
                 ViiperClient client = new ViiperClient(ViiperSetupManager.ApiHost, ViiperSetupManager.ApiPort);
                 string viiperDeviceName = ViiperStatePacketBuilder.GetViiperDeviceName(type);
-                int packetLength = ViiperStatePacketBuilder.Build(type, new DS4State(), -1).Length;
+                int packetLength = ViiperStatePacketBuilder.BuildNeutral(type).Length;
                 int feedbackLength = ViiperStatePacketBuilder.GetFeedbackLength(type);
                 Log($"Device={type} viiperName={viiperDeviceName} packetLength={packetLength} feedbackLength={feedbackLength}");
 
                 using ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(type);
                 Log($"Device={type} create/open stream OK");
 
-                WritePacket(stream, type, "neutral", new DS4State(), cancellationToken);
+                WritePacket(stream, type, "neutral", ViiperStatePacketBuilder.CreateNeutralState(), cancellationToken);
                 WritePacket(stream, type, "buttons", BuildButtonState(type), cancellationToken);
                 WritePacket(stream, type, "axes", BuildAxisState(type), cancellationToken);
                 WritePacket(stream, type, "touch", BuildTouchState(), cancellationToken);
-                WritePacket(stream, type, "reset", new DS4State(), cancellationToken);
+                WritePacket(stream, type, "reset", ViiperStatePacketBuilder.CreateNeutralState(), cancellationToken);
                 Log($"Device={type} dispose temp stream begin");
             }, cancellationToken);
         }

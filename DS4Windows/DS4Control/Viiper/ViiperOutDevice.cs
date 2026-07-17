@@ -434,7 +434,7 @@ namespace DS4Windows
 
             try
             {
-                QueueStatePacket(ViiperStatePacketBuilder.Build(viiperType, new DS4State(), -1));
+                QueueStatePacket(ViiperStatePacketBuilder.BuildNeutral(viiperType));
             }
             catch (IOException ex)
             {
@@ -2154,6 +2154,22 @@ namespace DS4Windows
                 ViiperVirtualDeviceType.DualSenseEdge => BuildDualSense(state, device),
                 ViiperVirtualDeviceType.Switch2Pro => BuildSwitch2Pro(state, device),
                 _ => BuildXbox360(state, device),
+            };
+        }
+
+        public static byte[] BuildNeutral(ViiperVirtualDeviceType type)
+        {
+            return Build(type, CreateNeutralState(), -1);
+        }
+
+        public static DS4State CreateNeutralState()
+        {
+            return new DS4State
+            {
+                LX = 128,
+                LY = 128,
+                RX = 128,
+                RY = 128,
             };
         }
 

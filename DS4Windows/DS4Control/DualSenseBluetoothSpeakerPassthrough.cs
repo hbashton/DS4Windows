@@ -76,14 +76,20 @@ namespace DS4Windows
         private long silentFramesSent;
         private long skippedScheduleSlots;
         private long maximumScheduleLatenessTicks;
+        private long activeScheduleMisses;
+        private long maximumActiveScheduleLatenessTicks;
         private long audioSegmentStarts;
         private long audioSegmentStops;
         private long captureCallbackCount;
         private long captureInputFrames;
         private long captureUnderruns;
+        private long activeCaptureUnderruns;
         private long captureDriftAdjustments;
         private long lastDiagnosticUtcTicks;
         private int diagnosticLogPending;
+        private int mmcssRegistered;
+        private int mmcssHighPriority;
+        private int mmcssRegistrationError;
 
         public DualSenseBluetoothSpeakerPassthrough(DualSenseDevice device, byte speakerVolume,
             string sourceEndpointId)
@@ -386,6 +392,7 @@ namespace DS4Windows
         private void StreamLoop()
         {
             timeBeginPeriod(1);
+            IntPtr mmcssHandle = RegisterMultimediaScheduler();
             IntPtr highResolutionTimer = CreateHighResolutionTimer();
             long nextTick = DateTime.UtcNow.Ticks;
             long cadenceTicks = (long)(BluetoothSpeakerCadenceMs * TimeSpan.TicksPerMillisecond);
@@ -398,11 +405,16 @@ namespace DS4Windows
                     Array.Clear(sourceFrame, 0, sourceFrame.Length);
                     Array.Clear(frame, 0, frame.Length);
                     int sourceFrames = GetSourceFramesPerTick();
+                    bool wasAudioSegmentActive = audioSegmentActive;
                     int capturedFrames = ReadCaptureFrames(sourceFrames);
                     bool captureUnderrun = capturedFrames < sourceFrames;
                     if (captureUnderrun)
                     {
                         Interlocked.Increment(ref captureUnderruns);
+                        if (wasAudioSegmentActive)
+                        {
+                            Interlocked.Increment(ref activeCaptureUnderruns);
+                        }
                     }
 
                     bool audible = capturedFrames > 0 &&
@@ -445,9 +457,11 @@ namespace DS4Windows
 
                     bool recentlyAudible = lastAudibleUtc != DateTime.MinValue &&
                         DateTime.UtcNow - lastAudibleUtc <= TimeSpan.FromMilliseconds(IdleKeepAliveMs);
+                    bool submittedFrameThisTick = false;
                     if (audioSegmentActive && recentlyAudible)
                     {
                         SendFrame();
+                        submittedFrameThisTick = true;
                         Interlocked.Increment(ref framesSent);
                         if (!audible)
                         {
@@ -470,6 +484,12 @@ namespace DS4Windows
                         long lateness = nowTicks - nextTick;
                         Interlocked.Increment(ref skippedScheduleSlots);
                         UpdateMaximum(ref maximumScheduleLatenessTicks, lateness);
+                        if (submittedFrameThisTick)
+                        {
+                            Interlocked.Increment(ref activeScheduleMisses);
+                            UpdateMaximum(ref maximumActiveScheduleLatenessTicks,
+                                lateness);
+                        }
                         nextTick = nowTicks + cadenceTicks;
                         LogStreamDiagnosticsIfVerbose();
                         continue;
@@ -481,6 +501,11 @@ namespace DS4Windows
             }
             finally
             {
+                if (mmcssHandle != IntPtr.Zero)
+                {
+                    AvRevertMmThreadCharacteristics(mmcssHandle);
+                }
+
                 if (highResolutionTimer != IntPtr.Zero)
                 {
                     CloseHandle(highResolutionTimer);
@@ -523,6 +548,8 @@ namespace DS4Windows
                         $"silentFrames={Interlocked.Read(ref silentFramesSent)} " +
                         $"scheduleMisses={Interlocked.Read(ref skippedScheduleSlots)} " +
                         $"maximumScheduleLatenessMs={Interlocked.Read(ref maximumScheduleLatenessTicks) / (double)TimeSpan.TicksPerMillisecond:F1} " +
+                        $"activeScheduleMisses={Interlocked.Read(ref activeScheduleMisses)} " +
+                        $"maximumActiveScheduleLatenessMs={Interlocked.Read(ref maximumActiveScheduleLatenessTicks) / (double)TimeSpan.TicksPerMillisecond:F1} " +
                         $"segmentStarts={Interlocked.Read(ref audioSegmentStarts)} " +
                         $"segmentStops={Interlocked.Read(ref audioSegmentStops)} " +
                         $"captureCallbacks={Interlocked.Read(ref captureCallbackCount)} " +
@@ -530,7 +557,12 @@ namespace DS4Windows
                         $"captureBufferedFrames={GetCaptureBufferedFrames()} " +
                         $"capturePrimed={IsCapturePrimed()} " +
                         $"captureUnderruns={Interlocked.Read(ref captureUnderruns)} " +
+                        $"activeCaptureUnderruns={Interlocked.Read(ref activeCaptureUnderruns)} " +
                         $"driftAdjustments={Interlocked.Read(ref captureDriftAdjustments)} " +
+                        $"mmcssRegistered={Volatile.Read(ref mmcssRegistered) != 0} " +
+                        $"mmcssHighPriority={Volatile.Read(ref mmcssHighPriority) != 0} " +
+                        $"mmcssError={Volatile.Read(ref mmcssRegistrationError)} " +
+                        $"gc0={GC.CollectionCount(0)} gc1={GC.CollectionCount(1)} gc2={GC.CollectionCount(2)} " +
                         $"queuedFrames={device.PendingBluetoothSpeakerFrames} " +
                         $"queueDrops={device.BluetoothSpeakerFramesDropped} " +
                         $"writerDrops={device.BluetoothRealtimeWriterDroppedReports} " +
@@ -666,6 +698,45 @@ namespace DS4Windows
             return timer;
         }
 
+        private IntPtr RegisterMultimediaScheduler()
+        {
+            try
+            {
+                uint taskIndex = 0;
+                IntPtr handle = AvSetMmThreadCharacteristicsW("Pro Audio",
+                    ref taskIndex);
+                if (handle == IntPtr.Zero)
+                {
+                    Volatile.Write(ref mmcssRegistrationError,
+                        Marshal.GetLastWin32Error());
+                    return IntPtr.Zero;
+                }
+
+                Volatile.Write(ref mmcssRegistered, 1);
+                if (AvSetMmThreadPriority(handle, AvrtPriority.High))
+                {
+                    Volatile.Write(ref mmcssHighPriority, 1);
+                }
+                else
+                {
+                    Volatile.Write(ref mmcssRegistrationError,
+                        Marshal.GetLastWin32Error());
+                }
+
+                return handle;
+            }
+            catch (DllNotFoundException)
+            {
+                Volatile.Write(ref mmcssRegistrationError, -1);
+                return IntPtr.Zero;
+            }
+            catch (EntryPointNotFoundException)
+            {
+                Volatile.Write(ref mmcssRegistrationError, -2);
+                return IntPtr.Zero;
+            }
+        }
+
         private sealed class LowLatencyWasapiLoopbackCapture : WasapiCapture
         {
             public LowLatencyWasapiLoopbackCapture(MMDevice captureDevice, int audioBufferMilliseconds)
@@ -683,11 +754,30 @@ namespace DS4Windows
         private const uint TimerAccess = 0x00000002 | 0x00100000;
         private const uint Infinite = 0xFFFFFFFF;
 
+        private enum AvrtPriority
+        {
+            Normal = 0,
+            High = 1,
+        }
+
         [DllImport("winmm.dll")]
         private static extern uint timeBeginPeriod(uint uMilliseconds);
 
         [DllImport("winmm.dll")]
         private static extern uint timeEndPeriod(uint uMilliseconds);
+
+        [DllImport("avrt.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr AvSetMmThreadCharacteristicsW(string taskName,
+            ref uint taskIndex);
+
+        [DllImport("avrt.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool AvSetMmThreadPriority(IntPtr avrtHandle,
+            AvrtPriority priority);
+
+        [DllImport("avrt.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool AvRevertMmThreadCharacteristics(IntPtr avrtHandle);
 
         [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         private static extern IntPtr CreateWaitableTimerExW(IntPtr lpTimerAttributes, string lpTimerName,

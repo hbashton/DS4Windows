@@ -66,12 +66,14 @@ namespace DS4Windows
         private readonly object physicalDualSenseIdentityLock = new object();
         private readonly object microphoneSourceLock = new object();
         private readonly AutoResetEvent writerSignal = new AutoResetEvent(false);
+        private readonly ManualResetEvent microphoneInterfaceStopSignal = new ManualResetEvent(false);
         private readonly Queue<byte[]> pendingMicrophoneOpusFrames = new Queue<byte[]>(MaxPendingMicrophoneFrames);
         private readonly short[] microphoneMonoPcm = new short[DualSenseMicrophoneFramesPerPacket];
         private readonly byte[] microphoneStereoPcm = new byte[DualSenseMicrophonePcmFrameLength];
         private ViiperDeviceStream deviceStream;
         private Thread feedbackThread;
         private Thread stateWriterThread;
+        private Thread microphoneInterfaceThread;
         private byte[] pendingStatePacket;
         private IOpusDecoder microphoneDecoder;
         private DualSenseDevice microphoneSourceDevice;
@@ -98,6 +100,8 @@ namespace DS4Windows
         private int lastInputDeviceIndex = -1;
         private int submitFailureLogged;
         private int microphoneUnavailableLogged;
+        private int virtualMicrophoneInterfaceActive;
+        private int virtualMicrophoneInterfaceStateKnown;
         private int edgePhysicalMismatchLogged;
         private int activeFeedbackLength;
         private string physicalDualSenseIdentityPath;
@@ -149,9 +153,13 @@ namespace DS4Windows
             }
             lastWriterHealthLogUtc = DateTime.MinValue;
             lastMicrophoneHealthLogUtc = DateTime.MinValue;
+            Volatile.Write(ref virtualMicrophoneInterfaceActive, 0);
+            Volatile.Write(ref virtualMicrophoneInterfaceStateKnown, 0);
+            microphoneInterfaceStopSignal.Reset();
             writerStopRequested = false;
             connected = true;
             StartStateWriter();
+            StartMicrophoneInterfaceMonitor();
             ResetState();
             StartFeedbackReader();
         }
@@ -160,6 +168,8 @@ namespace DS4Windows
         {
             activeStreamUsesFramedProtocol = false;
             activeStreamSupportsMicrophone = false;
+            Volatile.Write(ref virtualMicrophoneInterfaceActive, 0);
+            Volatile.Write(ref virtualMicrophoneInterfaceStateKnown, 0);
 
             if (viiperType == ViiperVirtualDeviceType.DualSense)
             {
@@ -268,6 +278,7 @@ namespace DS4Windows
             connected = false;
             writerStopRequested = true;
             writerSignal.Set();
+            StopMicrophoneInterfaceMonitor();
             DetachBluetoothMicrophoneSource();
             lock (pendingPacketLock)
             {
@@ -305,6 +316,86 @@ namespace DS4Windows
             }
 
             feedbackThread = null;
+        }
+
+        private void StartMicrophoneInterfaceMonitor()
+        {
+            if (!activeStreamSupportsMicrophone ||
+                microphoneInterfaceThread != null && microphoneInterfaceThread.IsAlive)
+            {
+                return;
+            }
+
+            microphoneInterfaceThread = new Thread(MicrophoneInterfaceMonitorLoop)
+            {
+                IsBackground = true,
+                Name = $"VIIPER {viiperType} microphone interface",
+            };
+            microphoneInterfaceThread.Start();
+        }
+
+        private void StopMicrophoneInterfaceMonitor()
+        {
+            microphoneInterfaceStopSignal.Set();
+            if (microphoneInterfaceThread != null && microphoneInterfaceThread.IsAlive &&
+                Thread.CurrentThread.ManagedThreadId != microphoneInterfaceThread.ManagedThreadId)
+            {
+                microphoneInterfaceThread.Join(500);
+            }
+
+            microphoneInterfaceThread = null;
+            Volatile.Write(ref virtualMicrophoneInterfaceActive, 0);
+            Volatile.Write(ref virtualMicrophoneInterfaceStateKnown, 0);
+        }
+
+        private void MicrophoneInterfaceMonitorLoop()
+        {
+            bool lastActive = false;
+            bool lastKnown = false;
+            DateTime lastFailureLogUtc = DateTime.MinValue;
+
+            while (connected && !microphoneInterfaceStopSignal.WaitOne(0))
+            {
+                ViiperDeviceStream stream = deviceStream;
+                try
+                {
+                    bool active = stream != null &&
+                        client.GetMicrophoneInterfaceActive(stream.BusId, stream.DevId);
+                    Volatile.Write(ref virtualMicrophoneInterfaceActive, active ? 1 : 0);
+                    Volatile.Write(ref virtualMicrophoneInterfaceStateKnown, 1);
+
+                    if (Global.VerboseStartupLogging && (!lastKnown || active != lastActive))
+                    {
+                        AppLogger.LogToGui(
+                            $"VIIPER {viiperType} microphone capture interface active={active}.",
+                            false);
+                    }
+
+                    lastKnown = true;
+                    lastActive = active;
+                }
+                catch (Exception ex) when (ex is IOException ||
+                    ex is SocketException || ex is JsonException)
+                {
+                    Volatile.Write(ref virtualMicrophoneInterfaceActive, 0);
+                    Volatile.Write(ref virtualMicrophoneInterfaceStateKnown, 0);
+                    lastKnown = false;
+
+                    if (Global.VerboseStartupLogging &&
+                        DateTime.UtcNow - lastFailureLogUtc >= TimeSpan.FromSeconds(5))
+                    {
+                        lastFailureLogUtc = DateTime.UtcNow;
+                        AppLogger.LogToGui(
+                            $"VIIPER {viiperType} microphone interface query failed: {ex.Message}",
+                            true);
+                    }
+                }
+
+                if (microphoneInterfaceStopSignal.WaitOne(125))
+                {
+                    break;
+                }
+            }
         }
 
         public override void ConvertandSendReport(DS4State state, int device)
@@ -805,15 +896,17 @@ namespace DS4Windows
 
         private void UpdateBluetoothMicrophoneSource(int deviceIndex)
         {
-            bool requested = connected &&
+            bool profileRequested = connected &&
                 IsDualSenseType() &&
                 deviceIndex >= 0 &&
                 deviceIndex < Global.DualSenseEnableMicrophonePassthrough.Length &&
                 Global.DualSenseEnableMicrophonePassthrough[deviceIndex];
+            bool requested = profileRequested &&
+                Volatile.Read(ref virtualMicrophoneInterfaceActive) == 1;
 
             if (!requested || !activeStreamSupportsMicrophone)
             {
-                if (requested && !activeStreamSupportsMicrophone &&
+                if (profileRequested && !activeStreamSupportsMicrophone &&
                     Interlocked.Exchange(ref microphoneUnavailableLogged, 1) == 0)
                 {
                     AppLogger.LogToGui(
@@ -904,6 +997,8 @@ namespace DS4Windows
             string rejectedTagText = rejectedTag < 0 ? "none" : $"0x{rejectedTag:X2}";
             AppLogger.LogToGui(
                 $"VIIPER {viiperType} microphone stats: streamV2={activeStreamUsesFramedProtocol} " +
+                $"interfaceKnown={Volatile.Read(ref virtualMicrophoneInterfaceStateKnown) == 1} " +
+                $"interfaceActive={Volatile.Read(ref virtualMicrophoneInterfaceActive) == 1} " +
                 $"armAttempts={Interlocked.Read(ref microphoneArmAttempts)} " +
                 $"armFailures={Interlocked.Read(ref microphoneArmFailures)} " +
                 $"physicalFrames={source.BluetoothMicrophoneFramesReceived} " +
@@ -1346,6 +1441,33 @@ namespace DS4Windows
             return SendRequestRaw("debug/dualsense-traffic/clear");
         }
 
+        public bool GetMicrophoneInterfaceActive(uint busId, string devId)
+        {
+            ViiperBusDevicesResponse response =
+                SendRequest<ViiperBusDevicesResponse>($"bus/{busId}/list");
+            if (response?.Devices == null)
+            {
+                return false;
+            }
+
+            foreach (ViiperListedDevice device in response.Devices)
+            {
+                if (!string.Equals(device.DevId, devId, StringComparison.Ordinal) ||
+                    device.DeviceSpecific.ValueKind != JsonValueKind.Object ||
+                    !device.DeviceSpecific.TryGetProperty("microphoneInterfaceActive",
+                        out JsonElement active))
+                {
+                    continue;
+                }
+
+                return active.ValueKind == JsonValueKind.True ||
+                    active.ValueKind == JsonValueKind.String &&
+                    bool.TryParse(active.GetString(), out bool parsed) && parsed;
+            }
+
+            return false;
+        }
+
         private ViiperDeviceStream OpenStream(uint busId, string devId, int usbipPort)
         {
             TcpClient tcp = Connect(StreamReceiveTimeoutMs);
@@ -1472,6 +1594,21 @@ namespace DS4Windows
         {
             [JsonPropertyName("type")]
             public string Type { get; set; }
+        }
+
+        private sealed class ViiperBusDevicesResponse
+        {
+            [JsonPropertyName("devices")]
+            public ViiperListedDevice[] Devices { get; set; }
+        }
+
+        private sealed class ViiperListedDevice
+        {
+            [JsonPropertyName("devId")]
+            public string DevId { get; set; }
+
+            [JsonPropertyName("deviceSpecific")]
+            public JsonElement DeviceSpecific { get; set; }
         }
 
         private sealed class ViiperDualSenseTrafficSetRequest
@@ -1828,6 +1965,10 @@ namespace DS4Windows
             this.usbipPort = usbipPort;
             this.removeDevice = removeDevice;
         }
+
+        public uint BusId => busId;
+
+        public string DevId => devId;
 
         public void Write(byte[] data)
         {

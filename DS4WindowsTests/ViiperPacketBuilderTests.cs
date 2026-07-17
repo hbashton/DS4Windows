@@ -26,6 +26,20 @@ namespace DS4WindowsTests
             AssertSonyMotion(packet, 19);
         }
 
+        [DataTestMethod]
+        [DataRow(ViiperVirtualDeviceType.DualSense)]
+        [DataRow(ViiperVirtualDeviceType.DualSenseEdge)]
+        [DataRow(ViiperVirtualDeviceType.DualShock4)]
+        public void SonyNeutralPacketCentersEveryStick(ViiperVirtualDeviceType type)
+        {
+            byte[] packet = BuildNeutralViiperStatePacket(type);
+
+            Assert.AreEqual(0, packet[0], "LX should be centered");
+            Assert.AreEqual(0, packet[1], "LY should be centered");
+            Assert.AreEqual(0, packet[2], "RX should be centered");
+            Assert.AreEqual(0, packet[3], "RY should be centered");
+        }
+
         private static DS4State CreateMotionState()
         {
             DS4State state = new DS4State();
@@ -58,6 +72,18 @@ namespace DS4WindowsTests
                 BindingFlags.Public | BindingFlags.Static);
 
             return (byte[])buildMethod.Invoke(null, new object[] { type, state, -1 });
+        }
+
+        private static byte[] BuildNeutralViiperStatePacket(ViiperVirtualDeviceType type)
+        {
+            Type builderType = typeof(ViiperVirtualDeviceType).Assembly.GetType(
+                "DS4Windows.ViiperStatePacketBuilder",
+                throwOnError: true);
+            MethodInfo buildMethod = builderType.GetMethod(
+                "BuildNeutral",
+                BindingFlags.Public | BindingFlags.Static);
+
+            return (byte[])buildMethod.Invoke(null, new object[] { type });
         }
 
         private static short ReadInt16(byte[] data, int offset)

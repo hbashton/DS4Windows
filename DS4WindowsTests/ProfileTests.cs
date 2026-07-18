@@ -376,6 +376,31 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void CheckSpeakerProcessingDefaultsAndRoundTrip()
+        {
+            var store = new BackingStore();
+            var dto = new ProfileDTO
+            {
+                DeviceIndex = 0,
+            };
+
+            dto.MapTo(store);
+            Assert.AreEqual((byte)DualSenseSpeakerCompression.Off,
+                store.dualSenseSpeakerCompression[0]);
+            Assert.AreEqual((byte)0, store.dualSenseSpeakerBassBoost[0]);
+
+            store.dualSenseSpeakerCompression[0] =
+                (byte)DualSenseSpeakerCompression.Strong;
+            store.dualSenseSpeakerBassBoost[0] = 5;
+            dto.MapFrom(store);
+
+            Assert.AreEqual((byte)DualSenseSpeakerCompression.Strong,
+                dto.DualSenseControllerSettings.AudioSettingsGroup.SpeakerCompression);
+            Assert.AreEqual((byte)5,
+                dto.DualSenseControllerSettings.AudioSettingsGroup.SpeakerBassBoost);
+        }
+
+        [TestMethod]
         public void CheckMuteButtonMicrophoneModeDefaultsAndRoundTrip()
         {
             var store = new BackingStore();

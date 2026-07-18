@@ -25,8 +25,9 @@ namespace DS4Windows
         private WaveFormat captureFormat;
         private string captureEndpointId = string.Empty;
 
-        public void Start(int slot, DualSenseDevice dualSenseDevice, byte speakerVolume, string requestedCaptureEndpointId,
-            string requestedSpeakerEndpointId)
+        public void Start(int slot, DualSenseDevice dualSenseDevice, byte speakerVolume,
+            DualSenseSpeakerCompression speakerCompression, byte speakerBassBoost,
+            string requestedCaptureEndpointId, string requestedSpeakerEndpointId)
         {
             if (slot < 0 || slot >= slots.Length)
             {
@@ -35,7 +36,8 @@ namespace DS4Windows
 
             if (dualSenseDevice?.ConnectionType == ConnectionType.BT)
             {
-                StartBluetooth(slot, dualSenseDevice, speakerVolume, requestedCaptureEndpointId);
+                StartBluetooth(slot, dualSenseDevice, speakerVolume, speakerCompression,
+                    speakerBassBoost, requestedCaptureEndpointId);
                 return;
             }
 
@@ -129,12 +131,15 @@ namespace DS4Windows
             }
         }
 
-        private void StartBluetooth(int slot, DualSenseDevice device, byte speakerVolume, string requestedCaptureEndpointId)
+        private void StartBluetooth(int slot, DualSenseDevice device, byte speakerVolume,
+            DualSenseSpeakerCompression speakerCompression, byte speakerBassBoost,
+            string requestedCaptureEndpointId)
         {
             requestedCaptureEndpointId ??= string.Empty;
             lock (syncRoot)
             {
-                if (bluetoothSlots[slot]?.Matches(device, speakerVolume, requestedCaptureEndpointId) == true)
+                if (bluetoothSlots[slot]?.Matches(device, speakerVolume, speakerCompression,
+                    speakerBassBoost, requestedCaptureEndpointId) == true)
                 {
                     return;
                 }
@@ -152,11 +157,12 @@ namespace DS4Windows
                 previous?.Dispose();
                 int generation = ++bluetoothStartGeneration[slot];
                 _ = Task.Run(() => StartBluetoothWithRetry(slot, device, speakerVolume,
-                    requestedCaptureEndpointId, generation));
+                    speakerCompression, speakerBassBoost, requestedCaptureEndpointId, generation));
             }
         }
 
         private void StartBluetoothWithRetry(int slot, DualSenseDevice device, byte speakerVolume,
+            DualSenseSpeakerCompression speakerCompression, byte speakerBassBoost,
             string requestedCaptureEndpointId, int generation)
         {
             const int attempts = 10;
@@ -172,8 +178,8 @@ namespace DS4Windows
                     }
                 }
 
-                var bluetoothPlayback = new DualSenseBluetoothSpeakerPassthrough(device, speakerVolume,
-                    requestedCaptureEndpointId);
+                var bluetoothPlayback = new DualSenseBluetoothSpeakerPassthrough(device,
+                    speakerVolume, speakerCompression, speakerBassBoost, requestedCaptureEndpointId);
                 try
                 {
                     bluetoothPlayback.Start();

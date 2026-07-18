@@ -2619,6 +2619,18 @@ namespace DS4Windows
             set => m_Config.dualSenseSpeakerVolume = value;
         }
 
+        public static byte[] DualSenseSpeakerCompression
+        {
+            get => m_Config.dualSenseSpeakerCompression;
+            set => m_Config.dualSenseSpeakerCompression = value;
+        }
+
+        public static byte[] DualSenseSpeakerBassBoost
+        {
+            get => m_Config.dualSenseSpeakerBassBoost;
+            set => m_Config.dualSenseSpeakerBassBoost = value;
+        }
+
         public static byte[] DualSenseHeadphoneVolume
         {
             get => m_Config.dualSenseHeadphoneVolume;
@@ -3874,6 +3886,8 @@ namespace DS4Windows
         };
         public bool[] dualSenseEnableSpeakerOutput = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
         public byte[] dualSenseSpeakerVolume = new byte[Global.TEST_PROFILE_ITEM_COUNT] { 128, 128, 128, 128, 128, 128, 128, 128, 128 };
+        public byte[] dualSenseSpeakerCompression = new byte[Global.TEST_PROFILE_ITEM_COUNT];
+        public byte[] dualSenseSpeakerBassBoost = new byte[Global.TEST_PROFILE_ITEM_COUNT];
         public byte[] dualSenseHeadphoneVolume = new byte[Global.TEST_PROFILE_ITEM_COUNT] { 128, 128, 128, 128, 128, 128, 128, 128, 128 };
         public byte[] dualSenseMicrophoneVolume = new byte[Global.TEST_PROFILE_ITEM_COUNT] { 128, 128, 128, 128, 128, 128, 128, 128, 128 };
         public byte[] dualSenseMicrophoneNoiseSuppression = new byte[Global.TEST_PROFILE_ITEM_COUNT] { 1, 1, 1, 1, 1, 1, 1, 1, 1 };
@@ -5057,6 +5071,8 @@ namespace DS4Windows
                 XmlElement xmlDSAudioGroupElement = m_Xdoc.CreateElement("AudioSettings"); xmlDualSenseControllerSettingsElement.AppendChild(xmlDSAudioGroupElement);
                 XmlNode xmlDSEnableSpeakerOutputElement = m_Xdoc.CreateNode(XmlNodeType.Element, "EnableSpeakerOutput", null); xmlDSEnableSpeakerOutputElement.InnerText = dualSenseEnableSpeakerOutput[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSEnableSpeakerOutputElement);
                 XmlNode xmlDSSpeakerVolumeElement = m_Xdoc.CreateNode(XmlNodeType.Element, "SpeakerVolume", null); xmlDSSpeakerVolumeElement.InnerText = dualSenseSpeakerVolume[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSSpeakerVolumeElement);
+                XmlNode xmlDSSpeakerCompressionElement = m_Xdoc.CreateNode(XmlNodeType.Element, "SpeakerCompression", null); xmlDSSpeakerCompressionElement.InnerText = dualSenseSpeakerCompression[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSSpeakerCompressionElement);
+                XmlNode xmlDSSpeakerBassBoostElement = m_Xdoc.CreateNode(XmlNodeType.Element, "SpeakerBassBoost", null); xmlDSSpeakerBassBoostElement.InnerText = dualSenseSpeakerBassBoost[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSSpeakerBassBoostElement);
                 XmlNode xmlDSHeadphoneVolumeElement = m_Xdoc.CreateNode(XmlNodeType.Element, "HeadphoneVolume", null); xmlDSHeadphoneVolumeElement.InnerText = dualSenseHeadphoneVolume[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSHeadphoneVolumeElement);
                 XmlNode xmlDSMicrophoneVolumeElement = m_Xdoc.CreateNode(XmlNodeType.Element, "MicrophoneVolume", null); xmlDSMicrophoneVolumeElement.InnerText = dualSenseMicrophoneVolume[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSMicrophoneVolumeElement);
                 XmlNode xmlDSMicrophoneNoiseSuppressionElement = m_Xdoc.CreateNode(XmlNodeType.Element, "MicrophoneNoiseSuppression", null); xmlDSMicrophoneNoiseSuppressionElement.InnerText = dualSenseMicrophoneNoiseSuppression[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSMicrophoneNoiseSuppressionElement);
@@ -7471,6 +7487,24 @@ namespace DS4Windows
                             Item = xmlDSAudioGroupElement.SelectSingleNode("SpeakerVolume");
                             byte.TryParse(Item.InnerText, out byte temp);
                             dualSenseSpeakerVolume[device] = temp;
+                        }
+                        catch { missingSetting = true; }
+
+                        try
+                        {
+                            Item = xmlDSAudioGroupElement.SelectSingleNode("SpeakerCompression");
+                            byte.TryParse(Item.InnerText, out byte temp);
+                            dualSenseSpeakerCompression[device] = Math.Min(temp,
+                                (byte)DS4Windows.DualSenseSpeakerCompression.Strong);
+                        }
+                        catch { missingSetting = true; }
+
+                        try
+                        {
+                            Item = xmlDSAudioGroupElement.SelectSingleNode("SpeakerBassBoost");
+                            byte.TryParse(Item.InnerText, out byte temp);
+                            dualSenseSpeakerBassBoost[device] = Math.Min(temp,
+                                DualSenseSpeakerProcessor.MaximumBassBoostDb);
                         }
                         catch { missingSetting = true; }
 

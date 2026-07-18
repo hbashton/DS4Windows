@@ -2183,6 +2183,8 @@
                                                     <RowDefinition Height="30" />
                                                     <RowDefinition Height="30" />
                                                     <RowDefinition Height="30" />
+                                                    <RowDefinition Height="30" />
+                                                    <RowDefinition Height="30" />
                                                 </Grid.RowDefinitions>
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto" />
@@ -2205,16 +2207,28 @@
                                                 <Label Content="Speaker volume:" Grid.Row="3" Grid.Column="0" />
                                                 <xctk:IntegerUpDown Value="{Binding DualSenseSpeakerVolume}" Minimum="0" Maximum="255" Grid.Row="3" Grid.Column="1"
                                                                     Margin="{StaticResource spaceMargin}" />
-                                                <CheckBox Content="Enable controller microphone input" IsChecked="{Binding DualSenseEnableMicrophonePassthrough}"
-                                                          Grid.Row="4" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}"
-                                                          ToolTip="Streams the microphone from a physical Bluetooth DualSense into the recording endpoint exposed by a VIIPER DualSense profile." />
-                                                <Label Content="Microphone level:" Grid.Row="5" Grid.Column="0"
-                                                       ToolTip="Adjusts the physical microphone level and the safely trimmed signal exposed to Windows." />
-                                                <xctk:IntegerUpDown Value="{Binding DualSenseMicrophoneVolume}" Minimum="0" Maximum="255" Grid.Row="5" Grid.Column="1"
+                                                <Label Content="Dynamic range:" Grid.Row="4" Grid.Column="0"
+                                                       ToolTip="Bluetooth speaker processing. Balanced raises quieter details and restrains loud effects. Strong narrows the range further. Processing is applied before Opus without look-ahead latency." />
+                                                <ComboBox SelectedIndex="{Binding DualSenseSpeakerCompressionIndex}" Grid.Row="4" Grid.Column="1"
+                                                          Margin="{StaticResource spaceMargin}">
+                                                    <ComboBoxItem Content="Off" />
+                                                    <ComboBoxItem Content="Balanced" />
+                                                    <ComboBoxItem Content="Strong" />
+                                                </ComboBox>
+                                                <Label Content="Bass/body boost:" Grid.Row="5" Grid.Column="0"
+                                                       ToolTip="Adds up to 6 dB around 200 Hz while filtering unusable sub-bass. Applies only to the Bluetooth controller speaker stream." />
+                                                <xctk:IntegerUpDown Value="{Binding DualSenseSpeakerBassBoost}" Minimum="0" Maximum="6" Grid.Row="5" Grid.Column="1"
                                                                     Margin="{StaticResource spaceMargin}" />
-                                                <Label Content="Noise suppression:" Grid.Row="6" Grid.Column="0"
+                                                <CheckBox Content="Enable controller microphone input" IsChecked="{Binding DualSenseEnableMicrophonePassthrough}"
+                                                          Grid.Row="6" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}"
+                                                          ToolTip="Streams the microphone from a physical Bluetooth DualSense into the recording endpoint exposed by a VIIPER DualSense profile." />
+                                                <Label Content="Microphone level:" Grid.Row="7" Grid.Column="0"
+                                                       ToolTip="Adjusts the physical microphone level and the safely trimmed signal exposed to Windows." />
+                                                <xctk:IntegerUpDown Value="{Binding DualSenseMicrophoneVolume}" Minimum="0" Maximum="255" Grid.Row="7" Grid.Column="1"
+                                                                    Margin="{StaticResource spaceMargin}" />
+                                                <Label Content="Noise suppression:" Grid.Row="8" Grid.Column="0"
                                                        ToolTip="Balanced applies RNNoise speech cleanup. Strong also reduces low-level residual noise. Off retains only gain, high-pass, and clipping protection." />
-                                                <ComboBox SelectedIndex="{Binding DualSenseMicrophoneNoiseSuppressionIndex}" Grid.Row="6" Grid.Column="1"
+                                                <ComboBox SelectedIndex="{Binding DualSenseMicrophoneNoiseSuppressionIndex}" Grid.Row="8" Grid.Column="1"
                                                           Margin="{StaticResource spaceMargin}">
                                                     <ComboBoxItem Content="Off" />
                                                     <ComboBoxItem Content="Balanced" />

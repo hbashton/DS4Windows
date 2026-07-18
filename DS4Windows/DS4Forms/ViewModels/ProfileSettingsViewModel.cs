@@ -3301,6 +3301,21 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             set => Global.DualSenseSpeakerVolume[device] = (byte)Math.Clamp(value, 0, 255);
         }
 
+        public int DualSenseSpeakerCompressionIndex
+        {
+            get => Global.DualSenseSpeakerCompression[device];
+            set => Global.DualSenseSpeakerCompression[device] = (byte)Math.Clamp(value,
+                (int)DualSenseSpeakerCompression.Off,
+                (int)DualSenseSpeakerCompression.Strong);
+        }
+
+        public int DualSenseSpeakerBassBoost
+        {
+            get => Global.DualSenseSpeakerBassBoost[device];
+            set => Global.DualSenseSpeakerBassBoost[device] = (byte)Math.Clamp(value, 0,
+                DualSenseSpeakerProcessor.MaximumBassBoostDb);
+        }
+
         public int DualSenseHeadphoneVolume
         {
             get => Global.DualSenseHeadphoneVolume[device];

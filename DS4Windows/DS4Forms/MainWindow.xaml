@@ -45,11 +45,20 @@
             </DockPanel>
         </StackPanel>
         <TabControl x:Name="mainTabCon" DockPanel.Dock="Top" SelectionChanged="MainTabCon_SelectionChanged" Style="{StaticResource BridgeMainTabControlStyle}">
-            <TabItem Header="{lex:Loc Controllers}" Tag="Connected devices, active profiles, battery state, and lightbar controls." IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">
+            <TabItem x:Name="overviewTab" Header="Overview" Tag="At-a-glance status and quick profile controls for the selected controller." IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">
+                <local:ControllerOverviewControl x:Name="controllerOverviewControl"
+                                                 EditProfileRequested="ControllerOverview_EditProfileRequested"
+                                                 ControllerDetailsRequested="ControllerOverview_ControllerDetailsRequested"
+                                                 LightbarRequested="ControllerOverview_LightbarRequested"
+                                                 DisconnectRequested="ControllerOverview_DisconnectRequested" />
+            </TabItem>
+
+            <TabItem x:Name="controllersTab" Header="{lex:Loc Controllers}" Tag="Connected devices, active profiles, battery state, and lightbar controls." IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">
                 <Grid>
                     <Label x:Name="noContLb" Visibility="Hidden" Content="{lex:Loc NoControllersConnected}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" />
                     <ListView x:Name="controllerLV" ItemsSource="{Binding ControllerCol}" SelectionMode="Single"
                               SelectedIndex="{Binding CurrentIndex, Mode=OneWayToSource}" Margin="0"
+                              SelectedItem="{Binding DataContext.SelectedController, RelativeSource={RelativeSource AncestorType={x:Type Window}}, Mode=TwoWay}"
                               ItemContainerStyle="{StaticResource BridgeControllerCardItemStyle}"
                               ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                               ScrollViewer.CanContentScroll="True"
@@ -539,7 +548,7 @@
                 </ScrollViewer>
 
             </TabItem>
-            <TabItem Header="{lex:Loc Log}" Tag="Live service events and diagnostic messages.">
+            <TabItem x:Name="logTab" Header="{lex:Loc Log}" Tag="Live service events and diagnostic messages.">
                 <DockPanel>
                     <DockPanel Height="20" DockPanel.Dock="Bottom" Margin="4,8">
                         <Button x:Name="exportLogBtn" Content="{lex:Loc Export}" HorizontalAlignment="Left" Padding="20,1" Click="ExportLogBtn_Click" />

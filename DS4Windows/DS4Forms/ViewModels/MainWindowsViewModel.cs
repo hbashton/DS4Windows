@@ -26,11 +26,37 @@ using System.Diagnostics;
 using System.IO;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
+using DS4Windows.InputDevices;
 
 namespace DS4WinWPF.DS4Forms.ViewModels
 {
+    public sealed class OverviewOutputControllerChoice
+    {
+        public OverviewOutputControllerChoice(string name, OutContType type)
+        {
+            Name = name;
+            Type = type;
+        }
+
+        public string Name { get; }
+        public OutContType Type { get; }
+    }
+
+    public sealed class QuickProfileSettingChangedEventArgs : EventArgs
+    {
+        public QuickProfileSettingChangedEventArgs(int deviceIndex)
+        {
+            DeviceIndex = deviceIndex;
+        }
+
+        public int DeviceIndex { get; }
+    }
+
     public class MainWindowsViewModel
     {
+        private static readonly int[] dualSenseHapticPercentages =
+            { 100, 87, 75, 62, 50, 37, 25, 12 };
+
         private ObservableCollection<CompositeDeviceModel> controllerCol = new();
 
         public ObservableCollection<CompositeDeviceModel> ControllerCol
@@ -45,6 +71,286 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         }
 
         public event EventHandler ControllerColChanged;
+
+        public IReadOnlyList<OverviewOutputControllerChoice> OutputControllerChoices { get; } =
+            new List<OverviewOutputControllerChoice>
+            {
+                new("Xbox 360", OutContType.X360),
+                new("DualShock 4", OutContType.DS4),
+                new("VIIPER Xbox 360", OutContType.ViiperX360),
+                new("VIIPER DualShock 4", OutContType.ViiperDS4),
+                new("VIIPER DualSense", OutContType.ViiperDualSense),
+                new("VIIPER DualSense Edge", OutContType.ViiperDualSenseEdge),
+                new("VIIPER Switch 2 Pro", OutContType.ViiperSwitch2Pro),
+            };
+
+        private CompositeDeviceModel selectedController;
+
+        public CompositeDeviceModel SelectedController
+        {
+            get => selectedController;
+            set
+            {
+                if (ReferenceEquals(selectedController, value)) return;
+
+                HookSelectedController(selectedController, false);
+                selectedController = value;
+                HookSelectedController(selectedController, true);
+                RefreshSelectedControllerProperties();
+            }
+        }
+
+        public event EventHandler SelectedControllerChanged;
+        public event EventHandler HasSelectedControllerChanged;
+        public event EventHandler CurrentProfileNameChanged;
+        public event EventHandler SelectedControllerConnectionChanged;
+        public event EventHandler SelectedControllerLatencyChanged;
+        public event EventHandler SelectedControllerSupportsAudioChanged;
+        public event EventHandler SelectedControllerIsWirelessChanged;
+        public event EventHandler SelectedOutputControllerChanged;
+        public event EventHandler SelectedOutputControllerNameChanged;
+        public event EventHandler HapticStrengthPercentChanged;
+        public event EventHandler SpeakerOutputEnabledChanged;
+        public event EventHandler MicrophoneInputEnabledChanged;
+        public event EventHandler SpeakerVolumePercentChanged;
+        public event EventHandler MicrophoneVolumePercentChanged;
+        public event EventHandler<QuickProfileSettingChangedEventArgs> QuickProfileSettingChanged;
+
+        public bool HasSelectedController => selectedController != null;
+
+        public string CurrentProfileName =>
+            string.IsNullOrWhiteSpace(selectedController?.SelectedProfile)
+                ? "No profile selected"
+                : selectedController.SelectedProfile;
+
+        public string SelectedControllerConnection => selectedController?.ConnectionText ?? "Not connected";
+
+        public string SelectedControllerLatency => selectedController?.LatencyText ?? "--";
+
+        public bool SelectedControllerSupportsAudio => selectedController?.SupportsDualSenseAudio == true;
+
+        public bool SelectedControllerIsWireless => selectedController?.IsWireless == true;
+
+        public OutContType SelectedOutputController
+        {
+            get => HasValidSelectedDevice ? Global.OutContType[selectedController.DevIndex] : OutContType.None;
+            set
+            {
+                if (!HasValidSelectedDevice || value == OutContType.None ||
+                    Global.OutContType[selectedController.DevIndex] == value)
+                {
+                    return;
+                }
+
+                int deviceIndex = selectedController.DevIndex;
+                Global.OutContType[deviceIndex] = value;
+                Global.outDevTypeTemp[deviceIndex] = value;
+                SelectedOutputControllerChanged?.Invoke(this, EventArgs.Empty);
+                SelectedOutputControllerNameChanged?.Invoke(this, EventArgs.Empty);
+                RaiseQuickProfileSettingChanged(deviceIndex);
+            }
+        }
+
+        public string SelectedOutputControllerName
+        {
+            get
+            {
+                OutContType selectedType = SelectedOutputController;
+                foreach (OverviewOutputControllerChoice choice in OutputControllerChoices)
+                {
+                    if (choice.Type == selectedType)
+                    {
+                        return choice.Name;
+                    }
+                }
+
+                return "No emulated device";
+            }
+        }
+
+        public int HapticStrengthPercent
+        {
+            get
+            {
+                if (!HasValidSelectedDevice) return 0;
+
+                int deviceIndex = selectedController.DevIndex;
+                if (selectedController.Device.DeviceType == InputDeviceType.DualSense)
+                {
+                    int levelIndex = Math.Clamp(Global.DualSenseHapticPowerLevel[deviceIndex],
+                        0, dualSenseHapticPercentages.Length - 1);
+                    return dualSenseHapticPercentages[levelIndex];
+                }
+
+                return Math.Clamp((int)Global.RumbleBoost[deviceIndex], 0, 100);
+            }
+            set
+            {
+                if (!HasValidSelectedDevice) return;
+
+                int deviceIndex = selectedController.DevIndex;
+                int requested = Math.Clamp(value, 0, 100);
+                if (selectedController.Device.DeviceType == InputDeviceType.DualSense)
+                {
+                    int nearestIndex = 0;
+                    int nearestDistance = int.MaxValue;
+                    for (int i = 0; i < dualSenseHapticPercentages.Length; i++)
+                    {
+                        int distance = Math.Abs(dualSenseHapticPercentages[i] - requested);
+                        if (distance < nearestDistance)
+                        {
+                            nearestDistance = distance;
+                            nearestIndex = i;
+                        }
+                    }
+
+                    if (Global.DualSenseHapticPowerLevel[deviceIndex] == nearestIndex) return;
+                    Global.DualSenseHapticPowerLevel[deviceIndex] = (byte)nearestIndex;
+                }
+                else
+                {
+                    if (Global.RumbleBoost[deviceIndex] == requested) return;
+                    Global.RumbleBoost[deviceIndex] = (byte)requested;
+                }
+
+                HapticStrengthPercentChanged?.Invoke(this, EventArgs.Empty);
+                RaiseQuickProfileSettingChanged(deviceIndex);
+            }
+        }
+
+        public bool SpeakerOutputEnabled
+        {
+            get => HasValidSelectedDevice && Global.DualSenseEnableSpeakerOutput[selectedController.DevIndex];
+            set
+            {
+                if (!HasValidSelectedDevice ||
+                    Global.DualSenseEnableSpeakerOutput[selectedController.DevIndex] == value) return;
+
+                int deviceIndex = selectedController.DevIndex;
+                Global.DualSenseEnableSpeakerOutput[deviceIndex] = value;
+                SpeakerOutputEnabledChanged?.Invoke(this, EventArgs.Empty);
+                RaiseQuickProfileSettingChanged(deviceIndex);
+            }
+        }
+
+        public bool MicrophoneInputEnabled
+        {
+            get => HasValidSelectedDevice && Global.DualSenseEnableMicrophonePassthrough[selectedController.DevIndex];
+            set
+            {
+                if (!HasValidSelectedDevice ||
+                    Global.DualSenseEnableMicrophonePassthrough[selectedController.DevIndex] == value) return;
+
+                int deviceIndex = selectedController.DevIndex;
+                Global.DualSenseEnableMicrophonePassthrough[deviceIndex] = value;
+                MicrophoneInputEnabledChanged?.Invoke(this, EventArgs.Empty);
+                RaiseQuickProfileSettingChanged(deviceIndex);
+            }
+        }
+
+        public int SpeakerVolumePercent
+        {
+            get => HasValidSelectedDevice
+                ? ByteToPercent(Global.DualSenseSpeakerVolume[selectedController.DevIndex])
+                : 0;
+            set
+            {
+                if (!HasValidSelectedDevice) return;
+
+                int deviceIndex = selectedController.DevIndex;
+                byte converted = PercentToByte(value);
+                if (Global.DualSenseSpeakerVolume[deviceIndex] == converted) return;
+                Global.DualSenseSpeakerVolume[deviceIndex] = converted;
+                SpeakerVolumePercentChanged?.Invoke(this, EventArgs.Empty);
+                RaiseQuickProfileSettingChanged(deviceIndex);
+            }
+        }
+
+        public int MicrophoneVolumePercent
+        {
+            get => HasValidSelectedDevice
+                ? ByteToPercent(Global.DualSenseMicrophoneVolume[selectedController.DevIndex])
+                : 0;
+            set
+            {
+                if (!HasValidSelectedDevice) return;
+
+                int deviceIndex = selectedController.DevIndex;
+                byte converted = PercentToByte(value);
+                if (Global.DualSenseMicrophoneVolume[deviceIndex] == converted) return;
+                Global.DualSenseMicrophoneVolume[deviceIndex] = converted;
+                MicrophoneVolumePercentChanged?.Invoke(this, EventArgs.Empty);
+                RaiseQuickProfileSettingChanged(deviceIndex);
+            }
+        }
+
+        public void RefreshSelectedControllerProperties()
+        {
+            SelectedControllerChanged?.Invoke(this, EventArgs.Empty);
+            HasSelectedControllerChanged?.Invoke(this, EventArgs.Empty);
+            CurrentProfileNameChanged?.Invoke(this, EventArgs.Empty);
+            SelectedControllerConnectionChanged?.Invoke(this, EventArgs.Empty);
+            SelectedControllerLatencyChanged?.Invoke(this, EventArgs.Empty);
+            SelectedControllerSupportsAudioChanged?.Invoke(this, EventArgs.Empty);
+            SelectedControllerIsWirelessChanged?.Invoke(this, EventArgs.Empty);
+            SelectedOutputControllerChanged?.Invoke(this, EventArgs.Empty);
+            SelectedOutputControllerNameChanged?.Invoke(this, EventArgs.Empty);
+            HapticStrengthPercentChanged?.Invoke(this, EventArgs.Empty);
+            SpeakerOutputEnabledChanged?.Invoke(this, EventArgs.Empty);
+            MicrophoneInputEnabledChanged?.Invoke(this, EventArgs.Empty);
+            SpeakerVolumePercentChanged?.Invoke(this, EventArgs.Empty);
+            MicrophoneVolumePercentChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        public void RefreshSelectedControllerStatus()
+        {
+            SelectedControllerChanged?.Invoke(this, EventArgs.Empty);
+            SelectedControllerLatencyChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        private bool HasValidSelectedDevice => selectedController != null &&
+            selectedController.DevIndex >= 0 &&
+            selectedController.DevIndex < ControlService.CURRENT_DS4_CONTROLLER_LIMIT;
+
+        private void HookSelectedController(CompositeDeviceModel controller, bool hook)
+        {
+            if (controller == null) return;
+
+            if (hook)
+            {
+                controller.SelectedProfileChanged += SelectedController_ProfileChanged;
+                controller.BatteryStateChanged += SelectedController_StatusChanged;
+                controller.IdTextChanged += SelectedController_StatusChanged;
+            }
+            else
+            {
+                controller.SelectedProfileChanged -= SelectedController_ProfileChanged;
+                controller.BatteryStateChanged -= SelectedController_StatusChanged;
+                controller.IdTextChanged -= SelectedController_StatusChanged;
+            }
+        }
+
+        private void SelectedController_ProfileChanged(object sender, EventArgs e)
+        {
+            RefreshSelectedControllerProperties();
+        }
+
+        private void SelectedController_StatusChanged(object sender, EventArgs e)
+        {
+            SelectedControllerChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        private void RaiseQuickProfileSettingChanged(int deviceIndex)
+        {
+            QuickProfileSettingChanged?.Invoke(this,
+                new QuickProfileSettingChangedEventArgs(deviceIndex));
+        }
+
+        private static int ByteToPercent(byte value) =>
+            (int)Math.Round(value / 255.0 * 100.0);
+
+        private static byte PercentToByte(int value) =>
+            (byte)Math.Round(Math.Clamp(value, 0, 100) / 100.0 * 255.0);
 
         private bool fullTabsEnabled = true;
 

@@ -1,0 +1,318 @@
+<UserControl x:Class="DS4WinWPF.DS4Forms.ControllerOverviewControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d"
+             d:DesignHeight="720" d:DesignWidth="940">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+
+        <Style x:Key="OverviewCardStyle" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource CardBackgroundColor}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderColor}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="5" />
+            <Setter Property="Padding" Value="18" />
+        </Style>
+
+        <Style x:Key="OverviewEyebrowStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Foreground" Value="{DynamicResource MutedForegroundColor}" />
+        </Style>
+
+        <Style x:Key="OverviewValueStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="16" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource ForegroundColor}" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        </Style>
+
+        <Style x:Key="OverviewAudioPanelStyle" TargetType="Grid">
+            <Setter Property="Opacity" Value="1" />
+            <Setter Property="IsEnabled" Value="True" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding SelectedControllerSupportsAudio}" Value="False">
+                    <Setter Property="Opacity" Value="0.45" />
+                    <Setter Property="IsEnabled" Value="False" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </UserControl.Resources>
+
+    <Grid>
+        <Border HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="470" Padding="30">
+            <Border.Style>
+                <Style TargetType="Border" BasedOn="{StaticResource OverviewCardStyle}">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding HasSelectedController}" Value="False">
+                            <Setter Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
+            <StackPanel HorizontalAlignment="Center">
+                <Border Width="54" Height="54" CornerRadius="27"
+                        Background="{DynamicResource RaisedBackgroundColor}"
+                        BorderBrush="{DynamicResource BorderColor}" BorderThickness="1">
+                    <TextBlock Text="&#xE7FC;" FontFamily="Segoe MDL2 Assets" FontSize="24"
+                               Foreground="{DynamicResource AccentColor}"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <TextBlock Text="No controller selected" Margin="0,16,0,5"
+                           FontSize="20" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                <TextBlock Text="Connect a controller, then choose it from the device cards in the upper-left corner."
+                           Foreground="{DynamicResource MutedForegroundColor}" TextAlignment="Center"
+                           TextWrapping="Wrap" />
+            </StackPanel>
+        </Border>
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <Grid Margin="0,0,8,6">
+                <Grid.Style>
+                    <Style TargetType="Grid">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding HasSelectedController}" Value="True">
+                                <Setter Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Grid.Style>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Border Style="{StaticResource OverviewCardStyle}" Padding="20" Margin="0,0,0,14">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <Border Width="152" Height="92" CornerRadius="5" Margin="0,0,20,0"
+                                Background="{DynamicResource RaisedBackgroundColor}"
+                                BorderBrush="{DynamicResource BorderColor}" BorderThickness="1">
+                            <Image Source="{Binding SelectedController.ControllerImageSource}"
+                                   Stretch="Uniform" Margin="7"
+                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                        </Border>
+
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                            <TextBlock Text="SELECTED CONTROLLER" Style="{StaticResource OverviewEyebrowStyle}" />
+                            <TextBlock Text="{Binding SelectedController.ControllerDisplayName}"
+                                       Margin="0,5,0,3" FontSize="22" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource ForegroundColor}" />
+                            <TextBlock Text="{Binding SelectedController.IdText}"
+                                       Foreground="{DynamicResource MutedForegroundColor}"
+                                       TextTrimming="CharacterEllipsis" />
+                            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                <Border Background="{DynamicResource RaisedBackgroundColor}"
+                                        BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
+                                        CornerRadius="3" Padding="8,4" Margin="0,0,8,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="Profile  " Foreground="{DynamicResource MutedForegroundColor}" />
+                                        <TextBlock Text="{Binding CurrentProfileName}" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource AccentColor}"
+                                                   MaxWidth="190" TextTrimming="CharacterEllipsis"
+                                                   ToolTip="{Binding CurrentProfileName}" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Background="{DynamicResource RaisedBackgroundColor}"
+                                        BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
+                                        CornerRadius="3" Padding="8,4">
+                                    <TextBlock Text="{Binding SelectedControllerConnection}" />
+                                </Border>
+                            </StackPanel>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="18,0,0,0">
+                            <TextBlock Text="BATTERY" Style="{StaticResource OverviewEyebrowStyle}"
+                                       HorizontalAlignment="Right" />
+                            <TextBlock Text="{Binding SelectedController.BatteryState}" Margin="0,5,0,0"
+                                       FontSize="20" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource SuccessColor}" HorizontalAlignment="Right" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <WrapPanel Grid.Row="1" Margin="-6,0,-6,8">
+                    <Border Style="{StaticResource OverviewCardStyle}" Width="218" MinHeight="112" Margin="6">
+                        <StackPanel>
+                            <TextBlock Text="CONNECTION" Style="{StaticResource OverviewEyebrowStyle}" />
+                            <TextBlock Text="{Binding SelectedControllerConnection}" Margin="0,11,0,3"
+                                       Style="{StaticResource OverviewValueStyle}" />
+                            <TextBlock Text="{Binding SelectedControllerLatency, StringFormat=Input latency {0}}"
+                                       Foreground="{DynamicResource MutedForegroundColor}" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource OverviewCardStyle}" Width="218" MinHeight="112" Margin="6">
+                        <StackPanel>
+                            <TextBlock Text="ACTIVE PROFILE" Style="{StaticResource OverviewEyebrowStyle}" />
+                            <TextBlock Text="{Binding CurrentProfileName}" Margin="0,11,0,3"
+                                       Style="{StaticResource OverviewValueStyle}" />
+                            <TextBlock Text="Settings below save to this profile"
+                                       Foreground="{DynamicResource MutedForegroundColor}" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource OverviewCardStyle}" Width="218" MinHeight="112" Margin="6">
+                        <StackPanel>
+                            <TextBlock Text="EMULATED DEVICE" Style="{StaticResource OverviewEyebrowStyle}" />
+                            <TextBlock Margin="0,11,0,3" Style="{StaticResource OverviewValueStyle}"
+                                       Text="{Binding SelectedOutputControllerName}" />
+                            <TextBlock Text="Applied through the active profile"
+                                       Foreground="{DynamicResource MutedForegroundColor}" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource OverviewCardStyle}" Width="218" MinHeight="112" Margin="6">
+                        <StackPanel>
+                            <TextBlock Text="CONTROLLER STATUS" Style="{StaticResource OverviewEyebrowStyle}" />
+                            <TextBlock Text="Ready" Margin="0,11,0,3" Style="{StaticResource OverviewValueStyle}"
+                                       Foreground="{DynamicResource SuccessColor}" />
+                            <TextBlock Text="Profile and output are active"
+                                       Foreground="{DynamicResource MutedForegroundColor}" />
+                        </StackPanel>
+                    </Border>
+                </WrapPanel>
+
+                <Border Grid.Row="2" Style="{StaticResource OverviewCardStyle}" Margin="0,0,0,14">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="26" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.ColumnSpan="3" Margin="0,0,0,18">
+                            <TextBlock Text="Quick profile controls" FontSize="18" FontWeight="SemiBold" />
+                            <TextBlock Text="Changes are saved to the selected controller's active profile and applied automatically."
+                                       Margin="0,3,0,0" Foreground="{DynamicResource MutedForegroundColor}" />
+                        </StackPanel>
+
+                        <Grid Grid.Row="1">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <TextBlock Text="Haptic feedback" FontWeight="SemiBold" />
+                            <TextBlock Grid.Column="1" Text="{Binding HapticStrengthPercent, StringFormat={}{0}%}"
+                                       FontWeight="SemiBold" Foreground="{DynamicResource AccentColor}" />
+                            <Slider Grid.Row="1" Grid.ColumnSpan="2" Margin="0,9,0,0"
+                                    Minimum="0" Maximum="100" TickFrequency="1"
+                                    Value="{Binding HapticStrengthPercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
+                        </Grid>
+
+                        <StackPanel Grid.Row="2" Margin="0,19,0,0">
+                            <TextBlock Text="Emulated device" FontWeight="SemiBold" />
+                            <ComboBox ItemsSource="{Binding OutputControllerChoices}"
+                                      DisplayMemberPath="Name" SelectedValuePath="Type"
+                                      SelectedValue="{Binding SelectedOutputController, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                      Style="{StaticResource BridgeProfileComboBoxStyle}" Margin="0,8,0,0" />
+                            <TextBlock Text="Changing the output device briefly reloads this controller's profile."
+                                       Margin="0,6,0,0" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource MutedForegroundColor}" FontSize="11" />
+                        </StackPanel>
+
+                        <Grid Grid.Row="1" Grid.RowSpan="2" Grid.Column="2"
+                              Style="{StaticResource OverviewAudioPanelStyle}">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,12">
+                                <TextBlock Text="DualSense audio" FontWeight="SemiBold" />
+                                <TextBlock Text="  ·  available on DualSense controllers" FontSize="11"
+                                           Foreground="{DynamicResource MutedForegroundColor}" />
+                            </StackPanel>
+
+                            <CheckBox Grid.Row="1" Grid.ColumnSpan="2" Content="Mirror audio to controller speaker"
+                                      IsChecked="{Binding SpeakerOutputEnabled, Mode=TwoWay}" Margin="0,0,0,12" />
+
+                            <TextBlock Grid.Row="2" Text="Speaker level" VerticalAlignment="Center" />
+                            <TextBlock Grid.Row="2" Grid.Column="1"
+                                       Text="{Binding SpeakerVolumePercent, StringFormat={}{0}%}"
+                                       Foreground="{DynamicResource AccentColor}" />
+                            <Slider Grid.Row="3" Grid.ColumnSpan="2" Margin="0,7,0,14"
+                                    Minimum="0" Maximum="100" TickFrequency="1"
+                                    Value="{Binding SpeakerVolumePercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
+
+                            <StackPanel Grid.Row="4" Grid.ColumnSpan="2">
+                                <CheckBox Content="Enable controller microphone input"
+                                          IsChecked="{Binding MicrophoneInputEnabled, Mode=TwoWay}" Margin="0,0,0,9" />
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Microphone level" />
+                                    <TextBlock Grid.Column="1"
+                                               Text="{Binding MicrophoneVolumePercent, StringFormat={}{0}%}"
+                                               Foreground="{DynamicResource AccentColor}" />
+                                    <Slider Grid.Row="1" Grid.ColumnSpan="2" Margin="0,7,0,0"
+                                            Minimum="0" Maximum="100" TickFrequency="1"
+                                            Value="{Binding MicrophoneVolumePercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
+                                </Grid>
+                            </StackPanel>
+                        </Grid>
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="3" Style="{StaticResource OverviewCardStyle}">
+                    <StackPanel>
+                        <StackPanel>
+                            <TextBlock Text="Quick actions" FontSize="18" FontWeight="SemiBold" />
+                            <TextBlock Text="Jump into the full editor or manage the selected physical controller."
+                                       Margin="0,3,0,0" Foreground="{DynamicResource MutedForegroundColor}" />
+                        </StackPanel>
+                        <WrapPanel Margin="0,15,0,0">
+                            <Button Content="Edit active profile" Margin="0,0,8,0"
+                                    Style="{StaticResource BridgePrimaryButtonStyle}"
+                                    Click="EditProfileBtn_Click" />
+                            <Button Content="Controller details" Margin="0,0,8,0"
+                                    Style="{StaticResource BridgeSecondaryButtonStyle}"
+                                    Click="ControllerDetailsBtn_Click" />
+                            <Button Content="Lightbar" Margin="0,0,8,0"
+                                    Style="{StaticResource BridgeSecondaryButtonStyle}"
+                                    Click="LightbarBtn_Click" />
+                            <Button Content="Disconnect"
+                                    Style="{StaticResource BridgeSecondaryButtonStyle}"
+                                    IsEnabled="{Binding SelectedControllerIsWireless}"
+                                    Click="DisconnectBtn_Click" />
+                        </WrapPanel>
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </ScrollViewer>
+    </Grid>
+</UserControl>

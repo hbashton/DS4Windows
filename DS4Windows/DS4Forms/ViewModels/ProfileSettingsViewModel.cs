@@ -708,6 +708,12 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             set => Global.GameBarHomeButtonSupport[device] = value;
         }
 
+        public bool GameBarControllerCompatibility
+        {
+            get => Global.GameBarControllerCompatibility[device];
+            set => Global.GameBarControllerCompatibility[device] = value;
+        }
+
         public string GameBarProfileName
         {
             get => Global.GameBarProfileName[device];

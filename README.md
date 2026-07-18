@@ -62,6 +62,8 @@ correctly.
 - Duplicate Auto Profile rules with per-device matching for DualSense, DS4, DS3, Switch Pro, and Joy-Con controllers.
 - An apply-to-all-controllers option for Auto Profiles.
 - Xbox Game Bar profile switching with Game Bar priority over normal Auto Profiles while the overlay is visible.
+- Per-profile Game Bar compatibility for VIIPER DualSense outputs, using a temporary
+  XInput companion only while the overlay is visible without changing the loaded profile.
 - Per-profile DualSense adaptive-trigger configuration and fixed full-pull trigger actions.
 - More reliable profile transitions, including duplicate-rule crash and profile-switch latency fixes.
 

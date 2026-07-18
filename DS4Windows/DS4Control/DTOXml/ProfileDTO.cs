@@ -765,6 +765,14 @@ namespace DS4WinWPF.DS4Control.DTOXml
             set => _gameBarHomeButtonSupport = XmlDataUtilities.StrToBool(value);
         }
 
+        private bool _gameBarControllerCompatibility;
+        [XmlElement("GameBarControllerCompatibility")]
+        public string GameBarControllerCompatibilityString
+        {
+            get => _gameBarControllerCompatibility.ToString();
+            set => _gameBarControllerCompatibility = XmlDataUtilities.StrToBool(value);
+        }
+
         [XmlElement("GameBarProfileName")]
         public string GameBarProfileName
         {
@@ -1680,6 +1688,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
             //ShiftModifier = source.
             LaunchProgram = source.launchProgram[deviceIndex];
             _gameBarHomeButtonSupport = source.gameBarHomeButtonSupport[deviceIndex];
+            _gameBarControllerCompatibility = source.gameBarControllerCompatibility[deviceIndex];
             GameBarProfileName = source.gameBarProfileName[deviceIndex];
             _dualSenseMuteButtonLightEnabled = source.dualSenseMuteButtonLightEnabled[deviceIndex];
             _dualSenseMuteButtonMutesMicrophone = source.dualSenseMuteButtonMutesMicrophone[deviceIndex];
@@ -2293,6 +2302,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
             //destination. = ShiftModifier 
             destination.launchProgram[deviceIndex] = LaunchProgram;
             destination.gameBarHomeButtonSupport[deviceIndex] = _gameBarHomeButtonSupport;
+            destination.gameBarControllerCompatibility[deviceIndex] = _gameBarControllerCompatibility;
             destination.gameBarProfileName[deviceIndex] = GameBarProfileName ?? string.Empty;
             destination.dualSenseMuteButtonLightEnabled[deviceIndex] = _dualSenseMuteButtonLightEnabled;
             destination.dualSenseMuteButtonMutesMicrophone[deviceIndex] = _dualSenseMuteButtonMutesMicrophone;

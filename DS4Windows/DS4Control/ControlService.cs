@@ -2306,6 +2306,7 @@ namespace DS4Windows
                 runHotPlug = false;
                 inServiceTask = true;
                 StopGameBarProfileTimer();
+                StopAllGameBarCompatibilityOutputs();
                 StartupDiag("ControlService.Stop PreServiceStop begin");
                 PreServiceStop?.Invoke(this, EventArgs.Empty);
                 StartupDiag("ControlService.Stop PreServiceStop end");
@@ -3180,6 +3181,7 @@ namespace DS4Windows
 
                 if (removingStatus)
                 {
+                    DeactivateGameBarCompatibilityOutput(ind);
                     CurrentState[ind].Battery = PreviousState[ind].Battery = 0; // Reset for the next connection's initial status change.
                     if (!useDInputOnly[ind])
                     {
@@ -3266,6 +3268,11 @@ namespace DS4Windows
         private string[] gameBarPreviousTempProfileName = new string[MAX_DS4_CONTROLLER_COUNT] { string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty };
         private string[] gameBarPreviousProfileName = new string[MAX_DS4_CONTROLLER_COUNT] { string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty };
         private DateTime[] gameBarHomeButtonIgnoreUntilUtc = new DateTime[MAX_DS4_CONTROLLER_COUNT];
+        private readonly OutputDevice[] gameBarCompatibilityOutputDevices = new OutputDevice[MAX_DS4_CONTROLLER_COUNT];
+        private readonly int[] gameBarCompatibilityRoutingActive = new int[MAX_DS4_CONTROLLER_COUNT];
+        private readonly DateTime[] gameBarCompatibilityNextRetryUtc = new DateTime[MAX_DS4_CONTROLLER_COUNT];
+        private readonly object gameBarCompatibilityOutputLock = new object();
+
         private DateTime gameBarLastVisibleUtc = DateTime.MinValue;
         private DateTime gameBarInvisibleSinceUtc = DateTime.MinValue;
         private DateTime gameBarLastVisibilityCheckUtc = DateTime.MinValue;
@@ -3296,6 +3303,50 @@ namespace DS4Windows
             }
 
             return false;
+        }
+
+        internal static bool ShouldUseGameBarControllerCompatibility(bool enabled,
+            OutContType outputType, bool dInputOnly)
+        {
+            return enabled && !dInputOnly &&
+                (outputType == OutContType.ViiperDualSense ||
+                outputType == OutContType.ViiperDualSenseEdge);
+        }
+
+        private bool HasAnyConfiguredGameBarCompatibility()
+        {
+            for (int i = 0; i < MAX_DS4_CONTROLLER_COUNT; i++)
+            {
+                if (DS4Controllers[i] != null &&
+                    ShouldUseGameBarControllerCompatibility(
+                        Global.GameBarControllerCompatibility[i],
+                        Global.OutContType[i], getDInputOnly(i)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool IsAnyGameBarCompatibilityActive()
+        {
+            for (int i = 0; i < MAX_DS4_CONTROLLER_COUNT; i++)
+            {
+                if (Volatile.Read(ref gameBarCompatibilityRoutingActive[i]) == 1)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private OutputDevice GetReportOutputDevice(int index)
+        {
+            return Volatile.Read(ref gameBarCompatibilityRoutingActive[index]) == 1 ?
+                Volatile.Read(ref gameBarCompatibilityOutputDevices[index]) :
+                outputDevices[index];
         }
 
         public bool TryDeferAutoProfileForGameBar(int ind, string profileName)
@@ -3337,8 +3388,7 @@ namespace DS4Windows
             for (int i = 0; i < MAX_DS4_CONTROLLER_COUNT; i++)
             {
                 if (DS4Controllers[i] != null &&
-                    Global.GameBarHomeButtonSupport[i] &&
-                    !string.IsNullOrEmpty(Global.GameBarProfileName[i]))
+                    TryGetConfiguredGameBarProfileName(i, out _))
                 {
                     return true;
                 }
@@ -3350,7 +3400,8 @@ namespace DS4Windows
         private bool TryGetConfiguredGameBarProfileName(int ind, out string profileName)
         {
             profileName = string.Empty;
-            if (!Global.GameBarHomeButtonSupport[ind])
+            if (!Global.GameBarHomeButtonSupport[ind] ||
+                Global.GameBarControllerCompatibility[ind])
             {
                 return false;
             }
@@ -3406,6 +3457,18 @@ namespace DS4Windows
                 return;
             }
 
+            if (ShouldUseGameBarControllerCompatibility(
+                Global.GameBarControllerCompatibility[ind],
+                Global.OutContType[ind], getDInputOnly(ind)))
+            {
+                cState.PS = false;
+                tempControlState.PS = false;
+                gameBarHomeButtonIgnoreUntilUtc[ind] = now + TimeSpan.FromSeconds(1);
+                string openResult = gameBarIntegration.OpenGameBar();
+                StartupDiag($"GameBar compatibility home button controller={ind + 1} {openResult}");
+                return;
+            }
+
             if (gameBarProfileActive[ind] || gameBarProfilePending[ind])
             {
                 cState.PS = false;
@@ -3429,6 +3492,164 @@ namespace DS4Windows
             StartupDiag($"GameBar home button controller={ind + 1} requestedProfile='{profileName}' {result}");
         }
 
+        private void UpdateGameBarCompatibilityOutputs(bool gameBarVisible)
+        {
+            for (int i = 0; i < MAX_DS4_CONTROLLER_COUNT; i++)
+            {
+                bool shouldRoute = gameBarVisible && DS4Controllers[i] != null &&
+                    ShouldUseGameBarControllerCompatibility(
+                        Global.GameBarControllerCompatibility[i],
+                        Global.OutContType[i], getDInputOnly(i));
+                if (shouldRoute)
+                {
+                    ActivateGameBarCompatibilityOutput(i);
+                }
+                else
+                {
+                    DeactivateGameBarCompatibilityOutput(i);
+                }
+            }
+        }
+
+        private void ActivateGameBarCompatibilityOutput(int index)
+        {
+            lock (gameBarCompatibilityOutputLock)
+            {
+                ActivateGameBarCompatibilityOutputCore(index);
+            }
+        }
+
+        private void ActivateGameBarCompatibilityOutputCore(int index)
+        {
+            if (!running ||
+                Volatile.Read(ref gameBarCompatibilityRoutingActive[index]) == 1 ||
+                DateTime.UtcNow < gameBarCompatibilityNextRetryUtc[index])
+            {
+                return;
+            }
+
+            DS4Device source = DS4Controllers[index];
+            OutputDevice nativeOutput = outputDevices[index];
+            if (source == null || nativeOutput == null)
+            {
+                return;
+            }
+
+            if (outputslotMan.FindOpenSlot() == null)
+            {
+                gameBarCompatibilityNextRetryUtc[index] =
+                    DateTime.UtcNow + TimeSpan.FromSeconds(2);
+                StartupDiag($"GameBar compatibility activation delayed controller={index + 1} reason=no-output-slot");
+                return;
+            }
+
+            Interlocked.Exchange(ref gameBarCompatibilityRoutingActive[index], 1);
+            OutputDevice compatibilityOutput = null;
+            try
+            {
+                nativeOutput.ResetState();
+                compatibilityOutput = EstablishOutDevice(index, OutContType.X360);
+                if (compatibilityOutput == null)
+                {
+                    throw new InvalidOperationException(
+                        "Could not create the temporary XInput output.");
+                }
+
+                outputslotMan.DeferredPlugin(compatibilityOutput, -1,
+                    $"Game Bar compatibility for controller {index + 1}",
+                    outputDevices, OutContType.X360);
+                if (outputslotMan.GetOutSlotDevice(compatibilityOutput) == null)
+                {
+                    throw new InvalidOperationException(
+                        "The temporary XInput output was not assigned to a slot.");
+                }
+
+                Interlocked.Exchange(
+                    ref gameBarCompatibilityOutputDevices[index], compatibilityOutput);
+                gameBarCompatibilityNextRetryUtc[index] = DateTime.MinValue;
+                StartupDiag($"GameBar compatibility activated controller={index + 1} native={Global.OutContType[index]} companion=X360");
+            }
+            catch (Exception ex)
+            {
+                if (compatibilityOutput != null &&
+                    outputslotMan.GetOutSlotDevice(compatibilityOutput) != null)
+                {
+                    outputslotMan.DeferredRemoval(compatibilityOutput, -1,
+                        outputDevices, true);
+                }
+
+                Interlocked.Exchange(
+                    ref gameBarCompatibilityOutputDevices[index], null);
+                try
+                {
+                    nativeOutput.ResetState();
+                }
+                catch
+                {
+                }
+                Interlocked.Exchange(ref gameBarCompatibilityRoutingActive[index], 0);
+                gameBarCompatibilityNextRetryUtc[index] =
+                    DateTime.UtcNow + TimeSpan.FromSeconds(2);
+                StartupDiag($"GameBar compatibility activation failed controller={index + 1} {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
+        private void DeactivateGameBarCompatibilityOutput(int index)
+        {
+            lock (gameBarCompatibilityOutputLock)
+            {
+                DeactivateGameBarCompatibilityOutputCore(index);
+            }
+        }
+
+        private void DeactivateGameBarCompatibilityOutputCore(int index)
+        {
+            gameBarCompatibilityNextRetryUtc[index] = DateTime.MinValue;
+            OutputDevice compatibilityOutput = Interlocked.Exchange(
+                ref gameBarCompatibilityOutputDevices[index], null);
+            if (compatibilityOutput == null &&
+                Volatile.Read(ref gameBarCompatibilityRoutingActive[index]) == 0)
+            {
+                return;
+            }
+
+            try
+            {
+                compatibilityOutput?.ResetState();
+                if (compatibilityOutput != null &&
+                    outputslotMan.GetOutSlotDevice(compatibilityOutput) != null)
+                {
+                    outputslotMan.DeferredRemoval(compatibilityOutput, -1,
+                        outputDevices, true);
+                }
+            }
+            catch (Exception ex)
+            {
+                StartupDiag($"GameBar compatibility removal failed controller={index + 1} {ex.GetType().Name}: {ex.Message}");
+            }
+            finally
+            {
+                try
+                {
+                    outputDevices[index]?.ResetState();
+                }
+                catch
+                {
+                }
+                Interlocked.Exchange(ref gameBarCompatibilityRoutingActive[index], 0);
+            }
+
+            StartupDiag($"GameBar compatibility deactivated controller={index + 1} native={Global.OutContType[index]}");
+        }
+
+        private void StopAllGameBarCompatibilityOutputs()
+        {
+            for (int i = 0; i < MAX_DS4_CONTROLLER_COUNT; i++)
+            {
+                DeactivateGameBarCompatibilityOutput(i);
+            }
+        }
+
         public void UpdateGameBarProfileState()
         {
             if (!running)
@@ -3446,8 +3667,11 @@ namespace DS4Windows
                 bool anyActiveOrPending = IsAnyGameBarProfilePriorityActive();
                 bool anyConfigured = HasAnyConfiguredGameBarProfile();
                 bool anyMutePending = HasAnyPendingDualSenseMuteProfile();
+                bool anyCompatibilityConfigured = HasAnyConfiguredGameBarCompatibility();
+                bool anyCompatibilityActive = IsAnyGameBarCompatibilityActive();
 
-                if (!anyActiveOrPending && !anyConfigured && !anyMutePending)
+                if (!anyActiveOrPending && !anyConfigured && !anyMutePending &&
+                    !anyCompatibilityConfigured && !anyCompatibilityActive)
                 {
                     return;
                 }
@@ -3460,11 +3684,13 @@ namespace DS4Windows
 
                 gameBarLastVisibilityCheckUtc = now;
                 bool gameBarVisible = gameBarIntegration.IsGameBarVisible();
-                LogGameBarDetectionIfVerbose(now, gameBarVisible, anyConfigured, anyActiveOrPending);
+                LogGameBarDetectionIfVerbose(now, gameBarVisible, anyConfigured,
+                    anyActiveOrPending, anyCompatibilityConfigured, anyCompatibilityActive);
                 if (gameBarVisible)
                 {
                     gameBarLastVisibleUtc = now;
                     gameBarInvisibleSinceUtc = DateTime.MinValue;
+                    UpdateGameBarCompatibilityOutputs(true);
                     RequestVisibleGameBarProfiles(now);
                     ActivatePendingGameBarProfiles(now);
                     return;
@@ -3475,6 +3701,15 @@ namespace DS4Windows
                 if (gameBarInvisibleSinceUtc == DateTime.MinValue)
                 {
                     gameBarInvisibleSinceUtc = now;
+                }
+
+                bool visibilityGraceElapsed = gameBarLastVisibleUtc == DateTime.MinValue ||
+                    now - gameBarLastVisibleUtc > TimeSpan.FromMilliseconds(1500);
+                bool invisibleStable = gameBarInvisibleSinceUtc != DateTime.MinValue &&
+                    now - gameBarInvisibleSinceUtc > TimeSpan.FromMilliseconds(1500);
+                if (visibilityGraceElapsed && invisibleStable)
+                {
+                    UpdateGameBarCompatibilityOutputs(false);
                 }
 
                 for (int i = 0; i < MAX_DS4_CONTROLLER_COUNT; i++)
@@ -3490,10 +3725,6 @@ namespace DS4Windows
                     }
 
                     bool activationGraceElapsed = now - gameBarProfileActivatedUtc[i] > TimeSpan.FromSeconds(3);
-                    bool visibilityGraceElapsed = gameBarLastVisibleUtc == DateTime.MinValue ||
-                        now - gameBarLastVisibleUtc > TimeSpan.FromMilliseconds(1500);
-                    bool invisibleStable = gameBarInvisibleSinceUtc != DateTime.MinValue &&
-                        now - gameBarInvisibleSinceUtc > TimeSpan.FromMilliseconds(1500);
 
                     if (activationGraceElapsed && visibilityGraceElapsed && invisibleStable &&
                         RestorePreviousGameBarProfile(i))
@@ -3516,7 +3747,8 @@ namespace DS4Windows
             }
         }
 
-        private void LogGameBarDetectionIfVerbose(DateTime now, bool gameBarVisible, bool anyConfigured, bool anyActiveOrPending)
+        private void LogGameBarDetectionIfVerbose(DateTime now, bool gameBarVisible,
+            bool anyConfigured, bool anyActiveOrPending, bool anyCompatibilityConfigured, bool anyCompatibilityActive)
         {
             if (!Global.VerboseStartupLogging)
             {
@@ -3535,7 +3767,8 @@ namespace DS4Windows
             gameBarVerboseDetectionLogInitialized = true;
             gameBarVerboseLastVisible = gameBarVisible;
             gameBarVerboseLastDetectionLogUtc = now;
-            StartupDiag($"GameBar detection visible={gameBarVisible} anyConfigured={anyConfigured} anyActiveOrPending={anyActiveOrPending} {gameBarIntegration.CaptureLastDetectionSummary()} controllers={BuildGameBarPriorityStateSummary()}");
+            StartupDiag($"GameBar detection visible={gameBarVisible} anyConfigured={anyConfigured} anyActiveOrPending={anyActiveOrPending} compatibilityConfigured={anyCompatibilityConfigured} compatibilityActive={anyCompatibilityActive} " +
+                $"{gameBarIntegration.CaptureLastDetectionSummary()} controllers={BuildGameBarPriorityStateSummary()}");
         }
 
         private string BuildGameBarPriorityStateSummary()
@@ -3545,7 +3778,8 @@ namespace DS4Windows
             {
                 if (DS4Controllers[i] == null &&
                     !gameBarProfileActive[i] &&
-                    !gameBarProfilePending[i])
+                    !gameBarProfilePending[i] &&
+                    Volatile.Read(ref gameBarCompatibilityRoutingActive[i]) == 0)
                 {
                     continue;
                 }
@@ -3561,6 +3795,10 @@ namespace DS4Windows
                 builder.Append(DS4Controllers[i] != null);
                 builder.Append(",enabled=");
                 builder.Append(Global.GameBarHomeButtonSupport[i]);
+                builder.Append(",compatibility=");
+                builder.Append(Global.GameBarControllerCompatibility[i]);
+                builder.Append(",compatibilityActive=");
+                builder.Append(Volatile.Read(ref gameBarCompatibilityRoutingActive[i]) == 1);
                 builder.Append(",target='");
                 builder.Append(Global.GameBarProfileName[i]);
                 builder.Append("',active=");
@@ -3962,7 +4200,7 @@ namespace DS4Windows
                                 Mapping.TempMouseJoystick(jointInd, tempMapState);
                                 if (!useDInputOnly[jointInd])
                                 {
-                                    outputDevices[jointInd]?.ConvertandSendReport(tempMapState, jointInd);
+                                    GetReportOutputDevice(jointInd)?.ConvertandSendReport(tempMapState, jointInd);
                                 }
                             }
                         }
@@ -4055,11 +4293,12 @@ namespace DS4Windows
                         }
                     }
 
+                    OutputDevice reportOutput = GetReportOutputDevice(ind);
                     if (startupReportDiag)
                     {
-                        StartupDiag($"On_Report ConvertandSendReport begin index={ind} count={startupReportCount} outDev={outputDevices[ind]?.GetDeviceType() ?? "null"}");
+                        StartupDiag($"On_Report ConvertandSendReport begin index={ind} count={startupReportCount} outDev={reportOutput?.GetDeviceType() ?? "null"}");
                     }
-                    outputDevices[ind]?.ConvertandSendReport(cState, ind);
+                    reportOutput?.ConvertandSendReport(cState, ind);
                     if (startupReportDiag)
                     {
                         StartupDiag($"On_Report ConvertandSendReport end index={ind} count={startupReportCount}");

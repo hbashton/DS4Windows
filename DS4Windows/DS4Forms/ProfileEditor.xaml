@@ -2350,20 +2350,26 @@
                         <GroupBox Header="Game Bar" Margin="0,8,0,0" Padding="2,4">
                             <Grid>
                                 <Grid.RowDefinitions>
-                                    <RowDefinition Height="30" />
-                                    <RowDefinition Height="30" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition />
                                 </Grid.ColumnDefinitions>
 
-                                <CheckBox Content="Enable Game Bar support with controller Home button" IsChecked="{Binding GameBarHomeButtonSupport}"
+                                <CheckBox Content="Enable Game Bar controller compatibility" IsChecked="{Binding GameBarControllerCompatibility}"
                                           Grid.Row="0" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}"
-                                          ToolTip="Pressing Home opens Xbox Game Bar and switches this controller to the selected profile while Game Bar is visible." />
-                                <Label Content="Profile:" Grid.Row="1" Grid.Column="0" />
-                                <ComboBox ItemsSource="{Binding GameBarProfileChoices}" SelectedItem="{Binding GameBarProfileName}"
-                                          Grid.Row="1" Grid.Column="1" Margin="{StaticResource spaceMargin}" />
+                                          ToolTip="While Xbox Game Bar is visible, temporarily route this profile's mapped input through an Xbox-compatible controller. The selected profile and native DualSense output stay configured." />
+                                <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Margin="8,0,8,6" TextWrapping="Wrap"
+                                           Text="Keeps the current profile loaded. A temporary XInput companion is used only while Game Bar is open." />
+                                <CheckBox Content="Switch to a different profile while Game Bar is visible (legacy)" IsChecked="{Binding GameBarHomeButtonSupport}"
+                                          Grid.Row="2" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}"
+                                          ToolTip="Pressing Home opens Xbox Game Bar and switches this controller to the profile selected below while Game Bar is visible." />
+                                <Label Content="Profile:" Grid.Row="3" Grid.Column="0" />
+                                <ComboBox ItemsSource="{Binding GameBarProfileChoices}" SelectedItem="{Binding GameBarProfileName}" Grid.Row="3" Grid.Column="1" Margin="{StaticResource spaceMargin}" />
                             </Grid>
                         </GroupBox>
                         <StackPanel Orientation="Horizontal" Margin="0,6,0,0">

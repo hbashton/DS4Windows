@@ -109,14 +109,15 @@
                                         <StackPanel>
                                             <TextBlock Text="ACTIVE PROFILE" FontSize="10" FontWeight="Bold"
                                                        Foreground="{DynamicResource MutedForegroundColor}" Margin="0,0,0,5" />
-                                            <ComboBox x:Name="selectProfCombo" MinWidth="220"
+                                            <ComboBox x:Name="selectProfCombo" Style="{StaticResource BridgeProfileComboBoxStyle}"
                                                       ItemsSource="{Binding ProfileListCol}" SelectedIndex="{Binding SelectedIndex}"
                                                       Tag="{Binding DevIndex, Mode=OneTime}"
                                                       Visibility="{Binding PrimaryDevice, Converter={StaticResource BooleanToVisibilityConverter}}"
                                                       SelectionChanged="SelectProfCombo_SelectionChanged" KeyDown="SelectProfCombo_KeyDown">
                                                 <ComboBox.ItemTemplate>
                                                     <DataTemplate>
-                                                        <TextBlock Text="{Binding Name,Mode=OneWay,FallbackValue=''}" />
+                                                        <TextBlock Text="{Binding Name,Mode=OneWay,FallbackValue=''}"
+                                                                   TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" />
                                                     </DataTemplate>
                                                 </ComboBox.ItemTemplate>
                                             </ComboBox>

@@ -42,6 +42,7 @@ namespace DS4Windows
         private const int STARTF_FORCEOFFFEEDBACK = 0x00000080;
         private const int SW_HIDE = 0;
         private const uint CREATE_NO_WINDOW = 0x08000000;
+        private const uint BELOW_NORMAL_PRIORITY_CLASS = 0x00004000;
         private const uint WAIT_OBJECT_0 = 0x00000000;
         private const uint WAIT_TIMEOUT = 0x00000102;
         private const int MaxAutomationDiagnosticRows = 20;
@@ -435,6 +436,7 @@ namespace DS4Windows
 
                     worker.IsBackground = true;
                     worker.Name = "DS4Windows Game Bar API Poll";
+                    worker.Priority = ThreadPriority.BelowNormal;
                     worker.Start();
                 }
 
@@ -677,7 +679,7 @@ namespace DS4Windows
                 IntPtr.Zero,
                 IntPtr.Zero,
                 false,
-                CREATE_NO_WINDOW,
+                CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS,
                 IntPtr.Zero,
                 workingDirectory,
                 ref startupInfo,

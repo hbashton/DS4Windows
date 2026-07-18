@@ -185,6 +185,7 @@
 		<None Include="Resources\DualSense Config.png" />
 		<None Include="Resources\DualSense lightbar.png" />
 		<None Include="Resources\DualSense-Config_Mute.png" />
+		<None Include="Resources\DualSense-Config_Highlights.png" />
 		<None Include="Resources\DualSense-Config_TouchLeft.png" />
 		<None Include="Resources\DualSense-Config_TouchMulti.png" />
 		<None Include="Resources\DualSense-Config_TouchRight.png" />
@@ -277,6 +278,7 @@
 		<Resource Include="Resources\DualSense Config.png" />
 		<Resource Include="Resources\DualSense lightbar.png" />
 		<Resource Include="Resources\DualSense-Config_Mute.png" />
+		<Resource Include="Resources\DualSense-Config_Highlights.png" />
 		<Resource Include="Resources\DualSense-Config_TouchLeft.png" />
 		<Resource Include="Resources\DualSense-Config_TouchMulti.png" />
 		<Resource Include="Resources\DualSense-Config_TouchRight.png" />

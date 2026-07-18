@@ -87,7 +87,7 @@ namespace DS4WinWPF.DS4Control
             unsafe
             {
                 int bytesReturned = 0;
-                NativeMethods.DeviceIoControl(hidHideHandle.DangerousGetHandle(),
+                result = NativeMethods.DeviceIoControl(hidHideHandle.DangerousGetHandle(),
                     HidHideAPIDevice.IOCTL_SET_ACTIVE,
                     new IntPtr(&state),
                     1,
@@ -171,7 +171,8 @@ namespace DS4WinWPF.DS4Control
         /// Adds device instance paths to a process-lifetime blacklist.
         /// Entries are automatically removed by HidHide when this process exits,
         /// regardless of whether the exit is clean or due to a crash.
-        /// Requires HidHide with session blacklist support (v1.5+).
+        /// Requires a HidHide build with session blacklist support. Released
+        /// HidHide 1.5 builds do not expose this API, so callers need a fallback.
         /// </summary>
         public bool AddSessionBlacklist(List<string> instances)
         {

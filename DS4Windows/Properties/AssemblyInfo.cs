@@ -1,5 +1,8 @@
 ﻿using System.Windows;
 
+using System.Runtime.CompilerServices;
+
+[assembly: InternalsVisibleTo("DS4WindowsTests")]
 
 [assembly: ThemeInfo(
     ResourceDictionaryLocation.None, //where theme specific resource dictionaries are located

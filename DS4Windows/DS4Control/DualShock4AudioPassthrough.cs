@@ -18,7 +18,7 @@ namespace DS4Windows
 
         public void Start(int slot, DS4Device device, byte speakerVolume,
             DualSenseSpeakerCompression compression, byte bassBoost,
-            string captureEndpointId)
+            string captureEndpointId, OutContType emulatedControllerType)
         {
             if (slot < 0 || slot >= slots.Length)
             {
@@ -27,10 +27,12 @@ namespace DS4Windows
 
             DualShock4BluetoothSpeakerPassthrough previous;
             int generation;
+            ControllerAudioEndpointKind endpointKind =
+                DualSenseAudioPassthrough.GetEndpointKind(emulatedControllerType);
             lock (syncRoot)
             {
                 if (slots[slot]?.Matches(device, speakerVolume, compression,
-                    bassBoost, captureEndpointId) == true)
+                    bassBoost, captureEndpointId, endpointKind) == true)
                 {
                     return;
                 }
@@ -42,7 +44,7 @@ namespace DS4Windows
 
             DisposeInBackground(previous);
             _ = Task.Run(() => StartWorker(slot, device, speakerVolume,
-                compression, bassBoost, captureEndpointId, generation));
+                compression, bassBoost, captureEndpointId, endpointKind, generation));
         }
 
         public void Stop(int slot)
@@ -84,10 +86,12 @@ namespace DS4Windows
 
         private void StartWorker(int slot, DS4Device device, byte speakerVolume,
             DualSenseSpeakerCompression compression, byte bassBoost,
-            string captureEndpointId, int generation)
+            string captureEndpointId, ControllerAudioEndpointKind endpointKind,
+            int generation)
         {
             var playback = new DualShock4BluetoothSpeakerPassthrough(device,
-                speakerVolume, compression, bassBoost, captureEndpointId);
+                speakerVolume, compression, bassBoost, captureEndpointId,
+                endpointKind);
             try
             {
                 playback.Start();

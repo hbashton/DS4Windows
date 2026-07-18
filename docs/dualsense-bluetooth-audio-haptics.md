@@ -9,8 +9,16 @@ This branch keeps three DualSense feedback paths separate:
 | Rumble, adaptive triggers, lightbar, LEDs | DualSense HID output report `0x02` | normal DualSense HID output (`0x31` on Bluetooth) |
 | Advanced haptics | VIIPER virtual UAC channels 3/4 | Bluetooth HID `0x32`, packet `0x12`, 3 kHz signed stereo PCM |
 | Controller speaker audio | selected Windows render endpoint, including VIIPER's virtual `Wireless Controller` endpoint | Bluetooth HID `0x35`, packet `0x13`, 48 kHz stereo Opus |
+| Controller microphone | physical DualSense Opus or DualShock 4 SBC microphone frames | VIIPER virtual DualSense/Edge 48 kHz stereo or DualShock 4 16 kHz mono UAC capture endpoint |
 
 The channels are intentionally not mixed. In particular, the advanced-haptics PCM stream is never converted to generic rumble or routed to the controller speaker.
+
+Speaker and microphone routing follows the emulated controller selected by the
+profile, not the physical model. A physical DualSense can therefore feed a
+virtual DualShock 4 audio endpoint, and a physical DualShock 4 can feed a
+virtual DualSense endpoint. DS4Windows selects the matching virtual render
+endpoint automatically and converts microphone PCM to the virtual endpoint's
+native sample rate and channel layout.
 
 ## In-game setup
 

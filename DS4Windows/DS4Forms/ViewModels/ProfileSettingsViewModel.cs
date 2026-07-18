@@ -3158,9 +3158,9 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             {
                 var choices = new List<AudioEndpointChoice>()
                 {
-                    new AudioEndpointChoice("Default audio endpoint", string.Empty),
-                    new AudioEndpointChoice("DualSense / game audio (auto-detect)",
-                        DualSenseAudioPassthrough.AutoDetectGameAudioEndpointId),
+                    new AudioEndpointChoice("Automatic for emulated controller", string.Empty),
+                    new AudioEndpointChoice("System default audio endpoint",
+                        DualSenseAudioPassthrough.DefaultSystemAudioEndpointId),
                 };
 
                 try
@@ -3169,9 +3169,9 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     foreach (MMDevice endpoint in enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active))
                     {
                         string name = endpoint.FriendlyName;
-                        if (DualSenseAudioPassthrough.IsDualSenseEndpoint(endpoint))
+                        if (DualSenseAudioPassthrough.IsControllerAudioEndpoint(endpoint))
                         {
-                            name += " (DualSense / game audio)";
+                            name += " (controller / game audio)";
                         }
 
                         choices.Add(new AudioEndpointChoice(name, endpoint.ID));
@@ -3191,7 +3191,13 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public string DualSenseAudioCaptureEndpointId
         {
-            get => Global.DualSenseAudioCaptureEndpointId[device];
+            get
+            {
+                string endpointId = Global.DualSenseAudioCaptureEndpointId[device];
+                return string.Equals(endpointId,
+                    DualSenseAudioPassthrough.AutoDetectGameAudioEndpointId,
+                    StringComparison.Ordinal) ? string.Empty : endpointId;
+            }
             set => Global.DualSenseAudioCaptureEndpointId[device] = value ?? string.Empty;
         }
 
@@ -3285,7 +3291,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     using var enumerator = new MMDeviceEnumerator();
                     foreach (MMDevice endpoint in enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active))
                     {
-                        if (!DualSenseAudioPassthrough.IsDualSenseEndpoint(endpoint))
+                        if (!DualSenseAudioPassthrough.IsControllerAudioEndpoint(endpoint))
                         {
                             choices.Add(new AudioEndpointChoice(endpoint.FriendlyName, endpoint.ID));
                         }

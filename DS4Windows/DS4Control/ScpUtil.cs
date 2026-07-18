@@ -2685,6 +2685,12 @@ namespace DS4Windows
             set => m_Config.gameBarHomeButtonSupport = value;
         }
 
+        public static bool[] GameBarControllerCompatibility
+        {
+            get => m_Config.gameBarControllerCompatibility;
+            set => m_Config.gameBarControllerCompatibility = value;
+        }
+
         public static string[] GameBarProfileName
         {
             get => m_Config.gameBarProfileName;
@@ -3897,6 +3903,7 @@ namespace DS4Windows
         public string[] dualSenseMicrophoneCaptureEndpointId = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
         public string[] dualSenseMicrophoneOutputEndpointId = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
         public bool[] gameBarHomeButtonSupport = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
+        public bool[] gameBarControllerCompatibility = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
         public string[] gameBarProfileName = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
         public bool[] dualSenseMuteButtonLightEnabled = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
         public bool[] dualSenseMuteButtonMutesMicrophone = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
@@ -4844,6 +4851,7 @@ namespace DS4Windows
                 //XmlNode xmlShiftMod = m_Xdoc.CreateNode(XmlNodeType.Element, "ShiftModifier", null); xmlShiftMod.InnerText = shiftModifier[device].ToString(); rootElement.AppendChild(xmlShiftMod);
                 XmlNode xmlLaunchProgram = m_Xdoc.CreateNode(XmlNodeType.Element, "LaunchProgram", null); xmlLaunchProgram.InnerText = launchProgram[device].ToString(); rootElement.AppendChild(xmlLaunchProgram);
                 XmlNode xmlGameBarHomeButtonSupport = m_Xdoc.CreateNode(XmlNodeType.Element, "GameBarHomeButtonSupport", null); xmlGameBarHomeButtonSupport.InnerText = gameBarHomeButtonSupport[device].ToString(); rootElement.AppendChild(xmlGameBarHomeButtonSupport);
+                XmlNode xmlGameBarControllerCompatibility = m_Xdoc.CreateNode(XmlNodeType.Element, "GameBarControllerCompatibility", null); xmlGameBarControllerCompatibility.InnerText = gameBarControllerCompatibility[device].ToString(); rootElement.AppendChild(xmlGameBarControllerCompatibility);
                 XmlNode xmlGameBarProfileName = m_Xdoc.CreateNode(XmlNodeType.Element, "GameBarProfileName", null); xmlGameBarProfileName.InnerText = gameBarProfileName[device]; rootElement.AppendChild(xmlGameBarProfileName);
                 XmlNode xmlDualSenseMuteButtonLightEnabled = m_Xdoc.CreateNode(XmlNodeType.Element, "DualSenseMuteButtonLightEnabled", null); xmlDualSenseMuteButtonLightEnabled.InnerText = dualSenseMuteButtonLightEnabled[device].ToString(); rootElement.AppendChild(xmlDualSenseMuteButtonLightEnabled);
                 XmlNode xmlDualSenseMuteButtonMutesMicrophone = m_Xdoc.CreateNode(XmlNodeType.Element, "DualSenseMuteButtonMutesMicrophone", null); xmlDualSenseMuteButtonMutesMicrophone.InnerText = dualSenseMuteButtonMutesMicrophone[device].ToString(); rootElement.AppendChild(xmlDualSenseMuteButtonMutesMicrophone);
@@ -6679,6 +6687,13 @@ namespace DS4Windows
                     bool.TryParse(Item.InnerText, out gameBarHomeButtonSupport[device]);
                 }
                 catch { gameBarHomeButtonSupport[device] = false; missingSetting = true; }
+
+                try
+                {
+                    Item = m_Xdoc.SelectSingleNode("/" + rootname + "/GameBarControllerCompatibility");
+                    bool.TryParse(Item.InnerText, out gameBarControllerCompatibility[device]);
+                }
+                catch { gameBarControllerCompatibility[device] = false; missingSetting = true; }
 
                 try
                 {
@@ -10034,6 +10049,7 @@ namespace DS4Windows
             enableOutputDataToDS4[device] = DEFAULT_OUTPUT_TO_DS4;
             gameBarHomeButtonSupport[device] = false;
             gameBarProfileName[device] = string.Empty;
+            gameBarControllerCompatibility[device] = false;
             dualSenseMuteButtonLightEnabled[device] = false;
             dualSenseMuteButtonMutesMicrophone[device] = false;
             dualSenseMuteOnProfileName[device] = string.Empty;

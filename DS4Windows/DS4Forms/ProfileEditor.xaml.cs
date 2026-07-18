@@ -999,7 +999,7 @@ namespace DS4WinWPF.DS4Forms
             ProfileNameChanged?.Invoke(this, EventArgs.Empty);
         }
 
-        public void Reload(int device, ProfileEntity profile = null)
+        public void Reload(int device, ProfileEntity profile = null, bool profileAlreadyLoaded = false)
         {
             profileSettingsTabCon.DataContext = null;
             mappingListBox.DataContext = null;
@@ -1010,12 +1010,15 @@ namespace DS4WinWPF.DS4Forms
             if (profile != null)
             {
                 currentProfile = profile;
-                if (device == Global.TEST_PROFILE_INDEX)
+                if (device == Global.TEST_PROFILE_INDEX && !profileAlreadyLoaded)
                 {
                     Global.ProfilePath[Global.TEST_PROFILE_INDEX] = profile.Name;
                 }
 
-                Global.LoadProfile(device, false, App.rootHub, false);
+                if (!profileAlreadyLoaded)
+                {
+                    Global.LoadProfile(device, false, App.rootHub, false);
+                }
                 profileNameTxt.Text = profile.Name;
                 profileNameTxt.IsEnabled = false;
                 applyBtn.IsEnabled = true;

@@ -41,6 +41,7 @@ namespace DS4Windows
     {
         public ViGEmClient vigemTestClient = null;
         private readonly DualSenseAudioPassthrough dualSenseAudioPassthrough = new DualSenseAudioPassthrough();
+        private readonly DualShock4AudioPassthrough dualShock4AudioPassthrough = new DualShock4AudioPassthrough();
         private readonly DualSenseMicrophonePassthrough dualSenseMicrophonePassthrough = new DualSenseMicrophonePassthrough();
         private readonly GameBarIntegration gameBarIntegration = new GameBarIntegration();
         private readonly object hidHideSessionLock = new object();
@@ -2383,6 +2384,9 @@ namespace DS4Windows
                 StartupDiag("ControlService.Stop DualSenseAudio dispose begin");
                 dualSenseAudioPassthrough.Dispose();
                 StartupDiag("ControlService.Stop DualSenseAudio dispose end");
+                StartupDiag("ControlService.Stop DualShock4Audio dispose begin");
+                dualShock4AudioPassthrough.Dispose();
+                StartupDiag("ControlService.Stop DualShock4Audio dispose end");
                 StartupDiag("ControlService.Stop DualSenseMicrophone dispose begin");
                 dualSenseMicrophonePassthrough.Dispose();
                 StartupDiag("ControlService.Stop DualSenseMicrophone dispose end");
@@ -2815,6 +2819,7 @@ namespace DS4Windows
             // DualSense specific profile settings
             if (device is InputDevices.DualSenseDevice dualsense)
             {
+                dualShock4AudioPassthrough.Stop(ind);
                 switch (DualSenseRumbleEmulationMode[ind])
                 {
                     case InputDevices.DualSenseDevice.RumbleEmulationMode.Disabled:
@@ -2870,6 +2875,28 @@ namespace DS4Windows
             else
             {
                 dualSenseAudioPassthrough.Stop(ind);
+                bool speakerEnabled = DualSenseEnableSpeakerOutput[ind];
+                bool microphoneEnabled = DualSenseEnableMicrophonePassthrough[ind];
+                bool audioConfigured = device.SetBluetoothAudioStreaming(
+                    speakerEnabled,
+                    microphoneEnabled,
+                    DualSenseSpeakerVolume[ind],
+                    DualSenseHeadphoneVolume[ind],
+                    DualSenseMicrophoneVolume[ind]);
+
+                if (audioConfigured && speakerEnabled)
+                {
+                    dualShock4AudioPassthrough.Start(ind, device,
+                        DualSenseSpeakerVolume[ind],
+                        (DualSenseSpeakerCompression)Global.DualSenseSpeakerCompression[ind],
+                        Global.DualSenseSpeakerBassBoost[ind],
+                        DualSenseAudioCaptureEndpointId[ind]);
+                }
+                else
+                {
+                    dualShock4AudioPassthrough.Stop(ind);
+                }
+
                 dualSenseMicrophonePassthrough.Stop();
             }
 
@@ -3183,6 +3210,7 @@ namespace DS4Windows
                     LogDebug(removed);
                     AppLogger.LogToTray(removed);
                     dualSenseAudioPassthrough.Stop(ind);
+                    dualShock4AudioPassthrough.Stop(ind);
                     dualSenseMicrophonePassthrough.Stop();
                     /*Stopwatch sw = new Stopwatch();
                     sw.Start();

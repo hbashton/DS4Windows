@@ -32,6 +32,7 @@ namespace DS4Windows
 
         private readonly DualSenseSpeakerCompression compression;
         private readonly byte bassBoostDb;
+        private readonly int sampleRate;
         private readonly BiQuadFilter highPassLeft;
         private readonly BiQuadFilter highPassRight;
         private readonly BiQuadFilter bassShelfLeft;
@@ -47,8 +48,9 @@ namespace DS4Windows
         private float limiterGain = 1.0f;
 
         public DualSenseSpeakerProcessor(DualSenseSpeakerCompression compression,
-            byte bassBoostDb)
+            byte bassBoostDb, int sampleRate = SampleRate)
         {
+            this.sampleRate = Math.Max(8000, sampleRate);
             this.compression = (DualSenseSpeakerCompression)Math.Clamp((int)compression,
                 (int)DualSenseSpeakerCompression.Off,
                 (int)DualSenseSpeakerCompression.Strong);
@@ -56,11 +58,11 @@ namespace DS4Windows
 
             if (this.bassBoostDb > 0)
             {
-                highPassLeft = BiQuadFilter.HighPassFilter(SampleRate, BassHighPassHz, FilterQ);
-                highPassRight = BiQuadFilter.HighPassFilter(SampleRate, BassHighPassHz, FilterQ);
-                bassShelfLeft = BiQuadFilter.LowShelf(SampleRate, BassShelfHz, 1.0f,
+                highPassLeft = BiQuadFilter.HighPassFilter(this.sampleRate, BassHighPassHz, FilterQ);
+                highPassRight = BiQuadFilter.HighPassFilter(this.sampleRate, BassHighPassHz, FilterQ);
+                bassShelfLeft = BiQuadFilter.LowShelf(this.sampleRate, BassShelfHz, 1.0f,
                     this.bassBoostDb);
-                bassShelfRight = BiQuadFilter.LowShelf(SampleRate, BassShelfHz, 1.0f,
+                bassShelfRight = BiQuadFilter.LowShelf(this.sampleRate, BassShelfHz, 1.0f,
                     this.bassBoostDb);
             }
 
@@ -157,9 +159,9 @@ namespace DS4Windows
             return ratioFactor * kneePosition * kneePosition / (2.0f * kneeDb);
         }
 
-        private static float TimeCoefficient(float milliseconds)
+        private float TimeCoefficient(float milliseconds)
         {
-            return (float)Math.Exp(-1.0 / (SampleRate * milliseconds / 1000.0));
+            return (float)Math.Exp(-1.0 / (sampleRate * milliseconds / 1000.0));
         }
 
         private static float LinearToDecibels(float value)

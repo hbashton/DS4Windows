@@ -19,6 +19,7 @@ using System.Text.Json.Serialization;
 using System.Threading;
 using Concentus;
 using DS4Windows.InputDevices;
+using SBC;
 
 namespace DS4Windows
 {
@@ -52,6 +53,8 @@ namespace DS4Windows
         private const int DualSenseMicrophoneOpusFrameLength = 71;
         private const int DualSenseMicrophoneFramesPerPacket = 480;
         private const int DualSenseMicrophonePcmFrameLength = DualSenseMicrophoneFramesPerPacket * 2 * sizeof(short);
+        private const int DualShock4MicrophoneMaximumUpsampledSamplesPerFrame =
+            SbcFrame.MaxSamples * 3;
         private const int MaxPendingMicrophoneFrames = 4;
         private const byte ViiperStreamFrameInputState = 0x01;
         private const byte ViiperStreamFrameMicrophonePcm = 0x02;
@@ -67,9 +70,14 @@ namespace DS4Windows
         private readonly object microphoneSourceLock = new object();
         private readonly AutoResetEvent writerSignal = new AutoResetEvent(false);
         private readonly ManualResetEvent microphoneInterfaceStopSignal = new ManualResetEvent(false);
-        private readonly Queue<byte[]> pendingMicrophoneOpusFrames = new Queue<byte[]>(MaxPendingMicrophoneFrames);
+        private readonly Queue<PendingMicrophoneFrame> pendingMicrophoneFrames =
+            new Queue<PendingMicrophoneFrame>(MaxPendingMicrophoneFrames);
         private readonly short[] microphoneMonoPcm = new short[DualSenseMicrophoneFramesPerPacket];
         private readonly byte[] microphoneStereoPcm = new byte[DualSenseMicrophonePcmFrameLength];
+        private readonly short[] dualShock4UpsampledPcm =
+            new short[DualShock4MicrophoneMaximumUpsampledSamplesPerFrame];
+        private readonly short[] dualShock4ResampleAccumulator =
+            new short[DualSenseMicrophoneFramesPerPacket * 2];
         private readonly DualSenseMicrophoneProcessor microphoneProcessor = new DualSenseMicrophoneProcessor();
         private ViiperDeviceStream deviceStream;
         private Thread feedbackThread;
@@ -77,7 +85,9 @@ namespace DS4Windows
         private Thread microphoneInterfaceThread;
         private byte[] pendingStatePacket;
         private IOpusDecoder microphoneDecoder;
-        private DualSenseDevice microphoneSourceDevice;
+        private SbcDecoder microphoneSbcDecoder;
+        private DS4Device microphoneSourceDevice;
+        private int dualShock4ResampleAccumulatorCount;
         private volatile bool writerStopRequested;
         private bool activeStreamUsesFramedProtocol;
         private bool activeStreamSupportsMicrophone;
@@ -93,6 +103,7 @@ namespace DS4Windows
         private long microphoneArmAttempts;
         private long microphoneArmFailures;
         private long microphoneOpusFramesReceived;
+        private long microphoneSbcFramesReceived;
         private long microphoneFramesDecoded;
         private long microphoneFramesSubmitted;
         private long microphoneFramesDropped;
@@ -112,6 +123,24 @@ namespace DS4Windows
         private bool physicalDualSenseIdentityVerified;
         private readonly byte[] lastR2TriggerFeedback = new byte[DualSenseTriggerEffectLength];
         private readonly byte[] lastL2TriggerFeedback = new byte[DualSenseTriggerEffectLength];
+
+        private enum MicrophoneCodec : byte
+        {
+            Opus,
+            Sbc,
+        }
+
+        private readonly struct PendingMicrophoneFrame
+        {
+            public PendingMicrophoneFrame(MicrophoneCodec codec, byte[] data)
+            {
+                Codec = codec;
+                Data = data;
+            }
+
+            public MicrophoneCodec Codec { get; }
+            public byte[] Data { get; }
+        }
 
         public ViiperOutDevice(OutContType outputType, ViiperVirtualDeviceType viiperType)
         {
@@ -147,6 +176,7 @@ namespace DS4Windows
             Interlocked.Exchange(ref microphoneArmAttempts, 0);
             Interlocked.Exchange(ref microphoneArmFailures, 0);
             Interlocked.Exchange(ref microphoneOpusFramesReceived, 0);
+            Interlocked.Exchange(ref microphoneSbcFramesReceived, 0);
             Interlocked.Exchange(ref microphoneFramesDecoded, 0);
             Interlocked.Exchange(ref microphoneFramesSubmitted, 0);
             Interlocked.Exchange(ref microphoneFramesDropped, 0);
@@ -289,7 +319,7 @@ namespace DS4Windows
             lock (pendingPacketLock)
             {
                 pendingStatePacket = null;
-                pendingMicrophoneOpusFrames.Clear();
+                pendingMicrophoneFrames.Clear();
             }
 
             lock (streamRecoveryLock)
@@ -537,16 +567,17 @@ namespace DS4Windows
                 while (!writerStopRequested)
                 {
                     byte[] packet;
-                    byte[] microphoneOpusFrame;
+                    PendingMicrophoneFrame? microphoneFrame;
                     lock (pendingPacketLock)
                     {
                         packet = pendingStatePacket;
                         pendingStatePacket = null;
-                        microphoneOpusFrame = pendingMicrophoneOpusFrames.Count > 0 ?
-                            pendingMicrophoneOpusFrames.Dequeue() : null;
+                        microphoneFrame = pendingMicrophoneFrames.Count > 0 ?
+                            pendingMicrophoneFrames.Dequeue() :
+                            (PendingMicrophoneFrame?)null;
                     }
 
-                    if (packet == null && microphoneOpusFrame == null)
+                    if (packet == null && !microphoneFrame.HasValue)
                     {
                         break;
                     }
@@ -559,9 +590,9 @@ namespace DS4Windows
                             Interlocked.Increment(ref writtenPacketCount);
                         }
 
-                        if (microphoneOpusFrame != null)
+                        if (microphoneFrame.HasValue)
                         {
-                            WriteMicrophoneOpusFrame(microphoneOpusFrame);
+                            WriteMicrophoneFrame(microphoneFrame.Value);
                         }
 
                         streamRecoveryAttempts = 0;
@@ -691,6 +722,19 @@ namespace DS4Windows
             }
         }
 
+        private void WriteMicrophoneFrame(PendingMicrophoneFrame frame)
+        {
+            switch (frame.Codec)
+            {
+                case MicrophoneCodec.Opus:
+                    WriteMicrophoneOpusFrame(frame.Data);
+                    break;
+                case MicrophoneCodec.Sbc:
+                    WriteMicrophoneSbcFrame(frame.Data);
+                    break;
+            }
+        }
+
         private void WriteMicrophoneOpusFrame(byte[] opusFrame)
         {
             if (!activeStreamSupportsMicrophone ||
@@ -699,12 +743,6 @@ namespace DS4Windows
                 opusFrame.Length != DualSenseMicrophoneOpusFrameLength)
             {
                 return;
-            }
-
-            ViiperDeviceStream stream = deviceStream;
-            if (stream == null)
-            {
-                throw new ObjectDisposedException(nameof(ViiperDeviceStream));
             }
 
             bool muted = Volatile.Read(ref microphoneMuted) == 1;
@@ -729,19 +767,115 @@ namespace DS4Windows
                 Interlocked.Increment(ref microphoneFramesDecoded);
 
                 frames = Math.Min(decodedSamples, DualSenseMicrophoneFramesPerPacket);
+            }
+
+            SubmitMicrophonePcm(frames, muted);
+        }
+
+        private void WriteMicrophoneSbcFrame(byte[] sbcFrame)
+        {
+            if (!activeStreamSupportsMicrophone ||
+                !activeStreamUsesFramedProtocol ||
+                sbcFrame == null || sbcFrame.Length < SbcFrame.HeaderSize)
+            {
+                return;
+            }
+
+            SbcDecoder decoder = microphoneSbcDecoder;
+            if (decoder == null)
+            {
+                decoder = new SbcDecoder();
+                microphoneSbcDecoder = decoder;
+            }
+
+            if (!decoder.Decode(sbcFrame, out short[] decoded,
+                out short[] ignoredRight, out SbcFrame decodedFrame) ||
+                decoded == null || decoded.Length == 0 ||
+                decodedFrame.Mode != SbcMode.Mono ||
+                decodedFrame.GetFrequencyHz() <= 0)
+            {
+                Interlocked.Increment(ref microphoneDecodeFailures);
+                return;
+            }
+
+            Interlocked.Increment(ref microphoneFramesDecoded);
+            int upsampledSamples = (int)Math.Round(decoded.Length * 48000.0 /
+                decodedFrame.GetFrequencyHz());
+            if (upsampledSamples <= 0 ||
+                upsampledSamples > dualShock4UpsampledPcm.Length)
+            {
+                Interlocked.Increment(ref microphoneDecodeFailures);
+                return;
+            }
+
+            UpsampleDualShock4Microphone(decoded, dualShock4UpsampledPcm,
+                upsampledSamples);
+            int available = dualShock4ResampleAccumulator.Length -
+                dualShock4ResampleAccumulatorCount;
+            int appended = Math.Min(available, upsampledSamples);
+            Array.Copy(dualShock4UpsampledPcm, 0, dualShock4ResampleAccumulator,
+                dualShock4ResampleAccumulatorCount, appended);
+            dualShock4ResampleAccumulatorCount += appended;
+            if (dualShock4ResampleAccumulatorCount <
+                DualSenseMicrophoneFramesPerPacket)
+            {
+                return;
+            }
+
+            Array.Copy(dualShock4ResampleAccumulator, 0, microphoneMonoPcm, 0,
+                DualSenseMicrophoneFramesPerPacket);
+            int remaining = dualShock4ResampleAccumulatorCount -
+                DualSenseMicrophoneFramesPerPacket;
+            if (remaining > 0)
+            {
+                Array.Copy(dualShock4ResampleAccumulator,
+                    DualSenseMicrophoneFramesPerPacket,
+                    dualShock4ResampleAccumulator, 0, remaining);
+            }
+            dualShock4ResampleAccumulatorCount = remaining;
+            SubmitMicrophonePcm(DualSenseMicrophoneFramesPerPacket,
+                Volatile.Read(ref microphoneMuted) == 1);
+        }
+
+        private static void UpsampleDualShock4Microphone(short[] source,
+            short[] destination, int destinationCount)
+        {
+            for (int index = 0; index < destinationCount; index++)
+            {
+                double position = index * source.Length / (double)destinationCount;
+                int first = Math.Min((int)position, source.Length - 1);
+                int second = Math.Min(first + 1, source.Length - 1);
+                double blend = position - first;
+                destination[index] = (short)Math.Clamp((int)Math.Round(
+                    source[first] * (1.0 - blend) + source[second] * blend),
+                    short.MinValue, short.MaxValue);
+            }
+        }
+
+        private void SubmitMicrophonePcm(int frames, bool muted)
+        {
+            ViiperDeviceStream stream = deviceStream;
+            if (stream == null)
+            {
+                throw new ObjectDisposedException(nameof(ViiperDeviceStream));
+            }
+
+            if (!muted)
+            {
                 DualSenseMicrophoneNoiseSuppression suppression =
                     (DualSenseMicrophoneNoiseSuppression)Math.Clamp(
                         Volatile.Read(ref microphoneNoiseSuppression),
                         (int)DualSenseMicrophoneNoiseSuppression.Off,
                         (int)DualSenseMicrophoneNoiseSuppression.Strong);
                 microphoneProcessor.Process(microphoneMonoPcm, frames,
-                    (byte)Math.Clamp(Volatile.Read(ref microphoneVolume), 0, byte.MaxValue),
-                    suppression);
+                    (byte)Math.Clamp(Volatile.Read(ref microphoneVolume), 0,
+                        byte.MaxValue), suppression);
                 if (suppression != DualSenseMicrophoneNoiseSuppression.Off &&
                     Global.VerboseStartupLogging &&
                     Volatile.Read(ref microphoneNoiseSuppressionUnavailableLogged) == 0 &&
                     !microphoneProcessor.NoiseSuppressionAvailable &&
-                    Interlocked.Exchange(ref microphoneNoiseSuppressionUnavailableLogged, 1) == 0)
+                    Interlocked.Exchange(
+                        ref microphoneNoiseSuppressionUnavailableLogged, 1) == 0)
                 {
                     AppLogger.LogToGui(
                         $"VIIPER microphone RNNoise unavailable; safety conditioning remains active: {microphoneProcessor.NoiseSuppressionFailure}",
@@ -902,7 +1036,21 @@ namespace DS4Windows
                             break;
                         }
 
-                        Program.rootHub.SetDevRumble(device, feedback[1], feedback[0], deviceIndex);
+                        byte lightFast = feedback[1];
+                        byte heavySlow = feedback[0];
+                        if (device is not DualSenseDevice)
+                        {
+                            int hapticsReportOffset =
+                                feedbackLength >= DualSenseCombinedExtendedFeedbackLength &&
+                                feedback[DualSenseCombinedBluetoothReportOffset] == 0x36 ?
+                                    DualSenseCombinedBluetoothReportOffset :
+                                    DualSenseBluetoothHapticsReportOffset;
+                            DualSenseHapticsTranslator.Translate(feedback, feedbackLength,
+                                hapticsReportOffset, out lightFast, out heavySlow);
+                        }
+
+                        Program.rootHub.SetDevRumble(device, lightFast, heavySlow,
+                            deviceIndex);
                         ApplyLightbar(device, feedback[2], feedback[3], feedback[4], 0, 0);
                         ApplyDualSenseTriggerFeedback(device, feedback, feedbackLength);
                     }
@@ -958,17 +1106,29 @@ namespace DS4Windows
                     (byte)DualSenseMicrophoneNoiseSuppression.Balanced);
 
             if (Program.rootHub == null ||
-                deviceIndex >= Program.rootHub.DS4Controllers.Length ||
-                Program.rootHub.DS4Controllers[deviceIndex] is not DualSenseDevice source ||
-                source.ConnectionType != ConnectionType.BT ||
-                !IsCurrentPhysicalSonyDualSense(source))
+                deviceIndex >= Program.rootHub.DS4Controllers.Length)
+            {
+                DetachBluetoothMicrophoneSource();
+                return;
+            }
+
+            DS4Device source = Program.rootHub.DS4Controllers[deviceIndex];
+            DualSenseDevice dualSenseSource = source as DualSenseDevice;
+            bool validDualSense = dualSenseSource != null &&
+                dualSenseSource.ConnectionType == ConnectionType.BT &&
+                IsCurrentPhysicalSonyDualSense(dualSenseSource);
+            bool validDualShock4 = source != null &&
+                source.DeviceType == InputDeviceType.DS4 &&
+                source.ConnectionType == ConnectionType.BT &&
+                IsCurrentPhysicalSonyDualShock4(source);
+            if (!validDualSense && !validDualShock4)
             {
                 DetachBluetoothMicrophoneSource();
                 return;
             }
 
             Volatile.Write(ref microphoneMuted,
-                source.IsProfileMicrophoneMuted ? 1 : 0);
+                dualSenseSource?.IsProfileMicrophoneMuted == true ? 1 : 0);
 
             bool sourceAlreadyAttached;
             lock (microphoneSourceLock)
@@ -985,8 +1145,16 @@ namespace DS4Windows
             lock (microphoneSourceLock)
             {
                 microphoneSourceDevice = source;
-                microphoneSourceDevice.BluetoothMicrophoneOpusFrameReceived +=
-                    BluetoothMicrophoneOpusFrameReceived;
+                if (source is DualSenseDevice attachedDualSense)
+                {
+                    attachedDualSense.BluetoothMicrophoneOpusFrameReceived +=
+                        BluetoothMicrophoneOpusFrameReceived;
+                }
+                else
+                {
+                        source.BluetoothMicrophoneSbcFrameReceived +=
+                            BluetoothMicrophoneSbcFrameReceived;
+                }
             }
 
             Interlocked.Exchange(ref lastMicrophoneFrameTimestamp, 0);
@@ -994,7 +1162,7 @@ namespace DS4Windows
             MaintainBluetoothMicrophoneStreaming(source);
         }
 
-        private void MaintainBluetoothMicrophoneStreaming(DualSenseDevice source)
+        private void MaintainBluetoothMicrophoneStreaming(DS4Device source)
         {
             long now = Stopwatch.GetTimestamp();
             long lastFrame = Interlocked.Read(ref lastMicrophoneFrameTimestamp);
@@ -1013,13 +1181,16 @@ namespace DS4Windows
 
             Interlocked.Exchange(ref lastMicrophoneArmTimestamp, now);
             Interlocked.Increment(ref microphoneArmAttempts);
-            if (!source.SetBluetoothMicrophoneStreaming(true))
+            bool armed = source is DualSenseDevice dualSenseSource ?
+                dualSenseSource.SetBluetoothMicrophoneStreaming(true) :
+                source.SetDualShock4BluetoothMicrophoneStreaming(true);
+            if (!armed)
             {
                 Interlocked.Increment(ref microphoneArmFailures);
             }
         }
 
-        private void LogMicrophoneHealthIfNeeded(DualSenseDevice source, long now,
+        private void LogMicrophoneHealthIfNeeded(DS4Device source, long now,
             long lastFrame)
         {
             if (!Global.VerboseStartupLogging ||
@@ -1031,37 +1202,52 @@ namespace DS4Windows
             lastMicrophoneHealthLogUtc = DateTime.UtcNow;
             string frameAge = lastFrame == 0 ? "never" :
                 $"{Math.Max(0, (now - lastFrame) * 1000 / Stopwatch.Frequency)}ms";
-            int rejectedTag = source.BluetoothLastRejectedInputTag;
+            DualSenseDevice dualSenseSource = source as DualSenseDevice;
+            int rejectedTag = dualSenseSource?.BluetoothLastRejectedInputTag ?? -1;
             string rejectedTagText = rejectedTag < 0 ? "none" : $"0x{rejectedTag:X2}";
+            long physicalFrames = dualSenseSource?.BluetoothMicrophoneFramesReceived ??
+                source.DualShock4BluetoothMicrophoneFramesReceived;
+            long rejectedInputs = dualSenseSource?.BluetoothRejectedInputFrames ?? 0;
+            string armStatus = dualSenseSource?.LastBluetoothMicrophoneWriteStatus ??
+                source.LastBluetoothAudioWriteStatus;
             AppLogger.LogToGui(
                 $"VIIPER {viiperType} microphone stats: streamV2={activeStreamUsesFramedProtocol} " +
                 $"interfaceKnown={Volatile.Read(ref virtualMicrophoneInterfaceStateKnown) == 1} " +
                 $"interfaceActive={Volatile.Read(ref virtualMicrophoneInterfaceActive) == 1} " +
                 $"armAttempts={Interlocked.Read(ref microphoneArmAttempts)} " +
                 $"armFailures={Interlocked.Read(ref microphoneArmFailures)} " +
-                $"physicalFrames={source.BluetoothMicrophoneFramesReceived} " +
-                $"forwardedFrames={Interlocked.Read(ref microphoneOpusFramesReceived)} " +
+                $"physicalFrames={physicalFrames} " +
+                $"opusFrames={Interlocked.Read(ref microphoneOpusFramesReceived)} " +
+                $"sbcFrames={Interlocked.Read(ref microphoneSbcFramesReceived)} " +
                 $"decodedFrames={Interlocked.Read(ref microphoneFramesDecoded)} " +
                 $"submittedFrames={Interlocked.Read(ref microphoneFramesSubmitted)} " +
                 $"queueDrops={Interlocked.Read(ref microphoneFramesDropped)} " +
                 $"decodeFailures={Interlocked.Read(ref microphoneDecodeFailures)} " +
-                $"rejectedInputs={source.BluetoothRejectedInputFrames} " +
+                $"rejectedInputs={rejectedInputs} " +
                 $"lastRejectedTag={rejectedTagText} lastFrameAge={frameAge} " +
-                $"armStatus=\"{source.LastBluetoothMicrophoneWriteStatus}\"",
+                $"armStatus=\"{armStatus}\"",
                 false);
         }
 
         private void DetachBluetoothMicrophoneSource()
         {
-            DualSenseDevice source = null;
+            DS4Device source = null;
             bool resetProcessor = false;
             lock (microphoneSourceLock)
             {
                 if (microphoneSourceDevice != null)
                 {
                     source = microphoneSourceDevice;
-                    microphoneSourceDevice.BluetoothMicrophoneOpusFrameReceived -=
-                        BluetoothMicrophoneOpusFrameReceived;
+                    if (source is DualSenseDevice dualSenseSource)
+                    {
+                        dualSenseSource.BluetoothMicrophoneOpusFrameReceived -=
+                            BluetoothMicrophoneOpusFrameReceived;
+                    }
+                    else
+                    {
+                        source.BluetoothMicrophoneSbcFrameReceived -=
+                            BluetoothMicrophoneSbcFrameReceived;
+                    }
                     microphoneSourceDevice = null;
                     resetProcessor = true;
                 }
@@ -1069,11 +1255,16 @@ namespace DS4Windows
 
             lock (pendingPacketLock)
             {
-                resetProcessor |= pendingMicrophoneOpusFrames.Count > 0;
-                pendingMicrophoneOpusFrames.Clear();
+                resetProcessor |= pendingMicrophoneFrames.Count > 0;
+                pendingMicrophoneFrames.Clear();
             }
-            resetProcessor |= microphoneDecoder != null;
+            resetProcessor |= microphoneDecoder != null || microphoneSbcDecoder != null ||
+                dualShock4ResampleAccumulatorCount > 0;
             microphoneDecoder = null;
+            microphoneSbcDecoder = null;
+            dualShock4ResampleAccumulatorCount = 0;
+            Array.Clear(dualShock4ResampleAccumulator, 0,
+                dualShock4ResampleAccumulator.Length);
             if (resetProcessor)
             {
                 microphoneProcessor.Reset();
@@ -1086,7 +1277,14 @@ namespace DS4Windows
             {
                 try
                 {
-                    source.SetBluetoothMicrophoneStreaming(false);
+                    if (source is DualSenseDevice dualSenseSource)
+                    {
+                        dualSenseSource.SetBluetoothMicrophoneStreaming(false);
+                    }
+                    else
+                    {
+                        source.SetDualShock4BluetoothMicrophoneStreaming(false);
+                    }
                 }
                 catch
                 {
@@ -1117,12 +1315,49 @@ namespace DS4Windows
             Buffer.BlockCopy(opusFrame, 0, copy, 0, copy.Length);
             lock (pendingPacketLock)
             {
-                while (pendingMicrophoneOpusFrames.Count >= MaxPendingMicrophoneFrames)
+                while (pendingMicrophoneFrames.Count >= MaxPendingMicrophoneFrames)
                 {
-                    pendingMicrophoneOpusFrames.Dequeue();
+                    pendingMicrophoneFrames.Dequeue();
                     Interlocked.Increment(ref microphoneFramesDropped);
                 }
-                pendingMicrophoneOpusFrames.Enqueue(copy);
+                pendingMicrophoneFrames.Enqueue(new PendingMicrophoneFrame(
+                    MicrophoneCodec.Opus, copy));
+            }
+
+            EnsureStateWriterAlive();
+            writerSignal.Set();
+        }
+
+        private void BluetoothMicrophoneSbcFrameReceived(DS4Device source,
+            byte[] sbcFrame)
+        {
+            lock (microphoneSourceLock)
+            {
+                if (!connected || !ReferenceEquals(source, microphoneSourceDevice))
+                {
+                    return;
+                }
+            }
+
+            if (sbcFrame == null || sbcFrame.Length < SbcFrame.HeaderSize)
+            {
+                return;
+            }
+
+            Interlocked.Increment(ref microphoneSbcFramesReceived);
+            Interlocked.Exchange(ref lastMicrophoneFrameTimestamp,
+                Stopwatch.GetTimestamp());
+            byte[] copy = new byte[sbcFrame.Length];
+            Buffer.BlockCopy(sbcFrame, 0, copy, 0, copy.Length);
+            lock (pendingPacketLock)
+            {
+                while (pendingMicrophoneFrames.Count >= MaxPendingMicrophoneFrames)
+                {
+                    pendingMicrophoneFrames.Dequeue();
+                    Interlocked.Increment(ref microphoneFramesDropped);
+                }
+                pendingMicrophoneFrames.Enqueue(new PendingMicrophoneFrame(
+                    MicrophoneCodec.Sbc, copy));
             }
 
             EnsureStateWriterAlive();
@@ -1299,6 +1534,56 @@ namespace DS4Windows
             int vendorId = device.HidDevice.Attributes.VendorId;
             int productId = device.HidDevice.Attributes.ProductId;
             return vendorId == DS4Devices.SONY_VID && (productId == 0x0CE6 || productId == 0x0DF2);
+        }
+
+        private bool IsCurrentPhysicalSonyDualShock4(DS4Device device)
+        {
+            if (!IsGenuineSonyDualShock4(device))
+            {
+                return false;
+            }
+
+            string devicePath = device.HidDevice.DevicePath ?? string.Empty;
+            lock (physicalDualSenseIdentityLock)
+            {
+                if (string.Equals(devicePath, physicalDualSenseIdentityPath,
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    return physicalDualSenseIdentityVerified;
+                }
+            }
+
+            bool isPhysical;
+            try
+            {
+                isPhysical = !Global.CheckIfVirtualDevice(devicePath);
+            }
+            catch
+            {
+                isPhysical = false;
+            }
+
+            lock (physicalDualSenseIdentityLock)
+            {
+                physicalDualSenseIdentityPath = devicePath;
+                physicalDualSenseIdentityVerified = isPhysical;
+            }
+
+            return isPhysical;
+        }
+
+        private static bool IsGenuineSonyDualShock4(DS4Device device)
+        {
+            if (device?.HidDevice?.Attributes == null ||
+                device.DeviceType != InputDeviceType.DS4)
+            {
+                return false;
+            }
+
+            int vendorId = device.HidDevice.Attributes.VendorId;
+            int productId = device.HidDevice.Attributes.ProductId;
+            return vendorId == DS4Devices.SONY_VID &&
+                (productId == 0x05C4 || productId == 0x09CC);
         }
 
         public static bool ApplySyntheticDualSenseTriggerFeedback(int deviceIndex, bool rightTrigger, byte mode,

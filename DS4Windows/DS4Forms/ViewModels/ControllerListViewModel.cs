@@ -242,7 +242,13 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public bool IsWireless => device.ConnectionType != ConnectionType.USB;
 
-        public bool SupportsDualSenseAudio => device.DeviceType == InputDeviceType.DualSense;
+        public bool SupportsDualSenseAudio =>
+            device.DeviceType == InputDeviceType.DualSense ||
+            device.DeviceType == InputDeviceType.DS4 &&
+            device.ConnectionType == ConnectionType.BT &&
+            device.HidDevice?.Attributes?.VendorId == DS4Devices.SONY_VID &&
+            (device.HidDevice.Attributes.ProductId == 0x05C4 ||
+                device.HidDevice.Attributes.ProductId == 0x09CC);
         public ProfileList ProfileEntities { get => profileListHolder; set => profileListHolder = value; }
         public ObservableCollection<ProfileEntity> ProfileListCol => profileListHolder.ProfileListCol;
 

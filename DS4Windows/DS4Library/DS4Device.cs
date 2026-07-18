@@ -214,6 +214,12 @@ namespace DS4Windows
         protected byte[] inputReport;
         protected byte[] btInputReport = null;
         protected byte[] outReportBuffer, outputReport;
+        private readonly object bluetoothOutputWriteLock = new object();
+        private volatile bool bluetoothSpeakerStreaming;
+        private volatile bool bluetoothMicrophoneStreaming;
+        private byte bluetoothSpeakerVolume = 0x4F;
+        private byte bluetoothHeadphoneVolume = 0x4F;
+        private byte bluetoothMicrophoneVolume = 0x40;
         protected int inputReportErrorCount = 0; // Num of consequtive input report errors (fex if BT device fails 5 times in crc32 and 0x11 data type check then switch over to handle incoming BT packets as those were usb PC-friendly packets. Some fake DS4 gamepads needs this)
         protected readonly DS4Touchpad touchpad = null;
         protected readonly DS4SixAxis sixAxis = null;
@@ -286,12 +292,19 @@ namespace DS4Windows
         //public event EventHandler<EventArgs> Report = null;
         public virtual event ReportHandler<EventArgs> Report = null;
         public virtual event EventHandler<EventArgs> Removal = null;
+        public event Action<DS4Device, byte[]> BluetoothMicrophoneSbcFrameReceived;
         public event EventHandler<EventArgs> SyncChange = null;
         public event EventHandler<EventArgs> SerialChange = null;
         //public EventHandler<EventArgs> MotionEvent = null;
         public ReportHandler<EventArgs> MotionEvent = null;
 
         public HidDevice HidDevice => hDevice;
+        public long DualShock4BluetoothMicrophoneFramesReceived { get; private set; }
+        public long BluetoothAudioReportsWritten { get; private set; }
+        public long BluetoothAudioWriteFailures { get; private set; }
+        public string LastBluetoothAudioWriteStatus { get; private set; } = "inactive";
+        public bool BluetoothSpeakerStreaming => bluetoothSpeakerStreaming;
+        public bool BluetoothMicrophoneStreaming => bluetoothMicrophoneStreaming;
         public bool IsHidExclusive => HidDevice.IsExclusive;
         public bool isHidExclusive()
         {
@@ -925,32 +938,122 @@ namespace DS4Windows
 
         protected bool WriteOutput(byte[] outputBuffer)
         {
-            if (conType == ConnectionType.BT)
+            lock (bluetoothOutputWriteLock)
             {
-                if (nativeOptionsStore != null && nativeOptionsStore.IsCopyCat)
-                    return hDevice.WriteOutputReportViaInterrupt(outputBuffer, READ_STREAM_TIMEOUT);
+                if (conType == ConnectionType.BT)
+                {
+                    if (nativeOptionsStore != null && nativeOptionsStore.IsCopyCat)
+                        return hDevice.WriteOutputReportViaInterrupt(outputBuffer, READ_STREAM_TIMEOUT);
 
-                return hDevice.WriteOutputReportViaControl(outputBuffer);
-            }
-            else
-            {
-                return hDevice.WriteOutputReportViaInterrupt(outputBuffer, READ_STREAM_TIMEOUT);
+                    return hDevice.WriteOutputReportViaControl(outputBuffer);
+                }
+                else
+                {
+                    return hDevice.WriteOutputReportViaInterrupt(outputBuffer, READ_STREAM_TIMEOUT);
+                }
             }
         }
 
         protected bool writeOutput()
         {
-            if (conType == ConnectionType.BT)
+            lock (bluetoothOutputWriteLock)
             {
-                if (nativeOptionsStore != null && nativeOptionsStore.IsCopyCat)
-                    return hDevice.WriteOutputReportViaInterrupt(outputReport, READ_STREAM_TIMEOUT);
+                if (conType == ConnectionType.BT)
+                {
+                    if (nativeOptionsStore != null && nativeOptionsStore.IsCopyCat)
+                        return hDevice.WriteOutputReportViaInterrupt(outputReport, READ_STREAM_TIMEOUT);
 
-                return hDevice.WriteOutputReportViaControl(outputReport);
+                    return hDevice.WriteOutputReportViaControl(outputReport);
+                }
+                else
+                {
+                    return hDevice.WriteOutputReportViaInterrupt(outReportBuffer,
+                        READ_STREAM_TIMEOUT);
+                }
+            }
+        }
+
+        public bool SetBluetoothAudioStreaming(bool speakerEnabled, bool microphoneEnabled,
+            byte speakerVolume, byte headphoneVolume, byte microphoneVolume)
+        {
+            if (!IsGenuineBluetoothDualShock4())
+            {
+                LastBluetoothAudioWriteStatus =
+                    "Bluetooth audio requires a physical Sony DualShock 4.";
+                return false;
+            }
+
+            bluetoothSpeakerStreaming = speakerEnabled;
+            bluetoothMicrophoneStreaming = microphoneEnabled;
+            bluetoothSpeakerVolume = ScaleAudioVolume(speakerVolume, 0x4F);
+            bluetoothHeadphoneVolume = ScaleAudioVolume(headphoneVolume, 0x4F);
+            bluetoothMicrophoneVolume = ScaleAudioVolume(microphoneVolume, 0x40);
+            currentHap.dirty = true;
+            LastBluetoothAudioWriteStatus = speakerEnabled || microphoneEnabled ?
+                "control report queued" : "disabled";
+            return true;
+        }
+
+        public bool SetDualShock4BluetoothMicrophoneStreaming(bool enabled)
+        {
+            return SetBluetoothAudioStreaming(bluetoothSpeakerStreaming, enabled,
+                ExpandAudioVolume(bluetoothSpeakerVolume, 0x4F),
+                ExpandAudioVolume(bluetoothHeadphoneVolume, 0x4F),
+                ExpandAudioVolume(bluetoothMicrophoneVolume, 0x40));
+        }
+
+        public bool WriteBluetoothAudioOutputReport(byte[] report)
+        {
+            if (!IsGenuineBluetoothDualShock4() || report == null ||
+                report.Length < 8 ||
+                DualShock4BluetoothAudioProtocol.GetInputReportLength(report[0]) != report.Length)
+            {
+                LastBluetoothAudioWriteStatus = "rejected invalid DS4 Bluetooth audio report";
+                return false;
+            }
+
+            bool written;
+            lock (bluetoothOutputWriteLock)
+            {
+                written = hDevice.WriteOutputReportViaInterrupt(report, READ_STREAM_TIMEOUT);
+            }
+
+            if (written)
+            {
+                BluetoothAudioReportsWritten++;
+                LastBluetoothAudioWriteStatus = $"report 0x{report[0]:X2} written";
             }
             else
             {
-                return hDevice.WriteOutputReportViaInterrupt(outReportBuffer, READ_STREAM_TIMEOUT);
+                BluetoothAudioWriteFailures++;
+                LastBluetoothAudioWriteStatus = $"report 0x{report[0]:X2} write failed";
             }
+
+            return written;
+        }
+
+        private bool IsGenuineBluetoothDualShock4()
+        {
+            if (conType != ConnectionType.BT || hDevice?.Attributes == null ||
+                hDevice.Attributes.VendorId != DS4Devices.SONY_VID ||
+                nativeOptionsStore?.IsCopyCat == true)
+            {
+                return false;
+            }
+
+            int productId = hDevice.Attributes.ProductId;
+            return productId == 0x05C4 || productId == 0x09CC;
+        }
+
+        private static byte ScaleAudioVolume(byte volume, int maximum)
+        {
+            return (byte)Math.Clamp((volume * maximum + 127) / 255, 0, maximum);
+        }
+
+        private static byte ExpandAudioVolume(byte volume, int maximum)
+        {
+            return maximum <= 0 ? (byte)0 :
+                (byte)Math.Clamp((volume * 255 + maximum / 2) / maximum, 0, 255);
         }
 
         private readonly Stopwatch rumbleAutostopTimer = new Stopwatch(); // Autostop timer to stop rumble motors if those are stuck in a rumble state
@@ -1019,6 +1122,20 @@ namespace DS4Windows
         private const int SONYWA_FEATURE_REPORT_LENGTH = 64;
         protected uint HamSeed = 2351727372;
 
+        private void HandleBluetoothMicrophoneSbcFrame(byte[] frame)
+        {
+            DualShock4BluetoothMicrophoneFramesReceived++;
+            try
+            {
+                BluetoothMicrophoneSbcFrameReceived?.Invoke(this, frame);
+            }
+            catch (Exception ex)
+            {
+                LastBluetoothAudioWriteStatus =
+                    $"microphone frame handler failed: {ex.Message}";
+            }
+        }
+
         protected unsafe void performDs4Input()
         {
             unchecked
@@ -1045,11 +1162,6 @@ namespace DS4Windows
                 double elapsedDeltaTime = 0.0;
                 uint tempDelta = 0;
                 byte tempByte = 0;
-                int CRC32_POS_1 = BT_INPUT_REPORT_CRC32_POS + 1,
-                    CRC32_POS_2 = BT_INPUT_REPORT_CRC32_POS + 2,
-                    CRC32_POS_3 = BT_INPUT_REPORT_CRC32_POS + 3;
-                int crcpos = BT_INPUT_REPORT_CRC32_POS;
-                int crcoffset = 0;
                 long latencySum = 0;
 
                 // Run continuous calibration on Gyro when starting input loop
@@ -1087,37 +1199,21 @@ namespace DS4Windows
                         timeoutEvent = false;
                         if (res == HidDevice.ReadStatus.Success)
                         {
-                            //Array.Copy(btInputReport, 2, inputReport, 0, inputReport.Length);
-                            fixed (byte* byteP = &btInputReport[2], imp = inputReport)
+                            int bluetoothReportLength =
+                                DualShock4BluetoothAudioProtocol.GetInputReportLength(
+                                    btInputReport[0]);
+                            bool validBluetoothReport = bluetoothReportLength > 0 &&
+                                DualShock4BluetoothAudioProtocol.ValidateInputReportCrc(
+                                    btInputReport, bluetoothReportLength);
+                            if (!validBluetoothReport)
                             {
-                                for (int j = 0; j < BT_INPUT_REPORT_LENGTH - 2; j++)
-                                {
-                                    imp[j] = byteP[j];
-                                }
-                            }
-
-                            //uint recvCrc32 = BitConverter.ToUInt32(btInputReport, BT_INPUT_REPORT_CRC32_POS);
-                            uint recvCrc32 = btInputReport[BT_INPUT_REPORT_CRC32_POS] |
-                                (uint)(btInputReport[CRC32_POS_1] << 8) |
-                                (uint)(btInputReport[CRC32_POS_2] << 16) |
-                                (uint)(btInputReport[CRC32_POS_3] << 24);
-
-                            uint calcCrc32 = ~Crc32Algorithm.CalculateFasterBT78Hash(ref HamSeed, ref btInputReport, ref crcoffset, ref crcpos);
-                            if (recvCrc32 != calcCrc32)
-                            {
-                                //Log.LogToGui("Crc check failed", true);
-                                //Console.WriteLine(MacAddress.ToString() + " " + System.DateTime.UtcNow.ToString("o") + "" +
-                                //                    "> invalid CRC32 in BT input report: 0x" + recvCrc32.ToString("X8") + " expected: 0x" + calcCrc32.ToString("X8"));
-
-                                cState.PacketCounter = pState.PacketCounter + 1; //still increase so we know there were lost packets
-
-                                // If the incoming data packet does not have the native DS4 type or CRC-32 checks keep failing. Fail out and disconnect controller.
+                                cState.PacketCounter = pState.PacketCounter + 1;
                                 if (this.inputReportErrorCount >= CRC32_NUM_ATTEMPTS)
                                 {
-                                    AppLogger.LogToGui($"{Mac.ToString()} failed CRC-32 checks {CRC32_NUM_ATTEMPTS} times. Disconnecting", false);
+                                    AppLogger.LogToGui($"{Mac} failed CRC-32 checks {CRC32_NUM_ATTEMPTS} times. Disconnecting", false);
 
                                     readWaitEv.Reset();
-                                    sendOutputReport(true, true); // Kick Windows into noticing the disconnection.
+                                    sendOutputReport(true, true);
                                     StopOutputUpdate();
                                     isDisconnecting = true;
                                     Removal?.Invoke(this, EventArgs.Empty);
@@ -1125,17 +1221,33 @@ namespace DS4Windows
                                     timeoutExecuted = true;
                                     return;
                                 }
-                                else
-                                {
-                                    this.inputReportErrorCount++;
-                                }
 
+                                this.inputReportErrorCount++;
                                 readWaitEv.Reset();
                                 continue;
                             }
-                            else
+
+                            this.inputReportErrorCount = 0;
+                            if (bluetoothMicrophoneStreaming)
                             {
-                                this.inputReportErrorCount = 0;
+                                DualShock4BluetoothAudioProtocol.ExtractMicrophoneSbcFrames(
+                                    btInputReport, bluetoothReportLength,
+                                    HandleBluetoothMicrophoneSbcFrame);
+                            }
+
+                            if (!DualShock4BluetoothAudioProtocol.HasHidState(btInputReport))
+                            {
+                                readWaitEv.Reset();
+                                continue;
+                            }
+
+                            //Array.Copy(btInputReport, 2, inputReport, 0, inputReport.Length);
+                            fixed (byte* byteP = &btInputReport[2], imp = inputReport)
+                            {
+                                for (int j = 0; j < BT_INPUT_REPORT_LENGTH - 2; j++)
+                                {
+                                    imp[j] = byteP[j];
+                                }
                             }
                         }
                         else
@@ -1201,7 +1313,9 @@ namespace DS4Windows
                     oldtime = curtime;
 
                     // Not going to do featureSet check anymore
-                    if (conType == ConnectionType.BT && btInputReport[0] != 0x11 && (this.featureSet & VidPidFeatureSet.OnlyInputData0x01) == 0)
+                    if (conType == ConnectionType.BT &&
+                        !DualShock4BluetoothAudioProtocol.HasHidState(btInputReport) &&
+                        (this.featureSet & VidPidFeatureSet.OnlyInputData0x01) == 0)
                     {
                         //Received incorrect report, skip it
                         continue;
@@ -1563,11 +1677,14 @@ namespace DS4Windows
                 //outReportBuffer[0] = 0x15;
                 //outReportBuffer[1] = (byte)(0x80 | btPollRate); // input report rate
                 outReportBuffer[1] = (byte)(0xC0 | btPollRate); // input report rate
-                //outReportBuffer[2] = 0xA0;
+                bool bluetoothAudioEnabled = bluetoothSpeakerStreaming ||
+                    bluetoothMicrophoneStreaming;
+                outReportBuffer[2] = bluetoothAudioEnabled ? (byte)0xA2 : (byte)0x00;
 
                 // Headphone volume L (0x10), Headphone volume R (0x20), Mic volume (0x40), Speaker volume (0x80)
                 // enable rumble (0x01), lightbar (0x02), flash (0x04). Default: 0x07
-                outReportBuffer[3] = outputFeaturesByte;
+                outReportBuffer[3] = bluetoothAudioEnabled ?
+                    (byte)(outputFeaturesByte | 0xF0) : outputFeaturesByte;
                 outReportBuffer[4] = 0x04;
 
                 outReportBuffer[6] = currentHap.rumbleState.RumbleMotorStrengthRightLightFast; // fast motor
@@ -1577,6 +1694,10 @@ namespace DS4Windows
                 outReportBuffer[10] = currentHap.lightbarState.LightBarColor.blue; // blue
                 outReportBuffer[11] = currentHap.lightbarState.LightBarFlashDurationOn; // flash on duration
                 outReportBuffer[12] = currentHap.lightbarState.LightBarFlashDurationOff; // flash off duration
+                outReportBuffer[21] = bluetoothAudioEnabled ? bluetoothHeadphoneVolume : (byte)0;
+                outReportBuffer[22] = bluetoothAudioEnabled ? bluetoothHeadphoneVolume : (byte)0;
+                outReportBuffer[23] = bluetoothMicrophoneStreaming ? bluetoothMicrophoneVolume : (byte)0;
+                outReportBuffer[24] = bluetoothSpeakerStreaming ? bluetoothSpeakerVolume : (byte)0;
 
                 fixed (byte* byteR = outputReport, byteB = outReportBuffer)
                 {

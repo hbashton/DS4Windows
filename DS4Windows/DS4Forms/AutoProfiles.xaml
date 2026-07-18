@@ -11,8 +11,53 @@
              xmlns:entity="clr-namespace:DS4WinWPF"
              mc:Ignorable="d" 
              d:DesignHeight="380" d:DesignWidth="800">
-    <DockPanel>
-            <ScrollViewer x:Name="sidebarScrollViewer" DockPanel.Dock="Right" Width="320" Margin="8" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+    <UserControl.Resources>
+        <Style x:Key="AutoProfileRuleItemStyle" TargetType="ListViewItem">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0,0,0,8" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListViewItem">
+                        <Border x:Name="RuleCard" Background="{DynamicResource CardBackgroundColor}"
+                                BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
+                                CornerRadius="5" Padding="12">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="RuleCard" Property="BorderBrush" Value="{DynamicResource AccentColor}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="RuleCard" Property="Background" Value="{DynamicResource NavigationSelectionColor}" />
+                                <Setter TargetName="RuleCard" Property="BorderBrush" Value="{DynamicResource AccentColor}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="AutoProfileMetaLabelStyle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource MutedForegroundColor}" />
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Margin" Value="0,1,10,1" />
+            <Setter Property="VerticalAlignment" Value="Top" />
+        </Style>
+        <Style x:Key="AutoProfileMetaValueStyle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource ForegroundColor}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,1" />
+        </Style>
+    </UserControl.Resources>
+    <DockPanel Margin="0,2,0,0">
+            <Border DockPanel.Dock="Right" Width="304" Margin="12,0,0,0"
+                    Background="{DynamicResource CardBackgroundColor}" BorderBrush="{DynamicResource BorderColor}"
+                    BorderThickness="1" CornerRadius="5" Padding="12">
+            <ScrollViewer x:Name="sidebarScrollViewer" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <ScrollViewer.Resources>
                     <Thickness x:Key="spaceMargin" Bottom="8" />
                 </ScrollViewer.Resources>
@@ -22,12 +67,12 @@
                     </StackPanel.Resources>
 
                     <StackPanel x:Name="editControlsPanel" IsEnabled="False">
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Height="30">
-                            <Button x:Name="removeAutoBtn" Content="{lex:Loc Remove}" Height="20" Padding="1" Width="80"
-                        IsEnabled="{Binding Exists}" Click="RemoveAutoBtn_Click" />
-                            <Button x:Name="duplicateAutoBtn" Content="Duplicate" Margin="20,0,0,0" Height="20" Width="80" Click="DuplicateAutoBtn_Click" />
-                            <Button x:Name="saveAutoBtn" Content="{lex:Loc Save}" Margin="20,0,0,0" Height="20" Width="80" Click="SaveAutoBtn_Click" />
-                        </StackPanel>
+                        <UniformGrid Columns="3" Height="34" Margin="0,0,0,10">
+                            <Button x:Name="removeAutoBtn" Content="{lex:Loc Remove}" Margin="0,0,6,0"
+                                    IsEnabled="{Binding Exists}" Click="RemoveAutoBtn_Click" />
+                            <Button x:Name="duplicateAutoBtn" Content="Duplicate" Margin="0,0,6,0" Click="DuplicateAutoBtn_Click" />
+                            <Button x:Name="saveAutoBtn" Content="{lex:Loc Save}" Click="SaveAutoBtn_Click" />
+                        </UniformGrid>
                         <Grid x:Name="autoProfilesGrid" Margin="0,8">
                             <Grid.RowDefinitions>
                                 <RowDefinition/>
@@ -216,8 +261,9 @@
                             </ComboBox>
                         </Grid>
 
-                    <CheckBox Content="{lex:Loc TurnOffDS4WindowsTemporarily}" Margin="{StaticResource spaceMargin}"
-                          IsChecked="{Binding Turnoff}" />
+                    <CheckBox Margin="{StaticResource spaceMargin}" IsChecked="{Binding Turnoff}">
+                        <TextBlock Text="{lex:Loc TurnOffDS4WindowsTemporarily}" TextWrapping="Wrap" />
+                    </CheckBox>
                         <Grid Margin="{StaticResource spaceMargin}">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition/>
@@ -254,20 +300,27 @@
 
                         <Border Height="4" Background="{DynamicResource BorderColor}" Margin="0,10,0,0" />
                     </StackPanel>
-                <CheckBox x:Name="revertDefaultProfileOnUnknownCk" Content="{lex:Loc RevertToDefaultProfileOnUnknown}" Margin="0,10,0,0" IsChecked="{Binding RevertDefaultProfileOnUnknown}" />
-                <CheckBox x:Name="showAutoDebugCk" Content="{lex:Loc ShowAutoProfileDebugMessages}" Margin="0,10,0,0" Click="ShowAutoDebugCk_Click" />
+                <CheckBox x:Name="revertDefaultProfileOnUnknownCk" Margin="0,10,0,0" IsChecked="{Binding RevertDefaultProfileOnUnknown}">
+                    <TextBlock Text="{lex:Loc RevertToDefaultProfileOnUnknown}" TextWrapping="Wrap" />
+                </CheckBox>
+                <CheckBox x:Name="showAutoDebugCk" Margin="0,10,0,0" Click="ShowAutoDebugCk_Click">
+                    <TextBlock Text="{lex:Loc ShowAutoProfileDebugMessages}" TextWrapping="Wrap" />
+                </CheckBox>
                 <StackPanel Orientation="Vertical" Margin="0,8,0,0">
-                    <Label Content="{lex:Loc AutoProfiles.DisplaySwitchVia}" />
+                    <TextBlock Text="{lex:Loc AutoProfiles.DisplaySwitchVia}" TextWrapping="Wrap"
+                               Foreground="{DynamicResource MutedForegroundColor}" Margin="0,0,0,5" />
                     <ComboBox ItemsSource="{Binding DisplayProfileSwitchList}" DisplayMemberPath="DisplayName" SelectedValuePath="ChoiceValue"
                               SelectedValue="{Binding ProfileSwitchChoice}" />
                 </StackPanel>
 
             </StackPanel>
             </ScrollViewer>
+            </Border>
 
         <DockPanel>
-            <StackPanel Orientation="Horizontal" DockPanel.Dock="Top" Margin="8">
-                <Button x:Name="addProgramsBtn" Content="{lex:Loc AddPrograms}" Click="AddProgramsBtn_Click">
+            <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                <Button x:Name="addProgramsBtn" Content="{lex:Loc AddPrograms}" Click="AddProgramsBtn_Click"
+                        Style="{StaticResource BridgeSecondaryButtonStyle}" Margin="0,0,8,0">
                     <Button.ContextMenu>
                         <ContextMenu>
                             <MenuItem x:Name="steamMenuItem" Header="{lex:Loc AddSteamGames}" Click="SteamMenuItem_Click" />
@@ -279,33 +332,59 @@
                         </ContextMenu>
                     </Button.ContextMenu>
                 </Button>
-                <Button x:Name="hideUncheckedBtn" Content="{lex:Loc HideUnchecked}" Margin="20,0,0,0" Click="HideUncheckedBtn_Click" />
-            </StackPanel>
-            <ListView x:Name="programListLV" ScrollViewer.HorizontalScrollBarVisibility="Visible" ScrollViewer.CanContentScroll="True" SelectedIndex="{Binding SelectedIndex}" SelectedItem="{Binding SelectedItem}" Margin="8,0,0,8">
-                <ListView.View>
-                    <GridView>
-                        <GridViewColumn Header="{lex:Loc Name}" Width="200">
-                            <GridViewColumn.CellTemplate>
-                                <DataTemplate>
-                                    <StackPanel Orientation="Horizontal">
-                                        <CheckBox IsChecked="{Binding Exists,Mode=OneWay}" IsEnabled="False" Margin="0,10,0,0" />
-                                        <Image Source="{Binding Exeicon}" Width="30" Margin="0,0,10,0" />
-                                        <TextBlock Text="{Binding Filename}" />
-                                    </StackPanel>
-                                </DataTemplate>
-                            </GridViewColumn.CellTemplate>
-                        </GridViewColumn>
-                        <GridViewColumn Header="{lex:Loc Path}" Width="360">
-                            <GridViewColumn.CellTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{Binding Path}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Path}" Width="350" />
-                                </DataTemplate>
-                            </GridViewColumn.CellTemplate>
-                        </GridViewColumn>
-                        <GridViewColumn Header="Device" Width="90" DisplayMemberBinding="{Binding DeviceOption}"/>
-                        <GridViewColumn Header="{lex:Loc WindowTitle}" Width="Auto" DisplayMemberBinding="{Binding Title}"/>
-                    </GridView>
-                </ListView.View>
+                <Button x:Name="hideUncheckedBtn" Content="{lex:Loc HideUnchecked}" Click="HideUncheckedBtn_Click"
+                        Style="{StaticResource BridgeSecondaryButtonStyle}" />
+            </WrapPanel>
+            <ListView x:Name="programListLV" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                      ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.CanContentScroll="True"
+                      SelectedIndex="{Binding SelectedIndex}" SelectedItem="{Binding SelectedItem}"
+                      ItemContainerStyle="{StaticResource AutoProfileRuleItemStyle}"
+                      Background="Transparent" BorderThickness="0">
+                <ListView.ItemTemplate>
+                    <DataTemplate>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <CheckBox IsChecked="{Binding Exists,Mode=OneWay}" IsEnabled="False"
+                                      VerticalAlignment="Top" Margin="0,7,10,0" />
+                            <StackPanel Grid.Column="1">
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Image Source="{Binding Exeicon}" Width="28" Height="28" Margin="0,0,10,0" />
+                                    <TextBlock Grid.Column="1" Text="{Binding Filename}" FontSize="13"
+                                               FontWeight="SemiBold" VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis" ToolTip="{Binding Filename}" />
+                                </Grid>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="76" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Text="{lex:Loc Path}" Style="{StaticResource AutoProfileMetaLabelStyle}" />
+                                    <TextBlock Grid.Column="1" Text="{Binding Path}" ToolTip="{Binding Path}"
+                                               Style="{StaticResource AutoProfileMetaValueStyle}" />
+                                    <TextBlock Grid.Row="1" Text="DEVICE" Style="{StaticResource AutoProfileMetaLabelStyle}" />
+                                    <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding DeviceOption}"
+                                               Style="{StaticResource AutoProfileMetaValueStyle}" />
+                                    <TextBlock Grid.Row="2" Text="{lex:Loc WindowTitle}"
+                                               Style="{StaticResource AutoProfileMetaLabelStyle}" />
+                                    <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding Title}"
+                                               ToolTip="{Binding Title}" Style="{StaticResource AutoProfileMetaValueStyle}" />
+                                </Grid>
+                            </StackPanel>
+                        </Grid>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
                 <ListView.ContextMenu>
                     <ContextMenu>
                         <MenuItem Header="{lex:Loc MoveUp}" Name="MoveUp" Click="MoveUpDownAutoBtn_Click"/>

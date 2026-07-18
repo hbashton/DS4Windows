@@ -2848,20 +2848,20 @@ namespace DS4Windows
                         (DualSenseSpeakerCompression)Global.DualSenseSpeakerCompression[ind],
                         Global.DualSenseSpeakerBassBoost[ind],
                         DualSenseAudioCaptureEndpointId[ind],
-                        DualSenseAudioSpeakerEndpointId[ind]);
+                        DualSenseAudioSpeakerEndpointId[ind],
+                        Global.OutContType[ind]);
                 }
                 else
                 {
                     dualSenseAudioPassthrough.Stop(ind);
                 }
 
-                bool useViiperDualSenseMicrophone =
+                bool useViiperControllerMicrophone =
                     DualSenseEnableMicrophonePassthrough[ind] &&
-                    (Global.OutContType[ind] == OutContType.ViiperDualSense ||
-                    Global.OutContType[ind] == OutContType.ViiperDualSenseEdge);
+                    ViiperOutDevice.SupportsVirtualMicrophone(Global.OutContType[ind]);
 
                 if (DualSenseEnableMicrophonePassthrough[ind] &&
-                    !useViiperDualSenseMicrophone)
+                    !useViiperControllerMicrophone)
                 {
                     dualSenseMicrophonePassthrough.Start(DualSenseMicrophoneVolume[ind],
                         DualSenseMicrophoneCaptureEndpointId[ind],
@@ -2890,7 +2890,8 @@ namespace DS4Windows
                         DualSenseSpeakerVolume[ind],
                         (DualSenseSpeakerCompression)Global.DualSenseSpeakerCompression[ind],
                         Global.DualSenseSpeakerBassBoost[ind],
-                        DualSenseAudioCaptureEndpointId[ind]);
+                        DualSenseAudioCaptureEndpointId[ind],
+                        Global.OutContType[ind]);
                 }
                 else
                 {

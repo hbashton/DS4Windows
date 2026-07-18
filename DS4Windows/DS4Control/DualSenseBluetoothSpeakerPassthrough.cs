@@ -44,6 +44,7 @@ namespace DS4Windows
         private readonly object syncRoot = new object();
         private readonly DualSenseDevice device;
         private readonly string sourceEndpointId;
+        private readonly ControllerAudioEndpointKind sourceEndpointKind;
         private readonly byte speakerVolume;
         private readonly DualSenseSpeakerCompression speakerCompression;
         private readonly byte speakerBassBoost;
@@ -96,7 +97,7 @@ namespace DS4Windows
 
         public DualSenseBluetoothSpeakerPassthrough(DualSenseDevice device, byte speakerVolume,
             DualSenseSpeakerCompression speakerCompression, byte speakerBassBoost,
-            string sourceEndpointId)
+            string sourceEndpointId, ControllerAudioEndpointKind sourceEndpointKind)
         {
             this.device = device ?? throw new ArgumentNullException(nameof(device));
             this.speakerVolume = speakerVolume;
@@ -108,11 +109,13 @@ namespace DS4Windows
             speakerProcessor = new DualSenseSpeakerProcessor(this.speakerCompression,
                 this.speakerBassBoost);
             this.sourceEndpointId = sourceEndpointId ?? string.Empty;
+            this.sourceEndpointKind = sourceEndpointKind;
         }
 
         public bool Matches(DualSenseDevice candidateDevice, byte candidateVolume,
             DualSenseSpeakerCompression candidateCompression, byte candidateBassBoost,
-            string candidateSourceEndpointId)
+            string candidateSourceEndpointId,
+            ControllerAudioEndpointKind candidateSourceEndpointKind)
         {
             return !stopping && ReferenceEquals(device, candidateDevice) &&
                 speakerVolume == candidateVolume &&
@@ -121,6 +124,7 @@ namespace DS4Windows
                     (int)DualSenseSpeakerCompression.Strong) &&
                 speakerBassBoost == Math.Min(candidateBassBoost,
                     DualSenseSpeakerProcessor.MaximumBassBoostDb) &&
+                sourceEndpointKind == candidateSourceEndpointKind &&
                 string.Equals(sourceEndpointId, candidateSourceEndpointId ?? string.Empty,
                     StringComparison.Ordinal);
         }
@@ -134,7 +138,8 @@ namespace DS4Windows
 
             try
             {
-                capture = CreateCapture(sourceEndpointId, out string sourceName);
+                capture = CreateCapture(sourceEndpointId, sourceEndpointKind,
+                    out string sourceName);
                 isGameAudioEndpoint = IsLikelyGameAudioEndpoint(sourceName);
                 captureBuffer = new BufferedWaveProvider(capture.WaveFormat)
                 {
@@ -187,9 +192,15 @@ namespace DS4Windows
             }
         }
 
-        private static WasapiCapture CreateCapture(string endpointId, out string sourceName)
+        private static WasapiCapture CreateCapture(string endpointId,
+            ControllerAudioEndpointKind endpointKind, out string sourceName)
         {
-            if (string.IsNullOrEmpty(endpointId))
+            bool useSystemDefault = string.Equals(endpointId,
+                DualSenseAudioPassthrough.DefaultSystemAudioEndpointId,
+                StringComparison.Ordinal) ||
+                (string.IsNullOrEmpty(endpointId) &&
+                    endpointKind == ControllerAudioEndpointKind.Any);
+            if (useSystemDefault)
             {
                 sourceName = "Default audio endpoint";
                 return new LowLatencyWasapiLoopbackCapture(
@@ -198,9 +209,10 @@ namespace DS4Windows
             }
 
             using var enumerator = new MMDeviceEnumerator();
-            bool autoDetectGameAudio = string.Equals(endpointId,
-                DualSenseAudioPassthrough.AutoDetectGameAudioEndpointId,
-                StringComparison.Ordinal);
+            bool autoDetectGameAudio = string.IsNullOrEmpty(endpointId) ||
+                string.Equals(endpointId,
+                    DualSenseAudioPassthrough.AutoDetectGameAudioEndpointId,
+                    StringComparison.Ordinal);
             MMDevice endpoint = null;
 
             if (!autoDetectGameAudio)
@@ -223,14 +235,14 @@ namespace DS4Windows
             if (endpoint == null)
             {
                 endpoint = DualSenseAudioPassthrough.FindActiveGameAudioEndpoint(enumerator,
-                    autoDetectGameAudio ? null : endpointId);
+                    autoDetectGameAudio ? null : endpointId, endpointKind);
             }
 
             if (endpoint == null)
             {
                 throw new InvalidOperationException(autoDetectGameAudio ?
-                    "DualSense / game audio endpoint is not available." :
-                    "Selected Bluetooth speaker audio source is not available and no active DualSense / game audio replacement was found.");
+                    "Emulated controller audio endpoint is not available." :
+                    "Selected Bluetooth speaker audio source is not available and no active controller audio replacement was found.");
             }
 
             if (!autoDetectGameAudio && !string.Equals(endpoint.ID, endpointId, StringComparison.Ordinal))

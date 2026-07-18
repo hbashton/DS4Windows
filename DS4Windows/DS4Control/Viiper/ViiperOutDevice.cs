@@ -53,6 +53,9 @@ namespace DS4Windows
         private const int DualSenseMicrophoneOpusFrameLength = 71;
         private const int DualSenseMicrophoneFramesPerPacket = 480;
         private const int DualSenseMicrophonePcmFrameLength = DualSenseMicrophoneFramesPerPacket * 2 * sizeof(short);
+        private const int DualShock4VirtualMicrophoneFramesPerPacket = 160;
+        private const int DualShock4VirtualMicrophonePcmFrameLength =
+            DualShock4VirtualMicrophoneFramesPerPacket * sizeof(short);
         private const int DualShock4MicrophoneMaximumUpsampledSamplesPerFrame =
             SbcFrame.MaxSamples * 3;
         private const int MaxPendingMicrophoneFrames = 4;
@@ -78,6 +81,8 @@ namespace DS4Windows
             new Queue<PendingMicrophoneFrame>(MaxPendingMicrophoneFrames);
         private readonly short[] microphoneMonoPcm = new short[DualSenseMicrophoneFramesPerPacket];
         private readonly byte[] microphoneStereoPcm = new byte[DualSenseMicrophonePcmFrameLength];
+        private readonly byte[] dualShock4MicrophonePcm =
+            new byte[DualShock4VirtualMicrophonePcmFrameLength];
         private readonly short[] dualShock4UpsampledPcm =
             new short[DualShock4MicrophoneMaximumUpsampledSamplesPerFrame];
         private readonly short[] dualShock4ResampleAccumulator =
@@ -305,6 +310,26 @@ namespace DS4Windows
                         activeFeedbackLength = DualSenseBaseFeedbackLength;
                         return client.CreateDeviceAndOpenStream("dualsenseedge");
                     }
+                }
+            }
+
+            if (viiperType == ViiperVirtualDeviceType.DualShock4)
+            {
+                try
+                {
+                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
+                        "dualshock4micv2");
+                    activeFeedbackLength = ViiperStatePacketBuilder.GetFeedbackLength(
+                        viiperType);
+                    activeStreamUsesFramedProtocol = true;
+                    activeStreamSupportsMicrophone = true;
+                    return stream;
+                }
+                catch (IOException ex)
+                {
+                    AppLogger.LogToGui(
+                        $"VIIPER DualShock 4 microphone input unavailable, continuing without mic-in: {ex.Message}",
+                        false);
                 }
             }
 
@@ -541,6 +566,13 @@ namespace DS4Windows
                 type == OutContType.ViiperDualSense ||
                 type == OutContType.ViiperDualSenseEdge ||
                 type == OutContType.ViiperSwitch2Pro;
+        }
+
+        public static bool SupportsVirtualMicrophone(OutContType type)
+        {
+            return type == OutContType.ViiperDS4 ||
+                type == OutContType.ViiperDualSense ||
+                type == OutContType.ViiperDualSenseEdge;
         }
 
         private void QueueStatePacket(byte[] data)
@@ -1064,22 +1096,67 @@ namespace DS4Windows
                 }
             }
 
-            Array.Clear(microphoneStereoPcm, 0, microphoneStereoPcm.Length);
-            if (!muted)
+            if (viiperType == ViiperVirtualDeviceType.DualShock4)
             {
-                for (int frame = 0; frame < frames; frame++)
+                ConvertMicrophoneMono48kToDualShock4Pcm(microphoneMonoPcm,
+                    muted ? 0 : frames, dualShock4MicrophonePcm);
+
+                stream.WriteFrameV2(ViiperStreamFrameMicrophonePcm,
+                    dualShock4MicrophonePcm);
+            }
+            else
+            {
+                Array.Clear(microphoneStereoPcm, 0, microphoneStereoPcm.Length);
+                if (!muted)
                 {
-                    short sample = microphoneMonoPcm[frame];
-                    int offset = frame * 4;
-                    microphoneStereoPcm[offset] = (byte)sample;
-                    microphoneStereoPcm[offset + 1] = (byte)(sample >> 8);
-                    microphoneStereoPcm[offset + 2] = (byte)sample;
-                    microphoneStereoPcm[offset + 3] = (byte)(sample >> 8);
+                    for (int frame = 0; frame < frames; frame++)
+                    {
+                        short sample = microphoneMonoPcm[frame];
+                        int offset = frame * 4;
+                        microphoneStereoPcm[offset] = (byte)sample;
+                        microphoneStereoPcm[offset + 1] = (byte)(sample >> 8);
+                        microphoneStereoPcm[offset + 2] = (byte)sample;
+                        microphoneStereoPcm[offset + 3] = (byte)(sample >> 8);
+                    }
                 }
+
+                stream.WriteFrameV2(ViiperStreamFrameMicrophonePcm,
+                    microphoneStereoPcm);
+            }
+            Interlocked.Increment(ref microphoneFramesSubmitted);
+        }
+
+        internal static int ConvertMicrophoneMono48kToDualShock4Pcm(
+            short[] source, int sourceFrames, byte[] destination)
+        {
+            if (source == null)
+            {
+                throw new ArgumentNullException(nameof(source));
             }
 
-            stream.WriteFrameV2(ViiperStreamFrameMicrophonePcm, microphoneStereoPcm);
-            Interlocked.Increment(ref microphoneFramesSubmitted);
+            if (destination == null)
+            {
+                throw new ArgumentNullException(nameof(destination));
+            }
+
+            Array.Clear(destination, 0, destination.Length);
+            int outputFrames = Math.Min(Math.Min(
+                DualShock4VirtualMicrophoneFramesPerPacket,
+                Math.Max(0, sourceFrames) / 3), destination.Length / sizeof(short));
+            outputFrames = Math.Min(outputFrames, source.Length / 3);
+
+            for (int frame = 0; frame < outputFrames; frame++)
+            {
+                int sourceOffset = frame * 3;
+                int averaged = (source[sourceOffset] + source[sourceOffset + 1] +
+                    source[sourceOffset + 2]) / 3;
+                short sample = (short)averaged;
+                int outputOffset = frame * sizeof(short);
+                destination[outputOffset] = (byte)sample;
+                destination[outputOffset + 1] = (byte)(sample >> 8);
+            }
+
+            return outputFrames;
         }
 
         private void LogWriterHealthIfNeeded()
@@ -1312,7 +1389,7 @@ namespace DS4Windows
         private void UpdateBluetoothMicrophoneSource(int deviceIndex)
         {
             bool profileRequested = connected &&
-                IsDualSenseType() &&
+                SupportsVirtualMicrophone(outputType) &&
                 deviceIndex >= 0 &&
                 deviceIndex < Global.DualSenseEnableMicrophonePassthrough.Length &&
                 Global.DualSenseEnableMicrophonePassthrough[deviceIndex];
@@ -1325,7 +1402,7 @@ namespace DS4Windows
                     Interlocked.Exchange(ref microphoneUnavailableLogged, 1) == 0)
                 {
                     AppLogger.LogToGui(
-                        "VIIPER DualSense microphone input requires the microphone-rebuild VIIPER backend.",
+                        $"VIIPER {viiperType} microphone input requires a microphone-capable VIIPER backend.",
                         true);
                 }
 
@@ -1388,8 +1465,8 @@ namespace DS4Windows
                 }
                 else
                 {
-                        source.BluetoothMicrophoneSbcFrameReceived +=
-                            BluetoothMicrophoneSbcFrameReceived;
+                    source.BluetoothMicrophoneSbcFrameReceived +=
+                        BluetoothMicrophoneSbcFrameReceived;
                 }
             }
 

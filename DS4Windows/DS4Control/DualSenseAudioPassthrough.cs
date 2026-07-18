@@ -10,9 +10,17 @@ using System.Threading.Tasks;
 
 namespace DS4Windows
 {
+    internal enum ControllerAudioEndpointKind
+    {
+        Any,
+        DualShock4,
+        DualSense,
+    }
+
     public sealed class DualSenseAudioPassthrough : IDisposable
     {
         public const string AutoDetectGameAudioEndpointId = "DS4Windows:AutoDetectDualSenseGameAudio";
+        public const string DefaultSystemAudioEndpointId = "DS4Windows:DefaultSystemAudio";
 
         private const string EndpointHistoryValueName = "{4b416b7d-8501-40c1-acfd-97aa9bdc17c8},1";
         private const string RenderEndpointRegistryPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Render\";
@@ -24,10 +32,12 @@ namespace DS4Windows
         private WasapiLoopbackCapture capture;
         private WaveFormat captureFormat;
         private string captureEndpointId = string.Empty;
+        private ControllerAudioEndpointKind captureEndpointKind;
 
         public void Start(int slot, DualSenseDevice dualSenseDevice, byte speakerVolume,
             DualSenseSpeakerCompression speakerCompression, byte speakerBassBoost,
-            string requestedCaptureEndpointId, string requestedSpeakerEndpointId)
+            string requestedCaptureEndpointId, string requestedSpeakerEndpointId,
+            OutContType emulatedControllerType)
         {
             if (slot < 0 || slot >= slots.Length)
             {
@@ -37,7 +47,7 @@ namespace DS4Windows
             if (dualSenseDevice?.ConnectionType == ConnectionType.BT)
             {
                 StartBluetooth(slot, dualSenseDevice, speakerVolume, speakerCompression,
-                    speakerBassBoost, requestedCaptureEndpointId);
+                    speakerBassBoost, requestedCaptureEndpointId, emulatedControllerType);
                 return;
             }
 
@@ -58,7 +68,8 @@ namespace DS4Windows
                 if (slots[slot] != null && string.Equals(slots[slot].EndpointId, endpoint.ID, StringComparison.Ordinal))
                 {
                     slots[slot].SpeakerVolume = speakerVolume;
-                    EnsureCaptureStarted(requestedCaptureEndpointId, endpoint.ID);
+                    EnsureCaptureStarted(requestedCaptureEndpointId, endpoint.ID,
+                        GetEndpointKind(emulatedControllerType));
                     return;
                 }
 
@@ -78,7 +89,8 @@ namespace DS4Windows
                     output.Play();
 
                     slots[slot] = new SlotPlayback(endpoint.ID, output, provider, outputFormat, speakerVolume);
-                    EnsureCaptureStarted(requestedCaptureEndpointId, endpoint.ID);
+                    EnsureCaptureStarted(requestedCaptureEndpointId, endpoint.ID,
+                        GetEndpointKind(emulatedControllerType));
                     AppLogger.LogToGui($"DualSense audio passthrough started for controller {slot + 1}: {endpoint.FriendlyName}", false);
                 }
                 catch (Exception ex)
@@ -133,13 +145,14 @@ namespace DS4Windows
 
         private void StartBluetooth(int slot, DualSenseDevice device, byte speakerVolume,
             DualSenseSpeakerCompression speakerCompression, byte speakerBassBoost,
-            string requestedCaptureEndpointId)
+            string requestedCaptureEndpointId, OutContType emulatedControllerType)
         {
             requestedCaptureEndpointId ??= string.Empty;
+            ControllerAudioEndpointKind endpointKind = GetEndpointKind(emulatedControllerType);
             lock (syncRoot)
             {
                 if (bluetoothSlots[slot]?.Matches(device, speakerVolume, speakerCompression,
-                    speakerBassBoost, requestedCaptureEndpointId) == true)
+                    speakerBassBoost, requestedCaptureEndpointId, endpointKind) == true)
                 {
                     return;
                 }
@@ -157,13 +170,15 @@ namespace DS4Windows
                 previous?.Dispose();
                 int generation = ++bluetoothStartGeneration[slot];
                 _ = Task.Run(() => StartBluetoothWithRetry(slot, device, speakerVolume,
-                    speakerCompression, speakerBassBoost, requestedCaptureEndpointId, generation));
+                    speakerCompression, speakerBassBoost, requestedCaptureEndpointId,
+                    endpointKind, generation));
             }
         }
 
         private void StartBluetoothWithRetry(int slot, DualSenseDevice device, byte speakerVolume,
             DualSenseSpeakerCompression speakerCompression, byte speakerBassBoost,
-            string requestedCaptureEndpointId, int generation)
+            string requestedCaptureEndpointId, ControllerAudioEndpointKind endpointKind,
+            int generation)
         {
             const int attempts = 10;
             Exception lastError = null;
@@ -179,7 +194,8 @@ namespace DS4Windows
                 }
 
                 var bluetoothPlayback = new DualSenseBluetoothSpeakerPassthrough(device,
-                    speakerVolume, speakerCompression, speakerBassBoost, requestedCaptureEndpointId);
+                    speakerVolume, speakerCompression, speakerBassBoost,
+                    requestedCaptureEndpointId, endpointKind);
                 try
                 {
                     bluetoothPlayback.Start();
@@ -218,19 +234,35 @@ namespace DS4Windows
             }
         }
 
-        private void EnsureCaptureStarted(string requestedCaptureEndpointId, string speakerEndpointId)
+        private void EnsureCaptureStarted(string requestedCaptureEndpointId,
+            string speakerEndpointId, ControllerAudioEndpointKind endpointKind)
         {
             requestedCaptureEndpointId ??= string.Empty;
             speakerEndpointId ??= string.Empty;
 
-            if (capture != null && string.Equals(captureEndpointId, requestedCaptureEndpointId, StringComparison.Ordinal))
+            if (capture != null && captureEndpointKind == endpointKind &&
+                string.Equals(captureEndpointId, requestedCaptureEndpointId, StringComparison.Ordinal))
             {
                 return;
             }
 
             StopCapture();
 
-            MMDevice sourceEndpoint = FindCaptureEndpoint(requestedCaptureEndpointId, speakerEndpointId);
+            MMDevice sourceEndpoint = FindCaptureEndpoint(requestedCaptureEndpointId,
+                speakerEndpointId, endpointKind);
+            bool expectsControllerEndpoint =
+                string.Equals(requestedCaptureEndpointId,
+                    AutoDetectGameAudioEndpointId, StringComparison.Ordinal) ||
+                (string.IsNullOrEmpty(requestedCaptureEndpointId) &&
+                    endpointKind != ControllerAudioEndpointKind.Any);
+            if (sourceEndpoint == null && expectsControllerEndpoint)
+            {
+                AppLogger.LogToGui(
+                    "Emulated controller audio endpoint is not available yet. Waiting for the virtual controller to enumerate.",
+                    true);
+                return;
+            }
+
             if (sourceEndpoint == null && string.IsNullOrEmpty(requestedCaptureEndpointId) && DefaultEndpointMatches(speakerEndpointId))
             {
                 AppLogger.LogToGui("DualSense audio passthrough cannot capture from the same endpoint it is playing to.", true);
@@ -239,6 +271,7 @@ namespace DS4Windows
 
             capture = sourceEndpoint != null ? new WasapiLoopbackCapture(sourceEndpoint) : new WasapiLoopbackCapture();
             captureEndpointId = requestedCaptureEndpointId;
+            captureEndpointKind = endpointKind;
             captureFormat = capture.WaveFormat;
             capture.DataAvailable += Capture_DataAvailable;
             capture.RecordingStopped += Capture_RecordingStopped;
@@ -254,6 +287,7 @@ namespace DS4Windows
             capture = null;
             captureFormat = null;
             captureEndpointId = string.Empty;
+            captureEndpointKind = ControllerAudioEndpointKind.Any;
 
             if (oldCapture == null)
             {
@@ -347,9 +381,14 @@ namespace DS4Windows
             return autoEndpoint;
         }
 
-        private static MMDevice FindCaptureEndpoint(string endpointId, string speakerEndpointId)
+        private static MMDevice FindCaptureEndpoint(string endpointId, string speakerEndpointId,
+            ControllerAudioEndpointKind endpointKind)
         {
-            if (string.IsNullOrEmpty(endpointId))
+            bool useSystemDefault = string.Equals(endpointId,
+                DefaultSystemAudioEndpointId, StringComparison.Ordinal) ||
+                (string.IsNullOrEmpty(endpointId) &&
+                endpointKind == ControllerAudioEndpointKind.Any);
+            if (useSystemDefault)
             {
                 return null;
             }
@@ -357,7 +396,12 @@ namespace DS4Windows
             try
             {
                 using var enumerator = new MMDeviceEnumerator();
-                MMDevice endpoint = enumerator.GetDevice(endpointId);
+                bool autoDetect = string.IsNullOrEmpty(endpointId) ||
+                    string.Equals(endpointId, AutoDetectGameAudioEndpointId,
+                        StringComparison.Ordinal);
+                MMDevice endpoint = autoDetect ?
+                    FindActiveGameAudioEndpoint(enumerator, null, endpointKind) :
+                    enumerator.GetDevice(endpointId);
                 if (endpoint?.State != DeviceState.Active)
                 {
                     return null;
@@ -373,7 +417,7 @@ namespace DS4Windows
             }
             catch
             {
-                AppLogger.LogToGui("DualSense audio passthrough capture source was not found. Falling back to default audio endpoint.", true);
+                AppLogger.LogToGui("Controller audio passthrough capture source was not found. Falling back to default audio endpoint.", true);
                 return null;
             }
         }
@@ -399,25 +443,166 @@ namespace DS4Windows
 
         public static bool IsDualSenseEndpoint(MMDevice device)
         {
-            string friendly = device.FriendlyName ?? string.Empty;
-            string deviceFriendly = device.DeviceFriendlyName ?? string.Empty;
-            string text = $"{friendly} {deviceFriendly}";
+            ControllerAudioEndpointKind kind = ClassifyEndpoint(device);
+            if (kind == ControllerAudioEndpointKind.DualSense)
+            {
+                return true;
+            }
 
-            return text.IndexOf("DualSense", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                text.IndexOf("Wireless Controller", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                text.IndexOf("PS5", StringComparison.OrdinalIgnoreCase) >= 0;
+            // Older endpoint property stores can omit their USB instance ID.
+            // Keep the historic generic fallback, but never mistake a positively
+            // identified DS4 endpoint for a physical DualSense speaker.
+            return kind == ControllerAudioEndpointKind.Any &&
+                GetEndpointIdentity(device).IndexOf("Wireless Controller",
+                    StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        public static bool IsControllerAudioEndpoint(MMDevice device)
+        {
+            string identity = GetEndpointIdentity(device);
+            return ClassifyEndpointIdentity(identity) != ControllerAudioEndpointKind.Any ||
+                identity.IndexOf("Wireless Controller", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                identity.IndexOf("VIIPER", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         internal static MMDevice FindActiveGameAudioEndpoint(MMDeviceEnumerator enumerator,
-            string previousEndpointId = null)
+            string previousEndpointId = null,
+            ControllerAudioEndpointKind preferredKind = ControllerAudioEndpointKind.Any)
         {
             IEnumerable<MMDevice> endpoints = enumerator
                 .EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active)
-                .Where(IsDualSenseEndpoint);
+                .Where(IsControllerAudioEndpoint);
 
-            return string.IsNullOrEmpty(previousEndpointId) ?
-                endpoints.FirstOrDefault() :
-                endpoints.FirstOrDefault(endpoint => EndpointReplaces(endpoint, previousEndpointId));
+            if (preferredKind != ControllerAudioEndpointKind.Any)
+            {
+                endpoints = endpoints.Where(endpoint =>
+                {
+                    ControllerAudioEndpointKind kind = ClassifyEndpoint(endpoint);
+                    return kind == preferredKind || kind == ControllerAudioEndpointKind.Any;
+                });
+            }
+
+            return endpoints
+                .OrderByDescending(endpoint => EndpointScore(endpoint, preferredKind,
+                    previousEndpointId))
+                .FirstOrDefault();
+        }
+
+        internal static ControllerAudioEndpointKind GetEndpointKind(OutContType outputType)
+        {
+            return outputType switch
+            {
+                OutContType.ViiperDS4 => ControllerAudioEndpointKind.DualShock4,
+                OutContType.ViiperDualSense or OutContType.ViiperDualSenseEdge =>
+                    ControllerAudioEndpointKind.DualSense,
+                _ => ControllerAudioEndpointKind.Any,
+            };
+        }
+
+        internal static ControllerAudioEndpointKind ClassifyEndpointIdentity(string identity)
+        {
+            identity ??= string.Empty;
+            string normalized = identity.Replace(" ", string.Empty)
+                .Replace("_", string.Empty)
+                .Replace("-", string.Empty);
+
+            if (ContainsSonyUsbIdentity(normalized, "05C4") ||
+                ContainsSonyUsbIdentity(normalized, "09CC") ||
+                identity.IndexOf("DualShock", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                identity.IndexOf("DS4", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return ControllerAudioEndpointKind.DualShock4;
+            }
+
+            if (ContainsSonyUsbIdentity(normalized, "0CE6") ||
+                ContainsSonyUsbIdentity(normalized, "0DF2") ||
+                identity.IndexOf("DualSense", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                identity.IndexOf("PS5", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return ControllerAudioEndpointKind.DualSense;
+            }
+
+            return ControllerAudioEndpointKind.Any;
+        }
+
+        private static ControllerAudioEndpointKind ClassifyEndpoint(MMDevice endpoint)
+        {
+            return ClassifyEndpointIdentity(GetEndpointIdentity(endpoint));
+        }
+
+        private static bool ContainsSonyUsbIdentity(string normalizedIdentity,
+            string productId)
+        {
+            return normalizedIdentity.IndexOf("VID054C", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                normalizedIdentity.IndexOf("PID" + productId,
+                    StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static string GetEndpointIdentity(MMDevice endpoint)
+        {
+            if (endpoint == null)
+            {
+                return string.Empty;
+            }
+
+            var values = new List<string>
+            {
+                endpoint.ID ?? string.Empty,
+                endpoint.FriendlyName ?? string.Empty,
+                endpoint.DeviceFriendlyName ?? string.Empty,
+            };
+
+            AddEndpointProperty(values, endpoint, PropertyKeys.PKEY_Device_InstanceId);
+            AddEndpointProperty(values, endpoint, PropertyKeys.PKEY_Device_ControllerDeviceId);
+            AddEndpointProperty(values, endpoint, PropertyKeys.PKEY_Device_InterfaceKey);
+            return string.Join(" ", values);
+        }
+
+        private static void AddEndpointProperty(List<string> values, MMDevice endpoint,
+            PropertyKey propertyKey)
+        {
+            try
+            {
+                object value = endpoint.Properties[propertyKey]?.Value;
+                if (value != null)
+                {
+                    values.Add(value.ToString());
+                }
+            }
+            catch
+            {
+                // Endpoint property availability differs by Windows audio driver.
+            }
+        }
+
+        private static int EndpointScore(MMDevice endpoint,
+            ControllerAudioEndpointKind preferredKind, string previousEndpointId)
+        {
+            int score = 0;
+            ControllerAudioEndpointKind actualKind = ClassifyEndpoint(endpoint);
+            if (preferredKind != ControllerAudioEndpointKind.Any && actualKind == preferredKind)
+            {
+                score += 100;
+            }
+            else if (actualKind != ControllerAudioEndpointKind.Any)
+            {
+                score += 20;
+            }
+
+            string identity = GetEndpointIdentity(endpoint);
+            if (identity.IndexOf("VIIPER", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                score += 10;
+            }
+
+            if (!string.IsNullOrEmpty(previousEndpointId) &&
+                (string.Equals(endpoint.ID, previousEndpointId, StringComparison.Ordinal) ||
+                EndpointReplaces(endpoint, previousEndpointId)))
+            {
+                score += 1000;
+            }
+
+            return score;
         }
 
         private static bool EndpointReplaces(MMDevice endpoint, string previousEndpointId)

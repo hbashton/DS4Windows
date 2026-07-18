@@ -74,13 +74,16 @@ correctly.
 - Adaptive-trigger feedback forwarded from games to a physical DualSense or DualSense Edge.
 - Advanced DualSense haptics transported from the virtual USB audio interface to a physical Bluetooth controller.
 
-### DualSense audio
+### PlayStation controller audio
 
 VIIPER preview builds expose Windows audio interfaces that match the virtual
-DualSense. Supported paths include:
+DualSense or DualShock 4 selected by the profile. Supported paths include:
 
-- Game or desktop audio sent to the physical DualSense speaker over Bluetooth.
-- A virtual recording endpoint fed by the physical DualSense microphone.
+- Game or desktop audio sent to a physical DualSense or DualShock 4 speaker over
+  Bluetooth, even when the emulated Sony controller is the other model.
+- A virtual recording endpoint fed by the physical DualSense or DualShock 4
+  microphone, with automatic conversion to the emulated controller's native
+  capture format.
 - Microphone level and noise-suppression controls.
 - A profile option that lets the DualSense mute button mute and restore the
   microphone while keeping the recording stream active.
@@ -148,9 +151,9 @@ notes call for a matching backend update.
 - **A VIIPER profile will not create an output:** open **Settings**, refresh the
   VIIPER status, run **Install / Repair VIIPER**, and reboot once if
   `usbip-win2` was installed.
-- **DualSense speaker or microphone is missing:** confirm you are using matching
+- **Controller speaker or microphone is missing:** confirm you are using matching
   DS4Windows and VIIPER preview releases and that the profile uses a VIIPER
-  DualSense output.
+  DualSense, DualSense Edge, or DualShock 4 output.
 - **Game Bar does not switch profiles:** install or repair Xbox Game Bar and run
   DS4Windows as administrator.
 - **More diagnostics are needed:** enable **Verbose logging**, reproduce the

@@ -184,7 +184,11 @@ namespace DS4WinWPF
             CreateTempWorkerThread();
 
             CreateControlService(parser);
-            RenderOptions.ProcessRenderMode = RenderMode.SoftwareOnly;
+            // Let WPF use the best renderer available for the current session. The
+            // previous SoftwareOnly override made the card-based UI noticeably laggy
+            // during resize, scrolling, and page changes. WPF still falls back to
+            // software automatically when hardware acceleration is unavailable.
+            RenderOptions.ProcessRenderMode = RenderMode.Default;
 
             DS4Windows.Global.FindConfigLocation();
             bool firstRun = DS4Windows.Global.firstRun;

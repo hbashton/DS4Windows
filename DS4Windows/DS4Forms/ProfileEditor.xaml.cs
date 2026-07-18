@@ -1743,9 +1743,9 @@ namespace DS4WinWPF.DS4Forms
                 OutContType.ViiperSwitch2Pro =>
                     "Switch 2 layout: Cross -> B, Circle -> A, Square -> Y, Triangle -> X, Share -> Minus, Options -> Plus, PS -> Home, Capture -> Capture.",
                 OutContType.ViiperDualSense =>
-                    "VIIPER DualSense exposes native DualSense identity with mute, touch, gyro, rumble, lightbar, and player LEDs. Adaptive triggers require the raw-output follow-up.",
+                    "DualSense output exposes native DualSense identity with mute, touch, gyro, rumble, lightbar, and player LEDs. Adaptive triggers require the raw-output follow-up.",
                 OutContType.ViiperDualSenseEdge =>
-                    "VIIPER DualSense Edge exposes native Edge identity with mute, touch, gyro, Fn buttons, back paddles, rumble, lightbar, and player LEDs. Adaptive triggers require the raw-output follow-up.",
+                    "DualSense Edge output exposes native Edge identity with mute, touch, gyro, Fn buttons, back paddles, rumble, lightbar, and player LEDs. Adaptive triggers require the raw-output follow-up.",
                 OutContType.ViiperDS4 =>
                     "VIIPER DualShock 4 uses USB/IP output with DS4 buttons, touch, gyro, rumble, lightbar, and flash feedback.",
                 OutContType.ViiperX360 =>

@@ -202,7 +202,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 string temp = "Empty";
                 if (outSlotDevice.OutputDevice != null)
                 {
-                    temp = outSlotDevice.OutputDevice.GetDeviceType();
+                    temp = GetOutputTypeDisplayName(outSlotDevice.CurrentType);
                 }
 
                 return temp;
@@ -218,13 +218,28 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 if (outSlotDevice.CurrentReserveStatus ==
                     OutSlotDevice.ReserveStatus.Permanent)
                 {
-                    temp = outSlotDevice.PermanentType.ToString();
+                    temp = GetOutputTypeDisplayName(outSlotDevice.PermanentType);
                 }
 
                 return temp;
             }
         }
         public event EventHandler DesiredTypeChanged;
+
+        private static string GetOutputTypeDisplayName(OutContType type)
+        {
+            return type switch
+            {
+                OutContType.X360 => "Xbox 360",
+                OutContType.DS4 => "DualShock 4",
+                OutContType.ViiperX360 => "Xbox 360 (VIIPER)",
+                OutContType.ViiperDS4 => "DualShock 4 (VIIPER)",
+                OutContType.ViiperDualSense => "DualSense",
+                OutContType.ViiperDualSenseEdge => "DualSense Edge",
+                OutContType.ViiperSwitch2Pro => "Switch 2 Pro",
+                _ => "Empty",
+            };
+        }
 
         public bool BoundInput
         {

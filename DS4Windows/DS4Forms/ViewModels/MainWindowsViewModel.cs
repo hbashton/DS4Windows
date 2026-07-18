@@ -77,11 +77,11 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             {
                 new("Xbox 360", OutContType.X360),
                 new("DualShock 4", OutContType.DS4),
-                new("VIIPER Xbox 360", OutContType.ViiperX360),
-                new("VIIPER DualShock 4", OutContType.ViiperDS4),
-                new("VIIPER DualSense", OutContType.ViiperDualSense),
-                new("VIIPER DualSense Edge", OutContType.ViiperDualSenseEdge),
-                new("VIIPER Switch 2 Pro", OutContType.ViiperSwitch2Pro),
+                new("Xbox 360 (VIIPER)", OutContType.ViiperX360),
+                new("DualShock 4 (VIIPER)", OutContType.ViiperDS4),
+                new("DualSense", OutContType.ViiperDualSense),
+                new("DualSense Edge", OutContType.ViiperDualSenseEdge),
+                new("Switch 2 Pro", OutContType.ViiperSwitch2Pro),
             };
 
         private CompositeDeviceModel selectedController;

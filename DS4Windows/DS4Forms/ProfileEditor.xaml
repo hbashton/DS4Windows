@@ -2089,9 +2089,9 @@
                                         <ComboBoxItem Content="DualShock 4"/>
                                         <ComboBoxItem Content="Xbox 360 (VIIPER)"/>
                                         <ComboBoxItem Content="DualShock 4 (VIIPER)"/>
-                                        <ComboBoxItem Content="DualSense (VIIPER)"/>
-                                        <ComboBoxItem Content="DualSense Edge (VIIPER)"/>
-                                        <ComboBoxItem Content="Switch 2 Pro (VIIPER)"/>
+                                        <ComboBoxItem Content="DualSense"/>
+                                        <ComboBoxItem Content="DualSense Edge"/>
+                                        <ComboBoxItem Content="Switch 2 Pro"/>
                                     </ComboBox>
                                 </StackPanel>
                                 <TextBlock x:Name="outputControllerHintText"
@@ -2219,7 +2219,7 @@
                                                           Grid.Row="0" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}"
                                                           ToolTip="Mirrors the selected Windows playback endpoint to a physical DualSense speaker. Bluetooth uses the controller speaker stream; USB uses its Windows speaker endpoint." />
                                                 <Label Content="Audio source:" Grid.Row="1" Grid.Column="0"
-                                                       ToolTip="For VIIPER game audio, select the virtual Wireless Controller endpoint created by a DualSense VIIPER profile. The first stereo pair is mirrored to the physical controller speaker." />
+                                                       ToolTip="For game audio, select the virtual Wireless Controller endpoint created by a DualSense output profile. The first stereo pair is mirrored to the physical controller speaker." />
                                                 <ComboBox ItemsSource="{Binding AudioCaptureEndpointChoices}" DisplayMemberPath="Name" SelectedValuePath="EndpointId"
                                                           SelectedValue="{Binding DualSenseAudioCaptureEndpointId}" Grid.Row="1" Grid.Column="1"
                                                           Margin="{StaticResource spaceMargin}" />
@@ -2245,7 +2245,7 @@
                                                                     Margin="{StaticResource spaceMargin}" />
                                                 <CheckBox Content="Enable controller microphone input" IsChecked="{Binding DualSenseEnableMicrophonePassthrough}"
                                                           Grid.Row="6" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}"
-                                                          ToolTip="Streams the microphone from a physical Bluetooth DualSense into the recording endpoint exposed by a VIIPER DualSense profile." />
+                                                          ToolTip="Streams the microphone from a physical Bluetooth DualSense into the recording endpoint exposed by a DualSense output profile." />
                                                 <Label Content="Microphone level:" Grid.Row="7" Grid.Column="0"
                                                        ToolTip="Adjusts the physical microphone level and the safely trimmed signal exposed to Windows." />
                                                 <xctk:IntegerUpDown Value="{Binding DualSenseMicrophoneVolume}" Minimum="0" Maximum="255" Grid.Row="7" Grid.Column="1"

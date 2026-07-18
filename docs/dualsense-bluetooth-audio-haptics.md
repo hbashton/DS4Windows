@@ -23,6 +23,16 @@ The channels are intentionally not mixed. In particular, the advanced-haptics PC
 
 The VIIPER virtual audio endpoint is created by VIIPER's USB Audio Class function. DS4Windows does not create a fake Windows audio endpoint in user mode. Windows audio endpoints require a driver-backed device interface; creating one separately would require an installed, signed virtual audio driver.
 
+## Bluetooth speaker processing
+
+The profile can optionally process the physical Bluetooth controller-speaker stream before Opus encoding:
+
+- **Dynamic range: Balanced** raises quieter detail while restraining loud effects.
+- **Dynamic range: Strong** applies a narrower range for larger volume differences.
+- **Bass/body boost** adds 0-6 dB around 200 Hz and filters unusable sub-bass below 70 Hz.
+
+Start with **Balanced** and **3 dB** of bass/body boost. The processor is stereo-linked and bufferless, so it adds no look-ahead frame or transport latency. **Off** and **0 dB** preserve the original PCM path. These controls affect speaker audio only; advanced-haptics channels remain untouched.
+
 ## Implementation references
 
 This is an independent implementation based on publicly documented packet behavior, not a copy of PadForge source code.

@@ -2840,6 +2840,8 @@ namespace DS4Windows
                 if (DualSenseEnableSpeakerOutput[ind])
                 {
                     dualSenseAudioPassthrough.Start(ind, dualsense, DualSenseSpeakerVolume[ind],
+                        (DualSenseSpeakerCompression)Global.DualSenseSpeakerCompression[ind],
+                        Global.DualSenseSpeakerBassBoost[ind],
                         DualSenseAudioCaptureEndpointId[ind],
                         DualSenseAudioSpeakerEndpointId[ind]);
                 }

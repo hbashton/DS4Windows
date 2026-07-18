@@ -1814,6 +1814,10 @@ namespace DS4WinWPF.DS4Control.DTOXml
                 {
                     EnableSpeakerOutput = source.dualSenseEnableSpeakerOutput[deviceIndex],
                     SpeakerVolume = source.dualSenseSpeakerVolume[deviceIndex],
+                    SpeakerCompression = Math.Min(source.dualSenseSpeakerCompression[deviceIndex],
+                        (byte)DualSenseSpeakerCompression.Strong),
+                    SpeakerBassBoost = Math.Min(source.dualSenseSpeakerBassBoost[deviceIndex],
+                        DualSenseSpeakerProcessor.MaximumBassBoostDb),
                     HeadphoneVolume = source.dualSenseHeadphoneVolume[deviceIndex],
                     MicrophoneVolume = source.dualSenseMicrophoneVolume[deviceIndex],
                     MicrophoneNoiseSuppression = source.dualSenseMicrophoneNoiseSuppression[deviceIndex],
@@ -2448,6 +2452,12 @@ namespace DS4WinWPF.DS4Control.DTOXml
                 {
                     destination.dualSenseEnableSpeakerOutput[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.EnableSpeakerOutput;
                     destination.dualSenseSpeakerVolume[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.SpeakerVolume;
+                    destination.dualSenseSpeakerCompression[deviceIndex] = Math.Min(
+                        DualSenseControllerSettings.AudioSettingsGroup.SpeakerCompression,
+                        (byte)DualSenseSpeakerCompression.Strong);
+                    destination.dualSenseSpeakerBassBoost[deviceIndex] = Math.Min(
+                        DualSenseControllerSettings.AudioSettingsGroup.SpeakerBassBoost,
+                        DualSenseSpeakerProcessor.MaximumBassBoostDb);
                     destination.dualSenseHeadphoneVolume[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.HeadphoneVolume;
                     destination.dualSenseMicrophoneVolume[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.MicrophoneVolume;
                     destination.dualSenseMicrophoneNoiseSuppression[deviceIndex] = Math.Min(
@@ -3249,6 +3259,18 @@ namespace DS4WinWPF.DS4Control.DTOXml
             {
                 get; set;
             } = 128;
+
+            [XmlElement("SpeakerCompression")]
+            public byte SpeakerCompression
+            {
+                get; set;
+            }
+
+            [XmlElement("SpeakerBassBoost")]
+            public byte SpeakerBassBoost
+            {
+                get; set;
+            }
 
             [XmlElement("HeadphoneVolume")]
             public byte HeadphoneVolume

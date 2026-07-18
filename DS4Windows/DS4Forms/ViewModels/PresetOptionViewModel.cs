@@ -67,7 +67,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             {
                 new EnumChoiceSelection<PresetOption.OutputContChoice>("Xbox 360", PresetOption.OutputContChoice.Xbox360),
                 new EnumChoiceSelection<PresetOption.OutputContChoice>("DualShock 4", PresetOption.OutputContChoice.DualShock4),
-                new EnumChoiceSelection<PresetOption.OutputContChoice>("DualSense (VIIPER)", PresetOption.OutputContChoice.DualSense),
+                new EnumChoiceSelection<PresetOption.OutputContChoice>("DualSense", PresetOption.OutputContChoice.DualSense),
             };
 
         public List<EnumChoiceSelection<PresetOption.OutputContChoice>> OutputChoices { get => outputChoices; }

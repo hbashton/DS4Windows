@@ -58,6 +58,7 @@ namespace DS4WinWPF.DS4Forms
         private Dictionary<Button, HoverImageInfo> hoverLocations = new Dictionary<Button, HoverImageInfo>();
         private Dictionary<Button, int> hoverIndexes = new Dictionary<Button, int>();
         private Dictionary<int, Button> reverseHoverIndexes = new Dictionary<int, Button>();
+        private Dictionary<Button, Geometry> dualSenseHoverGeometries = new Dictionary<Button, Geometry>();
 
         private bool keepsize;
         private bool controllerReadingsTabActive = false;
@@ -168,6 +169,62 @@ namespace DS4WinWPF.DS4Forms
             ds4LightbarColorBtn.Width = 170;
             ds4LightbarColorBtn.Height = 84;
             lightbarRect.OpacityMask = new ImageBrush(LoadResourceImage("DualSense lightbar.png"));
+
+            PopulateDualSenseHoverGeometries();
+        }
+
+        private void PopulateDualSenseHoverGeometries()
+        {
+            Geometry cross = new EllipseGeometry(new Point(346.5, 140.5), 14, 14);
+            Geometry circle = new EllipseGeometry(new Point(376.5, 113.5), 14, 14);
+            Geometry square = new EllipseGeometry(new Point(316.5, 113.5), 14, 14);
+            Geometry triangle = new EllipseGeometry(new Point(346.5, 89.5), 14, 14);
+
+            dualSenseHoverGeometries[crossConBtn] = cross;
+            dualSenseHoverGeometries[circleConBtn] = circle;
+            dualSenseHoverGeometries[squareConBtn] = square;
+            dualSenseHoverGeometries[triangleConBtn] = triangle;
+
+            dualSenseHoverGeometries[l1ConBtn] = Geometry.Parse(
+                "M 70,24 Q 99,32 130,25 L 133,43 Q 101,56 67,44 Z");
+            dualSenseHoverGeometries[r1ConBtn] = Geometry.Parse(
+                "M 310,25 Q 341,32 370,24 L 373,44 Q 339,56 307,43 Z");
+            dualSenseHoverGeometries[l2ConBtn] = Geometry.Parse(
+                "M 75,0 L 124,0 Q 129,10 130,25 Q 100,34 70,25 Q 71,10 75,0 Z");
+            dualSenseHoverGeometries[r2ConBtn] = Geometry.Parse(
+                "M 317,0 L 366,0 Q 370,10 371,25 Q 341,34 311,25 Q 312,10 317,0 Z");
+
+            dualSenseHoverGeometries[shareConBtn] =
+                new RectangleGeometry(new Rect(116, 58, 15, 26), 7, 7);
+            dualSenseHoverGeometries[optionsConBtn] =
+                new RectangleGeometry(new Rect(310, 58, 15, 26), 7, 7);
+            dualSenseHoverGeometries[guideConBtn] =
+                new EllipseGeometry(new Point(220.5, 161), 15, 12);
+            dualSenseHoverGeometries[muteConBtn] =
+                new RectangleGeometry(new Rect(210, 177, 22, 10), 5, 5);
+
+            Geometry leftStick = new EllipseGeometry(new Point(156.5, 169), 31, 31);
+            dualSenseHoverGeometries[l3ConBtn] = leftStick;
+            dualSenseHoverGeometries[lsuConBtn] = leftStick;
+            dualSenseHoverGeometries[lsrConBtn] = leftStick;
+            dualSenseHoverGeometries[lsdConBtn] = leftStick;
+            dualSenseHoverGeometries[lslConBtn] = leftStick;
+
+            Geometry rightStick = new EllipseGeometry(new Point(284.5, 169), 31, 31);
+            dualSenseHoverGeometries[r3ConBtn] = rightStick;
+            dualSenseHoverGeometries[rsuConBtn] = rightStick;
+            dualSenseHoverGeometries[rsrConBtn] = rightStick;
+            dualSenseHoverGeometries[rsdConBtn] = rightStick;
+            dualSenseHoverGeometries[rslConBtn] = rightStick;
+
+            dualSenseHoverGeometries[upConBtn] = Geometry.Parse(
+                "M 84,78 Q 94,73 104,78 L 106,95 L 95,103 L 83,95 Z");
+            dualSenseHoverGeometries[rightConBtn] = Geometry.Parse(
+                "M 104,96 L 121,94 Q 132,98 136,106 Q 132,115 121,119 L 104,112 Z");
+            dualSenseHoverGeometries[downConBtn] = Geometry.Parse(
+                "M 83,112 L 95,105 L 106,112 L 104,130 Q 94,136 84,130 Z");
+            dualSenseHoverGeometries[leftConBtn] = Geometry.Parse(
+                "M 83,96 L 83,112 L 67,119 Q 56,115 54,106 Q 57,98 68,94 Z");
         }
 
         private static bool ShouldUseDualSenseDiagram(int device)
@@ -436,6 +493,10 @@ namespace DS4WinWPF.DS4Forms
                 {
                     InputControlHighlight(tempBtn);
                 }
+                else
+                {
+                    HideControllerHover();
+                }
             }
 
         }
@@ -702,6 +763,22 @@ namespace DS4WinWPF.DS4Forms
 
         private void PopulateHoverImages()
         {
+            if (usingDualSenseDiagram)
+            {
+                // DualSense buttons use the geometry layer. Only the illustrated
+                // touch gestures need bitmap overlays in this mode, so no DS4
+                // button artwork is loaded or available to leak into the canvas.
+                hoverImages[leftTouchConBtn] = new ImageBrush(
+                    LoadResourceImage("DualSense-Config_TouchLeft.png"));
+                hoverImages[multiTouchConBtn] = new ImageBrush(
+                    LoadResourceImage("DualSense-Config_TouchMulti.png"));
+                hoverImages[rightTouchConBtn] = new ImageBrush(
+                    LoadResourceImage("DualSense-Config_TouchRight.png"));
+                hoverImages[topTouchConBtn] = new ImageBrush(
+                    LoadResourceImage("DualSense-Config_TouchUpper.png"));
+                return;
+            }
+
             ImageSourceConverter sourceConverter = new ImageSourceConverter();
 
             ImageSource temp =
@@ -1067,25 +1144,30 @@ namespace DS4WinWPF.DS4Forms
 
         private void InputControlHighlight(Button control)
         {
-            if (hoverImages.TryGetValue(control, out ImageBrush tempBrush))
+            if (usingDualSenseDiagram && dualSenseHoverGeometries.TryGetValue(control, out Geometry geometry))
             {
-                picBoxHover.Source = tempBrush.ImageSource;
-                //picBoxHover.Width = tempBrush.ImageSource.Width * .8;
-                //picBoxHover.Height = tempBrush.ImageSource.Height * .8;
-                //control.Background = tempBrush;
-                //control.Background = new SolidColorBrush(Colors.Green);
-                //control.Width = tempBrush.ImageSource.Width;
-                //control.Height = tempBrush.ImageSource.Height;
+                picBoxHover.Visibility = Visibility.Hidden;
+                dualSenseHoverPath.Data = geometry;
+                dualSenseHoverPath.Visibility = Visibility.Visible;
             }
-
-            if (hoverLocations.TryGetValue(control, out HoverImageInfo tempInfo))
+            else
             {
-                Canvas.SetLeft(picBoxHover, tempInfo.point.X);
-                Canvas.SetTop(picBoxHover, tempInfo.point.Y);
-                picBoxHover.Width = tempInfo.size.Width;
-                picBoxHover.Height = tempInfo.size.Height;
-                picBoxHover.Stretch = Stretch.Fill;
-                picBoxHover.Visibility = Visibility.Visible;
+                dualSenseHoverPath.Visibility = Visibility.Collapsed;
+
+                if (hoverImages.TryGetValue(control, out ImageBrush tempBrush))
+                {
+                    picBoxHover.Source = tempBrush.ImageSource;
+                }
+
+                if (hoverLocations.TryGetValue(control, out HoverImageInfo tempInfo))
+                {
+                    Canvas.SetLeft(picBoxHover, tempInfo.point.X);
+                    Canvas.SetTop(picBoxHover, tempInfo.point.Y);
+                    picBoxHover.Width = tempInfo.size.Width;
+                    picBoxHover.Height = tempInfo.size.Height;
+                    picBoxHover.Stretch = Stretch.Fill;
+                    picBoxHover.Visibility = Visibility.Visible;
+                }
             }
 
             if (hoverIndexes.TryGetValue(control, out int tempIndex))
@@ -1117,11 +1199,15 @@ namespace DS4WinWPF.DS4Forms
 
         private void ContBtn_MouseLeave(object sender, MouseEventArgs e)
         {
-            //Button control = sender as Button;
-            //control.Background = new SolidColorBrush(Colors.Transparent);
+            HideControllerHover();
+        }
+
+        private void HideControllerHover()
+        {
             Canvas.SetLeft(picBoxHover, 0);
             Canvas.SetTop(picBoxHover, 0);
             picBoxHover.Visibility = Visibility.Hidden;
+            dualSenseHoverPath.Visibility = Visibility.Collapsed;
         }
 
         private void GyroOutModeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)

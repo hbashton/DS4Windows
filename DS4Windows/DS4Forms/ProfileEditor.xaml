@@ -127,6 +127,14 @@
                             </Rectangle>
                         </Button>
 
+                        <Path x:Name="dualSenseHoverPath" IsHitTestVisible="False" Visibility="Collapsed"
+                              Fill="#662C7DF7" Stroke="{DynamicResource AccentColor}" StrokeThickness="1.5"
+                              StrokeLineJoin="Round" SnapsToDevicePixels="True">
+                            <Path.Effect>
+                                <DropShadowEffect Color="#FF2C7DF7" BlurRadius="10" ShadowDepth="0" Opacity="0.85" />
+                            </Path.Effect>
+                        </Path>
+
                         <Image x:Name="picBoxHover" IsEnabled="False" Source="{Binding Source={StaticResource resourcesPaths}, Path=DS4ConfigRSPNG}" Height="48" Width="48" Canvas.Left="447" Canvas.Top="5" />
                         <Image x:Name="picBoxHover2" IsEnabled="False" Source="{Binding Source={StaticResource resourcesPaths}, Path=DS4ConfigRSPNG}" Height="48" Width="48" Canvas.Left="0" Canvas.Top="0" Stretch="Fill" />
 

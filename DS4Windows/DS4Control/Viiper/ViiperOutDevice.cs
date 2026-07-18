@@ -103,6 +103,7 @@ namespace DS4Windows
         private int submitFailureLogged;
         private int microphoneUnavailableLogged;
         private int microphoneNoiseSuppressionUnavailableLogged;
+        private int microphoneMuted;
         private int virtualMicrophoneInterfaceActive;
         private int virtualMicrophoneInterfaceStateKnown;
         private int edgePhysicalMismatchLogged;
@@ -134,6 +135,7 @@ namespace DS4Windows
             Volatile.Write(ref submitFailureLogged, 0);
             Volatile.Write(ref microphoneUnavailableLogged, 0);
             Volatile.Write(ref microphoneNoiseSuppressionUnavailableLogged, 0);
+            Volatile.Write(ref microphoneMuted, 0);
             Volatile.Write(ref lastInputDeviceIndex, -1);
             streamRecoveryAttempts = 0;
             lastStreamRecoveryAttemptUtc = DateTime.MinValue;
@@ -705,52 +707,60 @@ namespace DS4Windows
                 throw new ObjectDisposedException(nameof(ViiperDeviceStream));
             }
 
-            IOpusDecoder decoder = microphoneDecoder;
-            if (decoder == null)
+            bool muted = Volatile.Read(ref microphoneMuted) == 1;
+            int frames = DualSenseMicrophoneFramesPerPacket;
+            if (!muted)
             {
-                decoder = OpusCodecFactory.CreateDecoder(48000, 1);
-                microphoneDecoder = decoder;
-            }
+                IOpusDecoder decoder = microphoneDecoder;
+                if (decoder == null)
+                {
+                    decoder = OpusCodecFactory.CreateDecoder(48000, 1);
+                    microphoneDecoder = decoder;
+                }
 
-            int decodedSamples = decoder.Decode(opusFrame.AsSpan(),
-                microphoneMonoPcm.AsSpan(), DualSenseMicrophoneFramesPerPacket, false);
-            if (decodedSamples <= 0)
-            {
-                Interlocked.Increment(ref microphoneDecodeFailures);
-                return;
-            }
+                int decodedSamples = decoder.Decode(opusFrame.AsSpan(),
+                    microphoneMonoPcm.AsSpan(), DualSenseMicrophoneFramesPerPacket, false);
+                if (decodedSamples <= 0)
+                {
+                    Interlocked.Increment(ref microphoneDecodeFailures);
+                    return;
+                }
 
-            Interlocked.Increment(ref microphoneFramesDecoded);
+                Interlocked.Increment(ref microphoneFramesDecoded);
 
-            int frames = Math.Min(decodedSamples, DualSenseMicrophoneFramesPerPacket);
-            DualSenseMicrophoneNoiseSuppression suppression =
-                (DualSenseMicrophoneNoiseSuppression)Math.Clamp(
-                    Volatile.Read(ref microphoneNoiseSuppression),
-                    (int)DualSenseMicrophoneNoiseSuppression.Off,
-                    (int)DualSenseMicrophoneNoiseSuppression.Strong);
-            microphoneProcessor.Process(microphoneMonoPcm, frames,
-                (byte)Math.Clamp(Volatile.Read(ref microphoneVolume), 0, byte.MaxValue),
-                suppression);
-            if (suppression != DualSenseMicrophoneNoiseSuppression.Off &&
-                Global.VerboseStartupLogging &&
-                Volatile.Read(ref microphoneNoiseSuppressionUnavailableLogged) == 0 &&
-                !microphoneProcessor.NoiseSuppressionAvailable &&
-                Interlocked.Exchange(ref microphoneNoiseSuppressionUnavailableLogged, 1) == 0)
-            {
-                AppLogger.LogToGui(
-                    $"VIIPER microphone RNNoise unavailable; safety conditioning remains active: {microphoneProcessor.NoiseSuppressionFailure}",
-                    true);
+                frames = Math.Min(decodedSamples, DualSenseMicrophoneFramesPerPacket);
+                DualSenseMicrophoneNoiseSuppression suppression =
+                    (DualSenseMicrophoneNoiseSuppression)Math.Clamp(
+                        Volatile.Read(ref microphoneNoiseSuppression),
+                        (int)DualSenseMicrophoneNoiseSuppression.Off,
+                        (int)DualSenseMicrophoneNoiseSuppression.Strong);
+                microphoneProcessor.Process(microphoneMonoPcm, frames,
+                    (byte)Math.Clamp(Volatile.Read(ref microphoneVolume), 0, byte.MaxValue),
+                    suppression);
+                if (suppression != DualSenseMicrophoneNoiseSuppression.Off &&
+                    Global.VerboseStartupLogging &&
+                    Volatile.Read(ref microphoneNoiseSuppressionUnavailableLogged) == 0 &&
+                    !microphoneProcessor.NoiseSuppressionAvailable &&
+                    Interlocked.Exchange(ref microphoneNoiseSuppressionUnavailableLogged, 1) == 0)
+                {
+                    AppLogger.LogToGui(
+                        $"VIIPER microphone RNNoise unavailable; safety conditioning remains active: {microphoneProcessor.NoiseSuppressionFailure}",
+                        true);
+                }
             }
 
             Array.Clear(microphoneStereoPcm, 0, microphoneStereoPcm.Length);
-            for (int frame = 0; frame < frames; frame++)
+            if (!muted)
             {
-                short sample = microphoneMonoPcm[frame];
-                int offset = frame * 4;
-                microphoneStereoPcm[offset] = (byte)sample;
-                microphoneStereoPcm[offset + 1] = (byte)(sample >> 8);
-                microphoneStereoPcm[offset + 2] = (byte)sample;
-                microphoneStereoPcm[offset + 3] = (byte)(sample >> 8);
+                for (int frame = 0; frame < frames; frame++)
+                {
+                    short sample = microphoneMonoPcm[frame];
+                    int offset = frame * 4;
+                    microphoneStereoPcm[offset] = (byte)sample;
+                    microphoneStereoPcm[offset + 1] = (byte)(sample >> 8);
+                    microphoneStereoPcm[offset + 2] = (byte)sample;
+                    microphoneStereoPcm[offset + 3] = (byte)(sample >> 8);
+                }
             }
 
             stream.WriteFrameV2(ViiperStreamFrameMicrophonePcm, microphoneStereoPcm);
@@ -957,6 +967,9 @@ namespace DS4Windows
                 return;
             }
 
+            Volatile.Write(ref microphoneMuted,
+                source.IsProfileMicrophoneMuted ? 1 : 0);
+
             bool sourceAlreadyAttached;
             lock (microphoneSourceLock)
             {
@@ -1067,6 +1080,7 @@ namespace DS4Windows
             }
             Interlocked.Exchange(ref lastMicrophoneFrameTimestamp, 0);
             Interlocked.Exchange(ref lastMicrophoneArmTimestamp, 0);
+            Volatile.Write(ref microphoneMuted, 0);
 
             if (source != null)
             {

@@ -720,6 +720,12 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             set => Global.DualSenseMuteButtonLightEnabled[device] = value;
         }
 
+        public bool DualSenseMuteButtonMutesMicrophone
+        {
+            get => Global.DualSenseMuteButtonMutesMicrophone[device];
+            set => Global.DualSenseMuteButtonMutesMicrophone[device] = value;
+        }
+
         public string DualSenseMuteOnProfileName
         {
             get => Global.DualSenseMuteOnProfileName[device];
@@ -955,8 +961,22 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         {
             get => tempControllerIndex; set
             {
+                if (tempControllerIndex == value)
+                {
+                    return;
+                }
+
                 tempControllerIndex = value;
                 Global.outDevTypeTemp[device] = TempConType;
+
+                if (TempConType == OutContType.ViiperDualSense ||
+                    TempConType == OutContType.ViiperDualSenseEdge)
+                {
+                    DualSenseSpeakerCompressionIndex =
+                        (int)DualSenseSpeakerProcessor.RecommendedCompression;
+                    DualSenseSpeakerBassBoost =
+                        DualSenseSpeakerProcessor.RecommendedBassBoostDb;
+                }
             }
         }
 
@@ -3294,6 +3314,43 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             get => Global.DualSenseSpeakerVolume[device];
             set => Global.DualSenseSpeakerVolume[device] = (byte)Math.Clamp(value, 0, 255);
         }
+
+        public int DualSenseSpeakerCompressionIndex
+        {
+            get => Global.DualSenseSpeakerCompression[device];
+            set
+            {
+                byte clamped = (byte)Math.Clamp(value,
+                    (int)DualSenseSpeakerCompression.Off,
+                    (int)DualSenseSpeakerCompression.Strong);
+                if (Global.DualSenseSpeakerCompression[device] == clamped)
+                {
+                    return;
+                }
+
+                Global.DualSenseSpeakerCompression[device] = clamped;
+                DualSenseSpeakerCompressionIndexChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        public event EventHandler DualSenseSpeakerCompressionIndexChanged;
+
+        public int DualSenseSpeakerBassBoost
+        {
+            get => Global.DualSenseSpeakerBassBoost[device];
+            set
+            {
+                byte clamped = (byte)Math.Clamp(value, 0,
+                    DualSenseSpeakerProcessor.MaximumBassBoostDb);
+                if (Global.DualSenseSpeakerBassBoost[device] == clamped)
+                {
+                    return;
+                }
+
+                Global.DualSenseSpeakerBassBoost[device] = clamped;
+                DualSenseSpeakerBassBoostChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        public event EventHandler DualSenseSpeakerBassBoostChanged;
 
         public int DualSenseHeadphoneVolume
         {

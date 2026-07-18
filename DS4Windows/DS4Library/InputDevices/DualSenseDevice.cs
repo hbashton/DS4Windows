@@ -340,6 +340,7 @@ namespace DS4Windows.InputDevices
         private byte muteLEDByte = 0x00;
         private bool microphoneMuteOverride;
         private bool microphoneMuted;
+        private int profileMicrophoneMuteState;
         private bool muteLedOverride;
         private bool muteLedOn;
         private uint hwVersion;
@@ -619,14 +620,28 @@ namespace DS4Windows.InputDevices
         private DualSenseControllerOptions nativeOptionsStore;
         public DualSenseControllerOptions NativeOptionsStore { get => nativeOptionsStore; }
 
-        public void SetMicrophoneMuteState(bool muted)
+        public bool IsProfileMicrophoneMuted =>
+            Volatile.Read(ref profileMicrophoneMuteState) == 2;
+
+        public void SetProfileMicrophoneMuteState(bool enabled, bool muted)
         {
+            int state = enabled ? (muted ? 2 : 1) : 0;
+            if (Interlocked.Exchange(ref profileMicrophoneMuteState, state) == state)
+            {
+                return;
+            }
+
             queueEvent(() =>
             {
-                microphoneMuteOverride = true;
-                microphoneMuted = muted;
+                microphoneMuteOverride = enabled;
+                microphoneMuted = enabled && muted;
                 outputDirty = true;
             });
+        }
+
+        public void SetMicrophoneMuteState(bool muted)
+        {
+            SetProfileMicrophoneMuteState(true, muted);
         }
 
         public void SetProfileMuteLedState(bool enabled, bool ledOn)

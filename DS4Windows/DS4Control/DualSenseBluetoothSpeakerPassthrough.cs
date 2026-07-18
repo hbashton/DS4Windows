@@ -45,6 +45,9 @@ namespace DS4Windows
         private readonly DualSenseDevice device;
         private readonly string sourceEndpointId;
         private readonly byte speakerVolume;
+        private readonly DualSenseSpeakerCompression speakerCompression;
+        private readonly byte speakerBassBoost;
+        private readonly DualSenseSpeakerProcessor speakerProcessor;
         private readonly float[] sourceFrame = new float[(SourcePullFrames + DriftAdjustmentFrames) * Channels];
         private readonly float[] frame = new float[FrameSamples * Channels];
         private readonly byte[] opusFrame = new byte[OpusBytes];
@@ -92,18 +95,32 @@ namespace DS4Windows
         private int mmcssRegistrationError;
 
         public DualSenseBluetoothSpeakerPassthrough(DualSenseDevice device, byte speakerVolume,
+            DualSenseSpeakerCompression speakerCompression, byte speakerBassBoost,
             string sourceEndpointId)
         {
             this.device = device ?? throw new ArgumentNullException(nameof(device));
             this.speakerVolume = speakerVolume;
+            this.speakerCompression = (DualSenseSpeakerCompression)Math.Clamp(
+                (int)speakerCompression, (int)DualSenseSpeakerCompression.Off,
+                (int)DualSenseSpeakerCompression.Strong);
+            this.speakerBassBoost = Math.Min(speakerBassBoost,
+                DualSenseSpeakerProcessor.MaximumBassBoostDb);
+            speakerProcessor = new DualSenseSpeakerProcessor(this.speakerCompression,
+                this.speakerBassBoost);
             this.sourceEndpointId = sourceEndpointId ?? string.Empty;
         }
 
         public bool Matches(DualSenseDevice candidateDevice, byte candidateVolume,
+            DualSenseSpeakerCompression candidateCompression, byte candidateBassBoost,
             string candidateSourceEndpointId)
         {
             return !stopping && ReferenceEquals(device, candidateDevice) &&
                 speakerVolume == candidateVolume &&
+                speakerCompression == (DualSenseSpeakerCompression)Math.Clamp(
+                    (int)candidateCompression, (int)DualSenseSpeakerCompression.Off,
+                    (int)DualSenseSpeakerCompression.Strong) &&
+                speakerBassBoost == Math.Min(candidateBassBoost,
+                    DualSenseSpeakerProcessor.MaximumBassBoostDb) &&
                 string.Equals(sourceEndpointId, candidateSourceEndpointId ?? string.Empty,
                     StringComparison.Ordinal);
         }
@@ -157,7 +174,10 @@ namespace DS4Windows
                 worker.Start();
                 AppLogger.LogToGui(
                     $"DualSense Bluetooth speaker passthrough started: {sourceName}" +
-                    (isGameAudioEndpoint ? " (low latency game-audio mode)" : string.Empty),
+                    (isGameAudioEndpoint ? " (low latency game-audio mode)" : string.Empty) +
+                    (speakerProcessor.Enabled ?
+                        $" (dynamic range={speakerCompression}, bass/body={speakerBassBoost} dB)" :
+                        string.Empty),
                     false);
             }
             catch
@@ -476,6 +496,8 @@ namespace DS4Windows
                         FadeInRecoveredCapture();
                         fadeInAfterCaptureUnderrun = false;
                     }
+
+                    speakerProcessor.Process(frame, FrameSamples);
 
                     // Combined reports already carry the firmware speaker
                     // volume. Applying the profile gain to PCM as well would

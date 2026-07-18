@@ -302,8 +302,9 @@
                             <Button Content="Controller details" Margin="0,0,8,0"
                                     Style="{StaticResource BridgeSecondaryButtonStyle}"
                                     Click="ControllerDetailsBtn_Click" />
-                            <Button Content="Lightbar" Margin="0,0,8,0"
+                            <Button Content="Lightbar controls" Margin="0,0,8,0"
                                     Style="{StaticResource BridgeSecondaryButtonStyle}"
+                                    ToolTip="Use profile lightbar controls or choose a temporary custom color"
                                     Click="LightbarBtn_Click" />
                             <Button Content="Disconnect"
                                     Style="{StaticResource BridgeSecondaryButtonStyle}"

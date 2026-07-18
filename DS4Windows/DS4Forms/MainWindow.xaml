@@ -245,6 +245,19 @@
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
+                    <Border x:Name="profileEditorLoadingPanel" Visibility="Collapsed"
+                            Background="{DynamicResource CardBackgroundColor}"
+                            BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
+                            CornerRadius="6" Padding="32">
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="280">
+                            <TextBlock Text="Loading profile editor" FontSize="18" FontWeight="SemiBold"
+                                       HorizontalAlignment="Center" />
+                            <TextBlock Text="Applying the profile and preparing its controls..."
+                                       Margin="0,7,0,16" TextAlignment="Center" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource MutedForegroundColor}" />
+                            <ProgressBar IsIndeterminate="True" Height="4" />
+                        </StackPanel>
+                    </Border>
                 </DockPanel>
             </TabItem>
             <TabItem Header="{lex:Loc AutoProfiles}" Tag="Switch profiles automatically when a game or application starts." IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">

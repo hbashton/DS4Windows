@@ -392,7 +392,6 @@
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="*" />
-                                        <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
 
                                     <StackPanel Orientation="Horizontal" Margin="4,0,0,20">
@@ -468,14 +467,13 @@
                                     <TextBlock Grid.Row="2" Text="NAVIGATION" Margin="10,0,0,8"
                                                FontSize="10" FontWeight="Bold"
                                                Foreground="{DynamicResource MutedForegroundColor}" />
-                                    <TabPanel Grid.Row="3" IsItemsHost="True" KeyboardNavigation.TabNavigation="Once" />
-
-                                    <StackPanel Grid.Row="4" Margin="8,14,8,0">
-                                        <Separator Background="{DynamicResource BorderColor}" Margin="0,0,0,12" />
-                                        <TextBlock Text="All legacy features remain available"
-                                                   TextWrapping="Wrap" FontSize="10"
-                                                   Foreground="{DynamicResource MutedForegroundColor}" />
-                                    </StackPanel>
+                                    <ScrollViewer Grid.Row="3"
+                                                  VerticalScrollBarVisibility="Auto"
+                                                  HorizontalScrollBarVisibility="Disabled"
+                                                  Focusable="False">
+                                        <TabPanel IsItemsHost="True"
+                                                  KeyboardNavigation.TabNavigation="Once" />
+                                    </ScrollViewer>
                                 </Grid>
                             </Border>
 

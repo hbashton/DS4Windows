@@ -24,6 +24,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -74,6 +75,7 @@ namespace DS4WinWPF.DS4Forms
         private NonFormTimer autoProfilesTimer;
         private AutoProfileChecker autoprofileChecker;
         private ProfileEditor editor;
+        private bool profileEditorLoading;
         private int profileEditorReturnTabIndex = 2;
         private bool profileEditorNavigationChanging;
         private readonly HashSet<int> overviewDirtyControllerIndices = new();
@@ -1122,7 +1124,15 @@ Suspend support not enabled.", true);
 
         private void ControllerOverview_LightbarRequested(object sender, EventArgs e)
         {
-            mainWinVM.SelectedController?.RequestCustomColorPicker();
+            CompositeDeviceModel controller = mainWinVM.SelectedController;
+            if (controller?.LightContext == null)
+            {
+                return;
+            }
+
+            controller.LightContext.PlacementTarget = controllerOverviewControl;
+            controller.LightContext.Placement = PlacementMode.MousePoint;
+            controller.LightContext.IsOpen = true;
         }
 
         private void ControllerOverview_DisconnectRequested(object sender, EventArgs e)
@@ -2045,45 +2055,93 @@ Suspend support not enabled.", true);
             ShowProfileEditor(Global.TEST_PROFILE_INDEX, null);
         }
 
-        private void ShowProfileEditor(int device, ProfileEntity entity = null)
+        private async void ShowProfileEditor(int device, ProfileEntity entity = null)
         {
-            if (editor == null)
+            if (editor != null || profileEditorLoading)
             {
-                profileEditorReturnTabIndex = mainTabCon.SelectedIndex;
-                profOptsToolbar.Visibility = Visibility.Collapsed;
-                profilesListBox.Visibility = Visibility.Collapsed;
-                mainWinVM.FullTabsEnabled = false;
+                return;
+            }
 
-                preserveSize = false;
-                oldSize.Width = Width;
-                oldSize.Height = Height;
-                if (this.Width < DEFAULT_PROFILE_EDITOR_WIDTH)
-                {
-                    this.Width = DEFAULT_PROFILE_EDITOR_WIDTH;
-                }
+            profileEditorLoading = true;
+            profileEditorReturnTabIndex = mainTabCon.SelectedIndex;
+            profOptsToolbar.Visibility = Visibility.Collapsed;
+            profilesListBox.Visibility = Visibility.Collapsed;
+            profileEditorLoadingPanel.Visibility = Visibility.Visible;
+            mainWinVM.FullTabsEnabled = false;
 
-                if (this.Height < DEFAULT_PROFILE_EDITOR_HEIGHT)
+            preserveSize = false;
+            oldSize.Width = Width;
+            oldSize.Height = Height;
+            if (this.Width < DEFAULT_PROFILE_EDITOR_WIDTH)
+            {
+                this.Width = DEFAULT_PROFILE_EDITOR_WIDTH;
+            }
+
+            if (this.Height < DEFAULT_PROFILE_EDITOR_HEIGHT)
+            {
+                this.Height = DEFAULT_PROFILE_EDITOR_HEIGHT;
+            }
+
+            mainWinVM.EditingProfileName = entity?.Name ?? "New profile";
+            mainWinVM.ProfileEditorMode = true;
+            mainTabCon.SelectedItem = profilesTab;
+            profileEditorNavigationChanging = true;
+            mainWinVM.ProfileEditorNavigationIndex = 1;
+            profileEditorNavigationChanging = false;
+
+            try
+            {
+                // Let the editor workspace and loading state render before profile
+                // parsing begins. Profile loading is file and XML heavy, and does
+                // not need to block WPF's dispatcher.
+                await Dispatcher.Yield(DispatcherPriority.Render);
+
+                bool profileAlreadyLoaded = false;
+                if (entity != null)
                 {
-                    this.Height = DEFAULT_PROFILE_EDITOR_HEIGHT;
+                    if (device == Global.TEST_PROFILE_INDEX)
+                    {
+                        Global.ProfilePath[Global.TEST_PROFILE_INDEX] = entity.Name;
+                    }
+
+                    await Task.Run(() => Global.LoadProfile(device, false, App.rootHub, false));
+                    profileAlreadyLoaded = true;
                 }
 
                 editor = new ProfileEditor(device);
                 editor.CreatedProfile += Editor_CreatedProfile;
                 editor.Closed += ProfileEditor_Closed;
                 editor.ProfileNameChanged += Editor_ProfileNameChanged;
+                editor.Reload(device, entity, profileAlreadyLoaded);
+
+                profileEditorLoadingPanel.Visibility = Visibility.Collapsed;
                 profDockPanel.Children.Add(editor);
-                editor.Reload(device, entity);
-
                 mainWinVM.EditingProfileName = editor.ProfileName;
-                mainWinVM.ProfileEditorMode = true;
-                mainTabCon.SelectedItem = profilesTab;
-
-                profileEditorNavigationChanging = true;
-                mainWinVM.ProfileEditorNavigationIndex = 1;
-                profileEditorNavigationChanging = false;
                 NavigateProfileEditor(1);
             }
-            
+            catch (Exception ex)
+            {
+                AppLogger.LogToGui($"Failed to open profile editor: {ex.Message}", true);
+                profileEditorLoadingPanel.Visibility = Visibility.Collapsed;
+                profOptsToolbar.Visibility = Visibility.Visible;
+                profilesListBox.Visibility = Visibility.Visible;
+                mainWinVM.ProfileEditorMode = false;
+                mainWinVM.EditingProfileName = "Profile";
+                mainWinVM.FullTabsEnabled = true;
+                mainTabCon.SelectedIndex = profileEditorReturnTabIndex;
+
+                if (!preserveSize)
+                {
+                    Width = oldSize.Width;
+                    Height = oldSize.Height;
+                }
+
+                editor = null;
+            }
+            finally
+            {
+                profileEditorLoading = false;
+            }
         }
 
         private void Editor_ProfileNameChanged(object sender, EventArgs e)

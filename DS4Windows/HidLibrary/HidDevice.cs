@@ -31,6 +31,7 @@ namespace DS4Windows
         //private bool _monitorDeviceEvents;
         private string serial = null;
         private SafeFileHandle safeReadHandle;
+        private readonly object handleLock = new object();
         private bool isOpen;
         private bool isExclusive;
         private const string BLANK_SERIAL = "00:00:00:00:00:00";
@@ -78,39 +79,73 @@ namespace DS4Windows
 
         public void OpenDevice(bool exclusive)
         {
-            if (IsOpen) return;
-            try
+            lock (handleLock)
             {
-                if (SafeReadHandle == null || SafeReadHandle.IsInvalid)
-                    SafeReadHandle = OpenHandle(_devicePath, exclusive, enumerate: false);
-            }
-            catch (Exception exception)
-            {
-                IsOpen = false;
-                throw new Exception("Error opening HID device.", exception);
-            }
+                if (IsOpen) return;
+                try
+                {
+                    if (safeReadHandle == null || safeReadHandle.IsClosed || safeReadHandle.IsInvalid)
+                    {
+                        safeReadHandle?.Dispose();
+                        safeReadHandle = OpenHandle(_devicePath, exclusive, enumerate: false);
+                    }
+                }
+                catch (Exception exception)
+                {
+                    IsOpen = false;
+                    IsExclusive = false;
+                    throw new Exception("Error opening HID device.", exception);
+                }
 
-            IsOpen = !SafeReadHandle.IsInvalid;
-            IsExclusive = exclusive;
+                IsOpen = safeReadHandle != null && !safeReadHandle.IsClosed && !safeReadHandle.IsInvalid;
+                IsExclusive = IsOpen && exclusive;
+            }
         }
 
         public void CloseDevice()
         {
-            if (!IsOpen) return;
+            SafeFileHandle handle;
+            lock (handleLock)
+            {
+                handle = safeReadHandle;
+                safeReadHandle = null;
+                IsOpen = false;
+                IsExclusive = false;
+            }
 
-            IsOpen = false;
+            if (handle == null)
+            {
+                return;
+            }
+
+            try
+            {
+                if (!handle.IsClosed && !handle.IsInvalid)
+                {
+                    NativeMethods.CancelIoEx(handle.DangerousGetHandle(), IntPtr.Zero);
+                }
+            }
+            finally
+            {
+                handle.Dispose();
+            }
         }
 
         public void Dispose()
         {
-            CancelIO();
             CloseDevice();
+            GC.SuppressFinalize(this);
         }
 
         public void CancelIO()
         {
-            if (IsOpen)
-                NativeMethods.CancelIoEx(SafeReadHandle.DangerousGetHandle(), IntPtr.Zero);
+            lock (handleLock)
+            {
+                if (IsOpen && safeReadHandle != null && !safeReadHandle.IsClosed && !safeReadHandle.IsInvalid)
+                {
+                    NativeMethods.CancelIoEx(safeReadHandle.DangerousGetHandle(), IntPtr.Zero);
+                }
+            }
         }
 
         [Obsolete("Unused.")]

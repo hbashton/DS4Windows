@@ -3488,6 +3488,14 @@ namespace DS4Windows
             return versionMatch.Success && Version.TryParse(versionMatch.Value, out version);
         }
 
+        private static bool IsStableRelease(GithubRelease release)
+        {
+            if (release is null || release.PreRelease) return false;
+
+            string tagName = release.TagName ?? string.Empty;
+            return !Regex.IsMatch(tagName, @"(?i)(alpha|beta|preview|pre-release|prerelease|rc)");
+        }
+
         // Much more compact and elegant way of checking if there is a new update available than the
         // shenanigans with fetching newest.txt and using a .txt file as a DTO instead of simply
         // passing a string to the function that displays the updater window.
@@ -3515,6 +3523,7 @@ namespace DS4Windows
 
                 foreach (var release in task.Result ?? Array.Empty<GithubRelease>())
                 {
+                    if (!IsStableRelease(release)) continue;
                     if (!TryParseReleaseVersion(release.TagName, out var parsedVersion)) continue;
                     if (parsedVersion > version) version = parsedVersion;
                 }
@@ -3551,6 +3560,7 @@ namespace DS4Windows
 
             foreach (var release in releases)
             {
+                if (!IsStableRelease(release)) continue;
                 if (!TryParseReleaseVersion(release.TagName, out var parsedVersion)) continue;
 
                 if (!allVersions && parsedVersion <= currentVersion) break;

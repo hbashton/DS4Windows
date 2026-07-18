@@ -7,6 +7,14 @@
     <SolidColorBrush x:Key="AccentColor" Color="#FF0066CC" />
     <SolidColorBrush x:Key="BorderColor" Color="#FFC8C8C8" />
     <SolidColorBrush x:Key="BackgroundColor" Color="{x:Static SystemColors.WindowColor}"/>
+    <SolidColorBrush x:Key="SurfaceBackgroundColor" Color="#FFF5F7FA" />
+    <SolidColorBrush x:Key="SidebarBackgroundColor" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="CardBackgroundColor" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="RaisedBackgroundColor" Color="#FFEAF1FA" />
+    <SolidColorBrush x:Key="NavigationSelectionColor" Color="#FFDCEBFF" />
+    <SolidColorBrush x:Key="MutedForegroundColor" Color="#FF5F7086" />
+    <SolidColorBrush x:Key="SuccessColor" Color="#FF16883F" />
+    <SolidColorBrush x:Key="DangerColor" Color="#FFB4232C" />
 
     <system:String x:Key="KeyImageImg">key-solid.png</system:String>
     <system:String x:Key="CancelImg">cancel.png</system:String>

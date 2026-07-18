@@ -21,6 +21,7 @@ using DS4WinWPF.ApiDTO;
 using HttpProgress;
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http.Json;
@@ -30,6 +31,21 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 {
     public class MainWindowsViewModel
     {
+        private ObservableCollection<CompositeDeviceModel> controllerCol = new();
+
+        public ObservableCollection<CompositeDeviceModel> ControllerCol
+        {
+            get => controllerCol;
+            set
+            {
+                if (ReferenceEquals(controllerCol, value)) return;
+                controllerCol = value;
+                ControllerColChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
+        public event EventHandler ControllerColChanged;
+
         private bool fullTabsEnabled = true;
 
         public bool FullTabsEnabled

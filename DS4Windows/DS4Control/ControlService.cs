@@ -3667,7 +3667,9 @@ namespace DS4Windows
                 return;
             }
 
-            bool muteLightEnabled = Global.DualSenseMuteButtonLightEnabled[ind];
+            bool muteMicrophoneEnabled = Global.DualSenseMuteButtonMutesMicrophone[ind];
+            bool muteLightEnabled = Global.DualSenseMuteButtonLightEnabled[ind] ||
+                muteMicrophoneEnabled;
             if (!muteLightEnabled)
             {
                 if (dualSenseMuteLedOverrideActive[ind])
@@ -3676,6 +3678,7 @@ namespace DS4Windows
                     dualSenseMuteLedOverrideActive[ind] = false;
                 }
 
+                dualSenseDevice.SetProfileMicrophoneMuteState(false, false);
                 dualSenseMuteButtonWasDown[ind] = cState.Mute;
                 return;
             }
@@ -3687,27 +3690,39 @@ namespace DS4Windows
                 dualSenseDevice.SetProfileMuteLedState(true, dualSenseMuteLedOn[ind]);
                 dualSenseMuteLedOverrideActive[ind] = true;
 
-                string requestedProfileName;
-                if (dualSenseMuteLedOn[ind])
+                if (!muteMicrophoneEnabled)
                 {
-                    requestedProfileName = Global.DualSenseMuteOnProfileName[ind];
-                    dualSenseMuteRememberedOffProfileName[ind] = Global.DualSenseMuteOffProfileName[ind];
-                }
-                else
-                {
-                    requestedProfileName = Global.DualSenseMuteOffProfileName[ind];
-                    if (string.IsNullOrEmpty(requestedProfileName))
+                    string requestedProfileName;
+                    if (dualSenseMuteLedOn[ind])
                     {
-                        requestedProfileName = dualSenseMuteRememberedOffProfileName[ind];
+                        requestedProfileName = Global.DualSenseMuteOnProfileName[ind];
+                        dualSenseMuteRememberedOffProfileName[ind] = Global.DualSenseMuteOffProfileName[ind];
                     }
-                }
+                    else
+                    {
+                        requestedProfileName = Global.DualSenseMuteOffProfileName[ind];
+                        if (string.IsNullOrEmpty(requestedProfileName))
+                        {
+                            requestedProfileName = dualSenseMuteRememberedOffProfileName[ind];
+                        }
+                    }
 
-                QueueDualSenseMuteProfile(ind, requestedProfileName);
+                    QueueDualSenseMuteProfile(ind, requestedProfileName);
+                }
             }
             else if (!dualSenseMuteLedOverrideActive[ind])
             {
                 dualSenseDevice.SetProfileMuteLedState(true, dualSenseMuteLedOn[ind]);
                 dualSenseMuteLedOverrideActive[ind] = true;
+            }
+
+            dualSenseDevice.SetProfileMicrophoneMuteState(muteMicrophoneEnabled,
+                dualSenseMuteLedOn[ind]);
+            if (muteMicrophoneEnabled)
+            {
+                dualSenseMuteRememberedOffProfileName[ind] = string.Empty;
+                dualSenseMuteButtonWasDown[ind] = muteDown;
+                return;
             }
 
             dualSenseMuteButtonWasDown[ind] = muteDown;

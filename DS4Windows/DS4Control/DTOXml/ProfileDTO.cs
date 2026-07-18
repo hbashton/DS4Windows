@@ -779,6 +779,19 @@ namespace DS4WinWPF.DS4Control.DTOXml
             set => _dualSenseMuteButtonLightEnabled = XmlDataUtilities.StrToBool(value);
         }
 
+        private bool _dualSenseMuteButtonMutesMicrophone;
+        [XmlElement("DualSenseMuteButtonMutesMicrophone")]
+        public string DualSenseMuteButtonMutesMicrophoneString
+        {
+            get => _dualSenseMuteButtonMutesMicrophone.ToString();
+            set => _dualSenseMuteButtonMutesMicrophone = XmlDataUtilities.StrToBool(value);
+        }
+
+        public bool ShouldSerializeDualSenseMuteButtonMutesMicrophoneString()
+        {
+            return _dualSenseMuteButtonMutesMicrophone;
+        }
+
         [XmlElement("DualSenseMuteOnProfileName")]
         public string DualSenseMuteOnProfileName
         {
@@ -1669,6 +1682,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
             _gameBarHomeButtonSupport = source.gameBarHomeButtonSupport[deviceIndex];
             GameBarProfileName = source.gameBarProfileName[deviceIndex];
             _dualSenseMuteButtonLightEnabled = source.dualSenseMuteButtonLightEnabled[deviceIndex];
+            _dualSenseMuteButtonMutesMicrophone = source.dualSenseMuteButtonMutesMicrophone[deviceIndex];
             DualSenseMuteOnProfileName = source.dualSenseMuteOnProfileName[deviceIndex];
             DualSenseMuteOffProfileName = source.dualSenseMuteOffProfileName[deviceIndex];
             _dinputOnly = source.dinputOnly[deviceIndex];
@@ -2277,6 +2291,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
             destination.gameBarHomeButtonSupport[deviceIndex] = _gameBarHomeButtonSupport;
             destination.gameBarProfileName[deviceIndex] = GameBarProfileName ?? string.Empty;
             destination.dualSenseMuteButtonLightEnabled[deviceIndex] = _dualSenseMuteButtonLightEnabled;
+            destination.dualSenseMuteButtonMutesMicrophone[deviceIndex] = _dualSenseMuteButtonMutesMicrophone;
             destination.dualSenseMuteOnProfileName[deviceIndex] = DualSenseMuteOnProfileName ?? string.Empty;
             destination.dualSenseMuteOffProfileName[deviceIndex] = DualSenseMuteOffProfileName ?? string.Empty;
             destination.dinputOnly[deviceIndex] = _dinputOnly;

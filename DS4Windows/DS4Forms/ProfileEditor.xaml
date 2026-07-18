@@ -2229,6 +2229,7 @@
                                                     <RowDefinition Height="30" />
                                                     <RowDefinition Height="30" />
                                                     <RowDefinition Height="30" />
+                                                    <RowDefinition Height="30" />
                                                 </Grid.RowDefinitions>
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto" />
@@ -2236,18 +2237,27 @@
                                                 </Grid.ColumnDefinitions>
 
                                                 <CheckBox Content="Enable mute button light" IsChecked="{Binding DualSenseMuteButtonLightEnabled}"
+                                                          IsEnabled="{Binding IsChecked, ElementName=MuteMicCheck, Converter={StaticResource InverseBoolConverter}}"
                                                           Grid.Row="0" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}"
                                                           ToolTip="Mirrors the physical DualSense mute button state to the controller mute LED while this profile is active. This only controls the light, not Windows microphone routing." />
                                                 <Label Content="Mute on profile:" Grid.Row="1" Grid.Column="0"
+                                                       IsEnabled="{Binding IsChecked, ElementName=MuteMicCheck, Converter={StaticResource InverseBoolConverter}}"
                                                        ToolTip="Optional. Switch to this profile when the physical DualSense mute button toggles on." />
                                                 <ComboBox ItemsSource="{Binding OptionalProfileChoices}" SelectedItem="{Binding DualSenseMuteOnProfileName}"
+                                                          IsEnabled="{Binding IsChecked, ElementName=MuteMicCheck, Converter={StaticResource InverseBoolConverter}}"
                                                           Grid.Row="1" Grid.Column="1" Margin="{StaticResource spaceMargin}"
                                                           ToolTip="Leave blank to avoid changing profiles when mute turns on." />
                                                 <Label Content="Mute off profile:" Grid.Row="2" Grid.Column="0"
+                                                       IsEnabled="{Binding IsChecked, ElementName=MuteMicCheck, Converter={StaticResource InverseBoolConverter}}"
                                                        ToolTip="Optional. Switch to this profile when the physical DualSense mute button toggles off." />
                                                 <ComboBox ItemsSource="{Binding OptionalProfileChoices}" SelectedItem="{Binding DualSenseMuteOffProfileName}"
+                                                          IsEnabled="{Binding IsChecked, ElementName=MuteMicCheck, Converter={StaticResource InverseBoolConverter}}"
                                                           Grid.Row="2" Grid.Column="1" Margin="{StaticResource spaceMargin}"
                                                           ToolTip="Leave blank to avoid changing profiles when mute turns off." />
+                                                <CheckBox x:Name="MuteMicCheck" Content="Mute button mutes the mic"
+                                                          IsChecked="{Binding DualSenseMuteButtonMutesMicrophone}"
+                                                          Grid.Row="3" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}"
+                                                          ToolTip="Uses the DualSense mute button for microphone mute instead of profile switching. A lit mute LED means the controller microphone is muted; pressing it again turns the LED off and restores microphone audio." />
                                             </Grid>
                                         </GroupBox>
 

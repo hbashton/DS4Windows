@@ -2685,6 +2685,12 @@ namespace DS4Windows
             set => m_Config.dualSenseMuteButtonLightEnabled = value;
         }
 
+        public static bool[] DualSenseMuteButtonMutesMicrophone
+        {
+            get => m_Config.dualSenseMuteButtonMutesMicrophone;
+            set => m_Config.dualSenseMuteButtonMutesMicrophone = value;
+        }
+
         public static string[] DualSenseMuteOnProfileName
         {
             get => m_Config.dualSenseMuteOnProfileName;
@@ -3869,6 +3875,7 @@ namespace DS4Windows
         public bool[] gameBarHomeButtonSupport = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
         public string[] gameBarProfileName = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
         public bool[] dualSenseMuteButtonLightEnabled = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
+        public bool[] dualSenseMuteButtonMutesMicrophone = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
         public string[] dualSenseMuteOnProfileName = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
         public string[] dualSenseMuteOffProfileName = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
         //
@@ -4815,6 +4822,7 @@ namespace DS4Windows
                 XmlNode xmlGameBarHomeButtonSupport = m_Xdoc.CreateNode(XmlNodeType.Element, "GameBarHomeButtonSupport", null); xmlGameBarHomeButtonSupport.InnerText = gameBarHomeButtonSupport[device].ToString(); rootElement.AppendChild(xmlGameBarHomeButtonSupport);
                 XmlNode xmlGameBarProfileName = m_Xdoc.CreateNode(XmlNodeType.Element, "GameBarProfileName", null); xmlGameBarProfileName.InnerText = gameBarProfileName[device]; rootElement.AppendChild(xmlGameBarProfileName);
                 XmlNode xmlDualSenseMuteButtonLightEnabled = m_Xdoc.CreateNode(XmlNodeType.Element, "DualSenseMuteButtonLightEnabled", null); xmlDualSenseMuteButtonLightEnabled.InnerText = dualSenseMuteButtonLightEnabled[device].ToString(); rootElement.AppendChild(xmlDualSenseMuteButtonLightEnabled);
+                XmlNode xmlDualSenseMuteButtonMutesMicrophone = m_Xdoc.CreateNode(XmlNodeType.Element, "DualSenseMuteButtonMutesMicrophone", null); xmlDualSenseMuteButtonMutesMicrophone.InnerText = dualSenseMuteButtonMutesMicrophone[device].ToString(); rootElement.AppendChild(xmlDualSenseMuteButtonMutesMicrophone);
                 XmlNode xmlDualSenseMuteOnProfileName = m_Xdoc.CreateNode(XmlNodeType.Element, "DualSenseMuteOnProfileName", null); xmlDualSenseMuteOnProfileName.InnerText = dualSenseMuteOnProfileName[device]; rootElement.AppendChild(xmlDualSenseMuteOnProfileName);
                 XmlNode xmlDualSenseMuteOffProfileName = m_Xdoc.CreateNode(XmlNodeType.Element, "DualSenseMuteOffProfileName", null); xmlDualSenseMuteOffProfileName.InnerText = dualSenseMuteOffProfileName[device]; rootElement.AppendChild(xmlDualSenseMuteOffProfileName);
                 XmlNode xmlDinput = m_Xdoc.CreateNode(XmlNodeType.Element, "DinputOnly", null); xmlDinput.InnerText = dinputOnly[device].ToString(); rootElement.AppendChild(xmlDinput);
@@ -6659,6 +6667,13 @@ namespace DS4Windows
                     bool.TryParse(Item.InnerText, out dualSenseMuteButtonLightEnabled[device]);
                 }
                 catch { dualSenseMuteButtonLightEnabled[device] = false; missingSetting = true; }
+
+                try
+                {
+                    Item = m_Xdoc.SelectSingleNode("/" + rootname + "/DualSenseMuteButtonMutesMicrophone");
+                    bool.TryParse(Item.InnerText, out dualSenseMuteButtonMutesMicrophone[device]);
+                }
+                catch { dualSenseMuteButtonMutesMicrophone[device] = false; missingSetting = true; }
 
                 try
                 {
@@ -9976,6 +9991,7 @@ namespace DS4Windows
             gameBarHomeButtonSupport[device] = false;
             gameBarProfileName[device] = string.Empty;
             dualSenseMuteButtonLightEnabled[device] = false;
+            dualSenseMuteButtonMutesMicrophone[device] = false;
             dualSenseMuteOnProfileName[device] = string.Empty;
             dualSenseMuteOffProfileName[device] = string.Empty;
             touchpadJitterCompensation[device] = DEFAULT_TOUCHPAD_JITTER_COMP;

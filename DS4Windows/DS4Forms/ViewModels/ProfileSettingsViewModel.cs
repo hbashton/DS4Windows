@@ -720,6 +720,12 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             set => Global.DualSenseMuteButtonLightEnabled[device] = value;
         }
 
+        public bool DualSenseMuteButtonMutesMicrophone
+        {
+            get => Global.DualSenseMuteButtonMutesMicrophone[device];
+            set => Global.DualSenseMuteButtonMutesMicrophone[device] = value;
+        }
+
         public string DualSenseMuteOnProfileName
         {
             get => Global.DualSenseMuteOnProfileName[device];

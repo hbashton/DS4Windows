@@ -19,6 +19,9 @@ namespace DS4Windows
         public const int SampleRate = 48000;
         public const int Channels = 2;
         public const byte MaximumBassBoostDb = 6;
+        public const DualSenseSpeakerCompression RecommendedCompression =
+            DualSenseSpeakerCompression.Balanced;
+        public const byte RecommendedBassBoostDb = 3;
 
         private const float LimiterCeiling = 0.8912509f;
         private const float LimiterReleaseMs = 60.0f;

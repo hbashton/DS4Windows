@@ -36,6 +36,7 @@ using NonFormTimer = System.Timers.Timer;
 using System.Runtime.InteropServices;
 using System.ComponentModel;
 using HttpProgress;
+using System.Windows.Threading;
 
 using DS4WinWPF.DS4Forms.ViewModels;
 using DS4Windows;
@@ -73,8 +74,11 @@ namespace DS4WinWPF.DS4Forms
         private NonFormTimer autoProfilesTimer;
         private AutoProfileChecker autoprofileChecker;
         private ProfileEditor editor;
-        private int profileEditorReturnTabIndex = 1;
+        private int profileEditorReturnTabIndex = 2;
         private bool profileEditorNavigationChanging;
+        private readonly HashSet<int> overviewDirtyControllerIndices = new();
+        private DispatcherTimer overviewProfileSaveTimer;
+        private DispatcherTimer overviewStatusRefreshTimer;
         private bool preserveSize = true;
         private Size oldSize;
         private bool contextclose;
@@ -97,6 +101,21 @@ namespace DS4WinWPF.DS4Forms
             mainWinVM = new MainWindowsViewModel();
             DataContext = mainWinVM;
             mainWinVM.ProfileEditorNavigationIndexChanged += MainWinVM_ProfileEditorNavigationIndexChanged;
+            mainWinVM.QuickProfileSettingChanged += MainWinVM_QuickProfileSettingChanged;
+
+            overviewProfileSaveTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(420),
+            };
+            overviewProfileSaveTimer.Tick += OverviewProfileSaveTimer_Tick;
+
+            overviewStatusRefreshTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(1),
+            };
+            overviewStatusRefreshTimer.Tick += (sender, e) =>
+                mainWinVM.RefreshSelectedControllerStatus();
+            overviewStatusRefreshTimer.Start();
 
             App root = Application.Current as App;
             settingsWrapVM = new SettingsViewModel();
@@ -118,6 +137,7 @@ namespace DS4WinWPF.DS4Forms
             mainWinVM.ControllerCol = conLvViewModel.ControllerCol;
             controllerLV.DataContext = conLvViewModel;
             controllerLV.ItemsSource = conLvViewModel.ControllerCol;
+            mainWinVM.SelectedController = conLvViewModel.ControllerCol.FirstOrDefault();
             ChangeControllerPanel();
 
             // Sort device by input slot number
@@ -173,6 +193,10 @@ namespace DS4WinWPF.DS4Forms
                 App.rootHub.OutputslotMan);
 
             SetupEvents();
+            foreach (CompositeDeviceModel controller in conLvViewModel.ControllerCol)
+            {
+                PrepareControllerItem(controller);
+            }
 
             // Don't tie timers to main thread
             Thread timerThread = new Thread(() =>
@@ -871,15 +895,18 @@ Suspend support not enabled.", true);
             Dispatcher.BeginInvoke((Action)(() =>
             {
                 ChangeControllerPanel();
+                if (mainWinVM.SelectedController == null ||
+                    !conLvViewModel.ControllerCol.Contains(mainWinVM.SelectedController))
+                {
+                    mainWinVM.SelectedController = conLvViewModel.ControllerCol.FirstOrDefault();
+                }
+
                 System.Collections.IList newitems = e.NewItems;
                 if (newitems != null)
                 {
                     foreach (CompositeDeviceModel item in newitems)
                     {
-                        item.LightContext = new ContextMenu();
-                        item.AddLightContextItems();
-                        item.Device.SyncChange += DS4Device_SyncChange;
-                        item.RequestColorPicker += Item_RequestColorPicker;
+                        PrepareControllerItem(item);
                         //item.LightContext.Items.Add(new MenuItem() { Header = "Use Profile Color", IsChecked = !item.UseCustomColor });
                         //item.LightContext.Items.Add(new MenuItem() { Header = "Use Custom Color", IsChecked = item.UseCustomColor });
                     }
@@ -888,6 +915,14 @@ Suspend support not enabled.", true);
                 if (App.rootHub.running)
                     trayIconVM.PopulateContextMenu();
             }));
+        }
+
+        private void PrepareControllerItem(CompositeDeviceModel item)
+        {
+            item.LightContext = new ContextMenu();
+            item.AddLightContextItems();
+            item.Device.SyncChange += DS4Device_SyncChange;
+            item.RequestColorPicker += Item_RequestColorPicker;
         }
 
         private void Item_RequestColorPicker(CompositeDeviceModel sender)
@@ -982,13 +1017,13 @@ Suspend support not enabled.", true);
         private void MainTabCon_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (mainWinVM?.ProfileEditorMode == true &&
-                mainTabCon.SelectedIndex != 1 && mainTabCon.SelectedIndex != 5)
+                mainTabCon.SelectedItem != profilesTab && mainTabCon.SelectedItem != logTab)
             {
                 mainTabCon.SelectedItem = profilesTab;
                 return;
             }
 
-            if (mainTabCon.SelectedIndex == 4)
+            if (mainTabCon.SelectedItem == settingsTab)
             {
                 lastMsgLb.Visibility = Visibility.Hidden;
             }
@@ -996,6 +1031,103 @@ Suspend support not enabled.", true);
             {
                 lastMsgLb.Visibility = Visibility.Visible;
             }
+        }
+
+        private void MainWinVM_QuickProfileSettingChanged(object sender,
+            QuickProfileSettingChangedEventArgs e)
+        {
+            overviewDirtyControllerIndices.Add(e.DeviceIndex);
+            overviewProfileSaveTimer.Stop();
+            overviewProfileSaveTimer.Start();
+        }
+
+        private void OverviewProfileSaveTimer_Tick(object sender, EventArgs e)
+        {
+            FlushOverviewQuickSettings();
+        }
+
+        private void FlushOverviewQuickSettings(int? onlyDeviceIndex = null, bool reloadProfile = true)
+        {
+            overviewProfileSaveTimer.Stop();
+            int[] deviceIndices = onlyDeviceIndex.HasValue
+                ? new[] { onlyDeviceIndex.Value }
+                : overviewDirtyControllerIndices.ToArray();
+
+            foreach (int deviceIndex in deviceIndices)
+            {
+                if (!overviewDirtyControllerIndices.Remove(deviceIndex) ||
+                    deviceIndex < 0 || deviceIndex >= ControlService.CURRENT_DS4_CONTROLLER_LIMIT)
+                {
+                    continue;
+                }
+
+                string profileName = Global.ProfilePath[deviceIndex];
+                if (string.IsNullOrWhiteSpace(profileName))
+                {
+                    continue;
+                }
+
+                ProfileEntity profile = profileListHolder.ProfileListCol
+                    .SingleOrDefault(item => item.Name == profileName);
+                if (profile != null)
+                {
+                    profile.SaveProfile(deviceIndex);
+                    if (reloadProfile)
+                    {
+                        profile.FireSaved();
+                    }
+                }
+                else
+                {
+                    Global.SaveProfile(deviceIndex, profileName);
+                    if (reloadProfile)
+                    {
+                        DS4Device device = App.rootHub.DS4Controllers[deviceIndex];
+                        if (device != null)
+                        {
+                            device.HaltReportingRunAction(() =>
+                                Global.LoadProfile(deviceIndex, false, App.rootHub));
+                        }
+                    }
+                }
+            }
+
+            mainWinVM.RefreshSelectedControllerProperties();
+            if (overviewDirtyControllerIndices.Count > 0)
+            {
+                overviewProfileSaveTimer.Start();
+            }
+        }
+
+        private void ControllerOverview_EditProfileRequested(object sender, EventArgs e)
+        {
+            CompositeDeviceModel controller = mainWinVM.SelectedController;
+            if (controller == null) return;
+
+            FlushOverviewQuickSettings(controller.DevIndex);
+            ProfileEntity profile = profileListHolder.ProfileListCol
+                .SingleOrDefault(item => item.Name == controller.SelectedProfile);
+            if (profile != null)
+            {
+                ShowProfileEditor(controller.DevIndex, profile);
+            }
+        }
+
+        private void ControllerOverview_ControllerDetailsRequested(object sender, EventArgs e)
+        {
+            mainTabCon.SelectedItem = controllersTab;
+            controllerLV.SelectedItem = mainWinVM.SelectedController;
+            controllerLV.ScrollIntoView(mainWinVM.SelectedController);
+        }
+
+        private void ControllerOverview_LightbarRequested(object sender, EventArgs e)
+        {
+            mainWinVM.SelectedController?.RequestCustomColorPicker();
+        }
+
+        private void ControllerOverview_DisconnectRequested(object sender, EventArgs e)
+        {
+            mainWinVM.SelectedController?.RequestDisconnect();
         }
 
         private void MainWinVM_ProfileEditorNavigationIndexChanged(object sender, EventArgs e)
@@ -1071,7 +1203,7 @@ Suspend support not enabled.", true);
             if (navigationIndex == 9)
             {
                 editor.DeactivateLiveReadings();
-                mainTabCon.SelectedIndex = 5;
+                mainTabCon.SelectedItem = logTab;
             }
             else
             {
@@ -1154,6 +1286,7 @@ Suspend support not enabled.", true);
             int idx = Convert.ToInt32(box.Tag);
             if (idx > -1 && conLvViewModel.ControllerDict.ContainsKey(idx))
             {
+                FlushOverviewQuickSettings(idx, false);
                 CompositeDeviceModel item = conLvViewModel.ControllerDict[idx];
                 if (item.SelectedIndex > -1)
                 {
@@ -1181,6 +1314,8 @@ Suspend support not enabled.", true);
 
         private void MainDS4Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {
+            FlushOverviewQuickSettings(reloadProfile: false);
+
             if (editor != null)
             {
                 editor.Close();
@@ -1213,6 +1348,8 @@ Suspend support not enabled.", true);
 
         private void MainDS4Window_Closed(object sender, EventArgs e)
         {
+            overviewProfileSaveTimer.Stop();
+            overviewStatusRefreshTimer.Stop();
             hotkeysTimer.Stop();
             autoProfilesTimer.Stop();
             //autoProfileHolder.Save();

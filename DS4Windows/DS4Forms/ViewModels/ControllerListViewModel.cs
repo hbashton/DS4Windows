@@ -216,7 +216,33 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         private int devIndex;
 
         public DS4Device Device { get => device; set => device = value; }
-        public string SelectedProfile { get => selectedProfile; set => selectedProfile = value; }
+        public string SelectedProfile
+        {
+            get => selectedProfile;
+            private set
+            {
+                if (selectedProfile == value) return;
+                selectedProfile = value;
+                SelectedProfileChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        public event EventHandler SelectedProfileChanged;
+
+        public string ControllerDisplayName => device.DisplayName;
+
+        public string ConnectionText => device.ConnectionType switch
+        {
+            ConnectionType.USB => "USB",
+            ConnectionType.BT => "Bluetooth",
+            ConnectionType.SONYWA => "Wireless adapter",
+            _ => "Connected",
+        };
+
+        public string LatencyText => $"{device.Latency:0.00} ms";
+
+        public bool IsWireless => device.ConnectionType != ConnectionType.USB;
+
+        public bool SupportsDualSenseAudio => device.DeviceType == InputDeviceType.DualSense;
         public ProfileList ProfileEntities { get => profileListHolder; set => profileListHolder = value; }
         public ObservableCollection<ProfileEntity> ProfileListCol => profileListHolder.ProfileListCol;
 
@@ -464,7 +490,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             string prolog = string.Format(Properties.Resources.UsingProfile, (devIndex + 1).ToString(), prof, $"{device.Battery}");
             DS4Windows.AppLogger.LogToGui(prolog, false);
 
-            selectedProfile = prof;
+            SelectedProfile = prof;
             this.selectedEntity = profileListHolder.ProfileListCol.SingleOrDefault(x => x.Name == prof);
             if (this.selectedEntity != null)
             {
@@ -501,6 +527,11 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         private void SelectedEntity_ProfileSaved(object sender, EventArgs e)
         {
+            if (selectedEntity != null)
+            {
+                SelectedProfile = selectedEntity.Name;
+            }
+
             // Run profile loading in Task. Need to still wait for Task to finish
             Task.Run(() =>
             {
@@ -559,8 +590,16 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         private void CustomColorItemClick(object sender, System.Windows.RoutedEventArgs e)
         {
+            RequestCustomColorPicker();
+        }
+
+        public void RequestCustomColorPicker()
+        {
             useCustomColor = true;
-            RefreshLightContext();
+            if (lightContext?.Items.Count >= 2)
+            {
+                RefreshLightContext();
+            }
             Global.LightbarSettingsInfo[devIndex].ds4winSettings.useCustomLed = true;
             LightColorChanged?.Invoke(this, EventArgs.Empty);
             RequestColorPicker?.Invoke(this);

@@ -307,6 +307,41 @@
         </Setter>
     </Style>
 
+    <Style x:Key="BridgeSidebarControllerItemStyle" TargetType="ListBoxItem">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource ForegroundColor}" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="Padding" Value="7" />
+        <Setter Property="Margin" Value="0,2" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ListBoxItem">
+                    <Border x:Name="ControllerSelectorCard"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="Transparent" BorderThickness="1"
+                            CornerRadius="4" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="ControllerSelectorCard" Property="Background"
+                                    Value="{DynamicResource RaisedBackgroundColor}" />
+                            <Setter TargetName="ControllerSelectorCard" Property="BorderBrush"
+                                    Value="{DynamicResource BorderColor}" />
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="ControllerSelectorCard" Property="Background"
+                                    Value="#253881D8" />
+                            <Setter TargetName="ControllerSelectorCard" Property="BorderBrush"
+                                    Value="{DynamicResource AccentColor}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <Style x:Key="BridgeMainTabControlStyle" TargetType="TabControl">
         <Setter Property="TabStripPlacement" Value="Left" />
         <Setter Property="ItemContainerStyle" Value="{StaticResource BridgeNavigationTabItemStyle}" />
@@ -376,26 +411,44 @@
 
                                     <Border Grid.Row="1" Background="{DynamicResource CardBackgroundColor}"
                                             BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
-                                            CornerRadius="4" Padding="10" Margin="0,0,0,18">
+                                            CornerRadius="4" Padding="5" Margin="0,0,0,18">
                                         <Grid>
-                                            <ItemsControl x:Name="SidebarControllerList" ItemsSource="{Binding ControllerCol}" MaxHeight="110">
-                                                <ItemsControl.ItemTemplate>
+                                            <ListBox x:Name="SidebarControllerList" ItemsSource="{Binding ControllerCol}"
+                                                     SelectedItem="{Binding SelectedController, Mode=TwoWay}"
+                                                     ItemContainerStyle="{StaticResource BridgeSidebarControllerItemStyle}"
+                                                     Background="Transparent" BorderThickness="0" MaxHeight="124"
+                                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                                     ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                                <ListBox.ItemTemplate>
                                                     <DataTemplate>
-                                                        <Grid Margin="0,3">
+                                                        <Grid>
                                                             <Grid.ColumnDefinitions>
-                                                                <ColumnDefinition Width="22" />
+                                                                <ColumnDefinition Width="48" />
                                                                 <ColumnDefinition Width="*" />
                                                                 <ColumnDefinition Width="Auto" />
                                                             </Grid.ColumnDefinitions>
-                                                            <Image Source="{Binding StatusSource}" Width="15" Height="15" VerticalAlignment="Center" />
-                                                            <TextBlock Grid.Column="1" Text="{Binding IdText}" TextTrimming="CharacterEllipsis"
-                                                                       FontSize="11" Foreground="{DynamicResource ForegroundColor}" VerticalAlignment="Center" />
-                                                            <TextBlock Grid.Column="2" Text="{Binding BatteryState}" Margin="6,0,0,0"
-                                                                       FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource SuccessColor}" />
+                                                            <Image Source="{Binding ControllerImageSource}" Width="42" Height="32"
+                                                                   Stretch="Uniform" VerticalAlignment="Center"
+                                                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                                                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="3,0,6,0">
+                                                                <TextBlock Text="{Binding ControllerDisplayName}" TextTrimming="CharacterEllipsis"
+                                                                           FontSize="11" FontWeight="SemiBold"
+                                                                           Foreground="{DynamicResource ForegroundColor}" />
+                                                                <TextBlock Text="{Binding SelectedProfile, StringFormat='Profile: {0}'}"
+                                                                           TextTrimming="CharacterEllipsis" FontSize="9"
+                                                                           Foreground="{DynamicResource MutedForegroundColor}"
+                                                                           ToolTip="{Binding SelectedProfile}" />
+                                                            </StackPanel>
+                                                            <StackPanel Grid.Column="2" VerticalAlignment="Center" HorizontalAlignment="Right">
+                                                                <TextBlock Text="{Binding BatteryState}" FontSize="10" FontWeight="SemiBold"
+                                                                           Foreground="{DynamicResource SuccessColor}" HorizontalAlignment="Right" />
+                                                                <Image Source="{Binding StatusSource}" Width="12" Height="12"
+                                                                       Margin="0,3,0,0" HorizontalAlignment="Right" />
+                                                            </StackPanel>
                                                         </Grid>
                                                     </DataTemplate>
-                                                </ItemsControl.ItemTemplate>
-                                            </ItemsControl>
+                                                </ListBox.ItemTemplate>
+                                            </ListBox>
                                             <TextBlock Text="Connect a controller to begin" TextWrapping="Wrap"
                                                        Foreground="{DynamicResource MutedForegroundColor}" FontSize="11">
                                                 <TextBlock.Style>

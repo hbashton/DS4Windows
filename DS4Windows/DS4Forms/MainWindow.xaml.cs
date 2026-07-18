@@ -73,6 +73,8 @@ namespace DS4WinWPF.DS4Forms
         private NonFormTimer autoProfilesTimer;
         private AutoProfileChecker autoprofileChecker;
         private ProfileEditor editor;
+        private int profileEditorReturnTabIndex = 1;
+        private bool profileEditorNavigationChanging;
         private bool preserveSize = true;
         private Size oldSize;
         private bool contextclose;
@@ -94,6 +96,7 @@ namespace DS4WinWPF.DS4Forms
 
             mainWinVM = new MainWindowsViewModel();
             DataContext = mainWinVM;
+            mainWinVM.ProfileEditorNavigationIndexChanged += MainWinVM_ProfileEditorNavigationIndexChanged;
 
             App root = Application.Current as App;
             settingsWrapVM = new SettingsViewModel();
@@ -978,6 +981,13 @@ Suspend support not enabled.", true);
 
         private void MainTabCon_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            if (mainWinVM?.ProfileEditorMode == true &&
+                mainTabCon.SelectedIndex != 1 && mainTabCon.SelectedIndex != 5)
+            {
+                mainTabCon.SelectedItem = profilesTab;
+                return;
+            }
+
             if (mainTabCon.SelectedIndex == 4)
             {
                 lastMsgLb.Visibility = Visibility.Hidden;
@@ -985,6 +995,88 @@ Suspend support not enabled.", true);
             else
             {
                 lastMsgLb.Visibility = Visibility.Visible;
+            }
+        }
+
+        private void MainWinVM_ProfileEditorNavigationIndexChanged(object sender, EventArgs e)
+        {
+            if (profileEditorNavigationChanging || !mainWinVM.ProfileEditorMode || editor == null)
+            {
+                return;
+            }
+
+            NavigateProfileEditor(mainWinVM.ProfileEditorNavigationIndex);
+        }
+
+        private void NavigateProfileEditor(int navigationIndex)
+        {
+            if (editor == null)
+            {
+                return;
+            }
+
+            if (navigationIndex == 0)
+            {
+                editor.CancelEdit();
+                return;
+            }
+
+            string title;
+            string description;
+            switch (navigationIndex)
+            {
+                case 1:
+                    title = "Button Mapping";
+                    description = "Assign controller buttons, sticks, touch gestures, and shortcuts.";
+                    break;
+                case 2:
+                    title = "Special Actions";
+                    description = "Create macros, profile shifts, program launches, and multi-action shortcuts.";
+                    break;
+                case 3:
+                    title = "Controller Readings";
+                    description = "Inspect live sticks, triggers, motion sensors, and input calibration.";
+                    break;
+                case 4:
+                    title = "Axis Config";
+                    description = "Tune sticks, triggers, dead zones, curves, and motion axes.";
+                    break;
+                case 5:
+                    title = "Lightbar";
+                    description = "Set profile colors, battery feedback, flashing, and charging behavior.";
+                    break;
+                case 6:
+                    title = "Touchpad";
+                    description = "Configure mouse control, gestures, passthrough, and absolute positioning.";
+                    break;
+                case 7:
+                    title = "Gyro";
+                    description = "Configure motion aiming, steering, mouse control, and directional swipes.";
+                    break;
+                case 8:
+                    title = "Advanced";
+                    description = "Manage output devices, rumble, audio, latency, compatibility, and custom hooks.";
+                    break;
+                case 9:
+                    title = "Log";
+                    description = "View live service events without leaving the profile editing workspace.";
+                    break;
+                default:
+                    return;
+            }
+
+            mainWinVM.ProfileEditorSectionTitle = title;
+            mainWinVM.ProfileEditorSectionDescription = description;
+
+            if (navigationIndex == 9)
+            {
+                editor.DeactivateLiveReadings();
+                mainTabCon.SelectedIndex = 5;
+            }
+            else
+            {
+                mainTabCon.SelectedItem = profilesTab;
+                editor.SelectWorkspaceSection(navigationIndex - 1);
             }
         }
 
@@ -1474,7 +1566,6 @@ Suspend support not enabled.", true);
             {
                 ProfileEntity entity = profileListHolder.ProfileListCol[item.SelectedIndex];
                 ShowProfileEditor(idx, entity);
-                mainTabCon.SelectedIndex = 1;
             }
         }
 
@@ -1484,7 +1575,6 @@ Suspend support not enabled.", true);
             int idx = Convert.ToInt32(temp.Tag);
             controllerLV.SelectedIndex = idx;
             ShowProfileEditor(idx, null);
-            mainTabCon.SelectedIndex = 1;
             //controllerLV.Focus();
         }
 
@@ -1790,11 +1880,12 @@ Suspend support not enabled.", true);
 
         private void ProfileEditor_Closed(object sender, EventArgs e)
         {
-            profDockPanel.Children.Remove(editor);
+            ProfileEditor closingEditor = sender as ProfileEditor ?? editor;
+            profDockPanel.Children.Remove(closingEditor);
             profOptsToolbar.Visibility = Visibility.Visible;
             profilesListBox.Visibility = Visibility.Visible;
             preserveSize = true;
-            if (!editor.Keepsize)
+            if (closingEditor != null && !closingEditor.Keepsize)
             {
                 this.Width = oldSize.Width;
                 this.Height = oldSize.Height;
@@ -1805,8 +1896,10 @@ Suspend support not enabled.", true);
             }
 
             editor = null;
-            mainTabCon.SelectedIndex = 0;
+            mainWinVM.ProfileEditorMode = false;
+            mainWinVM.EditingProfileName = "Profile";
             mainWinVM.FullTabsEnabled = true;
+            mainTabCon.SelectedIndex = profileEditorReturnTabIndex;
             //Task.Run(() => GC.Collect(0, GCCollectionMode.Forced, false));
         }
 
@@ -1819,6 +1912,7 @@ Suspend support not enabled.", true);
         {
             if (editor == null)
             {
+                profileEditorReturnTabIndex = mainTabCon.SelectedIndex;
                 profOptsToolbar.Visibility = Visibility.Collapsed;
                 profilesListBox.Visibility = Visibility.Collapsed;
                 mainWinVM.FullTabsEnabled = false;
@@ -1839,10 +1933,28 @@ Suspend support not enabled.", true);
                 editor = new ProfileEditor(device);
                 editor.CreatedProfile += Editor_CreatedProfile;
                 editor.Closed += ProfileEditor_Closed;
+                editor.ProfileNameChanged += Editor_ProfileNameChanged;
                 profDockPanel.Children.Add(editor);
                 editor.Reload(device, entity);
+
+                mainWinVM.EditingProfileName = editor.ProfileName;
+                mainWinVM.ProfileEditorMode = true;
+                mainTabCon.SelectedItem = profilesTab;
+
+                profileEditorNavigationChanging = true;
+                mainWinVM.ProfileEditorNavigationIndex = 1;
+                profileEditorNavigationChanging = false;
+                NavigateProfileEditor(1);
             }
             
+        }
+
+        private void Editor_ProfileNameChanged(object sender, EventArgs e)
+        {
+            if (sender is ProfileEditor activeEditor && mainWinVM.ProfileEditorMode)
+            {
+                mainWinVM.EditingProfileName = activeEditor.ProfileName;
+            }
         }
 
         private void Editor_CreatedProfile(ProfileEditor sender, string profile)

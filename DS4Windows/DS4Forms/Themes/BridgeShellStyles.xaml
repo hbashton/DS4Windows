@@ -261,6 +261,52 @@
         </Setter>
     </Style>
 
+    <Style x:Key="BridgeEditorNavigationListItemStyle" TargetType="ListBoxItem">
+        <Setter Property="Foreground" Value="{DynamicResource MutedForegroundColor}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="Padding" Value="10,7" />
+        <Setter Property="Margin" Value="0,1" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ListBoxItem">
+                    <Border x:Name="EditorNavItem" Background="{TemplateBinding Background}"
+                            BorderBrush="Transparent" BorderThickness="3,0,0,0"
+                            CornerRadius="3" Padding="{TemplateBinding Padding}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="24" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="EditorNavGlyph" Text="{TemplateBinding Tag}"
+                                       Foreground="{DynamicResource MutedForegroundColor}"
+                                       FontSize="13" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1">
+                                <ContentPresenter VerticalAlignment="Center" />
+                                <TextBlock Text="{TemplateBinding ToolTip}" Margin="0,1,0,0"
+                                           FontSize="9" TextTrimming="CharacterEllipsis"
+                                           Foreground="{DynamicResource MutedForegroundColor}" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="EditorNavItem" Property="Background" Value="{DynamicResource RaisedBackgroundColor}" />
+                            <Setter Property="Foreground" Value="{DynamicResource ForegroundColor}" />
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="EditorNavItem" Property="Background" Value="{DynamicResource NavigationSelectionColor}" />
+                            <Setter TargetName="EditorNavItem" Property="BorderBrush" Value="{DynamicResource AccentColor}" />
+                            <Setter TargetName="EditorNavGlyph" Property="Foreground" Value="{DynamicResource AccentColor}" />
+                            <Setter Property="Foreground" Value="{DynamicResource ForegroundColor}" />
+                            <Setter Property="FontWeight" Value="SemiBold" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <Style x:Key="BridgeMainTabControlStyle" TargetType="TabControl">
         <Setter Property="TabStripPlacement" Value="Left" />
         <Setter Property="ItemContainerStyle" Value="{StaticResource BridgeNavigationTabItemStyle}" />
@@ -275,83 +321,195 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
 
-                        <Border Background="{DynamicResource SidebarBackgroundColor}"
-                                BorderBrush="{DynamicResource BorderColor}"
-                                BorderThickness="0,0,1,0">
-                            <Grid Margin="18,18,18,14">
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="*" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
+                        <Grid>
+                            <Border Background="{DynamicResource SidebarBackgroundColor}"
+                                    BorderBrush="{DynamicResource BorderColor}"
+                                    BorderThickness="0,0,1,0">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Opacity" Value="1" />
+                                        <Setter Property="IsHitTestVisible" Value="True" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding ProfileEditorMode}" Value="True">
+                                                <Setter Property="Opacity" Value="0" />
+                                                <Setter Property="IsHitTestVisible" Value="False" />
+                                                <DataTrigger.EnterActions>
+                                                    <BeginStoryboard>
+                                                        <Storyboard>
+                                                            <DoubleAnimation Storyboard.TargetProperty="Opacity" From="1" To="0" Duration="0:0:0.16" />
+                                                        </Storyboard>
+                                                    </BeginStoryboard>
+                                                </DataTrigger.EnterActions>
+                                                <DataTrigger.ExitActions>
+                                                    <BeginStoryboard>
+                                                        <Storyboard>
+                                                            <DoubleAnimation Storyboard.TargetProperty="Opacity" From="0" To="1" Duration="0:0:0.18" />
+                                                        </Storyboard>
+                                                    </BeginStoryboard>
+                                                </DataTrigger.ExitActions>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <Grid Margin="18,18,18,14">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
 
-                                <StackPanel Orientation="Horizontal" Margin="4,0,0,20">
-                                    <Border Width="30" Height="30" CornerRadius="5"
-                                            Background="{DynamicResource AccentColor}" Margin="0,0,10,0">
-                                        <TextBlock Text="D" Foreground="White" FontSize="17" FontWeight="Bold"
-                                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    <StackPanel Orientation="Horizontal" Margin="4,0,0,20">
+                                        <Border Width="30" Height="30" CornerRadius="5"
+                                                Background="{DynamicResource AccentColor}" Margin="0,0,10,0">
+                                            <TextBlock Text="D" Foreground="White" FontSize="17" FontWeight="Bold"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="DS4Windows" FontSize="17" FontWeight="SemiBold"
+                                                       Foreground="{DynamicResource ForegroundColor}" />
+                                            <TextBlock Text="Controller companion" FontSize="10"
+                                                       Foreground="{DynamicResource MutedForegroundColor}" />
+                                        </StackPanel>
+                                    </StackPanel>
+
+                                    <Border Grid.Row="1" Background="{DynamicResource CardBackgroundColor}"
+                                            BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
+                                            CornerRadius="4" Padding="10" Margin="0,0,0,18">
+                                        <Grid>
+                                            <ItemsControl x:Name="SidebarControllerList" ItemsSource="{Binding ControllerCol}" MaxHeight="110">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Grid Margin="0,3">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="22" />
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <Image Source="{Binding StatusSource}" Width="15" Height="15" VerticalAlignment="Center" />
+                                                            <TextBlock Grid.Column="1" Text="{Binding IdText}" TextTrimming="CharacterEllipsis"
+                                                                       FontSize="11" Foreground="{DynamicResource ForegroundColor}" VerticalAlignment="Center" />
+                                                            <TextBlock Grid.Column="2" Text="{Binding BatteryState}" Margin="6,0,0,0"
+                                                                       FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource SuccessColor}" />
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                            <TextBlock Text="Connect a controller to begin" TextWrapping="Wrap"
+                                                       Foreground="{DynamicResource MutedForegroundColor}" FontSize="11">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding ElementName=SidebarControllerList, Path=HasItems}" Value="False">
+                                                                <Setter Property="Visibility" Value="Visible" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </Grid>
                                     </Border>
-                                    <StackPanel VerticalAlignment="Center">
-                                        <TextBlock Text="DS4Windows" FontSize="17" FontWeight="SemiBold"
-                                                   Foreground="{DynamicResource ForegroundColor}" />
-                                        <TextBlock Text="Controller companion" FontSize="10"
+
+                                    <TextBlock Grid.Row="2" Text="NAVIGATION" Margin="10,0,0,8"
+                                               FontSize="10" FontWeight="Bold"
+                                               Foreground="{DynamicResource MutedForegroundColor}" />
+                                    <TabPanel Grid.Row="3" IsItemsHost="True" KeyboardNavigation.TabNavigation="Once" />
+
+                                    <StackPanel Grid.Row="4" Margin="8,14,8,0">
+                                        <Separator Background="{DynamicResource BorderColor}" Margin="0,0,0,12" />
+                                        <TextBlock Text="All legacy features remain available"
+                                                   TextWrapping="Wrap" FontSize="10"
                                                    Foreground="{DynamicResource MutedForegroundColor}" />
                                     </StackPanel>
-                                </StackPanel>
+                                </Grid>
+                            </Border>
 
-                                <Border Grid.Row="1" Background="{DynamicResource CardBackgroundColor}"
-                                        BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
-                                        CornerRadius="4" Padding="10" Margin="0,0,0,18">
-                                    <Grid>
-                                        <ItemsControl x:Name="SidebarControllerList" ItemsSource="{Binding ControllerCol}" MaxHeight="110">
-                                            <ItemsControl.ItemTemplate>
-                                                <DataTemplate>
-                                                    <Grid Margin="0,3">
-                                                        <Grid.ColumnDefinitions>
-                                                            <ColumnDefinition Width="22" />
-                                                            <ColumnDefinition Width="*" />
-                                                            <ColumnDefinition Width="Auto" />
-                                                        </Grid.ColumnDefinitions>
-                                                        <Image Source="{Binding StatusSource}" Width="15" Height="15" VerticalAlignment="Center" />
-                                                        <TextBlock Grid.Column="1" Text="{Binding IdText}" TextTrimming="CharacterEllipsis"
-                                                                   FontSize="11" Foreground="{DynamicResource ForegroundColor}" VerticalAlignment="Center" />
-                                                        <TextBlock Grid.Column="2" Text="{Binding BatteryState}" Margin="6,0,0,0"
-                                                                   FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource SuccessColor}" />
-                                                    </Grid>
-                                                </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
-                                        <TextBlock Text="Connect a controller to begin" TextWrapping="Wrap"
-                                                   Foreground="{DynamicResource MutedForegroundColor}" FontSize="11">
-                                            <TextBlock.Style>
-                                                <Style TargetType="TextBlock">
-                                                    <Setter Property="Visibility" Value="Collapsed" />
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding ElementName=SidebarControllerList, Path=HasItems}" Value="False">
-                                                            <Setter Property="Visibility" Value="Visible" />
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </TextBlock.Style>
-                                        </TextBlock>
-                                    </Grid>
-                                </Border>
+                            <Border Panel.ZIndex="1" Background="{DynamicResource SidebarBackgroundColor}"
+                                    BorderBrush="{DynamicResource BorderColor}" BorderThickness="0,0,1,0">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Opacity" Value="0" />
+                                        <Setter Property="IsHitTestVisible" Value="False" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding ProfileEditorMode}" Value="True">
+                                                <Setter Property="Opacity" Value="1" />
+                                                <Setter Property="IsHitTestVisible" Value="True" />
+                                                <DataTrigger.EnterActions>
+                                                    <BeginStoryboard>
+                                                        <Storyboard>
+                                                            <DoubleAnimation Storyboard.TargetProperty="Opacity" From="0" To="1" Duration="0:0:0.20" />
+                                                        </Storyboard>
+                                                    </BeginStoryboard>
+                                                </DataTrigger.EnterActions>
+                                                <DataTrigger.ExitActions>
+                                                    <BeginStoryboard>
+                                                        <Storyboard>
+                                                            <DoubleAnimation Storyboard.TargetProperty="Opacity" From="1" To="0" Duration="0:0:0.14" />
+                                                        </Storyboard>
+                                                    </BeginStoryboard>
+                                                </DataTrigger.ExitActions>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <Grid Margin="18,18,18,14">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
 
-                                <TextBlock Grid.Row="2" Text="NAVIGATION" Margin="10,0,0,8"
-                                           FontSize="10" FontWeight="Bold"
-                                           Foreground="{DynamicResource MutedForegroundColor}" />
-                                <TabPanel Grid.Row="3" IsItemsHost="True" KeyboardNavigation.TabNavigation="Once" />
+                                    <StackPanel Orientation="Horizontal" Margin="4,0,0,16">
+                                        <Border Width="30" Height="30" CornerRadius="5"
+                                                Background="{DynamicResource AccentColor}" Margin="0,0,10,0">
+                                            <TextBlock Text="P" Foreground="White" FontSize="17" FontWeight="Bold"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="Profile Editor" FontSize="17" FontWeight="SemiBold"
+                                                       Foreground="{DynamicResource ForegroundColor}" />
+                                            <TextBlock Text="Focused workspace" FontSize="10"
+                                                       Foreground="{DynamicResource MutedForegroundColor}" />
+                                        </StackPanel>
+                                    </StackPanel>
 
-                                <StackPanel Grid.Row="4" Margin="8,14,8,0">
-                                    <Separator Background="{DynamicResource BorderColor}" Margin="0,0,0,12" />
-                                    <TextBlock Text="All legacy features remain available"
-                                               TextWrapping="Wrap" FontSize="10"
+                                    <Border Grid.Row="1" Background="{DynamicResource CardBackgroundColor}"
+                                            BorderBrush="{DynamicResource AccentColor}" BorderThickness="1"
+                                            CornerRadius="4" Padding="11" Margin="0,0,0,14">
+                                        <StackPanel>
+                                            <TextBlock Text="EDITING PROFILE" FontSize="9" FontWeight="Bold"
+                                                       Foreground="{DynamicResource AccentColor}" />
+                                            <TextBlock Text="{Binding EditingProfileName}" Margin="0,4,0,0"
+                                                       FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                                                       Foreground="{DynamicResource ForegroundColor}" />
+                                        </StackPanel>
+                                    </Border>
+
+                                    <TextBlock Grid.Row="2" Text="PROFILE WORKSPACE" Margin="10,0,0,7"
+                                               FontSize="10" FontWeight="Bold"
                                                Foreground="{DynamicResource MutedForegroundColor}" />
-                                </StackPanel>
-                            </Grid>
-                        </Border>
+
+                                    <ListBox Grid.Row="3" Background="Transparent" BorderThickness="0"
+                                             SelectedIndex="{Binding ProfileEditorNavigationIndex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                             ItemContainerStyle="{StaticResource BridgeEditorNavigationListItemStyle}"
+                                             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                        <ListBoxItem Content="Back to Profiles" Tag="&#x2190;" ToolTip="Cancel editing and return to the profile list" />
+                                        <ListBoxItem Content="Button Mapping" Tag="&#x25A3;" ToolTip="Buttons, sticks, touch gestures, and shortcuts" />
+                                        <ListBoxItem Content="Special Actions" Tag="&#x2726;" ToolTip="Macros, launches, shifts, and multi-actions" />
+                                        <ListBoxItem Content="Controller Readings" Tag="&#x223F;" ToolTip="Live inputs and calibration" />
+                                        <ListBoxItem Content="Axis Config" Tag="&#x2194;" ToolTip="Sticks, triggers, dead zones, and curves" />
+                                        <ListBoxItem Content="Lightbar" Tag="&#x25C9;" ToolTip="Color, battery, flash, and charging" />
+                                        <ListBoxItem Content="Touchpad" Tag="&#x25A1;" ToolTip="Mouse, gestures, passthrough, and positioning" />
+                                        <ListBoxItem Content="Gyro" Tag="&#x25CE;" ToolTip="Motion aiming, steering, and swipes" />
+                                        <ListBoxItem Content="Advanced" Tag="&#x2699;" ToolTip="Output, rumble, latency, and compatibility" />
+                                        <ListBoxItem Content="Log" Tag="&#x2261;" ToolTip="Service events without leaving the editor" />
+                                    </ListBox>
+                                </Grid>
+                            </Border>
+                        </Grid>
 
                         <Grid Grid.Column="1">
                             <Grid.RowDefinitions>
@@ -360,14 +518,43 @@
                             </Grid.RowDefinitions>
                             <Border BorderBrush="{DynamicResource BorderColor}" BorderThickness="0,0,0,1"
                                     Padding="28,16" Background="{DynamicResource SurfaceBackgroundColor}">
-                                <StackPanel VerticalAlignment="Center">
-                                    <ContentControl Content="{Binding SelectedItem.Header, RelativeSource={RelativeSource TemplatedParent}}"
-                                                    Foreground="{DynamicResource ForegroundColor}"
-                                                    FontSize="24" FontWeight="SemiBold" />
-                                    <TextBlock Text="{Binding SelectedItem.Tag, RelativeSource={RelativeSource TemplatedParent}}"
-                                               Margin="0,3,0,0" FontSize="12"
-                                               Foreground="{DynamicResource MutedForegroundColor}" />
-                                </StackPanel>
+                                <Grid>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <StackPanel.Style>
+                                            <Style TargetType="StackPanel">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding ProfileEditorMode}" Value="True">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </StackPanel.Style>
+                                        <ContentControl Content="{Binding SelectedItem.Header, RelativeSource={RelativeSource TemplatedParent}}"
+                                                        Foreground="{DynamicResource ForegroundColor}"
+                                                        FontSize="24" FontWeight="SemiBold" />
+                                        <TextBlock Text="{Binding SelectedItem.Tag, RelativeSource={RelativeSource TemplatedParent}}"
+                                                   Margin="0,3,0,0" FontSize="12"
+                                                   Foreground="{DynamicResource MutedForegroundColor}" />
+                                    </StackPanel>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <StackPanel.Style>
+                                            <Style TargetType="StackPanel">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding ProfileEditorMode}" Value="True">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </StackPanel.Style>
+                                        <TextBlock Text="{Binding ProfileEditorSectionTitle}"
+                                                   Foreground="{DynamicResource ForegroundColor}"
+                                                   FontSize="24" FontWeight="SemiBold" />
+                                        <TextBlock Text="{Binding ProfileEditorSectionDescription}"
+                                                   Margin="0,3,0,0" FontSize="12"
+                                                   Foreground="{DynamicResource MutedForegroundColor}" />
+                                    </StackPanel>
+                                </Grid>
                             </Border>
                             <ContentPresenter Grid.Row="1" x:Name="PART_SelectedContentHost"
                                               ContentSource="SelectedContent" Margin="28,22" />
@@ -413,32 +600,14 @@
     </Style>
 
     <Style x:Key="BridgeProfileTabControlStyle" TargetType="TabControl">
-        <Setter Property="TabStripPlacement" Value="Left" />
-        <Setter Property="ItemContainerStyle" Value="{StaticResource BridgeProfileTabItemStyle}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource BorderColor}" />
-        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Background" Value="{DynamicResource SurfaceBackgroundColor}" />
+        <Setter Property="BorderThickness" Value="0" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="TabControl">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="168" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <Border Background="{DynamicResource SidebarBackgroundColor}"
-                                BorderBrush="{DynamicResource BorderColor}" BorderThickness="0,0,1,0"
-                                Padding="10">
-                            <StackPanel>
-                                <TextBlock Text="PROFILE SETTINGS" Margin="8,4,0,10"
-                                           FontSize="10" FontWeight="Bold"
-                                           Foreground="{DynamicResource MutedForegroundColor}" />
-                                <TabPanel IsItemsHost="True" />
-                            </StackPanel>
-                        </Border>
-                        <Border Grid.Column="1" Background="{DynamicResource SurfaceBackgroundColor}" Padding="14">
-                            <ContentPresenter ContentSource="SelectedContent" />
-                        </Border>
-                    </Grid>
+                    <Border Background="{TemplateBinding Background}">
+                        <ContentPresenter ContentSource="SelectedContent" />
+                    </Border>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>

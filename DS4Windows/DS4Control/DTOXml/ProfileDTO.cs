@@ -779,6 +779,19 @@ namespace DS4WinWPF.DS4Control.DTOXml
             set => _dualSenseMuteButtonLightEnabled = XmlDataUtilities.StrToBool(value);
         }
 
+        private bool _dualSenseMuteButtonMutesMicrophone;
+        [XmlElement("DualSenseMuteButtonMutesMicrophone")]
+        public string DualSenseMuteButtonMutesMicrophoneString
+        {
+            get => _dualSenseMuteButtonMutesMicrophone.ToString();
+            set => _dualSenseMuteButtonMutesMicrophone = XmlDataUtilities.StrToBool(value);
+        }
+
+        public bool ShouldSerializeDualSenseMuteButtonMutesMicrophoneString()
+        {
+            return _dualSenseMuteButtonMutesMicrophone;
+        }
+
         [XmlElement("DualSenseMuteOnProfileName")]
         public string DualSenseMuteOnProfileName
         {
@@ -1669,6 +1682,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
             _gameBarHomeButtonSupport = source.gameBarHomeButtonSupport[deviceIndex];
             GameBarProfileName = source.gameBarProfileName[deviceIndex];
             _dualSenseMuteButtonLightEnabled = source.dualSenseMuteButtonLightEnabled[deviceIndex];
+            _dualSenseMuteButtonMutesMicrophone = source.dualSenseMuteButtonMutesMicrophone[deviceIndex];
             DualSenseMuteOnProfileName = source.dualSenseMuteOnProfileName[deviceIndex];
             DualSenseMuteOffProfileName = source.dualSenseMuteOffProfileName[deviceIndex];
             _dinputOnly = source.dinputOnly[deviceIndex];
@@ -1800,6 +1814,10 @@ namespace DS4WinWPF.DS4Control.DTOXml
                 {
                     EnableSpeakerOutput = source.dualSenseEnableSpeakerOutput[deviceIndex],
                     SpeakerVolume = source.dualSenseSpeakerVolume[deviceIndex],
+                    SpeakerCompression = Math.Min(source.dualSenseSpeakerCompression[deviceIndex],
+                        (byte)DualSenseSpeakerCompression.Strong),
+                    SpeakerBassBoost = Math.Min(source.dualSenseSpeakerBassBoost[deviceIndex],
+                        DualSenseSpeakerProcessor.MaximumBassBoostDb),
                     HeadphoneVolume = source.dualSenseHeadphoneVolume[deviceIndex],
                     MicrophoneVolume = source.dualSenseMicrophoneVolume[deviceIndex],
                     MicrophoneNoiseSuppression = source.dualSenseMicrophoneNoiseSuppression[deviceIndex],
@@ -2277,6 +2295,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
             destination.gameBarHomeButtonSupport[deviceIndex] = _gameBarHomeButtonSupport;
             destination.gameBarProfileName[deviceIndex] = GameBarProfileName ?? string.Empty;
             destination.dualSenseMuteButtonLightEnabled[deviceIndex] = _dualSenseMuteButtonLightEnabled;
+            destination.dualSenseMuteButtonMutesMicrophone[deviceIndex] = _dualSenseMuteButtonMutesMicrophone;
             destination.dualSenseMuteOnProfileName[deviceIndex] = DualSenseMuteOnProfileName ?? string.Empty;
             destination.dualSenseMuteOffProfileName[deviceIndex] = DualSenseMuteOffProfileName ?? string.Empty;
             destination.dinputOnly[deviceIndex] = _dinputOnly;
@@ -2433,6 +2452,12 @@ namespace DS4WinWPF.DS4Control.DTOXml
                 {
                     destination.dualSenseEnableSpeakerOutput[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.EnableSpeakerOutput;
                     destination.dualSenseSpeakerVolume[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.SpeakerVolume;
+                    destination.dualSenseSpeakerCompression[deviceIndex] = Math.Min(
+                        DualSenseControllerSettings.AudioSettingsGroup.SpeakerCompression,
+                        (byte)DualSenseSpeakerCompression.Strong);
+                    destination.dualSenseSpeakerBassBoost[deviceIndex] = Math.Min(
+                        DualSenseControllerSettings.AudioSettingsGroup.SpeakerBassBoost,
+                        DualSenseSpeakerProcessor.MaximumBassBoostDb);
                     destination.dualSenseHeadphoneVolume[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.HeadphoneVolume;
                     destination.dualSenseMicrophoneVolume[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.MicrophoneVolume;
                     destination.dualSenseMicrophoneNoiseSuppression[deviceIndex] = Math.Min(
@@ -3234,6 +3259,18 @@ namespace DS4WinWPF.DS4Control.DTOXml
             {
                 get; set;
             } = 128;
+
+            [XmlElement("SpeakerCompression")]
+            public byte SpeakerCompression
+            {
+                get; set;
+            }
+
+            [XmlElement("SpeakerBassBoost")]
+            public byte SpeakerBassBoost
+            {
+                get; set;
+            }
 
             [XmlElement("HeadphoneVolume")]
             public byte HeadphoneVolume

@@ -2619,6 +2619,18 @@ namespace DS4Windows
             set => m_Config.dualSenseSpeakerVolume = value;
         }
 
+        public static byte[] DualSenseSpeakerCompression
+        {
+            get => m_Config.dualSenseSpeakerCompression;
+            set => m_Config.dualSenseSpeakerCompression = value;
+        }
+
+        public static byte[] DualSenseSpeakerBassBoost
+        {
+            get => m_Config.dualSenseSpeakerBassBoost;
+            set => m_Config.dualSenseSpeakerBassBoost = value;
+        }
+
         public static byte[] DualSenseHeadphoneVolume
         {
             get => m_Config.dualSenseHeadphoneVolume;
@@ -2683,6 +2695,12 @@ namespace DS4Windows
         {
             get => m_Config.dualSenseMuteButtonLightEnabled;
             set => m_Config.dualSenseMuteButtonLightEnabled = value;
+        }
+
+        public static bool[] DualSenseMuteButtonMutesMicrophone
+        {
+            get => m_Config.dualSenseMuteButtonMutesMicrophone;
+            set => m_Config.dualSenseMuteButtonMutesMicrophone = value;
         }
 
         public static string[] DualSenseMuteOnProfileName
@@ -3482,6 +3500,14 @@ namespace DS4Windows
             return versionMatch.Success && Version.TryParse(versionMatch.Value, out version);
         }
 
+        private static bool IsStableRelease(GithubRelease release)
+        {
+            if (release is null || release.PreRelease) return false;
+
+            string tagName = release.TagName ?? string.Empty;
+            return !Regex.IsMatch(tagName, @"(?i)(alpha|beta|preview|pre-release|prerelease|rc)");
+        }
+
         // Much more compact and elegant way of checking if there is a new update available than the
         // shenanigans with fetching newest.txt and using a .txt file as a DTO instead of simply
         // passing a string to the function that displays the updater window.
@@ -3509,6 +3535,7 @@ namespace DS4Windows
 
                 foreach (var release in task.Result ?? Array.Empty<GithubRelease>())
                 {
+                    if (!IsStableRelease(release)) continue;
                     if (!TryParseReleaseVersion(release.TagName, out var parsedVersion)) continue;
                     if (parsedVersion > version) version = parsedVersion;
                 }
@@ -3545,6 +3572,7 @@ namespace DS4Windows
 
             foreach (var release in releases)
             {
+                if (!IsStableRelease(release)) continue;
                 if (!TryParseReleaseVersion(release.TagName, out var parsedVersion)) continue;
 
                 if (!allVersions && parsedVersion <= currentVersion) break;
@@ -3858,6 +3886,8 @@ namespace DS4Windows
         };
         public bool[] dualSenseEnableSpeakerOutput = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
         public byte[] dualSenseSpeakerVolume = new byte[Global.TEST_PROFILE_ITEM_COUNT] { 128, 128, 128, 128, 128, 128, 128, 128, 128 };
+        public byte[] dualSenseSpeakerCompression = new byte[Global.TEST_PROFILE_ITEM_COUNT];
+        public byte[] dualSenseSpeakerBassBoost = new byte[Global.TEST_PROFILE_ITEM_COUNT];
         public byte[] dualSenseHeadphoneVolume = new byte[Global.TEST_PROFILE_ITEM_COUNT] { 128, 128, 128, 128, 128, 128, 128, 128, 128 };
         public byte[] dualSenseMicrophoneVolume = new byte[Global.TEST_PROFILE_ITEM_COUNT] { 128, 128, 128, 128, 128, 128, 128, 128, 128 };
         public byte[] dualSenseMicrophoneNoiseSuppression = new byte[Global.TEST_PROFILE_ITEM_COUNT] { 1, 1, 1, 1, 1, 1, 1, 1, 1 };
@@ -3869,6 +3899,7 @@ namespace DS4Windows
         public bool[] gameBarHomeButtonSupport = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
         public string[] gameBarProfileName = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
         public bool[] dualSenseMuteButtonLightEnabled = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
+        public bool[] dualSenseMuteButtonMutesMicrophone = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
         public string[] dualSenseMuteOnProfileName = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
         public string[] dualSenseMuteOffProfileName = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
         //
@@ -4815,6 +4846,7 @@ namespace DS4Windows
                 XmlNode xmlGameBarHomeButtonSupport = m_Xdoc.CreateNode(XmlNodeType.Element, "GameBarHomeButtonSupport", null); xmlGameBarHomeButtonSupport.InnerText = gameBarHomeButtonSupport[device].ToString(); rootElement.AppendChild(xmlGameBarHomeButtonSupport);
                 XmlNode xmlGameBarProfileName = m_Xdoc.CreateNode(XmlNodeType.Element, "GameBarProfileName", null); xmlGameBarProfileName.InnerText = gameBarProfileName[device]; rootElement.AppendChild(xmlGameBarProfileName);
                 XmlNode xmlDualSenseMuteButtonLightEnabled = m_Xdoc.CreateNode(XmlNodeType.Element, "DualSenseMuteButtonLightEnabled", null); xmlDualSenseMuteButtonLightEnabled.InnerText = dualSenseMuteButtonLightEnabled[device].ToString(); rootElement.AppendChild(xmlDualSenseMuteButtonLightEnabled);
+                XmlNode xmlDualSenseMuteButtonMutesMicrophone = m_Xdoc.CreateNode(XmlNodeType.Element, "DualSenseMuteButtonMutesMicrophone", null); xmlDualSenseMuteButtonMutesMicrophone.InnerText = dualSenseMuteButtonMutesMicrophone[device].ToString(); rootElement.AppendChild(xmlDualSenseMuteButtonMutesMicrophone);
                 XmlNode xmlDualSenseMuteOnProfileName = m_Xdoc.CreateNode(XmlNodeType.Element, "DualSenseMuteOnProfileName", null); xmlDualSenseMuteOnProfileName.InnerText = dualSenseMuteOnProfileName[device]; rootElement.AppendChild(xmlDualSenseMuteOnProfileName);
                 XmlNode xmlDualSenseMuteOffProfileName = m_Xdoc.CreateNode(XmlNodeType.Element, "DualSenseMuteOffProfileName", null); xmlDualSenseMuteOffProfileName.InnerText = dualSenseMuteOffProfileName[device]; rootElement.AppendChild(xmlDualSenseMuteOffProfileName);
                 XmlNode xmlDinput = m_Xdoc.CreateNode(XmlNodeType.Element, "DinputOnly", null); xmlDinput.InnerText = dinputOnly[device].ToString(); rootElement.AppendChild(xmlDinput);
@@ -5039,6 +5071,8 @@ namespace DS4Windows
                 XmlElement xmlDSAudioGroupElement = m_Xdoc.CreateElement("AudioSettings"); xmlDualSenseControllerSettingsElement.AppendChild(xmlDSAudioGroupElement);
                 XmlNode xmlDSEnableSpeakerOutputElement = m_Xdoc.CreateNode(XmlNodeType.Element, "EnableSpeakerOutput", null); xmlDSEnableSpeakerOutputElement.InnerText = dualSenseEnableSpeakerOutput[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSEnableSpeakerOutputElement);
                 XmlNode xmlDSSpeakerVolumeElement = m_Xdoc.CreateNode(XmlNodeType.Element, "SpeakerVolume", null); xmlDSSpeakerVolumeElement.InnerText = dualSenseSpeakerVolume[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSSpeakerVolumeElement);
+                XmlNode xmlDSSpeakerCompressionElement = m_Xdoc.CreateNode(XmlNodeType.Element, "SpeakerCompression", null); xmlDSSpeakerCompressionElement.InnerText = dualSenseSpeakerCompression[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSSpeakerCompressionElement);
+                XmlNode xmlDSSpeakerBassBoostElement = m_Xdoc.CreateNode(XmlNodeType.Element, "SpeakerBassBoost", null); xmlDSSpeakerBassBoostElement.InnerText = dualSenseSpeakerBassBoost[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSSpeakerBassBoostElement);
                 XmlNode xmlDSHeadphoneVolumeElement = m_Xdoc.CreateNode(XmlNodeType.Element, "HeadphoneVolume", null); xmlDSHeadphoneVolumeElement.InnerText = dualSenseHeadphoneVolume[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSHeadphoneVolumeElement);
                 XmlNode xmlDSMicrophoneVolumeElement = m_Xdoc.CreateNode(XmlNodeType.Element, "MicrophoneVolume", null); xmlDSMicrophoneVolumeElement.InnerText = dualSenseMicrophoneVolume[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSMicrophoneVolumeElement);
                 XmlNode xmlDSMicrophoneNoiseSuppressionElement = m_Xdoc.CreateNode(XmlNodeType.Element, "MicrophoneNoiseSuppression", null); xmlDSMicrophoneNoiseSuppressionElement.InnerText = dualSenseMicrophoneNoiseSuppression[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSMicrophoneNoiseSuppressionElement);
@@ -6662,6 +6696,13 @@ namespace DS4Windows
 
                 try
                 {
+                    Item = m_Xdoc.SelectSingleNode("/" + rootname + "/DualSenseMuteButtonMutesMicrophone");
+                    bool.TryParse(Item.InnerText, out dualSenseMuteButtonMutesMicrophone[device]);
+                }
+                catch { dualSenseMuteButtonMutesMicrophone[device] = false; missingSetting = true; }
+
+                try
+                {
                     Item = m_Xdoc.SelectSingleNode("/" + rootname + "/DualSenseMuteOnProfileName");
                     dualSenseMuteOnProfileName[device] = Item.InnerText;
                 }
@@ -7446,6 +7487,24 @@ namespace DS4Windows
                             Item = xmlDSAudioGroupElement.SelectSingleNode("SpeakerVolume");
                             byte.TryParse(Item.InnerText, out byte temp);
                             dualSenseSpeakerVolume[device] = temp;
+                        }
+                        catch { missingSetting = true; }
+
+                        try
+                        {
+                            Item = xmlDSAudioGroupElement.SelectSingleNode("SpeakerCompression");
+                            byte.TryParse(Item.InnerText, out byte temp);
+                            dualSenseSpeakerCompression[device] = Math.Min(temp,
+                                (byte)DS4Windows.DualSenseSpeakerCompression.Strong);
+                        }
+                        catch { missingSetting = true; }
+
+                        try
+                        {
+                            Item = xmlDSAudioGroupElement.SelectSingleNode("SpeakerBassBoost");
+                            byte.TryParse(Item.InnerText, out byte temp);
+                            dualSenseSpeakerBassBoost[device] = Math.Min(temp,
+                                DualSenseSpeakerProcessor.MaximumBassBoostDb);
                         }
                         catch { missingSetting = true; }
 
@@ -9976,6 +10035,7 @@ namespace DS4Windows
             gameBarHomeButtonSupport[device] = false;
             gameBarProfileName[device] = string.Empty;
             dualSenseMuteButtonLightEnabled[device] = false;
+            dualSenseMuteButtonMutesMicrophone[device] = false;
             dualSenseMuteOnProfileName[device] = string.Empty;
             dualSenseMuteOffProfileName[device] = string.Empty;
             touchpadJitterCompensation[device] = DEFAULT_TOUCHPAD_JITTER_COMP;

@@ -15,6 +15,7 @@
         xml:lang="en-US"
         mc:Ignorable="d"
         Title="DS4Windows" Height="760" Width="1180" Closing="MainDS4Window_Closing" Closed="MainDS4Window_Closed" StateChanged="MainDS4Window_StateChanged" SizeChanged="MainDS4Window_SizeChanged" LocationChanged="MainDS4Window_LocationChanged" MinWidth="940" MinHeight="620"
+        UseLayoutRounding="True" SnapsToDevicePixels="True"
         Style="{DynamicResource WindowStyle}">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
@@ -50,7 +51,10 @@
                     <ListView x:Name="controllerLV" ItemsSource="{Binding ControllerCol}" SelectionMode="Single"
                               SelectedIndex="{Binding CurrentIndex, Mode=OneWayToSource}" Margin="0"
                               ItemContainerStyle="{StaticResource BridgeControllerCardItemStyle}"
-                              ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                              ScrollViewer.CanContentScroll="True"
+                              VirtualizingPanel.IsVirtualizing="True"
+                              VirtualizingPanel.VirtualizationMode="Recycling">
                         <ListView.ItemTemplate>
                             <DataTemplate>
                                 <Grid>

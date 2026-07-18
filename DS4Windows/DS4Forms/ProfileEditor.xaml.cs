@@ -164,10 +164,10 @@ namespace DS4WinWPF.DS4Forms
             SetCanvasButtonBounds(downConBtn, 84, 111, 23, 31);
             SetCanvasButtonBounds(leftConBtn, 55, 96, 33, 23);
 
-            Canvas.SetLeft(ds4LightbarColorBtn, 135);
+            Canvas.SetLeft(ds4LightbarColorBtn, 134);
             Canvas.SetTop(ds4LightbarColorBtn, 49);
-            ds4LightbarColorBtn.Width = 170;
-            ds4LightbarColorBtn.Height = 84;
+            ds4LightbarColorBtn.Width = 172;
+            ds4LightbarColorBtn.Height = 83;
             lightbarRect.OpacityMask = new ImageBrush(LoadResourceImage("DualSense lightbar.png"));
 
             PopulateDualSenseHoverImages();

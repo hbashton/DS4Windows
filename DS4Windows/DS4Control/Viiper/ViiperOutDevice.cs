@@ -61,11 +61,15 @@ namespace DS4Windows
         private readonly ViiperVirtualDeviceType viiperType;
         private readonly ViiperClient client;
         private readonly object pendingPacketLock = new object();
+        private readonly object microphoneQueueLock = new object();
+        private readonly object microphoneProcessingLock = new object();
         private readonly object writerThreadLock = new object();
+        private readonly object microphoneWriterThreadLock = new object();
         private readonly object streamRecoveryLock = new object();
         private readonly object physicalDualSenseIdentityLock = new object();
         private readonly object microphoneSourceLock = new object();
         private readonly AutoResetEvent writerSignal = new AutoResetEvent(false);
+        private readonly AutoResetEvent microphoneWriterSignal = new AutoResetEvent(false);
         private readonly ManualResetEvent microphoneInterfaceStopSignal = new ManualResetEvent(false);
         private readonly Queue<byte[]> pendingMicrophoneOpusFrames = new Queue<byte[]>(MaxPendingMicrophoneFrames);
         private readonly short[] microphoneMonoPcm = new short[DualSenseMicrophoneFramesPerPacket];
@@ -74,8 +78,10 @@ namespace DS4Windows
         private ViiperDeviceStream deviceStream;
         private Thread feedbackThread;
         private Thread stateWriterThread;
+        private Thread microphoneWriterThread;
         private Thread microphoneInterfaceThread;
         private byte[] pendingStatePacket;
+        private long pendingStatePacketQueuedTimestamp;
         private IOpusDecoder microphoneDecoder;
         private DualSenseDevice microphoneSourceDevice;
         private volatile bool writerStopRequested;
@@ -85,6 +91,7 @@ namespace DS4Windows
         private int microphoneNoiseSuppression = (int)DualSenseMicrophoneNoiseSuppression.Balanced;
         private long lastMicrophoneFrameTimestamp;
         private long lastMicrophoneArmTimestamp;
+        private long streamGeneration;
         private int streamRecoveryAttempts;
         private DateTime lastStreamRecoveryAttemptUtc = DateTime.MinValue;
         private long replacedPendingPacketCount;
@@ -97,12 +104,19 @@ namespace DS4Windows
         private long microphoneFramesSubmitted;
         private long microphoneFramesDropped;
         private long microphoneDecodeFailures;
+        private long lastStateQueuedTimestamp;
+        private long lastStateWrittenTimestamp;
+        private long maximumStateQueueGapTicks;
+        private long maximumStatePacketAgeTicks;
+        private long maximumStateWriteDurationTicks;
+        private long maximumStateWriteGapTicks;
         private DateTime lastWriterHealthLogUtc = DateTime.MinValue;
         private DateTime lastMicrophoneHealthLogUtc = DateTime.MinValue;
         private int lastInputDeviceIndex = -1;
         private int submitFailureLogged;
         private int microphoneUnavailableLogged;
         private int microphoneNoiseSuppressionUnavailableLogged;
+        private int microphoneProcessingFailureLogged;
         private int microphoneMuted;
         private int virtualMicrophoneInterfaceActive;
         private int virtualMicrophoneInterfaceStateKnown;
@@ -132,12 +146,14 @@ namespace DS4Windows
             }
 
             deviceStream = CreateDeviceStreamWithServerFallback();
+            Interlocked.Increment(ref streamGeneration);
             Volatile.Write(ref submitFailureLogged, 0);
             Volatile.Write(ref microphoneUnavailableLogged, 0);
             Volatile.Write(ref microphoneNoiseSuppressionUnavailableLogged, 0);
+            Volatile.Write(ref microphoneProcessingFailureLogged, 0);
             Volatile.Write(ref microphoneMuted, 0);
             Volatile.Write(ref lastInputDeviceIndex, -1);
-            streamRecoveryAttempts = 0;
+            Interlocked.Exchange(ref streamRecoveryAttempts, 0);
             lastStreamRecoveryAttemptUtc = DateTime.MinValue;
             Interlocked.Exchange(ref replacedPendingPacketCount, 0);
             Interlocked.Exchange(ref submittedPacketCount, 0);
@@ -151,6 +167,12 @@ namespace DS4Windows
             Interlocked.Exchange(ref microphoneFramesSubmitted, 0);
             Interlocked.Exchange(ref microphoneFramesDropped, 0);
             Interlocked.Exchange(ref microphoneDecodeFailures, 0);
+            Interlocked.Exchange(ref lastStateQueuedTimestamp, 0);
+            Interlocked.Exchange(ref lastStateWrittenTimestamp, 0);
+            Interlocked.Exchange(ref maximumStateQueueGapTicks, 0);
+            Interlocked.Exchange(ref maximumStatePacketAgeTicks, 0);
+            Interlocked.Exchange(ref maximumStateWriteDurationTicks, 0);
+            Interlocked.Exchange(ref maximumStateWriteGapTicks, 0);
             Volatile.Write(ref edgePhysicalMismatchLogged, 0);
             lock (physicalDualSenseIdentityLock)
             {
@@ -165,6 +187,7 @@ namespace DS4Windows
             writerStopRequested = false;
             connected = true;
             StartStateWriter();
+            StartMicrophoneWriter();
             StartMicrophoneInterfaceMonitor();
             ResetState();
             StartFeedbackReader();
@@ -284,17 +307,23 @@ namespace DS4Windows
             connected = false;
             writerStopRequested = true;
             writerSignal.Set();
+            microphoneWriterSignal.Set();
             StopMicrophoneInterfaceMonitor();
             DetachBluetoothMicrophoneSource();
             lock (pendingPacketLock)
             {
                 pendingStatePacket = null;
+                pendingStatePacketQueuedTimestamp = 0;
+            }
+            lock (microphoneQueueLock)
+            {
                 pendingMicrophoneOpusFrames.Clear();
             }
 
             lock (streamRecoveryLock)
             {
                 ViiperDeviceStream stream = Interlocked.Exchange(ref deviceStream, null);
+                Interlocked.Increment(ref streamGeneration);
                 stream?.Dispose();
             }
 
@@ -307,6 +336,13 @@ namespace DS4Windows
             }
 
             stateWriterThread = null;
+            if (microphoneWriterThread != null && microphoneWriterThread.IsAlive &&
+                Thread.CurrentThread.ManagedThreadId != microphoneWriterThread.ManagedThreadId)
+            {
+                microphoneWriterThread.Join(500);
+            }
+
+            microphoneWriterThread = null;
             StopFeedbackReader();
             ViiperUsbipPortManager.DetachStaleLocalViiperPorts();
         }
@@ -397,6 +433,8 @@ namespace DS4Windows
                     }
                 }
 
+                UpdateBluetoothMicrophoneSource(Volatile.Read(ref lastInputDeviceIndex));
+
                 if (microphoneInterfaceStopSignal.WaitOne(125))
                 {
                     break;
@@ -407,7 +445,6 @@ namespace DS4Windows
         public override void ConvertandSendReport(DS4State state, int device)
         {
             Volatile.Write(ref lastInputDeviceIndex, device);
-            UpdateBluetoothMicrophoneSource(device);
             if (!connected)
             {
                 return;
@@ -478,6 +515,13 @@ namespace DS4Windows
 
         private void QueueStatePacket(byte[] data)
         {
+            long queuedAt = Stopwatch.GetTimestamp();
+            long previousQueuedAt = Interlocked.Exchange(ref lastStateQueuedTimestamp, queuedAt);
+            if (previousQueuedAt > 0)
+            {
+                RecordMaximum(ref maximumStateQueueGapTicks, queuedAt - previousQueuedAt);
+            }
+
             lock (pendingPacketLock)
             {
                 if (pendingStatePacket != null)
@@ -486,6 +530,7 @@ namespace DS4Windows
                 }
 
                 pendingStatePacket = data;
+                pendingStatePacketQueuedTimestamp = queuedAt;
             }
 
             Interlocked.Increment(ref submittedPacketCount);
@@ -519,6 +564,7 @@ namespace DS4Windows
                 {
                     IsBackground = true,
                     Name = $"VIIPER {viiperType} writer",
+                    Priority = ThreadPriority.AboveNormal,
                 };
                 stateWriterThread.Start();
             }
@@ -537,39 +583,49 @@ namespace DS4Windows
                 while (!writerStopRequested)
                 {
                     byte[] packet;
-                    byte[] microphoneOpusFrame;
+                    long queuedAt;
                     lock (pendingPacketLock)
                     {
                         packet = pendingStatePacket;
                         pendingStatePacket = null;
-                        microphoneOpusFrame = pendingMicrophoneOpusFrames.Count > 0 ?
-                            pendingMicrophoneOpusFrames.Dequeue() : null;
+                        queuedAt = pendingStatePacketQueuedTimestamp;
+                        pendingStatePacketQueuedTimestamp = 0;
                     }
 
-                    if (packet == null && microphoneOpusFrame == null)
+                    if (packet == null)
                     {
                         break;
                     }
 
+                    long writeStreamGeneration = Volatile.Read(ref streamGeneration);
                     try
                     {
-                        if (packet != null)
+                        long writeStartedAt = Stopwatch.GetTimestamp();
+                        if (queuedAt > 0)
                         {
-                            WriteState(packet);
-                            Interlocked.Increment(ref writtenPacketCount);
+                            RecordMaximum(ref maximumStatePacketAgeTicks,
+                                writeStartedAt - queuedAt);
                         }
 
-                        if (microphoneOpusFrame != null)
+                        WriteState(packet);
+                        long writtenAt = Stopwatch.GetTimestamp();
+                        RecordMaximum(ref maximumStateWriteDurationTicks,
+                            writtenAt - writeStartedAt);
+                        long previousWrittenAt = Interlocked.Exchange(
+                            ref lastStateWrittenTimestamp, writtenAt);
+                        if (previousWrittenAt > 0)
                         {
-                            WriteMicrophoneOpusFrame(microphoneOpusFrame);
+                            RecordMaximum(ref maximumStateWriteGapTicks,
+                                writtenAt - previousWrittenAt);
                         }
+                        Interlocked.Increment(ref writtenPacketCount);
 
-                        streamRecoveryAttempts = 0;
+                        Interlocked.Exchange(ref streamRecoveryAttempts, 0);
                         LogWriterHealthIfNeeded();
                     }
                     catch (IOException ex)
                     {
-                        if (TryRecoverStream(ex.Message, packet))
+                        if (TryRecoverStream(ex.Message, writeStreamGeneration, packet))
                         {
                             continue;
                         }
@@ -579,7 +635,7 @@ namespace DS4Windows
                     }
                     catch (SocketException ex)
                     {
-                        if (TryRecoverStream(ex.Message, packet))
+                        if (TryRecoverStream(ex.Message, writeStreamGeneration, packet))
                         {
                             continue;
                         }
@@ -591,7 +647,7 @@ namespace DS4Windows
                     {
                         if (!writerStopRequested)
                         {
-                            if (TryRecoverStream(ex.Message, packet))
+                            if (TryRecoverStream(ex.Message, writeStreamGeneration, packet))
                             {
                                 continue;
                             }
@@ -605,11 +661,130 @@ namespace DS4Windows
             }
         }
 
-        private bool TryRecoverStream(string reason, byte[] packetToRetry = null)
+        private void EnsureMicrophoneWriterAlive()
+        {
+            if (!connected || writerStopRequested || !activeStreamSupportsMicrophone)
+            {
+                return;
+            }
+
+            if (microphoneWriterThread == null || !microphoneWriterThread.IsAlive)
+            {
+                StartMicrophoneWriter();
+            }
+        }
+
+        private void StartMicrophoneWriter()
+        {
+            if (!activeStreamSupportsMicrophone)
+            {
+                return;
+            }
+
+            lock (microphoneWriterThreadLock)
+            {
+                if (microphoneWriterThread != null && microphoneWriterThread.IsAlive)
+                {
+                    return;
+                }
+
+                microphoneWriterThread = new Thread(MicrophoneWriteLoop)
+                {
+                    IsBackground = true,
+                    Name = $"VIIPER {viiperType} microphone writer",
+                    Priority = ThreadPriority.Normal,
+                };
+                microphoneWriterThread.Start();
+            }
+        }
+
+        private void MicrophoneWriteLoop()
+        {
+            while (!writerStopRequested)
+            {
+                microphoneWriterSignal.WaitOne();
+                if (writerStopRequested)
+                {
+                    return;
+                }
+
+                while (!writerStopRequested)
+                {
+                    byte[] microphoneOpusFrame;
+                    lock (microphoneQueueLock)
+                    {
+                        microphoneOpusFrame = pendingMicrophoneOpusFrames.Count > 0 ?
+                            pendingMicrophoneOpusFrames.Dequeue() : null;
+                    }
+
+                    if (microphoneOpusFrame == null)
+                    {
+                        break;
+                    }
+
+                    long writeStreamGeneration = Volatile.Read(ref streamGeneration);
+                    try
+                    {
+                        WriteMicrophoneOpusFrame(microphoneOpusFrame);
+                        Interlocked.Exchange(ref streamRecoveryAttempts, 0);
+                    }
+                    catch (IOException ex)
+                    {
+                        if (TryRecoverStream(ex.Message, writeStreamGeneration))
+                        {
+                            continue;
+                        }
+
+                        LogSubmitFailure(ex.Message);
+                        return;
+                    }
+                    catch (SocketException ex)
+                    {
+                        if (TryRecoverStream(ex.Message, writeStreamGeneration))
+                        {
+                            continue;
+                        }
+
+                        LogSubmitFailure(ex.Message);
+                        return;
+                    }
+                    catch (ObjectDisposedException ex)
+                    {
+                        if (!writerStopRequested &&
+                            TryRecoverStream(ex.Message, writeStreamGeneration))
+                        {
+                            continue;
+                        }
+
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        Interlocked.Increment(ref microphoneDecodeFailures);
+                        if (Global.VerboseStartupLogging &&
+                            Interlocked.Exchange(ref microphoneProcessingFailureLogged, 1) == 0)
+                        {
+                            AppLogger.LogToGui(
+                                $"VIIPER microphone processing failed: {ex.GetType().Name}: {ex.Message}",
+                                true);
+                        }
+                    }
+                }
+            }
+        }
+
+        private bool TryRecoverStream(string reason, long failedStreamGeneration,
+            byte[] packetToRetry = null)
         {
             if (writerStopRequested || !connected)
             {
                 return false;
+            }
+
+            if (Volatile.Read(ref streamGeneration) != failedStreamGeneration)
+            {
+                QueueRetryStatePacket(packetToRetry);
+                return true;
             }
 
             lock (streamRecoveryLock)
@@ -619,21 +794,27 @@ namespace DS4Windows
                     return false;
                 }
 
+                if (Volatile.Read(ref streamGeneration) != failedStreamGeneration)
+                {
+                    QueueRetryStatePacket(packetToRetry);
+                    return true;
+                }
+
                 DateTime now = DateTime.UtcNow;
                 if (now - lastStreamRecoveryAttemptUtc < TimeSpan.FromSeconds(2))
                 {
                     return false;
                 }
 
-                if (streamRecoveryAttempts >= MaxStreamRecoveryAttempts)
+                if (Volatile.Read(ref streamRecoveryAttempts) >= MaxStreamRecoveryAttempts)
                 {
                     return false;
                 }
 
-                streamRecoveryAttempts++;
+                int recoveryAttempt = Interlocked.Increment(ref streamRecoveryAttempts);
                 lastStreamRecoveryAttemptUtc = now;
                 AppLogger.LogToGui(
-                    $"VIIPER {viiperType} stream interrupted; attempting recovery {streamRecoveryAttempts}/{MaxStreamRecoveryAttempts}: {reason}",
+                    $"VIIPER {viiperType} stream interrupted; attempting recovery {recoveryAttempt}/{MaxStreamRecoveryAttempts}: {reason}",
                     true);
 
                 try
@@ -646,21 +827,15 @@ namespace DS4Windows
                     }
 
                     ViiperDeviceStream oldStream = Interlocked.Exchange(ref deviceStream, null);
+                    Interlocked.Increment(ref streamGeneration);
                     oldStream?.Dispose();
                     StopFeedbackReader();
 
                     deviceStream = CreateDeviceStreamWithServerFallback();
+                    Interlocked.Increment(ref streamGeneration);
                     StartFeedbackReader();
 
-                    if (packetToRetry != null)
-                    {
-                        lock (pendingPacketLock)
-                        {
-                            pendingStatePacket = packetToRetry;
-                        }
-
-                        writerSignal.Set();
-                    }
+                    QueueRetryStatePacket(packetToRetry);
 
                     AppLogger.LogToGui($"VIIPER {viiperType} stream recovered.", false);
                     return true;
@@ -707,59 +882,62 @@ namespace DS4Windows
                 throw new ObjectDisposedException(nameof(ViiperDeviceStream));
             }
 
-            bool muted = Volatile.Read(ref microphoneMuted) == 1;
-            int frames = DualSenseMicrophoneFramesPerPacket;
-            if (!muted)
+            lock (microphoneProcessingLock)
             {
-                IOpusDecoder decoder = microphoneDecoder;
-                if (decoder == null)
+                bool muted = Volatile.Read(ref microphoneMuted) == 1;
+                int frames = DualSenseMicrophoneFramesPerPacket;
+                if (!muted)
                 {
-                    decoder = OpusCodecFactory.CreateDecoder(48000, 1);
-                    microphoneDecoder = decoder;
+                    IOpusDecoder decoder = microphoneDecoder;
+                    if (decoder == null)
+                    {
+                        decoder = OpusCodecFactory.CreateDecoder(48000, 1);
+                        microphoneDecoder = decoder;
+                    }
+
+                    int decodedSamples = decoder.Decode(opusFrame.AsSpan(),
+                        microphoneMonoPcm.AsSpan(), DualSenseMicrophoneFramesPerPacket, false);
+                    if (decodedSamples <= 0)
+                    {
+                        Interlocked.Increment(ref microphoneDecodeFailures);
+                        return;
+                    }
+
+                    Interlocked.Increment(ref microphoneFramesDecoded);
+
+                    frames = Math.Min(decodedSamples, DualSenseMicrophoneFramesPerPacket);
+                    DualSenseMicrophoneNoiseSuppression suppression =
+                        (DualSenseMicrophoneNoiseSuppression)Math.Clamp(
+                            Volatile.Read(ref microphoneNoiseSuppression),
+                            (int)DualSenseMicrophoneNoiseSuppression.Off,
+                            (int)DualSenseMicrophoneNoiseSuppression.Strong);
+                    microphoneProcessor.Process(microphoneMonoPcm, frames,
+                        (byte)Math.Clamp(Volatile.Read(ref microphoneVolume), 0, byte.MaxValue),
+                        suppression);
+                    if (suppression != DualSenseMicrophoneNoiseSuppression.Off &&
+                        Global.VerboseStartupLogging &&
+                        Volatile.Read(ref microphoneNoiseSuppressionUnavailableLogged) == 0 &&
+                        !microphoneProcessor.NoiseSuppressionAvailable &&
+                        Interlocked.Exchange(ref microphoneNoiseSuppressionUnavailableLogged, 1) == 0)
+                    {
+                        AppLogger.LogToGui(
+                            $"VIIPER microphone RNNoise unavailable; safety conditioning remains active: {microphoneProcessor.NoiseSuppressionFailure}",
+                            true);
+                    }
                 }
 
-                int decodedSamples = decoder.Decode(opusFrame.AsSpan(),
-                    microphoneMonoPcm.AsSpan(), DualSenseMicrophoneFramesPerPacket, false);
-                if (decodedSamples <= 0)
+                Array.Clear(microphoneStereoPcm, 0, microphoneStereoPcm.Length);
+                if (!muted)
                 {
-                    Interlocked.Increment(ref microphoneDecodeFailures);
-                    return;
-                }
-
-                Interlocked.Increment(ref microphoneFramesDecoded);
-
-                frames = Math.Min(decodedSamples, DualSenseMicrophoneFramesPerPacket);
-                DualSenseMicrophoneNoiseSuppression suppression =
-                    (DualSenseMicrophoneNoiseSuppression)Math.Clamp(
-                        Volatile.Read(ref microphoneNoiseSuppression),
-                        (int)DualSenseMicrophoneNoiseSuppression.Off,
-                        (int)DualSenseMicrophoneNoiseSuppression.Strong);
-                microphoneProcessor.Process(microphoneMonoPcm, frames,
-                    (byte)Math.Clamp(Volatile.Read(ref microphoneVolume), 0, byte.MaxValue),
-                    suppression);
-                if (suppression != DualSenseMicrophoneNoiseSuppression.Off &&
-                    Global.VerboseStartupLogging &&
-                    Volatile.Read(ref microphoneNoiseSuppressionUnavailableLogged) == 0 &&
-                    !microphoneProcessor.NoiseSuppressionAvailable &&
-                    Interlocked.Exchange(ref microphoneNoiseSuppressionUnavailableLogged, 1) == 0)
-                {
-                    AppLogger.LogToGui(
-                        $"VIIPER microphone RNNoise unavailable; safety conditioning remains active: {microphoneProcessor.NoiseSuppressionFailure}",
-                        true);
-                }
-            }
-
-            Array.Clear(microphoneStereoPcm, 0, microphoneStereoPcm.Length);
-            if (!muted)
-            {
-                for (int frame = 0; frame < frames; frame++)
-                {
-                    short sample = microphoneMonoPcm[frame];
-                    int offset = frame * 4;
-                    microphoneStereoPcm[offset] = (byte)sample;
-                    microphoneStereoPcm[offset + 1] = (byte)(sample >> 8);
-                    microphoneStereoPcm[offset + 2] = (byte)sample;
-                    microphoneStereoPcm[offset + 3] = (byte)(sample >> 8);
+                    for (int frame = 0; frame < frames; frame++)
+                    {
+                        short sample = microphoneMonoPcm[frame];
+                        int offset = frame * 4;
+                        microphoneStereoPcm[offset] = (byte)sample;
+                        microphoneStereoPcm[offset + 1] = (byte)(sample >> 8);
+                        microphoneStereoPcm[offset + 2] = (byte)sample;
+                        microphoneStereoPcm[offset + 3] = (byte)(sample >> 8);
+                    }
                 }
             }
 
@@ -774,12 +952,6 @@ namespace DS4Windows
                 return;
             }
 
-            long replaced = Interlocked.Read(ref replacedPendingPacketCount);
-            if (replaced == 0)
-            {
-                return;
-            }
-
             DateTime now = DateTime.UtcNow;
             if (now - lastWriterHealthLogUtc < TimeSpan.FromSeconds(5))
             {
@@ -787,9 +959,65 @@ namespace DS4Windows
             }
 
             lastWriterHealthLogUtc = now;
+            long maximumQueueGap = Interlocked.Exchange(ref maximumStateQueueGapTicks, 0);
+            long maximumPacketAge = Interlocked.Exchange(ref maximumStatePacketAgeTicks, 0);
+            long maximumWriteDuration = Interlocked.Exchange(ref maximumStateWriteDurationTicks, 0);
+            long maximumWriteGap = Interlocked.Exchange(ref maximumStateWriteGapTicks, 0);
             AppLogger.LogToGui(
-                $"VIIPER {viiperType} writer stats: submitted={Interlocked.Read(ref submittedPacketCount)} written={Interlocked.Read(ref writtenPacketCount)} coalesced={replaced}",
+                $"VIIPER {viiperType} writer stats: " +
+                $"submitted={Interlocked.Read(ref submittedPacketCount)} " +
+                $"written={Interlocked.Read(ref writtenPacketCount)} " +
+                $"coalesced={Interlocked.Read(ref replacedPendingPacketCount)} " +
+                $"queueGapMaxMs={StopwatchTicksToMilliseconds(maximumQueueGap):F2} " +
+                $"packetAgeMaxMs={StopwatchTicksToMilliseconds(maximumPacketAge):F2} " +
+                $"writeMaxMs={StopwatchTicksToMilliseconds(maximumWriteDuration):F2} " +
+                $"writeGapMaxMs={StopwatchTicksToMilliseconds(maximumWriteGap):F2}",
                 false);
+        }
+
+        private static void RecordMaximum(ref long target, long candidate)
+        {
+            if (candidate <= 0)
+            {
+                return;
+            }
+
+            long current = Interlocked.Read(ref target);
+            while (candidate > current)
+            {
+                long observed = Interlocked.CompareExchange(ref target, candidate, current);
+                if (observed == current)
+                {
+                    return;
+                }
+
+                current = observed;
+            }
+        }
+
+        private void QueueRetryStatePacket(byte[] packetToRetry)
+        {
+            if (packetToRetry == null)
+            {
+                return;
+            }
+
+            lock (pendingPacketLock)
+            {
+                // A state queued while recovery was running is newer than the failed packet.
+                if (pendingStatePacket == null)
+                {
+                    pendingStatePacket = packetToRetry;
+                    pendingStatePacketQueuedTimestamp = Stopwatch.GetTimestamp();
+                }
+            }
+
+            writerSignal.Set();
+        }
+
+        private static double StopwatchTicksToMilliseconds(long ticks)
+        {
+            return ticks <= 0 ? 0.0 : ticks * 1000.0 / Stopwatch.Frequency;
         }
 
         private void StartFeedbackReader()
@@ -812,6 +1040,7 @@ namespace DS4Windows
         {
             int bufferLength = IsDualSenseType() ? Math.Max(feedbackLength, DualSenseCombinedExtendedFeedbackLength) : feedbackLength;
             byte[] buffer = new byte[bufferLength];
+            long readStreamGeneration = Volatile.Read(ref streamGeneration);
             try
             {
                 while (connected)
@@ -822,20 +1051,24 @@ namespace DS4Windows
                         return;
                     }
 
+                    readStreamGeneration = Volatile.Read(ref streamGeneration);
                     stream.ReadExactly(buffer, 0, feedbackLength);
                     ApplyFeedback(buffer, feedbackLength);
                 }
             }
             catch (IOException)
             {
-                if (connected && !TryRecoverStream("feedback reader stopped"))
+                if (connected &&
+                    !TryRecoverStream("feedback reader stopped", readStreamGeneration))
                 {
                     AppLogger.LogToGui($"VIIPER {viiperType} feedback reader stopped.", true);
                 }
             }
             catch (SocketException)
             {
-                if (connected && !TryRecoverStream("feedback reader stopped due to socket error"))
+                if (connected &&
+                    !TryRecoverStream("feedback reader stopped due to socket error",
+                        readStreamGeneration))
                 {
                     AppLogger.LogToGui($"VIIPER {viiperType} feedback reader stopped due to socket error.", true);
                 }
@@ -1067,16 +1300,19 @@ namespace DS4Windows
                 }
             }
 
-            lock (pendingPacketLock)
+            lock (microphoneQueueLock)
             {
                 resetProcessor |= pendingMicrophoneOpusFrames.Count > 0;
                 pendingMicrophoneOpusFrames.Clear();
             }
-            resetProcessor |= microphoneDecoder != null;
-            microphoneDecoder = null;
-            if (resetProcessor)
+            lock (microphoneProcessingLock)
             {
-                microphoneProcessor.Reset();
+                resetProcessor |= microphoneDecoder != null;
+                microphoneDecoder = null;
+                if (resetProcessor)
+                {
+                    microphoneProcessor.Reset();
+                }
             }
             Interlocked.Exchange(ref lastMicrophoneFrameTimestamp, 0);
             Interlocked.Exchange(ref lastMicrophoneArmTimestamp, 0);
@@ -1115,7 +1351,7 @@ namespace DS4Windows
                 Stopwatch.GetTimestamp());
             byte[] copy = new byte[DualSenseMicrophoneOpusFrameLength];
             Buffer.BlockCopy(opusFrame, 0, copy, 0, copy.Length);
-            lock (pendingPacketLock)
+            lock (microphoneQueueLock)
             {
                 while (pendingMicrophoneOpusFrames.Count >= MaxPendingMicrophoneFrames)
                 {
@@ -1125,8 +1361,8 @@ namespace DS4Windows
                 pendingMicrophoneOpusFrames.Enqueue(copy);
             }
 
-            EnsureStateWriterAlive();
-            writerSignal.Set();
+            EnsureMicrophoneWriterAlive();
+            microphoneWriterSignal.Set();
         }
 
         private void ApplyDualSenseTriggerFeedback(DS4Device device, byte[] feedback, int feedbackLength)

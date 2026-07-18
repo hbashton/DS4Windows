@@ -2383,7 +2383,8 @@ namespace DS4Windows
             }
 
             runHotPlug = false;
-            ReleaseHidHideManagedDevices();
+            // HidHide session entries belong to this process and intentionally survive an
+            // in-process Stop/Start. ShutDown releases them when DS4Windows actually exits.
             StartupDiag("ControlService.Stop before stopped events");
             ServiceStopped?.Invoke(this, EventArgs.Empty);
             RunningChanged?.Invoke(this, EventArgs.Empty);

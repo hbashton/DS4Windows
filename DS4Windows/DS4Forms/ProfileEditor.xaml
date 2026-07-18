@@ -2197,7 +2197,7 @@
 
                                         <CheckBox x:Name="dualSForceGenRumbleRescale" IsChecked="{Binding EnableGenericRumbleStrRescaleForDualSenseDevices}" Content="{lex:Loc DualSRumbleForceGenericRescale}" ToolTip="{lex:Loc DualSRumbleForceGenericRescale_Tip}" Margin="3,8,0,0" HorizontalAlignment="Left" />
 
-                                        <GroupBox Header="DualSense Audio" Margin="0,10,0,0" Padding="2,4">
+                                        <GroupBox Header="Controller Audio" Margin="0,10,0,0" Padding="2,4">
                                             <Grid>
                                                 <Grid.RowDefinitions>
                                                     <RowDefinition Height="30" />
@@ -2217,7 +2217,7 @@
 
                                                 <CheckBox Content="Mirror audio to controller speaker" IsChecked="{Binding DualSenseEnableSpeakerOutput}"
                                                           Grid.Row="0" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}"
-                                                          ToolTip="Mirrors the selected Windows playback endpoint to a physical DualSense speaker. Bluetooth uses the controller speaker stream; USB uses its Windows speaker endpoint." />
+                                                          ToolTip="Mirrors the selected Windows playback endpoint to a physical controller speaker. DualShock 4 and DualSense use their native Bluetooth audio streams; USB DualSense uses its Windows speaker endpoint." />
                                                 <Label Content="Audio source:" Grid.Row="1" Grid.Column="0"
                                                        ToolTip="For game audio, select the virtual Wireless Controller endpoint created by a DualSense output profile. The first stereo pair is mirrored to the physical controller speaker." />
                                                 <ComboBox ItemsSource="{Binding AudioCaptureEndpointChoices}" DisplayMemberPath="Name" SelectedValuePath="EndpointId"
@@ -2245,7 +2245,7 @@
                                                                     Margin="{StaticResource spaceMargin}" />
                                                 <CheckBox Content="Enable controller microphone input" IsChecked="{Binding DualSenseEnableMicrophonePassthrough}"
                                                           Grid.Row="6" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}"
-                                                          ToolTip="Streams the microphone from a physical Bluetooth DualSense into the recording endpoint exposed by a DualSense output profile." />
+                                                          ToolTip="Streams a physical Bluetooth DualShock 4 headset microphone or DualSense microphone into the recording endpoint exposed by a VIIPER DualSense output profile." />
                                                 <Label Content="Microphone level:" Grid.Row="7" Grid.Column="0"
                                                        ToolTip="Adjusts the physical microphone level and the safely trimmed signal exposed to Windows." />
                                                 <xctk:IntegerUpDown Value="{Binding DualSenseMicrophoneVolume}" Minimum="0" Maximum="255" Grid.Row="7" Grid.Column="1"

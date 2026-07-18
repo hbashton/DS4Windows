@@ -97,7 +97,7 @@
                             </ContextMenu>
                         </Canvas.Resources>
 
-                        <Image Source="{Binding Source={StaticResource resourcesPaths}, Path=DS4ConfigPNG}" Width="440" Height="220" Stretch="Uniform"/>
+                        <Image x:Name="controllerDiagram" Source="{Binding Source={StaticResource resourcesPaths}, Path=DS4ConfigPNG}" Width="440" Height="220" Stretch="Uniform"/>
 
                         <Button x:Name="ds4LightbarColorBtn" Width="138" Height="12" Canvas.Left="150" Canvas.Top="28"
                                 Background="{x:Null}" BorderBrush="{x:Null}" MouseEnter="Ds4LightbarColorBtn_MouseEnter" MouseLeave="Ds4LightbarColorBtn_MouseLeave" Click="Ds4LightbarColorBtn_Click">
@@ -143,7 +143,8 @@
                         <Button Content="Share" x:Name="shareConBtn" Canvas.Left="134" Canvas.Top="63" Width="16" Height="24" Style="{StaticResource NoBGHoverBtn}" Click="HoverConBtn_Click" MouseEnter="ContBtn_MouseEnter" MouseLeave="ContBtn_MouseLeave" />
                         <Button Content="Options" x:Name="optionsConBtn" Canvas.Left="291" Canvas.Top="63" Width="16" Height="24" Style="{StaticResource NoBGHoverBtn}" Click="HoverConBtn_Click" MouseEnter="ContBtn_MouseEnter" MouseLeave="ContBtn_MouseLeave" />
                         <Button Content="Guide" x:Name="guideConBtn" Canvas.Left="211" Canvas.Top="144" Width="20" Height="20" Style="{StaticResource NoBGHoverBtn}" Click="HoverConBtn_Click" MouseEnter="ContBtn_MouseEnter" MouseLeave="ContBtn_MouseLeave" />
-                        <Button Content="Mute" x:Name="muteConBtn" Canvas.Left="0" Canvas.Top="0" Width="0" Height="0" Style="{StaticResource NoBGHoverBtn}" Visibility="Collapsed" />
+                        <Button Content="Mute" x:Name="muteConBtn" Canvas.Left="0" Canvas.Top="0" Width="0" Height="0" Style="{StaticResource NoBGHoverBtn}" Visibility="Collapsed"
+                                Click="HoverConBtn_Click" MouseEnter="ContBtn_MouseEnter" MouseLeave="ContBtn_MouseLeave" />
                         <Button Content="Function Left" x:Name="fnlConBtn" Canvas.Left="0" Canvas.Top="0" Width="0" Height="0" Style="{StaticResource NoBGHoverBtn}" Visibility="Collapsed" />
                         <Button Content="Function Right" x:Name="fnrConBtn" Canvas.Left="0" Canvas.Top="0" Width="0" Height="0" Style="{StaticResource NoBGHoverBtn}" Visibility="Collapsed" />
                         <Button Content="Bottom Left Paddle" x:Name="blpConBtn" Canvas.Left="0" Canvas.Top="0" Width="0" Height="0" Style="{StaticResource NoBGHoverBtn}" Visibility="Collapsed" />

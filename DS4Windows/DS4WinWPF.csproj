@@ -182,6 +182,13 @@
 		<None Include="Resources\USB.png" />
 		<None Include="Resources\DualSense Controller.png" />
 		<None Include="Resources\DualShock 4 Controller.png" />
+		<None Include="Resources\DualSense Config.png" />
+		<None Include="Resources\DualSense lightbar.png" />
+		<None Include="Resources\DualSense-Config_Mute.png" />
+		<None Include="Resources\DualSense-Config_TouchLeft.png" />
+		<None Include="Resources\DualSense-Config_TouchMulti.png" />
+		<None Include="Resources\DualSense-Config_TouchRight.png" />
+		<None Include="Resources\DualSense-Config_TouchUpper.png" />
 
 		<None Include="Resources\0.ico" />
 		<None Include="Resources\10.ico" />
@@ -267,6 +274,13 @@
 		<Resource Include="Resources\USB.png" />
 		<Resource Include="Resources\DualSense Controller.png" />
 		<Resource Include="Resources\DualShock 4 Controller.png" />
+		<Resource Include="Resources\DualSense Config.png" />
+		<Resource Include="Resources\DualSense lightbar.png" />
+		<Resource Include="Resources\DualSense-Config_Mute.png" />
+		<Resource Include="Resources\DualSense-Config_TouchLeft.png" />
+		<Resource Include="Resources\DualSense-Config_TouchMulti.png" />
+		<Resource Include="Resources\DualSense-Config_TouchRight.png" />
+		<Resource Include="Resources\DualSense-Config_TouchUpper.png" />
 
 		<Resource Include="Resources\0.ico" />
 		<Resource Include="Resources\10.ico" />

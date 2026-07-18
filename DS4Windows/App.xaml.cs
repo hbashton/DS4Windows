@@ -803,6 +803,10 @@ namespace DS4WinWPF
                     DS4Windows.AppThemeChoice.Dark : DS4Windows.AppThemeChoice.Light;
                 themeLocs.TryGetValue(implicitTheme, out string loc);
                 Application.Current.Resources.MergedDictionaries.Add(new ResourceDictionary() { Source = new Uri(loc, uriKind: UriKind.Relative) });
+                Application.Current.Resources.MergedDictionaries.Add(new ResourceDictionary()
+                {
+                    Source = new Uri("DS4Forms/Themes/BridgeShellStyles.xaml", UriKind.Relative)
+                });
 
                 if (fireChanged)
                 {
@@ -813,6 +817,10 @@ namespace DS4WinWPF
             {
                 Application.Current.Resources.MergedDictionaries.Clear();
                 Application.Current.Resources.MergedDictionaries.Add(new ResourceDictionary() { Source = new Uri(loc, uriKind: UriKind.Relative) });
+                Application.Current.Resources.MergedDictionaries.Add(new ResourceDictionary()
+                {
+                    Source = new Uri("DS4Forms/Themes/BridgeShellStyles.xaml", UriKind.Relative)
+                });
 
                 if (fireChanged)
                 {

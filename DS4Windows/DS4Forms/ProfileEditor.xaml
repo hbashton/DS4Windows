@@ -19,12 +19,12 @@
         <local:ResourcePaths x:Key="resourcesPaths" />
     </UserControl.Resources>
     <DockPanel>
-        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,4,0,10">
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,4,0,14">
             <TextBlock Text="{lex:BLoc Profile, StringFormat='{}{0}:'}" VerticalAlignment="Center" Margin="0,0,8,0"/>
             <TextBox x:Name="profileNameTxt" Text="" Width="160" VerticalContentAlignment="Center" />
-            <Button x:Name="saveBtn" Content="{lex:Loc SaveProfile}" Margin="10,0,0,0" Click="SaveBtn_Click" />
-            <Button x:Name="cancelBtn" Content="{lex:Loc Cancel}" Margin="10,0,0,0" Click="CancelBtn_Click" />
-            <Button x:Name="applyBtn" Content="{lex:Loc Apply}" Margin="10,0,0,0" Click="ApplyBtn_Click" IsEnabled="False" />
+            <Button x:Name="saveBtn" Content="{lex:Loc SaveProfile}" Margin="10,0,0,0" Click="SaveBtn_Click" Style="{StaticResource BridgePrimaryButtonStyle}" />
+            <Button x:Name="cancelBtn" Content="{lex:Loc Cancel}" Margin="10,0,0,0" Click="CancelBtn_Click" Style="{StaticResource BridgeSecondaryButtonStyle}" />
+            <Button x:Name="applyBtn" Content="{lex:Loc Apply}" Margin="10,0,0,0" Click="ApplyBtn_Click" IsEnabled="False" Style="{StaticResource BridgeSecondaryButtonStyle}" />
             <Button x:Name="presetBtn" Content="Select Preset" Margin="10,0,0,0" Click="PresetBtn_Click" />
             <Button x:Name="keepSizeBtn" Margin="10,0,0,0" Click="KeepSizeBtn_Click">
                 <StackPanel Orientation="Horizontal" Margin="0">
@@ -243,12 +243,12 @@
             </TabItem>
         </TabControl>
 
-        <TabControl x:Name="profileSettingsTabCon" DockPanel.Dock="Right" Margin="10,0,0,0" Padding="6">
+        <TabControl x:Name="profileSettingsTabCon" DockPanel.Dock="Right" Margin="10,0,0,0" Padding="6" Style="{StaticResource BridgeProfileTabControlStyle}">
             <TabControl.Resources>
                 <Thickness x:Key="spaceMargin" Bottom="8" />
             </TabControl.Resources>
 
-            <TabItem Header="{lex:Loc AxisConfig}" Height="24" Margin="-2,0,-2,0" VerticalAlignment="Bottom">
+            <TabItem Header="{lex:Loc AxisConfig}" Tag="Sticks, triggers, dead zones, curves, and motion axes">
                 <TabItem.Resources>
                     <Thickness x:Key="spaceMargin" Left="10" Bottom="6" />
                     <Style x:Key="gridRowHeight" TargetType="{x:Type RowDefinition}">
@@ -1162,7 +1162,7 @@
                 </ScrollViewer>
             </TabItem>
 
-            <TabItem Header="{lex:Loc Lightbar}">
+            <TabItem Header="{lex:Loc Lightbar}" Tag="Color, battery indicators, flash, and passthrough">
                 <StackPanel>
                     <StackPanel Orientation="Horizontal">
                         <Label Content="{lex:Loc OutputMode}" ContentStringFormat="{}{0}:" />
@@ -1273,7 +1273,7 @@
                 </StackPanel>
             </TabItem>
 
-            <TabItem Header="{lex:Loc Touchpad}" Height="22" VerticalAlignment="Top">
+            <TabItem Header="{lex:Loc Touchpad}" Tag="Mouse, controls, gestures, and absolute positioning">
                 <TabItem.Resources>
                     <Thickness x:Key="spaceMargin" Bottom="8" />
                 </TabItem.Resources>
@@ -1589,7 +1589,7 @@
                 
             </TabItem>
 
-            <TabItem Header="{lex:Loc Gyro}">
+            <TabItem Header="{lex:Loc Gyro}" Tag="Motion controls, mouse, steering, and directional swipes">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
@@ -2052,7 +2052,7 @@
                 </ScrollViewer>
             </TabItem>
 
-            <TabItem Header="{lex:Loc Other}">
+            <TabItem Header="Advanced" Tag="Output device, rumble, audio, latency, compatibility, and custom hooks">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel>
                         <GroupBox Header="{lex:Loc VirtualControllerSettings}" MinHeight="50" Margin="4,4,4,0" Padding="0,4,0,4">

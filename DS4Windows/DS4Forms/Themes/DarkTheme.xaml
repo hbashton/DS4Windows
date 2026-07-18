@@ -6,11 +6,19 @@
                     xmlns:themes1="clr-namespace:Microsoft.Windows.Themes;assembly=PresentationFramework.Aero">
 
     <!-- Brushes -->
-    <SolidColorBrush x:Key="BackgroundColor" Color="#FF202020" />
-    <SolidColorBrush x:Key="BorderColor" Color="#FF3F3F46" />
-    <SolidColorBrush x:Key="ForegroundColor" Color="White" />
-    <SolidColorBrush x:Key="SecondaryColor" Color="#FF2d5a8c" />
-    <SolidColorBrush x:Key="AccentColor" Color="#FF007ACC" />
+    <SolidColorBrush x:Key="BackgroundColor" Color="#FF070D15" />
+    <SolidColorBrush x:Key="BorderColor" Color="#FF223041" />
+    <SolidColorBrush x:Key="ForegroundColor" Color="#FFF4F7FB" />
+    <SolidColorBrush x:Key="SecondaryColor" Color="#FF153B6E" />
+    <SolidColorBrush x:Key="AccentColor" Color="#FF2C7DF7" />
+    <SolidColorBrush x:Key="SurfaceBackgroundColor" Color="#FF070D15" />
+    <SolidColorBrush x:Key="SidebarBackgroundColor" Color="#FF08111B" />
+    <SolidColorBrush x:Key="CardBackgroundColor" Color="#FF0A121D" />
+    <SolidColorBrush x:Key="RaisedBackgroundColor" Color="#FF0E1926" />
+    <SolidColorBrush x:Key="NavigationSelectionColor" Color="#FF153B6E" />
+    <SolidColorBrush x:Key="MutedForegroundColor" Color="#FF9CB0CA" />
+    <SolidColorBrush x:Key="SuccessColor" Color="#FF41D56A" />
+    <SolidColorBrush x:Key="DangerColor" Color="#FFE2555F" />
 
     <system:String x:Key="KeyImageImg">key-solid_white.png</system:String>
     <system:String x:Key="CancelImg">cancel_white.png</system:String>

@@ -68,24 +68,36 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
 
-                                    <StackPanel Orientation="Horizontal">
-                                        <Image x:Name="contStatusImg" Source="{Binding StatusSource}" Stretch="Uniform"
-                                               Width="22" Height="22" Margin="0,0,10,0"
-                                               ToolTip="Right click to disconnect wireless"
-                                               MouseRightButtonUp="ContStatusImg_MouseRightButtonUp" Tag="{Binding DevIndex}" />
-                                        <StackPanel>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Border Width="116" Height="72" Margin="0,0,14,0" CornerRadius="5"
+                                                Background="{DynamicResource RaisedBackgroundColor}"
+                                                BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
+                                                Visibility="{Binding HasControllerArtwork, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <Image Source="{Binding ControllerImageSource}" Stretch="Uniform"
+                                                   Width="108" Height="66" Margin="4"
+                                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                                        </Border>
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                             <TextBlock x:Name="idColumnTxtB" Text="{Binding IdText, Mode=OneWay}"
                                                        ToolTip="{Binding TooltipIDText, Mode=OneWay}"
                                                        ToolTipOpening="IdColumnTxtB_ToolTipOpening" Tag="{Binding DevIndex, Mode=OneTime}"
-                                                       FontSize="15" FontWeight="SemiBold" />
+                                                       FontSize="15" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                                             <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
+                                                <Image x:Name="contStatusImg" Source="{Binding StatusSource}" Stretch="Uniform"
+                                                       Width="18" Height="18" Margin="0,0,6,0"
+                                                       ToolTip="Right click to disconnect wireless"
+                                                       MouseRightButtonUp="ContStatusImg_MouseRightButtonUp" Tag="{Binding DevIndex}" />
                                                 <Image Source="{Binding ExclusiveSource}" Width="13" Height="13" Margin="0,0,5,0"
                                                        ToolTip="{Binding IsExclusiveText}" />
                                                 <TextBlock Text="{Binding IsExclusiveText}" FontSize="11"
                                                            Foreground="{DynamicResource MutedForegroundColor}" />
                                             </StackPanel>
                                         </StackPanel>
-                                    </StackPanel>
+                                    </Grid>
                                     <Border Grid.Column="1" Background="{DynamicResource RaisedBackgroundColor}"
                                             BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
                                             CornerRadius="3" Padding="10,5" VerticalAlignment="Top">

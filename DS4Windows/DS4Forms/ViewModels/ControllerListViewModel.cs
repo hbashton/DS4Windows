@@ -28,6 +28,7 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Media;
 using DS4Windows;
+using DS4Windows.InputDevices;
 
 namespace DS4WinWPF.DS4Forms.ViewModels
 {
@@ -257,6 +258,27 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             }
         }
         public event EventHandler BatteryStateChanged;
+
+        public bool HasControllerArtwork
+        {
+            get => device.DeviceType == InputDeviceType.DualSense ||
+                   device.DeviceType == InputDeviceType.DS4;
+        }
+
+        public string ControllerImageSource
+        {
+            get
+            {
+                string imageName = device.DeviceType switch
+                {
+                    InputDeviceType.DualSense => "DualSense Controller.png",
+                    InputDeviceType.DS4 => "DualShock 4 Controller.png",
+                    _ => null,
+                };
+
+                return imageName == null ? null : $"{Global.RESOURCES_PREFIX}/{imageName}";
+            }
+        }
 
         public int SelectedIndex
         {

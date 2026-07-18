@@ -376,6 +376,38 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void CheckMuteButtonMicrophoneModeDefaultsAndRoundTrip()
+        {
+            var store = new BackingStore();
+            var dto = new ProfileDTO
+            {
+                DeviceIndex = 0,
+            };
+
+            dto.MapTo(store);
+            Assert.IsFalse(store.dualSenseMuteButtonMutesMicrophone[0]);
+
+            dto.DualSenseMuteButtonMutesMicrophoneString = bool.TrueString;
+            dto.MapTo(store);
+            Assert.IsTrue(store.dualSenseMuteButtonMutesMicrophone[0]);
+
+            var roundTrip = new ProfileDTO
+            {
+                DeviceIndex = 0,
+            };
+            roundTrip.MapFrom(store);
+            Assert.AreEqual(bool.TrueString,
+                roundTrip.DualSenseMuteButtonMutesMicrophoneString);
+
+            var serializer = new XmlSerializer(typeof(ProfileDTO),
+                ProfileDTO.GetAttributeOverrides());
+            using var writer = new StringWriter();
+            serializer.Serialize(writer, roundTrip);
+            StringAssert.Contains(writer.ToString(),
+                "<DualSenseMuteButtonMutesMicrophone>True</DualSenseMuteButtonMutesMicrophone>");
+        }
+
+        [TestMethod]
         public void CheckWriteProfile()
         {
             BackingStore tempStore = new BackingStore();

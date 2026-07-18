@@ -961,8 +961,22 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         {
             get => tempControllerIndex; set
             {
+                if (tempControllerIndex == value)
+                {
+                    return;
+                }
+
                 tempControllerIndex = value;
                 Global.outDevTypeTemp[device] = TempConType;
+
+                if (TempConType == OutContType.ViiperDualSense ||
+                    TempConType == OutContType.ViiperDualSenseEdge)
+                {
+                    DualSenseSpeakerCompressionIndex =
+                        (int)DualSenseSpeakerProcessor.RecommendedCompression;
+                    DualSenseSpeakerBassBoost =
+                        DualSenseSpeakerProcessor.RecommendedBassBoostDb;
+                }
             }
         }
 
@@ -3304,17 +3318,39 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public int DualSenseSpeakerCompressionIndex
         {
             get => Global.DualSenseSpeakerCompression[device];
-            set => Global.DualSenseSpeakerCompression[device] = (byte)Math.Clamp(value,
-                (int)DualSenseSpeakerCompression.Off,
-                (int)DualSenseSpeakerCompression.Strong);
+            set
+            {
+                byte clamped = (byte)Math.Clamp(value,
+                    (int)DualSenseSpeakerCompression.Off,
+                    (int)DualSenseSpeakerCompression.Strong);
+                if (Global.DualSenseSpeakerCompression[device] == clamped)
+                {
+                    return;
+                }
+
+                Global.DualSenseSpeakerCompression[device] = clamped;
+                DualSenseSpeakerCompressionIndexChanged?.Invoke(this, EventArgs.Empty);
+            }
         }
+        public event EventHandler DualSenseSpeakerCompressionIndexChanged;
 
         public int DualSenseSpeakerBassBoost
         {
             get => Global.DualSenseSpeakerBassBoost[device];
-            set => Global.DualSenseSpeakerBassBoost[device] = (byte)Math.Clamp(value, 0,
-                DualSenseSpeakerProcessor.MaximumBassBoostDb);
+            set
+            {
+                byte clamped = (byte)Math.Clamp(value, 0,
+                    DualSenseSpeakerProcessor.MaximumBassBoostDb);
+                if (Global.DualSenseSpeakerBassBoost[device] == clamped)
+                {
+                    return;
+                }
+
+                Global.DualSenseSpeakerBassBoost[device] = clamped;
+                DualSenseSpeakerBassBoostChanged?.Invoke(this, EventArgs.Empty);
+            }
         }
+        public event EventHandler DualSenseSpeakerBassBoostChanged;
 
         public int DualSenseHeadphoneVolume
         {

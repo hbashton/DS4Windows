@@ -31,7 +31,7 @@ The profile can optionally process the physical Bluetooth controller-speaker str
 - **Dynamic range: Strong** applies a narrower range for larger volume differences.
 - **Bass/body boost** adds 0-6 dB around 200 Hz and filters unusable sub-bass below 70 Hz.
 
-Start with **Balanced** and **3 dB** of bass/body boost. The processor is stereo-linked and bufferless, so it adds no look-ahead frame or transport latency. **Off** and **0 dB** preserve the original PCM path. These controls affect speaker audio only; advanced-haptics channels remain untouched.
+Selecting a VIIPER DualSense or DualSense Edge as the emulated controller initializes the profile to **Balanced** and **3 dB** of bass/body boost. The user can tune or disable those values afterward. The processor is stereo-linked and bufferless, so it adds no look-ahead frame or transport latency. **Off** and **0 dB** preserve the original PCM path. These controls affect speaker audio only; advanced-haptics channels remain untouched.
 
 ## Implementation references
 

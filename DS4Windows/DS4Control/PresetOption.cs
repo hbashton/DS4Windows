@@ -54,6 +54,10 @@ namespace DS4WinWPF.DS4Control
         {
             DS4Windows.Global.OutContType[idx] = DS4Windows.OutContType.ViiperDualSense;
             DS4Windows.Global.UseGenericRumbleStrRescaleForDualSenses[idx] = true;
+            DS4Windows.Global.DualSenseSpeakerCompression[idx] =
+                (byte)DS4Windows.DualSenseSpeakerProcessor.RecommendedCompression;
+            DS4Windows.Global.DualSenseSpeakerBassBoost[idx] =
+                DS4Windows.DualSenseSpeakerProcessor.RecommendedBassBoostDb;
         }
     }
 

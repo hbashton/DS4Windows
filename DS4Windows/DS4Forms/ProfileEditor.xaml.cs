@@ -10,6 +10,7 @@ using System.Windows.Data;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
@@ -47,6 +48,7 @@ namespace DS4WinWPF.DS4Forms
         private bool usingDualSenseDiagram;
 
         public event EventHandler Closed;
+        public event EventHandler ProfileNameChanged;
 
         public delegate void CreatedProfileHandler(ProfileEditor sender, string profile);
 
@@ -72,6 +74,8 @@ namespace DS4WinWPF.DS4Forms
         {
             get => deviceNum;
         }
+
+        public string ProfileName => profileNameTxt.Text;
 
         private NonFormTimer inputTimer;
 
@@ -937,6 +941,62 @@ namespace DS4WinWPF.DS4Forms
             hoverImages[fnrConBtn] = guideHover;
             hoverImages[blpConBtn] = guideHover;
             hoverImages[brpConBtn] = guideHover;
+        }
+
+        public void SelectWorkspaceSection(int sectionIndex)
+        {
+            int nextSection = Math.Clamp(sectionIndex, 0, 7);
+            if (nextSection <= 2)
+            {
+                profileSettingsTabCon.Visibility = Visibility.Collapsed;
+                sidebarTabControl.Visibility = Visibility.Visible;
+                sidebarTabControl.SelectedIndex = nextSection;
+                AnimateWorkspacePanel(sidebarTabControl);
+            }
+            else
+            {
+                // Leaving controller readings must also stop its live polling timer.
+                if (sidebarTabControl.SelectedIndex == 2)
+                {
+                    sidebarTabControl.SelectedIndex = 0;
+                }
+
+                sidebarTabControl.Visibility = Visibility.Collapsed;
+                profileSettingsTabCon.Visibility = Visibility.Visible;
+                profileSettingsTabCon.SelectedIndex = nextSection - 3;
+                AnimateWorkspacePanel(profileSettingsTabCon);
+            }
+        }
+
+        private static void AnimateWorkspacePanel(UIElement panel)
+        {
+            panel.Opacity = 1.0;
+            TranslateTransform translate = new TranslateTransform();
+            panel.RenderTransform = translate;
+
+            CubicEase easing = new CubicEase { EasingMode = EasingMode.EaseOut };
+            panel.BeginAnimation(OpacityProperty, new DoubleAnimation(0.25, 1.0,
+                TimeSpan.FromMilliseconds(170)) { EasingFunction = easing });
+            translate.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(12.0, 0.0,
+                TimeSpan.FromMilliseconds(190)) { EasingFunction = easing });
+        }
+
+        public void CancelEdit()
+        {
+            CancelBtn_Click(this, new RoutedEventArgs());
+        }
+
+        public void DeactivateLiveReadings()
+        {
+            if (sidebarTabControl.SelectedIndex == 2)
+            {
+                sidebarTabControl.SelectedIndex = 0;
+            }
+        }
+
+        private void ProfileNameTxt_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            ProfileNameChanged?.Invoke(this, EventArgs.Empty);
         }
 
         public void Reload(int device, ProfileEntity profile = null)

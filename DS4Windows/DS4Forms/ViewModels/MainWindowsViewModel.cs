@@ -59,6 +59,78 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         }
         public event EventHandler FullTabsEnabledChanged;
 
+        private bool profileEditorMode;
+
+        public bool ProfileEditorMode
+        {
+            get => profileEditorMode;
+            set
+            {
+                if (profileEditorMode == value) return;
+                profileEditorMode = value;
+                ProfileEditorModeChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        public event EventHandler ProfileEditorModeChanged;
+
+        private string editingProfileName = "Profile";
+
+        public string EditingProfileName
+        {
+            get => editingProfileName;
+            set
+            {
+                string nextValue = string.IsNullOrWhiteSpace(value) ? "New profile" : value;
+                if (editingProfileName == nextValue) return;
+                editingProfileName = nextValue;
+                EditingProfileNameChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        public event EventHandler EditingProfileNameChanged;
+
+        private int profileEditorNavigationIndex = 1;
+
+        public int ProfileEditorNavigationIndex
+        {
+            get => profileEditorNavigationIndex;
+            set
+            {
+                if (profileEditorNavigationIndex == value) return;
+                profileEditorNavigationIndex = value;
+                ProfileEditorNavigationIndexChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        public event EventHandler ProfileEditorNavigationIndexChanged;
+
+        private string profileEditorSectionTitle = "Button Mapping";
+
+        public string ProfileEditorSectionTitle
+        {
+            get => profileEditorSectionTitle;
+            set
+            {
+                if (profileEditorSectionTitle == value) return;
+                profileEditorSectionTitle = value;
+                ProfileEditorSectionTitleChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        public event EventHandler ProfileEditorSectionTitleChanged;
+
+        private string profileEditorSectionDescription =
+            "Assign controller buttons, sticks, touch gestures, and shortcuts.";
+
+        public string ProfileEditorSectionDescription
+        {
+            get => profileEditorSectionDescription;
+            set
+            {
+                if (profileEditorSectionDescription == value) return;
+                profileEditorSectionDescription = value;
+                ProfileEditorSectionDescriptionChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        public event EventHandler ProfileEditorSectionDescriptionChanged;
+
         public string updaterExe = Environment.Is64BitProcess ? "DS4Updater.exe" : "DS4Updater_x86.exe";
 
         private string DownloadUpstreamUpdaterVersion()

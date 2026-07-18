@@ -1,12 +1,12 @@
 Controller artwork attribution
 ==============================
 
-The controller thumbnails in this directory are adapted from Gamepad Asset
-Pack by AL2009man / Al. Lopez:
+The controller thumbnails and DualSense remapping artwork in this directory
+are adapted from Gamepad Asset Pack by AL2009man / Al. Lopez:
 
 https://github.com/AL2009man/Gamepad-Asset-Pack
 
-The DualSense thumbnail follows the adaptation used by SundayMoments/DS5_Bridge:
+The DualSense artwork follows the adaptation used by SundayMoments/DS5_Bridge:
 
 https://github.com/SundayMoments/DS5_Bridge
 

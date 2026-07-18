@@ -24,6 +24,7 @@ using MessageBox = System.Windows.MessageBox;
 using MouseEventArgs = System.Windows.Input.MouseEventArgs;
 using OpenFileDialog = Microsoft.Win32.OpenFileDialog;
 using UserControl = System.Windows.Controls.UserControl;
+using DS4Windows.InputDevices;
 
 namespace DS4WinWPF.DS4Forms
 {
@@ -43,6 +44,7 @@ namespace DS4WinWPF.DS4Forms
         private MappingListViewModel mappingListVM;
         private ProfileEntity currentProfile;
         private SpecialActionsListViewModel specialActionsVM;
+        private bool usingDualSenseDiagram;
 
         public event EventHandler Closed;
 
@@ -85,6 +87,8 @@ namespace DS4WinWPF.DS4Forms
             picBoxHover.Visibility = Visibility.Hidden;
             picBoxHover2.Visibility = Visibility.Hidden;
 
+            ConfigureControllerDiagram(device);
+
             mappingListVM = new MappingListViewModel(deviceNum, profileSettingsVM.ContType);
             specialActionsVM = new SpecialActionsListViewModel(device);
 
@@ -108,6 +112,105 @@ namespace DS4WinWPF.DS4Forms
             inputTimer = new NonFormTimer(100);
             inputTimer.Elapsed += InputDS4;
             SetupEvents();
+        }
+
+        private void ConfigureControllerDiagram(int device)
+        {
+            usingDualSenseDiagram = ShouldUseDualSenseDiagram(device);
+            if (!usingDualSenseDiagram)
+            {
+                return;
+            }
+
+            controllerDiagram.Source = LoadResourceImage("DualSense Config.png");
+            controllerDiagram.ToolTip = "DualSense remapping layout";
+
+            SetCanvasButtonBounds(crossConBtn, 333, 127, 27, 27);
+            SetCanvasButtonBounds(circleConBtn, 363, 100, 27, 27);
+            SetCanvasButtonBounds(squareConBtn, 303, 100, 27, 27);
+            SetCanvasButtonBounds(triangleConBtn, 333, 76, 27, 27);
+
+            SetCanvasButtonBounds(l1ConBtn, 68, 25, 64, 27);
+            SetCanvasButtonBounds(r1ConBtn, 309, 25, 64, 27);
+            SetCanvasButtonBounds(l2ConBtn, 72, 0, 57, 27);
+            SetCanvasButtonBounds(r2ConBtn, 314, 0, 57, 27);
+
+            SetCanvasButtonBounds(shareConBtn, 115, 54, 20, 30);
+            SetCanvasButtonBounds(optionsConBtn, 306, 54, 20, 30);
+            SetCanvasButtonBounds(guideConBtn, 210, 151, 22, 23);
+            SetCanvasButtonBounds(muteConBtn, 210, 177, 22, 14);
+            muteConBtn.Visibility = Visibility.Visible;
+
+            SetCanvasButtonBounds(leftTouchConBtn, 145, 77, 52, 52);
+            SetCanvasButtonBounds(multiTouchConBtn, 197, 77, 46, 52);
+            SetCanvasButtonBounds(rightTouchConBtn, 243, 77, 56, 52);
+            SetCanvasButtonBounds(topTouchConBtn, 143, 49, 158, 28);
+
+            SetCanvasButtonBounds(l3ConBtn, 133, 145, 47, 48);
+            SetCanvasButtonBounds(lsuConBtn, 147, 138, 19, 16);
+            SetCanvasButtonBounds(lsrConBtn, 174, 160, 18, 18);
+            SetCanvasButtonBounds(lsdConBtn, 147, 184, 19, 16);
+            SetCanvasButtonBounds(lslConBtn, 121, 160, 18, 18);
+
+            SetCanvasButtonBounds(r3ConBtn, 261, 145, 47, 48);
+            SetCanvasButtonBounds(rsuConBtn, 275, 138, 19, 16);
+            SetCanvasButtonBounds(rsrConBtn, 302, 160, 18, 18);
+            SetCanvasButtonBounds(rsdConBtn, 275, 184, 19, 16);
+            SetCanvasButtonBounds(rslConBtn, 249, 160, 18, 18);
+
+            SetCanvasButtonBounds(upConBtn, 84, 76, 23, 31);
+            SetCanvasButtonBounds(rightConBtn, 103, 96, 33, 23);
+            SetCanvasButtonBounds(downConBtn, 84, 111, 23, 31);
+            SetCanvasButtonBounds(leftConBtn, 55, 96, 33, 23);
+
+            Canvas.SetLeft(ds4LightbarColorBtn, 135);
+            Canvas.SetTop(ds4LightbarColorBtn, 49);
+            ds4LightbarColorBtn.Width = 170;
+            ds4LightbarColorBtn.Height = 84;
+            lightbarRect.OpacityMask = new ImageBrush(LoadResourceImage("DualSense lightbar.png"));
+        }
+
+        private static bool ShouldUseDualSenseDiagram(int device)
+        {
+            if (App.rootHub == null)
+            {
+                return false;
+            }
+
+            if (device >= 0 && device < ControlService.CURRENT_DS4_CONTROLLER_LIMIT)
+            {
+                DS4Device selectedController = App.rootHub.DS4Controllers[device];
+                return selectedController?.DeviceType == InputDeviceType.DualSense;
+            }
+
+            // Profiles opened from the Profiles page use the test slot. Match the
+            // first connected DualSense so that the generic editor reflects the
+            // controller the user is actually configuring.
+            for (int i = 0; i < ControlService.CURRENT_DS4_CONTROLLER_LIMIT; i++)
+            {
+                if (App.rootHub.DS4Controllers[i]?.DeviceType == InputDeviceType.DualSense)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static void SetCanvasButtonBounds(Button button, double left, double top,
+            double width, double height)
+        {
+            Canvas.SetLeft(button, left);
+            Canvas.SetTop(button, top);
+            button.Width = width;
+            button.Height = height;
+        }
+
+        private static ImageSource LoadResourceImage(string fileName)
+        {
+            ImageSourceConverter sourceConverter = new ImageSourceConverter();
+            return sourceConverter.ConvertFromString(
+                $"{Global.ASSEMBLY_RESOURCE_PREFIX}component/Resources/{fileName}") as ImageSource;
         }
 
         private void PopulateGyroActionsTriggersMenu()
@@ -460,14 +563,26 @@ namespace DS4WinWPF.DS4Forms
                 size = new Size(muteConBtn.Width, muteConBtn.Height)
             };
 
-            hoverLocations[leftTouchConBtn] = new HoverImageInfo()
-                { point = new Point(144, 44), size = new Size(140, 98) };
-            hoverLocations[multiTouchConBtn] = new HoverImageInfo()
-                { point = new Point(143, 42), size = new Size(158, 100) };
-            hoverLocations[rightTouchConBtn] = new HoverImageInfo()
-                { point = new Point(156, 47), size = new Size(146, 94) };
-            hoverLocations[topTouchConBtn] = new HoverImageInfo()
-                { point = new Point(155, 6), size = new Size(153, 114) };
+            if (usingDualSenseDiagram)
+            {
+                HoverImageInfo dualSenseTouchOverlay = new HoverImageInfo()
+                    { point = new Point(0, 0), size = new Size(440, 220) };
+                hoverLocations[leftTouchConBtn] = dualSenseTouchOverlay;
+                hoverLocations[multiTouchConBtn] = dualSenseTouchOverlay;
+                hoverLocations[rightTouchConBtn] = dualSenseTouchOverlay;
+                hoverLocations[topTouchConBtn] = dualSenseTouchOverlay;
+            }
+            else
+            {
+                hoverLocations[leftTouchConBtn] = new HoverImageInfo()
+                    { point = new Point(144, 44), size = new Size(140, 98) };
+                hoverLocations[multiTouchConBtn] = new HoverImageInfo()
+                    { point = new Point(143, 42), size = new Size(158, 100) };
+                hoverLocations[rightTouchConBtn] = new HoverImageInfo()
+                    { point = new Point(156, 47), size = new Size(146, 94) };
+                hoverLocations[topTouchConBtn] = new HoverImageInfo()
+                    { point = new Point(155, 6), size = new Size(153, 114) };
+            }
 
             hoverLocations[l3ConBtn] = new HoverImageInfo()
             {
@@ -635,19 +750,28 @@ namespace DS4WinWPF.DS4Forms
             ImageBrush guideHover = new ImageBrush(temp);
 
             temp = sourceConverter.ConvertFromString(
-                $"{Global.ASSEMBLY_RESOURCE_PREFIX}component/Resources/DS4-Config_TouchLeft.png") as ImageSource;
+                $"{Global.ASSEMBLY_RESOURCE_PREFIX}component/Resources/" +
+                (usingDualSenseDiagram ? "DualSense-Config_Mute.png" : "DS4-Config_PS.png")) as ImageSource;
+            ImageBrush muteHover = new ImageBrush(temp);
+
+            temp = sourceConverter.ConvertFromString(
+                $"{Global.ASSEMBLY_RESOURCE_PREFIX}component/Resources/" +
+                (usingDualSenseDiagram ? "DualSense-Config_TouchLeft.png" : "DS4-Config_TouchLeft.png")) as ImageSource;
             ImageBrush leftTouchHover = new ImageBrush(temp);
 
             temp = sourceConverter.ConvertFromString(
-                $"{Global.ASSEMBLY_RESOURCE_PREFIX}component/Resources/DS4-Config_TouchMulti.png") as ImageSource;
+                $"{Global.ASSEMBLY_RESOURCE_PREFIX}component/Resources/" +
+                (usingDualSenseDiagram ? "DualSense-Config_TouchMulti.png" : "DS4-Config_TouchMulti.png")) as ImageSource;
             ImageBrush multiTouchTouchHover = new ImageBrush(temp);
 
             temp = sourceConverter.ConvertFromString(
-                $"{Global.ASSEMBLY_RESOURCE_PREFIX}component/Resources/DS4-Config_TouchRight.png") as ImageSource;
+                $"{Global.ASSEMBLY_RESOURCE_PREFIX}component/Resources/" +
+                (usingDualSenseDiagram ? "DualSense-Config_TouchRight.png" : "DS4-Config_TouchRight.png")) as ImageSource;
             ImageBrush rightTouchHover = new ImageBrush(temp);
 
             temp = sourceConverter.ConvertFromString(
-                $"{Global.ASSEMBLY_RESOURCE_PREFIX}component/Resources/DS4-Config_TouchUpper.png") as ImageSource;
+                $"{Global.ASSEMBLY_RESOURCE_PREFIX}component/Resources/" +
+                (usingDualSenseDiagram ? "DualSense-Config_TouchUpper.png" : "DS4-Config_TouchUpper.png")) as ImageSource;
             ImageBrush topTouchHover = new ImageBrush(temp);
 
 
@@ -720,7 +844,7 @@ namespace DS4WinWPF.DS4Forms
             hoverImages[shareConBtn] = shareHover;
             hoverImages[optionsConBtn] = optionsHover;
             hoverImages[guideConBtn] = guideHover;
-            hoverImages[muteConBtn] = guideHover;
+            hoverImages[muteConBtn] = muteHover;
 
             hoverImages[leftTouchConBtn] = leftTouchHover;
             hoverImages[multiTouchConBtn] = multiTouchTouchHover;

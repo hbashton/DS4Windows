@@ -172,80 +172,221 @@
             </TabItem>
 
             <TabItem x:Name="profilesTab" Header="{lex:Loc Profiles}" Tag="Create and manage complete controller configurations.">
-                <DockPanel x:Name="profDockPanel">
-                    <ToolBar x:Name="profOptsToolbar" Height="30" DockPanel.Dock="Top" Background="{x:Null}">
-                        <Button x:Name="newProfListBtn" Click="NewProfListBtn_Click">
-                            <Button.Content>
-                                <StackPanel Orientation="Horizontal">
-                                    <Image Source="{Binding NewProfile, Source={StaticResource ImgLocPaths}}" />
-                                    <TextBlock Text="{lex:Loc New}" />
-                                </StackPanel>
-                            </Button.Content>
-                        </Button>
-                        <Button x:Name="editProfBtn" Margin="10,0,0,0" IsEnabled="False" Click="EditProfBtn_Click">
-                            <Button.Content>
-                                <StackPanel Orientation="Horizontal">
-                                    <Image Source="{Binding EditProfile, Source={StaticResource ImgLocPaths}}" />
-                                    <TextBlock Text="{lex:Loc Edit}" />
-                                </StackPanel>
-                            </Button.Content>
-                        </Button>
-                        <Button x:Name="deleteProfBtn" Margin="10,0,0,0" IsEnabled="False" Click="DeleteProfBtn_Click">
-                            <Button.Content>
-                                <StackPanel Orientation="Horizontal">
-                                    <Image Source="{Binding DeleteProfile, Source={StaticResource ImgLocPaths}}" />
-                                    <TextBlock Text="{lex:Loc Delete}" />
-                                </StackPanel>
-                            </Button.Content>
-                        </Button>
-                        <Button x:Name="renameProfBtn" Margin="10,0,0,0" IsEnabled="False" Click="RenameProfBtn_Click">
-                            <Button.Content>
-                                <StackPanel Orientation="Horizontal">
-                                    <Image Source="{Binding EditProfile, Source={StaticResource ImgLocPaths}}" />
-                                    <TextBlock Text="{lex:Loc RenameProfile}" />
-                                </StackPanel>
-                            </Button.Content>
-                        </Button>
-                        <Button x:Name="dupProfBtn" Margin="10,0,0,0" IsEnabled="False" Click="DupProfBtn_Click">
-                            <Button.Content>
-                                <StackPanel Orientation="Horizontal">
-                                    <Image Source="{Binding DuplicateProfile, Source={StaticResource ImgLocPaths}}" />
-                                    <TextBlock Text="{lex:Loc Duplicate}" />
-                                </StackPanel>
-                            </Button.Content>
-                        </Button>
-                        <Button x:Name="importProfBtn" Margin="10,0,0,0" Click="ImportProfBtn_Click">
-                            <Button.Content>
-                                <StackPanel Orientation="Horizontal">
-                                    <Image Source="{Binding ImportProfile, Source={StaticResource ImgLocPaths}}" />
-                                    <TextBlock Text="{lex:Loc Import}" />
-                                </StackPanel>
-                            </Button.Content>
-                        </Button>
-                        <Button x:Name="exportProfBtn" Margin="10,0,0,0" IsEnabled="False" Click="ExportProfBtn_Click">
-                            <Button.Content>
-                                <StackPanel Orientation="Horizontal">
-                                    <Image Source="{Binding ExportProfile, Source={StaticResource ImgLocPaths}}" />
-                                    <TextBlock Text="{lex:Loc Export}" />
-                                </StackPanel>
-                            </Button.Content>
-                        </Button>
-                    </ToolBar>
-                    <ToolBar x:Name="dupBoxBar" Height="40" DockPanel.Dock="Top" Background="{x:Null}" HorizontalAlignment="Center" Visibility="Collapsed">
-                        <local:DupBox x:Name="dupBox" />
-                    </ToolBar>
+                <Grid x:Name="profDockPanel">
+                    <Grid x:Name="profilesBrowserPanel">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
 
-                    <ListBox x:Name="profilesListBox" DockPanel.Dock="Bottom" SelectionChanged="ProfilesListBox_SelectionChanged" MouseDoubleClick="ProfilesListBox_MouseDoubleClick">
-                        <ListBox.Resources>
-                            <localConverters:EscapeAccessKeysConverter x:Key="escapeAccessConvert" />
-                        </ListBox.Resources>
-                        <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <Label Content="{Binding Name, Mode=OneWay, Converter={StaticResource escapeAccessConvert}}" Padding="0" />
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
-                    <Border x:Name="profileEditorLoadingPanel" Visibility="Collapsed"
+                        <Border x:Name="profOptsToolbar" Style="{StaticResource BridgeCardStyle}"
+                                Padding="12,10" Margin="0,0,0,14">
+                            <WrapPanel VerticalAlignment="Center">
+                                <Button x:Name="newProfListBtn" Click="NewProfListBtn_Click"
+                                        Style="{StaticResource BridgePrimaryButtonStyle}" Margin="0,0,8,6">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Image Source="{Binding NewProfile, Source={StaticResource ImgLocPaths}}"
+                                               Width="16" Height="16" Margin="0,0,7,0" />
+                                        <TextBlock Text="New profile" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Button>
+                                <Button x:Name="editProfBtn" IsEnabled="False" Click="EditProfBtn_Click"
+                                        Style="{StaticResource BridgeSecondaryButtonStyle}" Margin="0,0,8,6">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Image Source="{Binding EditProfile, Source={StaticResource ImgLocPaths}}"
+                                               Width="16" Height="16" Margin="0,0,7,0" />
+                                        <TextBlock Text="{lex:Loc Edit}" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Button>
+                                <Button x:Name="dupProfBtn" IsEnabled="False" Click="DupProfBtn_Click"
+                                        Style="{StaticResource BridgeSecondaryButtonStyle}" Margin="0,0,8,6">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Image Source="{Binding DuplicateProfile, Source={StaticResource ImgLocPaths}}"
+                                               Width="16" Height="16" Margin="0,0,7,0" />
+                                        <TextBlock Text="{lex:Loc Duplicate}" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Button>
+                                <Button x:Name="renameProfBtn" IsEnabled="False" Click="RenameProfBtn_Click"
+                                        Style="{StaticResource BridgeSecondaryButtonStyle}" Margin="0,0,8,6">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Image Source="{Binding EditProfile, Source={StaticResource ImgLocPaths}}"
+                                               Width="16" Height="16" Margin="0,0,7,0" />
+                                        <TextBlock Text="{lex:Loc RenameProfile}" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Button>
+                                <Button x:Name="deleteProfBtn" IsEnabled="False" Click="DeleteProfBtn_Click"
+                                        Style="{StaticResource BridgeSecondaryButtonStyle}" Foreground="{DynamicResource DangerColor}"
+                                        Margin="0,0,16,6">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Image Source="{Binding DeleteProfile, Source={StaticResource ImgLocPaths}}"
+                                               Width="16" Height="16" Margin="0,0,7,0" />
+                                        <TextBlock Text="{lex:Loc Delete}" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Button>
+                                <Button x:Name="importProfBtn" Click="ImportProfBtn_Click"
+                                        Style="{StaticResource BridgeSecondaryButtonStyle}" Margin="0,0,8,6">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Image Source="{Binding ImportProfile, Source={StaticResource ImgLocPaths}}"
+                                               Width="16" Height="16" Margin="0,0,7,0" />
+                                        <TextBlock Text="{lex:Loc Import}" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Button>
+                                <Button x:Name="exportProfBtn" IsEnabled="False" Click="ExportProfBtn_Click"
+                                        Style="{StaticResource BridgeSecondaryButtonStyle}" Margin="0,0,0,6">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Image Source="{Binding ExportProfile, Source={StaticResource ImgLocPaths}}"
+                                               Width="16" Height="16" Margin="0,0,7,0" />
+                                        <TextBlock Text="{lex:Loc Export}" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Button>
+                            </WrapPanel>
+                        </Border>
+
+                        <Border x:Name="dupBoxBar" Grid.Row="1" Style="{StaticResource BridgeCardStyle}"
+                                Padding="14,10" Margin="0,0,0,14" Visibility="Collapsed">
+                            <local:DupBox x:Name="dupBox" HorizontalAlignment="Center" />
+                        </Border>
+
+                        <Border Grid.Row="2" Background="{DynamicResource CardBackgroundColor}"
+                                BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
+                                CornerRadius="5">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+
+                                <Border Padding="18,14" BorderBrush="{DynamicResource BorderColor}"
+                                        BorderThickness="0,0,0,1">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="Your profiles" FontSize="16" FontWeight="SemiBold" />
+                                            <TextBlock Text="Select a profile for actions, or double-click a card to edit it."
+                                                       Margin="0,3,0,0" FontSize="11"
+                                                       Foreground="{DynamicResource MutedForegroundColor}" />
+                                        </StackPanel>
+                                        <Border Grid.Column="1" Background="{DynamicResource RaisedBackgroundColor}"
+                                                BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
+                                                CornerRadius="4" Padding="10,5" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding ElementName=profilesListBox, Path=Items.Count, StringFormat={}{0} profiles}"
+                                                       FontSize="11" FontWeight="SemiBold"
+                                                       Foreground="{DynamicResource MutedForegroundColor}" />
+                                        </Border>
+                                    </Grid>
+                                </Border>
+
+                                <Grid Grid.Row="1">
+                                    <ListBox x:Name="profilesListBox" Background="Transparent" BorderThickness="0"
+                                             Padding="10" SelectionChanged="ProfilesListBox_SelectionChanged"
+                                             MouseDoubleClick="ProfilesListBox_MouseDoubleClick"
+                                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                             ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                        <ListBox.Resources>
+                                            <localConverters:EscapeAccessKeysConverter x:Key="escapeAccessConvert" />
+                                        </ListBox.Resources>
+                                        <ListBox.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <WrapPanel IsItemsHost="True" />
+                                            </ItemsPanelTemplate>
+                                        </ListBox.ItemsPanel>
+                                        <ListBox.ItemContainerStyle>
+                                            <Style TargetType="ListBoxItem">
+                                                <Setter Property="Width" Value="270" />
+                                                <Setter Property="Height" Value="88" />
+                                                <Setter Property="Margin" Value="6" />
+                                                <Setter Property="Padding" Value="0" />
+                                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                                <Setter Property="Background" Value="Transparent" />
+                                                <Setter Property="BorderThickness" Value="0" />
+                                                <Setter Property="Template">
+                                                    <Setter.Value>
+                                                        <ControlTemplate TargetType="ListBoxItem">
+                                                            <Border x:Name="ProfileCard" Background="{DynamicResource RaisedBackgroundColor}"
+                                                                    BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
+                                                                    CornerRadius="5" Padding="13">
+                                                                <ContentPresenter />
+                                                            </Border>
+                                                            <ControlTemplate.Triggers>
+                                                                <Trigger Property="IsMouseOver" Value="True">
+                                                                    <Setter TargetName="ProfileCard" Property="BorderBrush" Value="{DynamicResource AccentColor}" />
+                                                                </Trigger>
+                                                                <Trigger Property="IsSelected" Value="True">
+                                                                    <Setter TargetName="ProfileCard" Property="Background" Value="{DynamicResource NavigationSelectionColor}" />
+                                                                    <Setter TargetName="ProfileCard" Property="BorderBrush" Value="{DynamicResource AccentColor}" />
+                                                                    <Setter TargetName="ProfileCard" Property="BorderThickness" Value="2" />
+                                                                </Trigger>
+                                                                <Trigger Property="IsEnabled" Value="False">
+                                                                    <Setter Property="Opacity" Value="0.48" />
+                                                                </Trigger>
+                                                            </ControlTemplate.Triggers>
+                                                        </ControlTemplate>
+                                                    </Setter.Value>
+                                                </Setter>
+                                            </Style>
+                                        </ListBox.ItemContainerStyle>
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="46" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Border Width="38" Height="38" CornerRadius="5"
+                                                            Background="{DynamicResource AccentColor}" VerticalAlignment="Center">
+                                                        <TextBlock Text="P" Foreground="White" FontSize="16" FontWeight="Bold"
+                                                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                    </Border>
+                                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="4,0,8,0">
+                                                        <TextBlock Text="{Binding Name, Mode=OneWay, Converter={StaticResource escapeAccessConvert}}"
+                                                                   FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                                                                   ToolTip="{Binding Name}" />
+                                                        <TextBlock Text="Controller profile" Margin="0,4,0,0" FontSize="10"
+                                                                   Foreground="{DynamicResource MutedForegroundColor}" />
+                                                    </StackPanel>
+                                                    <TextBlock Grid.Column="2" Text="&#x203A;" FontSize="22"
+                                                               Foreground="{DynamicResource MutedForegroundColor}"
+                                                               VerticalAlignment="Center" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+
+                                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                IsHitTestVisible="False">
+                                        <StackPanel.Style>
+                                            <Style TargetType="StackPanel">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding ElementName=profilesListBox, Path=HasItems}" Value="False">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </StackPanel.Style>
+                                        <Border Width="52" Height="52" CornerRadius="8"
+                                                Background="{DynamicResource RaisedBackgroundColor}"
+                                                BorderBrush="{DynamicResource BorderColor}" BorderThickness="1">
+                                            <TextBlock Text="P" FontSize="20" FontWeight="Bold"
+                                                       Foreground="{DynamicResource AccentColor}"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
+                                        <TextBlock Text="No profiles yet" Margin="0,12,0,3" FontSize="15"
+                                                   FontWeight="SemiBold" HorizontalAlignment="Center" />
+                                        <TextBlock Text="Create or import a profile to get started."
+                                                   Foreground="{DynamicResource MutedForegroundColor}" />
+                                    </StackPanel>
+                                </Grid>
+                            </Grid>
+                        </Border>
+                    </Grid>
+
+                    <Border x:Name="profileEditorLoadingPanel" Visibility="Collapsed" Panel.ZIndex="2"
                             Background="{DynamicResource CardBackgroundColor}"
                             BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
                             CornerRadius="6" Padding="32">
@@ -258,7 +399,7 @@
                             <ProgressBar IsIndeterminate="True" Height="4" />
                         </StackPanel>
                     </Border>
-                </DockPanel>
+                </Grid>
             </TabItem>
             <TabItem Header="{lex:Loc AutoProfiles}" Tag="Switch profiles automatically when a game or application starts." IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">
                 <local:AutoProfiles x:Name="autoProfControl">

@@ -212,7 +212,7 @@ namespace DS4Windows
 
         // ViGEm-created DS4 controllers report the Sony VID with one of these PIDs.
         private static readonly int[] VirtualDS4Pids = { 0x05C4, 0x09CC };
-        private static readonly TimeSpan OwnVirtualDS4PendingTimeout = TimeSpan.FromSeconds(2);
+        private static readonly TimeSpan OwnVirtualDS4PendingTimeout = TimeSpan.FromSeconds(15);
         private const string VigemVirtualDS4MacPrefix = "C0:13:37";
 
         private static HashSet<string> SnapshotVirtualDS4Paths()
@@ -275,40 +275,74 @@ namespace DS4Windows
             }
         }
 
-        // Any virtual DS4 that appears after our Connect() call, and was not present in
-        // beforePaths, is one we just created -> record it so input detection skips it.
-        public static void RegisterOwnVirtualDS4(HashSet<string> beforePaths)
+        // VIIPER presents a complete USB composite device through USBIP. Windows can
+        // take several seconds to bind usbccgp, HID, and UAC after the API call has
+        // returned, so registration must outlive Connect() without blocking startup.
+        // The pending guard rejects the arriving virtual HID immediately; the path
+        // registry then keeps rejecting it for the rest of that output's lifetime.
+        public static void RegisterOwnVirtualDS4Async(HashSet<string> beforePaths)
         {
-            HashSet<string> after = null;
-            bool foundNew = false;
-            // The HID device can take a moment to enumerate after ViGEm Connect().
-            for (int attempt = 0; attempt < 10 && !foundNew; attempt++)
+            var worker = new System.Threading.Thread(() =>
             {
-                after = SnapshotVirtualDS4Paths();
-                foreach (string p in after)
+                try
                 {
-                    if (beforePaths == null || !beforePaths.Contains(p))
+                    HashSet<string> after = null;
+                    bool foundNew = false;
+                    for (int attempt = 0; attempt < 300 && !foundNew; attempt++)
                     {
-                        foundNew = true;
-                        break;
+                        after = SnapshotVirtualDS4Paths();
+                        foreach (string path in after)
+                        {
+                            if (beforePaths == null || !beforePaths.Contains(path))
+                            {
+                                foundNew = true;
+                                break;
+                            }
+                        }
+
+                        if (!foundNew)
+                        {
+                            System.Threading.Thread.Sleep(50);
+                        }
+                    }
+
+                    if (after == null)
+                    {
+                        return;
+                    }
+
+                    lock (ownVirtualLock)
+                    {
+                        foreach (string path in after)
+                        {
+                            if (beforePaths == null || !beforePaths.Contains(path))
+                            {
+                                ownVirtualDS4Paths.Add(path);
+                            }
+                        }
+
+                        ownVirtualDS4Paths.RemoveWhere(path => !after.Contains(path));
                     }
                 }
-                if (!foundNew) System.Threading.Thread.Sleep(30);
+                finally
+                {
+                    EndOwnVirtualDS4Connect();
+                }
+            })
+            {
+                IsBackground = true,
+                Name = "DS4Windows VIIPER DS4 registration",
+                Priority = System.Threading.ThreadPriority.BelowNormal,
+            };
+
+            try
+            {
+                worker.Start();
             }
-
-            if (after == null) return;
-
-            lock (ownVirtualLock)
+            catch
             {
-                foreach (string p in after)
-                {
-                    if (beforePaths == null || !beforePaths.Contains(p))
-                    {
-                        ownVirtualDS4Paths.Add(p);
-                    }
-                }
-                // Drop entries for devices that are no longer present (unplugged outputs).
-                ownVirtualDS4Paths.RemoveWhere(p => !after.Contains(p));
+                EndOwnVirtualDS4Connect();
+                throw;
             }
         }
 

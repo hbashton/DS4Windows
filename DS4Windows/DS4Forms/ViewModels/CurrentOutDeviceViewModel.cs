@@ -228,10 +228,9 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         private static string GetOutputTypeDisplayName(OutContType type)
         {
-            return type switch
+            return type.Normalize() switch
             {
                 OutContType.X360 => "Xbox 360",
-                OutContType.DS4 => "DualShock 4",
                 OutContType.ViiperX360 => "Xbox 360 (VIIPER)",
                 OutContType.ViiperDS4 => "DualShock 4 (VIIPER)",
                 OutContType.ViiperDualSense => "DualSense",
@@ -390,7 +389,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         private int DetermineDesiredChoiceIdx()
         {
             int result = 0;
-            switch (outSlotDevice.PermanentType)
+            switch (outSlotDevice.PermanentType.Normalize())
             {
                 case OutContType.None:
                     result = 0;
@@ -398,23 +397,20 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 case OutContType.X360:
                     result = 1;
                     break;
-                case OutContType.DS4:
+                case OutContType.ViiperDS4:
                     result = 2;
                     break;
                 case OutContType.ViiperX360:
                     result = 3;
                     break;
-                case OutContType.ViiperDS4:
+                case OutContType.ViiperDualSense:
                     result = 4;
                     break;
-                case OutContType.ViiperDualSense:
+                case OutContType.ViiperDualSenseEdge:
                     result = 5;
                     break;
-                case OutContType.ViiperDualSenseEdge:
-                    result = 6;
-                    break;
                 case OutContType.ViiperSwitch2Pro:
-                    result = 7;
+                    result = 6;
                     break;
                 default:
                     break;
@@ -452,21 +448,18 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     result = OutContType.X360;
                     break;
                 case 2:
-                    result = OutContType.DS4;
+                    result = OutContType.ViiperDS4;
                     break;
                 case 3:
                     result = OutContType.ViiperX360;
                     break;
                 case 4:
-                    result = OutContType.ViiperDS4;
-                    break;
-                case 5:
                     result = OutContType.ViiperDualSense;
                     break;
-                case 6:
+                case 5:
                     result = OutContType.ViiperDualSenseEdge;
                     break;
-                case 7:
+                case 6:
                     result = OutContType.ViiperSwitch2Pro;
                     break;
                 default:

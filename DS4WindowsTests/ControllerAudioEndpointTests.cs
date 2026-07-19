@@ -23,7 +23,9 @@ namespace DS4WindowsTests
         [DataRow(OutContType.ViiperDS4, (int)ControllerAudioEndpointKind.DualShock4)]
         [DataRow(OutContType.ViiperDualSense, (int)ControllerAudioEndpointKind.DualSense)]
         [DataRow(OutContType.ViiperDualSenseEdge, (int)ControllerAudioEndpointKind.DualSense)]
-        [DataRow(OutContType.DS4, (int)ControllerAudioEndpointKind.Any)]
+        // Legacy profiles that serialized "DS4" are migrated to the VIIPER
+        // DualShock 4 backend before audio endpoint selection.
+        [DataRow(OutContType.DS4, (int)ControllerAudioEndpointKind.DualShock4)]
         public void MapsVirtualOutputToPreferredAudioEndpoint(OutContType output, int expected)
         {
             Assert.AreEqual((ControllerAudioEndpointKind)expected,

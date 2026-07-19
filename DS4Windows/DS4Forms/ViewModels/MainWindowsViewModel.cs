@@ -76,7 +76,6 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             new List<OverviewOutputControllerChoice>
             {
                 new("Xbox 360", OutContType.X360),
-                new("DualShock 4", OutContType.DS4),
                 new("Xbox 360 (VIIPER)", OutContType.ViiperX360),
                 new("DualShock 4 (VIIPER)", OutContType.ViiperDS4),
                 new("DualSense", OutContType.ViiperDualSense),
@@ -133,11 +132,14 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public OutContType SelectedOutputController
         {
-            get => HasValidSelectedDevice ? Global.OutContType[selectedController.DevIndex] : OutContType.None;
+            get => HasValidSelectedDevice ?
+                Global.OutContType[selectedController.DevIndex].Normalize() :
+                OutContType.None;
             set
             {
+                value = value.Normalize();
                 if (!HasValidSelectedDevice || value == OutContType.None ||
-                    Global.OutContType[selectedController.DevIndex] == value)
+                    Global.OutContType[selectedController.DevIndex].Normalize() == value)
                 {
                     return;
                 }

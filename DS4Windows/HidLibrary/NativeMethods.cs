@@ -96,11 +96,23 @@ namespace DS4Windows
         [DllImport("kernel32.dll", SetLastError = true)]
         static internal extern bool ReadFile(IntPtr hFile, [Out] byte[] lpBuffer, uint nNumberOfBytesToRead, out uint lpNumberOfBytesRead, IntPtr lpOverlapped);
 
+        [DllImport("kernel32.dll", SetLastError = true, EntryPoint = "ReadFile")]
+        internal static extern unsafe bool ReadFilePinned(IntPtr hFile,
+            byte* lpBuffer, uint nNumberOfBytesToRead,
+            uint* lpNumberOfBytesRead,
+            System.Threading.NativeOverlapped* lpOverlapped);
+
         [DllImport("kernel32.dll")]
         static internal extern uint WaitForSingleObject(IntPtr hHandle, int dwMilliseconds);
 
         [DllImport("kernel32.dll")]
         static internal extern bool WriteFile(IntPtr hFile, byte[] lpBuffer, uint nNumberOfBytesToWrite, out uint lpNumberOfBytesWritten, [In] ref System.Threading.NativeOverlapped lpOverlapped);
+
+        [DllImport("kernel32.dll", SetLastError = true, EntryPoint = "WriteFile")]
+        internal static extern unsafe bool WriteFilePinned(IntPtr hFile,
+            byte* lpBuffer, uint nNumberOfBytesToWrite,
+            uint* lpNumberOfBytesWritten,
+            System.Threading.NativeOverlapped* lpOverlapped);
 
         internal const int DBT_DEVICEARRIVAL = 0x8000;
         internal const int DBT_DEVICEREMOVECOMPLETE = 0x8004;

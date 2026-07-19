@@ -61,12 +61,23 @@ namespace DS4Windows
     {
         None = 0,
         X360,
+        // Retained only so existing XML and output-slot files deserialize with
+        // their original numeric value. Runtime code normalizes this retired
+        // ViGEm DS4 value to ViiperDS4.
         DS4,
         ViiperX360,
         ViiperDS4,
         ViiperDualSense,
         ViiperDualSenseEdge,
         ViiperSwitch2Pro,
+    }
+
+    public static class OutContTypeCompatibility
+    {
+        public static OutContType Normalize(this OutContType type)
+        {
+            return type == OutContType.DS4 ? OutContType.ViiperDS4 : type;
+        }
     }
 
     public enum GyroOutMode : uint
@@ -882,6 +893,7 @@ namespace DS4Windows
 
         public static string getX360ControlString(X360Controls key, OutContType conType)
         {
+            conType = conType.Normalize();
             string result = string.Empty;
             if (conType == DS4Windows.OutContType.X360 ||
                 conType == DS4Windows.OutContType.ViiperX360)
@@ -892,8 +904,7 @@ namespace DS4Windows
             {
                 switchDefaultNames.TryGetValue(key, out result);
             }
-            else if (conType == DS4Windows.OutContType.DS4 ||
-                conType == DS4Windows.OutContType.ViiperDS4 ||
+            else if (conType == DS4Windows.OutContType.ViiperDS4 ||
                 conType == DS4Windows.OutContType.ViiperDualSense ||
                 conType == DS4Windows.OutContType.ViiperDualSenseEdge)
             {
@@ -4491,12 +4502,12 @@ namespace DS4Windows
 
         private string OutContDeviceString(OutContType id)
         {
+            id = id.Normalize();
             string result = "X360";
             switch (id)
             {
                 case OutContType.None:
                 case OutContType.X360: result = "X360"; break;
-                case OutContType.DS4: result = "DS4"; break;
                 case OutContType.ViiperX360: result = "ViiperX360"; break;
                 case OutContType.ViiperDS4: result = "ViiperDS4"; break;
                 case OutContType.ViiperDualSense: result = "ViiperDualSense"; break;
@@ -4515,7 +4526,7 @@ namespace DS4Windows
             {
                 case "None":
                 case "X360": id = OutContType.X360; break;
-                case "DS4": id = OutContType.DS4; break;
+                case "DS4": id = OutContType.ViiperDS4; break;
                 case "DualSense": id = OutContType.ViiperDualSense; break;
                 case "ViiperX360": id = OutContType.ViiperX360; break;
                 case "ViiperDS4": id = OutContType.ViiperDS4; break;
@@ -8042,7 +8053,7 @@ namespace DS4Windows
                     catch { }
                 }
 
-                try { Item = m_Xdoc.SelectSingleNode("/" + rootname + "/OutputContDevice"); outputDevType[device] = OutContDeviceId(Item.InnerText); }
+                try { Item = m_Xdoc.SelectSingleNode("/" + rootname + "/OutputContDevice"); outputDevType[device] = OutContDeviceId(Item.InnerText).Normalize(); }
                 catch { outputDevType[device] = OutContType.X360; missingSetting = true; }
 
                 // Only change xinput devices under certain conditions. Avoid
@@ -10229,7 +10240,7 @@ namespace DS4Windows
             TriggerDeadZoneZInfo r2Info = r2ModInfo[device];
             r2Info.deadZone = (byte)(0.00 * 255);
 
-            outputDevType[device] = OutContType.DS4;
+            outputDevType[device] = OutContType.ViiperDS4;
 
             // If a device exists, make sure to transfer relevant profile device
             // options to device instance
@@ -10345,7 +10356,7 @@ namespace DS4Windows
             gyroMStickInfo[device].useSmoothing = true;
             gyroMStickInfo[device].smoothingMethod = GyroMouseStickInfo.SmoothingMethod.OneEuro;
 
-            outputDevType[device] = OutContType.DS4;
+            outputDevType[device] = OutContType.ViiperDS4;
 
             // If a device exists, make sure to transfer relevant profile device
             // options to device instance
@@ -10431,7 +10442,7 @@ namespace DS4Windows
             gyroMouseInfo[device].enableSmoothing = true;
             gyroMouseInfo[device].smoothingMethod = GyroMouseInfo.SmoothingMethod.OneEuro;
 
-            outputDevType[device] = OutContType.DS4;
+            outputDevType[device] = OutContType.ViiperDS4;
 
             // If a device exists, make sure to transfer relevant profile device
             // options to device instance
@@ -10460,7 +10471,7 @@ namespace DS4Windows
             rsInfo.antiDeadZone = 0;
             rsInfo.maxZone = 90;
 
-            outputDevType[device] = OutContType.DS4;
+            outputDevType[device] = OutContType.ViiperDS4;
 
             // If a device exists, make sure to transfer relevant profile device
             // options to device instance

@@ -117,6 +117,7 @@ namespace DS4WinWPF.DS4Control
             get => permanentType;
             set
             {
+                value = value.Normalize();
                 if (permanentType == value) return;
 
                 if(value != OutContType.None)
@@ -131,7 +132,11 @@ namespace DS4WinWPF.DS4Control
         /// <summary>
         /// Device type of the current output controller
         /// </summary>
-        public OutContType CurrentType { get => currentType; set => currentType = value; }
+        public OutContType CurrentType
+        {
+            get => currentType;
+            set => currentType = value.Normalize();
+        }
 
         public OutSlotDevice(int idx)
         {
@@ -155,7 +160,7 @@ namespace DS4WinWPF.DS4Control
         {
             this.outputDevice = outputDevice;
             attachedStatus = AttachedStatus.Attached;
-            currentType = contType;
+            currentType = contType.Normalize();
             inputIndex = inIdx;
             inputDisplayString = inDisplayString;
             //desiredType = contType;

@@ -10,15 +10,21 @@ namespace DS4Windows
     /// </summary>
     public static class DualShock4BluetoothAudioProtocol
     {
-        public const int SpeakerReportLength = 270;
-        public const int SpeakerFramesPerReport = 2;
+        public const int SpeakerSmallReportLength = 270;
+        public const int SpeakerLargeReportLength = 462;
+        public const int SpeakerSmallFramesPerReport = 2;
+        public const int SpeakerLargeFramesPerReport = 4;
+        public const int SpeakerMinimumBufferedFrames = SpeakerLargeFramesPerReport;
         public const int SpeakerSbcFrameLength = 109;
         public const int MicrophoneMsbcFrameLength = 57;
         public const int MicrophoneSamplesPerFrame = 120;
 
         private const int HidStateLength = 75;
         private const int BluetoothHeaderLength = 3;
-        private const byte MicrophoneAudioTarget = 0x03;
+        // Genuine CUH-ZCT2 hardware uses target 0x01 for the microphone lane.
+        // Older protocol notes and synthetic fixtures use 0x03, so accept both.
+        private const byte MicrophoneAudioTarget = 0x01;
+        private const byte LegacyMicrophoneAudioTarget = 0x03;
 
         public static int GetInputReportLength(byte reportId)
         {
@@ -62,27 +68,112 @@ namespace DS4Windows
         public static byte[] BuildSpeakerReport(ushort frameNumber, byte[] firstFrame,
             byte[] secondFrame, byte audioTarget = 0x02)
         {
-            if (firstFrame == null || firstFrame.Length != SpeakerSbcFrameLength)
+            return BuildSpeakerReport(frameNumber,
+                new[] { firstFrame, secondFrame }, audioTarget);
+        }
+
+        /// <summary>
+        /// Builds the DS4 Bluetooth speaker packet used by Sony hardware. Four
+        /// SBC frames use report 0x17; the two-frame drain fallback uses 0x14.
+        /// The frame counter advances by the number of encoded SBC frames, not
+        /// by the number of HID reports.
+        /// </summary>
+        public static byte[] BuildSpeakerReport(ushort frameNumber,
+            byte[][] frames, byte audioTarget = 0x02,
+            bool microphoneEnabled = false)
+        {
+            if (frames == null ||
+                (frames.Length != SpeakerSmallFramesPerReport &&
+                    frames.Length != SpeakerLargeFramesPerReport))
             {
-                throw new ArgumentException($"A DS4 speaker SBC frame must be {SpeakerSbcFrameLength} bytes.", nameof(firstFrame));
+                throw new ArgumentException(
+                    "A DS4 speaker report must contain exactly two or four SBC frames.",
+                    nameof(frames));
             }
 
-            if (secondFrame == null || secondFrame.Length != SpeakerSbcFrameLength)
+            for (int index = 0; index < frames.Length; index++)
             {
-                throw new ArgumentException($"A DS4 speaker SBC frame must be {SpeakerSbcFrameLength} bytes.", nameof(secondFrame));
+                if (frames[index] == null ||
+                    frames[index].Length != SpeakerSbcFrameLength)
+                {
+                    throw new ArgumentException(
+                        $"A DS4 speaker SBC frame must be {SpeakerSbcFrameLength} bytes.",
+                        nameof(frames));
+                }
             }
 
-            byte[] report = new byte[SpeakerReportLength];
-            report[0] = 0x14;
+            bool large = frames.Length == SpeakerLargeFramesPerReport;
+            int reportLength = large ? SpeakerLargeReportLength :
+                SpeakerSmallReportLength;
+            byte[] report = new byte[reportLength];
+            report[0] = large ? (byte)0x17 : (byte)0x14;
             report[1] = 0x40;
-            report[2] = 0xA2;
+            // The low three bits select the DS4 microphone input mode. Mode 2
+            // (the A2 value copied by the original proof-of-concepts) stops
+            // ordinary HID input on genuine hardware. A0 is speaker-only;
+            // A1 requests the combined HID + microphone report 0x13.
+            report[2] = microphoneEnabled ? (byte)0xA1 : (byte)0xA0;
             report[3] = (byte)frameNumber;
             report[4] = (byte)(frameNumber >> 8);
             report[5] = audioTarget;
-            Buffer.BlockCopy(firstFrame, 0, report, 6, SpeakerSbcFrameLength);
-            Buffer.BlockCopy(secondFrame, 0, report, 6 + SpeakerSbcFrameLength,
-                SpeakerSbcFrameLength);
-            WriteBluetoothCrc(report, SpeakerReportLength);
+            for (int index = 0; index < frames.Length; index++)
+            {
+                Buffer.BlockCopy(frames[index], 0, report,
+                    6 + index * SpeakerSbcFrameLength, SpeakerSbcFrameLength);
+            }
+
+            WriteBluetoothCrc(report, reportLength);
+            return report;
+        }
+
+        /// <summary>
+        /// Builds the one-shot report 0x11 which arms or disarms the DS4 audio
+        /// plane. Only volume validity bits are asserted, matching the Sony
+        /// protocol reference; rumble, lightbar, and flash state therefore
+        /// remain owned by the regular output dispatcher.
+        /// </summary>
+        public static byte[] BuildAudioControlReport(bool speakerEnabled,
+            bool microphoneEnabled, byte speakerVolume,
+            byte headphoneVolume, byte microphoneVolume)
+        {
+            const int reportLength = 78;
+            byte[] report = new byte[reportLength];
+            bool audioEnabled = speakerEnabled || microphoneEnabled;
+            // Audio control is specifically a 78-byte report 0x11. A DS4 may
+            // also accept the 334-byte report 0x15 for ordinary effects, but
+            // putting 0x15 on this short packet makes the firmware stop
+            // reporting input. Keep this invariant inside the packet builder.
+            report[0] = 0x11;
+            report[1] = 0xC0;
+            report[2] = microphoneEnabled ? (byte)0xA1 :
+                speakerEnabled ? (byte)0xA0 : (byte)0x00;
+
+            byte validity = 0;
+            if (speakerEnabled)
+            {
+                // PadForge keeps only the speaker/headphone volume fields valid
+                // on its dedicated audio session. Effects remain on the primary
+                // DS4Windows control-transfer session.
+                validity |= 0xB0;
+            }
+
+            if (microphoneEnabled)
+            {
+                validity |= 0x40;
+            }
+
+            if (!audioEnabled)
+            {
+                // Explicitly mute all audio lanes when the transport is torn down.
+                validity = 0xF0;
+            }
+
+            report[3] = validity;
+            report[21] = speakerEnabled ? headphoneVolume : (byte)0;
+            report[22] = speakerEnabled ? headphoneVolume : (byte)0;
+            report[23] = microphoneEnabled ? microphoneVolume : (byte)0;
+            report[24] = speakerEnabled ? speakerVolume : (byte)0;
+            WriteBluetoothCrc(report, reportLength);
             return report;
         }
 
@@ -186,13 +277,13 @@ namespace DS4Windows
 
             if (HasHidState(report) &&
                 stateAndAudioOffset + 3 <= crcOffset &&
-                report[stateAndAudioOffset + 2] == MicrophoneAudioTarget)
+                IsMicrophoneAudioTarget(report[stateAndAudioOffset + 2]))
             {
                 return stateAndAudioOffset;
             }
 
             if (audioOnlyOffset + 3 <= crcOffset &&
-                report[audioOnlyOffset + 2] == MicrophoneAudioTarget)
+                IsMicrophoneAudioTarget(report[audioOnlyOffset + 2]))
             {
                 return audioOnlyOffset;
             }
@@ -200,12 +291,18 @@ namespace DS4Windows
             // Some firmware revisions leave the HID flag stale. Check the
             // state-prefixed location as a compatibility fallback.
             if (stateAndAudioOffset + 3 <= crcOffset &&
-                report[stateAndAudioOffset + 2] == MicrophoneAudioTarget)
+                IsMicrophoneAudioTarget(report[stateAndAudioOffset + 2]))
             {
                 return stateAndAudioOffset;
             }
 
             return -1;
+        }
+
+        private static bool IsMicrophoneAudioTarget(byte target)
+        {
+            return target == MicrophoneAudioTarget ||
+                target == LegacyMicrophoneAudioTarget;
         }
 
         private static void WriteBluetoothCrc(byte[] report, int reportLength)

@@ -2195,9 +2195,8 @@
                                     <ComboBox x:Name="outConTypeCombo" SelectedIndex="{Binding TempControllerIndex, FallbackValue=0}" IsEnabled="{Binding DInputOnly, Converter={StaticResource InverseBoolConverter}}" MinWidth="140"
                                       ToolTip="{lex:Loc OutContNotice}">
                                         <ComboBoxItem Content="Xbox 360"/>
-                                        <ComboBoxItem Content="DualShock 4"/>
-                                        <ComboBoxItem Content="Xbox 360 (VIIPER)"/>
                                         <ComboBoxItem Content="DualShock 4 (VIIPER)"/>
+                                        <ComboBoxItem Content="Xbox 360 (VIIPER)"/>
                                         <ComboBoxItem Content="DualSense"/>
                                         <ComboBoxItem Content="DualSense Edge"/>
                                         <ComboBoxItem Content="Switch 2 Pro"/>

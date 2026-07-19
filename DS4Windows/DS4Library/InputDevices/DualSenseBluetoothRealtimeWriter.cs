@@ -206,7 +206,8 @@ namespace DS4Windows.InputDevices
         /// reader: opening a second handle loses to the exclusive share mode.
         /// </summary>
         public static bool TryCreate(SafeFileHandle deviceHandle, int reportLength,
-            out DualSenseBluetoothRealtimeWriter writer, out int error)
+            out DualSenseBluetoothRealtimeWriter writer, out int error,
+            int slotCount = 3)
         {
             writer = null;
             error = 0;
@@ -218,7 +219,8 @@ namespace DS4Windows.InputDevices
 
             try
             {
-                writer = new DualSenseBluetoothRealtimeWriter(deviceHandle, reportLength, slotCount: 3);
+                writer = new DualSenseBluetoothRealtimeWriter(deviceHandle, reportLength,
+                    Math.Max(1, slotCount));
                 return true;
             }
             catch
@@ -235,7 +237,8 @@ namespace DS4Windows.InputDevices
         public bool TryWrite(byte[] report, out bool transportFault)
         {
             transportFault = false;
-            if (report == null || report.Length != slots[0].Buffer.Length)
+            if (report == null || report.Length == 0 ||
+                report.Length > slots[0].Buffer.Length)
             {
                 transportFault = true;
                 return false;
@@ -302,6 +305,123 @@ namespace DS4Windows.InputDevices
 
                 RecordSubmissionGap(now);
                 nextSlot = (nextSlot + 1) % slots.Length;
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Writes a one-shot control report and waits for its exact OVERLAPPED
+        /// completion. DS4 audio gives this writer a dedicated HID handle, so
+        /// the wait cannot consume or cancel the input reader's IRP.
+        /// </summary>
+        public bool TryWriteAndWait(byte[] report, uint timeoutMilliseconds,
+            out bool transportFault)
+        {
+            transportFault = false;
+            if (report == null || report.Length == 0 ||
+                report.Length > slots[0].Buffer.Length)
+            {
+                transportFault = true;
+                return false;
+            }
+
+            lock (syncRoot)
+            {
+                if (disposed)
+                {
+                    transportFault = true;
+                    return false;
+                }
+
+                ObserveCompletedWrites();
+                WriteSlot slot = null;
+                foreach (WriteSlot candidate in slots)
+                {
+                    if (WaitForSingleObject(candidate.EventHandle, 0) !=
+                        WAIT_OBJECT_0)
+                    {
+                        continue;
+                    }
+
+                    if (candidate.Pending)
+                    {
+                        if (!GetOverlappedResult(deviceHandle,
+                            candidate.Overlapped, out _, false))
+                        {
+                            transportFault = true;
+                            return false;
+                        }
+
+                        RecordCompletion(Stopwatch.GetTimestamp() -
+                            candidate.SubmittedTimestamp);
+                        candidate.Pending = false;
+                        candidate.SubmittedTimestamp = 0;
+                    }
+
+                    slot = candidate;
+                    break;
+                }
+
+                if (slot == null)
+                {
+                    transportFault = true;
+                    return false;
+                }
+
+                Buffer.BlockCopy(report, 0, slot.Buffer, 0, report.Length);
+                ResetEvent(slot.EventHandle);
+                Marshal.StructureToPtr(new NativeOverlappedData
+                {
+                    EventHandle = slot.EventHandle,
+                }, slot.Overlapped, false);
+
+                long submitted = Stopwatch.GetTimestamp();
+                bool completed = WriteFile(deviceHandle,
+                    slot.BufferHandle.AddrOfPinnedObject(), (uint)report.Length,
+                    IntPtr.Zero, slot.Overlapped);
+                if (!completed)
+                {
+                    int error = Marshal.GetLastWin32Error();
+                    if (error != ERROR_IO_PENDING)
+                    {
+                        SetEvent(slot.EventHandle);
+                        transportFault = true;
+                        return false;
+                    }
+
+                    slot.Pending = true;
+                    slot.SubmittedTimestamp = submitted;
+                    if (WaitForSingleObject(slot.EventHandle,
+                        timeoutMilliseconds) != WAIT_OBJECT_0)
+                    {
+                        CancelIoEx(deviceHandle, slot.Overlapped);
+                        WaitForSingleObject(slot.EventHandle, INFINITE);
+                        slot.Pending = false;
+                        slot.SubmittedTimestamp = 0;
+                        transportFault = true;
+                        return false;
+                    }
+
+                    if (!GetOverlappedResult(deviceHandle, slot.Overlapped,
+                        out _, false))
+                    {
+                        slot.Pending = false;
+                        slot.SubmittedTimestamp = 0;
+                        transportFault = true;
+                        return false;
+                    }
+
+                    RecordCompletion(Stopwatch.GetTimestamp() - submitted);
+                    slot.Pending = false;
+                    slot.SubmittedTimestamp = 0;
+                }
+                else
+                {
+                    SetEvent(slot.EventHandle);
+                    Interlocked.Increment(ref completedWrites);
+                }
+
+                RecordSubmissionGap(submitted);
                 return true;
             }
         }

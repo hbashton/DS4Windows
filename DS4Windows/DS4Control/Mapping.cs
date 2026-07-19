@@ -6857,8 +6857,7 @@ namespace DS4Windows
                 double sxAntiDead = getSXAntiDeadzone(device);
 
                 int outputAxisMax, outputAxisMin, outputAxisZero;
-                if ( Global.OutContType[device] == OutContType.DS4 ||
-                    Global.OutContType[device] == OutContType.ViiperDS4 ||
+                if ( Global.OutContType[device].Normalize() == OutContType.ViiperDS4 ||
                     Global.OutContType[device] == OutContType.ViiperDualSense ||
                     Global.OutContType[device] == OutContType.ViiperDualSenseEdge )
                 {

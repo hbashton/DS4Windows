@@ -119,6 +119,7 @@ namespace DS4Windows
 
         public OutputDevice AllocateController(OutContType contType, ViGEmClient client)
         {
+            contType = contType.Normalize();
             OutputDevice outputDevice = null;
             switch (contType)
             {
@@ -133,9 +134,6 @@ namespace DS4Windows
                         outputDevice = new Xbox360OutDevice(client);
                     }
 
-                    break;
-                case OutContType.DS4:
-                    outputDevice = DS4OutDeviceFactory.CreateDS4Device(client, Global.vigemBusVersionInfo);
                     break;
                 case OutContType.ViiperX360:
                     outputDevice = new ViiperOutDevice(contType, ViiperVirtualDeviceType.Xbox360);
@@ -178,6 +176,7 @@ namespace DS4Windows
         public void DeferredPlugin(OutputDevice outputDevice, int inIdx, string inDisplayString,
             OutputDevice[] outdevs, OutContType contType)
         {
+            contType = contType.Normalize();
             ControlService.StartupDiag($"OutputSlotManager.DeferredPlugin enter inIdx={inIdx} contType={contType} outputNull={outputDevice == null}");
             // releases ReaderWriterLockSlim when locker goes out of scope
             using WriteLocker locker = new WriteLocker(queueLocker);
@@ -192,7 +191,7 @@ namespace DS4Windows
                     // we are about to create a virtual DS4. Record the device so it is not
                     // later re-ingested as input (which would cascade into more devices).
                     HashSet<string> beforeVirtualDS4 = null;
-                    if (contType == OutContType.DS4 && Global.UseMoonlight)
+                    if (contType == OutContType.ViiperDS4 && Global.UseMoonlight)
                     {
                         beforeVirtualDS4 = DS4Devices.SnapshotBeforeOwnVirtualDS4();
                         DS4Devices.BeginOwnVirtualDS4Connect();
@@ -238,14 +237,10 @@ namespace DS4Windows
 
                     if (beforeVirtualDS4 != null)
                     {
-                        try
-                        {
-                            DS4Devices.RegisterOwnVirtualDS4(beforeVirtualDS4);
-                        }
-                        finally
-                        {
-                            DS4Devices.EndOwnVirtualDS4Connect();
-                        }
+                        DS4Devices.RegisterOwnVirtualDS4Async(beforeVirtualDS4);
+                        // The asynchronous registration worker now owns the
+                        // matching EndOwnVirtualDS4Connect call.
+                        beforeVirtualDS4 = null;
                     }
 
                     if (contType == OutContType.X360)

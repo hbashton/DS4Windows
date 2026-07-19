@@ -925,13 +925,13 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             get
             {
                 int type = 0;
-                switch (Global.OutContType[device])
+                switch (Global.OutContType[device].Normalize())
                 {
                     case OutContType.X360:
                         type = 0;
                         break;
 
-                    case OutContType.DS4:
+                    case OutContType.ViiperDS4:
                         type = 1;
                         break;
 
@@ -939,20 +939,16 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                         type = 2;
                         break;
 
-                    case OutContType.ViiperDS4:
+                    case OutContType.ViiperDualSense:
                         type = 3;
                         break;
 
-                    case OutContType.ViiperDualSense:
+                    case OutContType.ViiperDualSenseEdge:
                         type = 4;
                         break;
 
-                    case OutContType.ViiperDualSenseEdge:
-                        type = 5;
-                        break;
-
                     case OutContType.ViiperSwitch2Pro:
-                        type = 6;
+                        type = 5;
                         break;
 
                     default: break;
@@ -996,16 +992,14 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     case 0:
                         result = OutContType.X360; break;
                     case 1:
-                        result = OutContType.DS4; break;
+                        result = OutContType.ViiperDS4; break;
                     case 2:
                         result = OutContType.ViiperX360; break;
                     case 3:
-                        result = OutContType.ViiperDS4; break;
-                    case 4:
                         result = OutContType.ViiperDualSense; break;
-                    case 5:
+                    case 4:
                         result = OutContType.ViiperDualSenseEdge; break;
-                    case 6:
+                    case 5:
                         result = OutContType.ViiperSwitch2Pro; break;
                     default: result = OutContType.X360; break;
                 }

@@ -61,6 +61,10 @@ namespace DS4Windows
         private const int MaxPendingMicrophoneFrames = 4;
         private const byte ViiperStreamFrameInputState = 0x01;
         private const byte ViiperStreamFrameMicrophonePcm = 0x02;
+        private const byte ViiperStreamFrameOutputState = 0x81;
+        private const byte ViiperStreamFrameSpeakerPcm = 0x82;
+        private const byte ViiperStreamFrameVersionV2 = 0x02;
+        private const byte ViiperStreamFrameVersionV3 = 0x03;
         private const int MaxStreamRecoveryAttempts = 2;
 
         private readonly OutContType outputType;
@@ -102,6 +106,8 @@ namespace DS4Windows
         private volatile bool writerStopRequested;
         private bool activeStreamUsesFramedProtocol;
         private bool activeStreamSupportsMicrophone;
+        private bool activeStreamSupportsDirectSpeaker;
+        private byte activeStreamFrameVersion;
         private int microphoneVolume = 128;
         private int microphoneNoiseSuppression = (int)DualSenseMicrophoneNoiseSuppression.Balanced;
         private long lastMicrophoneFrameTimestamp;
@@ -168,6 +174,11 @@ namespace DS4Windows
             client = new ViiperClient(DefaultHost, DefaultPort);
         }
 
+        internal event Action<ViiperOutDevice, byte[]> VirtualSpeakerPcmReceived;
+
+        internal bool SupportsDirectSpeakerPcm =>
+            connected && activeStreamSupportsDirectSpeaker;
+
         public override void Connect()
         {
             Disconnect();
@@ -232,6 +243,8 @@ namespace DS4Windows
         {
             activeStreamUsesFramedProtocol = false;
             activeStreamSupportsMicrophone = false;
+            activeStreamSupportsDirectSpeaker = false;
+            activeStreamFrameVersion = 0;
             Volatile.Write(ref virtualMicrophoneInterfaceActive, 0);
             Volatile.Write(ref virtualMicrophoneInterfaceStateKnown, 0);
 
@@ -243,6 +256,7 @@ namespace DS4Windows
                     activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
                     activeStreamUsesFramedProtocol = true;
                     activeStreamSupportsMicrophone = true;
+                    activeStreamFrameVersion = ViiperStreamFrameVersionV2;
                     return stream;
                 }
                 catch (IOException ex)
@@ -282,6 +296,7 @@ namespace DS4Windows
                     activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
                     activeStreamUsesFramedProtocol = true;
                     activeStreamSupportsMicrophone = true;
+                    activeStreamFrameVersion = ViiperStreamFrameVersionV2;
                     return stream;
                 }
                 catch (IOException ex)
@@ -318,11 +333,31 @@ namespace DS4Windows
                 try
                 {
                     ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
-                        "dualshock4micv2");
+                        "dualshock4audioduplexv3", 0x05C4);
                     activeFeedbackLength = ViiperStatePacketBuilder.GetFeedbackLength(
                         viiperType);
                     activeStreamUsesFramedProtocol = true;
                     activeStreamSupportsMicrophone = true;
+                    activeStreamSupportsDirectSpeaker = true;
+                    activeStreamFrameVersion = ViiperStreamFrameVersionV3;
+                    return stream;
+                }
+                catch (IOException ex)
+                {
+                    AppLogger.LogToGui(
+                        $"VIIPER DualShock 4 direct speaker stream unavailable, trying microphone V2: {ex.Message}",
+                        false);
+                }
+
+                try
+                {
+                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
+                        "dualshock4micv2", 0x05C4);
+                    activeFeedbackLength = ViiperStatePacketBuilder.GetFeedbackLength(
+                        viiperType);
+                    activeStreamUsesFramedProtocol = true;
+                    activeStreamSupportsMicrophone = true;
+                    activeStreamFrameVersion = ViiperStreamFrameVersionV2;
                     return stream;
                 }
                 catch (IOException ex)
@@ -331,6 +366,10 @@ namespace DS4Windows
                         $"VIIPER DualShock 4 microphone input unavailable, continuing without mic-in: {ex.Message}",
                         false);
                 }
+
+                activeFeedbackLength = ViiperStatePacketBuilder.GetFeedbackLength(
+                    viiperType);
+                return client.CreateDeviceAndOpenStream("dualshock4", 0x05C4);
             }
 
             activeFeedbackLength = ViiperStatePacketBuilder.GetFeedbackLength(viiperType);
@@ -921,7 +960,8 @@ namespace DS4Windows
 
             if (activeStreamUsesFramedProtocol)
             {
-                stream.WriteFrameV2(ViiperStreamFrameInputState, data);
+                stream.WriteFrame(activeStreamFrameVersion,
+                    ViiperStreamFrameInputState, data);
             }
             else
             {
@@ -1101,8 +1141,8 @@ namespace DS4Windows
                 ConvertMicrophoneMono48kToDualShock4Pcm(microphoneMonoPcm,
                     muted ? 0 : frames, dualShock4MicrophonePcm);
 
-                stream.WriteFrameV2(ViiperStreamFrameMicrophonePcm,
-                    dualShock4MicrophonePcm);
+                stream.WriteFrame(activeStreamFrameVersion,
+                    ViiperStreamFrameMicrophonePcm, dualShock4MicrophonePcm);
             }
             else
             {
@@ -1120,8 +1160,8 @@ namespace DS4Windows
                     }
                 }
 
-                stream.WriteFrameV2(ViiperStreamFrameMicrophonePcm,
-                    microphoneStereoPcm);
+                stream.WriteFrame(activeStreamFrameVersion,
+                    ViiperStreamFrameMicrophonePcm, microphoneStereoPcm);
             }
             Interlocked.Increment(ref microphoneFramesSubmitted);
         }
@@ -1266,8 +1306,26 @@ namespace DS4Windows
                     }
 
                     readStreamGeneration = Volatile.Read(ref streamGeneration);
-                    stream.ReadExactly(buffer, 0, feedbackLength);
-                    ApplyFeedback(buffer, feedbackLength);
+                    if (activeStreamSupportsDirectSpeaker)
+                    {
+                        byte[] payload = stream.ReadFrame(
+                            ViiperStreamFrameVersionV3, out byte frameType);
+                        if (frameType == ViiperStreamFrameOutputState)
+                        {
+                            ApplyFeedback(payload, payload.Length);
+                        }
+                        else if (frameType == ViiperStreamFrameSpeakerPcm &&
+                            payload.Length > 0 && payload.Length %
+                                (sizeof(short) * 2) == 0)
+                        {
+                            VirtualSpeakerPcmReceived?.Invoke(this, payload);
+                        }
+                    }
+                    else
+                    {
+                        stream.ReadExactly(buffer, 0, feedbackLength);
+                        ApplyFeedback(buffer, feedbackLength);
+                    }
                 }
             }
             catch (IOException)
@@ -2036,7 +2094,8 @@ namespace DS4Windows
             return CreateDeviceAndOpenStream(ViiperStatePacketBuilder.GetViiperDeviceName(deviceType));
         }
 
-        public ViiperDeviceStream CreateDeviceAndOpenStream(string deviceName)
+        public ViiperDeviceStream CreateDeviceAndOpenStream(string deviceName,
+            ushort? idProduct = null)
         {
             ViiperUsbipPortManager.DetachStaleLocalViiperPorts();
 
@@ -2048,6 +2107,7 @@ namespace DS4Windows
                 string payload = JsonSerializer.Serialize(new ViiperDeviceCreateRequest
                 {
                     Type = deviceName,
+                    IdProduct = idProduct,
                 }, JsonOptions);
 
                 device = SendRequest<ViiperDeviceResponse>($"bus/{bus.BusId}/add", payload);
@@ -2243,6 +2303,10 @@ namespace DS4Windows
         {
             [JsonPropertyName("type")]
             public string Type { get; set; }
+
+            [JsonPropertyName("idProduct")]
+            [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            public ushort? IdProduct { get; set; }
         }
 
         private sealed class ViiperBusDevicesResponse
@@ -2597,6 +2661,8 @@ namespace DS4Windows
         private readonly Action<uint, string> removeDevice;
         private readonly object writeLock = new object();
         private uint frameSequence;
+        private uint incomingFrameSequence;
+        private bool incomingFrameSequenceKnown;
         private int disposed;
         private const int FrameV2HeaderLength = 16;
         private const byte FrameMagic0 = (byte)'V';
@@ -2604,6 +2670,7 @@ namespace DS4Windows
         private const byte FrameMagic2 = (byte)'C';
         private const byte FrameMagic3 = (byte)'M';
         private const byte FrameVersionV2 = 0x02;
+        private const byte FrameVersionV3 = 0x03;
 
         public ViiperDeviceStream(TcpClient tcp, uint busId, string devId, int usbipPort, Action<uint, string> removeDevice)
         {
@@ -2637,7 +2704,7 @@ namespace DS4Windows
             }
         }
 
-        public void WriteFrameV2(byte frameType, byte[] data)
+        public void WriteFrame(byte version, byte frameType, byte[] data)
         {
             if (data == null)
             {
@@ -2646,6 +2713,10 @@ namespace DS4Windows
             if (data.Length > ushort.MaxValue)
             {
                 throw new ArgumentOutOfRangeException(nameof(data));
+            }
+            if (version != FrameVersionV2 && version != FrameVersionV3)
+            {
+                throw new ArgumentOutOfRangeException(nameof(version));
             }
 
             lock (writeLock)
@@ -2660,7 +2731,7 @@ namespace DS4Windows
                 frame[1] = FrameMagic1;
                 frame[2] = FrameMagic2;
                 frame[3] = FrameMagic3;
-                frame[4] = FrameVersionV2;
+                frame[4] = version;
                 frame[5] = frameType;
                 frame[6] = (byte)data.Length;
                 frame[7] = (byte)(data.Length >> 8);
@@ -2679,6 +2750,43 @@ namespace DS4Windows
             }
         }
 
+        public byte[] ReadFrame(byte expectedVersion, out byte frameType)
+        {
+            byte[] header = new byte[FrameV2HeaderLength];
+            ReadExactly(header, 0, header.Length);
+            if (header[0] != FrameMagic0 || header[1] != FrameMagic1 ||
+                header[2] != FrameMagic2 || header[3] != FrameMagic3 ||
+                header[4] != expectedVersion)
+            {
+                throw new IOException("VIIPER returned an invalid framed stream header.");
+            }
+
+            int payloadLength = header[6] | header[7] << 8;
+            byte[] payload = new byte[payloadLength];
+            ReadExactly(payload, 0, payload.Length);
+
+            uint sequence = (uint)(header[8] | header[9] << 8 |
+                header[10] << 16 | header[11] << 24);
+            if (incomingFrameSequenceKnown && sequence != incomingFrameSequence)
+            {
+                throw new IOException(
+                    $"VIIPER framed output sequence mismatch (expected {incomingFrameSequence}, received {sequence}).");
+            }
+            incomingFrameSequence = sequence + 1;
+            incomingFrameSequenceKnown = true;
+
+            uint receivedCrc = (uint)(header[12] | header[13] << 8 |
+                header[14] << 16 | header[15] << 24);
+            uint calculatedCrc = ComputeFrameCrc(header, payload);
+            if (receivedCrc != calculatedCrc)
+            {
+                throw new IOException("VIIPER framed output CRC mismatch.");
+            }
+
+            frameType = header[5];
+            return payload;
+        }
+
         private static uint ComputeFrameV2Crc(byte[] frame)
         {
             uint crc = 0xFFFFFFFFu;
@@ -2689,6 +2797,20 @@ namespace DS4Windows
             for (int i = FrameV2HeaderLength; i < frame.Length; i++)
             {
                 crc = UpdateCrc32(crc, frame[i]);
+            }
+            return ~crc;
+        }
+
+        private static uint ComputeFrameCrc(byte[] header, byte[] payload)
+        {
+            uint crc = 0xFFFFFFFFu;
+            for (int index = 4; index < 12; index++)
+            {
+                crc = UpdateCrc32(crc, header[index]);
+            }
+            for (int index = 0; index < payload.Length; index++)
+            {
+                crc = UpdateCrc32(crc, payload[index]);
             }
             return ~crc;
         }

@@ -87,7 +87,14 @@ namespace DS4Windows
                     if (safeReadHandle == null || safeReadHandle.IsClosed || safeReadHandle.IsInvalid)
                     {
                         safeReadHandle?.Dispose();
-                        safeReadHandle = OpenHandle(_devicePath, exclusive, enumerate: false);
+                        // DS4 Bluetooth audio is a distinct HID file session in
+                        // every working Windows reference. Keep the primary
+                        // handle shareable inside this HidHide-protected process
+                        // so the dedicated audio session can coexist with input.
+                        bool shareForDs4Audio = IsSonyBluetoothDualShock4();
+                        safeReadHandle = OpenHandle(_devicePath,
+                            exclusive && !shareForDs4Audio,
+                            enumerate: false);
                     }
                 }
                 catch (Exception exception)
@@ -100,6 +107,49 @@ namespace DS4Windows
                 IsOpen = safeReadHandle != null && !safeReadHandle.IsClosed && !safeReadHandle.IsInvalid;
                 IsExclusive = IsOpen && exclusive;
             }
+        }
+
+        internal bool TryOpenDedicatedAudioHandle(out SafeFileHandle handle)
+        {
+            handle = null;
+            if (!IsSonyBluetoothDualShock4())
+            {
+                return false;
+            }
+
+            try
+            {
+                handle = OpenHandle(_devicePath, isExclusive: false,
+                    enumerate: false);
+                if (handle == null || handle.IsClosed || handle.IsInvalid)
+                {
+                    handle?.Dispose();
+                    handle = null;
+                    return false;
+                }
+                return true;
+            }
+            catch
+            {
+                handle?.Dispose();
+                handle = null;
+                return false;
+            }
+        }
+
+        private bool IsSonyBluetoothDualShock4()
+        {
+            if (_deviceAttributes?.VendorId != 0x054C ||
+                (_deviceAttributes.ProductId != 0x05C4 &&
+                 _deviceAttributes.ProductId != 0x09CC))
+            {
+                return false;
+            }
+
+            return _devicePath.IndexOf("00001124-0000-1000-8000-00805f9b34fb",
+                StringComparison.OrdinalIgnoreCase) >= 0 ||
+                _devicePath.IndexOf("_VID&0002054c_",
+                    StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         public void CloseDevice()
@@ -127,7 +177,7 @@ namespace DS4Windows
             }
             finally
             {
-                handle.Dispose();
+                handle?.Dispose();
             }
         }
 
@@ -206,15 +256,40 @@ namespace DS4Windows
 
             var ov = new NativeOverlapped { EventHandle = wait.SafeWaitHandle.DangerousGetHandle() };
 
-            if (PInvoke.ReadFile(SafeReadHandle, inputBuffer, null, &ov))
+            fixed (byte* buffer = inputBuffer)
+            {
+                if (NativeMethods.ReadFilePinned(
+                    SafeReadHandle.DangerousGetHandle(), buffer,
+                    (uint)inputBuffer.Length, null, &ov))
+                {
+                    return ReadStatus.Success;
+                }
+
+                if (Marshal.GetLastWin32Error() !=
+                    (uint)WIN32_ERROR.ERROR_IO_PENDING)
+                {
+                    return ReadStatus.ReadError;
+                }
+
+                if (!PInvoke.GetOverlappedResultEx(SafeReadHandle, ov, out _,
+                    timeout, true))
+                {
+                    uint error = (uint)Marshal.GetLastWin32Error();
+                    if (error == NativeMethods.WAIT_TIMEOUT)
+                    {
+                        // Both the buffer and OVERLAPPED stay pinned/alive until
+                        // the exact pending IRP has been cancelled and drained.
+                        NativeMethods.CancelIoEx(
+                            SafeReadHandle.DangerousGetHandle(), (IntPtr)(&ov));
+                        PInvoke.GetOverlappedResult(SafeReadHandle, ov, out _, true);
+                        return ReadStatus.WaitTimedOut;
+                    }
+
+                    return ReadStatus.ReadError;
+                }
+
                 return ReadStatus.Success;
-
-            if (Marshal.GetLastWin32Error() != (uint)WIN32_ERROR.ERROR_IO_PENDING) return ReadStatus.ReadError;
-
-            if (!PInvoke.GetOverlappedResultEx(SafeReadHandle, ov, out _, timeout, true))
-                return ReadStatus.ReadError;
-
-            return ReadStatus.Success;
+            }
         }
 
         public bool WriteOutputReportViaControl(byte[] outputBuffer)
@@ -226,19 +301,101 @@ namespace DS4Windows
 
         public unsafe bool WriteOutputReportViaInterrupt(byte[] outputBuffer, int timeout)
         {
-                SafeReadHandle ??= OpenHandle(_devicePath, true, false);
-                using AutoResetEvent wait = new(false);
-                var ov = new NativeOverlapped { EventHandle = wait.SafeWaitHandle.DangerousGetHandle() };
+            SafeReadHandle ??= OpenHandle(_devicePath, true, false);
+            using AutoResetEvent wait = new(false);
+            var ov = new NativeOverlapped { EventHandle = wait.SafeWaitHandle.DangerousGetHandle() };
 
-                if (PInvoke.WriteFile(SafeReadHandle, outputBuffer, null, &ov))
+            fixed (byte* buffer = outputBuffer)
+            {
+                if (NativeMethods.WriteFilePinned(
+                    SafeReadHandle.DangerousGetHandle(), buffer,
+                    (uint)outputBuffer.Length, null, &ov))
+                {
                     return true;
+                }
 
-                if (Marshal.GetLastWin32Error() != (uint)WIN32_ERROR.ERROR_IO_PENDING) return false;
-
-                if (!PInvoke.GetOverlappedResult(SafeReadHandle, ov, out _, true))
+                if (Marshal.GetLastWin32Error() !=
+                    (uint)WIN32_ERROR.ERROR_IO_PENDING)
+                {
                     return false;
+                }
+
+                uint waitMilliseconds = timeout < 0 ? uint.MaxValue :
+                    (uint)timeout;
+                if (!PInvoke.GetOverlappedResultEx(SafeReadHandle, ov, out _,
+                    waitMilliseconds, true))
+                {
+                    uint error = (uint)Marshal.GetLastWin32Error();
+                    if (error == NativeMethods.WAIT_TIMEOUT)
+                    {
+                        NativeMethods.CancelIoEx(
+                            SafeReadHandle.DangerousGetHandle(), (IntPtr)(&ov));
+                        PInvoke.GetOverlappedResult(SafeReadHandle, ov, out _, true);
+                    }
+
+                    return false;
+                }
 
                 return true;
+            }
+        }
+
+        /// <summary>
+        /// Writes one Sony effect report through a fresh, shared, overlapped
+        /// HID handle. This intentionally mirrors PadForge's SonyEffectWriter:
+        /// the input handle is never used for effects, and a disconnect cannot
+        /// leave a stale persistent effect handle behind.
+        /// </summary>
+        public unsafe bool WriteOutputReportViaSharedOverlapped(
+            byte[] outputBuffer, int timeout)
+        {
+            if (outputBuffer == null || outputBuffer.Length == 0)
+            {
+                return false;
+            }
+
+            using SafeFileHandle effectHandle = OpenHandle(_devicePath,
+                isExclusive: false, enumerate: false);
+            if (effectHandle == null || effectHandle.IsClosed ||
+                effectHandle.IsInvalid)
+            {
+                return false;
+            }
+
+            using AutoResetEvent wait = new(false);
+            var ov = new NativeOverlapped
+            {
+                EventHandle = wait.SafeWaitHandle.DangerousGetHandle()
+            };
+
+            fixed (byte* buffer = outputBuffer)
+            {
+                bool submitted = NativeMethods.WriteFilePinned(
+                    effectHandle.DangerousGetHandle(), buffer,
+                    (uint)outputBuffer.Length, null, &ov);
+                if (!submitted && Marshal.GetLastWin32Error() !=
+                    (int)WIN32_ERROR.ERROR_IO_PENDING)
+                {
+                    return false;
+                }
+
+                uint waitMilliseconds = timeout < 0 ? uint.MaxValue :
+                    (uint)timeout;
+                if (!submitted && wait.WaitOne(
+                    waitMilliseconds == uint.MaxValue ?
+                        Timeout.Infinite : (int)waitMilliseconds) == false)
+                {
+                    NativeMethods.CancelIoEx(
+                        effectHandle.DangerousGetHandle(), (IntPtr)(&ov));
+                    PInvoke.GetOverlappedResult(effectHandle, ov, out _, true);
+                    return false;
+                }
+
+                // PadForge drains the OVERLAPPED before closing the one-shot
+                // handle even when WriteFile completed synchronously.
+                return PInvoke.GetOverlappedResult(
+                    effectHandle, ov, out _, true);
+            }
         }
 
         private SafeFileHandle OpenHandle(string devicePathName, bool isExclusive, bool enumerate)

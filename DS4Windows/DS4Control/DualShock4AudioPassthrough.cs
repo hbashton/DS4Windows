@@ -1,5 +1,6 @@
 using System;
-using System.Threading.Tasks;
+using System.Runtime.CompilerServices;
+using System.Threading;
 
 namespace DS4Windows
 {
@@ -14,11 +15,15 @@ namespace DS4Windows
         private readonly object syncRoot = new object();
         private readonly DualShock4BluetoothSpeakerPassthrough[] slots =
             new DualShock4BluetoothSpeakerPassthrough[ControllerCount];
+        private readonly StartRequest[] pendingStarts =
+            new StartRequest[ControllerCount];
         private readonly int[] startGenerations = new int[ControllerCount];
+        private readonly object[] slotWorkerLocks = CreateSlotWorkerLocks();
 
         public void Start(int slot, DS4Device device, byte speakerVolume,
             DualSenseSpeakerCompression compression, byte bassBoost,
-            string captureEndpointId, OutContType emulatedControllerType)
+            string captureEndpointId, OutContType emulatedControllerType,
+            ViiperOutDevice directSpeakerSource = null)
         {
             if (slot < 0 || slot >= slots.Length)
             {
@@ -32,7 +37,15 @@ namespace DS4Windows
             lock (syncRoot)
             {
                 if (slots[slot]?.Matches(device, speakerVolume, compression,
-                    bassBoost, captureEndpointId, endpointKind) == true)
+                    bassBoost, captureEndpointId, endpointKind,
+                    directSpeakerSource) == true)
+                {
+                    return;
+                }
+
+                if (pendingStarts[slot]?.Matches(device, speakerVolume,
+                    compression, bassBoost, captureEndpointId,
+                    endpointKind, directSpeakerSource) == true)
                 {
                     return;
                 }
@@ -40,14 +53,28 @@ namespace DS4Windows
                 previous = slots[slot];
                 slots[slot] = null;
                 generation = ++startGenerations[slot];
+                pendingStarts[slot] = new StartRequest(device, speakerVolume,
+                    compression, bassBoost, captureEndpointId, endpointKind,
+                    directSpeakerSource, generation);
             }
 
-            DisposeInBackground(previous);
-            _ = Task.Run(() => StartWorker(slot, device, speakerVolume,
-                compression, bassBoost, captureEndpointId, endpointKind, generation));
+            AppLogger.LogToGui(
+                $"DS4 audio owner slot {slot + 1}: start generation {generation}, endpointKind={endpointKind}, replacingActive={previous != null}.",
+                false);
+
+            StartBackgroundThread(() =>
+            {
+                lock (slotWorkerLocks[slot])
+                {
+                    previous?.Dispose();
+                    StartWorker(slot, device, speakerVolume, compression,
+                        bassBoost, captureEndpointId, endpointKind,
+                        directSpeakerSource, generation);
+                }
+            }, $"DualShock 4 audio startup {slot + 1}");
         }
 
-        public void Stop(int slot)
+        public void Stop(int slot, [CallerMemberName] string caller = null)
         {
             if (slot < 0 || slot >= slots.Length)
             {
@@ -58,11 +85,19 @@ namespace DS4Windows
             lock (syncRoot)
             {
                 playback = slots[slot];
+                bool hadPendingStart = pendingStarts[slot] != null;
                 slots[slot] = null;
+                pendingStarts[slot] = null;
                 startGenerations[slot]++;
+                if (playback != null || hadPendingStart)
+                {
+                    AppLogger.LogToGui(
+                        $"DS4 audio owner slot {slot + 1}: stop from {caller}, active={playback != null}, pending={hadPendingStart}, generation={startGenerations[slot]}.",
+                        false);
+                }
             }
 
-            DisposeInBackground(playback);
+            DisposeInBackground(slot, playback);
         }
 
         public void Dispose()
@@ -74,45 +109,30 @@ namespace DS4Windows
                 {
                     previous[slot] = slots[slot];
                     slots[slot] = null;
+                    pendingStarts[slot] = null;
                     startGenerations[slot]++;
                 }
             }
 
-            foreach (DualShock4BluetoothSpeakerPassthrough playback in previous)
+            for (int slot = 0; slot < previous.Length; slot++)
             {
-                playback?.Dispose();
+                lock (slotWorkerLocks[slot])
+                {
+                    previous[slot]?.Dispose();
+                }
             }
         }
 
         private void StartWorker(int slot, DS4Device device, byte speakerVolume,
             DualSenseSpeakerCompression compression, byte bassBoost,
             string captureEndpointId, ControllerAudioEndpointKind endpointKind,
-            int generation)
+            ViiperOutDevice directSpeakerSource, int generation)
         {
-            var playback = new DualShock4BluetoothSpeakerPassthrough(device,
-                speakerVolume, compression, bassBoost, captureEndpointId,
-                endpointKind);
-            try
-            {
-                playback.Start();
-                bool stale;
-                lock (syncRoot)
-                {
-                    stale = generation != startGenerations[slot];
-                    if (!stale)
-                    {
-                        slots[slot] = playback;
-                    }
-                }
+            const int attempts = 20;
+            Exception lastError = null;
 
-                if (stale)
-                {
-                    playback.Dispose();
-                }
-            }
-            catch (Exception ex)
+            for (int attempt = 0; attempt < attempts; attempt++)
             {
-                playback.Dispose();
                 lock (syncRoot)
                 {
                     if (generation != startGenerations[slot])
@@ -121,19 +141,149 @@ namespace DS4Windows
                     }
                 }
 
-                AppLogger.LogToGui(
-                    $"DualShock 4 Bluetooth speaker passthrough could not start: {ex.Message}",
-                    true);
+                var playback = new DualShock4BluetoothSpeakerPassthrough(device,
+                    speakerVolume, compression, bassBoost, captureEndpointId,
+                    endpointKind, directSpeakerSource);
+                try
+                {
+                    playback.Start();
+                    lock (syncRoot)
+                    {
+                        if (generation != startGenerations[slot])
+                        {
+                            playback.Dispose();
+                            return;
+                        }
+
+                        slots[slot] = playback;
+                        pendingStarts[slot] = null;
+                    }
+
+                    AppLogger.LogToGui(
+                        $"DS4 audio owner slot {slot + 1}: generation {generation} became active.",
+                        false);
+
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    lastError = ex;
+                    playback.Dispose();
+                    lock (syncRoot)
+                    {
+                        if (generation != startGenerations[slot])
+                        {
+                            return;
+                        }
+                    }
+
+                    Thread.Sleep(500);
+                }
+            }
+
+            AppLogger.LogToGui(
+                $"DualShock 4 Bluetooth speaker passthrough could not start after waiting for the selected audio endpoint: {lastError?.Message}",
+                true);
+            lock (syncRoot)
+            {
+                if (generation == startGenerations[slot])
+                {
+                    pendingStarts[slot] = null;
+                }
             }
         }
 
-        private static void DisposeInBackground(
-            DualShock4BluetoothSpeakerPassthrough playback)
+        private void DisposeInBackground(
+            int slot, DualShock4BluetoothSpeakerPassthrough playback)
         {
             if (playback != null)
             {
-                _ = Task.Run(playback.Dispose);
+                StartBackgroundThread(() =>
+                {
+                    lock (slotWorkerLocks[slot])
+                    {
+                        playback.Dispose();
+                    }
+                }, "DualShock 4 audio cleanup");
             }
+        }
+
+        private static object[] CreateSlotWorkerLocks()
+        {
+            var locks = new object[ControllerCount];
+            for (int slot = 0; slot < locks.Length; slot++)
+            {
+                locks[slot] = new object();
+            }
+
+            return locks;
+        }
+
+        private sealed class StartRequest
+        {
+            private readonly DS4Device device;
+            private readonly byte speakerVolume;
+            private readonly DualSenseSpeakerCompression compression;
+            private readonly byte bassBoost;
+            private readonly string sourceEndpointId;
+            private readonly ControllerAudioEndpointKind sourceEndpointKind;
+            private readonly ViiperOutDevice directSpeakerSource;
+
+            public StartRequest(DS4Device device, byte speakerVolume,
+                DualSenseSpeakerCompression compression, byte bassBoost,
+                string sourceEndpointId,
+                ControllerAudioEndpointKind sourceEndpointKind,
+                ViiperOutDevice directSpeakerSource, int generation)
+            {
+                this.device = device;
+                this.speakerVolume = speakerVolume;
+                this.compression =
+                    (DualSenseSpeakerCompression)Math.Clamp((int)compression,
+                        (int)DualSenseSpeakerCompression.Off,
+                        (int)DualSenseSpeakerCompression.Strong);
+                this.bassBoost = Math.Min(bassBoost,
+                    DualSenseSpeakerProcessor.MaximumBassBoostDb);
+                this.sourceEndpointId = sourceEndpointId ?? string.Empty;
+                this.sourceEndpointKind = sourceEndpointKind;
+                this.directSpeakerSource = directSpeakerSource;
+                Generation = generation;
+            }
+
+            public int Generation { get; }
+
+            public bool Matches(DS4Device candidate, byte candidateVolume,
+                DualSenseSpeakerCompression candidateCompression,
+                byte candidateBassBoost, string candidateSourceEndpointId,
+                ControllerAudioEndpointKind candidateSourceEndpointKind,
+                ViiperOutDevice candidateDirectSpeakerSource)
+            {
+                return ReferenceEquals(device, candidate) &&
+                    speakerVolume == candidateVolume &&
+                    compression ==
+                        (DualSenseSpeakerCompression)Math.Clamp(
+                            (int)candidateCompression,
+                            (int)DualSenseSpeakerCompression.Off,
+                            (int)DualSenseSpeakerCompression.Strong) &&
+                    bassBoost == Math.Min(candidateBassBoost,
+                        DualSenseSpeakerProcessor.MaximumBassBoostDb) &&
+                    sourceEndpointKind == candidateSourceEndpointKind &&
+                    ReferenceEquals(directSpeakerSource,
+                        candidateDirectSpeakerSource) &&
+                    string.Equals(sourceEndpointId,
+                        candidateSourceEndpointId ?? string.Empty,
+                        StringComparison.Ordinal);
+            }
+        }
+
+        private static void StartBackgroundThread(ThreadStart action, string name)
+        {
+            var thread = new Thread(action)
+            {
+                IsBackground = true,
+                Name = name,
+                Priority = ThreadPriority.BelowNormal,
+            };
+            thread.Start();
         }
     }
 }

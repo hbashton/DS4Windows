@@ -1178,13 +1178,13 @@ namespace DS4Windows
 
         private void EnsureHidHideForVirtualOutput(int index, DS4Device device, OutContType contType)
         {
+            contType = contType.Normalize();
             if (device == null || !DS4Devices.isExclusiveMode)
             {
                 return;
             }
 
             if (contType != OutContType.X360 &&
-                contType != OutContType.DS4 &&
                 !ViiperOutDevice.IsViiperType(contType))
             {
                 return;
@@ -1473,6 +1473,7 @@ namespace DS4Windows
 
         private OutputDevice EstablishOutDevice(int index, OutContType contType)
         {
+            contType = contType.Normalize();
             StartupDiag($"EstablishOutDevice begin index={index} contType={contType} client={vigemTestClient != null}");
             OutputDevice temp = null;
             temp = outputslotMan.AllocateController(contType, vigemTestClient);
@@ -1483,6 +1484,7 @@ namespace DS4Windows
         public void EstablishOutFeedback(int index, OutContType contType,
             OutputDevice outDevice, DS4Device device)
         {
+            contType = contType.Normalize();
             int devIndex = index;
 
             if (contType == OutContType.X360)
@@ -1707,6 +1709,7 @@ namespace DS4Windows
 
         public void RemoveOutFeedback(OutContType contType, OutputDevice outDevice, int inIdx)
         {
+            contType = contType.Normalize();
             if (contType == OutContType.X360)
             {
                 Xbox360OutDevice tempXbox = outDevice as Xbox360OutDevice;
@@ -1730,6 +1733,7 @@ namespace DS4Windows
 
         public void AttachNewUnboundOutDev(OutContType contType)
         {
+            contType = contType.Normalize();
             OutSlotDevice slotDevice = outputslotMan.FindOpenSlot();
             if (slotDevice != null &&
                 slotDevice.CurrentAttachedStatus == OutSlotDevice.AttachedStatus.UnAttached)
@@ -1741,6 +1745,7 @@ namespace DS4Windows
 
         public void AttachUnboundOutDev(OutSlotDevice slotDevice, OutContType contType)
         {
+            contType = contType.Normalize();
             if (slotDevice.CurrentAttachedStatus == OutSlotDevice.AttachedStatus.UnAttached &&
                 slotDevice.CurrentInputBound == OutSlotDevice.InputBound.Unbound)
             {
@@ -1762,7 +1767,9 @@ namespace DS4Windows
 
         public void PluginOutDev(int index, DS4Device device)
         {
-            OutContType contType = Global.OutContType[index];
+            OutContType contType = Global.OutContType[index].Normalize();
+            Global.OutContType[index] = contType;
+            Global.outDevTypeTemp[index] = Global.outDevTypeTemp[index].Normalize();
             StartupDiag($"PluginOutDev enter index={index} contType={contType} useDInputOnly={useDInputOnly[index]} profileDInputOnly={getDInputOnly(index)}");
 
             OutSlotDevice slotDevice = null;
@@ -2879,7 +2886,7 @@ namespace DS4Windows
                 bool speakerEnabled = DualSenseEnableSpeakerOutput[ind];
                 bool microphoneEnabled = DualSenseEnableMicrophonePassthrough[ind];
                 bool audioConfigured = device.SetBluetoothAudioStreaming(
-                    speakerEnabled,
+                    false,
                     microphoneEnabled,
                     DualSenseSpeakerVolume[ind],
                     DualSenseHeadphoneVolume[ind],
@@ -2887,12 +2894,19 @@ namespace DS4Windows
 
                 if (audioConfigured && speakerEnabled)
                 {
+                    ViiperOutDevice directSpeakerSource =
+                        outputDevices[ind] as ViiperOutDevice;
+                    if (directSpeakerSource?.SupportsDirectSpeakerPcm != true)
+                    {
+                        directSpeakerSource = null;
+                    }
+
                     dualShock4AudioPassthrough.Start(ind, device,
                         DualSenseSpeakerVolume[ind],
                         (DualSenseSpeakerCompression)Global.DualSenseSpeakerCompression[ind],
                         Global.DualSenseSpeakerBassBoost[ind],
                         DualSenseAudioCaptureEndpointId[ind],
-                        Global.OutContType[ind]);
+                        Global.OutContType[ind], directSpeakerSource);
                 }
                 else
                 {
@@ -4275,7 +4289,7 @@ namespace DS4Windows
                 if (!useDInputOnly[ind])
                 {
                     // Perform this virtual trigger button check in post
-                    if (activeOutDevType[ind] == OutContType.DS4)
+                    if (activeOutDevType[ind].Normalize() == OutContType.ViiperDS4)
                     {
                         DS4TriggerOutputMode trigMode = Global.GetOutputDS4TriggerMode(ind);
                         if (trigMode == DS4TriggerOutputMode.Default)

@@ -101,7 +101,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
                 case "DualShock 4":
                 case "DualShock4":
                 case "DS4":
-                    return OutContType.DS4;
+                    return OutContType.ViiperDS4;
                 case "Xbox 360 (VIIPER)":
                 case "ViiperXbox360":
                 case "ViiperX360":
@@ -129,7 +129,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
             if (Enum.TryParse(value, true, out OutContType parsed) &&
                 Enum.IsDefined(typeof(OutContType), parsed))
             {
-                return parsed;
+                return parsed.Normalize();
             }
 
             return fallback;
@@ -137,10 +137,9 @@ namespace DS4WinWPF.DS4Control.DTOXml
 
         internal static string FormatOutputDeviceType(OutContType value)
         {
-            return value switch
+            return value.Normalize() switch
             {
                 OutContType.X360 => "X360",
-                OutContType.DS4 => "DS4",
                 OutContType.None => "None",
                 OutContType.ViiperX360 => "ViiperX360",
                 OutContType.ViiperDS4 => "ViiperDS4",

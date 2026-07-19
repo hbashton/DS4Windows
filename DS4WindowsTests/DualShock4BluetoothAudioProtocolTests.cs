@@ -46,7 +46,7 @@ namespace DS4WindowsTests
             Assert.AreEqual(270, report.Length);
             CollectionAssert.AreEqual(new byte[]
             {
-                0x14, 0x40, 0xA2, 0x34, 0x12, 0x02,
+                0x14, 0x40, 0xA0, 0x34, 0x12, 0x02,
             }, report.Take(6).ToArray());
             CollectionAssert.AreEqual(first,
                 report.Skip(6).Take(first.Length).ToArray());
@@ -59,6 +59,82 @@ namespace DS4WindowsTests
             Assert.AreEqual(
                 Crc32Algorithm.Compute(prefixedReport),
                 ReadUInt32(report, crcOffset));
+        }
+
+        [TestMethod]
+        public void FourFrameSpeakerReportUsesLargeTransportPacket()
+        {
+            byte[][] frames = Enumerable.Range(1, 4)
+                .Select(value => Enumerable.Repeat((byte)value,
+                    DualShock4BluetoothAudioProtocol.SpeakerSbcFrameLength)
+                    .ToArray())
+                .ToArray();
+
+            byte[] report =
+                DualShock4BluetoothAudioProtocol.BuildSpeakerReport(
+                    0xFFFE, frames);
+
+            Assert.AreEqual(462, report.Length);
+            CollectionAssert.AreEqual(new byte[]
+            {
+                0x17, 0x40, 0xA0, 0xFE, 0xFF, 0x02,
+            }, report.Take(6).ToArray());
+            for (int index = 0; index < frames.Length; index++)
+            {
+                CollectionAssert.AreEqual(frames[index], report.Skip(
+                    6 + index * frames[index].Length)
+                    .Take(frames[index].Length).ToArray());
+            }
+
+            Assert.AreEqual(
+                DualShock4BluetoothAudioProtocol.ComputeBluetoothCrc(
+                    0xA2, report, report.Length - sizeof(uint)),
+                ReadUInt32(report, report.Length - sizeof(uint)));
+        }
+
+        [TestMethod]
+        public void SpeakerControlReportMatchesSonyBluetoothAudioLayout()
+        {
+            byte[] report =
+                DualShock4BluetoothAudioProtocol.BuildAudioControlReport(
+                    speakerEnabled: true, microphoneEnabled: false,
+                    speakerVolume: 0x4F, headphoneVolume: 0x4F,
+                    microphoneVolume: 0x4F);
+
+            Assert.AreEqual(78, report.Length);
+            Assert.AreEqual(0x11, report[0]);
+            Assert.AreEqual(0xC0, report[1]);
+            Assert.AreEqual(0xA0, report[2]);
+            Assert.AreEqual(0xB0, report[3]);
+            Assert.AreEqual(0x4F, report[21]);
+            Assert.AreEqual(0x4F, report[22]);
+            Assert.AreEqual(0x00, report[23]);
+            Assert.AreEqual(0x4F, report[24]);
+            Assert.AreEqual(
+                DualShock4BluetoothAudioProtocol.ComputeBluetoothCrc(
+                    0xA2, report, report.Length - sizeof(uint)),
+                ReadUInt32(report, report.Length - sizeof(uint)));
+        }
+
+        [TestMethod]
+        public void MicrophoneModeUsesCombinedHidInputValue()
+        {
+            byte[] control =
+                DualShock4BluetoothAudioProtocol.BuildAudioControlReport(
+                    speakerEnabled: true, microphoneEnabled: true,
+                    speakerVolume: 0x4F, headphoneVolume: 0x4F,
+                    microphoneVolume: 0x40);
+            byte[][] frames = Enumerable.Range(0, 4)
+                .Select(_ => new byte[
+                    DualShock4BluetoothAudioProtocol.SpeakerSbcFrameLength])
+                .ToArray();
+            byte[] speaker =
+                DualShock4BluetoothAudioProtocol.BuildSpeakerReport(
+                    0, frames, microphoneEnabled: true);
+
+            Assert.AreEqual(0xA1, control[2]);
+            Assert.AreEqual(0xF0, control[3]);
+            Assert.AreEqual(0xA1, speaker[2]);
         }
 
         [TestMethod]
@@ -100,6 +176,22 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void ExtractsGenuineHardwareMicrophoneTarget()
+        {
+            byte[] frame = BuildStandardMicrophoneFrame();
+            byte[] report = BuildMicrophoneInputReport(0x13, hasHid: true,
+                audioTarget: 0x01, frame);
+            var extracted = new List<byte[]>();
+
+            int count =
+                DualShock4BluetoothAudioProtocol.ExtractMicrophoneSbcFrames(
+                    report, report.Length, extracted.Add);
+
+            Assert.AreEqual(1, count);
+            CollectionAssert.AreEqual(frame, extracted.Single());
+        }
+
+        [TestMethod]
         public void MsbcRoundTripProducesOneHundredTwentyMonoSamples()
         {
             byte[] encoded = BuildMsbcFrame();
@@ -118,18 +210,7 @@ namespace DS4WindowsTests
         [TestMethod]
         public void StandardSbcMicrophoneFrameIsExtractedAndDecoded()
         {
-            var encoder = new SbcEncoder();
-            var configuration = new SbcFrame
-            {
-                Frequency = SbcFrequency.Freq16K,
-                Mode = SbcMode.Mono,
-                AllocationMethod = SbcBitAllocationMethod.Loudness,
-                Blocks = 16,
-                Subbands = 8,
-                Bitpool = 24,
-            };
-            byte[] frame = encoder.Encode(BuildTone(128, 16000, 700.0), null,
-                configuration);
+            byte[] frame = BuildStandardMicrophoneFrame();
             byte[] report = BuildMicrophoneInputReport(0x12, hasHid: false,
                 frame);
             var extracted = new List<byte[]>();
@@ -182,6 +263,12 @@ namespace DS4WindowsTests
         private static byte[] BuildMicrophoneInputReport(byte reportId,
             bool hasHid, params byte[][] frames)
         {
+            return BuildMicrophoneInputReport(reportId, hasHid, 0x03, frames);
+        }
+
+        private static byte[] BuildMicrophoneInputReport(byte reportId,
+            bool hasHid, byte audioTarget, params byte[][] frames)
+        {
             int reportLength =
                 DualShock4BluetoothAudioProtocol.GetInputReportLength(reportId);
             byte[] report = new byte[reportLength];
@@ -191,7 +278,7 @@ namespace DS4WindowsTests
             int audioOffset = hasHid ? 78 : 3;
             report[audioOffset] = 0x34;
             report[audioOffset + 1] = 0x12;
-            report[audioOffset + 2] = 0x03;
+            report[audioOffset + 2] = audioTarget;
             int offset = audioOffset + 3;
             foreach (byte[] frame in frames)
             {
@@ -207,6 +294,22 @@ namespace DS4WindowsTests
             report[crcOffset + 2] = (byte)(crc >> 16);
             report[crcOffset + 3] = (byte)(crc >> 24);
             return report;
+        }
+
+        private static byte[] BuildStandardMicrophoneFrame()
+        {
+            var encoder = new SbcEncoder();
+            var configuration = new SbcFrame
+            {
+                Frequency = SbcFrequency.Freq16K,
+                Mode = SbcMode.Mono,
+                AllocationMethod = SbcBitAllocationMethod.Loudness,
+                Blocks = 16,
+                Subbands = 8,
+                Bitpool = 24,
+            };
+            return encoder.Encode(BuildTone(128, 16000, 700.0), null,
+                configuration);
         }
 
         private static byte[] BuildMsbcFrame()

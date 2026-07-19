@@ -490,6 +490,7 @@ namespace DS4Windows
 
         internal static ControllerAudioEndpointKind GetEndpointKind(OutContType outputType)
         {
+            outputType = outputType.Normalize();
             return outputType switch
             {
                 OutContType.ViiperDS4 => ControllerAudioEndpointKind.DualShock4,

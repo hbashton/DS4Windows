@@ -1224,13 +1224,14 @@ Suspend support not enabled.", true);
 
         private void ProfilesListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            bool hasSelection = profilesListBox.SelectedIndex >= 0;
             newProfListBtn.IsEnabled = true;
-            editProfBtn.IsEnabled = true;
-            deleteProfBtn.IsEnabled = true;
-            renameProfBtn.IsEnabled = true;
-            dupProfBtn.IsEnabled = true;
+            editProfBtn.IsEnabled = hasSelection;
+            deleteProfBtn.IsEnabled = hasSelection;
+            renameProfBtn.IsEnabled = hasSelection;
+            dupProfBtn.IsEnabled = hasSelection;
             importProfBtn.IsEnabled = true;
-            exportProfBtn.IsEnabled = true;
+            exportProfBtn.IsEnabled = hasSelection;
         }
 
         private void RunAtStartCk_Click(object sender, RoutedEventArgs e)
@@ -2029,6 +2030,7 @@ Suspend support not enabled.", true);
         {
             ProfileEditor closingEditor = sender as ProfileEditor ?? editor;
             profDockPanel.Children.Remove(closingEditor);
+            profilesBrowserPanel.Visibility = Visibility.Visible;
             profOptsToolbar.Visibility = Visibility.Visible;
             profilesListBox.Visibility = Visibility.Visible;
             preserveSize = true;
@@ -2064,6 +2066,7 @@ Suspend support not enabled.", true);
 
             profileEditorLoading = true;
             profileEditorReturnTabIndex = mainTabCon.SelectedIndex;
+            profilesBrowserPanel.Visibility = Visibility.Collapsed;
             profOptsToolbar.Visibility = Visibility.Collapsed;
             profilesListBox.Visibility = Visibility.Collapsed;
             profileEditorLoadingPanel.Visibility = Visibility.Visible;
@@ -2123,6 +2126,7 @@ Suspend support not enabled.", true);
             {
                 AppLogger.LogToGui($"Failed to open profile editor: {ex.Message}", true);
                 profileEditorLoadingPanel.Visibility = Visibility.Collapsed;
+                profilesBrowserPanel.Visibility = Visibility.Visible;
                 profOptsToolbar.Visibility = Visibility.Visible;
                 profilesListBox.Visibility = Visibility.Visible;
                 mainWinVM.ProfileEditorMode = false;

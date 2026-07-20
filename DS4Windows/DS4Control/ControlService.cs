@@ -2103,6 +2103,16 @@ namespace DS4Windows
                     AssignInitialDevices();
                     StartupDiag("AssignInitialDevices end");
 
+                    // A force-closed prior development build can leave its
+                    // USB/IP output imported. Remove those ports before HID
+                    // discovery or DS4Windows will ingest its own VIIPER DS4,
+                    // create a second output/UAC endpoint, and recurse.
+                    ViiperUsbipPortManager.DetachStaleLocalViiperPorts();
+                    // Let usbccgp/HID finish publishing removal before the
+                    // first input snapshot; otherwise a detached interface can
+                    // remain enumerable for one final discovery pass.
+                    Thread.Sleep(250);
+
                     StartupDiag("DS4Devices.findControllers dispatch begin");
                     eventDispatcher.Invoke(() =>
                     {
@@ -2848,25 +2858,34 @@ namespace DS4Windows
                 dualsense.EnableSpeakerOutput = DualSenseEnableSpeakerOutput[ind];
                 dualsense.SpeakerVolume = DualSenseSpeakerVolume[ind];
                 dualsense.HeadphoneVolume = DualSenseHeadphoneVolume[ind];
-                dualsense.MicrophoneVolume = DualSenseMicrophoneVolume[ind];
+                ViiperOutDevice viiperMicrophoneOutput =
+                    outputDevices[ind] as ViiperOutDevice;
+                bool useViiperControllerMicrophone =
+                    ControllerMicrophoneRoutePolicy.CanRouteDirectViiperMicrophone(
+                        DualSenseEnableMicrophonePassthrough[ind], dualsense,
+                        Global.OutContType[ind], viiperMicrophoneOutput);
+                // The profile volume is applied once in the shared software
+                // microphone processor. Keep the physical ADC at full scale so
+                // cross-emulation does not attenuate the signal a second time.
+                dualsense.MicrophoneVolume = useViiperControllerMicrophone ?
+                    byte.MaxValue : DualSenseMicrophoneVolume[ind];
 
                 if (DualSenseEnableSpeakerOutput[ind])
                 {
+                    ViiperOutDevice directSpeakerSource =
+                        outputDevices[ind] as ViiperOutDevice;
+
                     dualSenseAudioPassthrough.Start(ind, dualsense, DualSenseSpeakerVolume[ind],
                         (DualSenseSpeakerCompression)Global.DualSenseSpeakerCompression[ind],
                         Global.DualSenseSpeakerBassBoost[ind],
                         DualSenseAudioCaptureEndpointId[ind],
                         DualSenseAudioSpeakerEndpointId[ind],
-                        Global.OutContType[ind]);
+                        Global.OutContType[ind], directSpeakerSource);
                 }
                 else
                 {
                     dualSenseAudioPassthrough.Stop(ind);
                 }
-
-                bool useViiperControllerMicrophone =
-                    DualSenseEnableMicrophonePassthrough[ind] &&
-                    ViiperOutDevice.SupportsVirtualMicrophone(Global.OutContType[ind]);
 
                 if (DualSenseEnableMicrophonePassthrough[ind] &&
                     !useViiperControllerMicrophone)
@@ -2884,22 +2903,31 @@ namespace DS4Windows
             {
                 dualSenseAudioPassthrough.Stop(ind);
                 bool speakerEnabled = DualSenseEnableSpeakerOutput[ind];
-                bool microphoneEnabled = DualSenseEnableMicrophonePassthrough[ind];
-                bool audioConfigured = device.SetBluetoothAudioStreaming(
-                    false,
+                ViiperOutDevice viiperMicrophoneOutput =
+                    outputDevices[ind] as ViiperOutDevice;
+                bool useViiperControllerMicrophone =
+                    ControllerMicrophoneRoutePolicy.CanRouteDirectViiperMicrophone(
+                        DualSenseEnableMicrophonePassthrough[ind], device,
+                        Global.OutContType[ind], viiperMicrophoneOutput);
+                // VIIPER opens the physical microphone only while a Windows
+                // client is actively recording. Do not arm it during profile
+                // load and consume Bluetooth bandwidth before that point.
+                bool microphoneEnabled =
+                    ControllerMicrophoneRoutePolicy.ShouldArmPhysicalBluetoothMicrophone(
+                        DualSenseEnableMicrophonePassthrough[ind], device,
+                        Global.OutContType[ind], viiperMicrophoneOutput);
+                bool audioConfigured = device.ConfigureBluetoothAudioForProfile(
+                    speakerEnabled,
                     microphoneEnabled,
                     DualSenseSpeakerVolume[ind],
                     DualSenseHeadphoneVolume[ind],
-                    DualSenseMicrophoneVolume[ind]);
+                    useViiperControllerMicrophone ? byte.MaxValue :
+                        DualSenseMicrophoneVolume[ind]);
 
                 if (audioConfigured && speakerEnabled)
                 {
                     ViiperOutDevice directSpeakerSource =
                         outputDevices[ind] as ViiperOutDevice;
-                    if (directSpeakerSource?.SupportsDirectSpeakerPcm != true)
-                    {
-                        directSpeakerSource = null;
-                    }
 
                     dualShock4AudioPassthrough.Start(ind, device,
                         DualSenseSpeakerVolume[ind],
@@ -3771,7 +3799,7 @@ namespace DS4Windows
 
             bool shouldLog = !gameBarVerboseDetectionLogInitialized ||
                 gameBarVisible != gameBarVerboseLastVisible ||
-                now - gameBarVerboseLastDetectionLogUtc > TimeSpan.FromSeconds(3);
+                now - gameBarVerboseLastDetectionLogUtc > TimeSpan.FromSeconds(30);
 
             if (!shouldLog)
             {
@@ -4765,7 +4793,6 @@ namespace DS4Windows
             }
 
             startupDiagLogger.Info($"[StartupDiag][T{Thread.CurrentThread.ManagedThreadId}] {data}");
-            LogManager.Flush(TimeSpan.FromSeconds(1));
         }
 
         public void OnDebug(object sender, DebugEventArgs args)

@@ -5,17 +5,409 @@ using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 using System;
+using System.Buffers.Binary;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 
 namespace DS4Windows
 {
     /// <summary>
+    /// Opt-in diagnostic WAV sink used to split virtual-USB discontinuities
+    /// from the Bluetooth presentation path. It is never constructed unless
+    /// DS4WINDOWS_DUALSENSE_PCM_TRACE_DIRECTORY is set for the process.
+    /// </summary>
+    internal sealed class Pcm16WaveTraceWriter : IDisposable
+    {
+        private const int HeaderLength = 44;
+        private const int QueueCapacity = 64;
+        private const int QueueSlotBytes = 64 * 1024;
+        private readonly FileStream stream;
+        private readonly int sampleRate;
+        private readonly short channels;
+        private readonly object queueLock = new object();
+        private readonly byte[][] queueSlots = new byte[QueueCapacity][];
+        private readonly int[] queueLengths = new int[QueueCapacity];
+        private readonly AutoResetEvent dataAvailable = new AutoResetEvent(false);
+        private readonly Thread writerThread;
+        private int queueReadIndex;
+        private int queueWriteIndex;
+        private int queuedSlots;
+        private long dataBytes;
+        private volatile bool stopping;
+        private bool disposed;
+
+        private Pcm16WaveTraceWriter(string path, int sampleRate,
+            short channels)
+        {
+            this.sampleRate = sampleRate;
+            this.channels = channels;
+            stream = new FileStream(path, FileMode.Create, FileAccess.Write,
+                FileShare.Read, 1024 * 1024, FileOptions.SequentialScan);
+            for (int index = 0; index < queueSlots.Length; index++)
+            {
+                queueSlots[index] = new byte[QueueSlotBytes];
+            }
+
+            // A streaming-size header keeps an abruptly terminated diagnostic
+            // trace recoverable. Dispose replaces it with exact RIFF lengths.
+            WriteWaveHeader(uint.MaxValue, uint.MaxValue);
+            stream.Flush();
+            writerThread = new Thread(WriterLoop)
+            {
+                IsBackground = true,
+                Name = "DualSense PCM trace writer",
+                Priority = ThreadPriority.BelowNormal,
+            };
+            writerThread.Start();
+        }
+
+        internal static Pcm16WaveTraceWriter TryCreate(string path,
+            int sampleRate, short channels)
+        {
+            try
+            {
+                return new Pcm16WaveTraceWriter(path, sampleRate, channels);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogToGui(
+                    $"DualSense PCM trace could not open '{path}': {ex.Message}",
+                    true);
+                return null;
+            }
+        }
+
+        internal void Write(byte[] source, int offset, int length)
+        {
+            if (disposed || stopping || source == null || length <= 0)
+            {
+                return;
+            }
+
+            int boundedLength = Math.Min(length, source.Length - offset);
+            if (offset < 0 || boundedLength <= 0)
+            {
+                return;
+            }
+
+            int copied = 0;
+            lock (queueLock)
+            {
+                while (copied < boundedLength && queuedSlots < QueueCapacity)
+                {
+                    int slotLength = Math.Min(QueueSlotBytes,
+                        boundedLength - copied);
+                    Buffer.BlockCopy(source, offset + copied,
+                        queueSlots[queueWriteIndex], 0, slotLength);
+                    queueLengths[queueWriteIndex] = slotLength;
+                    queueWriteIndex = (queueWriteIndex + 1) % QueueCapacity;
+                    queuedSlots++;
+                    copied += slotLength;
+                }
+            }
+
+            if (copied > 0)
+            {
+                dataAvailable.Set();
+            }
+        }
+
+        internal void Write(float[] source, int sampleCount)
+        {
+            if (disposed || stopping || source == null || sampleCount <= 0)
+            {
+                return;
+            }
+
+            int boundedSamples = Math.Min(sampleCount, source.Length);
+            int maximumSamplesPerSlot = QueueSlotBytes / sizeof(short);
+            int converted = 0;
+            lock (queueLock)
+            {
+                while (converted < boundedSamples &&
+                    queuedSlots < QueueCapacity)
+                {
+                    int slotSamples = Math.Min(maximumSamplesPerSlot,
+                        boundedSamples - converted);
+                    byte[] destination = queueSlots[queueWriteIndex];
+                    for (int index = 0; index < slotSamples; index++)
+                    {
+                        short sample = (short)Math.Clamp((int)Math.Round(
+                            source[converted + index] * short.MaxValue),
+                            short.MinValue, short.MaxValue);
+                        BinaryPrimitives.WriteInt16LittleEndian(
+                            destination.AsSpan(index * sizeof(short),
+                                sizeof(short)), sample);
+                    }
+
+                    queueLengths[queueWriteIndex] = slotSamples *
+                        sizeof(short);
+                    queueWriteIndex = (queueWriteIndex + 1) % QueueCapacity;
+                    queuedSlots++;
+                    converted += slotSamples;
+                }
+            }
+
+            if (converted > 0)
+            {
+                dataAvailable.Set();
+            }
+        }
+
+        private void WriterLoop()
+        {
+            try
+            {
+                while (true)
+                {
+                    int slotIndex;
+                    int length;
+                    lock (queueLock)
+                    {
+                        if (queuedSlots == 0)
+                        {
+                            if (stopping)
+                            {
+                                break;
+                            }
+
+                            slotIndex = -1;
+                            length = 0;
+                        }
+                        else
+                        {
+                            slotIndex = queueReadIndex;
+                            length = queueLengths[slotIndex];
+                        }
+                    }
+
+                    if (slotIndex < 0)
+                    {
+                        dataAvailable.WaitOne();
+                        continue;
+                    }
+
+                    stream.Write(queueSlots[slotIndex], 0, length);
+                    dataBytes += length;
+                    lock (queueLock)
+                    {
+                        queueLengths[slotIndex] = 0;
+                        queueReadIndex = (queueReadIndex + 1) % QueueCapacity;
+                        queuedSlots--;
+                    }
+                }
+            }
+            catch
+            {
+                // Diagnostics must never terminate the controller transport.
+            }
+        }
+
+        public void Dispose()
+        {
+            if (disposed)
+            {
+                return;
+            }
+
+            stopping = true;
+            dataAvailable.Set();
+            if (writerThread != null && writerThread.IsAlive &&
+                Thread.CurrentThread.ManagedThreadId !=
+                    writerThread.ManagedThreadId)
+            {
+                writerThread.Join(10000);
+            }
+
+            disposed = true;
+            try
+            {
+                uint boundedDataBytes = (uint)Math.Min(dataBytes,
+                    uint.MaxValue - 36L);
+                WriteWaveHeader(boundedDataBytes + 36, boundedDataBytes);
+                stream.SetLength(HeaderLength + boundedDataBytes);
+                stream.Flush(true);
+            }
+            catch
+            {
+            }
+            finally
+            {
+                stream.Dispose();
+                dataAvailable.Dispose();
+            }
+        }
+
+        private void WriteWaveHeader(uint riffLength, uint dataLength)
+        {
+            Span<byte> header = stackalloc byte[HeaderLength];
+            "RIFF"u8.CopyTo(header);
+            BinaryPrimitives.WriteUInt32LittleEndian(header[4..8],
+                riffLength);
+            "WAVEfmt "u8.CopyTo(header[8..16]);
+            BinaryPrimitives.WriteUInt32LittleEndian(header[16..20], 16);
+            BinaryPrimitives.WriteUInt16LittleEndian(header[20..22], 1);
+            BinaryPrimitives.WriteUInt16LittleEndian(header[22..24],
+                (ushort)channels);
+            BinaryPrimitives.WriteUInt32LittleEndian(header[24..28],
+                (uint)sampleRate);
+            uint byteRate = (uint)(sampleRate * channels * sizeof(short));
+            BinaryPrimitives.WriteUInt32LittleEndian(header[28..32],
+                byteRate);
+            BinaryPrimitives.WriteUInt16LittleEndian(header[32..34],
+                (ushort)(channels * sizeof(short)));
+            BinaryPrimitives.WriteUInt16LittleEndian(header[34..36], 16);
+            "data"u8.CopyTo(header[36..40]);
+            BinaryPrimitives.WriteUInt32LittleEndian(header[40..44],
+                dataLength);
+            stream.Position = 0;
+            stream.Write(header);
+            stream.Position = HeaderLength + dataBytes;
+        }
+    }
+
+    /// <summary>
+    /// Stateful sample-rate converter for VIIPER's interleaved stereo PCM16
+    /// stream. The fractional source position and final input frame survive
+    /// transport-frame boundaries, so a 32 kHz virtual DS4 can feed the 48 kHz
+    /// DualSense speaker clock without duplicating or dropping a boundary
+    /// sample.
+    /// </summary>
+    internal sealed class DualSenseDirectPcmRateConverter
+    {
+        private const double IntegerTolerance = 1.0e-10;
+        private readonly double outputFramesPerInputFrame;
+        private double sourcePosition;
+        private bool hasCarry;
+        private short carryLeft;
+        private short carryRight;
+
+        internal DualSenseDirectPcmRateConverter(int sourceSampleRate,
+            int outputSampleRate)
+        {
+            if (sourceSampleRate <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(sourceSampleRate));
+            }
+            if (outputSampleRate <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(outputSampleRate));
+            }
+
+            outputFramesPerInputFrame = outputSampleRate /
+                (double)sourceSampleRate;
+        }
+
+        internal int Convert(byte[] source, int offset, int length,
+            float[] destination)
+        {
+            if (source == null)
+            {
+                throw new ArgumentNullException(nameof(source));
+            }
+            if (destination == null)
+            {
+                throw new ArgumentNullException(nameof(destination));
+            }
+            if (offset < 0 || length < 0 || offset + length > source.Length ||
+                length % (sizeof(short) * 2) != 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(length));
+            }
+
+            int inputFrames = length / (sizeof(short) * 2);
+            if (inputFrames == 0)
+            {
+                return 0;
+            }
+
+            double sourceStep = 1.0 / outputFramesPerInputFrame;
+            int outputFrames = 0;
+            while (true)
+            {
+                double roundedPosition = Math.Round(sourcePosition);
+                if (Math.Abs(sourcePosition - roundedPosition) <=
+                    IntegerTolerance)
+                {
+                    sourcePosition = roundedPosition;
+                }
+
+                int lowerFrame = (int)Math.Floor(sourcePosition);
+                double fraction = sourcePosition - lowerFrame;
+                int upperFrame = fraction <= IntegerTolerance ? lowerFrame :
+                    lowerFrame + 1;
+                if (lowerFrame < -1 || upperFrame >= inputFrames ||
+                    (lowerFrame < 0 && !hasCarry))
+                {
+                    break;
+                }
+                if (outputFrames > destination.Length / 2 - 1)
+                {
+                    throw new ArgumentException(
+                        "The direct PCM destination buffer is too small.",
+                        nameof(destination));
+                }
+
+                short left0 = ReadSample(source, offset, lowerFrame, 0,
+                    carryLeft);
+                short right0 = ReadSample(source, offset, lowerFrame, 1,
+                    carryRight);
+                short left1 = ReadSample(source, offset, upperFrame, 0,
+                    carryLeft);
+                short right1 = ReadSample(source, offset, upperFrame, 1,
+                    carryRight);
+                int destinationOffset = outputFrames * 2;
+                destination[destinationOffset] = (float)(Interpolate(left0,
+                    left1, fraction) / 32768.0);
+                destination[destinationOffset + 1] = (float)(Interpolate(
+                    right0, right1, fraction) / 32768.0);
+                outputFrames++;
+                sourcePosition += sourceStep;
+            }
+
+            sourcePosition -= inputFrames;
+            int finalOffset = offset + (inputFrames - 1) * 4;
+            carryLeft = ReadInt16(source, finalOffset);
+            carryRight = ReadInt16(source, finalOffset + 2);
+            hasCarry = true;
+            return outputFrames;
+        }
+
+        internal void Reset()
+        {
+            sourcePosition = 0.0;
+            hasCarry = false;
+            carryLeft = 0;
+            carryRight = 0;
+        }
+
+        private static short ReadSample(byte[] source, int offset, int frame,
+            int channel, short carry)
+        {
+            return frame < 0 ? carry : ReadInt16(source,
+                offset + frame * 4 + channel * 2);
+        }
+
+        private static short ReadInt16(byte[] source, int offset)
+        {
+            return (short)(source[offset] | source[offset + 1] << 8);
+        }
+
+        private static double Interpolate(short first, short second,
+            double fraction)
+        {
+            return fraction <= IntegerTolerance || first == second ? first :
+                first + (second - (double)first) * fraction;
+        }
+    }
+
+    /// <summary>
     /// Mirrors a Windows render endpoint to a physical Bluetooth DualSense
-    /// speaker. Before VIIPER activates combined Bluetooth output, frames use
-    /// the 0x35 / packet 0x13 Opus lane. Once combined mode is active, frames
-    /// are cached for the next vDS-style 0x36 haptics/state write.
+    /// speaker. Every frame uses the vDS-style 0x36 combined transport so
+    /// speaker audio, microphone state, haptics, and controller output never
+    /// compete through separate Bluetooth report IDs.
     ///
     /// VIIPER's virtual DualSense audio interface is a valid source here: its
     /// first two channels are controller speaker audio. Channels three and four
@@ -28,20 +420,44 @@ namespace DS4Windows
         private const int Channels = 2;
         private const int FrameSamples = 480;
         private const int SourcePullFrames = 512;
-        private const int DriftAdjustmentFrames = 4;
         private const int OpusBytes = 200;
-        private const int ReportLength = 334;
         private const int LowLatencyCaptureBufferMs = 10;
-        private const int CaptureBufferMs = 240;
-        private const int InitialBufferMs = 48;
-        private const int TargetBufferMs = 32;
-        private const int BufferDeadbandMs = 8;
+        // Ownership recovery is bounded by helper process-exit plus startup
+        // waits. Keep normal target latency at 64 ms, but retain source history
+        // for the entire bounded transition instead of silently draining it.
+        private const int CaptureBufferMs = 24000;
+        // The isolated writer primes eight 10.667 ms reports (about 85 ms).
+        // Retain another ~64 ms in the source ring, matching the proven DS4
+        // production strategy of a hardware queue plus an independent source
+        // cushion. This absorbs the 100-120 ms Windows/virtual-endpoint stalls
+        // seen in long repeat-playback traces without changing packet cadence.
+        private const int InitialBufferMs = 160;
+        private const int TargetBufferMs = 64;
+        // Eight queued reports cover only about 85 ms. A long-running duplex
+        // trace observed a 97.7 ms virtual-endpoint callback stall: the helper
+        // exhausted that reserve, re-armed its eight-report prime gate, and the
+        // controller produced an audible ~100 ms gap even though no PCM or HID
+        // write was dropped. Keep sixteen reports ready (about 171 ms). The
+        // helper patches the newest haptics/control template at presentation,
+        // so this speaker-audio cushion does not add haptics latency.
+        internal const int PacerReservoirTargetFrames = 16;
+        internal const int StartupWarmupReportCount = 6;
         private const int CaptureRingFrames = (SampleRate * CaptureBufferMs) / 1000;
         private const int CapturePumpBufferFrames = 2048;
+        private const int DirectPcmChunkBytes = 4096;
+        private const int DirectPcmMaximumOutputFrames =
+            (DirectPcmChunkBytes / (sizeof(short) * Channels) * 3 / 2) + 2;
         private const int IdleKeepAliveMs = 2000;
+        private const int PacerPrewarmRetryMs = 2000;
         private const double BluetoothSpeakerCadenceMs = 10.0 + (2.0 / 3.0);
+        private const double CaptureClockMaximumCorrection = 0.001;
+        private const double CaptureClockCorrectionGain = 1.0 / 65536.0;
+        private const double CaptureClockRatioSlewPerPacket = 0.000002;
+        private const double CaptureClockSmoothingAlpha = 0.005319148936170213;
+        private const double CaptureClockErrorDeadbandFrames = 2.0;
 
         private readonly object syncRoot = new object();
+        private readonly object directPcmSync = new object();
         private readonly DualSenseDevice device;
         private readonly string sourceEndpointId;
         private readonly ControllerAudioEndpointKind sourceEndpointKind;
@@ -49,33 +465,63 @@ namespace DS4Windows
         private readonly DualSenseSpeakerCompression speakerCompression;
         private readonly byte speakerBassBoost;
         private readonly DualSenseSpeakerProcessor speakerProcessor;
-        private readonly float[] sourceFrame = new float[(SourcePullFrames + DriftAdjustmentFrames) * Channels];
+        private readonly ViiperOutDevice directSpeakerSource;
+        private readonly int directSpeakerSampleRate;
+        private readonly DualSensePcm16SourceRateConverter directPcmRateConverter;
+        private readonly DualSenseSpeakerFrameResampler speakerFrameResampler =
+            new DualSenseSpeakerFrameResampler();
+        private Pcm16WaveTraceWriter rawDirectPcmTrace;
+        private Pcm16WaveTraceWriter preOpusPcmTrace;
+        private readonly float[] directPcmFrame = new float[
+            DirectPcmMaximumOutputFrames * Channels];
         private readonly float[] frame = new float[FrameSamples * Channels];
+        private readonly float[] speakerResampleInput = new float[
+            SourcePullFrames * Channels];
+        private readonly float[] speakerResampleOutput = new float[
+            (FrameSamples + 8) * Channels];
+        private readonly float[] speakerResampleFifo = new float[
+            FrameSamples * Channels * 4];
         private readonly byte[] opusFrame = new byte[OpusBytes];
-        private readonly byte[] report = new byte[ReportLength];
         private readonly float[] captureRing = new float[CaptureRingFrames * Channels];
         private readonly AutoResetEvent captureDataAvailable = new AutoResetEvent(false);
         private readonly AutoResetEvent captureFramesAvailable = new AutoResetEvent(false);
+        private readonly AutoResetEvent pacerLifecycleRequested =
+            new AutoResetEvent(false);
 
         private WasapiCapture capture;
         private BufferedWaveProvider captureBuffer;
         private Thread worker;
         private Thread capturePump;
+        private Thread pacerLifecycleWorker;
         private IOpusEncoder opusEncoder;
         private volatile bool stopping;
         private int captureRingReadIndex;
         private int captureRingWriteIndex;
         private int captureRingBufferedFrames;
+        private int speakerResampleFifoReadFrame;
+        private int speakerResampleFifoWriteFrame;
+        private int speakerResampleFifoFrames;
         private bool capturePrimed;
+        private double captureSmoothedBufferedFrames;
+        private double captureCurrentClockRatio = 1.0;
+        private double captureTargetClockRatio = 1.0;
+        private bool captureClockInitialized;
         private bool fadeInAfterCaptureUnderrun;
         private float previousOutputLeft;
         private float previousOutputRight;
-        private int reportSequence;
-        private byte packetCounter;
         private int loggedWriteFailure;
+        private int loggedDirectPcmFailure;
+        private int loggedPacerPrewarmFailure;
+        private int loggedPacerLifecycleFailure;
+        private int disposeStarted;
         private bool isGameAudioEndpoint;
-        private bool audioSegmentActive;
-        private DateTime lastAudibleUtc = DateTime.MinValue;
+        private volatile bool audioSegmentActive;
+        private readonly long speakerSessionId;
+        private long speakerGeneration;
+        private int startupWarmupFramesRemaining;
+        private bool pendingEncodedFrame;
+        private bool pendingEncodedFrameWasAudible;
+        private long lastAudibleTimestamp;
         private long framesSent;
         private long silentFramesSent;
         private long skippedScheduleSlots;
@@ -89,17 +535,43 @@ namespace DS4Windows
         private long captureUnderruns;
         private long activeCaptureUnderruns;
         private long captureDriftAdjustments;
+        private long captureOverflowFrames;
+        private long directPcmCallbacks;
+        private long directPcmInputFrames;
+        private long directPcmOutputFrames;
+        private long directPcmPreviousCallbackTimestamp;
+        private long directPcmMaximumCallbackGapTicks;
+        private long directPcmMaximumCallbackLockWaitTicks;
+        private int pacerPrewarmRequested;
+        private int pacerPrewarmInProgress;
+        private int pacerRecoveryRequested;
+        private int pacerLifecycleGateSource;
+        private int pacerLifecycleStopping;
+        private int pacerFinalClearRequested;
+        private long pacerFinalClearGeneration;
+        private int pacerPrewarmAttemptedForSegment;
+        private long pacerPrewarmRetryAfterTimestamp;
+        private long lastRawAudibleTimestamp;
+        private long pacerPrewarmAttempts;
+        private long pacerPrewarmSuccesses;
+        private long pacerPrewarmFailures;
+        private long pacerPrewarmMaximumTicks;
         private long lastDiagnosticUtcTicks;
         private int diagnosticLogPending;
         private int mmcssRegistered;
         private int mmcssHighPriority;
         private int mmcssRegistrationError;
+        private int deferredDisposeCleanupScheduled;
+        private int disposeCleanupCompleted;
+        private long startupWarmupReportsSent;
 
         public DualSenseBluetoothSpeakerPassthrough(DualSenseDevice device, byte speakerVolume,
             DualSenseSpeakerCompression speakerCompression, byte speakerBassBoost,
-            string sourceEndpointId, ControllerAudioEndpointKind sourceEndpointKind)
+            string sourceEndpointId, ControllerAudioEndpointKind sourceEndpointKind,
+            ViiperOutDevice directSpeakerSource = null)
         {
             this.device = device ?? throw new ArgumentNullException(nameof(device));
+            speakerSessionId = this.device.CreateBluetoothSpeakerSession();
             this.speakerVolume = speakerVolume;
             this.speakerCompression = (DualSenseSpeakerCompression)Math.Clamp(
                 (int)speakerCompression, (int)DualSenseSpeakerCompression.Off,
@@ -110,12 +582,62 @@ namespace DS4Windows
                 this.speakerBassBoost);
             this.sourceEndpointId = sourceEndpointId ?? string.Empty;
             this.sourceEndpointKind = sourceEndpointKind;
+            this.directSpeakerSource = directSpeakerSource;
+            directSpeakerSampleRate = directSpeakerSource?.DirectSpeakerPcmSampleRate ?? 0;
+            if (directSpeakerSampleRate > 0)
+            {
+                directPcmRateConverter = new DualSensePcm16SourceRateConverter(
+                    directSpeakerSampleRate, SampleRate);
+                TryCreateDirectPcmTraces();
+            }
+        }
+
+        private void TryCreateDirectPcmTraces()
+        {
+            string directory = Environment.GetEnvironmentVariable(
+                "DS4WINDOWS_DUALSENSE_PCM_TRACE_DIRECTORY");
+            if (string.IsNullOrWhiteSpace(directory))
+            {
+                return;
+            }
+
+            try
+            {
+                directory = Path.GetFullPath(directory);
+                Directory.CreateDirectory(directory);
+                string stamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff");
+                string rawPath = Path.Combine(directory,
+                    $"dualsense-{stamp}-raw-{directSpeakerSampleRate}hz.wav");
+                string preOpusPath = Path.Combine(directory,
+                    $"dualsense-{stamp}-pre-opus-48000hz.wav");
+                rawDirectPcmTrace = Pcm16WaveTraceWriter.TryCreate(rawPath,
+                    directSpeakerSampleRate, Channels);
+                preOpusPcmTrace = Pcm16WaveTraceWriter.TryCreate(preOpusPath,
+                    SampleRate, Channels);
+                if (rawDirectPcmTrace != null && preOpusPcmTrace != null)
+                {
+                    AppLogger.LogToGui(
+                        $"DualSense PCM trace enabled: raw='{rawPath}', preOpus='{preOpusPath}'",
+                        false);
+                }
+            }
+            catch (Exception ex)
+            {
+                rawDirectPcmTrace?.Dispose();
+                preOpusPcmTrace?.Dispose();
+                rawDirectPcmTrace = null;
+                preOpusPcmTrace = null;
+                AppLogger.LogToGui(
+                    $"DualSense PCM trace could not initialize: {ex.Message}",
+                    true);
+            }
         }
 
         public bool Matches(DualSenseDevice candidateDevice, byte candidateVolume,
             DualSenseSpeakerCompression candidateCompression, byte candidateBassBoost,
             string candidateSourceEndpointId,
-            ControllerAudioEndpointKind candidateSourceEndpointKind)
+            ControllerAudioEndpointKind candidateSourceEndpointKind,
+            ViiperOutDevice candidateDirectSpeakerSource = null)
         {
             return !stopping && ReferenceEquals(device, candidateDevice) &&
                 speakerVolume == candidateVolume &&
@@ -125,6 +647,8 @@ namespace DS4Windows
                 speakerBassBoost == Math.Min(candidateBassBoost,
                     DualSenseSpeakerProcessor.MaximumBassBoostDb) &&
                 sourceEndpointKind == candidateSourceEndpointKind &&
+                ReferenceEquals(directSpeakerSource,
+                    candidateDirectSpeakerSource) &&
                 string.Equals(sourceEndpointId, candidateSourceEndpointId ?? string.Empty,
                     StringComparison.Ordinal);
         }
@@ -136,8 +660,54 @@ namespace DS4Windows
                 throw new InvalidOperationException("Bluetooth speaker passthrough requires a physical Sony DualSense or DualSense Edge.");
             }
 
+            if (!device.EnsureBluetoothCombinedOutputTransport())
+            {
+                throw new InvalidOperationException(
+                    $"Could not initialize the DualSense combined Bluetooth transport: {device.LastBluetoothHapticsWriteStatus}");
+            }
+
+            if (!device.ActivateBluetoothSpeakerSession(speakerSessionId))
+            {
+                throw new InvalidOperationException(
+                    "Could not activate the DualSense Bluetooth speaker session.");
+            }
+
             try
             {
+                opusEncoder = CreateSpeakerOpusEncoder();
+                StartPacerLifecycleWorker();
+                RequestPacerLifecyclePreparation(recovery: false,
+                    gateSource: true);
+
+                if (directSpeakerSource != null)
+                {
+                    if (!directSpeakerSource.SupportsDirectSpeakerPcm ||
+                        directSpeakerSampleRate <= 0 ||
+                        directPcmRateConverter == null)
+                    {
+                        throw new InvalidOperationException(
+                            "VIIPER's direct speaker PCM stream is not available.");
+                    }
+
+                    isGameAudioEndpoint = true;
+                    directSpeakerSource.VirtualSpeakerPcmReceived +=
+                        DirectSpeakerSource_VirtualSpeakerPcmReceived;
+                    worker = new Thread(StreamLoop)
+                    {
+                        IsBackground = true,
+                        Name = "DualSense Bluetooth direct speaker audio",
+                        Priority = ThreadPriority.Highest,
+                    };
+                    // Establish the reusable HID owner while the endpoint is
+                    // idle. This removes helper process startup from the first
+                    // speaker-only segment without blocking profile/UI setup.
+                    worker.Start();
+                    AppLogger.LogToGui(
+                        $"DualSense Bluetooth speaker passthrough started: direct VIIPER PCM ({directSpeakerSampleRate / 1000} kHz source, no WASAPI loopback, phase-continuous clock correction)",
+                        false);
+                    return;
+                }
+
                 capture = CreateCapture(sourceEndpointId, sourceEndpointKind,
                     out string sourceName);
                 isGameAudioEndpoint = IsLikelyGameAudioEndpoint(sourceName);
@@ -156,11 +726,6 @@ namespace DS4Windows
                 {
                     source = new WdlResamplingSampleProvider(source, SampleRate);
                 }
-
-                opusEncoder = OpusCodecFactory.CreateEncoder(SampleRate, Channels, OpusApplication.OPUS_APPLICATION_AUDIO);
-                opusEncoder.Bitrate = OpusBytes * 8 * 100;
-                opusEncoder.UseVBR = false;
-                opusEncoder.ExpertFrameDuration = OpusFramesize.OPUS_FRAMESIZE_10_MS;
 
                 capturePump = new Thread(() => CapturePumpLoop(source))
                 {
@@ -298,6 +863,110 @@ namespace DS4Windows
             return mux;
         }
 
+        private void DirectSpeakerSource_VirtualSpeakerPcmReceived(
+            ViiperOutDevice source, byte[] pcm, int length)
+        {
+            if (stopping || !ReferenceEquals(source, directSpeakerSource) ||
+                pcm == null || length <= 0)
+            {
+                return;
+            }
+
+            int alignedLength = Math.Min(length, pcm.Length) &
+                ~(sizeof(short) * Channels - 1);
+            if (alignedLength <= 0)
+            {
+                return;
+            }
+
+            long callbackEntered = Stopwatch.GetTimestamp();
+            long previousCallback = Interlocked.Exchange(
+                ref directPcmPreviousCallbackTimestamp, callbackEntered);
+            if (previousCallback != 0)
+            {
+                UpdateMaximum(ref directPcmMaximumCallbackGapTicks,
+                    callbackEntered - previousCallback);
+            }
+
+            try
+            {
+                // Stream recovery may briefly overlap the retiring and
+                // replacement VIIPER feedback readers. Serialize the stateful
+                // converter and its shared scratch buffer, and make this lock
+                // the outer lock whenever both directPcmSync and syncRoot are
+                // needed.
+                lock (directPcmSync)
+                {
+                    UpdateMaximum(ref directPcmMaximumCallbackLockWaitTicks,
+                        Stopwatch.GetTimestamp() - callbackEntered);
+                    if (stopping || !ReferenceEquals(source,
+                        directSpeakerSource))
+                    {
+                        return;
+                    }
+
+                    Interlocked.Increment(ref directPcmCallbacks);
+                    Interlocked.Add(ref directPcmInputFrames,
+                        alignedLength / (sizeof(short) * Channels));
+                    rawDirectPcmTrace?.Write(pcm, 0, alignedLength);
+                    int offset = 0;
+                    while (offset < alignedLength && !stopping)
+                    {
+                        int chunkLength = Math.Min(DirectPcmChunkBytes,
+                            alignedLength - offset) &
+                            ~(sizeof(short) * Channels - 1);
+                        if (chunkLength <= 0)
+                        {
+                            break;
+                        }
+
+                        int convertedFrames = directPcmRateConverter.Convert(
+                            pcm, offset, chunkLength, directPcmFrame);
+                        if (convertedFrames > 0)
+                        {
+                            AppendCaptureSamples(directPcmFrame,
+                                convertedFrames * Channels);
+                            Interlocked.Add(ref directPcmOutputFrames,
+                                convertedFrames);
+                            Interlocked.Add(ref captureInputFrames,
+                                convertedFrames);
+                        }
+
+                        offset += chunkLength;
+                    }
+
+                    Interlocked.Increment(ref captureCallbackCount);
+                }
+            }
+            catch (Exception ex)
+            {
+                // This callback runs on VIIPER's isolated speaker consumer.
+                // Never allow an audio conversion fault to terminate that
+                // consumer or starve later controller audio.
+                if (Interlocked.Exchange(ref loggedDirectPcmFailure, 1) == 0)
+                {
+                    string message = ex.Message;
+                    ThreadPool.QueueUserWorkItem(_ => AppLogger.LogToGui(
+                        $"DualSense direct speaker PCM conversion failed: {message}",
+                        true));
+                }
+            }
+        }
+
+        /// <summary>
+        /// Creates the exact proven PadForge DualSense speaker encoder. The
+        /// 480-sample input passed to Encode selects a 10 ms Opus frame; leaving
+        /// complexity at Concentus' recommended default preserves music quality.
+        /// </summary>
+        internal static IOpusEncoder CreateSpeakerOpusEncoder()
+        {
+            IOpusEncoder encoder = OpusCodecFactory.CreateEncoder(SampleRate,
+                Channels, OpusApplication.OPUS_APPLICATION_AUDIO);
+            encoder.Bitrate = OpusBytes * 8 * 100;
+            encoder.UseVBR = false;
+            return encoder;
+        }
+
         private void Capture_DataAvailable(object sender, WaveInEventArgs e)
         {
             lock (syncRoot)
@@ -319,8 +988,10 @@ namespace DS4Windows
 
         private void Capture_RecordingStopped(object sender, StoppedEventArgs e)
         {
-            device.ClearBluetoothSpeakerAudioFrame();
             audioSegmentActive = false;
+            RequestGenerationEnd(Interlocked.Read(ref speakerGeneration));
+            Volatile.Write(ref pacerPrewarmAttemptedForSegment, 0);
+            Interlocked.Exchange(ref lastRawAudibleTimestamp, 0);
             if (!stopping && e.Exception != null)
             {
                 AppLogger.LogToGui($"DualSense Bluetooth speaker capture stopped: {e.Exception.Message}", true);
@@ -359,17 +1030,61 @@ namespace DS4Windows
                 return;
             }
 
+            if (HasAudibleSamples(samples, sampleCount))
+            {
+                // The helper process is deliberately started by StreamLoop,
+                // not this producer callback. That lets the transport handoff
+                // overlap PCM accumulation without ever blocking VIIPER's
+                // isolated speaker consumer.
+                long now = Stopwatch.GetTimestamp();
+                long previousRawAudible = Interlocked.Exchange(
+                    ref lastRawAudibleTimestamp, now);
+                bool newRawGeneration = previousRawAudible == 0 ||
+                    now - previousRawAudible > Stopwatch.Frequency *
+                        IdleKeepAliveMs / 1000;
+                if (newRawGeneration)
+                {
+                    long generation = Interlocked.Increment(
+                        ref speakerGeneration);
+                    if (generation == 0)
+                    {
+                        Interlocked.Increment(ref speakerGeneration);
+                    }
+
+                    Volatile.Write(
+                        ref pacerPrewarmAttemptedForSegment, 0);
+                    Volatile.Write(ref startupWarmupFramesRemaining,
+                        StartupWarmupReportCount);
+                    // Request during cooldown without consuming the attempt
+                    // latch. The lifecycle worker waits until retryAfter while
+                    // the stream gate preserves source history; only an actual
+                    // attempt consumes the one-per-generation latch.
+                    RequestPacerLifecyclePreparation(recovery: false,
+                        gateSource: true);
+                }
+            }
+
             int sourceFrameOffset = (sampleCount / Channels) - frames;
             lock (syncRoot)
             {
+                int overflowFrames = Math.Max(0,
+                    captureRingBufferedFrames + frames - CaptureRingFrames);
+                if (overflowFrames > 0)
+                {
+                    captureRingReadIndex = (captureRingReadIndex +
+                        overflowFrames) % CaptureRingFrames;
+                    captureRingBufferedFrames -= overflowFrames;
+                    capturePrimed = false;
+                    captureClockInitialized = false;
+                    directPcmRateConverter?.Reset();
+                    ResetSpeakerResamplingLocked();
+                    fadeInAfterCaptureUnderrun = true;
+                    Interlocked.Add(ref captureOverflowFrames,
+                        overflowFrames);
+                }
+
                 for (int frameIndex = 0; frameIndex < frames; frameIndex++)
                 {
-                    if (captureRingBufferedFrames == CaptureRingFrames)
-                    {
-                        captureRingReadIndex = (captureRingReadIndex + 1) % CaptureRingFrames;
-                        captureRingBufferedFrames--;
-                    }
-
                     int sourceOffset = (sourceFrameOffset + frameIndex) * Channels;
                     int destinationOffset = captureRingWriteIndex * Channels;
                     captureRing[destinationOffset] = samples[sourceOffset];
@@ -382,61 +1097,188 @@ namespace DS4Windows
             captureFramesAvailable.Set();
         }
 
-        private int ReadCaptureFrames(int frameCount)
+        private bool TryFillOutputFrame(out int consumedSourceFrames)
         {
+            if (directSpeakerSource != null)
+            {
+                lock (directPcmSync)
+                {
+                    lock (syncRoot)
+                    {
+                        return TryFillOutputFrameLocked(
+                            out consumedSourceFrames);
+                    }
+                }
+            }
+
             lock (syncRoot)
             {
-                if (!capturePrimed)
-                {
-                    int initialFrames = (SampleRate * InitialBufferMs) / 1000;
-                    if (captureRingBufferedFrames < initialFrames)
-                    {
-                        return 0;
-                    }
-
-                    capturePrimed = true;
-                }
-
-                if (captureRingBufferedFrames < frameCount)
-                {
-                    capturePrimed = false;
-                    return 0;
-                }
-
-                for (int frameIndex = 0; frameIndex < frameCount; frameIndex++)
-                {
-                    int sourceOffset = captureRingReadIndex * Channels;
-                    int destinationOffset = frameIndex * Channels;
-                    sourceFrame[destinationOffset] = captureRing[sourceOffset];
-                    sourceFrame[destinationOffset + 1] = captureRing[sourceOffset + 1];
-                    captureRingReadIndex = (captureRingReadIndex + 1) % CaptureRingFrames;
-                }
-
-                captureRingBufferedFrames -= frameCount;
-                return frameCount;
+                return TryFillOutputFrameLocked(out consumedSourceFrames);
             }
         }
 
-        private int GetSourceFramesPerTick()
+        private bool TryFillOutputFrameLocked(out int consumedSourceFrames)
         {
-            lock (syncRoot)
+            consumedSourceFrames = 0;
+            int initialFrames = (SampleRate * InitialBufferMs) / 1000;
+            if (!capturePrimed)
             {
-                int targetFrames = (SampleRate * TargetBufferMs) / 1000;
-                int deadbandFrames = (SampleRate * BufferDeadbandMs) / 1000;
-                if (captureRingBufferedFrames > targetFrames + deadbandFrames)
+                if (captureRingBufferedFrames < initialFrames)
                 {
-                    Interlocked.Increment(ref captureDriftAdjustments);
-                    return SourcePullFrames + DriftAdjustmentFrames;
+                    return false;
                 }
 
-                if (captureRingBufferedFrames < targetFrames - deadbandFrames)
-                {
-                    Interlocked.Increment(ref captureDriftAdjustments);
-                    return SourcePullFrames - DriftAdjustmentFrames;
-                }
+                capturePrimed = true;
             }
 
-            return SourcePullFrames;
+            UpdateCaptureClockRatioLocked();
+            speakerFrameResampler.SetInputRateRatio(
+                captureCurrentClockRatio);
+            while (speakerResampleFifoFrames < FrameSamples)
+            {
+                if (captureRingBufferedFrames < SourcePullFrames)
+                {
+                    // Once a primed stream runs dry, none of its residual
+                    // samples or filter history belong at the front of a later
+                    // playback generation.
+                    captureRingReadIndex = captureRingWriteIndex;
+                    captureRingBufferedFrames = 0;
+                    capturePrimed = false;
+                    captureClockInitialized = false;
+                    directPcmRateConverter?.Reset();
+                    ResetSpeakerResamplingLocked();
+                    return false;
+                }
+
+                CopyCaptureFramesToSpeakerResamplerLocked();
+                int producedFrames = speakerFrameResampler.Convert(
+                    speakerResampleInput, 0, SourcePullFrames,
+                    speakerResampleOutput, 0,
+                    speakerResampleOutput.Length / Channels);
+                if (producedFrames <= 0 ||
+                    speakerResampleFifoFrames + producedFrames >
+                        speakerResampleFifo.Length / Channels)
+                {
+                    captureRingReadIndex = captureRingWriteIndex;
+                    captureRingBufferedFrames = 0;
+                    capturePrimed = false;
+                    captureClockInitialized = false;
+                    directPcmRateConverter?.Reset();
+                    ResetSpeakerResamplingLocked();
+                    return false;
+                }
+
+                AppendSpeakerResampleOutputLocked(producedFrames);
+                consumedSourceFrames += SourcePullFrames;
+            }
+
+            TakeSpeakerResampleFrameLocked();
+            return true;
+        }
+
+        private void CopyCaptureFramesToSpeakerResamplerLocked()
+        {
+            int firstFrames = Math.Min(SourcePullFrames,
+                CaptureRingFrames - captureRingReadIndex);
+            Array.Copy(captureRing, captureRingReadIndex * Channels,
+                speakerResampleInput, 0, firstFrames * Channels);
+            int remainingFrames = SourcePullFrames - firstFrames;
+            if (remainingFrames > 0)
+            {
+                Array.Copy(captureRing, 0, speakerResampleInput,
+                    firstFrames * Channels, remainingFrames * Channels);
+            }
+
+            captureRingReadIndex = (captureRingReadIndex +
+                SourcePullFrames) % CaptureRingFrames;
+            captureRingBufferedFrames -= SourcePullFrames;
+        }
+
+        private void AppendSpeakerResampleOutputLocked(int producedFrames)
+        {
+            int capacityFrames = speakerResampleFifo.Length / Channels;
+            int firstFrames = Math.Min(producedFrames,
+                capacityFrames - speakerResampleFifoWriteFrame);
+            Array.Copy(speakerResampleOutput, 0, speakerResampleFifo,
+                speakerResampleFifoWriteFrame * Channels,
+                firstFrames * Channels);
+            int remainingFrames = producedFrames - firstFrames;
+            if (remainingFrames > 0)
+            {
+                Array.Copy(speakerResampleOutput, firstFrames * Channels,
+                    speakerResampleFifo, 0, remainingFrames * Channels);
+            }
+
+            speakerResampleFifoWriteFrame =
+                (speakerResampleFifoWriteFrame + producedFrames) %
+                capacityFrames;
+            speakerResampleFifoFrames += producedFrames;
+        }
+
+        private void TakeSpeakerResampleFrameLocked()
+        {
+            int capacityFrames = speakerResampleFifo.Length / Channels;
+            int firstFrames = Math.Min(FrameSamples,
+                capacityFrames - speakerResampleFifoReadFrame);
+            Array.Copy(speakerResampleFifo,
+                speakerResampleFifoReadFrame * Channels, frame, 0,
+                firstFrames * Channels);
+            int remainingFrames = FrameSamples - firstFrames;
+            if (remainingFrames > 0)
+            {
+                Array.Copy(speakerResampleFifo, 0, frame,
+                    firstFrames * Channels, remainingFrames * Channels);
+            }
+
+            speakerResampleFifoReadFrame =
+                (speakerResampleFifoReadFrame + FrameSamples) %
+                capacityFrames;
+            speakerResampleFifoFrames -= FrameSamples;
+        }
+
+        private void ResetSpeakerResamplingLocked()
+        {
+            speakerFrameResampler.Reset();
+            speakerResampleFifoReadFrame = 0;
+            speakerResampleFifoWriteFrame = 0;
+            speakerResampleFifoFrames = 0;
+        }
+
+        private void UpdateCaptureClockRatioLocked()
+        {
+            int targetFrames = (SampleRate * TargetBufferMs) / 1000;
+            if (!captureClockInitialized)
+            {
+                // Start neutral rather than biasing the servo with whichever
+                // side of the 480/512 callback sawtooth happened to prime it.
+                captureSmoothedBufferedFrames = targetFrames;
+                captureCurrentClockRatio = 1.0;
+                captureTargetClockRatio = 1.0;
+                captureClockInitialized = true;
+                return;
+            }
+
+            captureSmoothedBufferedFrames +=
+                (captureRingBufferedFrames - captureSmoothedBufferedFrames) *
+                CaptureClockSmoothingAlpha;
+            double errorFrames = captureSmoothedBufferedFrames - targetFrames;
+            if (Math.Abs(errorFrames) <= CaptureClockErrorDeadbandFrames)
+            {
+                errorFrames = 0.0;
+            }
+
+            captureTargetClockRatio = 1.0 + Math.Clamp(
+                errorFrames * CaptureClockCorrectionGain,
+                -CaptureClockMaximumCorrection,
+                CaptureClockMaximumCorrection);
+            captureCurrentClockRatio += Math.Clamp(
+                captureTargetClockRatio - captureCurrentClockRatio,
+                -CaptureClockRatioSlewPerPacket,
+                CaptureClockRatioSlewPerPacket);
+            if (Math.Abs(captureCurrentClockRatio - 1.0) > 0.000001)
+            {
+                Interlocked.Increment(ref captureDriftAdjustments);
+            }
         }
 
         private void WaitForInitialCaptureBuffer()
@@ -457,25 +1299,488 @@ namespace DS4Windows
             }
         }
 
+        private bool HasEnoughBufferedCaptureForNextFrame()
+        {
+            if (directSpeakerSource != null)
+            {
+                lock (directPcmSync)
+                {
+                    lock (syncRoot)
+                    {
+                        return HasEnoughBufferedCaptureForNextFrameLocked();
+                    }
+                }
+            }
+
+            lock (syncRoot)
+            {
+                return HasEnoughBufferedCaptureForNextFrameLocked();
+            }
+        }
+
+        private bool HasEnoughBufferedCaptureForNextFrameLocked()
+        {
+            if (!capturePrimed)
+            {
+                return captureRingBufferedFrames >=
+                    (SampleRate * InitialBufferMs) / 1000;
+            }
+
+            // A drift-adjusted 512-frame conversion can leave a complete
+            // 480-frame Opus packet in the resampler FIFO. Do not wait for
+            // another source block when that packet is already available.
+            return speakerResampleFifoFrames >= FrameSamples ||
+                captureRingBufferedFrames >= SourcePullFrames;
+        }
+
+        internal static bool ShouldAttemptPacerLifecycle(
+            bool recoveryRequested, bool helperActive, bool segmentAttempted,
+            long retryAfterTimestamp, long nowTimestamp)
+        {
+            return !helperActive && retryAfterTimestamp <= nowTimestamp &&
+                (recoveryRequested || !segmentAttempted);
+        }
+
+        internal static int GetPacerRetryWaitMilliseconds(
+            long retryAfterTimestamp, long nowTimestamp, long frequency)
+        {
+            if (retryAfterTimestamp <= nowTimestamp || frequency <= 0)
+            {
+                return 0;
+            }
+
+            long remainingTicks = retryAfterTimestamp - nowTimestamp;
+            long milliseconds = (remainingTicks * 1000L + frequency - 1) /
+                frequency;
+            return (int)Math.Clamp(milliseconds, 1L, 1000L);
+        }
+
+        internal static bool ShouldEmitStartupWarmup(int reportsRemaining,
+            bool lifecycleGateActive, bool recoveryRequired,
+            bool captureReady)
+        {
+            return reportsRemaining > 0 && !lifecycleGateActive &&
+                !recoveryRequired && captureReady;
+        }
+
+        internal static double StartupWarmupLatencyMilliseconds =>
+            StartupWarmupReportCount * BluetoothSpeakerCadenceMs;
+
+        internal static bool ShouldDeferDisposeCleanup(bool workerAlive,
+            bool capturePumpAlive, bool lifecycleWorkerAlive)
+        {
+            return workerAlive || capturePumpAlive || lifecycleWorkerAlive;
+        }
+
+        private void StartPacerLifecycleWorker()
+        {
+            pacerLifecycleWorker = new Thread(PacerLifecycleLoop)
+            {
+                IsBackground = true,
+                Name = "DualSense Bluetooth audio lifecycle",
+                Priority = ThreadPriority.AboveNormal,
+            };
+            pacerLifecycleWorker.Start();
+        }
+
+        private void RequestPacerLifecyclePreparation(bool recovery,
+            bool gateSource)
+        {
+            if (stopping || Volatile.Read(ref pacerLifecycleStopping) != 0)
+            {
+                return;
+            }
+
+            if (gateSource)
+            {
+                Volatile.Write(ref pacerLifecycleGateSource, 1);
+            }
+
+            if (recovery)
+            {
+                Volatile.Write(ref pacerRecoveryRequested, 1);
+            }
+            Volatile.Write(ref pacerPrewarmRequested, 1);
+            pacerLifecycleRequested.Set();
+        }
+
+        private void RequestGenerationEnd(long generation)
+        {
+            if (generation == 0)
+            {
+                return;
+            }
+
+            Interlocked.Exchange(ref pacerFinalClearGeneration, generation);
+            Volatile.Write(ref pacerFinalClearRequested, 1);
+            pacerLifecycleRequested.Set();
+        }
+
+        internal static long SelectPacerFinalClearGenerationForRetry(
+            long pendingGeneration, long failedGeneration)
+        {
+            return Math.Max(pendingGeneration, failedGeneration);
+        }
+
+        private void RestoreGenerationEndRequest(long failedGeneration)
+        {
+            if (failedGeneration == 0)
+            {
+                return;
+            }
+
+            long observed;
+            long replacement;
+            do
+            {
+                observed = Interlocked.Read(ref pacerFinalClearGeneration);
+                replacement = SelectPacerFinalClearGenerationForRetry(
+                    observed, failedGeneration);
+                if (replacement == observed)
+                {
+                    break;
+                }
+            }
+            while (Interlocked.CompareExchange(ref pacerFinalClearGeneration,
+                replacement, observed) != observed);
+
+            Volatile.Write(ref pacerFinalClearRequested, 1);
+        }
+
+        private bool HasRecentRawAudible(long now)
+        {
+            long rawAudible = Interlocked.Read(ref lastRawAudibleTimestamp);
+            long age = now - rawAudible;
+            return rawAudible != 0 && age >= 0 && age <=
+                Stopwatch.Frequency * IdleKeepAliveMs / 1000;
+        }
+
+        private void PacerLifecycleLoop()
+        {
+            try
+            {
+                while (Volatile.Read(ref pacerLifecycleStopping) == 0)
+                {
+                    long finalClearGenerationInProgress = 0;
+                    try
+                    {
+                        if (Interlocked.Exchange(
+                            ref pacerFinalClearRequested, 0) != 0)
+                        {
+                            finalClearGenerationInProgress = Interlocked.Exchange(
+                            ref pacerFinalClearGeneration, 0);
+                            bool ended = device.EndBluetoothSpeakerGeneration(
+                                speakerSessionId,
+                                finalClearGenerationInProgress);
+                            // If no speaker report ever claimed this generation,
+                            // there is no active token to end. A session reset is
+                            // still required to commit a microphone transition at
+                            // the boundary, but only while this remains the newest
+                            // local generation; an old request must never clear a
+                            // newer generation.
+                            if (!ended && finalClearGenerationInProgress != 0 &&
+                                Interlocked.Read(ref speakerGeneration) ==
+                                    finalClearGenerationInProgress)
+                            {
+                                device.ResetBluetoothSpeakerSession(
+                                    speakerSessionId);
+                            }
+
+                            finalClearGenerationInProgress = 0;
+                        }
+
+                        bool recovery = Volatile.Read(
+                            ref pacerRecoveryRequested) != 0 ||
+                            device.BluetoothAudioPacerRecoveryRequired;
+                        if (Volatile.Read(ref pacerPrewarmRequested) == 0 &&
+                            !recovery)
+                        {
+                            pacerLifecycleRequested.WaitOne(250);
+                            continue;
+                        }
+
+                        long now = Stopwatch.GetTimestamp();
+                        bool rawAudible = HasRecentRawAudible(now);
+                        bool attempted = Volatile.Read(
+                            ref pacerPrewarmAttemptedForSegment) != 0;
+                        long retryAfter = Volatile.Read(
+                            ref pacerPrewarmRetryAfterTimestamp);
+
+                        if (device.BluetoothAudioPacerActive)
+                        {
+                            Volatile.Write(ref pacerPrewarmRequested, 0);
+                            Volatile.Write(ref pacerRecoveryRequested, 0);
+                            Volatile.Write(ref pacerLifecycleGateSource, 0);
+                            captureFramesAvailable.Set();
+                            continue;
+                        }
+
+                        if (!ShouldAttemptPacerLifecycle(recovery,
+                            device.BluetoothAudioPacerActive, attempted,
+                            retryAfter, now))
+                        {
+                            if (!recovery && attempted)
+                            {
+                                Volatile.Write(ref pacerPrewarmRequested, 0);
+                                Volatile.Write(ref pacerLifecycleGateSource, 0);
+                                captureFramesAvailable.Set();
+                                continue;
+                            }
+
+                            int waitMilliseconds = GetPacerRetryWaitMilliseconds(
+                                retryAfter, now, Stopwatch.Frequency);
+                            pacerLifecycleRequested.WaitOne(
+                                waitMilliseconds == 0 ? 10 : waitMilliseconds);
+                            continue;
+                        }
+
+                        if (rawAudible && !recovery &&
+                            Interlocked.CompareExchange(
+                                ref pacerPrewarmAttemptedForSegment, 1, 0) != 0)
+                        {
+                            Volatile.Write(ref pacerPrewarmRequested, 0);
+                            Volatile.Write(ref pacerLifecycleGateSource, 0);
+                            captureFramesAvailable.Set();
+                            continue;
+                        }
+
+                        Volatile.Write(ref pacerPrewarmRequested, 0);
+                        Volatile.Write(ref pacerRecoveryRequested, 0);
+                        Volatile.Write(ref pacerPrewarmInProgress, 1);
+                        long started = Stopwatch.GetTimestamp();
+                        Interlocked.Increment(ref pacerPrewarmAttempts);
+                        bool prepared = false;
+                        try
+                        {
+                            prepared = recovery ?
+                                device.RecoverBluetoothSpeakerClockTransport() :
+                                device.PrepareBluetoothSpeakerClockTransport();
+                            // The session boundary clears stale queued audio and
+                            // physically commits any pending microphone transition
+                            // before speaker traffic is released again.
+                            device.ResetBluetoothSpeakerSession(speakerSessionId);
+                        }
+                        catch (Exception ex)
+                        {
+                            if (Interlocked.Exchange(
+                                    ref loggedPacerPrewarmFailure, 1) == 0)
+                            {
+                                AppLogger.LogToGui(
+                                    $"DualSense Bluetooth audio lifecycle failed: {ex.GetType().Name}: {ex.Message}",
+                                    true);
+                            }
+                        }
+                        finally
+                        {
+                            if (prepared)
+                            {
+                                Interlocked.Increment(ref pacerPrewarmSuccesses);
+                                Volatile.Write(ref pacerPrewarmRetryAfterTimestamp, 0);
+                                Volatile.Write(ref pacerPrewarmRequested, 0);
+                                Volatile.Write(ref pacerRecoveryRequested, 0);
+                            }
+                            else
+                            {
+                                Interlocked.Increment(ref pacerPrewarmFailures);
+                                Volatile.Write(ref pacerPrewarmRetryAfterTimestamp,
+                                    Stopwatch.GetTimestamp() + Stopwatch.Frequency *
+                                        PacerPrewarmRetryMs / 1000);
+                                // Once ownership retirement has started, never fall
+                                // through to source consumption or a competing
+                                // direct HID writer merely because replacement
+                                // startup failed. Preserve the source gate and retry
+                                // asynchronously after cooldown.
+                                Volatile.Write(ref pacerRecoveryRequested, 1);
+                                Volatile.Write(ref pacerPrewarmRequested, 1);
+                            }
+
+                            UpdateMaximum(ref pacerPrewarmMaximumTicks,
+                                Stopwatch.GetTimestamp() - started);
+                            Volatile.Write(ref pacerPrewarmInProgress, 0);
+                            Volatile.Write(ref pacerLifecycleGateSource,
+                                prepared ? 0 : 1);
+                            captureFramesAvailable.Set();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        RestoreGenerationEndRequest(
+                            finalClearGenerationInProgress);
+                        if (Volatile.Read(ref pacerLifecycleStopping) != 0 ||
+                            stopping)
+                        {
+                            break;
+                        }
+
+                        // Keep the source gated and force a full transport retry.
+                        // Most importantly, do not allow a transient End/Reset
+                        // cleanup failure to terminate the sole lifecycle worker.
+                        Volatile.Write(ref pacerLifecycleGateSource, 1);
+                        Volatile.Write(ref pacerRecoveryRequested, 1);
+                        Volatile.Write(ref pacerPrewarmRequested, 1);
+                        Volatile.Write(ref pacerPrewarmRetryAfterTimestamp,
+                            Stopwatch.GetTimestamp() + Stopwatch.Frequency *
+                                PacerPrewarmRetryMs / 1000);
+                        if (Interlocked.Exchange(
+                                ref loggedPacerLifecycleFailure, 1) == 0)
+                        {
+                            try
+                            {
+                                AppLogger.LogToGui(
+                                    $"DualSense Bluetooth lifecycle worker recovered from {ex.GetType().Name}: {ex.Message}",
+                                    true);
+                            }
+                            catch
+                            {
+                            }
+                        }
+
+                        // Use the wakeable cooldown so a persistent cleanup
+                        // fault cannot spin, while shutdown/new work can still
+                        // interrupt the wait immediately.
+                        pacerLifecycleRequested.WaitOne(PacerPrewarmRetryMs);
+                    }
+                }
+            }
+            finally
+            {
+                try
+                {
+                    long finalGeneration = Interlocked.Read(
+                        ref speakerGeneration);
+                    if (!device.EndBluetoothSpeakerGeneration(
+                            speakerSessionId, finalGeneration))
+                    {
+                        // Session validation makes this harmless if a newer
+                        // passthrough instance has already replaced us. For the
+                        // current session it also commits pending microphone
+                        // state when no speaker report claimed the generation.
+                        device.ResetBluetoothSpeakerSession(speakerSessionId);
+                    }
+                }
+                catch
+                {
+                }
+
+                Volatile.Write(ref pacerLifecycleGateSource, 0);
+                captureFramesAvailable.Set();
+            }
+        }
+
         private void StreamLoop()
         {
             timeBeginPeriod(1);
             IntPtr mmcssHandle = RegisterMultimediaScheduler();
             IntPtr highResolutionTimer = CreateHighResolutionTimer();
-            long nextTick = DateTime.UtcNow.Ticks;
-            long cadenceTicks = (long)(BluetoothSpeakerCadenceMs * TimeSpan.TicksPerMillisecond);
+            long nextTick = Stopwatch.GetTimestamp();
+            long cadenceTicks = Math.Max(1, (long)Math.Round(
+                BluetoothSpeakerCadenceMs * Stopwatch.Frequency / 1000.0));
             try
             {
-                WaitForInitialCaptureBuffer();
-                nextTick = DateTime.UtcNow.Ticks;
+                nextTick = Stopwatch.GetTimestamp();
                 while (!stopping)
                 {
-                    Array.Clear(sourceFrame, 0, sourceFrame.Length);
+                    bool recoveryRequired =
+                        device.BluetoothAudioPacerRecoveryRequired;
+                    if (recoveryRequired)
+                    {
+                        // A replacement helper must receive the same six valid
+                        // Opus warmup reports before retained content. The
+                        // source gate below keeps both the ring and any already
+                        // encoded content intact throughout ownership recovery.
+                        Volatile.Write(ref startupWarmupFramesRemaining,
+                            StartupWarmupReportCount);
+                        RequestPacerLifecyclePreparation(recovery: true,
+                            gateSource: true);
+                    }
+
+                    bool lifecycleGateActive = Volatile.Read(
+                        ref pacerLifecycleGateSource) != 0 ||
+                        device.BluetoothAudioLifecycleTransitioning;
+                    if (lifecycleGateActive)
+                    {
+                        // Do not consume, resample, process, or encode while HID
+                        // ownership is moving. Resetting the local deadline also
+                        // prevents the recovery duration from being counted as a
+                        // real-time schedule miss when the gate opens.
+                        nextTick = Stopwatch.GetTimestamp();
+                        captureFramesAvailable.WaitOne(2);
+                        continue;
+                    }
+
+                    if (device.BluetoothAudioPacerActive &&
+                        device.PendingBluetoothSpeakerFrames > 1 &&
+                        !HasEnoughBufferedCaptureForNextFrame())
+                    {
+                        captureFramesAvailable.WaitOne(2);
+                        continue;
+                    }
+
+                    bool captureReady =
+                        HasEnoughBufferedCaptureForNextFrame();
+                    int warmupReportsRemaining = Volatile.Read(
+                        ref startupWarmupFramesRemaining);
+                    if (ShouldEmitStartupWarmup(warmupReportsRemaining,
+                        lifecycleGateActive, recoveryRequired, captureReady))
+                    {
+                        // Encode real fixed-size CBR Opus silence with the same
+                        // encoder and 0x36 combined report path as content. No
+                        // source frame is removed until all six reports have
+                        // been accepted by the transport.
+                        Array.Clear(frame, 0, frame.Length);
+                        bool submittedWarmup = EncodeCurrentFrame() &&
+                            SendEncodedFrame();
+                        if (submittedWarmup)
+                        {
+                            Interlocked.Decrement(
+                                ref startupWarmupFramesRemaining);
+                            Interlocked.Increment(
+                                ref startupWarmupReportsSent);
+                            Interlocked.Increment(ref framesSent);
+                            Interlocked.Increment(ref silentFramesSent);
+                        }
+                        else if (device.BluetoothAudioPacerRecoveryRequired ||
+                            device.BluetoothAudioLifecycleTransitioning)
+                        {
+                            RequestPacerLifecyclePreparation(recovery: true,
+                                gateSource: true);
+                        }
+
+                        ScheduleNextStreamTick(submittedWarmup, ref nextTick,
+                            cadenceTicks, highResolutionTimer);
+                        continue;
+                    }
+
+                    if (pendingEncodedFrame)
+                    {
+                        bool submittedPending = SendEncodedFrame();
+                        if (submittedPending)
+                        {
+                            pendingEncodedFrame = false;
+                            Interlocked.Increment(ref framesSent);
+                            if (!pendingEncodedFrameWasAudible)
+                            {
+                                Interlocked.Increment(ref silentFramesSent);
+                            }
+                        }
+                        else if (device.BluetoothAudioPacerRecoveryRequired ||
+                            device.BluetoothAudioLifecycleTransitioning)
+                        {
+                            Volatile.Write(ref startupWarmupFramesRemaining,
+                                StartupWarmupReportCount);
+                            RequestPacerLifecyclePreparation(recovery: true,
+                                gateSource: true);
+                        }
+
+                        ScheduleNextStreamTick(submittedPending, ref nextTick,
+                            cadenceTicks, highResolutionTimer);
+                        continue;
+                    }
+
                     Array.Clear(frame, 0, frame.Length);
-                    int sourceFrames = GetSourceFramesPerTick();
                     bool wasAudioSegmentActive = audioSegmentActive;
-                    int capturedFrames = ReadCaptureFrames(sourceFrames);
-                    bool captureUnderrun = capturedFrames < sourceFrames;
+                    bool captured = TryFillOutputFrame(out _);
+                    bool captureUnderrun = !captured;
                     if (captureUnderrun)
                     {
                         Interlocked.Increment(ref captureUnderruns);
@@ -485,11 +1790,11 @@ namespace DS4Windows
                         }
                     }
 
-                    bool audible = capturedFrames > 0 &&
-                        HasAudibleSamples(sourceFrame, capturedFrames * Channels);
+                    bool audible = captured &&
+                        HasAudibleSamples(frame, frame.Length);
                     if (audible)
                     {
-                        lastAudibleUtc = DateTime.UtcNow;
+                        lastAudibleTimestamp = Stopwatch.GetTimestamp();
                         if (!audioSegmentActive)
                         {
                             audioSegmentActive = true;
@@ -497,7 +1802,6 @@ namespace DS4Windows
                         }
                     }
 
-                    FillOutputFrame(capturedFrames);
                     if (captureUnderrun)
                     {
                         FadeOutCaptureUnderrun();
@@ -511,11 +1815,10 @@ namespace DS4Windows
 
                     speakerProcessor.Process(frame, FrameSamples);
 
-                    // Combined reports already carry the firmware speaker
-                    // volume. Applying the profile gain to PCM as well would
-                    // attenuate the stream twice.
-                    float volume = device.BluetoothCombinedOutputTransportEnabled ?
-                        1.0f : speakerVolume / 255.0f;
+                    // The combined report carries firmware speaker volume.
+                    // Applying the profile gain to PCM too would attenuate the
+                    // stream twice.
+                    const float volume = 1.0f;
                     for (int i = 0; i < frame.Length; i++)
                     {
                         frame[i] = Math.Clamp(frame[i] * volume, -1.0f, 1.0f);
@@ -525,52 +1828,75 @@ namespace DS4Windows
                     previousOutputLeft = frame[tailOffset];
                     previousOutputRight = frame[tailOffset + 1];
 
-                    bool recentlyAudible = lastAudibleUtc != DateTime.MinValue &&
-                        DateTime.UtcNow - lastAudibleUtc <= TimeSpan.FromMilliseconds(IdleKeepAliveMs);
+                    long audibleTimestamp = Interlocked.Read(
+                        ref lastAudibleTimestamp);
+                    long audibleAgeTicks = Stopwatch.GetTimestamp() -
+                        audibleTimestamp;
+                    bool recentlyAudible = audibleTimestamp != 0 &&
+                        audibleAgeTicks >= 0 && audibleAgeTicks <=
+                            Stopwatch.Frequency * IdleKeepAliveMs / 1000;
                     bool submittedFrameThisTick = false;
                     if (audioSegmentActive && recentlyAudible)
                     {
-                        SendFrame();
-                        submittedFrameThisTick = true;
-                        Interlocked.Increment(ref framesSent);
-                        if (!audible)
+                        preOpusPcmTrace?.Write(frame, frame.Length);
+                        if (EncodeCurrentFrame())
                         {
-                            // This is a real CBR Opus silence frame inside the
-                            // shared 0x36 stream, not an empty speaker TLV.
-                            Interlocked.Increment(ref silentFramesSent);
+                            submittedFrameThisTick = SendEncodedFrame();
+                            if (submittedFrameThisTick)
+                            {
+                                Interlocked.Increment(ref framesSent);
+                                if (!audible)
+                                {
+                                    // This is a real CBR Opus silence frame
+                                    // inside the shared 0x36 stream, not an
+                                    // empty speaker TLV.
+                                    Interlocked.Increment(ref silentFramesSent);
+                                }
+                            }
+                            else
+                            {
+                                // The exact encoded packet survives queue
+                                // backpressure or a helper fault. No additional
+                                // source is drained until it is accepted.
+                                pendingEncodedFrame = true;
+                                pendingEncodedFrameWasAudible = audible;
+                                if (device.BluetoothAudioPacerRecoveryRequired ||
+                                    device.BluetoothAudioLifecycleTransitioning)
+                                {
+                                    Volatile.Write(
+                                        ref startupWarmupFramesRemaining,
+                                        StartupWarmupReportCount);
+                                    RequestPacerLifecyclePreparation(
+                                        recovery: true, gateSource: true);
+                                }
+                            }
                         }
                     }
                     else if (audioSegmentActive)
                     {
-                        device.ClearBluetoothSpeakerAudioFrame();
+                        if (!stopping)
+                        {
+                            RequestGenerationEnd(Interlocked.Read(
+                                ref speakerGeneration));
+                        }
                         audioSegmentActive = false;
+                        Volatile.Write(
+                            ref pacerPrewarmAttemptedForSegment, 0);
+                        Interlocked.Exchange(
+                            ref lastRawAudibleTimestamp, 0);
                         Interlocked.Increment(ref audioSegmentStops);
                     }
 
-                    nextTick += cadenceTicks;
-                    long nowTicks = DateTime.UtcNow.Ticks;
-                    if (nextTick <= nowTicks)
-                    {
-                        long lateness = nowTicks - nextTick;
-                        Interlocked.Increment(ref skippedScheduleSlots);
-                        UpdateMaximum(ref maximumScheduleLatenessTicks, lateness);
-                        if (submittedFrameThisTick)
-                        {
-                            Interlocked.Increment(ref activeScheduleMisses);
-                            UpdateMaximum(ref maximumActiveScheduleLatenessTicks,
-                                lateness);
-                        }
-                        nextTick = nowTicks + cadenceTicks;
-                        LogStreamDiagnosticsIfVerbose();
-                        continue;
-                    }
-
-                    LogStreamDiagnosticsIfVerbose();
-                    WaitUntil(highResolutionTimer, nextTick);
+                    ScheduleNextStreamTick(submittedFrameThisTick,
+                        ref nextTick, cadenceTicks, highResolutionTimer);
                 }
             }
             finally
             {
+                // The lifecycle worker owns the tokenized Clear -> pending mic
+                // commit boundary. Never perform it on this sole real-time
+                // speaker thread.
+                RequestGenerationEnd(Interlocked.Read(ref speakerGeneration));
                 if (mmcssHandle != IntPtr.Zero)
                 {
                     AvRevertMmThreadCharacteristics(mmcssHandle);
@@ -583,6 +1909,44 @@ namespace DS4Windows
 
                 timeEndPeriod(1);
             }
+        }
+
+        private void ScheduleNextStreamTick(bool submittedFrameThisTick,
+            ref long nextTick, long cadenceTicks, IntPtr highResolutionTimer)
+        {
+            if (submittedFrameThisTick &&
+                device.BluetoothAudioPacerActive &&
+                device.PendingBluetoothSpeakerFrames <
+                    PacerReservoirTargetFrames)
+            {
+                // The producer may fill the host reservoir immediately. Only
+                // the isolated helper presents reports to hardware, at exactly
+                // one report per 10.667 ms and never in catch-up bursts.
+                nextTick = Stopwatch.GetTimestamp();
+                LogStreamDiagnosticsIfVerbose();
+                return;
+            }
+
+            nextTick += cadenceTicks;
+            long nowTicks = Stopwatch.GetTimestamp();
+            if (nextTick <= nowTicks)
+            {
+                long lateness = nowTicks - nextTick;
+                Interlocked.Increment(ref skippedScheduleSlots);
+                UpdateMaximum(ref maximumScheduleLatenessTicks, lateness);
+                if (submittedFrameThisTick)
+                {
+                    Interlocked.Increment(ref activeScheduleMisses);
+                    UpdateMaximum(ref maximumActiveScheduleLatenessTicks,
+                        lateness);
+                }
+                nextTick = nowTicks + cadenceTicks;
+                LogStreamDiagnosticsIfVerbose();
+                return;
+            }
+
+            LogStreamDiagnosticsIfVerbose();
+            WaitUntil(highResolutionTimer, nextTick);
         }
 
         private void LogStreamDiagnosticsIfVerbose()
@@ -617,19 +1981,32 @@ namespace DS4Windows
                         $"DualSense Bluetooth combined stream stats: frames={Interlocked.Read(ref framesSent)} " +
                         $"silentFrames={Interlocked.Read(ref silentFramesSent)} " +
                         $"scheduleMisses={Interlocked.Read(ref skippedScheduleSlots)} " +
-                        $"maximumScheduleLatenessMs={Interlocked.Read(ref maximumScheduleLatenessTicks) / (double)TimeSpan.TicksPerMillisecond:F1} " +
+                        $"maximumScheduleLatenessMs={StopwatchTicksToMilliseconds(Interlocked.Read(ref maximumScheduleLatenessTicks)):F1} " +
                         $"activeScheduleMisses={Interlocked.Read(ref activeScheduleMisses)} " +
-                        $"maximumActiveScheduleLatenessMs={Interlocked.Read(ref maximumActiveScheduleLatenessTicks) / (double)TimeSpan.TicksPerMillisecond:F1} " +
+                        $"maximumActiveScheduleLatenessMs={StopwatchTicksToMilliseconds(Interlocked.Read(ref maximumActiveScheduleLatenessTicks)):F1} " +
                         $"segmentStarts={Interlocked.Read(ref audioSegmentStarts)} " +
                         $"segmentStops={Interlocked.Read(ref audioSegmentStops)} " +
                         $"captureCallbacks={Interlocked.Read(ref captureCallbackCount)} " +
                         $"captureInputFrames={Interlocked.Read(ref captureInputFrames)} " +
                         $"captureBufferedFrames={GetCaptureBufferedFrames()} " +
                         $"capturePrimed={IsCapturePrimed()} " +
-                        $"captureUnderruns={Interlocked.Read(ref captureUnderruns)} " +
-                        $"activeCaptureUnderruns={Interlocked.Read(ref activeCaptureUnderruns)} " +
-                        $"driftAdjustments={Interlocked.Read(ref captureDriftAdjustments)} " +
-                        $"mmcssRegistered={Volatile.Read(ref mmcssRegistered) != 0} " +
+                         $"captureUnderruns={Interlocked.Read(ref captureUnderruns)} " +
+                         $"activeCaptureUnderruns={Interlocked.Read(ref activeCaptureUnderruns)} " +
+                         $"captureOverflowFrames={Interlocked.Read(ref captureOverflowFrames)} " +
+                         $"driftAdjustments={Interlocked.Read(ref captureDriftAdjustments)} " +
+                         $"clockRatio={GetCaptureCurrentClockRatio():F7}/" +
+                         $"{GetCaptureTargetClockRatio():F7} " +
+                         $"smoothedBufferedFrames={GetCaptureSmoothedBufferedFrames():F1} " +
+                         $"directPcmCallbacks={Interlocked.Read(ref directPcmCallbacks)} " +
+                         $"directPcmFrames={Interlocked.Read(ref directPcmInputFrames)}/" +
+                         $"{Interlocked.Read(ref directPcmOutputFrames)} " +
+                         $"directPcmCallbackGapMaxMs={StopwatchTicksToMilliseconds(Interlocked.Read(ref directPcmMaximumCallbackGapTicks)):F1} " +
+                         $"directPcmCallbackLockWaitMaxMs={StopwatchTicksToMilliseconds(Interlocked.Read(ref directPcmMaximumCallbackLockWaitTicks)):F1} " +
+                         $"pacerPrewarm={Interlocked.Read(ref pacerPrewarmAttempts)}/" +
+                         $"{Interlocked.Read(ref pacerPrewarmSuccesses)}/" +
+                         $"{Interlocked.Read(ref pacerPrewarmFailures)} " +
+                         $"pacerPrewarmMaxMs={StopwatchTicksToMilliseconds(Interlocked.Read(ref pacerPrewarmMaximumTicks)):F1} " +
+                         $"mmcssRegistered={Volatile.Read(ref mmcssRegistered) != 0} " +
                         $"mmcssHighPriority={Volatile.Read(ref mmcssHighPriority) != 0} " +
                         $"mmcssError={Volatile.Read(ref mmcssRegistrationError)} " +
                         $"gc0={GC.CollectionCount(0)} gc1={GC.CollectionCount(1)} gc2={GC.CollectionCount(2)} " +
@@ -639,8 +2016,12 @@ namespace DS4Windows
                         $"writerCompletions={device.BluetoothRealtimeWriterCompletedReports} " +
                         $"writerSlowCompletions={device.BluetoothRealtimeWriterSlowCompletionCount} " +
                         $"writerMaximumCompletionMs={device.BluetoothRealtimeWriterMaximumCompletionMilliseconds:F1} " +
-                        $"writerLateSubmissions={device.BluetoothRealtimeWriterLateSubmissionCount} " +
-                        $"writerMaximumSubmissionGapMs={device.BluetoothRealtimeWriterMaximumSubmissionGapMilliseconds:F1} " +
+                         $"writerLateSubmissions={device.BluetoothRealtimeWriterLateSubmissionCount} " +
+                         $"writerMaximumSubmissionGapMs={device.BluetoothRealtimeWriterMaximumSubmissionGapMilliseconds:F1} " +
+                         $"isolatedPacer={device.BluetoothAudioPacerActive} " +
+                         $"pacerPresented={device.BluetoothAudioPacerPresentedReports} " +
+                         $"pacerRejected={device.BluetoothAudioPacerRejectedReports} " +
+                         $"pacerError='{device.BluetoothAudioPacerLastError}' " +
                         $"speakerWrites={device.BluetoothCombinedSpeakerReportsWritten} " +
                         $"speakerWriteFailures={device.BluetoothCombinedSpeakerWriteFailures} " +
                         $"hapticsPairedWrites={device.BluetoothCombinedHapticsPairedWrites} " +
@@ -672,6 +2053,30 @@ namespace DS4Windows
             }
         }
 
+        private double GetCaptureCurrentClockRatio()
+        {
+            lock (syncRoot)
+            {
+                return captureCurrentClockRatio;
+            }
+        }
+
+        private double GetCaptureTargetClockRatio()
+        {
+            lock (syncRoot)
+            {
+                return captureTargetClockRatio;
+            }
+        }
+
+        private double GetCaptureSmoothedBufferedFrames()
+        {
+            lock (syncRoot)
+            {
+                return captureSmoothedBufferedFrames;
+            }
+        }
+
         private static void UpdateMaximum(ref long target, long value)
         {
             long current;
@@ -684,30 +2089,6 @@ namespace DS4Windows
                 }
             }
             while (Interlocked.CompareExchange(ref target, value, current) != current);
-        }
-
-        private void FillOutputFrame(int sourceFrames)
-        {
-            if (sourceFrames <= 0)
-            {
-                return;
-            }
-
-            double step = sourceFrames / (double)FrameSamples;
-            for (int outputFrame = 0; outputFrame < FrameSamples; outputFrame++)
-            {
-                double position = outputFrame * step;
-                int sourceIndex0 = Math.Min((int)position, sourceFrames - 1);
-                int sourceIndex1 = Math.Min(sourceIndex0 + 1, sourceFrames - 1);
-                double blend = position - sourceIndex0;
-                int outputOffset = outputFrame * Channels;
-                int sourceOffset0 = sourceIndex0 * Channels;
-                int sourceOffset1 = sourceIndex1 * Channels;
-                frame[outputOffset] = (float)(sourceFrame[sourceOffset0] * (1.0 - blend) +
-                    sourceFrame[sourceOffset1] * blend);
-                frame[outputOffset + 1] = (float)(sourceFrame[sourceOffset0 + 1] * (1.0 - blend) +
-                    sourceFrame[sourceOffset1 + 1] * blend);
-            }
         }
 
         private void FadeOutCaptureUnderrun()
@@ -735,9 +2116,16 @@ namespace DS4Windows
             }
         }
 
-        private static void WaitUntil(IntPtr highResolutionTimer, long targetUtcTicks)
+        private static double StopwatchTicksToMilliseconds(long ticks)
         {
-            double waitMs = (targetUtcTicks - DateTime.UtcNow.Ticks) / (double)TimeSpan.TicksPerMillisecond;
+            return ticks * 1000.0 / Stopwatch.Frequency;
+        }
+
+        private static void WaitUntil(IntPtr highResolutionTimer,
+            long targetStopwatchTicks)
+        {
+            double waitMs = (targetStopwatchTicks - Stopwatch.GetTimestamp()) *
+                1000.0 / Stopwatch.Frequency;
             if (waitMs <= 0)
             {
                 return;
@@ -876,12 +2264,18 @@ namespace DS4Windows
             return false;
         }
 
-        private void SendFrame()
+        private bool EncodeCurrentFrame()
         {
+            if (stopping)
+            {
+                return false;
+            }
+
             int encoded;
             try
             {
-                encoded = opusEncoder.Encode(frame.AsSpan(), FrameSamples, opusFrame.AsSpan(), OpusBytes);
+                encoded = opusEncoder.Encode(frame.AsSpan(), FrameSamples,
+                    opusFrame.AsSpan(), OpusBytes);
             }
             catch (Exception ex)
             {
@@ -890,7 +2284,7 @@ namespace DS4Windows
                     AppLogger.LogToGui($"DualSense Bluetooth speaker encoder failed: {ex.Message}", true);
                 }
 
-                return;
+                return false;
             }
 
             // vDS uses a fixed 200-byte CBR frame in the 0x36 speaker block.
@@ -903,88 +2297,59 @@ namespace DS4Windows
                     AppLogger.LogToGui($"DualSense Bluetooth speaker encoder produced {encoded} bytes; expected {OpusBytes} for the combined transport.", true);
                 }
 
-                return;
+                return false;
             }
 
-            if (device.BluetoothCombinedOutputTransportEnabled)
-            {
-                device.SetBluetoothSpeakerAudioFrame(opusFrame, encoded);
-                return;
-            }
-
-            Array.Clear(report, 0, report.Length);
-            report[0] = 0x35;
-            report[1] = (byte)((reportSequence & 0x0F) << 4);
-            reportSequence = (reportSequence + 1) & 0x0F;
-
-            // Packet 0x11 starts the audio stream. Packet 0x13 is the
-            // internal speaker lane; packet 0x16 would target the headset.
-            report[2] = 0x91;
-            report[3] = 0x07;
-            report[4] = 0xFE;
-            report[9] = 0xFF;
-            report[10] = packetCounter++;
-            report[11] = 0x93;
-            report[12] = OpusBytes;
-            Array.Copy(opusFrame, 0, report, 13, Math.Min(encoded, OpusBytes));
-
-            uint crc = CalculateBluetoothCrc(report, ReportLength - 4);
-            report[ReportLength - 4] = (byte)crc;
-            report[ReportLength - 3] = (byte)(crc >> 8);
-            report[ReportLength - 2] = (byte)(crc >> 16);
-            report[ReportLength - 1] = (byte)(crc >> 24);
-
-            if (!device.WriteBluetoothSpeakerAudioOutputReport(report, 0, report.Length) &&
-                Interlocked.Exchange(ref loggedWriteFailure, 1) == 0)
-            {
-                AppLogger.LogToGui($"DualSense Bluetooth speaker write failed: {device.LastBluetoothHapticsWriteStatus}", true);
-            }
+            return true;
         }
 
-        private static uint CalculateBluetoothCrc(byte[] data, int length)
+        private bool SendEncodedFrame()
         {
-            // Sony Bluetooth output reports use CRC32 with the 0xA2 report
-            // prefix pre-applied. This is the SAxense seed expressed directly.
-            uint crc = ~0xEADA2D49u;
-            for (int i = 0; i < length; i++)
+            try
             {
-                crc ^= data[i];
-                for (int bit = 0; bit < 8; bit++)
-                {
-                    crc = (crc >> 1) ^ ((crc & 1) != 0 ? 0xEDB88320u : 0u);
-                }
+                return !stopping &&
+                    device.SetBluetoothSpeakerAudioFrame(opusFrame, OpusBytes,
+                        speakerSessionId,
+                        Interlocked.Read(ref speakerGeneration));
             }
+            catch (Exception ex)
+            {
+                if (Interlocked.Exchange(ref loggedWriteFailure, 1) == 0)
+                {
+                    AppLogger.LogToGui(
+                        $"DualSense Bluetooth speaker transport failed: {ex.GetType().Name}: {ex.Message}",
+                        true);
+                }
 
-            return ~crc;
+                return false;
+            }
         }
 
         public void Dispose()
         {
+            if (Interlocked.Exchange(ref disposeStarted, 1) != 0)
+            {
+                return;
+            }
+
             stopping = true;
-            captureDataAvailable.Set();
-            captureFramesAvailable.Set();
-            if (worker != null && worker.IsAlive && Thread.CurrentThread.ManagedThreadId != worker.ManagedThreadId)
+            if (directSpeakerSource != null)
             {
-                worker.Join(500);
+                directSpeakerSource.VirtualSpeakerPcmReceived -=
+                    DirectSpeakerSource_VirtualSpeakerPcmReceived;
+                // Unsubscription does not cancel a delegate already in
+                // flight. This is the drain barrier for the reused VIIPER PCM
+                // buffer and the stateful converter.
+                lock (directPcmSync)
+                {
+                }
             }
 
-            worker = null;
-            if (capturePump != null && capturePump.IsAlive &&
-                Thread.CurrentThread.ManagedThreadId != capturePump.ManagedThreadId)
-            {
-                capturePump.Join(500);
-            }
-
-            capturePump = null;
             WasapiCapture oldCapture;
             lock (syncRoot)
             {
                 oldCapture = capture;
-                capture = null;
-                captureBuffer = null;
-                capturePrimed = false;
             }
-
             if (oldCapture != null)
             {
                 oldCapture.DataAvailable -= Capture_DataAvailable;
@@ -993,12 +2358,135 @@ namespace DS4Windows
                 {
                     oldCapture.StopRecording();
                 }
-                catch { }
-
-                oldCapture.Dispose();
+                catch
+                {
+                }
             }
 
-            device.ClearBluetoothSpeakerAudioFrame();
+            // The RT worker's finally and the lifecycle worker's finally both
+            // preserve this boundary. Signalling before requesting lifecycle
+            // shutdown also gives the worker an opportunity to perform the
+            // tokenized End -> pending microphone commit normally.
+            RequestGenerationEnd(Interlocked.Read(ref speakerGeneration));
+            Volatile.Write(ref pacerLifecycleStopping, 1);
+            captureDataAvailable.Set();
+            captureFramesAvailable.Set();
+            pacerLifecycleRequested.Set();
+
+            Thread oldWorker = worker;
+            Thread oldCapturePump = capturePump;
+            Thread oldLifecycleWorker = pacerLifecycleWorker;
+            bool workerStopped = JoinThreadWithin(oldWorker, 2000);
+            bool capturePumpStopped = JoinThreadWithin(oldCapturePump, 2000);
+            bool lifecycleWorkerStopped = JoinThreadWithin(
+                oldLifecycleWorker, 2000);
+
+            if (ShouldDeferDisposeCleanup(!workerStopped,
+                !capturePumpStopped, !lifecycleWorkerStopped))
+            {
+                ScheduleDeferredDisposeCleanup(oldWorker, oldCapturePump,
+                    oldLifecycleWorker);
+                return;
+            }
+
+            FinalizeDisposeResources();
+        }
+
+        private static bool JoinThreadWithin(Thread thread,
+            int millisecondsTimeout)
+        {
+            if (thread == null || !thread.IsAlive)
+            {
+                return true;
+            }
+            if (Thread.CurrentThread.ManagedThreadId == thread.ManagedThreadId)
+            {
+                return false;
+            }
+
+            try
+            {
+                return thread.Join(millisecondsTimeout) || !thread.IsAlive;
+            }
+            catch (ThreadStateException)
+            {
+                return !thread.IsAlive;
+            }
+        }
+
+        private void ScheduleDeferredDisposeCleanup(Thread oldWorker,
+            Thread oldCapturePump, Thread oldLifecycleWorker)
+        {
+            if (Interlocked.CompareExchange(
+                    ref deferredDisposeCleanupScheduled, 1, 0) != 0)
+            {
+                return;
+            }
+
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                JoinThreadToExit(oldWorker);
+                JoinThreadToExit(oldCapturePump);
+                JoinThreadToExit(oldLifecycleWorker);
+                FinalizeDisposeResources();
+            });
+        }
+
+        private static void JoinThreadToExit(Thread thread)
+        {
+            if (thread == null || !thread.IsAlive ||
+                Thread.CurrentThread.ManagedThreadId == thread.ManagedThreadId)
+            {
+                return;
+            }
+
+            try
+            {
+                thread.Join();
+            }
+            catch (ThreadStateException)
+            {
+            }
+        }
+
+        private void FinalizeDisposeResources()
+        {
+            if (Interlocked.CompareExchange(
+                    ref disposeCleanupCompleted, 1, 0) != 0)
+            {
+                return;
+            }
+
+            long finalGeneration = Interlocked.Read(ref speakerGeneration);
+            if (!device.EndBluetoothSpeakerGeneration(speakerSessionId,
+                    finalGeneration))
+            {
+                device.ResetBluetoothSpeakerSession(speakerSessionId);
+            }
+
+            WasapiCapture oldCapture;
+            lock (syncRoot)
+            {
+                oldCapture = capture;
+                capture = null;
+                captureBuffer = null;
+                capturePrimed = false;
+                captureClockInitialized = false;
+                directPcmRateConverter?.Reset();
+                ResetSpeakerResamplingLocked();
+            }
+
+            oldCapture?.Dispose();
+            worker = null;
+            capturePump = null;
+            pacerLifecycleWorker = null;
+            captureDataAvailable.Dispose();
+            captureFramesAvailable.Dispose();
+            pacerLifecycleRequested.Dispose();
+            rawDirectPcmTrace?.Dispose();
+            preOpusPcmTrace?.Dispose();
+            rawDirectPcmTrace = null;
+            preOpusPcmTrace = null;
         }
     }
 }

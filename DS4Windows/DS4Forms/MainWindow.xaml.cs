@@ -543,6 +543,11 @@ Suspend support not enabled.", true);
             }
 
             CheckAutoProfileStatus();
+
+            if (!HasManagedInputController())
+            {
+                StartBoundedHotplugRecovery();
+            }
         }
 
         private void AutoprofileChecker_RequestServiceChange(AutoProfileChecker sender, bool state)
@@ -805,6 +810,8 @@ Suspend support not enabled.", true);
 
         private void PrepareForServiceStop(object sender, EventArgs e)
         {
+            CancelBoundedHotplugRecovery();
+
             Dispatcher.BeginInvoke((Action)(() =>
             {
                 trayIconVM.ClearContextMenu();
@@ -894,6 +901,15 @@ Suspend support not enabled.", true);
         private void ControllerCol_CollectionChanged(object sender,
             System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
         {
+            if (e.NewItems != null && e.NewItems.Count > 0)
+            {
+                CancelBoundedHotplugRecovery();
+            }
+            else if (App.rootHub.running && !HasManagedInputController())
+            {
+                StartBoundedHotplugRecovery();
+            }
+
             Dispatcher.BeginInvoke((Action)(() =>
             {
                 ChangeControllerPanel();
@@ -951,6 +967,11 @@ Suspend support not enabled.", true);
         {
             //Tester service = sender as Tester;
             ControlService service = sender as ControlService;
+            if (!service.running)
+            {
+                CancelBoundedHotplugRecovery();
+            }
+
             Dispatcher.BeginInvoke((Action)(() =>
             {
                 if (service.running)
@@ -1359,6 +1380,7 @@ Suspend support not enabled.", true);
 
         private void MainDS4Window_Closed(object sender, EventArgs e)
         {
+            CancelBoundedHotplugRecovery();
             overviewProfileSaveTimer.Stop();
             overviewStatusRefreshTimer.Stop();
             hotkeysTimer.Stop();
@@ -1392,10 +1414,9 @@ Suspend support not enabled.", true);
 
         private bool inHotPlug = false;
         private int hotplugCounter = 0;
-        private object hotplugCounterLock = new object();
-        private const int DBT_DEVNODES_CHANGED = 0x0007;
-        private const int DBT_DEVICEARRIVAL = 0x8000;
-        private const int DBT_DEVICEREMOVECOMPLETE = 0x8004;
+        private readonly object hotplugCounterLock = new object();
+        private readonly object hotplugRecoveryLock = new object();
+        private CancellationTokenSource hotplugRecoveryCancellation;
         public const int WM_COPYDATA = 0x004A;
         private const int HOTPLUG_CHECK_DELAY = 2000;
 
@@ -1410,20 +1431,14 @@ Suspend support not enabled.", true);
                     if (Global.runHotPlug)
                     {
                         Int32 Type = wParam.ToInt32();
-                        if (Type == DBT_DEVICEARRIVAL ||
-                            Type == DBT_DEVICEREMOVECOMPLETE)
+                        bool hasManagedController = HasManagedInputController();
+                        if (HotplugRecoveryPolicy.ShouldQueueForDeviceChange(Type,
+                            hasManagedController))
                         {
-                            lock (hotplugCounterLock)
+                            QueueHotplugScan(queueBehindActiveScan: true);
+                            if (!hasManagedController)
                             {
-                                hotplugCounter++;
-                            }
-
-                            if (!inHotPlug)
-                            {
-                                inHotPlug = true;
-                                Task hotplugTask = Task.Run(() => { InnerHotplug2(); });
-                                // Log exceptions that might occur
-                                Util.LogAssistBackgroundTask(hotplugTask);
+                                StartBoundedHotplugRecovery();
                             }
                         }
                     }
@@ -1666,30 +1681,196 @@ Suspend support not enabled.", true);
 
         private void InnerHotplug2()
         {
-            inHotPlug = true;
+            bool finishedNormally = false;
+            try
+            {
+                Program.rootHub.UpdateHidHiddenAttributes();
+                while (true)
+                {
+                    lock (hotplugCounterLock)
+                    {
+                        if (hotplugCounter == 0)
+                        {
+                            inHotPlug = false;
+                            finishedNormally = true;
+                            return;
+                        }
 
-            bool loopHotplug = false;
+                        // Multiple Windows notifications collapse into one scan.
+                        hotplugCounter = 0;
+                    }
 
+                    Thread.Sleep(HOTPLUG_CHECK_DELAY);
+                    if (!Global.runHotPlug || !Program.rootHub.running)
+                    {
+                        lock (hotplugCounterLock)
+                        {
+                            hotplugCounter = 0;
+                            inHotPlug = false;
+                        }
+
+                        finishedNormally = true;
+                        return;
+                    }
+
+                    Program.rootHub.HotPlug();
+                }
+            }
+            finally
+            {
+                // Never strand future device notifications if enumeration throws.
+                if (!finishedNormally)
+                {
+                    lock (hotplugCounterLock)
+                    {
+                        hotplugCounter = 0;
+                        inHotPlug = false;
+                    }
+                }
+            }
+        }
+
+        private bool QueueHotplugScan(bool queueBehindActiveScan)
+        {
+            bool startWorker = false;
             lock (hotplugCounterLock)
             {
-                loopHotplug = hotplugCounter > 0;
-                hotplugCounter = 0;
-            }
-
-            Program.rootHub.UpdateHidHiddenAttributes();
-            while (loopHotplug == true)
-            {
-                Thread.Sleep(HOTPLUG_CHECK_DELAY);
-                Program.rootHub.HotPlug();
-
-                lock (hotplugCounterLock)
+                if (!Global.runHotPlug)
                 {
-                    loopHotplug = hotplugCounter > 0;
-                    hotplugCounter = 0;
+                    return false;
+                }
+
+                if (!queueBehindActiveScan && (inHotPlug || hotplugCounter > 0))
+                {
+                    return false;
+                }
+
+                hotplugCounter++;
+                if (!inHotPlug)
+                {
+                    inHotPlug = true;
+                    startWorker = true;
                 }
             }
 
-            inHotPlug = false;
+            if (startWorker)
+            {
+                Task hotplugTask = Task.Run(InnerHotplug2);
+                // Log exceptions that might occur.
+                Util.LogAssistBackgroundTask(hotplugTask);
+            }
+
+            return true;
+        }
+
+        private static bool HasManagedInputController()
+        {
+            ControlService service = Program.rootHub;
+            if (service?.DS4Controllers == null)
+            {
+                return false;
+            }
+
+            DS4Device[] controllers = service.DS4Controllers;
+            for (int i = 0; i < controllers.Length; i++)
+            {
+                DS4Device controller = Volatile.Read(ref controllers[i]);
+                if (controller != null && !controller.IsRemoving)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void StartBoundedHotplugRecovery()
+        {
+            if (!Program.rootHub.running || !Global.runHotPlug ||
+                HasManagedInputController())
+            {
+                return;
+            }
+
+            CancellationTokenSource recoveryCancellation;
+            lock (hotplugRecoveryLock)
+            {
+                // Repeated Windows notifications must not extend the bounded window.
+                if (hotplugRecoveryCancellation != null)
+                {
+                    return;
+                }
+
+                recoveryCancellation = new CancellationTokenSource();
+                hotplugRecoveryCancellation = recoveryCancellation;
+            }
+
+            Task recoveryTask = RunBoundedHotplugRecovery(recoveryCancellation);
+            Util.LogAssistBackgroundTask(recoveryTask);
+        }
+
+        private async Task RunBoundedHotplugRecovery(
+            CancellationTokenSource recoveryCancellation)
+        {
+            CancellationToken cancellationToken = recoveryCancellation.Token;
+            try
+            {
+                for (int completedAttempts = 0;
+                    HotplugRecoveryPolicy.ShouldContinueRecovery(
+                        Program.rootHub.running && Global.runHotPlug,
+                        HasManagedInputController(), completedAttempts);
+                    completedAttempts++)
+                {
+                    await Task.Delay(
+                        HotplugRecoveryPolicy.RecoveryIntervalMilliseconds,
+                        cancellationToken).ConfigureAwait(false);
+
+                    if (!HotplugRecoveryPolicy.ShouldContinueRecovery(
+                        Program.rootHub.running && Global.runHotPlug,
+                        HasManagedInputController(), completedAttempts))
+                    {
+                        break;
+                    }
+
+                    // A fallback tick never queues work behind an active native scan.
+                    QueueHotplugScan(queueBehindActiveScan: false);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+            }
+            finally
+            {
+                lock (hotplugRecoveryLock)
+                {
+                    if (ReferenceEquals(hotplugRecoveryCancellation,
+                        recoveryCancellation))
+                    {
+                        hotplugRecoveryCancellation = null;
+                    }
+                }
+
+                recoveryCancellation.Dispose();
+            }
+        }
+
+        private void CancelBoundedHotplugRecovery()
+        {
+            CancellationTokenSource recoveryCancellation;
+            lock (hotplugRecoveryLock)
+            {
+                recoveryCancellation = hotplugRecoveryCancellation;
+                hotplugRecoveryCancellation = null;
+            }
+
+            try
+            {
+                recoveryCancellation?.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // The bounded task completed between the field swap and cancellation.
+            }
         }
 
         private void HookWindowMessages(HwndSource source)
@@ -2047,6 +2228,7 @@ Suspend support not enabled.", true);
             editor = null;
             mainWinVM.ProfileEditorMode = false;
             mainWinVM.EditingProfileName = "Profile";
+            mainWinVM.SetEditingControllerContext(null);
             mainWinVM.FullTabsEnabled = true;
             mainTabCon.SelectedIndex = profileEditorReturnTabIndex;
             //Task.Run(() => GC.Collect(0, GCCollectionMode.Forced, false));
@@ -2063,6 +2245,15 @@ Suspend support not enabled.", true);
             {
                 return;
             }
+
+            int controllerContextDevice =
+                device >= 0 && device < ControlService.CURRENT_DS4_CONTROLLER_LIMIT
+                    ? device
+                    : mainWinVM.SelectedController?.DevIndex ?? -1;
+            CompositeDeviceModel editingController = controllerContextDevice >= 0
+                ? conLvViewModel.ControllerCol.FirstOrDefault(controller =>
+                    controller.DevIndex == controllerContextDevice)
+                : null;
 
             profileEditorLoading = true;
             profileEditorReturnTabIndex = mainTabCon.SelectedIndex;
@@ -2086,6 +2277,7 @@ Suspend support not enabled.", true);
             }
 
             mainWinVM.EditingProfileName = entity?.Name ?? "New profile";
+            mainWinVM.SetEditingControllerContext(editingController);
             mainWinVM.ProfileEditorMode = true;
             mainTabCon.SelectedItem = profilesTab;
             profileEditorNavigationChanging = true;
@@ -2111,7 +2303,7 @@ Suspend support not enabled.", true);
                     profileAlreadyLoaded = true;
                 }
 
-                editor = new ProfileEditor(device);
+                editor = new ProfileEditor(device, controllerContextDevice);
                 editor.CreatedProfile += Editor_CreatedProfile;
                 editor.Closed += ProfileEditor_Closed;
                 editor.ProfileNameChanged += Editor_ProfileNameChanged;
@@ -2131,6 +2323,7 @@ Suspend support not enabled.", true);
                 profilesListBox.Visibility = Visibility.Visible;
                 mainWinVM.ProfileEditorMode = false;
                 mainWinVM.EditingProfileName = "Profile";
+                mainWinVM.SetEditingControllerContext(null);
                 mainWinVM.FullTabsEnabled = true;
                 mainTabCon.SelectedIndex = profileEditorReturnTabIndex;
 

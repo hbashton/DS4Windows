@@ -187,14 +187,16 @@ namespace DS4Windows
                 ControlService.StartupDiag($"OutputSlotManager.DeferredPlugin emptySlot={slot + 1} inIdx={inIdx} contType={contType}");
                 if (slot != -1)
                 {
-                    // Only relevant when Virtual Controller (Moonlight) support is on and
-                    // we are about to create a virtual DS4. Record the device so it is not
-                    // later re-ingested as input (which would cascade into more devices).
-                    HashSet<string> beforeVirtualDS4 = null;
-                    if (contType == OutContType.ViiperDS4 && Global.UseMoonlight)
+                    // Record every VIIPER Sony output so its complete USB/IP
+                    // HID cannot be re-ingested as a physical input.
+                    HashSet<string> beforeVirtualSony = null;
+                    if (contType == OutContType.ViiperDS4 ||
+                        contType == OutContType.ViiperDualSense ||
+                        contType == OutContType.ViiperDualSenseEdge)
                     {
-                        beforeVirtualDS4 = DS4Devices.SnapshotBeforeOwnVirtualDS4();
-                        DS4Devices.BeginOwnVirtualDS4Connect();
+                        beforeVirtualSony = DS4Devices.
+                            SnapshotBeforeOwnVirtualSony();
+                        DS4Devices.BeginOwnVirtualSonyConnect();
                     }
 
                     try
@@ -217,9 +219,9 @@ namespace DS4Windows
                             ViGEmFailure?.Invoke(this, e.ErrorCode);
                         }
 
-                        if (beforeVirtualDS4 != null)
+                        if (beforeVirtualSony != null)
                         {
-                            DS4Devices.EndOwnVirtualDS4Connect();
+                            DS4Devices.EndOwnVirtualSonyConnect();
                         }
 
                         return;
@@ -227,20 +229,21 @@ namespace DS4Windows
                     catch (Exception e)
                     {
                         AppLogger.LogToGui($"Failed to plug in virtual {contType} controller: {e.Message}", true);
-                        if (beforeVirtualDS4 != null)
+                        if (beforeVirtualSony != null)
                         {
-                            DS4Devices.EndOwnVirtualDS4Connect();
+                            DS4Devices.EndOwnVirtualSonyConnect();
                         }
 
                         return;
                     }
 
-                    if (beforeVirtualDS4 != null)
+                    if (beforeVirtualSony != null)
                     {
-                        DS4Devices.RegisterOwnVirtualDS4Async(beforeVirtualDS4);
+                        DS4Devices.RegisterOwnVirtualSonyAsync(
+                            beforeVirtualSony);
                         // The asynchronous registration worker now owns the
-                        // matching EndOwnVirtualDS4Connect call.
-                        beforeVirtualDS4 = null;
+                        // matching EndOwnVirtualSonyConnect call.
+                        beforeVirtualSony = null;
                     }
 
                     if (contType == OutContType.X360)

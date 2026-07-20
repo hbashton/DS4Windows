@@ -209,13 +209,25 @@ namespace DS4WinWPF.DS4Forms.ViewModels
     public class CompositeDeviceModel
     {
         private DS4Device device;
+        private ControllerUiCapabilities uiCapabilities;
         private string selectedProfile;
         private ProfileList profileListHolder;
         private ProfileEntity selectedEntity;
         private int selectedIndex = -1;
         private int devIndex;
 
-        public DS4Device Device { get => device; set => device = value; }
+        private ControllerUiCapabilities UiCapabilities =>
+            uiCapabilities ??= ControllerUiCapabilities.ForDevice(device);
+
+        public DS4Device Device
+        {
+            get => device;
+            set
+            {
+                device = value;
+                uiCapabilities = ControllerUiCapabilities.ForDevice(device);
+            }
+        }
         public string SelectedProfile
         {
             get => selectedProfile;
@@ -242,13 +254,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public bool IsWireless => device.ConnectionType != ConnectionType.USB;
 
-        public bool SupportsDualSenseAudio =>
-            device.DeviceType == InputDeviceType.DualSense ||
-            device.DeviceType == InputDeviceType.DS4 &&
-            device.ConnectionType == ConnectionType.BT &&
-            device.HidDevice?.Attributes?.VendorId == DS4Devices.SONY_VID &&
-            (device.HidDevice.Attributes.ProductId == 0x05C4 ||
-                device.HidDevice.Attributes.ProductId == 0x09CC);
+        public bool SupportsControllerAudio =>
+            UiCapabilities.SupportsControllerAudio;
         public ProfileList ProfileEntities { get => profileListHolder; set => profileListHolder = value; }
         public ObservableCollection<ProfileEntity> ProfileListCol => profileListHolder.ProfileListCol;
 
@@ -291,22 +298,38 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         }
         public event EventHandler BatteryStateChanged;
 
-        public bool HasControllerArtwork
-        {
-            get => device.DeviceType == InputDeviceType.DualSense ||
-                   device.DeviceType == InputDeviceType.DS4;
-        }
+        public bool HasControllerArtwork => UiCapabilities.HasControllerArtwork;
+
+        public bool IsDualShock4 => UiCapabilities.IsDualShock4;
+
+        public bool IsDualSense => UiCapabilities.IsDualSense;
+
+        public bool SupportsAdaptiveTriggers =>
+            UiCapabilities.SupportsAdaptiveTriggers;
+
+        public bool SupportsAdvancedHaptics =>
+            UiCapabilities.SupportsAdvancedHaptics;
+
+        public bool SupportsMuteButton => UiCapabilities.SupportsMuteButton;
+
+        public string FeedbackControlLabel => UiCapabilities.FeedbackLabel;
+
+        public string ControllerAudioHeader => UiCapabilities.AudioHeader;
+
+        public string ControllerAudioDescription =>
+            UiCapabilities.AudioDescription;
+
+        public string MicrophoneToggleLabel =>
+            UiCapabilities.MicrophoneToggleLabel;
+
+        public string MicrophoneDescription =>
+            UiCapabilities.MicrophoneDescription;
 
         public string ControllerImageSource
         {
             get
             {
-                string imageName = device.DeviceType switch
-                {
-                    InputDeviceType.DualSense => "DualSense Controller.png",
-                    InputDeviceType.DS4 => "DualShock 4 Controller.png",
-                    _ => null,
-                };
+                string imageName = UiCapabilities.ImageResourceName;
 
                 return imageName == null ? null : $"{Global.RESOURCES_PREFIX}/{imageName}";
             }
@@ -436,6 +459,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             ProfileList collection)
         {
             this.device = device;
+            uiCapabilities = ControllerUiCapabilities.ForDevice(device);
             device.BatteryChanged += (sender, e) => BatteryStateChanged?.Invoke(this, e);
             device.ChargingChanged += (sender, e) => BatteryStateChanged?.Invoke(this, e);
             device.MacAddressChanged += (sender, e) => IdTextChanged?.Invoke(this, e);

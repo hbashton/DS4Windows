@@ -530,13 +530,31 @@
                                     <Border Grid.Row="1" Background="{DynamicResource CardBackgroundColor}"
                                             BorderBrush="{DynamicResource AccentColor}" BorderThickness="1"
                                             CornerRadius="4" Padding="11" Margin="0,0,0,14">
-                                        <StackPanel>
-                                            <TextBlock Text="EDITING PROFILE" FontSize="9" FontWeight="Bold"
-                                                       Foreground="{DynamicResource AccentColor}" />
-                                            <TextBlock Text="{Binding EditingProfileName}" Margin="0,4,0,0"
-                                                       FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
-                                                       Foreground="{DynamicResource ForegroundColor}" />
-                                        </StackPanel>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="48" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Image Source="{Binding EditingControllerImageSource}"
+                                                   Width="42" Height="34" Margin="0,0,6,0"
+                                                   Stretch="Uniform" VerticalAlignment="Center"
+                                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                                            <StackPanel Grid.Column="1">
+                                                <TextBlock Text="EDITING PROFILE" FontSize="9" FontWeight="Bold"
+                                                           Foreground="{DynamicResource AccentColor}" />
+                                                <TextBlock Text="{Binding EditingProfileName}" Margin="0,3,0,0"
+                                                           FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                                                           ToolTip="{Binding EditingProfileName}"
+                                                           Foreground="{DynamicResource ForegroundColor}" />
+                                                <TextBlock Text="{Binding EditingControllerName}"
+                                                           Margin="0,2,0,0" FontSize="9" TextTrimming="CharacterEllipsis"
+                                                           ToolTip="{Binding EditingControllerName}"
+                                                           Foreground="{DynamicResource MutedForegroundColor}" />
+                                                <TextBlock Text="{Binding EditingControllerConnection}"
+                                                           Margin="0,1,0,0" FontSize="9" TextTrimming="CharacterEllipsis"
+                                                           Foreground="{DynamicResource MutedForegroundColor}" />
+                                            </StackPanel>
+                                        </Grid>
                                     </Border>
 
                                     <TextBlock Grid.Row="2" Text="PROFILE WORKSPACE" Margin="10,0,0,7"

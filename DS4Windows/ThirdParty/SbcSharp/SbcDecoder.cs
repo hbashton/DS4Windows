@@ -13,6 +13,33 @@ namespace SBC;
 public class SbcDecoder
 {
     private readonly DecoderState[] _channelStates;
+    private readonly short[][] _sbSamples =
+    {
+        new short[SbcFrame.MaxSamples],
+        new short[SbcFrame.MaxSamples],
+    };
+    private readonly int[] _sbScale = new int[2];
+    private readonly int[][] _scaleFactors =
+    {
+        new int[SbcFrame.MaxSubbands],
+        new int[SbcFrame.MaxSubbands],
+    };
+    private readonly int[][] _nbits =
+    {
+        new int[SbcFrame.MaxSubbands],
+        new int[SbcFrame.MaxSubbands],
+    };
+    private readonly int[][] _bitNeeds =
+    {
+        new int[SbcFrame.MaxSubbands],
+        new int[SbcFrame.MaxSubbands],
+    };
+    private readonly int[][] _singleScaleFactors = new int[1][];
+    private readonly int[][] _singleNbits = new int[1][];
+    private readonly SbcBitStream _headerBits = new SbcBitStream(
+        Array.Empty<byte>(), 0, isReader: true);
+    private readonly SbcBitStream _dataBits = new SbcBitStream(
+        Array.Empty<byte>(), 0, isReader: true);
     private int _numChannels;
     private int _numBlocks;
     private int _numSubbands;
@@ -22,6 +49,8 @@ public class SbcDecoder
         _channelStates = new DecoderState[2];
         _channelStates[0] = new DecoderState();
         _channelStates[1] = new DecoderState();
+        _singleScaleFactors[0] = _scaleFactors[1];
+        _singleNbits[0] = _nbits[1];
         Reset();
     }
 
@@ -68,33 +97,102 @@ public class SbcDecoder
         pcmRight = null;
         frame = new SbcFrame();
 
+        if (!TryPrepareDecode(sbcData, frame, out int frameSize,
+            out int samplesPerChannel))
+            return false;
+
+        if (!DecodePreparedFrameData(sbcData, frame, frameSize))
+            return false;
+
+        pcmLeft = new short[samplesPerChannel];
+        if (frame.Mode != SbcMode.Mono)
+            pcmRight = new short[samplesPerChannel];
+
+        SynthesizePrepared(pcmLeft, pcmRight);
+        return true;
+    }
+
+    /// <summary>
+    /// Decodes an SBC frame into caller-owned PCM buffers. All temporary
+    /// subband, bit-allocation, and bitstream storage is owned by this decoder,
+    /// so repeated calls do not allocate after construction.
+    /// </summary>
+    /// <param name="sbcData">SBC encoded frame data.</param>
+    /// <param name="pcmLeft">Caller-owned left/mono PCM buffer.</param>
+    /// <param name="pcmRight">
+    /// Caller-owned right PCM buffer. May be null for mono frames.
+    /// </param>
+    /// <param name="frame">
+    /// Caller-owned object populated with the decoded frame parameters.
+    /// </param>
+    /// <param name="samplesPerChannel">
+    /// Number of samples written to each active channel buffer.
+    /// </param>
+    /// <returns>True on success, false on invalid data or short buffers.</returns>
+    public bool DecodeInto(byte[] sbcData, short[] pcmLeft,
+        short[]? pcmRight, SbcFrame frame, out int samplesPerChannel)
+    {
+        samplesPerChannel = 0;
+        if (pcmLeft == null || frame == null ||
+            !TryPrepareDecode(sbcData, frame, out int frameSize,
+                out int requiredSamples))
+        {
+            return false;
+        }
+
+        if (pcmLeft.Length < requiredSamples ||
+            (frame.Mode != SbcMode.Mono &&
+                (pcmRight == null || pcmRight.Length < requiredSamples)))
+        {
+            return false;
+        }
+
+        if (!DecodePreparedFrameData(sbcData, frame, frameSize))
+        {
+            return false;
+        }
+
+        SynthesizePrepared(pcmLeft, pcmRight);
+        samplesPerChannel = requiredSamples;
+        return true;
+    }
+
+    private bool TryPrepareDecode(byte[] sbcData, SbcFrame frame,
+        out int frameSize, out int samplesPerChannel)
+    {
+        frameSize = 0;
+        samplesPerChannel = 0;
         if (sbcData == null || sbcData.Length < SbcFrame.HeaderSize)
             return false;
 
-        // Decode header
-        var headerBits = new SbcBitStream(sbcData, SbcFrame.HeaderSize, isReader: true);
-        if (!DecodeHeader(headerBits, frame, out int crc) || headerBits.HasError)
+        SbcBitStream headerBits = _headerBits;
+        headerBits.Reset(sbcData, SbcFrame.HeaderSize, isReader: true);
+        if (!DecodeHeader(headerBits, frame, out int crc) ||
+            headerBits.HasError)
+        {
+            return false;
+        }
+
+        frameSize = frame.GetFrameSize();
+        if (frameSize <= 0 || sbcData.Length < frameSize)
             return false;
 
-        int frameSize = frame.GetFrameSize();
-        if (sbcData.Length < frameSize)
-            return false;
-
-        // Verify CRC
-        int computedCrc = SbcTables.ComputeCrc(frame, sbcData, sbcData.Length);
+        int computedCrc = SbcTables.ComputeCrc(frame, sbcData, frameSize);
         if (computedCrc != crc)
             return false;
 
-        // Decode frame data
-        var dataBits = new SbcBitStream(sbcData, frameSize, isReader: true);
+        samplesPerChannel = frame.Blocks * frame.Subbands;
+        return true;
+    }
+
+    private bool DecodePreparedFrameData(byte[] sbcData, SbcFrame frame,
+        int frameSize)
+    {
+        SbcBitStream dataBits = _dataBits;
+        dataBits.Reset(sbcData, frameSize, isReader: true);
         dataBits.GetBits(SbcFrame.HeaderSize * 8); // Skip header
 
-        short[][] sbSamples = new short[2][];
-        sbSamples[0] = new short[SbcFrame.MaxSamples];
-        sbSamples[1] = new short[SbcFrame.MaxSamples];
-        int[] sbScale = new int[2];
-
-        DecodeFrameData(dataBits, frame, sbSamples, sbScale);
+        DecodeFrameData(dataBits, frame, _sbSamples, _sbScale);
         if (dataBits.HasError)
             return false;
 
@@ -102,21 +200,19 @@ public class SbcDecoder
         _numBlocks = frame.Blocks;
         _numSubbands = frame.Subbands;
 
-        // Synthesize PCM
-        int samplesPerChannel = _numBlocks * _numSubbands;
-        pcmLeft = new short[samplesPerChannel];
-
-        Synthesize(_channelStates[0], _numBlocks, _numSubbands,
-                   sbSamples[0], sbScale[0], pcmLeft, 1);
-
-        if (frame.Mode != SbcMode.Mono)
-        {
-            pcmRight = new short[samplesPerChannel];
-            Synthesize(_channelStates[1], _numBlocks, _numSubbands,
-                      sbSamples[1], sbScale[1], pcmRight, 1);
-        }
-
         return true;
+    }
+
+    private void SynthesizePrepared(short[] pcmLeft, short[]? pcmRight)
+    {
+        Synthesize(_channelStates[0], _numBlocks, _numSubbands,
+            _sbSamples[0], _sbScale[0], pcmLeft, 1);
+
+        if (_numChannels != 1 && pcmRight != null)
+        {
+            Synthesize(_channelStates[1], _numBlocks, _numSubbands,
+                _sbSamples[1], _sbScale[1], pcmRight, 1);
+        }
     }
 
     private bool DecodeHeader(SbcBitStream bits, SbcFrame frame, out int crc)
@@ -129,13 +225,12 @@ public class SbcDecoder
         if (frame.IsMsbc)
         {
             bits.GetBits(16); // reserved
-            var msbcFrame = SbcFrame.CreateMsbc();
-            frame.Frequency = msbcFrame.Frequency;
-            frame.Mode = msbcFrame.Mode;
-            frame.AllocationMethod = msbcFrame.AllocationMethod;
-            frame.Blocks = msbcFrame.Blocks;
-            frame.Subbands = msbcFrame.Subbands;
-            frame.Bitpool = msbcFrame.Bitpool;
+            frame.Frequency = SbcFrequency.Freq16K;
+            frame.Mode = SbcMode.Mono;
+            frame.AllocationMethod = SbcBitAllocationMethod.Loudness;
+            frame.Blocks = 15;
+            frame.Subbands = 8;
+            frame.Bitpool = 26;
         }
         else if (syncword == 0x9c)
         {
@@ -192,25 +287,20 @@ public class SbcDecoder
         }
 
         // Decode scale factors
-        int[][] scaleFactors = new int[2][];
-        scaleFactors[0] = new int[SbcFrame.MaxSubbands];
-        scaleFactors[1] = new int[SbcFrame.MaxSubbands];
+        int[][] scaleFactors = _scaleFactors;
 
         for (int ch = 0; ch < nchannels; ch++)
             for (int sb = 0; sb < nsubbands; sb++)
                 scaleFactors[ch][sb] = (int)bits.GetBits(4);
 
         // Compute bit allocation
-        int[][] nbits = new int[2][];
-        nbits[0] = new int[SbcFrame.MaxSubbands];
-        nbits[1] = new int[SbcFrame.MaxSubbands];
+        int[][] nbits = _nbits;
 
         ComputeBitAllocation(frame, scaleFactors, nbits);
         if (frame.Mode == SbcMode.DualChannel)
         {
-            int[][] scaleFactors1 = new int[][] { scaleFactors[1] };
-            int[][] nbits1 = new int[][] { nbits[1] };
-            ComputeBitAllocation(frame, scaleFactors1, nbits1);
+            ComputeBitAllocation(frame, _singleScaleFactors,
+                _singleNbits);
         }
 
         // Compute scale for output samples
@@ -284,9 +374,7 @@ public class SbcDecoder
         int nsubbands = frame.Subbands;
         int nchannels = stereoMode ? 2 : 1;
 
-        int[][] bitneeds = new int[2][];
-        bitneeds[0] = new int[SbcFrame.MaxSubbands];
-        bitneeds[1] = new int[SbcFrame.MaxSubbands];
+        int[][] bitneeds = _bitNeeds;
         int maxBitneed = 0;
 
         for (int ch = 0; ch < nchannels; ch++)

@@ -68,6 +68,31 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
+        public void MutedOutputIsSilentWhileProcessorHistoryContinues()
+        {
+            using var processor = new DualSenseMicrophoneProcessor();
+            short[] frame = new short[DualSenseMicrophoneProcessor.FrameSize];
+
+            for (int pass = 0; pass < 3; pass++)
+            {
+                Array.Fill(frame, (short)12000);
+                processor.Process(frame, frame.Length, 128,
+                    DualSenseMicrophoneNoiseSuppression.Off,
+                    muteOutput: true);
+                Assert.AreEqual(0, MaxAbsolute(frame),
+                    "Muted frames must never leak into the virtual endpoint.");
+            }
+
+            Array.Fill(frame, (short)12000);
+            processor.Process(frame, frame.Length, 128,
+                DualSenseMicrophoneNoiseSuppression.Off,
+                muteOutput: false);
+
+            Assert.IsTrue(MaxAbsolute(frame) < 2,
+                "Unmuting must resume from continuously advanced filter state.");
+        }
+
+        [TestMethod]
         public void BalancedModeLoadsPackagedRnnoiseOnX64()
         {
             if (!Environment.Is64BitProcess)

@@ -12,9 +12,9 @@ namespace SBC;
 /// </summary>
 internal class SbcBitStream
 {
-    private readonly byte[] _data;
-    private readonly int _maxBytes;
-    private readonly bool _isReader;
+    private byte[] _data = Array.Empty<byte>();
+    private int _maxBytes;
+    private bool _isReader;
 
     private int _bytePosition;
     private uint _accumulator;
@@ -22,6 +22,11 @@ internal class SbcBitStream
     private bool _error;
 
     public SbcBitStream(byte[] data, int size, bool isReader)
+    {
+        Reset(data, size, isReader);
+    }
+
+    public void Reset(byte[] data, int size, bool isReader)
     {
         _data = data;
         _maxBytes = size;

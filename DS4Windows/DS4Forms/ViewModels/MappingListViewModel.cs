@@ -17,6 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 using DS4Windows;
+using DS4Windows.InputDevices;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -73,7 +74,9 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         private List<MappedControl> extraControls = new List<MappedControl>();
 
-        public MappingListViewModel(int devIndex, OutContType devType)
+        public MappingListViewModel(int devIndex, OutContType devType,
+            InputDeviceType? physicalControllerType = null,
+            bool physicalControllerIsDualSenseEdge = false)
         {
             mappings.Add(new MappedControl(devIndex, DS4Controls.Cross, "Cross", devType));
             mappings.Add(new MappedControl(devIndex, DS4Controls.Circle, "Circle", devType));
@@ -127,9 +130,17 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             mappings.Add(new MappedControl(devIndex, DS4Controls.BLP, "Bottom Left Paddle", devType));
             mappings.Add(new MappedControl(devIndex, DS4Controls.BRP, "Bottom Right Paddle", devType));
 
+            ControllerUiCapabilities uiCapabilities =
+                ControllerUiCapabilities.For(physicalControllerType);
             int controlIndex = 0;
             foreach (MappedControl mapped in mappings)
             {
+                bool available = uiCapabilities.IsMappingControlAvailable(
+                    mapped.Control, physicalControllerIsDualSenseEdge);
+                mapped.SetPhysicalControllerAvailability(
+                    available, uiCapabilities.ControllerName,
+                    available && uiCapabilities.IsControllerMapListOnlyControl(
+                        mapped.Control, physicalControllerIsDualSenseEdge));
                 controlMap.Add(mapped.Control, mapped);
                 controlIndexMap.Add(mapped.Control, controlIndex);
                 controlIndex++;
@@ -210,6 +221,9 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public DS4ControlSettings Setting { get => setting; }
         public string ControlName { get => controlName; }
         public string MappingName { get => mappingName; }
+        public bool IsAvailableOnPhysicalController { get; private set; } = true;
+        public bool IsControllerMapListOnly { get; private set; }
+        public string PhysicalControllerAvailabilityHint { get; private set; }
         public OutContType DevType
         {
             get => devType;
@@ -245,6 +259,18 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             }
 
             DevTypeChanged += MappedControl_DevTypeChanged;
+        }
+
+        internal void SetPhysicalControllerAvailability(bool available,
+            string physicalControllerName, bool controllerMapListOnly = false)
+        {
+            IsAvailableOnPhysicalController = available;
+            IsControllerMapListOnly = available && controllerMapListOnly;
+            PhysicalControllerAvailabilityHint = !available
+                ? $"{ControlName} is not available on {physicalControllerName}. The saved backend mapping is preserved."
+                : IsControllerMapListOnly
+                    ? $"{ControlName} is fully remappable from this list. The current controller diagram has no accurate target for this Edge-only control."
+                    : null;
         }
 
         private void MappedControl_DevTypeChanged(object sender, EventArgs e)

@@ -10,17 +10,62 @@ namespace DS4Windows
     /// </summary>
     public static class DualShock4BluetoothAudioProtocol
     {
+        public const int SpeakerRealtimeReportLength = 142;
         public const int SpeakerSmallReportLength = 270;
         public const int SpeakerLargeReportLength = 462;
+        public const int SpeakerRealtimeFramesPerReport = 1;
         public const int SpeakerSmallFramesPerReport = 2;
         public const int SpeakerLargeFramesPerReport = 4;
-        public const int SpeakerMinimumBufferedFrames = SpeakerLargeFramesPerReport;
+        // The physical pad accepts report 0x12 with one 4 ms SBC frame, so keep
+        // the format available for protocol tests and diagnostics. The direct
+        // production lane uses four-frame 0x17 reports: Windows HIDCLASS pads
+        // these variable-length writes to the controller's 547-byte maximum,
+        // so one-frame reports only quadruple the HID transaction rate.
+        public const int SpeakerRealtimeReportDurationMilliseconds =
+            SpeakerSamplesPerFrame * SpeakerRealtimeFramesPerReport * 1000 /
+            SpeakerSampleRate;
+        public const int SpeakerRealtimePrimeFrames = 20;
+        public const int SpeakerRealtimeSourceCushionFrames = 16;
+        public const int SpeakerMinimumBufferedFrames =
+            SpeakerRealtimePrimeFrames + SpeakerRealtimeSourceCushionFrames;
+        public const int SpeakerEncodedFrameQueueLimit =
+            SpeakerLargeFramesPerReport * 32;
+        public const int SpeakerSampleRate = 32000;
+        public const int SpeakerSamplesPerFrame = 128;
+        public const int SpeakerLargeReportDurationMilliseconds =
+            SpeakerSamplesPerFrame * SpeakerLargeFramesPerReport * 1000 /
+            SpeakerSampleRate;
+        public const int SpeakerDirectFramesPerReport =
+            SpeakerLargeFramesPerReport;
+        public const int SpeakerDirectReportDurationMilliseconds =
+            SpeakerLargeReportDurationMilliseconds;
+        public const int SpeakerDirectPrimeReports =
+            SpeakerRealtimePrimeFrames / SpeakerDirectFramesPerReport;
         public const int SpeakerSbcFrameLength = 109;
         public const int MicrophoneMsbcFrameLength = 57;
         public const int MicrophoneSamplesPerFrame = 120;
 
+        /// <summary>
+        /// Selects the legacy batched Sony speaker report from frames which
+        /// already exist. The direct VIIPER sender uses the four-frame result
+        /// for its steady 16 ms cadence; the two-frame result remains useful
+        /// when draining a legacy source tail.
+        /// </summary>
+        public static int GetSpeakerReportFrameCount(int bufferedFrames)
+        {
+            if (bufferedFrames >= SpeakerLargeFramesPerReport)
+            {
+                return SpeakerLargeFramesPerReport;
+            }
+
+            return bufferedFrames >= SpeakerSmallFramesPerReport ?
+                SpeakerSmallFramesPerReport : 0;
+        }
+
         private const int HidStateLength = 75;
         private const int BluetoothHeaderLength = 3;
+        private const byte SpeakerAudioMode = 0xA0;
+        private const byte MicrophoneAudioMode = 0xA1;
         // Genuine CUH-ZCT2 hardware uses target 0x01 for the microphone lane.
         // Older protocol notes and synthetic fixtures use 0x03, so accept both.
         private const byte MicrophoneAudioTarget = 0x01;
@@ -73,25 +118,53 @@ namespace DS4Windows
         }
 
         /// <summary>
-        /// Builds the DS4 Bluetooth speaker packet used by Sony hardware. Four
-        /// SBC frames use report 0x17; the two-frame drain fallback uses 0x14.
-        /// The frame counter advances by the number of encoded SBC frames, not
-        /// by the number of HID reports.
+        /// Builds a DS4 Bluetooth speaker packet used by Sony hardware. One,
+        /// two, and four SBC frames use reports 0x12, 0x14, and 0x17. The frame
+        /// counter advances by the number of encoded SBC frames, not by the
+        /// number of HID reports.
         /// </summary>
         public static byte[] BuildSpeakerReport(ushort frameNumber,
             byte[][] frames, byte audioTarget = 0x02,
             bool microphoneEnabled = false)
         {
             if (frames == null ||
-                (frames.Length != SpeakerSmallFramesPerReport &&
+                (frames.Length != SpeakerRealtimeFramesPerReport &&
+                    frames.Length != SpeakerSmallFramesPerReport &&
                     frames.Length != SpeakerLargeFramesPerReport))
             {
                 throw new ArgumentException(
-                    "A DS4 speaker report must contain exactly two or four SBC frames.",
+                    "A DS4 speaker report must contain exactly one, two, or four SBC frames.",
                     nameof(frames));
             }
 
-            for (int index = 0; index < frames.Length; index++)
+            int reportLength = GetSpeakerReportLength(frames.Length);
+            byte[] report = new byte[reportLength];
+            WriteSpeakerReport(report, frameNumber, frames, frames.Length,
+                audioTarget, microphoneEnabled);
+            return report;
+        }
+
+        /// <summary>
+        /// Writes a Sony speaker report into caller-owned storage. This keeps
+        /// the realtime Bluetooth lane allocation-free while preserving the
+        /// allocating builder used by tests and non-realtime callers.
+        /// </summary>
+        public static void WriteSpeakerReport(byte[] report,
+            ushort frameNumber, byte[][] frames, int frameCount,
+            byte audioTarget = 0x02, bool microphoneEnabled = false)
+        {
+            if (frames == null ||
+                (frameCount != SpeakerRealtimeFramesPerReport &&
+                    frameCount != SpeakerSmallFramesPerReport &&
+                    frameCount != SpeakerLargeFramesPerReport) ||
+                frames.Length < frameCount)
+            {
+                throw new ArgumentException(
+                    "A DS4 speaker report must contain exactly one, two, or four SBC frames.",
+                    nameof(frames));
+            }
+
+            for (int index = 0; index < frameCount; index++)
             {
                 if (frames[index] == null ||
                     frames[index].Length != SpeakerSbcFrameLength)
@@ -102,35 +175,57 @@ namespace DS4Windows
                 }
             }
 
-            bool large = frames.Length == SpeakerLargeFramesPerReport;
-            int reportLength = large ? SpeakerLargeReportLength :
-                SpeakerSmallReportLength;
-            byte[] report = new byte[reportLength];
-            report[0] = large ? (byte)0x17 : (byte)0x14;
+            int reportLength = GetSpeakerReportLength(frameCount);
+            if (report == null || report.Length < reportLength)
+            {
+                throw new ArgumentException(
+                    $"The DS4 speaker report buffer must hold {reportLength} bytes.",
+                    nameof(report));
+            }
+
+            Array.Clear(report, 0, reportLength);
+            report[0] = frameCount switch
+            {
+                SpeakerRealtimeFramesPerReport => (byte)0x12,
+                SpeakerSmallFramesPerReport => (byte)0x14,
+                _ => (byte)0x17,
+            };
             report[1] = 0x40;
-            // The low three bits select the DS4 microphone input mode. Mode 2
-            // (the A2 value copied by the original proof-of-concepts) stops
-            // ordinary HID input on genuine hardware. A0 is speaker-only;
-            // A1 requests the combined HID + microphone report 0x13.
-            report[2] = microphoneEnabled ? (byte)0xA1 : (byte)0xA0;
+            // Byte 2 selects the controller's inbound report mode even on a
+            // report which carries outbound speaker SBC. Hardware sweeps on a
+            // genuine CUH-ZCT2 show that A2 stops ordinary controller input
+            // after a few reports. A0 preserves normal input while the report
+            // ID, target byte, and SBC payload still select speaker output;
+            // A1 preserves microphone input during full duplex.
+            report[2] = microphoneEnabled ? MicrophoneAudioMode :
+                SpeakerAudioMode;
             report[3] = (byte)frameNumber;
             report[4] = (byte)(frameNumber >> 8);
             report[5] = audioTarget;
-            for (int index = 0; index < frames.Length; index++)
+            for (int index = 0; index < frameCount; index++)
             {
                 Buffer.BlockCopy(frames[index], 0, report,
                     6 + index * SpeakerSbcFrameLength, SpeakerSbcFrameLength);
             }
 
             WriteBluetoothCrc(report, reportLength);
-            return report;
+        }
+
+        private static int GetSpeakerReportLength(int frameCount)
+        {
+            return frameCount switch
+            {
+                SpeakerRealtimeFramesPerReport => SpeakerRealtimeReportLength,
+                SpeakerSmallFramesPerReport => SpeakerSmallReportLength,
+                SpeakerLargeFramesPerReport => SpeakerLargeReportLength,
+                _ => throw new ArgumentOutOfRangeException(nameof(frameCount)),
+            };
         }
 
         /// <summary>
         /// Builds the one-shot report 0x11 which arms or disarms the DS4 audio
-        /// plane. Only volume validity bits are asserted, matching the Sony
-        /// protocol reference; rumble, lightbar, and flash state therefore
-        /// remain owned by the regular output dispatcher.
+        /// plane. The normal effects dispatcher continues to own ongoing
+        /// rumble, lightbar, and flash state after this initialization packet.
         /// </summary>
         public static byte[] BuildAudioControlReport(bool speakerEnabled,
             bool microphoneEnabled, byte speakerVolume,
@@ -145,28 +240,16 @@ namespace DS4Windows
             // reporting input. Keep this invariant inside the packet builder.
             report[0] = 0x11;
             report[1] = 0xC0;
-            report[2] = microphoneEnabled ? (byte)0xA1 :
-                speakerEnabled ? (byte)0xA0 : (byte)0x00;
+            // A0 keeps ordinary controller input alive for speaker-only
+            // streaming. A1 selects microphone input even when speaker output
+            // is also active; full-duplex speaker payloads retain A1 as well.
+            report[2] = microphoneEnabled ? MicrophoneAudioMode :
+                (speakerEnabled ? SpeakerAudioMode : (byte)0x00);
 
-            byte validity = 0;
-            if (speakerEnabled)
-            {
-                // PadForge keeps only the speaker/headphone volume fields valid
-                // on its dedicated audio session. Effects remain on the primary
-                // DS4Windows control-transfer session.
-                validity |= 0xB0;
-            }
-
-            if (microphoneEnabled)
-            {
-                validity |= 0x40;
-            }
-
-            if (!audioEnabled)
-            {
-                // Explicitly mute all audio lanes when the transport is torn down.
-                validity = 0xF0;
-            }
+            // This is the Sony/DS4AudioStreamer audio-plane validity mask used
+            // by the zero-dropout physical-controller trace. The normal effects
+            // dispatcher resumes ownership immediately after this one-shot arm.
+            byte validity = audioEnabled ? (byte)0xF3 : (byte)0xF0;
 
             report[3] = validity;
             report[21] = speakerEnabled ? headphoneVolume : (byte)0;
@@ -179,6 +262,18 @@ namespace DS4Windows
 
         public static int ExtractMicrophoneSbcFrames(byte[] report, int reportLength,
             Action<byte[]> frameHandler)
+        {
+            if (frameHandler == null)
+            {
+                return 0;
+            }
+
+            return ExtractMicrophoneSbcFrames(report, reportLength,
+                (_, frame) => frameHandler(frame));
+        }
+
+        public static int ExtractMicrophoneSbcFrames(byte[] report, int reportLength,
+            Action<ushort, byte[]> frameHandler)
         {
             if (report == null || frameHandler == null ||
                 reportLength <= BluetoothHeaderLength + sizeof(uint) ||
@@ -194,6 +289,8 @@ namespace DS4Windows
                 return 0;
             }
 
+            ushort frameNumber = (ushort)(report[audioOffset] |
+                (report[audioOffset + 1] << 8));
             int count = 0;
             int scan = audioOffset + 3;
             while (scan + SbcFrame.HeaderSize <= crcOffset)
@@ -213,7 +310,7 @@ namespace DS4Windows
 
                 byte[] frame = new byte[frameLength];
                 Buffer.BlockCopy(report, scan, frame, 0, frame.Length);
-                frameHandler(frame);
+                frameHandler(unchecked((ushort)(frameNumber + count)), frame);
                 count++;
                 scan += frameLength;
             }

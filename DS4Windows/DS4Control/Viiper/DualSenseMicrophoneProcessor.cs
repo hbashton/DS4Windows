@@ -57,7 +57,8 @@ namespace DS4Windows
         }
 
         public void Process(short[] samples, int sampleCount, byte volume,
-            DualSenseMicrophoneNoiseSuppression suppression)
+            DualSenseMicrophoneNoiseSuppression suppression,
+            bool muteOutput = false)
         {
             if (samples == null)
             {
@@ -132,9 +133,10 @@ namespace DS4Windows
                 ApplyLimiter(sampleCount);
                 for (int i = 0; i < sampleCount; i++)
                 {
-                    samples[i] = (short)Math.Clamp(
-                        (int)MathF.Round(workingFrame[i] * limiterGain * 32768.0f),
-                        short.MinValue, short.MaxValue);
+                    samples[i] = muteOutput ? (short)0 :
+                        (short)Math.Clamp(
+                            (int)MathF.Round(workingFrame[i] * limiterGain *
+                                32768.0f), short.MinValue, short.MaxValue);
                 }
             }
         }

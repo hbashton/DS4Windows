@@ -82,19 +82,29 @@ namespace DS4WinWPF.DS4Forms
         private TouchButtonUserControl touchButtonUC;
         private ContentControl activeTouchButtonDisplayControl;
 
-        public ProfileEditor(int device)
+        public ProfileEditor(int device, int controllerContextDevice = -1)
         {
             InitializeComponent();
 
             deviceNum = device;
             emptyColorGB.Visibility = Visibility.Collapsed;
-            profileSettingsVM = new ProfileSettingsViewModel(device);
+            DS4Device physicalController = ResolveControllerContext(
+                device, controllerContextDevice);
+            profileSettingsVM = new ProfileSettingsViewModel(device,
+                physicalController?.DeviceType,
+                physicalController?.ConnectionType,
+                physicalController?.HidDevice?.Attributes?.VendorId,
+                physicalController?.HidDevice?.Attributes?.ProductId);
             picBoxHover.Visibility = Visibility.Hidden;
             picBoxHover2.Visibility = Visibility.Hidden;
 
-            ConfigureControllerDiagram(device);
+            ConfigureControllerDiagram(physicalController?.DeviceType);
 
-            mappingListVM = new MappingListViewModel(deviceNum, profileSettingsVM.ContType);
+            bool physicalControllerIsDualSenseEdge =
+                physicalController?.HidDevice?.Attributes?.ProductId == 0x0DF2;
+            mappingListVM = new MappingListViewModel(deviceNum,
+                profileSettingsVM.ContType, physicalController?.DeviceType,
+                physicalControllerIsDualSenseEdge);
             specialActionsVM = new SpecialActionsListViewModel(device);
 
             touchButtonUC = new TouchButtonUserControl(device);
@@ -119,9 +129,10 @@ namespace DS4WinWPF.DS4Forms
             SetupEvents();
         }
 
-        private void ConfigureControllerDiagram(int device)
+        private void ConfigureControllerDiagram(InputDeviceType? physicalControllerType)
         {
-            usingDualSenseDiagram = ShouldUseDualSenseDiagram(device);
+            usingDualSenseDiagram =
+                physicalControllerType == InputDeviceType.DualSense;
             if (!usingDualSenseDiagram)
             {
                 return;
@@ -219,33 +230,64 @@ namespace DS4WinWPF.DS4Forms
             dualSenseHoverImages[rightConBtn] = Frame(15);
             dualSenseHoverImages[downConBtn] = Frame(16);
             dualSenseHoverImages[leftConBtn] = Frame(17);
+
+            // The touch illustrations are full 880x440 controller canvases, just
+            // like the base DualSense diagram. Route them through the full-canvas
+            // overlay path so they remain aligned instead of being squeezed into
+            // the individual touch hit targets.
+            dualSenseHoverImages[leftTouchConBtn] =
+                LoadResourceImage("DualSense-Config_TouchLeft.png");
+            dualSenseHoverImages[multiTouchConBtn] =
+                LoadResourceImage("DualSense-Config_TouchMulti.png");
+            dualSenseHoverImages[rightTouchConBtn] =
+                LoadResourceImage("DualSense-Config_TouchRight.png");
+            dualSenseHoverImages[topTouchConBtn] =
+                LoadResourceImage("DualSense-Config_TouchUpper.png");
         }
 
-        private static bool ShouldUseDualSenseDiagram(int device)
+        private static DS4Device ResolveControllerContext(int profileDevice,
+            int preferredControllerDevice)
         {
             if (App.rootHub == null)
             {
-                return false;
+                return null;
             }
 
-            if (device >= 0 && device < ControlService.CURRENT_DS4_CONTROLLER_LIMIT)
+            if (preferredControllerDevice >= 0 &&
+                preferredControllerDevice < ControlService.CURRENT_DS4_CONTROLLER_LIMIT)
             {
-                DS4Device selectedController = App.rootHub.DS4Controllers[device];
-                return selectedController?.DeviceType == InputDeviceType.DualSense;
-            }
-
-            // Profiles opened from the Profiles page use the test slot. Match the
-            // first connected DualSense so that the generic editor reflects the
-            // controller the user is actually configuring.
-            for (int i = 0; i < ControlService.CURRENT_DS4_CONTROLLER_LIMIT; i++)
-            {
-                if (App.rootHub.DS4Controllers[i]?.DeviceType == InputDeviceType.DualSense)
+                DS4Device selectedController =
+                    App.rootHub.DS4Controllers[preferredControllerDevice];
+                if (selectedController != null)
                 {
-                    return true;
+                    return selectedController;
                 }
             }
 
-            return false;
+            if (profileDevice >= 0 &&
+                profileDevice < ControlService.CURRENT_DS4_CONTROLLER_LIMIT)
+            {
+                DS4Device profileController =
+                    App.rootHub.DS4Controllers[profileDevice];
+                if (profileController != null)
+                {
+                    return profileController;
+                }
+            }
+
+            // Offline/test-slot profile editing has no physical slot of its own.
+            // Use the first connected controller as a deterministic fallback;
+            // MainWindow normally supplies the explicitly selected controller.
+            for (int i = 0; i < ControlService.CURRENT_DS4_CONTROLLER_LIMIT; i++)
+            {
+                DS4Device connectedController = App.rootHub.DS4Controllers[i];
+                if (connectedController != null)
+                {
+                    return connectedController;
+                }
+            }
+
+            return null;
         }
 
         private static void SetCanvasButtonBounds(Button button, double left, double top,
@@ -759,17 +801,10 @@ namespace DS4WinWPF.DS4Forms
         {
             if (usingDualSenseDiagram)
             {
-                // DualSense buttons use the geometry layer. Only the illustrated
-                // touch gestures need bitmap overlays in this mode, so no DS4
-                // button artwork is loaded or available to leak into the canvas.
-                hoverImages[leftTouchConBtn] = new ImageBrush(
-                    LoadResourceImage("DualSense-Config_TouchLeft.png"));
-                hoverImages[multiTouchConBtn] = new ImageBrush(
-                    LoadResourceImage("DualSense-Config_TouchMulti.png"));
-                hoverImages[rightTouchConBtn] = new ImageBrush(
-                    LoadResourceImage("DualSense-Config_TouchRight.png"));
-                hoverImages[topTouchConBtn] = new ImageBrush(
-                    LoadResourceImage("DualSense-Config_TouchUpper.png"));
+                // Every DualSense highlight, including the illustrated touch
+                // gestures, uses the full-canvas overlay dictionary populated by
+                // PopulateDualSenseHoverImages. Do not load legacy per-button DS4
+                // artwork into this mode.
                 return;
             }
 
@@ -1973,10 +2008,30 @@ namespace DS4WinWPF.DS4Forms
 
         private void MappingListBox_MouseDoubleClick(object sender, MouseButtonEventArgs e)
         {
-            if (mappingListVM.SelectedIndex >= 0)
+            if (e.ChangedButton != MouseButton.Left)
             {
-                ShowControlBindingWindow();
+                return;
             }
+
+            IInputElement hitElement = mappingListBox.InputHitTest(
+                e.GetPosition(mappingListBox));
+            ListBoxItem clickedItem = ItemsControl.ContainerFromElement(
+                mappingListBox, hitElement as DependencyObject) as ListBoxItem;
+            if (clickedItem == null || !clickedItem.IsEnabled)
+            {
+                return;
+            }
+
+            int clickedIndex = mappingListBox.ItemContainerGenerator
+                .IndexFromContainer(clickedItem);
+            if (clickedIndex < 0)
+            {
+                return;
+            }
+
+            mappingListVM.SelectedIndex = clickedIndex;
+            e.Handled = true;
+            ShowControlBindingWindow();
         }
 
         private void SidebarTabControl_SelectionChanged(object sender, SelectionChangedEventArgs e)

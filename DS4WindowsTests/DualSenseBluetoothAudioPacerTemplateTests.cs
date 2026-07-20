@@ -1,0 +1,415 @@
+using DS4Windows.InputDevices;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+
+namespace DS4Windows.Tests
+{
+    [TestClass]
+    public class DualSenseBluetoothAudioPacerTemplateTests
+    {
+        private const int ReportLength = 398;
+        private const int HapticsOffset = 78;
+        private const int HapticsLength = 64;
+
+        [TestMethod]
+        public void FreshLatestTemplateHapticsSurviveOldQueuedAudioFrame()
+        {
+            const long qpcFrequency = 10_000_000;
+            const long nowQpc = qpcFrequency * 10;
+            long queuedAtQpc = nowQpc - qpcFrequency * 85 / 1000;
+            long oldQueuedHapticsExpiryQpc = queuedAtQpc +
+                qpcFrequency * 30 / 1000;
+            long latestTemplateHapticsExpiryQpc = nowQpc +
+                qpcFrequency * 30 / 1000;
+            Assert.IsTrue(oldQueuedHapticsExpiryQpc < nowQpc,
+                "The fixture must represent an 85 ms-old queued audio frame.");
+
+            byte[] queued = CreateReport(0x31);
+            byte[] latestTemplate = CreateReport(0x72);
+            FillHaptics(latestTemplate, 0x40);
+            byte expectedSequence = queued[1];
+            byte expectedPacketCounter = queued[10];
+            byte[] expectedSpeaker = CopyRange(queued, 142, 202);
+
+            DualSenseBluetoothAudioReportPatcher.PatchForPresentation(
+                queued, oldQueuedHapticsExpiryQpc, latestTemplate,
+                latestTemplateHapticsExpiryQpc, nowQpc);
+
+            for (int index = 0; index < HapticsLength; index++)
+            {
+                Assert.AreEqual(latestTemplate[HapticsOffset + index],
+                    queued[HapticsOffset + index],
+                    $"Fresh latest-template haptics changed at byte {index}.");
+            }
+
+            Assert.AreEqual(expectedSequence, queued[1]);
+            Assert.AreEqual(expectedPacketCounter, queued[10]);
+            CollectionAssert.AreEqual(expectedSpeaker,
+                CopyRange(queued, 142, 202));
+            AssertCrcIsValid(queued);
+        }
+
+        [TestMethod]
+        public void StaleLatestTemplateHapticsAreZeroed()
+        {
+            const long nowQpc = 50_000_000;
+            byte[] queued = CreateReport(0x28);
+            byte[] latestTemplate = CreateReport(0x63);
+            FillHaptics(latestTemplate, 0x55);
+            long stillFreshQueuedHapticsExpiryQpc = nowQpc + 1_000_000;
+
+            DualSenseBluetoothAudioReportPatcher.PatchForPresentation(
+                queued, stillFreshQueuedHapticsExpiryQpc, latestTemplate,
+                nowQpc - 1, nowQpc);
+
+            for (int index = 0; index < HapticsLength; index++)
+            {
+                Assert.AreEqual((byte)0, queued[HapticsOffset + index],
+                    $"Stale latest-template haptics survived at byte {index}.");
+            }
+
+            AssertCrcIsValid(queued);
+        }
+
+        [TestMethod]
+        public void QueuedSpeakerBufferDepthSurvivesControlTemplateOverlay()
+        {
+            const byte speakerBufferDepth = 64;
+            const byte controlBufferDepth = 16;
+            const long nowQpc = 50_000_000;
+            byte[] queued = CreateReport(0x28);
+            byte[] latestTemplate = CreateReport(0x63);
+            for (int index = 5; index <= 9; index++)
+            {
+                queued[index] = speakerBufferDepth;
+                latestTemplate[index] = controlBufferDepth;
+            }
+
+            byte[] expectedBufferDepths = CopyRange(queued, 5, 5);
+
+            DualSenseBluetoothAudioReportPatcher.PatchForPresentation(
+                queued, latestTemplate, nowQpc + 1, nowQpc);
+
+            CollectionAssert.AreEqual(expectedBufferDepths,
+                CopyRange(queued, 5, 5),
+                "Presentation replaced the queued speaker buffer depth with the control template depth.");
+            Assert.AreEqual(latestTemplate[2], queued[2]);
+            Assert.AreEqual(latestTemplate[3], queued[3]);
+            Assert.AreEqual(latestTemplate[4], queued[4]);
+            Assert.AreEqual(latestTemplate[11], queued[11]);
+            Assert.AreEqual(latestTemplate[141], queued[141]);
+            AssertCrcIsValid(queued);
+        }
+
+        [DataTestMethod]
+        [DataRow(0)]
+        [DataRow(500)]
+        [DataRow(1000)]
+        public void SchedulerRetainsPhaseForAtMostOneMillisecondLateness(
+            int latenessMicroseconds)
+        {
+            const long qpcFrequency = 10_000_000;
+            const long firstCadenceTicks = 106_666;
+            const long maximumCatchUpTicks = qpcFrequency / 1000;
+            const long startQpc = 1_000_000;
+            var scheduler = new DualSenseBluetoothAudioPacerScheduler(
+                qpcFrequency);
+            scheduler.Start(startQpc);
+            long presentationQpc = startQpc +
+                latenessMicroseconds * qpcFrequency / 1_000_000;
+
+            long nextDeadline = scheduler.AdvanceAfterSend(presentationQpc);
+
+            Assert.AreEqual(startQpc + firstCadenceTicks, nextDeadline,
+                "Normal scheduler jitter must remain locked to the rational phase.");
+            Assert.IsTrue(nextDeadline - presentationQpc >=
+                firstCadenceTicks - maximumCatchUpTicks,
+                "Phase lock must never compress catch-up by more than one millisecond.");
+        }
+
+        [DataTestMethod]
+        [DataRow(5)]
+        [DataRow(10)]
+        [DataRow(20)]
+        public void SchedulerReanchorsAfterLargeLateness(
+            int latenessMilliseconds)
+        {
+            const long qpcFrequency = 10_000_000;
+            const long firstCadenceTicks = 106_666;
+            const long startQpc = 1_000_000;
+            var scheduler = new DualSenseBluetoothAudioPacerScheduler(
+                qpcFrequency);
+            scheduler.Start(startQpc);
+            long presentationQpc = startQpc +
+                latenessMilliseconds * qpcFrequency / 1000;
+
+            long nextDeadline = scheduler.AdvanceAfterSend(presentationQpc);
+
+            Assert.AreEqual(firstCadenceTicks,
+                nextDeadline - presentationQpc,
+                "A true stall must re-anchor and leave one full cadence before the next presentation.");
+        }
+
+        [TestMethod]
+        public void SchedulerPreservesExactRationalCadenceThroughSubMillisecondJitter()
+        {
+            const long qpcFrequency = 10_000_000;
+            const int intervals = 3000;
+            long[] deterministicJitterTicks =
+            {
+                0,
+                qpcFrequency / 10_000,
+                qpcFrequency * 3 / 10_000,
+                qpcFrequency * 5 / 10_000,
+                qpcFrequency * 9 / 10_000,
+            };
+            var scheduler = new DualSenseBluetoothAudioPacerScheduler(
+                qpcFrequency);
+            scheduler.Start(0);
+
+            for (int index = 0; index < intervals; index++)
+            {
+                long presentationQpc = scheduler.NextDeadlineQpc +
+                    deterministicJitterTicks[index %
+                        deterministicJitterTicks.Length];
+                scheduler.AdvanceAfterSend(presentationQpc);
+            }
+
+            Assert.AreEqual(qpcFrequency * 32L,
+                scheduler.NextDeadlineQpc,
+                "Sub-millisecond jitter must not accumulate phase or average-cadence error.");
+        }
+
+        [TestMethod]
+        public void CleanStopBarrierRequiresExplicitReleasedOwnershipAck()
+        {
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.IsCleanStopBarrier(
+                stopSignalReceived: false, cleanStopAcknowledged: false));
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.IsCleanStopBarrier(
+                stopSignalReceived: true, cleanStopAcknowledged: false));
+            Assert.IsTrue(DualSenseBluetoothAudioPacer.IsCleanStopBarrier(
+                stopSignalReceived: true, cleanStopAcknowledged: true));
+        }
+
+        [TestMethod]
+        public void HelperCannotPublishStoppedBeforeWorkersAndWriterRetire()
+        {
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.CanPublishStopped(
+                pacerThreadStopped: false, acknowledgementThreadStopped: true,
+                transportReleased: true));
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.CanPublishStopped(
+                pacerThreadStopped: true, acknowledgementThreadStopped: false,
+                transportReleased: true));
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.CanPublishStopped(
+                pacerThreadStopped: true, acknowledgementThreadStopped: true,
+                transportReleased: false));
+            Assert.IsTrue(DualSenseBluetoothAudioPacer.CanPublishStopped(
+                pacerThreadStopped: true, acknowledgementThreadStopped: true,
+                transportReleased: true));
+        }
+
+        [TestMethod]
+        public void OnlyTransportFaultAcknowledgementIsFatal()
+        {
+            Assert.IsTrue(
+                DualSenseBluetoothAudioPacer.IsFatalAcknowledgementDisposition(
+                    DualSenseBluetoothAudioPacer.AcknowledgementDisposition
+                        .TransportFault));
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.IsFatalAcknowledgementDisposition(
+                    DualSenseBluetoothAudioPacer.AcknowledgementDisposition
+                        .Rejected));
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.IsFatalAcknowledgementDisposition(
+                    DualSenseBluetoothAudioPacer.AcknowledgementDisposition
+                        .Presented));
+        }
+
+        [TestMethod]
+        public void SpeakerFreeControlReportBypassesAudioPrimeGate()
+        {
+            byte[] control = CreateReport(0x25);
+            control[142] = 0;
+            control[143] = 0;
+
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.IsSpeakerAudioReport(control));
+            Assert.IsTrue(
+                DualSenseBluetoothAudioPacer.CanPresentFromPrimeGate(
+                    primeRequired: true, speakerReportCount: 0,
+                    nextReport: control),
+                "A completion-aware mic/haptics control must not wait for eight audio packets.");
+        }
+
+        [TestMethod]
+        public void SpeakerAudioStillRequiresCompletePrimeReservoir()
+        {
+            byte[] speaker = CreateReport(0x52);
+
+            Assert.IsTrue(
+                DualSenseBluetoothAudioPacer.IsSpeakerAudioReport(speaker));
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.CanPresentFromPrimeGate(
+                    primeRequired: true,
+                    speakerReportCount:
+                        DualSenseBluetoothAudioPacer.PrimeReportCount - 1,
+                    nextReport: speaker));
+            Assert.IsTrue(
+                DualSenseBluetoothAudioPacer.CanPresentFromPrimeGate(
+                    primeRequired: true,
+                    speakerReportCount:
+                        DualSenseBluetoothAudioPacer.PrimeReportCount,
+                    nextReport: speaker));
+        }
+
+        [TestMethod]
+        public void ProducerReservoirCoversLongWindowsCallbackStall()
+        {
+            double protectedMilliseconds =
+                DualSenseBluetoothSpeakerPassthrough
+                    .PacerReservoirTargetFrames * 1000.0 *
+                DualSenseBluetoothAudioPacerScheduler.CadenceNumerator /
+                DualSenseBluetoothAudioPacerScheduler.CadenceDenominator;
+
+            Assert.IsTrue(protectedMilliseconds >= 160.0,
+                $"The host presentation reserve covers only " +
+                $"{protectedMilliseconds:F1} ms; observed Windows callback " +
+                "stalls can exceed 120 ms.");
+            Assert.IsTrue(
+                DualSenseBluetoothSpeakerPassthrough
+                    .PacerReservoirTargetFrames >
+                DualSenseBluetoothAudioPacer.PrimeReportCount,
+                "The steady-state reserve must survive a stall without " +
+                "falling through the helper's empty-reservoir re-prime gate.");
+        }
+
+        [TestMethod]
+        public void ControlReportDoesNotCountAsSpeakerPrimeCredit()
+        {
+            byte[] speaker = CreateReport(0x41);
+
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.CanPresentFromPrimeGate(
+                    primeRequired: true,
+                    speakerReportCount:
+                        DualSenseBluetoothAudioPacer.PrimeReportCount - 1,
+                    nextReport: speaker),
+                "Seven speaker reports plus a control report must not satisfy the eight-speaker prime.");
+        }
+
+        [TestMethod]
+        public void ControlPrimeBypassKeepsAudioPrimeArmed()
+        {
+            byte[] control = CreateReport(0x37);
+            control[142] = 0;
+            control[143] = 0;
+
+            Assert.IsTrue(
+                DualSenseBluetoothAudioPacer.CanPresentFromPrimeGate(
+                    primeRequired: true, speakerReportCount: 0,
+                    nextReport: control));
+            Assert.IsTrue(
+                DualSenseBluetoothAudioPacer.
+                    ShouldRequireAudioPrimeAfterPresentation(
+                        presentedControlReport: true,
+                        remainingReportCount:
+                            DualSenseBluetoothAudioPacer.PrimeReportCount),
+                "A control commit must hard re-prime audio even when speaker reports remain queued.");
+        }
+
+        [TestMethod]
+        public void PrimeCountsOnlyConsecutiveHeadSpeakerReports()
+        {
+            var ring = new DualSenseBluetoothAudioPacerRing<byte[]>(9);
+            for (int index = 0;
+                index < DualSenseBluetoothAudioPacer.PrimeReportCount - 1;
+                index++)
+            {
+                Assert.IsTrue(ring.TryEnqueue(CreateReport((byte)index)));
+            }
+            byte[] control = CreateReport(0x60);
+            control[142] = 0;
+            control[143] = 0;
+            Assert.IsTrue(ring.TryEnqueue(control));
+            Assert.IsTrue(ring.TryEnqueue(CreateReport(0x61)));
+
+            int leadingSpeakers = ring.CountLeading(
+                DualSenseBluetoothAudioPacer.IsSpeakerAudioReport);
+            Assert.AreEqual(DualSenseBluetoothAudioPacer.PrimeReportCount - 1,
+                leadingSpeakers);
+            Assert.IsTrue(ring.TryPeek(out byte[] first));
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.CanPresentFromPrimeGate(
+                    primeRequired: true,
+                    speakerReportCount: leadingSpeakers,
+                    nextReport: first),
+                "A speaker after an intervening control must not complete the leading audio prime.");
+        }
+
+        [TestMethod]
+        public void PartialSpeakerPrimeCanYieldToControlWithoutReorderingControls()
+        {
+            var ring = new DualSenseBluetoothAudioPacerRing<byte[]>(8);
+            for (int index = 0; index < 4; index++)
+            {
+                Assert.IsTrue(ring.TryEnqueue(CreateReport((byte)index)));
+            }
+            byte[] firstControl = CreateReport(0x70);
+            firstControl[142] = 0;
+            firstControl[143] = 0;
+            Assert.IsTrue(ring.TryEnqueue(firstControl));
+            byte[] secondControl = CreateReport(0x71);
+            secondControl[142] = 0;
+            secondControl[143] = 0;
+            Assert.IsTrue(ring.TryEnqueue(secondControl));
+
+            var removed = ring.RemoveWhere(
+                DualSenseBluetoothAudioPacer.IsSpeakerAudioReport);
+
+            Assert.AreEqual(4, removed.Count);
+            Assert.IsTrue(ring.TryDequeue(out byte[] retainedFirst));
+            Assert.AreSame(firstControl, retainedFirst);
+            Assert.IsTrue(ring.TryDequeue(out byte[] retainedSecond));
+            Assert.AreSame(secondControl, retainedSecond);
+        }
+
+        private static byte[] CreateReport(byte seed)
+        {
+            byte[] report = new byte[ReportLength];
+            for (int index = 0; index < ReportLength - sizeof(uint); index++)
+            {
+                report[index] = (byte)(seed + index * 17);
+            }
+
+            report[0] = 0x36;
+            report[142] = 0x93;
+            report[143] = 200;
+            return report;
+        }
+
+        private static void FillHaptics(byte[] report, byte seed)
+        {
+            report[76] = 0x92;
+            report[77] = HapticsLength;
+            for (int index = 0; index < HapticsLength; index++)
+            {
+                report[HapticsOffset + index] = (byte)(seed + index);
+            }
+        }
+
+        private static byte[] CopyRange(byte[] source, int offset, int count)
+        {
+            byte[] result = new byte[count];
+            Buffer.BlockCopy(source, offset, result, 0, count);
+            return result;
+        }
+
+        private static void AssertCrcIsValid(byte[] report)
+        {
+            uint expected = DualSenseBluetoothAudioReportPatcher.ComputeSonyCrc(
+                report, ReportLength - sizeof(uint));
+            uint actual = BitConverter.ToUInt32(report,
+                ReportLength - sizeof(uint));
+            Assert.AreEqual(expected, actual);
+        }
+    }
+}

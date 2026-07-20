@@ -34,6 +34,13 @@ namespace DS4Windows
             int generation;
             ControllerAudioEndpointKind endpointKind =
                 DualSenseAudioPassthrough.GetEndpointKind(emulatedControllerType);
+            DirectSpeakerRouteDecision initialRoute =
+                DualSenseAudioPassthrough.EvaluateDirectSpeakerRoute(
+                    captureEndpointId, endpointKind, directSpeakerSource);
+            if (initialRoute == DirectSpeakerRouteDecision.Loopback)
+            {
+                directSpeakerSource = null;
+            }
             lock (syncRoot)
             {
                 if (slots[slot]?.Matches(device, speakerVolume, compression,
@@ -141,9 +148,23 @@ namespace DS4Windows
                     }
                 }
 
+                DirectSpeakerRouteDecision route =
+                    DualSenseAudioPassthrough.EvaluateDirectSpeakerRoute(
+                        captureEndpointId, endpointKind, directSpeakerSource);
+                if (route == DirectSpeakerRouteDecision.Pending)
+                {
+                    lastError = new InvalidOperationException(
+                        "The selected VIIPER controller audio endpoint is still enumerating or its direct stream is recovering.");
+                    Thread.Sleep(500);
+                    continue;
+                }
+
+                ViiperOutDevice activeDirectSpeakerSource =
+                    route == DirectSpeakerRouteDecision.Direct ?
+                        directSpeakerSource : null;
                 var playback = new DualShock4BluetoothSpeakerPassthrough(device,
                     speakerVolume, compression, bassBoost, captureEndpointId,
-                    endpointKind, directSpeakerSource);
+                    endpointKind, activeDirectSpeakerSource);
                 try
                 {
                     playback.Start();

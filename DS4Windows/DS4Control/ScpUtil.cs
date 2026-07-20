@@ -1494,6 +1494,94 @@ namespace DS4Windows
             return result;
         }
 
+        // VIIPER exposes its USB devices through usbip-win2's emulated host
+        // controller.  Moonlight mode deliberately accepts some virtual DS4s,
+        // so CheckIfVirtualDevice alone cannot be used to reject our own
+        // VIIPER output.  Keep this identity check separate and explicit.
+        public static bool CheckIfUsbIpWin2Device(string devicePath)
+        {
+            return TryResolveUsbIpWin2Device(devicePath,
+                out bool usbIpWin2AncestorFound, out _) &&
+                usbIpWin2AncestorFound;
+        }
+
+        internal static bool TryGetUsbIpWin2Port(string devicePath, out int port)
+        {
+            return TryResolveUsbIpWin2Device(devicePath,
+                out bool usbIpWin2AncestorFound, out port) &&
+                usbIpWin2AncestorFound && port >= 0;
+        }
+
+        internal static bool TryResolveUsbIpWin2Device(string devicePath,
+            out bool usbIpWin2AncestorFound, out int port)
+        {
+            const string usbIpWin2HardwareId = @"ROOT\USBIP_WIN2\UDE";
+            string testInstanceId = GetInstanceIdFromDevicePath(devicePath);
+            usbIpWin2AncestorFound = false;
+            port = -1;
+            if (string.IsNullOrEmpty(testInstanceId))
+            {
+                return false;
+            }
+
+            int discoveredPort = -1;
+
+            for (int depth = 0; depth < 16 && !string.IsNullOrEmpty(testInstanceId); depth++)
+            {
+                string[] hardwareIds = GetStringArrayDeviceProperty(testInstanceId,
+                    NativeMethods.DEVPKEY_Device_HardwareIds);
+                if (hardwareIds != null && hardwareIds.Any(id =>
+                    string.Equals(id, usbIpWin2HardwareId,
+                        StringComparison.OrdinalIgnoreCase)))
+                {
+                    usbIpWin2AncestorFound = true;
+                    port = discoveredPort;
+                    return true;
+                }
+
+                if (discoveredPort < 0 &&
+                    testInstanceId.StartsWith(@"USB\VID_",
+                        StringComparison.OrdinalIgnoreCase) &&
+                    testInstanceId.IndexOf("&MI_",
+                        StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    string location = GetStringDeviceProperty(testInstanceId,
+                        NativeMethods.DEVPKEY_Device_LocationInfo);
+                    Match match = Regex.Match(location ?? string.Empty,
+                        @"Port_#(?<port>\d+)", RegexOptions.IgnoreCase);
+                    if (match.Success && int.TryParse(
+                        match.Groups["port"].Value,
+                        NumberStyles.None, CultureInfo.InvariantCulture,
+                        out int parsedPort))
+                    {
+                        discoveredPort = parsedPort;
+                    }
+                }
+
+                string parentInstanceId = GetStringDeviceProperty(testInstanceId,
+                    NativeMethods.DEVPKEY_Device_Parent);
+                if (parentInstanceId.Equals(@"HTREE\ROOT\0",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    port = discoveredPort;
+                    return true;
+                }
+
+                if (string.IsNullOrEmpty(parentInstanceId))
+                {
+                    // A missing parent before HTREE\ROOT means the PnP tree is
+                    // not ready (or the interface vanished mid-query). Do not
+                    // misclassify that transient as a physical USB endpoint.
+                    return false;
+                }
+
+                testInstanceId = parentInstanceId;
+            }
+
+            // Depth exhaustion is not a completed ancestry query.
+            return false;
+        }
+
         public static void FindConfigLocation()
         {
             bool programFolderAutoProfilesExists = File.Exists(Path.Combine(exedirpath, "Auto Profiles.xml"));

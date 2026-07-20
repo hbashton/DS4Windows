@@ -17,6 +17,20 @@ namespace DS4Windows
         DualSense,
     }
 
+    internal enum DirectSpeakerRouteDecision
+    {
+        Loopback,
+        Direct,
+        Pending,
+    }
+
+    internal enum DirectSpeakerEndpointOwnership
+    {
+        Unresolved,
+        Owned,
+        Unowned,
+    }
+
     public sealed class DualSenseAudioPassthrough : IDisposable
     {
         public const string AutoDetectGameAudioEndpointId = "DS4Windows:AutoDetectDualSenseGameAudio";
@@ -29,15 +43,19 @@ namespace DS4Windows
         private readonly SlotPlayback[] slots = new SlotPlayback[ControllerCount];
         private readonly DualSenseBluetoothSpeakerPassthrough[] bluetoothSlots = new DualSenseBluetoothSpeakerPassthrough[ControllerCount];
         private readonly int[] bluetoothStartGeneration = new int[ControllerCount];
+        private readonly object[] bluetoothStartGates = Enumerable.Range(0,
+            ControllerCount).Select(_ => new object()).ToArray();
         private WasapiLoopbackCapture capture;
         private WaveFormat captureFormat;
         private string captureEndpointId = string.Empty;
         private ControllerAudioEndpointKind captureEndpointKind;
+        private bool disposed;
 
         public void Start(int slot, DualSenseDevice dualSenseDevice, byte speakerVolume,
             DualSenseSpeakerCompression speakerCompression, byte speakerBassBoost,
             string requestedCaptureEndpointId, string requestedSpeakerEndpointId,
-            OutContType emulatedControllerType)
+            OutContType emulatedControllerType,
+            ViiperOutDevice directSpeakerSource = null)
         {
             if (slot < 0 || slot >= slots.Length)
             {
@@ -47,56 +65,127 @@ namespace DS4Windows
             if (dualSenseDevice?.ConnectionType == ConnectionType.BT)
             {
                 StartBluetooth(slot, dualSenseDevice, speakerVolume, speakerCompression,
-                    speakerBassBoost, requestedCaptureEndpointId, emulatedControllerType);
+                    speakerBassBoost, requestedCaptureEndpointId,
+                    emulatedControllerType, directSpeakerSource);
                 return;
             }
 
-            StopBluetooth(slot);
-
-            lock (syncRoot)
+            requestedCaptureEndpointId ??= string.Empty;
+            requestedSpeakerEndpointId ??= string.Empty;
+            lock (bluetoothStartGates[slot])
             {
-                requestedCaptureEndpointId ??= string.Empty;
-                requestedSpeakerEndpointId ??= string.Empty;
-                MMDevice endpoint = FindControllerEndpoint(slot, requestedSpeakerEndpointId);
-                if (endpoint == null)
+                DualSenseBluetoothSpeakerPassthrough bluetoothPlayback;
+                lock (syncRoot)
                 {
-                    AppLogger.LogToGui("DualSense audio passthrough could not find a controller speaker endpoint.", true);
-                    Stop(slot);
-                    return;
+                    if (disposed)
+                    {
+                        return;
+                    }
+
+                    bluetoothPlayback = bluetoothSlots[slot];
+                    bluetoothSlots[slot] = null;
+                    bluetoothStartGeneration[slot]++;
                 }
 
-                if (slots[slot] != null && string.Equals(slots[slot].EndpointId, endpoint.ID, StringComparison.Ordinal))
-                {
-                    slots[slot].SpeakerVolume = speakerVolume;
-                    EnsureCaptureStarted(requestedCaptureEndpointId, endpoint.ID,
-                        GetEndpointKind(emulatedControllerType));
-                    return;
-                }
+                // The per-slot gate is the ownership barrier between a retiring
+                // Bluetooth transport and any replacement start. The global
+                // manager lock is deliberately not held across its worker joins.
+                bluetoothPlayback?.Dispose();
 
-                Stop(slot);
+                SlotPlayback playbackToDispose = null;
+                SlotPlayback failedPlayback = null;
+                bool endpointMissing = false;
 
                 try
                 {
-                    WaveFormat outputFormat = endpoint.AudioClient.MixFormat;
-                    var provider = new BufferedWaveProvider(outputFormat)
+                    lock (syncRoot)
                     {
-                        BufferDuration = TimeSpan.FromMilliseconds(250),
-                        DiscardOnBufferOverflow = true,
-                    };
+                        if (disposed)
+                        {
+                            return;
+                        }
 
-                    var output = new WasapiOut(endpoint, AudioClientShareMode.Shared, true, 40);
-                    output.Init(provider);
-                    output.Play();
+                        MMDevice endpoint = FindControllerEndpoint(slot,
+                            requestedSpeakerEndpointId);
+                        if (endpoint == null)
+                        {
+                            AppLogger.LogToGui(
+                                "DualSense audio passthrough could not find a controller speaker endpoint.",
+                                true);
+                            playbackToDispose = slots[slot];
+                            slots[slot] = null;
+                            if (!slots.Any(item => item != null))
+                            {
+                                StopCapture();
+                            }
 
-                    slots[slot] = new SlotPlayback(endpoint.ID, output, provider, outputFormat, speakerVolume);
-                    EnsureCaptureStarted(requestedCaptureEndpointId, endpoint.ID,
-                        GetEndpointKind(emulatedControllerType));
-                    AppLogger.LogToGui($"DualSense audio passthrough started for controller {slot + 1}: {endpoint.FriendlyName}", false);
+                            endpointMissing = true;
+                        }
+                        else if (slots[slot] != null && string.Equals(
+                            slots[slot].EndpointId, endpoint.ID,
+                            StringComparison.Ordinal))
+                        {
+                            slots[slot].SpeakerVolume = speakerVolume;
+                            EnsureCaptureStarted(requestedCaptureEndpointId,
+                                endpoint.ID,
+                                GetEndpointKind(emulatedControllerType));
+                            return;
+                        }
+                        else
+                        {
+                            playbackToDispose = slots[slot];
+                            slots[slot] = null;
+                            if (!slots.Any(item => item != null))
+                            {
+                                StopCapture();
+                            }
+
+                            WaveFormat outputFormat = endpoint.AudioClient.MixFormat;
+                            var provider = new BufferedWaveProvider(outputFormat)
+                            {
+                                BufferDuration = TimeSpan.FromMilliseconds(250),
+                                DiscardOnBufferOverflow = true,
+                            };
+
+                            var output = new WasapiOut(endpoint,
+                                AudioClientShareMode.Shared, true, 40);
+                            output.Init(provider);
+                            output.Play();
+
+                            slots[slot] = new SlotPlayback(endpoint.ID, output,
+                                provider, outputFormat, speakerVolume);
+                            EnsureCaptureStarted(requestedCaptureEndpointId,
+                                endpoint.ID,
+                                GetEndpointKind(emulatedControllerType));
+                            AppLogger.LogToGui(
+                                $"DualSense audio passthrough started for controller {slot + 1}: {endpoint.FriendlyName}",
+                                false);
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
                     AppLogger.LogToGui($"DualSense audio passthrough failed to start: {ex.Message}", true);
-                    Stop(slot);
+                    lock (syncRoot)
+                    {
+                        failedPlayback = slots[slot];
+                        slots[slot] = null;
+                        if (!slots.Any(item => item != null))
+                        {
+                            StopCapture();
+                        }
+                    }
+                }
+
+                playbackToDispose?.Dispose();
+                if (!ReferenceEquals(failedPlayback, playbackToDispose))
+                {
+                    failedPlayback?.Dispose();
+                }
+
+                if (endpointMissing)
+                {
+                    return;
                 }
             }
         }
@@ -108,106 +197,196 @@ namespace DS4Windows
                 return;
             }
 
-            lock (syncRoot)
+            lock (bluetoothStartGates[slot])
             {
-                SlotPlayback playback = slots[slot];
-                slots[slot] = null;
-                playback?.Dispose();
-
-                DualSenseBluetoothSpeakerPassthrough bluetoothPlayback = bluetoothSlots[slot];
-                bluetoothSlots[slot] = null;
-                bluetoothStartGeneration[slot]++;
-                bluetoothPlayback?.Dispose();
-
-                if (!slots.Any(item => item != null))
+                SlotPlayback playback;
+                DualSenseBluetoothSpeakerPassthrough bluetoothPlayback;
+                lock (syncRoot)
                 {
-                    StopCapture();
+                    playback = slots[slot];
+                    slots[slot] = null;
+
+                    bluetoothPlayback = bluetoothSlots[slot];
+                    bluetoothSlots[slot] = null;
+                    bluetoothStartGeneration[slot]++;
+
+                    if (!slots.Any(item => item != null))
+                    {
+                        StopCapture();
+                    }
                 }
+
+                playback?.Dispose();
+                bluetoothPlayback?.Dispose();
             }
         }
 
         public void Dispose()
         {
+            var playbacks = new SlotPlayback[slots.Length];
+            var bluetoothPlaybacks =
+                new DualSenseBluetoothSpeakerPassthrough[bluetoothSlots.Length];
             lock (syncRoot)
             {
+                if (disposed)
+                {
+                    return;
+                }
+
+                disposed = true;
                 for (int i = 0; i < slots.Length; i++)
                 {
-                    slots[i]?.Dispose();
+                    playbacks[i] = slots[i];
                     slots[i] = null;
-                    bluetoothSlots[i]?.Dispose();
+                    bluetoothPlaybacks[i] = bluetoothSlots[i];
                     bluetoothSlots[i] = null;
                     bluetoothStartGeneration[i]++;
                 }
 
                 StopCapture();
             }
+
+            for (int i = 0; i < slots.Length; i++)
+            {
+                lock (bluetoothStartGates[i])
+                {
+                    playbacks[i]?.Dispose();
+                    bluetoothPlaybacks[i]?.Dispose();
+                }
+            }
         }
 
         private void StartBluetooth(int slot, DualSenseDevice device, byte speakerVolume,
             DualSenseSpeakerCompression speakerCompression, byte speakerBassBoost,
-            string requestedCaptureEndpointId, OutContType emulatedControllerType)
+            string requestedCaptureEndpointId, OutContType emulatedControllerType,
+            ViiperOutDevice directSpeakerSource)
         {
             requestedCaptureEndpointId ??= string.Empty;
             ControllerAudioEndpointKind endpointKind = GetEndpointKind(emulatedControllerType);
-            lock (syncRoot)
+            DirectSpeakerRouteDecision initialRoute =
+                EvaluateDirectSpeakerRoute(requestedCaptureEndpointId,
+                    endpointKind, directSpeakerSource);
+            if (initialRoute == DirectSpeakerRouteDecision.Loopback)
             {
-                if (bluetoothSlots[slot]?.Matches(device, speakerVolume, speakerCompression,
-                    speakerBassBoost, requestedCaptureEndpointId, endpointKind) == true)
-                {
-                    return;
-                }
-
-                SlotPlayback usbPlayback = slots[slot];
-                slots[slot] = null;
-                usbPlayback?.Dispose();
-                if (!slots.Any(item => item != null))
-                {
-                    StopCapture();
-                }
-
-                DualSenseBluetoothSpeakerPassthrough previous = bluetoothSlots[slot];
-                bluetoothSlots[slot] = null;
-                previous?.Dispose();
-                int generation = ++bluetoothStartGeneration[slot];
-                _ = Task.Run(() => StartBluetoothWithRetry(slot, device, speakerVolume,
-                    speakerCompression, speakerBassBoost, requestedCaptureEndpointId,
-                    endpointKind, generation));
+                directSpeakerSource = null;
             }
+
+            int generation;
+            lock (bluetoothStartGates[slot])
+            {
+                SlotPlayback usbPlayback;
+                DualSenseBluetoothSpeakerPassthrough previous;
+                lock (syncRoot)
+                {
+                    if (disposed)
+                    {
+                        return;
+                    }
+
+                    if (bluetoothSlots[slot]?.Matches(device, speakerVolume,
+                        speakerCompression, speakerBassBoost,
+                        requestedCaptureEndpointId, endpointKind,
+                        directSpeakerSource) == true)
+                    {
+                        return;
+                    }
+
+                    usbPlayback = slots[slot];
+                    slots[slot] = null;
+                    if (!slots.Any(item => item != null))
+                    {
+                        StopCapture();
+                    }
+
+                    previous = bluetoothSlots[slot];
+                    bluetoothSlots[slot] = null;
+                    generation = ++bluetoothStartGeneration[slot];
+                }
+
+                usbPlayback?.Dispose();
+                previous?.Dispose();
+            }
+
+            _ = Task.Run(() => StartBluetoothWithRetry(slot, device, speakerVolume,
+                speakerCompression, speakerBassBoost, requestedCaptureEndpointId,
+                endpointKind, directSpeakerSource, generation));
         }
 
         private void StartBluetoothWithRetry(int slot, DualSenseDevice device, byte speakerVolume,
             DualSenseSpeakerCompression speakerCompression, byte speakerBassBoost,
             string requestedCaptureEndpointId, ControllerAudioEndpointKind endpointKind,
-            int generation)
+            ViiperOutDevice directSpeakerSource, int generation)
         {
-            const int attempts = 10;
+            // At most one start attempt may own a physical controller slot.
+            // A superseded task is allowed to finish/tear down before its
+            // replacement starts, so it can never clear the winner's speaker
+            // frame during the publish-generation check.
+            lock (bluetoothStartGates[slot])
+            {
+                StartBluetoothWithRetrySerialized(slot, device,
+                    speakerVolume, speakerCompression, speakerBassBoost,
+                    requestedCaptureEndpointId, endpointKind,
+                    directSpeakerSource, generation);
+            }
+        }
+
+        private void StartBluetoothWithRetrySerialized(int slot,
+            DualSenseDevice device, byte speakerVolume,
+            DualSenseSpeakerCompression speakerCompression,
+            byte speakerBassBoost, string requestedCaptureEndpointId,
+            ControllerAudioEndpointKind endpointKind,
+            ViiperOutDevice directSpeakerSource, int generation)
+        {
+            const int attempts = 20;
             Exception lastError = null;
 
             for (int attempt = 0; attempt < attempts; attempt++)
             {
                 lock (syncRoot)
                 {
-                    if (generation != bluetoothStartGeneration[slot])
+                    if (disposed ||
+                        generation != bluetoothStartGeneration[slot])
                     {
                         return;
                     }
                 }
 
+                DirectSpeakerRouteDecision route =
+                    EvaluateDirectSpeakerRoute(requestedCaptureEndpointId,
+                        endpointKind, directSpeakerSource);
+                if (route == DirectSpeakerRouteDecision.Pending)
+                {
+                    lastError = new InvalidOperationException(
+                        "The selected VIIPER controller audio endpoint is still enumerating or its direct stream is recovering.");
+                    Thread.Sleep(500);
+                    continue;
+                }
+
+                ViiperOutDevice activeDirectSpeakerSource =
+                    route == DirectSpeakerRouteDecision.Direct ?
+                        directSpeakerSource : null;
                 var bluetoothPlayback = new DualSenseBluetoothSpeakerPassthrough(device,
                     speakerVolume, speakerCompression, speakerBassBoost,
-                    requestedCaptureEndpointId, endpointKind);
+                    requestedCaptureEndpointId, endpointKind,
+                    activeDirectSpeakerSource);
                 try
                 {
                     bluetoothPlayback.Start();
+                    bool superseded;
                     lock (syncRoot)
                     {
-                        if (generation != bluetoothStartGeneration[slot])
+                        superseded = disposed ||
+                            generation != bluetoothStartGeneration[slot];
+                        if (!superseded)
                         {
-                            bluetoothPlayback.Dispose();
-                            return;
+                            bluetoothSlots[slot] = bluetoothPlayback;
                         }
+                    }
 
-                        bluetoothSlots[slot] = bluetoothPlayback;
+                    if (superseded)
+                    {
+                        bluetoothPlayback.Dispose();
+                        return;
                     }
 
                     return;
@@ -225,11 +404,16 @@ namespace DS4Windows
 
         private void StopBluetooth(int slot)
         {
-            lock (syncRoot)
+            lock (bluetoothStartGates[slot])
             {
-                DualSenseBluetoothSpeakerPassthrough bluetoothPlayback = bluetoothSlots[slot];
-                bluetoothSlots[slot] = null;
-                bluetoothStartGeneration[slot]++;
+                DualSenseBluetoothSpeakerPassthrough bluetoothPlayback;
+                lock (syncRoot)
+                {
+                    bluetoothPlayback = bluetoothSlots[slot];
+                    bluetoothSlots[slot] = null;
+                    bluetoothStartGeneration[slot]++;
+                }
+
                 bluetoothPlayback?.Dispose();
             }
         }
@@ -500,6 +684,289 @@ namespace DS4Windows
             };
         }
 
+        internal static bool IsDirectSpeakerRequest(string endpointId,
+            bool explicitEndpointOwnedByDirectSource)
+        {
+            endpointId ??= string.Empty;
+            if (string.IsNullOrEmpty(endpointId) ||
+                string.Equals(endpointId, AutoDetectGameAudioEndpointId,
+                    StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            if (string.Equals(endpointId, DefaultSystemAudioEndpointId,
+                StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            return explicitEndpointOwnedByDirectSource;
+        }
+
+        internal static DirectSpeakerRouteDecision DecideDirectSpeakerRoute(
+            string endpointId, bool directSourceCapable,
+            bool directStreamActive,
+            DirectSpeakerEndpointOwnership explicitEndpointOwnership)
+        {
+            endpointId ??= string.Empty;
+            if (string.Equals(endpointId, DefaultSystemAudioEndpointId,
+                StringComparison.Ordinal))
+            {
+                return DirectSpeakerRouteDecision.Loopback;
+            }
+
+            if (!directSourceCapable)
+            {
+                return DirectSpeakerRouteDecision.Loopback;
+            }
+
+            bool automatic = string.IsNullOrEmpty(endpointId) ||
+                string.Equals(endpointId, AutoDetectGameAudioEndpointId,
+                    StringComparison.Ordinal);
+            if (automatic)
+            {
+                return directStreamActive ? DirectSpeakerRouteDecision.Direct :
+                    DirectSpeakerRouteDecision.Pending;
+            }
+
+            return explicitEndpointOwnership switch
+            {
+                DirectSpeakerEndpointOwnership.Owned when directStreamActive =>
+                    DirectSpeakerRouteDecision.Direct,
+                DirectSpeakerEndpointOwnership.Owned =>
+                    DirectSpeakerRouteDecision.Pending,
+                DirectSpeakerEndpointOwnership.Unowned =>
+                    DirectSpeakerRouteDecision.Loopback,
+                _ => DirectSpeakerRouteDecision.Pending,
+            };
+        }
+
+        internal static DirectSpeakerRouteDecision EvaluateDirectSpeakerRoute(
+            string endpointId,
+            ControllerAudioEndpointKind endpointKind,
+            ViiperOutDevice directSpeakerSource)
+        {
+            bool capable = directSpeakerSource?.CanProvideDirectSpeakerPcm == true;
+            bool active = directSpeakerSource?.SupportsDirectSpeakerPcm == true;
+            DirectSpeakerEndpointOwnership ownership =
+                DirectSpeakerEndpointOwnership.Unresolved;
+            bool explicitEndpoint = !string.IsNullOrEmpty(endpointId) &&
+                !string.Equals(endpointId, AutoDetectGameAudioEndpointId,
+                    StringComparison.Ordinal) &&
+                !string.Equals(endpointId, DefaultSystemAudioEndpointId,
+                    StringComparison.Ordinal);
+            if (capable && explicitEndpoint)
+            {
+                ownership = ResolveExplicitEndpointOwnership(endpointId,
+                    endpointKind, directSpeakerSource);
+            }
+
+            return DecideDirectSpeakerRoute(endpointId, capable, active,
+                ownership);
+        }
+
+        private static DirectSpeakerEndpointOwnership
+            ResolveExplicitEndpointOwnership(
+            string endpointId, ControllerAudioEndpointKind endpointKind,
+            ViiperOutDevice directSpeakerSource)
+        {
+            if (string.IsNullOrEmpty(endpointId) ||
+                directSpeakerSource == null)
+            {
+                return DirectSpeakerEndpointOwnership.Unresolved;
+            }
+
+            try
+            {
+                using var enumerator = new MMDeviceEnumerator();
+                List<MMDevice> activeEndpoints = enumerator
+                    .EnumerateAudioEndPoints(DataFlow.Render,
+                        DeviceState.Active).ToList();
+                try
+                {
+                    MMDevice exactEndpoint = activeEndpoints.FirstOrDefault(
+                        endpoint => string.Equals(endpoint.ID, endpointId,
+                            StringComparison.Ordinal));
+                    if (exactEndpoint != null)
+                    {
+                        return ResolveEndpointOwnership(exactEndpoint,
+                            endpointKind, directSpeakerSource);
+                    }
+
+                    DirectSpeakerEndpointOwnership replacementResult =
+                        DirectSpeakerEndpointOwnership.Unresolved;
+                    foreach (MMDevice candidate in activeEndpoints.Where(
+                        endpoint => EndpointReplaces(endpoint, endpointId)))
+                    {
+                        DirectSpeakerEndpointOwnership candidateResult =
+                            ResolveEndpointOwnership(candidate, endpointKind,
+                                directSpeakerSource);
+                        if (candidateResult ==
+                            DirectSpeakerEndpointOwnership.Owned)
+                        {
+                            return candidateResult;
+                        }
+
+                        if (candidateResult ==
+                            DirectSpeakerEndpointOwnership.Unowned)
+                        {
+                            replacementResult = candidateResult;
+                        }
+                    }
+
+                    if (replacementResult !=
+                        DirectSpeakerEndpointOwnership.Unresolved)
+                    {
+                        return replacementResult;
+                    }
+                }
+                finally
+                {
+                    foreach (MMDevice endpoint in activeEndpoints)
+                    {
+                        endpoint.Dispose();
+                    }
+                }
+
+                try
+                {
+                    using MMDevice savedEndpoint =
+                        enumerator.GetDevice(endpointId);
+                    if (savedEndpoint?.State == DeviceState.Active)
+                    {
+                        return ResolveEndpointOwnership(savedEndpoint,
+                            endpointKind, directSpeakerSource);
+                    }
+
+                    // Profiles retain the concrete render-endpoint GUID that
+                    // was active when they were saved. Switching the VIIPER
+                    // persona recreates that endpoint with a different Sony
+                    // identity and GUID (for example DS4 -> DualSense). An
+                    // inactive controller endpoint of the other kind can never
+                    // become the current direct source, so treating it as a
+                    // transient enumeration failure leaves a healthy V3 stream
+                    // stuck in Pending forever. Route the current controller's
+                    // direct PCM in that one cross-persona case. Non-controller
+                    // endpoints remain explicit and are never silently changed.
+                    if (savedEndpoint != null &&
+                        IsStaleControllerEndpointSelection(
+                            ClassifyEndpoint(savedEndpoint), endpointKind))
+                    {
+                        return DirectSpeakerEndpointOwnership.Owned;
+                    }
+                }
+                catch
+                {
+                    // Missing and inactive saved endpoints are both transient:
+                    // the VIIPER USB audio function may still be enumerating.
+                }
+
+                return DirectSpeakerEndpointOwnership.Unresolved;
+            }
+            catch
+            {
+                return DirectSpeakerEndpointOwnership.Unresolved;
+            }
+        }
+
+        internal static bool IsStaleControllerEndpointSelection(
+            ControllerAudioEndpointKind savedEndpointKind,
+            ControllerAudioEndpointKind currentOutputKind)
+        {
+            bool savedIsSpecificController =
+                savedEndpointKind == ControllerAudioEndpointKind.DualShock4 ||
+                savedEndpointKind == ControllerAudioEndpointKind.DualSense;
+            bool currentIsSpecificController =
+                currentOutputKind == ControllerAudioEndpointKind.DualShock4 ||
+                currentOutputKind == ControllerAudioEndpointKind.DualSense;
+            return savedIsSpecificController && currentIsSpecificController &&
+                savedEndpointKind != currentOutputKind;
+        }
+
+        private static DirectSpeakerEndpointOwnership ResolveEndpointOwnership(
+            MMDevice endpoint, ControllerAudioEndpointKind endpointKind,
+            ViiperOutDevice directSpeakerSource)
+        {
+            bool identityMatches = EndpointKindMatches(endpoint, endpointKind);
+            string interfacePath = GetEndpointProperty(endpoint,
+                PropertyKeys.PKEY_Device_InterfaceKey);
+            int pathStart = interfacePath.IndexOf(@"\\?\",
+                StringComparison.Ordinal);
+            if (pathStart > 0)
+            {
+                interfacePath = interfacePath.Substring(pathStart);
+            }
+
+            bool interfacePathAvailable =
+                !string.IsNullOrEmpty(interfacePath);
+            int endpointPort = -1;
+            bool usbIpAncestor = false;
+            bool usbIpQueryResolved = interfacePathAvailable &&
+                Global.TryResolveUsbIpWin2Device(interfacePath,
+                    out usbIpAncestor, out endpointPort);
+
+            return ClassifyDirectSpeakerEndpointOwnership(
+                endpoint?.State == DeviceState.Active, identityMatches,
+                interfacePathAvailable, usbIpQueryResolved, usbIpAncestor,
+                endpointPort, directSpeakerSource?.DirectSpeakerUsbipPort ?? -1);
+        }
+
+        internal static DirectSpeakerEndpointOwnership
+            ClassifyDirectSpeakerEndpointOwnership(bool endpointActive,
+            bool controllerIdentityMatches, bool interfacePathAvailable,
+            bool usbIpQueryResolved, bool usbIpAncestor, int endpointPort,
+            int sourcePort)
+        {
+            if (!endpointActive)
+            {
+                return DirectSpeakerEndpointOwnership.Unresolved;
+            }
+
+            if (!controllerIdentityMatches)
+            {
+                return DirectSpeakerEndpointOwnership.Unowned;
+            }
+
+            if (!interfacePathAvailable)
+            {
+                return DirectSpeakerEndpointOwnership.Unresolved;
+            }
+
+            if (!usbIpQueryResolved)
+            {
+                return DirectSpeakerEndpointOwnership.Unresolved;
+            }
+
+            if (!usbIpAncestor)
+            {
+                return DirectSpeakerEndpointOwnership.Unowned;
+            }
+
+            if (endpointPort < 0 || sourcePort < 0)
+            {
+                return DirectSpeakerEndpointOwnership.Unresolved;
+            }
+
+            return endpointPort == sourcePort ?
+                DirectSpeakerEndpointOwnership.Owned :
+                DirectSpeakerEndpointOwnership.Unowned;
+        }
+
+        private static bool EndpointKindMatches(MMDevice endpoint,
+            ControllerAudioEndpointKind expectedKind)
+        {
+            if (!IsControllerAudioEndpoint(endpoint))
+            {
+                return false;
+            }
+
+            ControllerAudioEndpointKind actualKind = ClassifyEndpoint(endpoint);
+            return expectedKind == ControllerAudioEndpointKind.Any ||
+                actualKind == expectedKind ||
+                actualKind == ControllerAudioEndpointKind.Any;
+        }
+
         internal static ControllerAudioEndpointKind ClassifyEndpointIdentity(string identity)
         {
             identity ??= string.Empty;
@@ -557,6 +1024,20 @@ namespace DS4Windows
             AddEndpointProperty(values, endpoint, PropertyKeys.PKEY_Device_ControllerDeviceId);
             AddEndpointProperty(values, endpoint, PropertyKeys.PKEY_Device_InterfaceKey);
             return string.Join(" ", values);
+        }
+
+        private static string GetEndpointProperty(MMDevice endpoint,
+            PropertyKey propertyKey)
+        {
+            try
+            {
+                return endpoint?.Properties[propertyKey]?.Value?.ToString() ??
+                    string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
+            }
         }
 
         private static void AddEndpointProperty(List<string> values, MMDevice endpoint,

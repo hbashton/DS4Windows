@@ -199,78 +199,89 @@ namespace DS4Windows
                 detectNewControllers = value;
             }
         }
-        // Registry of device paths for virtual DS4 controllers that DS4Windows itself
-        // created as OUTPUT (via ViGEmBus). These must never be ingested as INPUT, even
-        // when "Virtual Controller Support" (Moonlight) is enabled, otherwise DS4Windows
-        // detects its own DS4 output as a new controller, spawns another virtual DS4 for
-        // it, detects that one too, and cascades until every output slot is filled.
+        // Registry of Sony HID paths created by DS4Windows through VIIPER. These
+        // complete USB/IP devices look physical to Windows and must never be
+        // re-ingested as input, regardless of the selected virtual Sony persona.
         private static readonly object ownVirtualLock = new object();
-        private static readonly HashSet<string> ownVirtualDS4Paths =
+        private static readonly HashSet<string> ownVirtualSonyPaths =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        private static int pendingOwnVirtualDS4Connects;
-        private static long pendingOwnVirtualDS4Timestamp;
+        private static int pendingOwnVirtualSonyConnects;
+        private static long pendingOwnVirtualSonyTimestamp;
 
         // ViGEm-created DS4 controllers report the Sony VID with one of these PIDs.
         private static readonly int[] VirtualDS4Pids = { 0x05C4, 0x09CC };
-        private static readonly TimeSpan OwnVirtualDS4PendingTimeout = TimeSpan.FromSeconds(15);
+        private static readonly int[] ViiperSonyPids =
+            { 0x05C4, 0x09CC, 0x0CE6, 0x0DF2 };
+        private static readonly TimeSpan OwnVirtualSonyPendingTimeout =
+            TimeSpan.FromSeconds(15);
         private const string VigemVirtualDS4MacPrefix = "C0:13:37";
 
-        private static HashSet<string> SnapshotVirtualDS4Paths()
+        internal static bool IsViiperSonyProductId(int productId)
+        {
+            return ViiperSonyPids.Contains(productId);
+        }
+
+        private static HashSet<string> SnapshotVirtualSonyPaths()
         {
             var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             try
             {
-                foreach (HidDevice d in HidDevices.Enumerate(SONY_VID, VirtualDS4Pids))
+                foreach (HidDevice d in HidDevices.Enumerate(SONY_VID,
+                    ViiperSonyPids))
                 {
-                    if (Global.CheckIfVirtualDevice(d.DevicePath))
-                    {
-                        set.Add(d.DevicePath);
-                    }
+                    // VIIPER exposes a complete USB/IP composite device, so
+                    // Windows does not classify it as a software-enumerated
+                    // virtual HID. Snapshot every supported Sony path and identify
+                    // our output by the before/after difference instead.
+                    set.Add(d.DevicePath);
                 }
             }
             catch { /* enumeration best-effort; never throw into the plug path */ }
             return set;
         }
 
-        // Capture the set of virtual DS4 controllers present immediately BEFORE we plug
-        // in one of our own. Call RegisterOwnVirtualDS4 with this snapshot right after.
-        public static HashSet<string> SnapshotBeforeOwnVirtualDS4()
+        // Capture every supported Sony controller immediately before VIIPER
+        // creates one of our outputs. The before/after delta remains a fallback
+        // for transient PnP states where the USB/IP port cannot yet be resolved.
+        public static HashSet<string> SnapshotBeforeOwnVirtualSony()
         {
-            HashSet<string> before = SnapshotVirtualDS4Paths();
+            HashSet<string> before = SnapshotVirtualSonyPaths();
             return before;
         }
 
-        public static void BeginOwnVirtualDS4Connect()
+        public static void BeginOwnVirtualSonyConnect()
         {
             lock (ownVirtualLock)
             {
-                pendingOwnVirtualDS4Connects++;
-                pendingOwnVirtualDS4Timestamp = Stopwatch.GetTimestamp();
+                pendingOwnVirtualSonyConnects++;
+                pendingOwnVirtualSonyTimestamp = Stopwatch.GetTimestamp();
             }
         }
 
-        public static void EndOwnVirtualDS4Connect()
+        public static void EndOwnVirtualSonyConnect()
         {
             lock (ownVirtualLock)
             {
-                if (pendingOwnVirtualDS4Connects > 0)
+                if (pendingOwnVirtualSonyConnects > 0)
                 {
-                    pendingOwnVirtualDS4Connects--;
+                    pendingOwnVirtualSonyConnects--;
                 }
             }
         }
 
-        private static bool IsOwnVirtualDS4ConnectPending()
+        private static bool IsOwnVirtualSonyConnectPending()
         {
             lock (ownVirtualLock)
             {
-                if (pendingOwnVirtualDS4Connects <= 0)
+                if (pendingOwnVirtualSonyConnects <= 0)
                 {
                     return false;
                 }
 
-                long elapsed = Stopwatch.GetTimestamp() - pendingOwnVirtualDS4Timestamp;
-                long timeoutTicks = (long)(OwnVirtualDS4PendingTimeout.TotalSeconds * Stopwatch.Frequency);
+                long elapsed = Stopwatch.GetTimestamp() -
+                    pendingOwnVirtualSonyTimestamp;
+                long timeoutTicks = (long)(OwnVirtualSonyPendingTimeout.
+                    TotalSeconds * Stopwatch.Frequency);
                 return elapsed < timeoutTicks;
             }
         }
@@ -280,7 +291,8 @@ namespace DS4Windows
         // returned, so registration must outlive Connect() without blocking startup.
         // The pending guard rejects the arriving virtual HID immediately; the path
         // registry then keeps rejecting it for the rest of that output's lifetime.
-        public static void RegisterOwnVirtualDS4Async(HashSet<string> beforePaths)
+        public static void RegisterOwnVirtualSonyAsync(
+            HashSet<string> beforePaths)
         {
             var worker = new System.Threading.Thread(() =>
             {
@@ -290,7 +302,7 @@ namespace DS4Windows
                     bool foundNew = false;
                     for (int attempt = 0; attempt < 300 && !foundNew; attempt++)
                     {
-                        after = SnapshotVirtualDS4Paths();
+                        after = SnapshotVirtualSonyPaths();
                         foreach (string path in after)
                         {
                             if (beforePaths == null || !beforePaths.Contains(path))
@@ -317,21 +329,22 @@ namespace DS4Windows
                         {
                             if (beforePaths == null || !beforePaths.Contains(path))
                             {
-                                ownVirtualDS4Paths.Add(path);
+                                ownVirtualSonyPaths.Add(path);
                             }
                         }
 
-                        ownVirtualDS4Paths.RemoveWhere(path => !after.Contains(path));
+                        ownVirtualSonyPaths.RemoveWhere(path =>
+                            !after.Contains(path));
                     }
                 }
                 finally
                 {
-                    EndOwnVirtualDS4Connect();
+                    EndOwnVirtualSonyConnect();
                 }
             })
             {
                 IsBackground = true,
-                Name = "DS4Windows VIIPER DS4 registration",
+                Name = "DS4Windows VIIPER Sony HID registration",
                 Priority = System.Threading.ThreadPriority.BelowNormal,
             };
 
@@ -341,18 +354,32 @@ namespace DS4Windows
             }
             catch
             {
-                EndOwnVirtualDS4Connect();
+                EndOwnVirtualSonyConnect();
                 throw;
             }
         }
 
-        // True if devicePath is a virtual DS4 that DS4Windows created as output.
+        // True if devicePath belongs to a currently owned VIIPER Sony output.
+        // Match the active USB/IP port first so delayed HID enumeration and
+        // DualSense/Edge personas cannot bypass the path-delta fallback.
         public static bool IsOwnVirtualDevice(string devicePath)
         {
+            if (string.IsNullOrEmpty(devicePath))
+            {
+                return false;
+            }
+
             lock (ownVirtualLock)
             {
-                return ownVirtualDS4Paths.Count > 0 && ownVirtualDS4Paths.Contains(devicePath);
+                if (ownVirtualSonyPaths.Count > 0 &&
+                    ownVirtualSonyPaths.Contains(devicePath))
+                {
+                    return true;
+                }
             }
+
+            return Global.TryGetUsbIpWin2Port(devicePath, out int port) &&
+                ViiperUsbipPortManager.IsActivePort(port);
         }
 
         private static bool HasViGEmVirtualDS4Identity(HidDevice hDevice, string serial)
@@ -381,9 +408,9 @@ namespace DS4Windows
 
             bool isVirtualDevice = Global.CheckIfVirtualDevice(hDevice.DevicePath);
 
-            if (isVirtualDevice && hDevice.Attributes.VendorId == SONY_VID &&
-                VirtualDS4Pids.Contains(hDevice.Attributes.ProductId) &&
-                IsOwnVirtualDS4ConnectPending())
+            if (hDevice.Attributes.VendorId == SONY_VID &&
+                IsViiperSonyProductId(hDevice.Attributes.ProductId) &&
+                IsOwnVirtualSonyConnectPending())
             {
                 return false;
             }

@@ -29,7 +29,7 @@
             <Setter Property="TextTrimming" Value="CharacterEllipsis" />
         </Style>
 
-        <Style x:Key="OverviewAudioPanelStyle" TargetType="Grid">
+        <Style x:Key="OverviewSpeakerPanelStyle" TargetType="Grid">
             <Setter Property="Opacity" Value="1" />
             <Setter Property="IsEnabled" Value="True" />
             <Style.Triggers>
@@ -213,7 +213,8 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
 
-                            <TextBlock Text="Haptic feedback" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding SelectedController.FeedbackControlLabel}"
+                                       FontWeight="SemiBold" />
                             <TextBlock Grid.Column="1" Text="{Binding HapticStrengthPercent, StringFormat={}{0}%}"
                                        FontWeight="SemiBold" Foreground="{DynamicResource AccentColor}" />
                             <Slider Grid.Row="1" Grid.ColumnSpan="2" Margin="0,9,0,0"
@@ -232,8 +233,7 @@
                                        Foreground="{DynamicResource MutedForegroundColor}" FontSize="11" />
                         </StackPanel>
 
-                        <Grid Grid.Row="1" Grid.RowSpan="2" Grid.Column="2"
-                              Style="{StaticResource OverviewAudioPanelStyle}">
+                        <Grid Grid.Row="1" Grid.RowSpan="2" Grid.Column="2">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
@@ -246,27 +246,52 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
 
-                            <StackPanel Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,12">
-                                <TextBlock Text="DualSense audio" FontWeight="SemiBold" />
-                                <TextBlock Text="  ·  available on DualSense controllers" FontSize="11"
+                            <StackPanel Grid.ColumnSpan="2" Margin="0,0,0,12">
+                                <TextBlock Text="{Binding SelectedController.ControllerAudioHeader}"
+                                           FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding SelectedController.ControllerAudioDescription}"
+                                           Margin="0,3,0,0" FontSize="11" TextWrapping="Wrap"
                                            Foreground="{DynamicResource MutedForegroundColor}" />
                             </StackPanel>
 
-                            <CheckBox Grid.Row="1" Grid.ColumnSpan="2" Content="Mirror audio to controller speaker"
-                                      IsChecked="{Binding SpeakerOutputEnabled, Mode=TwoWay}" Margin="0,0,0,12" />
+                            <Grid Grid.Row="1" Grid.RowSpan="3" Grid.ColumnSpan="2"
+                                  Style="{StaticResource OverviewSpeakerPanelStyle}">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
 
-                            <TextBlock Grid.Row="2" Text="Speaker level" VerticalAlignment="Center" />
-                            <TextBlock Grid.Row="2" Grid.Column="1"
-                                       Text="{Binding SpeakerVolumePercent, StringFormat={}{0}%}"
-                                       Foreground="{DynamicResource AccentColor}" />
-                            <Slider Grid.Row="3" Grid.ColumnSpan="2" Margin="0,7,0,14"
-                                    Minimum="0" Maximum="100" TickFrequency="1"
-                                    Value="{Binding SpeakerVolumePercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
+                                <CheckBox Grid.ColumnSpan="2" Content="Mirror audio to controller speaker"
+                                          IsChecked="{Binding SpeakerOutputEnabled, Mode=TwoWay}"
+                                          Margin="0,0,0,12" />
+                                <TextBlock Grid.Row="1" Text="Speaker level" VerticalAlignment="Center" />
+                                <TextBlock Grid.Row="1" Grid.Column="1"
+                                           Text="{Binding SpeakerVolumePercent, StringFormat={}{0}%}"
+                                           Foreground="{DynamicResource AccentColor}" />
+                                <Slider Grid.Row="2" Grid.ColumnSpan="2" Margin="0,7,0,14"
+                                        Minimum="0" Maximum="100" TickFrequency="1"
+                                        Value="{Binding SpeakerVolumePercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
+                            </Grid>
 
                             <StackPanel Grid.Row="4" Grid.ColumnSpan="2">
-                                <CheckBox Content="Enable controller microphone input"
-                                          IsChecked="{Binding MicrophoneInputEnabled, Mode=TwoWay}" Margin="0,0,0,9" />
-                                <Grid>
+                                <CheckBox Content="{Binding SelectedController.MicrophoneToggleLabel}"
+                                          IsChecked="{Binding MicrophoneInputEnabled, Mode=TwoWay}"
+                                          IsEnabled="{Binding CanChangeMicrophoneInput}"
+                                          ToolTip="{Binding MicrophoneAvailabilityText}"
+                                          Margin="0,0,0,9" />
+                                <TextBlock Text="{Binding SelectedController.MicrophoneDescription}"
+                                           Margin="0,0,0,9" FontSize="11" TextWrapping="Wrap"
+                                           Foreground="{DynamicResource MutedForegroundColor}" />
+                                <TextBlock Margin="0,0,0,9" FontSize="11" TextWrapping="Wrap"
+                                           Foreground="{DynamicResource MutedForegroundColor}"
+                                           Text="{Binding MicrophoneAvailabilityText}"
+                                           Visibility="{Binding ShowMicrophoneAvailabilityMessage, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                <Grid IsEnabled="{Binding MicrophoneLevelControlsEnabled}">
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />

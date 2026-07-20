@@ -105,6 +105,11 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public event EventHandler SelectedControllerConnectionChanged;
         public event EventHandler SelectedControllerLatencyChanged;
         public event EventHandler SelectedControllerSupportsAudioChanged;
+        public event EventHandler SelectedControllerSupportsMicrophoneChanged;
+        public event EventHandler MicrophoneAvailabilityTextChanged;
+        public event EventHandler ShowMicrophoneAvailabilityMessageChanged;
+        public event EventHandler CanChangeMicrophoneInputChanged;
+        public event EventHandler MicrophoneLevelControlsEnabledChanged;
         public event EventHandler SelectedControllerIsWirelessChanged;
         public event EventHandler SelectedOutputControllerChanged;
         public event EventHandler SelectedOutputControllerNameChanged;
@@ -126,7 +131,49 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public string SelectedControllerLatency => selectedController?.LatencyText ?? "--";
 
-        public bool SelectedControllerSupportsAudio => selectedController?.SupportsDualSenseAudio == true;
+        public bool SelectedControllerSupportsAudio =>
+            selectedController?.SupportsControllerAudio == true;
+
+        private ControllerMicrophoneUiState SelectedControllerMicrophoneUiState
+        {
+            get
+            {
+                if (!HasValidSelectedDevice)
+                {
+                    return new ControllerMicrophoneUiState(
+                        ControllerMicrophoneUiStatus.RequiresCompatibleController,
+                        canEnable: false,
+                        "Select a compatible PlayStation controller to configure microphone input.");
+                }
+
+                int deviceIndex = selectedController.DevIndex;
+                ViiperOutDevice outputDevice = App.rootHub?.outputDevices[deviceIndex]
+                    as ViiperOutDevice;
+                return ControllerUiCapabilities.ForDevice(selectedController.Device)
+                    .GetMicrophoneUiState(Global.OutContType[deviceIndex],
+                        outputDevice?.SupportsActiveVirtualMicrophone == true,
+                        requireActiveStream: true);
+            }
+        }
+
+        public bool SelectedControllerSupportsMicrophone =>
+            SelectedControllerMicrophoneUiState.CanEnable;
+
+        public string MicrophoneAvailabilityText =>
+            SelectedControllerMicrophoneUiState.Message;
+
+        public bool ShowMicrophoneAvailabilityMessage =>
+            SelectedControllerMicrophoneUiState.ShowMessage;
+
+        // Keep an already-enabled but no-longer-supported profile switch
+        // actionable so the user can turn it off from Overview.
+        public bool CanChangeMicrophoneInput => HasValidSelectedDevice &&
+            SelectedControllerMicrophoneUiState.CanChange(
+                MicrophoneInputEnabled);
+
+        public bool MicrophoneLevelControlsEnabled =>
+            SelectedControllerMicrophoneUiState.CanAdjustLevel(
+                MicrophoneInputEnabled);
 
         public bool SelectedControllerIsWireless => selectedController?.IsWireless == true;
 
@@ -149,6 +196,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 Global.outDevTypeTemp[deviceIndex] = value;
                 SelectedOutputControllerChanged?.Invoke(this, EventArgs.Empty);
                 SelectedOutputControllerNameChanged?.Invoke(this, EventArgs.Empty);
+                RaiseMicrophoneCapabilityChanged();
                 RaiseQuickProfileSettingChanged(deviceIndex);
             }
         }
@@ -246,6 +294,9 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 int deviceIndex = selectedController.DevIndex;
                 Global.DualSenseEnableMicrophonePassthrough[deviceIndex] = value;
                 MicrophoneInputEnabledChanged?.Invoke(this, EventArgs.Empty);
+                CanChangeMicrophoneInputChanged?.Invoke(this, EventArgs.Empty);
+                MicrophoneLevelControlsEnabledChanged?.Invoke(this,
+                    EventArgs.Empty);
                 RaiseQuickProfileSettingChanged(deviceIndex);
             }
         }
@@ -294,6 +345,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             SelectedControllerConnectionChanged?.Invoke(this, EventArgs.Empty);
             SelectedControllerLatencyChanged?.Invoke(this, EventArgs.Empty);
             SelectedControllerSupportsAudioChanged?.Invoke(this, EventArgs.Empty);
+            RaiseMicrophoneCapabilityChanged();
             SelectedControllerIsWirelessChanged?.Invoke(this, EventArgs.Empty);
             SelectedOutputControllerChanged?.Invoke(this, EventArgs.Empty);
             SelectedOutputControllerNameChanged?.Invoke(this, EventArgs.Empty);
@@ -308,6 +360,19 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         {
             SelectedControllerChanged?.Invoke(this, EventArgs.Empty);
             SelectedControllerLatencyChanged?.Invoke(this, EventArgs.Empty);
+            RaiseMicrophoneCapabilityChanged();
+        }
+
+        private void RaiseMicrophoneCapabilityChanged()
+        {
+            SelectedControllerSupportsMicrophoneChanged?.Invoke(this,
+                EventArgs.Empty);
+            MicrophoneAvailabilityTextChanged?.Invoke(this, EventArgs.Empty);
+            ShowMicrophoneAvailabilityMessageChanged?.Invoke(this,
+                EventArgs.Empty);
+            CanChangeMicrophoneInputChanged?.Invoke(this, EventArgs.Empty);
+            MicrophoneLevelControlsEnabledChanged?.Invoke(this,
+                EventArgs.Empty);
         }
 
         private bool HasValidSelectedDevice => selectedController != null &&
@@ -395,6 +460,62 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             }
         }
         public event EventHandler EditingProfileNameChanged;
+
+        private string editingControllerName = "Generic profile";
+
+        public string EditingControllerName
+        {
+            get => editingControllerName;
+            private set
+            {
+                string nextValue = string.IsNullOrWhiteSpace(value)
+                    ? "Generic profile"
+                    : value;
+                if (editingControllerName == nextValue) return;
+                editingControllerName = nextValue;
+                EditingControllerNameChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        public event EventHandler EditingControllerNameChanged;
+
+        private string editingControllerImageSource;
+
+        public string EditingControllerImageSource
+        {
+            get => editingControllerImageSource;
+            private set
+            {
+                if (editingControllerImageSource == value) return;
+                editingControllerImageSource = value;
+                EditingControllerImageSourceChanged?.Invoke(this,
+                    EventArgs.Empty);
+            }
+        }
+        public event EventHandler EditingControllerImageSourceChanged;
+
+        private string editingControllerConnection;
+
+        public string EditingControllerConnection
+        {
+            get => editingControllerConnection;
+            private set
+            {
+                if (editingControllerConnection == value) return;
+                editingControllerConnection = value;
+                EditingControllerConnectionChanged?.Invoke(this,
+                    EventArgs.Empty);
+            }
+        }
+        public event EventHandler EditingControllerConnectionChanged;
+
+        public void SetEditingControllerContext(CompositeDeviceModel controller)
+        {
+            EditingControllerName = controller?.ControllerDisplayName;
+            EditingControllerImageSource = controller?.ControllerImageSource;
+            EditingControllerConnection = controller == null
+                ? "No physical controller selected"
+                : controller.ConnectionText;
+        }
 
         private int profileEditorNavigationIndex = 1;
 

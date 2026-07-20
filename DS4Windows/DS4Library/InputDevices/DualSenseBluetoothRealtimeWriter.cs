@@ -3,6 +3,7 @@ using System.Diagnostics;
 using Microsoft.Win32.SafeHandles;
 using System.Runtime.InteropServices;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace DS4Windows.InputDevices
 {
@@ -20,9 +21,11 @@ namespace DS4Windows.InputDevices
         private const uint OPEN_EXISTING = 3;
         private const uint FILE_FLAG_OVERLAPPED = 0x40000000;
         private const uint WAIT_OBJECT_0 = 0;
+        private const uint WAIT_TIMEOUT = 258;
         private const uint WAIT_FAILED = 0xFFFFFFFF;
         private const uint INFINITE = 0xFFFFFFFF;
         private const int ERROR_IO_PENDING = 997;
+        private const uint CancellationCompletionGraceMilliseconds = 100;
         private const int LateSubmissionMilliseconds = 15;
         private const int SlowCompletionMilliseconds = 20;
 
@@ -88,12 +91,16 @@ namespace DS4Windows.InputDevices
         private int nextSlot;
         private bool disposed;
         private bool nativeResourcesReleased;
+        private int deferredDisposeStarted;
         private long completedWrites;
         private long slowCompletionCount;
         private long maximumCompletionTicks;
         private long lateSubmissionCount;
         private long maximumSubmissionGapTicks;
         private long lastSubmissionTimestamp;
+        private readonly TaskCompletionSource<bool> disposalCompletion =
+            new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
 
         public long CompletedWrites => Interlocked.Read(ref completedWrites);
         public long SlowCompletionCount => Interlocked.Read(ref slowCompletionCount);
@@ -102,6 +109,8 @@ namespace DS4Windows.InputDevices
             Interlocked.Read(ref maximumCompletionTicks) * 1000.0 / Stopwatch.Frequency;
         public double MaximumSubmissionGapMilliseconds =>
             Interlocked.Read(ref maximumSubmissionGapTicks) * 1000.0 / Stopwatch.Frequency;
+        public bool NativeResourcesReleased =>
+            disposalCompletion.Task.IsCompletedSuccessfully;
 
         public void ResetSubmissionClock()
         {
@@ -254,11 +263,31 @@ namespace DS4Windows.InputDevices
 
                 ObserveCompletedWrites();
                 long now = Stopwatch.GetTimestamp();
-                WriteSlot slot = slots[nextSlot];
-                uint waitResult = WaitForSingleObject(slot.EventHandle, 0);
-                if (waitResult != WAIT_OBJECT_0)
+                WriteSlot slot = null;
+                int slotIndex = -1;
+                for (int offset = 0; offset < slots.Length; offset++)
                 {
-                    transportFault = waitResult == WAIT_FAILED;
+                    int candidateIndex = (nextSlot + offset) % slots.Length;
+                    WriteSlot candidate = slots[candidateIndex];
+                    uint waitResult = WaitForSingleObject(candidate.EventHandle, 0);
+                    if (waitResult == WAIT_FAILED)
+                    {
+                        transportFault = true;
+                        return false;
+                    }
+
+                    if (waitResult != WAIT_OBJECT_0)
+                    {
+                        continue;
+                    }
+
+                    slot = candidate;
+                    slotIndex = candidateIndex;
+                    break;
+                }
+
+                if (slot == null)
+                {
                     return false;
                 }
 
@@ -304,15 +333,16 @@ namespace DS4Windows.InputDevices
                 }
 
                 RecordSubmissionGap(now);
-                nextSlot = (nextSlot + 1) % slots.Length;
+                nextSlot = (slotIndex + 1) % slots.Length;
                 return true;
             }
         }
 
         /// <summary>
         /// Writes a one-shot control report and waits for its exact OVERLAPPED
-        /// completion. DS4 audio gives this writer a dedicated HID handle, so
-        /// the wait cannot consume or cancel the input reader's IRP.
+        /// completion. This writer owns the exact OVERLAPPED pointer even when
+        /// the HID handle is shared, so its wait/cancel cannot consume the input
+        /// reader's IRP.
         /// </summary>
         public bool TryWriteAndWait(byte[] report, uint timeoutMilliseconds,
             out bool transportFault)
@@ -333,10 +363,24 @@ namespace DS4Windows.InputDevices
                     return false;
                 }
 
+                long waitStarted = Stopwatch.GetTimestamp();
                 ObserveCompletedWrites();
-                WriteSlot slot = null;
-                foreach (WriteSlot candidate in slots)
+                // A completion acknowledgement for a control report is also a
+                // physical ordering barrier. Do not submit it into any free
+                // slot while an older audio IRP can still complete afterwards
+                // and restore stale microphone/light/haptics state.
+                if (!TryDrainPendingWrites(waitStarted, timeoutMilliseconds,
+                    out transportFault))
                 {
+                    return false;
+                }
+
+                WriteSlot slot = null;
+                int slotIndex = -1;
+                for (int offset = 0; offset < slots.Length; offset++)
+                {
+                    int candidateIndex = (nextSlot + offset) % slots.Length;
+                    WriteSlot candidate = slots[candidateIndex];
                     if (WaitForSingleObject(candidate.EventHandle, 0) !=
                         WAIT_OBJECT_0)
                     {
@@ -359,13 +403,45 @@ namespace DS4Windows.InputDevices
                     }
 
                     slot = candidate;
+                    slotIndex = candidateIndex;
                     break;
                 }
 
                 if (slot == null)
                 {
-                    transportFault = true;
-                    return false;
+                    IntPtr[] eventHandles = new IntPtr[slots.Length];
+                    for (int index = 0; index < slots.Length; index++)
+                    {
+                        eventHandles[index] = slots[index].EventHandle;
+                    }
+
+                    uint waitResult = WaitForMultipleObjects(
+                        (uint)eventHandles.Length, eventHandles, false,
+                        RemainingTimeoutMilliseconds(waitStarted,
+                            timeoutMilliseconds));
+                    if (waitResult == WAIT_FAILED || waitResult == WAIT_TIMEOUT ||
+                        waitResult >= WAIT_OBJECT_0 + (uint)eventHandles.Length)
+                    {
+                        transportFault = true;
+                        return false;
+                    }
+
+                    slotIndex = (int)(waitResult - WAIT_OBJECT_0);
+                    slot = slots[slotIndex];
+                    if (slot.Pending)
+                    {
+                        if (!GetOverlappedResult(deviceHandle,
+                            slot.Overlapped, out _, false))
+                        {
+                            transportFault = true;
+                            return false;
+                        }
+
+                        RecordCompletion(Stopwatch.GetTimestamp() -
+                            slot.SubmittedTimestamp);
+                        slot.Pending = false;
+                        slot.SubmittedTimestamp = 0;
+                    }
                 }
 
                 Buffer.BlockCopy(report, 0, slot.Buffer, 0, report.Length);
@@ -392,12 +468,28 @@ namespace DS4Windows.InputDevices
                     slot.Pending = true;
                     slot.SubmittedTimestamp = submitted;
                     if (WaitForSingleObject(slot.EventHandle,
-                        timeoutMilliseconds) != WAIT_OBJECT_0)
+                        RemainingTimeoutMilliseconds(waitStarted,
+                            timeoutMilliseconds)) != WAIT_OBJECT_0)
                     {
                         CancelIoEx(deviceHandle, slot.Overlapped);
-                        WaitForSingleObject(slot.EventHandle, INFINITE);
-                        slot.Pending = false;
-                        slot.SubmittedTimestamp = 0;
+                        uint cancellationWait = WaitForSingleObject(
+                            slot.EventHandle,
+                            CancellationCompletionGraceMilliseconds);
+                        if (cancellationWait == WAIT_OBJECT_0)
+                        {
+                            slot.Pending = false;
+                            slot.SubmittedTimestamp = 0;
+                        }
+                        else
+                        {
+                            // A wedged HID stack must not hold syncRoot (and its
+                            // caller) forever. Poison this writer and retain all
+                            // pinned/native ownership until the existing
+                            // deferred retirement barrier observes completion.
+                            disposed = true;
+                            ScheduleDeferredDisposeLocked();
+                        }
+
                         transportFault = true;
                         return false;
                     }
@@ -422,8 +514,61 @@ namespace DS4Windows.InputDevices
                 }
 
                 RecordSubmissionGap(submitted);
+                nextSlot = (slotIndex + 1) % slots.Length;
                 return true;
             }
+        }
+
+        private bool TryDrainPendingWrites(long waitStarted,
+            uint timeoutMilliseconds, out bool transportFault)
+        {
+            transportFault = false;
+            foreach (WriteSlot slot in slots)
+            {
+                if (!slot.Pending)
+                {
+                    continue;
+                }
+
+                uint waitResult = WaitForSingleObject(slot.EventHandle,
+                    RemainingTimeoutMilliseconds(waitStarted,
+                        timeoutMilliseconds));
+                if (waitResult != WAIT_OBJECT_0)
+                {
+                    transportFault = true;
+                    return false;
+                }
+
+                if (!GetOverlappedResult(deviceHandle, slot.Overlapped,
+                    out _, false))
+                {
+                    transportFault = true;
+                    return false;
+                }
+
+                RecordCompletion(Stopwatch.GetTimestamp() -
+                    slot.SubmittedTimestamp);
+                slot.Pending = false;
+                slot.SubmittedTimestamp = 0;
+            }
+
+            return true;
+        }
+
+        private static uint RemainingTimeoutMilliseconds(long started,
+            uint timeoutMilliseconds)
+        {
+            if (timeoutMilliseconds == INFINITE)
+            {
+                return INFINITE;
+            }
+
+            long elapsedTicks = Math.Max(0,
+                Stopwatch.GetTimestamp() - started);
+            ulong elapsedMilliseconds = (ulong)elapsedTicks * 1000UL /
+                (ulong)Stopwatch.Frequency;
+            return elapsedMilliseconds >= timeoutMilliseconds ? 0 :
+                timeoutMilliseconds - (uint)elapsedMilliseconds;
         }
 
         private void ObserveCompletedWrites()
@@ -504,12 +649,32 @@ namespace DS4Windows.InputDevices
                     // Windows has completed its I/O. A Bluetooth disconnect can
                     // delay that completion; freeing it early corrupts native
                     // memory and can terminate CoreCLR later on reconnect.
-                    ThreadPool.QueueUserWorkItem(_ => FinishDeferredDispose());
+                    ScheduleDeferredDisposeLocked();
                     return;
                 }
 
                 ReleaseNativeResources();
             }
+        }
+
+        /// <summary>
+        /// Waits until every OVERLAPPED write has completed or been cancelled
+        /// and this writer has released its pinned buffers, native slots, and
+        /// HID-handle ownership/reference. Call <see cref="Dispose"/> first.
+        /// A false result is not a transport-ownership barrier: the caller must
+        /// not start another writer against this controller yet.
+        /// </summary>
+        public bool WaitForDisposal(uint timeoutMilliseconds)
+        {
+            if (timeoutMilliseconds == INFINITE)
+            {
+                disposalCompletion.Task.GetAwaiter().GetResult();
+                return true;
+            }
+
+            int boundedTimeout = timeoutMilliseconds > int.MaxValue ?
+                int.MaxValue : (int)timeoutMilliseconds;
+            return disposalCompletion.Task.Wait(boundedTimeout);
         }
 
         private bool CancelAndWaitForPendingWrites(uint timeoutMilliseconds)
@@ -546,14 +711,21 @@ namespace DS4Windows.InputDevices
                 {
                     return;
                 }
+            }
 
-                // The UI and controller shutdown path must not hang on a bad
-                // Bluetooth stack. This background cleanup may wait, but it is
-                // the only safe place to release native overlapped buffers.
-                if (CancelAndWaitForPendingWrites(INFINITE))
-                {
-                    ReleaseNativeResources();
-                }
+            // The UI and controller shutdown path must not hang on a bad
+            // Bluetooth stack. This background cleanup may wait, but must not
+            // hold syncRoot while doing so: Dispose/health checks still need to
+            // observe the poisoned writer without joining the native wait.
+            bool completed = CancelAndWaitForPendingWrites(INFINITE);
+            if (!completed)
+            {
+                return;
+            }
+
+            lock (syncRoot)
+            {
+                ReleaseNativeResources();
             }
         }
 
@@ -579,6 +751,18 @@ namespace DS4Windows.InputDevices
                 sharedHandleReferenceAdded = false;
                 sharedDeviceHandle.DangerousRelease();
             }
+
+            disposalCompletion.TrySetResult(true);
+        }
+
+        private void ScheduleDeferredDisposeLocked()
+        {
+            if (Interlocked.CompareExchange(ref deferredDisposeStarted, 1, 0) != 0)
+            {
+                return;
+            }
+
+            ThreadPool.QueueUserWorkItem(_ => FinishDeferredDispose());
         }
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -609,6 +793,10 @@ namespace DS4Windows.InputDevices
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern uint WaitForMultipleObjects(uint count,
+            IntPtr[] handles, bool waitAll, uint milliseconds);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool CloseHandle(IntPtr handle);

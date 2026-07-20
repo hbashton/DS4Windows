@@ -1,4 +1,9 @@
 using DS4Windows;
+using System.Diagnostics;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Text.Json;
 
 namespace DS4WindowsTests
 {
@@ -30,6 +35,220 @@ namespace DS4WindowsTests
         {
             Assert.AreEqual((ControllerAudioEndpointKind)expected,
                 DualSenseAudioPassthrough.GetEndpointKind(output));
+        }
+
+        [DataTestMethod]
+        [DataRow("", false, true)]
+        [DataRow(DualSenseAudioPassthrough.AutoDetectGameAudioEndpointId,
+            false, true)]
+        [DataRow(DualSenseAudioPassthrough.DefaultSystemAudioEndpointId,
+            true, false)]
+        [DataRow("{0.0.0.00000000}.{virtual-controller}", true, true)]
+        [DataRow("{0.0.0.00000000}.{other-endpoint}", false, false)]
+        public void DirectSpeakerRouteHonorsExplicitEndpointOwnership(
+            string endpointId, bool endpointOwnedByDirectSource, bool expected)
+        {
+            Assert.AreEqual(expected,
+                DualSenseAudioPassthrough.IsDirectSpeakerRequest(endpointId,
+                    endpointOwnedByDirectSource));
+        }
+
+        [DataTestMethod]
+        [DataRow("", true, false,
+            (int)DirectSpeakerEndpointOwnership.Unresolved,
+            (int)DirectSpeakerRouteDecision.Pending)]
+        [DataRow("", true, true,
+            (int)DirectSpeakerEndpointOwnership.Unresolved,
+            (int)DirectSpeakerRouteDecision.Direct)]
+        [DataRow(DualSenseAudioPassthrough.DefaultSystemAudioEndpointId,
+            true, true, (int)DirectSpeakerEndpointOwnership.Owned,
+            (int)DirectSpeakerRouteDecision.Loopback)]
+        [DataRow("explicit", true, true,
+            (int)DirectSpeakerEndpointOwnership.Unresolved,
+            (int)DirectSpeakerRouteDecision.Pending)]
+        [DataRow("explicit", true, true,
+            (int)DirectSpeakerEndpointOwnership.Owned,
+            (int)DirectSpeakerRouteDecision.Direct)]
+        [DataRow("explicit", true, false,
+            (int)DirectSpeakerEndpointOwnership.Owned,
+            (int)DirectSpeakerRouteDecision.Pending)]
+        [DataRow("explicit", true, true,
+            (int)DirectSpeakerEndpointOwnership.Unowned,
+            (int)DirectSpeakerRouteDecision.Loopback)]
+        [DataRow("explicit", false, false,
+            (int)DirectSpeakerEndpointOwnership.Unresolved,
+            (int)DirectSpeakerRouteDecision.Loopback)]
+        public void DirectSpeakerRouteRetriesTransientEnumerationAndRecovery(
+            string endpointId, bool capable, bool active, int ownership,
+            int expected)
+        {
+            Assert.AreEqual((DirectSpeakerRouteDecision)expected,
+                DualSenseAudioPassthrough.DecideDirectSpeakerRoute(endpointId,
+                    capable, active,
+                    (DirectSpeakerEndpointOwnership)ownership));
+        }
+
+        [DataTestMethod]
+        [DataRow(true, true, true, true, true, 1, 1,
+            (int)DirectSpeakerEndpointOwnership.Owned)]
+        [DataRow(true, true, true, true, true, 2, 1,
+            (int)DirectSpeakerEndpointOwnership.Unowned)]
+        [DataRow(true, true, true, true, false, -1, 1,
+            (int)DirectSpeakerEndpointOwnership.Unowned)]
+        [DataRow(true, true, false, false, false, -1, 1,
+            (int)DirectSpeakerEndpointOwnership.Unresolved)]
+        [DataRow(true, true, true, false, false, -1, 1,
+            (int)DirectSpeakerEndpointOwnership.Unresolved)]
+        [DataRow(true, true, true, true, true, -1, 1,
+            (int)DirectSpeakerEndpointOwnership.Unresolved)]
+        [DataRow(false, true, true, true, true, 1, 1,
+            (int)DirectSpeakerEndpointOwnership.Unresolved)]
+        [DataRow(true, false, true, true, true, 1, 1,
+            (int)DirectSpeakerEndpointOwnership.Unowned)]
+        public void DirectSpeakerOwnershipRequiresExactActiveUsbipPort(
+            bool endpointActive, bool identityMatches,
+            bool interfacePathAvailable, bool usbIpQueryResolved,
+            bool usbIpAncestor, int endpointPort, int sourcePort, int expected)
+        {
+            Assert.AreEqual((DirectSpeakerEndpointOwnership)expected,
+                DualSenseAudioPassthrough.
+                    ClassifyDirectSpeakerEndpointOwnership(endpointActive,
+                        identityMatches, interfacePathAvailable,
+                        usbIpQueryResolved, usbIpAncestor, endpointPort,
+                        sourcePort));
+        }
+
+        [TestMethod]
+        public void ViiperUsbipOwnershipTracksOnlyRegisteredActivePort()
+        {
+            const int ownedPort = 7331;
+            const int unrelatedPort = 7332;
+            ViiperUsbipPortManager.UnregisterActivePort(ownedPort);
+            ViiperUsbipPortManager.UnregisterActivePort(unrelatedPort);
+
+            try
+            {
+                Assert.IsFalse(ViiperUsbipPortManager.IsActivePort(ownedPort));
+                ViiperUsbipPortManager.RegisterActivePort(ownedPort);
+                Assert.IsTrue(ViiperUsbipPortManager.IsActivePort(ownedPort));
+                Assert.IsFalse(ViiperUsbipPortManager.IsActivePort(
+                    unrelatedPort));
+            }
+            finally
+            {
+                ViiperUsbipPortManager.UnregisterActivePort(ownedPort);
+                ViiperUsbipPortManager.UnregisterActivePort(unrelatedPort);
+            }
+
+            Assert.IsFalse(ViiperUsbipPortManager.IsActivePort(ownedPort));
+        }
+
+        [DataTestMethod]
+        [DataRow(0x05C4, true)]
+        [DataRow(0x09CC, true)]
+        [DataRow(0x0CE6, true)]
+        [DataRow(0x0DF2, true)]
+        [DataRow(0x0268, false)]
+        public void ViiperSonyOutputIdentityIncludesEverySupportedPersona(
+            int productId, bool expected)
+        {
+            Assert.AreEqual(expected,
+                DS4Devices.IsViiperSonyProductId(productId));
+        }
+
+        [TestMethod]
+        public void MissingDevicePathIsNeverTreatedAsOwnedViiperOutput()
+        {
+            Assert.IsFalse(DS4Devices.IsOwnVirtualDevice(null));
+            Assert.IsFalse(DS4Devices.IsOwnVirtualDevice(string.Empty));
+        }
+
+        [DataTestMethod]
+        [DataRow((int)ControllerAudioEndpointKind.DualShock4,
+            (int)ControllerAudioEndpointKind.DualSense, true)]
+        [DataRow((int)ControllerAudioEndpointKind.DualSense,
+            (int)ControllerAudioEndpointKind.DualShock4, true)]
+        [DataRow((int)ControllerAudioEndpointKind.DualSense,
+            (int)ControllerAudioEndpointKind.DualSense, false)]
+        [DataRow((int)ControllerAudioEndpointKind.DualShock4,
+            (int)ControllerAudioEndpointKind.DualShock4, false)]
+        [DataRow((int)ControllerAudioEndpointKind.Any,
+            (int)ControllerAudioEndpointKind.DualSense, false)]
+        [DataRow((int)ControllerAudioEndpointKind.DualSense,
+            (int)ControllerAudioEndpointKind.Any, false)]
+        public void OnlyCrossPersonaControllerEndpointsBecomeDirectSelections(
+            int savedEndpointKind, int currentOutputKind, bool expected)
+        {
+            Assert.AreEqual(expected,
+                DualSenseAudioPassthrough.IsStaleControllerEndpointSelection(
+                    (ControllerAudioEndpointKind)savedEndpointKind,
+                    (ControllerAudioEndpointKind)currentOutputKind));
+        }
+    }
+
+    [TestClass]
+    public class ControllerMicrophoneRoutePolicyTests
+    {
+        [DataTestMethod]
+        [DataRow(OutContType.DS4, true)]
+        [DataRow(OutContType.ViiperDS4, true)]
+        [DataRow(OutContType.ViiperDualSense, true)]
+        [DataRow(OutContType.ViiperDualSenseEdge, true)]
+        [DataRow(OutContType.X360, false)]
+        [DataRow(OutContType.ViiperX360, false)]
+        [DataRow(OutContType.ViiperSwitch2Pro, false)]
+        public void DirectRouteRequiresMicrophoneCapablePlayStationOutput(
+            OutContType outputType, bool expected)
+        {
+            Assert.AreEqual(expected,
+                ControllerMicrophoneRoutePolicy.CanRouteDirectViiperMicrophone(
+                    profileEnabled: true,
+                    eligibleBluetoothSource: true,
+                    outputType: outputType,
+                    activeStreamSupportsMicrophone: true));
+        }
+
+        [TestMethod]
+        public void DirectRouteRequiresProfileSourceAndActiveConsumer()
+        {
+            Assert.IsFalse(
+                ControllerMicrophoneRoutePolicy.CanRouteDirectViiperMicrophone(
+                    profileEnabled: false, eligibleBluetoothSource: true,
+                    outputType: OutContType.ViiperDS4,
+                    activeStreamSupportsMicrophone: true));
+            Assert.IsFalse(
+                ControllerMicrophoneRoutePolicy.CanRouteDirectViiperMicrophone(
+                    profileEnabled: true, eligibleBluetoothSource: false,
+                    outputType: OutContType.ViiperDS4,
+                    activeStreamSupportsMicrophone: true));
+            Assert.IsFalse(
+                ControllerMicrophoneRoutePolicy.CanRouteDirectViiperMicrophone(
+                    profileEnabled: true, eligibleBluetoothSource: true,
+                    outputType: OutContType.ViiperDS4,
+                    activeStreamSupportsMicrophone: false));
+        }
+
+        [TestMethod]
+        public void PhysicalMicrophoneArmsOnlyForAnOpenVirtualCaptureInterface()
+        {
+            Assert.IsFalse(
+                ControllerMicrophoneRoutePolicy.ShouldArmPhysicalBluetoothMicrophone(
+                    profileEnabled: true, eligibleBluetoothSource: true,
+                    outputType: OutContType.ViiperDualSense,
+                    activeStreamSupportsMicrophone: true,
+                    virtualMicrophoneInterfaceActive: false));
+            Assert.IsTrue(
+                ControllerMicrophoneRoutePolicy.ShouldArmPhysicalBluetoothMicrophone(
+                    profileEnabled: true, eligibleBluetoothSource: true,
+                    outputType: OutContType.ViiperDualSense,
+                    activeStreamSupportsMicrophone: true,
+                    virtualMicrophoneInterfaceActive: true));
+            Assert.IsFalse(
+                ControllerMicrophoneRoutePolicy.ShouldArmPhysicalBluetoothMicrophone(
+                    profileEnabled: true, eligibleBluetoothSource: true,
+                    outputType: OutContType.ViiperSwitch2Pro,
+                    activeStreamSupportsMicrophone: true,
+                    virtualMicrophoneInterfaceActive: true));
         }
     }
 
@@ -83,6 +302,704 @@ namespace DS4WindowsTests
                 source, 0, destination);
             Assert.AreEqual(0, frames);
             CollectionAssert.AreEqual(new byte[destination.Length], destination);
+        }
+    }
+
+    [TestClass]
+    public class ViiperMicrophoneInterfaceActivityTrackerTests
+    {
+        [TestMethod]
+        public void QueryFailurePreservesLastKnownActiveState()
+        {
+            var tracker = new MicrophoneInterfaceActivityTracker();
+
+            Assert.IsTrue(tracker.RecordObservation(active: true, timestamp: 0));
+            tracker.RecordQueryFailure();
+
+            Assert.IsTrue(tracker.StateKnown);
+            Assert.IsTrue(tracker.IsActive);
+        }
+
+        [TestMethod]
+        public void InactiveStateRequiresConsecutiveObservationsAndGrace()
+        {
+            var tracker = new MicrophoneInterfaceActivityTracker();
+            long grace = MicrophoneInterfaceActivityTracker.InactiveGraceTicks;
+
+            tracker.RecordObservation(active: true, timestamp: 0);
+            Assert.IsFalse(tracker.RecordObservation(active: false, timestamp: 1));
+            Assert.IsFalse(tracker.RecordObservation(active: false,
+                timestamp: grace));
+            Assert.IsTrue(tracker.IsActive);
+
+            Assert.IsTrue(tracker.RecordObservation(active: false,
+                timestamp: grace + 1));
+            Assert.IsTrue(tracker.StateKnown);
+            Assert.IsFalse(tracker.IsActive);
+        }
+
+        [TestMethod]
+        public void QueryFailureBreaksPendingInactiveRun()
+        {
+            var tracker = new MicrophoneInterfaceActivityTracker();
+            long grace = MicrophoneInterfaceActivityTracker.InactiveGraceTicks;
+
+            tracker.RecordObservation(active: true, timestamp: 0);
+            tracker.RecordObservation(active: false, timestamp: 1);
+            tracker.RecordObservation(active: false, timestamp: grace + 1);
+            tracker.RecordQueryFailure();
+
+            Assert.IsFalse(tracker.RecordObservation(active: false,
+                timestamp: grace * 2));
+            Assert.IsFalse(tracker.RecordObservation(active: false,
+                timestamp: grace * 3));
+            Assert.IsTrue(tracker.IsActive);
+
+            Assert.IsTrue(tracker.RecordObservation(active: false,
+                timestamp: grace * 3 + 1));
+            Assert.IsFalse(tracker.IsActive);
+        }
+
+        [TestMethod]
+        public void ActiveObservationCancelsPendingInactiveRunImmediately()
+        {
+            var tracker = new MicrophoneInterfaceActivityTracker();
+            long grace = MicrophoneInterfaceActivityTracker.InactiveGraceTicks;
+
+            tracker.RecordObservation(active: true, timestamp: 0);
+            tracker.RecordObservation(active: false, timestamp: 1);
+            tracker.RecordObservation(active: false, timestamp: grace + 1);
+            Assert.IsFalse(tracker.RecordObservation(active: true,
+                timestamp: grace + 2));
+
+            Assert.IsFalse(tracker.RecordObservation(active: false,
+                timestamp: grace * 2));
+            Assert.IsTrue(tracker.IsActive);
+        }
+    }
+
+    [TestClass]
+    public class ViiperMicrophoneBufferSnapshotTests
+    {
+        [TestMethod]
+        public void ParsesCurrentViiperMicrophoneBufferTelemetry()
+        {
+            using JsonDocument document = JsonDocument.Parse("""
+                {
+                  "queuedMicrophoneBytes": 960,
+                  "microphoneQueueTargetBytes": "1920",
+                  "microphoneFilteredQueueBytes": 1280,
+                  "microphoneQueuePrimed": true,
+                  "microphoneUnderruns": 2,
+                  "microphoneReprimes": "3",
+                  "microphoneDroppedBytes": 4,
+                  "microphoneZeroPackets": 5,
+                  "microphoneOverflowEvents": 6,
+                  "microphoneLowWaterBytes": -1,
+                  "microphoneHighWaterBytes": 2240,
+                  "microphoneQueueFrames": 7,
+                  "microphoneQueueMinGapUS": 7300,
+                  "microphoneQueueMaxGapUS": 12100,
+                  "microphoneReadMinGapUS": 900,
+                  "microphoneReadMaxGapUS": 1350
+                }
+                """);
+
+            ViiperMicrophoneBufferSnapshot snapshot =
+                ViiperMicrophoneBufferSnapshot.Parse(document.RootElement);
+
+            Assert.AreEqual(960L, snapshot.QueuedBytes);
+            Assert.AreEqual(1920L, snapshot.TargetBytes);
+            Assert.AreEqual(1280L, snapshot.FilteredBytes);
+            Assert.AreEqual(true, snapshot.Primed);
+            Assert.AreEqual(2UL, snapshot.Underruns);
+            Assert.AreEqual(3UL, snapshot.Reprimes);
+            Assert.AreEqual(4UL, snapshot.DroppedBytes);
+            Assert.AreEqual(5UL, snapshot.ZeroPackets);
+            Assert.AreEqual(6UL, snapshot.OverflowEvents);
+            Assert.AreEqual(-1L, snapshot.LowWaterBytes);
+            Assert.AreEqual(2240L, snapshot.HighWaterBytes);
+            Assert.AreEqual(7UL, snapshot.QueueFrames);
+            Assert.AreEqual(7300L, snapshot.QueueMinGapMicroseconds);
+            Assert.AreEqual(12100L, snapshot.QueueMaxGapMicroseconds);
+            Assert.AreEqual(900L, snapshot.ReadMinGapMicroseconds);
+            Assert.AreEqual(1350L, snapshot.ReadMaxGapMicroseconds);
+        }
+
+        [TestMethod]
+        public void MissingOrMalformedTelemetryIsUnavailableWithoutThrowing()
+        {
+            using JsonDocument document = JsonDocument.Parse("""
+                {
+                  "queuedMicrophoneBytes": {},
+                  "microphoneQueuePrimed": "not-a-boolean",
+                  "microphoneUnderruns": -1,
+                  "microphoneReprimes": 18446744073709551615,
+                  "MICROPHONEZEROPACKETS": "8"
+                }
+                """);
+
+            ViiperMicrophoneBufferSnapshot snapshot =
+                ViiperMicrophoneBufferSnapshot.Parse(document.RootElement);
+
+            Assert.IsNull(snapshot.QueuedBytes);
+            Assert.IsNull(snapshot.TargetBytes);
+            Assert.IsNull(snapshot.Primed);
+            Assert.IsNull(snapshot.Underruns);
+            Assert.AreEqual(ulong.MaxValue, snapshot.Reprimes);
+            Assert.AreEqual(8UL, snapshot.ZeroPackets);
+            StringAssert.Contains(snapshot.ToLogFields(),
+                "virtualMicQueuedBytes=n/a");
+        }
+    }
+
+    [TestClass]
+    public class ViiperMicrophonePipelineHealthTests
+    {
+        private const long Timeout = 1_000;
+        private const long Now = 10_000;
+
+        [TestMethod]
+        public void UnarmedPipelineWithNoActivityIsStarting()
+        {
+            Assert.AreEqual(MicrophonePipelineHealthStage.Starting,
+                Classify(0, 0, 0, hasArmedSource: false));
+        }
+
+        [TestMethod]
+        public void ArmedPipelineWithoutPhysicalFramesReportsReceiveStall()
+        {
+            Assert.AreEqual(
+                MicrophonePipelineHealthStage.PhysicalReceiveStalled,
+                Classify(0, 0, 0, hasArmedSource: true));
+        }
+
+        [TestMethod]
+        public void FreshCompressedFramesCannotHideDecodeProcessStall()
+        {
+            Assert.AreEqual(
+                MicrophonePipelineHealthStage.DecodeOrProcessStalled,
+                Classify(Now - 1, 0, 0));
+        }
+
+        [TestMethod]
+        public void FreshProcessedPcmCannotHideVirtualSubmissionStall()
+        {
+            Assert.AreEqual(
+                MicrophonePipelineHealthStage.VirtualSubmissionStalled,
+                Classify(Now - 2, Now - 1, 0));
+        }
+
+        [TestMethod]
+        public void OnlyFreshSuccessfulVirtualSubmissionIsHealthy()
+        {
+            Assert.AreEqual(MicrophonePipelineHealthStage.Healthy,
+                Classify(Now - 3, Now - 2, Now - 1));
+
+            Assert.AreEqual(
+                MicrophonePipelineHealthStage.PhysicalReceiveStalled,
+                Classify(Now - Timeout, Now - Timeout,
+                    Now - Timeout));
+        }
+
+        [TestMethod]
+        public void SuccessfulSubmissionRestoresHealthAfterVirtualTransportStall()
+        {
+            long freshCompressedRx = Now - 3;
+            long freshProcessedPcm = Now - 2;
+
+            Assert.AreEqual(
+                MicrophonePipelineHealthStage.VirtualSubmissionStalled,
+                Classify(freshCompressedRx, freshProcessedPcm,
+                    Now - Timeout));
+
+            // A recovered transport is not considered healthy merely because
+            // it reopened. The first PCM frame must successfully reach the
+            // virtual endpoint before the pipeline returns to green.
+            Assert.AreEqual(MicrophonePipelineHealthStage.Healthy,
+                Classify(freshCompressedRx, freshProcessedPcm, Now - 1));
+        }
+
+        [TestMethod]
+        public void FailedStageNamesAreExplicitForTelemetry()
+        {
+            Assert.AreEqual("physical-rx-stalled",
+                MicrophonePipelineHealth.GetDisplayName(
+                    MicrophonePipelineHealthStage.PhysicalReceiveStalled));
+            Assert.AreEqual("decode-process-stalled",
+                MicrophonePipelineHealth.GetDisplayName(
+                    MicrophonePipelineHealthStage.DecodeOrProcessStalled));
+            Assert.AreEqual("virtual-submit-stalled",
+                MicrophonePipelineHealth.GetDisplayName(
+                    MicrophonePipelineHealthStage.VirtualSubmissionStalled));
+        }
+
+        private static MicrophonePipelineHealthStage Classify(
+            long lastCompressedRx, long lastProcessed, long lastSubmitted,
+            bool hasArmedSource = true)
+        {
+            return MicrophonePipelineHealth.Classify(Now, Timeout,
+                lastCompressedRx, lastProcessed, lastSubmitted,
+                hasArmedSource);
+        }
+    }
+
+    [TestClass]
+    public class ViiperMicrophoneTelemetryTests
+    {
+        [TestMethod]
+        public void SubmitGapMaximumIsMonotonicAndRejectsBadTimestamps()
+        {
+            var telemetry = new ViiperMicrophoneTelemetry();
+
+            telemetry.RecordSuccessfulSubmission(100);
+            telemetry.RecordSuccessfulSubmission(110);
+            telemetry.RecordSuccessfulSubmission(105);
+            telemetry.RecordSuccessfulSubmission(140);
+            telemetry.RecordSuccessfulSubmission(0);
+
+            Assert.AreEqual(2L, telemetry.ObservedSubmissionGaps);
+            Assert.AreEqual(30L, telemetry.LastSubmissionGapTicks);
+            Assert.AreEqual(30L, telemetry.MaximumSubmissionGapTicks);
+
+            telemetry.RecordSuccessfulSubmission(145);
+
+            Assert.AreEqual(3L, telemetry.ObservedSubmissionGaps);
+            Assert.AreEqual(5L, telemetry.LastSubmissionGapTicks);
+            Assert.AreEqual(30L, telemetry.MaximumSubmissionGapTicks);
+        }
+
+        [TestMethod]
+        public void CaptureIntervalResetPreservesCumulativeTelemetry()
+        {
+            var telemetry = new ViiperMicrophoneTelemetry();
+            telemetry.RecordSuccessfulSubmission(100);
+            telemetry.RecordSuccessfulSubmission(120);
+
+            telemetry.ResetSubmissionBaseline();
+            telemetry.RecordSuccessfulSubmission(10_000);
+
+            Assert.AreEqual(1L, telemetry.ObservedSubmissionGaps);
+            Assert.AreEqual(0L, telemetry.LastSubmissionGapTicks);
+            Assert.AreEqual(20L, telemetry.MaximumSubmissionGapTicks);
+        }
+
+        [TestMethod]
+        public void ZeroFrameCountersDistinguishProcessingAndExpectedMute()
+        {
+            var telemetry = new ViiperMicrophoneTelemetry();
+            short[] silence = new short[480];
+            short[] signal = new short[480];
+            signal[200] = 1;
+
+            telemetry.ObservePreProcessorFrame(silence, silence.Length);
+            telemetry.ObservePreProcessorFrame(signal, signal.Length);
+            telemetry.ObservePostProcessorFrame(silence, silence.Length,
+                muted: false);
+            telemetry.ObservePostProcessorFrame(silence, silence.Length,
+                muted: true);
+            telemetry.ObservePostProcessorFrame(signal, signal.Length,
+                muted: false);
+            telemetry.ObservePreProcessorFrame(null, 480);
+            telemetry.ObservePostProcessorFrame(silence, 0, muted: false);
+
+            Assert.AreEqual(1L, telemetry.PreProcessorAllZeroFrames);
+            Assert.AreEqual(2L, telemetry.PostProcessorAllZeroFrames);
+            Assert.AreEqual(1L,
+                telemetry.PostProcessorAllZeroUnmutedFrames);
+        }
+
+        [TestMethod]
+        public void QueueHighWaterAndCountersCannotMoveBackwardOrOverflow()
+        {
+            var telemetry = new ViiperMicrophoneTelemetry();
+            telemetry.ObserveCompressedQueueDepth(3);
+            telemetry.ObserveCompressedQueueDepth(1);
+            telemetry.ObserveCompressedQueueDepth(-1);
+            telemetry.ObserveCompressedQueueDepth(8);
+
+            Assert.AreEqual(8L, telemetry.CompressedQueueHighWaterMark);
+
+            long counter = long.MaxValue - 1;
+            ViiperMicrophoneTelemetry.IncrementSaturating(ref counter);
+            ViiperMicrophoneTelemetry.IncrementSaturating(ref counter);
+            Assert.AreEqual(long.MaxValue, counter);
+        }
+    }
+
+    [TestClass]
+    public class ViiperDeviceStreamRecoveryTests
+    {
+        [TestMethod]
+        public void TransportClosePreservesVirtualDeviceForSameIdentity()
+        {
+            var cleanup = new CleanupCounters();
+            var lifetime = cleanup.CreateLifetime(27, "4", 11);
+            var oldPayload = new CountingMemoryStream();
+            var oldTransport = new CountingDisposable();
+            var oldStream = new ViiperDeviceStream(oldPayload, oldTransport,
+                lifetime);
+
+            oldStream.CloseTransport();
+
+            Assert.IsTrue(oldStream.IsTransportClosed);
+            Assert.AreEqual(1, oldPayload.DisposeCount);
+            Assert.AreEqual(1, oldTransport.DisposeCount);
+            cleanup.AssertNotCleaned();
+
+            var replacementPayload = new CountingMemoryStream();
+            var replacementTransport = new CountingDisposable();
+            var replacement = new ViiperDeviceStream(replacementPayload,
+                replacementTransport, lifetime);
+
+            Assert.AreEqual(oldStream.BusId, replacement.BusId);
+            Assert.AreEqual(oldStream.DevId, replacement.DevId);
+            Assert.AreEqual(oldStream.UsbipPort, replacement.UsbipPort);
+            Assert.AreSame(oldStream.DeviceLifetime,
+                replacement.DeviceLifetime);
+
+            replacement.Dispose();
+            oldStream.Dispose();
+
+            Assert.AreEqual(1, replacementPayload.DisposeCount);
+            Assert.AreEqual(1, replacementTransport.DisposeCount);
+            cleanup.AssertCleanedExactlyOnce(27, "4", 11);
+        }
+
+        [DataTestMethod]
+        [DataRow(320, DisplayName = "DualShock 4 microphone payload")]
+        [DataRow(1920, DisplayName = "DualSense microphone payload")]
+        public void CloseFirstRecoveryCanImmediatelySubmitMicrophonePayload(
+            int payloadLength)
+        {
+            var cleanup = new CleanupCounters();
+            var lifetime = cleanup.CreateLifetime(73, "5", 13);
+            var oldPayload = new CountingMemoryStream();
+            var oldTransport = new CountingDisposable();
+            var oldStream = new ViiperDeviceStream(oldPayload, oldTransport,
+                lifetime);
+            byte[] warmup = Enumerable.Range(0, 32)
+                .Select(index => (byte)index)
+                .ToArray();
+            oldStream.WriteFrame(0x03, 0x02, warmup);
+
+            oldStream.CloseTransport();
+            cleanup.AssertNotCleaned();
+            Assert.ThrowsException<ObjectDisposedException>(() =>
+                oldStream.WriteFrame(0x03, 0x02, warmup));
+
+            var replacementPayload = new CountingMemoryStream();
+            var replacementTransport = new CountingDisposable();
+            var replacement = new ViiperDeviceStream(replacementPayload,
+                replacementTransport, lifetime);
+            byte[] microphonePcm = Enumerable.Range(0, payloadLength)
+                .Select(index => (byte)(index * 37 + 11))
+                .ToArray();
+
+            replacement.WriteFrame(0x03, 0x02, microphonePcm);
+
+            byte[] framed = replacementPayload.ToArray();
+            Assert.AreEqual(16 + payloadLength, framed.Length);
+            CollectionAssert.AreEqual(new byte[]
+            {
+                (byte)'V', (byte)'P', (byte)'C', (byte)'M', 0x03, 0x02,
+            }, framed.Take(6).ToArray());
+            Assert.AreEqual(payloadLength, framed[6] | framed[7] << 8);
+            Assert.AreEqual(0u, ReadUInt32(framed, 8),
+                "A replacement transport begins a new framed-stream generation.");
+            CollectionAssert.AreEqual(microphonePcm,
+                framed.Skip(16).ToArray());
+            cleanup.AssertNotCleaned();
+
+            replacement.Dispose();
+            oldStream.Dispose();
+
+            Assert.AreEqual(1, oldPayload.DisposeCount);
+            Assert.AreEqual(1, oldTransport.DisposeCount);
+            Assert.AreEqual(1, replacementPayload.DisposeCount);
+            Assert.AreEqual(1, replacementTransport.DisposeCount);
+            cleanup.AssertCleanedExactlyOnce(73, "5", 13);
+        }
+
+        [TestMethod]
+        public void FramedWriterReusesStorageAcrossChangingPayloadSizes()
+        {
+            var cleanup = new CleanupCounters();
+            var lifetime = cleanup.CreateLifetime(81, "8", 14);
+            var payloadStream = new CountingMemoryStream();
+            var transport = new CountingDisposable();
+            var stream = new ViiperDeviceStream(payloadStream, transport,
+                lifetime);
+            byte[] large = Enumerable.Range(0, 1920)
+                .Select(index => (byte)(index * 17 + 3)).ToArray();
+            byte[] small = Enumerable.Range(0, 32)
+                .Select(index => (byte)(index * 29 + 7)).ToArray();
+
+            stream.WriteFrame(0x03, 0x02, large);
+            stream.WriteFrame(0x03, 0x01, small);
+
+            byte[] framed = payloadStream.ToArray();
+            int secondOffset = 16 + large.Length;
+            Assert.AreEqual(secondOffset + 16 + small.Length,
+                framed.Length,
+                "The reusable writer must not transmit stale bytes from its prior larger payload.");
+            Assert.AreEqual(0u, ReadUInt32(framed, 8));
+            Assert.AreEqual(1u, ReadUInt32(framed, secondOffset + 8));
+            Assert.AreEqual(0x03, framed[secondOffset + 4]);
+            Assert.AreEqual(0x01, framed[secondOffset + 5]);
+            Assert.AreEqual(small.Length, framed[secondOffset + 6] |
+                framed[secondOffset + 7] << 8);
+            CollectionAssert.AreEqual(small, framed.Skip(secondOffset + 16)
+                .ToArray());
+
+            stream.Dispose();
+            Assert.AreEqual(1, payloadStream.DisposeCount);
+            Assert.AreEqual(1, transport.DisposeCount);
+            cleanup.AssertCleanedExactlyOnce(81, "8", 14);
+        }
+
+        [TestMethod]
+        public void ConcurrentFinalDisposalCleansVirtualDeviceExactlyOnce()
+        {
+            var cleanup = new CleanupCounters();
+            var lifetime = cleanup.CreateLifetime(91, "12", 7);
+            ViiperDeviceStream[] generations = Enumerable.Range(0, 16)
+                .Select(_ => new ViiperDeviceStream(
+                    new CountingMemoryStream(), new CountingDisposable(),
+                    lifetime))
+                .ToArray();
+
+            Parallel.ForEach(generations, stream => stream.Dispose());
+            Parallel.ForEach(generations, stream => stream.Dispose());
+
+            Assert.IsTrue(lifetime.IsDisposed);
+            cleanup.AssertCleanedExactlyOnce(91, "12", 7);
+            foreach (ViiperDeviceStream generation in generations)
+            {
+                Assert.IsTrue(generation.IsTransportClosed);
+            }
+        }
+
+        [TestMethod]
+        public async Task OpenExistingDeviceStreamTargetsOriginalBusAndDevice()
+        {
+            var listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            var cleanup = new CleanupCounters();
+            var lifetime = cleanup.CreateLifetime(42, "9", 6);
+            ViiperDeviceStream opened = null;
+
+            try
+            {
+                Task<TcpClient> accept = listener.AcceptTcpClientAsync();
+                var client = new ViiperClient("127.0.0.1", port);
+                opened = client.OpenExistingDeviceStream(42, "9", 6,
+                    lifetime);
+                using TcpClient accepted = await accept.WaitAsync(
+                    TimeSpan.FromSeconds(2));
+                NetworkStream serverStream = accepted.GetStream();
+                byte[] expected = Encoding.UTF8.GetBytes("bus/42/9\0");
+                byte[] received = new byte[expected.Length];
+                int total = 0;
+                while (total < received.Length)
+                {
+                    int read = await serverStream.ReadAsync(
+                        received.AsMemory(total, received.Length - total));
+                    Assert.IsTrue(read > 0,
+                        "VIIPER stream handshake closed early.");
+                    total += read;
+                }
+
+                CollectionAssert.AreEqual(expected, received);
+                Assert.AreEqual((uint)42, opened.BusId);
+                Assert.AreEqual("9", opened.DevId);
+                Assert.AreEqual(6, opened.UsbipPort);
+                cleanup.AssertNotCleaned();
+            }
+            finally
+            {
+                opened?.Dispose();
+                listener.Stop();
+            }
+
+            cleanup.AssertCleanedExactlyOnce(42, "9", 6);
+        }
+
+        [TestMethod]
+        public void RecoveryBackoffIsImmediateExponentialAndBounded()
+        {
+            CollectionAssert.AreEqual(new[]
+            {
+                0, 50, 100, 200, 400, 800, 1000, 1000,
+            }, Enumerable.Range(1, 8)
+                .Select(ViiperOutDevice.GetStreamRecoveryBackoffMilliseconds)
+                .ToArray());
+            Assert.AreEqual(1000,
+                ViiperOutDevice.GetStreamRecoveryBackoffMilliseconds(100));
+        }
+
+        [DataTestMethod]
+        [DataRow(null, 0)]
+        [DataRow("", 0)]
+        [DataRow("immediate", 0)]
+        [DataRow("29", 0)]
+        [DataRow("200", 200)]
+        [DataRow(" 250 ", 250)]
+        [DataRow("1001", 0)]
+        public void ViiperStateWriteRateEnvironmentIsStrictAndBounded(
+            string value, int expected)
+        {
+            Assert.AreEqual(expected,
+                ViiperStateWriteRateSettings.Parse(value));
+        }
+
+        [TestMethod]
+        public void ViiperPlayStationStateRatesDefaultToTheirUsbDescriptorIntervals()
+        {
+            const int defaultRate =
+                ViiperStateWriteRateSettings.DefaultDualShock4RateHz;
+            Assert.AreEqual(200, ViiperStateWriteRateSettings.GetDefaultRateHz(
+                ViiperVirtualDeviceType.DualShock4));
+            Assert.AreEqual(250, ViiperStateWriteRateSettings.GetDefaultRateHz(
+                ViiperVirtualDeviceType.DualSense));
+            Assert.AreEqual(250, ViiperStateWriteRateSettings.GetDefaultRateHz(
+                ViiperVirtualDeviceType.DualSenseEdge));
+            Assert.AreEqual(0, ViiperStateWriteRateSettings.GetDefaultRateHz(
+                ViiperVirtualDeviceType.Xbox360));
+            Assert.AreEqual(0, ViiperStateWriteRateSettings.GetDefaultRateHz(
+                ViiperVirtualDeviceType.Switch2Pro));
+            Assert.AreEqual(200,
+                ViiperStateWriteRateSettings.Parse(null, defaultRate));
+            Assert.AreEqual(200,
+                ViiperStateWriteRateSettings.Parse("unknown", defaultRate));
+            Assert.AreEqual(250,
+                ViiperStateWriteRateSettings.Parse("250", defaultRate));
+            Assert.AreEqual(0,
+                ViiperStateWriteRateSettings.Parse("off", defaultRate));
+            Assert.AreEqual(0,
+                ViiperStateWriteRateSettings.Parse("0", defaultRate));
+        }
+
+        [TestMethod]
+        public void ViiperStateWriteRateWindowStartsImmediatelyAndNeverCatchesUp()
+        {
+            long interval =
+                ViiperStateWriteRateSettings.GetMinimumIntervalTicks(200);
+            Assert.IsTrue(interval >= Stopwatch.Frequency / 200);
+            Assert.AreEqual(0,
+                ViiperStateWriteRateSettings.GetRemainingTicks(
+                    now: 1000, previousWriteStart: 0,
+                    minimumIntervalTicks: interval));
+
+            long firstWrite = 10 * Stopwatch.Frequency;
+            Assert.AreEqual(interval,
+                ViiperStateWriteRateSettings.GetRemainingTicks(
+                    now: firstWrite, previousWriteStart: firstWrite,
+                    minimumIntervalTicks: interval));
+            Assert.AreEqual(0,
+                ViiperStateWriteRateSettings.GetRemainingTicks(
+                    now: firstWrite + interval,
+                    previousWriteStart: firstWrite,
+                    minimumIntervalTicks: interval));
+
+            long lateWrite = firstWrite + interval * 3;
+            Assert.AreEqual(interval,
+                ViiperStateWriteRateSettings.GetRemainingTicks(
+                    now: lateWrite, previousWriteStart: lateWrite,
+                    minimumIntervalTicks: interval),
+                "A late write must rebase the next window instead of creating a catch-up burst.");
+        }
+
+        private sealed class CleanupCounters
+        {
+            private int detachCount;
+            private int unregisterCount;
+            private int removeCount;
+            private int staleCount;
+            private int detachedPort = int.MinValue;
+            private int unregisteredPort = int.MinValue;
+            private uint removedBus;
+            private string removedDevice;
+
+            public ViiperVirtualDeviceLifetime CreateLifetime(uint busId,
+                string devId, int usbipPort)
+            {
+                return new ViiperVirtualDeviceLifetime(busId, devId,
+                    usbipPort,
+                    (bus, device) =>
+                    {
+                        removedBus = bus;
+                        removedDevice = device;
+                        Interlocked.Increment(ref removeCount);
+                    },
+                    (port, _) =>
+                    {
+                        detachedPort = port;
+                        Interlocked.Increment(ref detachCount);
+                    },
+                    port =>
+                    {
+                        unregisteredPort = port;
+                        Interlocked.Increment(ref unregisterCount);
+                    },
+                    () => Interlocked.Increment(ref staleCount));
+            }
+
+            public void AssertNotCleaned()
+            {
+                Assert.AreEqual(0, Volatile.Read(ref detachCount));
+                Assert.AreEqual(0, Volatile.Read(ref unregisterCount));
+                Assert.AreEqual(0, Volatile.Read(ref removeCount));
+                Assert.AreEqual(0, Volatile.Read(ref staleCount));
+            }
+
+            public void AssertCleanedExactlyOnce(uint busId, string devId,
+                int usbipPort)
+            {
+                Assert.AreEqual(1, Volatile.Read(ref detachCount));
+                Assert.AreEqual(1, Volatile.Read(ref unregisterCount));
+                Assert.AreEqual(1, Volatile.Read(ref removeCount));
+                Assert.AreEqual(1, Volatile.Read(ref staleCount));
+                Assert.AreEqual(usbipPort, detachedPort);
+                Assert.AreEqual(usbipPort, unregisteredPort);
+                Assert.AreEqual(busId, removedBus);
+                Assert.AreEqual(devId, removedDevice);
+            }
+        }
+
+        private static uint ReadUInt32(byte[] data, int offset)
+        {
+            return (uint)(data[offset] | data[offset + 1] << 8 |
+                data[offset + 2] << 16 | data[offset + 3] << 24);
+        }
+
+        private sealed class CountingDisposable : IDisposable
+        {
+            private int disposeCount;
+
+            public int DisposeCount => Volatile.Read(ref disposeCount);
+
+            public void Dispose()
+            {
+                Interlocked.Increment(ref disposeCount);
+            }
+        }
+
+        private sealed class CountingMemoryStream : MemoryStream
+        {
+            private int disposeCount;
+
+            public int DisposeCount => Volatile.Read(ref disposeCount);
+
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing)
+                {
+                    Interlocked.Increment(ref disposeCount);
+                }
+                base.Dispose(disposing);
+            }
         }
     }
 }

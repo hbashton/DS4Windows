@@ -57,6 +57,65 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         private int funcDevNum;
         public int FuncDevNum { get => funcDevNum; }
 
+        private readonly ControllerUiCapabilities controllerUiCapabilities;
+
+        public string PhysicalControllerName =>
+            controllerUiCapabilities.ControllerName;
+
+        public bool ShowControllerAudioSettings =>
+            controllerUiCapabilities.ShowControllerAudioSettings;
+
+        public bool ShowDualSenseHardwareControls =>
+            controllerUiCapabilities.ShowDualSenseHardwareControls;
+
+        public bool ShowPlayStationControllerSettings =>
+            controllerUiCapabilities.ShowPlayStationControllerSettings;
+
+        public bool SupportsAdaptiveTriggers =>
+            controllerUiCapabilities.SupportsAdaptiveTriggers;
+
+        public bool ShowUsbDualSenseSpeakerSelector =>
+            controllerUiCapabilities.ShowUsbDualSenseSpeakerSelector;
+
+        public bool ShowLegacyMicrophoneRouting =>
+            controllerUiCapabilities.ShowLegacyMicrophoneRouting;
+
+        public string ControllerAudioHeader =>
+            controllerUiCapabilities.AudioHeader;
+
+        public string ControllerAudioDescription =>
+            controllerUiCapabilities.AudioDescription;
+
+        public string ControllerMicrophoneToggleLabel =>
+            controllerUiCapabilities.MicrophoneToggleLabel;
+
+        public string ControllerMicrophoneDescription =>
+            controllerUiCapabilities.MicrophoneDescription;
+
+        private ControllerMicrophoneUiState ControllerMicrophoneUiState =>
+            controllerUiCapabilities.GetMicrophoneUiState(TempConType,
+                activeStreamSupportsMicrophone: true,
+                requireActiveStream: false);
+
+        public bool CanChangeControllerMicrophoneInput =>
+            ControllerMicrophoneUiState.CanChange(
+                DualSenseEnableMicrophonePassthrough);
+
+        public bool ControllerMicrophoneLevelControlsEnabled =>
+            ControllerMicrophoneUiState.CanAdjustLevel(
+                DualSenseEnableMicrophonePassthrough);
+
+        public string ControllerMicrophoneAvailabilityText =>
+            ControllerMicrophoneUiState.Message;
+
+        public bool ShowControllerMicrophoneAvailabilityMessage =>
+            ControllerMicrophoneUiState.ShowMessage;
+
+        public event EventHandler CanChangeControllerMicrophoneInputChanged;
+        public event EventHandler ControllerMicrophoneLevelControlsEnabledChanged;
+        public event EventHandler ControllerMicrophoneAvailabilityTextChanged;
+        public event EventHandler ShowControllerMicrophoneAvailabilityMessageChanged;
+
         private ImageBrush lightbarImgBrush = new ImageBrush();
         private SolidColorBrush lightbarColBrush = new SolidColorBrush();
 
@@ -963,49 +1022,46 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         {
             get => tempControllerIndex; set
             {
-                if (tempControllerIndex == value)
+                if (!ApplyTemporaryOutputControllerSelection(device,
+                    ref tempControllerIndex, value))
                 {
                     return;
                 }
 
-                tempControllerIndex = value;
-                Global.outDevTypeTemp[device] = TempConType;
-
-                if (TempConType == OutContType.ViiperDualSense ||
-                    TempConType == OutContType.ViiperDualSenseEdge)
-                {
-                    DualSenseSpeakerCompressionIndex =
-                        (int)DualSenseSpeakerProcessor.RecommendedCompression;
-                    DualSenseSpeakerBassBoost =
-                        DualSenseSpeakerProcessor.RecommendedBassBoostDb;
-                }
+                RaiseControllerMicrophoneUiStateChanged();
             }
         }
 
-        public OutContType TempConType
+        internal static bool ApplyTemporaryOutputControllerSelection(int device,
+            ref int currentIndex, int requestedIndex)
         {
-            get
+            if (currentIndex == requestedIndex)
             {
-                OutContType result = OutContType.None;
-                switch (tempControllerIndex)
-                {
-                    case 0:
-                        result = OutContType.X360; break;
-                    case 1:
-                        result = OutContType.ViiperDS4; break;
-                    case 2:
-                        result = OutContType.ViiperX360; break;
-                    case 3:
-                        result = OutContType.ViiperDualSense; break;
-                    case 4:
-                        result = OutContType.ViiperDualSenseEdge; break;
-                    case 5:
-                        result = OutContType.ViiperSwitch2Pro; break;
-                    default: result = OutContType.X360; break;
-                }
-                return result;
+                return false;
             }
+
+            currentIndex = requestedIndex;
+            Global.outDevTypeTemp[device] =
+                GetOutputControllerType(requestedIndex);
+            return true;
         }
+
+        internal static OutContType GetOutputControllerType(int controllerIndex)
+        {
+            return controllerIndex switch
+            {
+                0 => OutContType.X360,
+                1 => OutContType.ViiperDS4,
+                2 => OutContType.ViiperX360,
+                3 => OutContType.ViiperDualSense,
+                4 => OutContType.ViiperDualSenseEdge,
+                5 => OutContType.ViiperSwitch2Pro,
+                _ => OutContType.X360,
+            };
+        }
+
+        public OutContType TempConType =>
+            GetOutputControllerType(tempControllerIndex);
 
         public int GyroOutModeIndex
         {
@@ -3207,7 +3263,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             {
                 var choices = new List<AudioEndpointChoice>()
                 {
-                    new AudioEndpointChoice("Auto-detect DualSense speaker", string.Empty),
+                    new AudioEndpointChoice("Auto-detect controller speaker", string.Empty),
                 };
 
                 try
@@ -3239,7 +3295,28 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public bool DualSenseEnableMicrophonePassthrough
         {
             get => Global.DualSenseEnableMicrophonePassthrough[device];
-            set => Global.DualSenseEnableMicrophonePassthrough[device] = value;
+            set
+            {
+                if (Global.DualSenseEnableMicrophonePassthrough[device] == value)
+                {
+                    return;
+                }
+
+                Global.DualSenseEnableMicrophonePassthrough[device] = value;
+                RaiseControllerMicrophoneUiStateChanged();
+            }
+        }
+
+        private void RaiseControllerMicrophoneUiStateChanged()
+        {
+            CanChangeControllerMicrophoneInputChanged?.Invoke(this,
+                EventArgs.Empty);
+            ControllerMicrophoneLevelControlsEnabledChanged?.Invoke(this,
+                EventArgs.Empty);
+            ControllerMicrophoneAvailabilityTextChanged?.Invoke(this,
+                EventArgs.Empty);
+            ShowControllerMicrophoneAvailabilityMessageChanged?.Invoke(this,
+                EventArgs.Empty);
         }
 
         public List<AudioEndpointChoice> MicrophoneCaptureEndpointChoices
@@ -3248,7 +3325,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             {
                 var choices = new List<AudioEndpointChoice>()
                 {
-                    new AudioEndpointChoice("Auto-detect DualSense microphone", string.Empty),
+                    new AudioEndpointChoice("Auto-detect controller microphone", string.Empty),
                 };
 
                 try
@@ -3389,9 +3466,20 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             set => Global.InverseRumbleMotors[device] = value;
         }
 
-        public ProfileSettingsViewModel(int device)
+        public ProfileSettingsViewModel(int device,
+            InputDeviceType? physicalControllerType = null,
+            ConnectionType? physicalControllerConnection = null,
+            int? physicalControllerVendorId = null,
+            int? physicalControllerProductId = null)
         {
             this.device = device;
+            controllerUiCapabilities =
+                physicalControllerType == null ?
+                    ControllerUiCapabilities.For(null) :
+                    ControllerUiCapabilities.For(physicalControllerType,
+                        physicalControllerConnection,
+                        physicalControllerVendorId,
+                        physicalControllerProductId);
             funcDevNum = device < ControlService.CURRENT_DS4_CONTROLLER_LIMIT ? device : 0;
             tempControllerIndex = ControllerTypeIndex;
             Global.outDevTypeTemp[device] = OutContType.X360;

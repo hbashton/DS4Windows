@@ -14,6 +14,10 @@ namespace DS4WindowsTests
             typeof(DualSenseDevice).GetMethod(
                 "ApplyBluetoothSpeakerVolumeAndRouting",
                 BindingFlags.NonPublic | BindingFlags.Static);
+        private static readonly MethodInfo SanitizeAudioSnapshotMethod =
+            typeof(DualSenseDevice).GetMethod(
+                "SanitizeBluetoothSpeakerAudioSnapshot",
+                BindingFlags.NonPublic | BindingFlags.Static);
 
         [TestMethod]
         public void ZeroProfileVolumeMutesSpeaker()
@@ -57,8 +61,48 @@ namespace DS4WindowsTests
             Assert.AreEqual((byte)0xA5, report[13]);
             Assert.AreEqual((byte)0x84, report[14]);
             Assert.AreEqual(MapVolume(20), report[18]);
-            Assert.AreEqual((byte)0xF7, report[20]);
-            Assert.AreEqual((byte)0xAB, report[50]);
+            Assert.AreEqual((byte)0x30, report[20]);
+            Assert.AreEqual((byte)0x03, report[50]);
+        }
+
+        [TestMethod]
+        public void SpeakerSnapshotDoesNotRepeatMicrophoneAndDspControls()
+        {
+            byte[] report = new byte[64];
+            report[4] = 0xFF; // 0x36 header: microphone stream remains enabled.
+            report[13] = 0xFF;
+            report[14] = 0xFF;
+            report[19] = 0xFF;
+            report[21] = 0x01;
+            report[22] = 0x50;
+
+            Assert.IsNotNull(SanitizeAudioSnapshotMethod);
+            SanitizeAudioSnapshotMethod.Invoke(null, new object[] { report });
+            ApplyVolumeMethod.Invoke(null, new object[] { report, (byte)255 });
+
+            Assert.AreEqual((byte)0xFF, report[4],
+                "Speaker snapshot sanitation disabled the microphone stream header.");
+            Assert.AreEqual((byte)0xBF, report[13]);
+            Assert.AreEqual((byte)0xFE, report[14]);
+            Assert.AreEqual((byte)0x00, report[19]);
+            Assert.AreEqual((byte)0x30, report[20]);
+            Assert.AreEqual((byte)0x00, report[21]);
+            Assert.AreEqual((byte)0x40, report[22]);
+            Assert.AreEqual((byte)0x03, report[50]);
+        }
+
+        [TestMethod]
+        public void MicOnlyPowerSaveControlIsRemovedFromSpeakerSnapshot()
+        {
+            byte[] report = new byte[64];
+            report[14] = 0x03;
+            report[22] = 0x10;
+
+            Assert.IsNotNull(SanitizeAudioSnapshotMethod);
+            SanitizeAudioSnapshotMethod.Invoke(null, new object[] { report });
+
+            Assert.AreEqual((byte)0x00, report[14]);
+            Assert.AreEqual((byte)0x00, report[22]);
         }
 
         private static byte MapVolume(byte value)

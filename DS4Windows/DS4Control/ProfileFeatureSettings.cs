@@ -183,6 +183,87 @@ namespace DS4Windows
             Math.Clamp((int)Math.Round(value / (double)SliderStep) * SliderStep, 0, 100);
     }
 
+    public sealed class TriggerLabPreset
+    {
+        public TriggerLabPreset(string id, string name, string description,
+            TriggerLabMode mode, int startPercent, int wallPercent,
+            int forcePercent)
+        {
+            Id = id;
+            Name = name;
+            Description = description;
+            Mode = mode;
+            StartPercent = startPercent;
+            WallPercent = wallPercent;
+            ForcePercent = forcePercent;
+        }
+
+        public string Id { get; }
+        public string Name { get; }
+        public string Description { get; }
+        public TriggerLabMode Mode { get; }
+        public int StartPercent { get; }
+        public int WallPercent { get; }
+        public int ForcePercent { get; }
+
+        public TriggerLabEffectSettings CreateEffect() =>
+            new TriggerLabEffectSettings
+            {
+                ProfileId = Id,
+                Mode = Mode,
+                StartPercent = StartPercent,
+                WallPercent = WallPercent,
+                ForcePercent = ForcePercent,
+            }.Normalize();
+    }
+
+    public static class TriggerLabPresetCatalog
+    {
+        private static readonly IReadOnlyList<TriggerLabPreset> presets =
+            Array.AsReadOnly(new[]
+            {
+                new TriggerLabPreset("default", "Balanced Weapon",
+                    "A clean, medium travel weapon break.",
+                    TriggerLabMode.Weapon, 20, 60, 85),
+                new TriggerLabPreset("soft-resistance", "Soft Resistance",
+                    "Gentle resistance through most of the trigger travel.",
+                    TriggerLabMode.Feedback, 10, 50, 30),
+                new TriggerLabPreset("firm-resistance", "Firm Resistance",
+                    "A heavier continuous pull for brakes and throttles.",
+                    TriggerLabMode.Feedback, 5, 50, 75),
+                new TriggerLabPreset("hair-trigger", "Hair Trigger",
+                    "A short pull with an early, light break.",
+                    TriggerLabMode.Weapon, 5, 25, 65),
+                new TriggerLabPreset("pistol-break", "Pistol Break",
+                    "A defined mid-travel wall with a strong click.",
+                    TriggerLabMode.Weapon, 20, 55, 95),
+                new TriggerLabPreset("rifle-break", "Rifle Break",
+                    "A later, heavier break suited to rifles.",
+                    TriggerLabMode.Weapon, 35, 75, 100),
+                new TriggerLabPreset("machine-gun", "Machine Gun",
+                    "Fast, strong vibration after the initial take-up.",
+                    TriggerLabMode.Vibration, 15, 80, 85),
+                new TriggerLabPreset("road-texture", "Road Texture",
+                    "A lower-frequency vibration for terrain and engines.",
+                    TriggerLabMode.Vibration, 5, 35, 45),
+            });
+
+        public static IReadOnlyList<TriggerLabPreset> Presets => presets;
+
+        public static bool IsBuiltIn(string id) =>
+            presets.Any(preset => string.Equals(preset.Id, id,
+                StringComparison.Ordinal));
+
+        public static bool TryCreateEffect(string id,
+            out TriggerLabEffectSettings effect)
+        {
+            TriggerLabPreset preset = presets.FirstOrDefault(candidate =>
+                string.Equals(candidate.Id, id, StringComparison.Ordinal));
+            effect = preset?.CreateEffect();
+            return effect != null;
+        }
+    }
+
     public sealed class TriggerLabCustomProfile
     {
         public string Id { get; set; } = string.Empty;
@@ -259,17 +340,11 @@ namespace DS4Windows
                 .Select(group => group.Last())
                 .ToList();
 
-            // The built-in default is a template, never a persistent override.
-            if (Left.ProfileId == DefaultProfileId) LeftActive = false;
-            if (Right.ProfileId == DefaultProfileId) RightActive = false;
             LeftActive &= Left.ForcePercent > 0;
             RightActive &= Right.ForcePercent > 0;
             if (Linked)
             {
                 Right = Left.Clone();
-                bool active = LeftActive || RightActive;
-                LeftActive = active;
-                RightActive = active;
             }
 
             Enabled &= LeftActive || RightActive;

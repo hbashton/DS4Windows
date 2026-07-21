@@ -8,6 +8,21 @@ namespace DS4WindowsTests
     [TestClass]
     public class DualSenseBluetoothSpeakerLifecyclePolicyTests
     {
+        [TestMethod]
+        public void VirtualAudioEndpointGetsAFullEnumerationWindow()
+        {
+            int retryWindowMilliseconds =
+                DualSenseAudioPassthrough.BluetoothStartRetryAttempts *
+                DualSenseAudioPassthrough
+                    .BluetoothStartRetryDelayMilliseconds;
+
+            Assert.IsTrue(retryWindowMilliseconds >= 60000,
+                "A freshly created VIIPER audio endpoint can take longer than ten seconds to enumerate.");
+            Assert.IsTrue(DualSenseAudioPassthrough
+                    .BluetoothStartRetryDelayMilliseconds <= 250,
+                "Cancellation should be observed promptly while the endpoint is pending.");
+        }
+
         private static readonly FieldInfo ConnectionTypeField =
             typeof(DS4Device).GetField("conType",
                 BindingFlags.Instance | BindingFlags.NonPublic);

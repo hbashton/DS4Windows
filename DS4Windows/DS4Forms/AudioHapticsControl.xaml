@@ -30,6 +30,11 @@
             <Setter Property="FontSize" Value="14" />
             <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
+        <Style x:Key="ActivePresetButton" TargetType="Button" BasedOn="{StaticResource BridgePrimaryButtonStyle}">
+            <Setter Property="MinHeight" Value="42" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
         <Style x:Key="ModernToggle" TargetType="CheckBox">
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Template">
@@ -182,11 +187,11 @@
                                     <ColumnDefinition Width="10" />
                                     <ColumnDefinition />
                                 </Grid.ColumnDefinitions>
-                                <Button Content="Low" Tag="50" Style="{StaticResource PresetButton}"
+                                <Button x:Name="lowGainButton" Content="Low" Tag="50" Style="{StaticResource PresetButton}"
                                         Click="GainPreset_Click" />
-                                <Button Grid.Column="2" Content="Medium" Tag="100"
+                                <Button x:Name="mediumGainButton" Grid.Column="2" Content="Medium" Tag="100"
                                         Style="{StaticResource PresetButton}" Click="GainPreset_Click" />
-                                <Button Grid.Column="4" Content="High" Tag="150"
+                                <Button x:Name="highGainButton" Grid.Column="4" Content="High" Tag="150"
                                         Style="{StaticResource PresetButton}" Click="GainPreset_Click" />
                             </Grid>
 

@@ -149,14 +149,19 @@ namespace DS4Windows
         private const int MaximumStreamRecoveryBackoffMilliseconds = 1000;
         private const int MicrophoneDisableRetryMilliseconds = 250;
         // DualSense virtual speaker packets are normally 1,920 bytes and can
-        // reach 1,960 bytes. A 4 KiB slot leaves protocol headroom. The
-        // preallocated 160 ms reserve keeps scheduling jitter off the TCP
-        // reader without allowing seconds of stale PCM to burst into the
-        // downstream 240 ms capture ring. Acceptance still requires zero
-        // overflow drops and a low, non-growing high-water mark.
+        // reach 1,960 bytes. A 4 KiB slot leaves protocol headroom. Keep only
+        // an 80 ms live handoff window: the physical Bluetooth transport owns
+        // its separate, proven dropout reservoir, so replaying older virtual
+        // PCM here would add latency without adding protection.
         private const int FeedbackSpeakerSlotLength = 4096;
-        private const int FeedbackSpeakerQueueCapacity = 16;
-        private const int FeedbackOrderedControlQueueCapacity = 128;
+        internal const int FeedbackSpeakerQueueCapacity = 8;
+        internal const int FeedbackSpeakerMaximumAgeMilliseconds = 80;
+        // Native DualSense feedback arrives at roughly 150 Hz and is valid for
+        // only 30 ms in the physical combined transport. Four ordered reports
+        // preserve waveform continuity while preventing a stalled callback
+        // from turning old game effects into almost a second of input lag.
+        internal const int FeedbackOrderedControlQueueCapacity = 4;
+        internal const int FeedbackOrderedControlMaximumAgeMilliseconds = 20;
 
         private readonly OutContType outputType;
         private readonly ViiperVirtualDeviceType viiperType;
@@ -213,7 +218,9 @@ namespace DS4Windows
             new ViiperFeedbackDispatchBuffer(FeedbackSpeakerQueueCapacity,
                 FeedbackSpeakerSlotLength,
                 DualSenseCombinedExtendedFeedbackLength,
-                FeedbackOrderedControlQueueCapacity);
+                FeedbackOrderedControlQueueCapacity,
+                FeedbackSpeakerMaximumAgeMilliseconds,
+                FeedbackOrderedControlMaximumAgeMilliseconds);
         private ViiperDeviceStream deviceStream;
         private Thread feedbackThread;
         private Thread feedbackSpeakerDispatchThread;
@@ -1094,7 +1101,7 @@ namespace DS4Windows
                     {
                         IsBackground = true,
                         Name = $"VIIPER {viiperType} control dispatch",
-                        Priority = ThreadPriority.AboveNormal,
+                        Priority = ThreadPriority.Highest,
                     };
                     feedbackControlDispatchThread = thread;
                     thread.Start();
@@ -2354,11 +2361,13 @@ namespace DS4Windows
                 $"speakerDequeued={feedbackDispatchBuffer.SpeakerDequeued} " +
                 $"speakerDelivered={Interlocked.Read(ref feedbackSpeakerDelivered)} " +
                 $"speakerDropped={feedbackDispatchBuffer.SpeakerDropped} " +
+                $"speakerExpired={feedbackDispatchBuffer.SpeakerExpired} " +
                 $"speakerStale={Interlocked.Read(ref feedbackSpeakerStale)} " +
                 $"speakerNoSubscriberDeferrals={Interlocked.Read(ref feedbackSpeakerNoSubscriberDeferrals)} " +
                 $"speakerCallbackFailures={Interlocked.Read(ref feedbackSpeakerCallbackFailures)} " +
                 $"speakerPending={feedbackDispatchBuffer.PendingSpeakerCount} " +
                 $"speakerHighWater={feedbackDispatchBuffer.SpeakerHighWater} " +
+                $"speakerQueueAgeMaxMs={feedbackDispatchBuffer.SpeakerMaximumQueueAgeMilliseconds:F2} " +
                 $"speakerDispatchGapMaxMs={StopwatchTicksToMilliseconds(maximumSpeakerDispatchGap):F2} " +
                 $"speakerCallbackMaxMs={StopwatchTicksToMilliseconds(maximumSpeakerCallback):F2} " +
                 $"controlQueued={feedbackDispatchBuffer.ControlEnqueued} " +
@@ -2368,8 +2377,10 @@ namespace DS4Windows
                 $"hapticsQueued={feedbackDispatchBuffer.OrderedControlEnqueued} " +
                 $"hapticsDequeued={feedbackDispatchBuffer.OrderedControlDequeued} " +
                 $"hapticsDropped={feedbackDispatchBuffer.OrderedControlDropped} " +
+                $"hapticsExpired={feedbackDispatchBuffer.OrderedControlExpired} " +
                 $"hapticsPending={feedbackDispatchBuffer.PendingOrderedControlCount} " +
                 $"hapticsHighWater={feedbackDispatchBuffer.OrderedControlHighWater} " +
+                $"hapticsQueueAgeMaxMs={feedbackDispatchBuffer.OrderedControlMaximumQueueAgeMilliseconds:F2} " +
                 $"controlDelivered={Interlocked.Read(ref feedbackControlDelivered)} " +
                 $"controlStale={Interlocked.Read(ref feedbackControlStale)} " +
                 $"controlCallbackFailures={Interlocked.Read(ref feedbackControlCallbackFailures)}",

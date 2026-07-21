@@ -39,6 +39,8 @@ namespace DS4Windows
         private const string EndpointHistoryValueName = "{4b416b7d-8501-40c1-acfd-97aa9bdc17c8},1";
         private const string RenderEndpointRegistryPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Render\";
         private const int ControllerCount = ControlService.MAX_DS4_CONTROLLER_COUNT;
+        internal const int BluetoothStartRetryAttempts = 240;
+        internal const int BluetoothStartRetryDelayMilliseconds = 250;
         private readonly object syncRoot = new object();
         private readonly SlotPlayback[] slots = new SlotPlayback[ControllerCount];
         private readonly DualSenseBluetoothSpeakerPassthrough[] bluetoothSlots = new DualSenseBluetoothSpeakerPassthrough[ControllerCount];
@@ -317,37 +319,54 @@ namespace DS4Windows
             string requestedCaptureEndpointId, ControllerAudioEndpointKind endpointKind,
             ViiperOutDevice directSpeakerSource, int generation)
         {
-            // At most one start attempt may own a physical controller slot.
-            // A superseded task is allowed to finish/tear down before its
-            // replacement starts, so it can never clear the winner's speaker
-            // frame during the publish-generation check.
-            lock (bluetoothStartGates[slot])
+            Exception lastError = null;
+            for (int attempt = 0; attempt < BluetoothStartRetryAttempts;
+                attempt++)
             {
-                StartBluetoothWithRetrySerialized(slot, device,
-                    speakerVolume, speakerCompression, speakerBassBoost,
+                if (TryStartBluetoothOnce(slot, device, speakerVolume,
+                    speakerCompression, speakerBassBoost,
                     requestedCaptureEndpointId, endpointKind,
-                    directSpeakerSource, generation);
+                    directSpeakerSource, generation, out lastError))
+                {
+                    return;
+                }
+
+                // Endpoint enumeration is not an ownership operation. Keep the
+                // per-slot gate free while waiting so disconnect/profile-change
+                // teardown is immediate and can cancel this generation.
+                Thread.Sleep(BluetoothStartRetryDelayMilliseconds);
             }
+
+            lock (syncRoot)
+            {
+                if (disposed || generation != bluetoothStartGeneration[slot])
+                {
+                    return;
+                }
+            }
+
+            AppLogger.LogToGui($"DualSense Bluetooth speaker passthrough could not start after waiting for the selected audio endpoint: {lastError?.Message}", true);
         }
 
-        private void StartBluetoothWithRetrySerialized(int slot,
+        private bool TryStartBluetoothOnce(int slot,
             DualSenseDevice device, byte speakerVolume,
             DualSenseSpeakerCompression speakerCompression,
             byte speakerBassBoost, string requestedCaptureEndpointId,
             ControllerAudioEndpointKind endpointKind,
-            ViiperOutDevice directSpeakerSource, int generation)
+            ViiperOutDevice directSpeakerSource, int generation,
+            out Exception lastError)
         {
-            const int attempts = 20;
-            Exception lastError = null;
-
-            for (int attempt = 0; attempt < attempts; attempt++)
+            lastError = null;
+            // At most one actual transport construction may own this physical
+            // slot. The short gate spans start/publish, never retry sleeps.
+            lock (bluetoothStartGates[slot])
             {
                 lock (syncRoot)
                 {
                     if (disposed ||
                         generation != bluetoothStartGeneration[slot])
                     {
-                        return;
+                        return true;
                     }
                 }
 
@@ -358,8 +377,7 @@ namespace DS4Windows
                 {
                     lastError = new InvalidOperationException(
                         "The selected VIIPER controller audio endpoint is still enumerating or its direct stream is recovering.");
-                    Thread.Sleep(500);
-                    continue;
+                    return false;
                 }
 
                 ViiperOutDevice activeDirectSpeakerSource =
@@ -386,20 +404,18 @@ namespace DS4Windows
                     if (superseded)
                     {
                         bluetoothPlayback.Dispose();
-                        return;
+                        return true;
                     }
 
-                    return;
+                    return true;
                 }
                 catch (Exception ex)
                 {
                     lastError = ex;
                     bluetoothPlayback.Dispose();
-                    Thread.Sleep(500);
+                    return false;
                 }
             }
-
-            AppLogger.LogToGui($"DualSense Bluetooth speaker passthrough could not start after waiting for the selected audio endpoint: {lastError?.Message}", true);
         }
 
         private void StopBluetooth(int slot)

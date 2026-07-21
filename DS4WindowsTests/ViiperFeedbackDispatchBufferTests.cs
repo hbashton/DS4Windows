@@ -1,5 +1,6 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
+using System.Threading;
 
 namespace DS4Windows.Tests
 {
@@ -116,6 +117,57 @@ namespace DS4Windows.Tests
             Assert.IsTrue(buffer.TryDequeueOrderedControl(destination,
                 out _, out generation, out _));
             Assert.AreEqual(3L, generation);
+        }
+
+        [TestMethod]
+        public void ProductionFeedbackWindowsStayInsideLiveLatencyBudgets()
+        {
+            const double dualSenseFeedbackPacketsPerSecond = 150.0;
+            const double speakerPacketMilliseconds = 10.0;
+
+            double hapticsWindowMilliseconds =
+                ViiperOutDevice.FeedbackOrderedControlQueueCapacity * 1000.0 /
+                dualSenseFeedbackPacketsPerSecond;
+            double speakerWindowMilliseconds =
+                ViiperOutDevice.FeedbackSpeakerQueueCapacity *
+                speakerPacketMilliseconds;
+
+            Assert.IsTrue(hapticsWindowMilliseconds <= 30.0,
+                $"The native-haptics FIFO can retain {hapticsWindowMilliseconds:F1} ms of stale effects.");
+            Assert.IsTrue(speakerWindowMilliseconds <= 80.0,
+                $"The direct-speaker FIFO can retain {speakerWindowMilliseconds:F1} ms of stale audio.");
+            Assert.IsTrue(
+                ViiperOutDevice.FeedbackOrderedControlMaximumAgeMilliseconds <=
+                    20,
+                "A paused haptics frame can outlive the presentation budget.");
+            Assert.IsTrue(
+                ViiperOutDevice.FeedbackSpeakerMaximumAgeMilliseconds <= 80,
+                "A paused direct-speaker frame can outlive the handoff budget.");
+        }
+
+        [TestMethod]
+        public void ExpiredLiveFeedbackIsNeverReplayedAfterAStall()
+        {
+            var buffer = new ViiperFeedbackDispatchBuffer(2, 16, 16, 2,
+                speakerMaximumAgeMilliseconds: 1,
+                orderedControlMaximumAgeMilliseconds: 1);
+            byte[] destination = new byte[16];
+
+            Assert.IsTrue(buffer.TryEnqueueSpeaker(
+                new byte[] { 1, 2 }, 2, 1));
+            Assert.IsTrue(buffer.TryEnqueueOrderedControl(
+                new byte[] { 3, 4 }, 2, 1, 0));
+            Thread.Sleep(15);
+
+            Assert.IsFalse(buffer.TryDequeueSpeaker(destination,
+                out _, out _));
+            Assert.IsFalse(buffer.TryDequeueOrderedControl(destination,
+                out _, out _, out _));
+            Assert.AreEqual(1L, buffer.SpeakerExpired);
+            Assert.AreEqual(1L, buffer.OrderedControlExpired);
+            Assert.IsTrue(buffer.SpeakerMaximumQueueAgeMilliseconds >= 1.0);
+            Assert.IsTrue(
+                buffer.OrderedControlMaximumQueueAgeMilliseconds >= 1.0);
         }
 
         [TestMethod]

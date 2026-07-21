@@ -208,6 +208,56 @@
         </Setter>
     </Style>
 
+    <Style x:Key="BridgeTriggerPairIconStyle" TargetType="ContentControl">
+        <Setter Property="Width" Value="32" />
+        <Setter Property="Height" Value="24" />
+        <Setter Property="Foreground" Value="{DynamicResource MutedForegroundColor}" />
+        <Setter Property="HorizontalAlignment" Value="Center" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ContentControl">
+                    <Grid Width="32" Height="24">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="16" />
+                            <ColumnDefinition Width="16" />
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Width="15" Height="20"
+                                HorizontalAlignment="Right" VerticalAlignment="Top"
+                                CornerRadius="6,3,4,7" BorderThickness="1.2"
+                                BorderBrush="{TemplateBinding Foreground}"
+                                Background="{DynamicResource RaisedBackgroundColor}"
+                                RenderTransformOrigin="0.5,0.5">
+                            <Border.RenderTransform>
+                                <RotateTransform Angle="-8" />
+                            </Border.RenderTransform>
+                            <TextBlock Text="L2" Margin="0,1,0,0"
+                                       FontFamily="Segoe UI" FontSize="7.5"
+                                       FontWeight="Bold" TextAlignment="Center"
+                                       Foreground="{TemplateBinding Foreground}"
+                                       VerticalAlignment="Center" />
+                        </Border>
+                        <Border Grid.Column="1" Width="15" Height="20"
+                                HorizontalAlignment="Left" VerticalAlignment="Top"
+                                CornerRadius="3,6,7,4" BorderThickness="1.2"
+                                BorderBrush="{TemplateBinding Foreground}"
+                                Background="{DynamicResource RaisedBackgroundColor}"
+                                RenderTransformOrigin="0.5,0.5">
+                            <Border.RenderTransform>
+                                <RotateTransform Angle="8" />
+                            </Border.RenderTransform>
+                            <TextBlock Text="R2" Margin="0,1,0,0"
+                                       FontFamily="Segoe UI" FontSize="7.5"
+                                       FontWeight="Bold" TextAlignment="Center"
+                                       Foreground="{TemplateBinding Foreground}"
+                                       VerticalAlignment="Center" />
+                        </Border>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <Style x:Key="BridgeNavigationTabItemStyle" TargetType="TabItem">
         <Setter Property="Foreground" Value="{DynamicResource MutedForegroundColor}" />
         <Setter Property="Background" Value="Transparent" />
@@ -225,7 +275,7 @@
                             Padding="{TemplateBinding Padding}">
                         <Grid>
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="22" />
+                                <ColumnDefinition Width="36" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <TextBlock x:Name="NavGlyph"
@@ -233,7 +283,12 @@
                                        FontFamily="Segoe Fluent Icons"
                                        Foreground="{DynamicResource MutedForegroundColor}"
                                        FontSize="14"
+                                       Width="28" TextAlignment="Center"
+                                       HorizontalAlignment="Center"
                                        VerticalAlignment="Center" />
+                            <ContentControl x:Name="NavTriggerGlyph"
+                                            Style="{StaticResource BridgeTriggerPairIconStyle}"
+                                            Visibility="Collapsed" />
                             <ContentPresenter Grid.Column="1"
                                               ContentSource="Header"
                                               RecognizesAccessKey="True"
@@ -249,8 +304,13 @@
                             <Setter TargetName="NavItem" Property="Background" Value="{DynamicResource NavigationSelectionColor}" />
                             <Setter TargetName="NavItem" Property="BorderBrush" Value="{DynamicResource AccentColor}" />
                             <Setter TargetName="NavGlyph" Property="Foreground" Value="{DynamicResource AccentColor}" />
+                            <Setter TargetName="NavTriggerGlyph" Property="Foreground" Value="{DynamicResource AccentColor}" />
                             <Setter Property="Foreground" Value="{DynamicResource ForegroundColor}" />
                             <Setter Property="FontWeight" Value="SemiBold" />
+                        </Trigger>
+                        <Trigger Property="Tag" Value="TriggerPair">
+                            <Setter TargetName="NavGlyph" Property="Visibility" Value="Collapsed" />
+                            <Setter TargetName="NavTriggerGlyph" Property="Visibility" Value="Visible" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.45" />
@@ -275,12 +335,17 @@
                             CornerRadius="3" Padding="{TemplateBinding Padding}">
                         <Grid>
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="24" />
+                                <ColumnDefinition Width="36" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <TextBlock x:Name="EditorNavGlyph" Text="{TemplateBinding Tag}"
+                                       FontFamily="Segoe Fluent Icons"
                                        Foreground="{DynamicResource MutedForegroundColor}"
-                                       FontSize="13" VerticalAlignment="Center" />
+                                       FontSize="13" Width="28" TextAlignment="Center"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <ContentControl x:Name="EditorNavTriggerGlyph"
+                                            Style="{StaticResource BridgeTriggerPairIconStyle}"
+                                            Visibility="Collapsed" />
                             <StackPanel Grid.Column="1">
                                 <ContentPresenter VerticalAlignment="Center" />
                                 <TextBlock Text="{TemplateBinding ToolTip}" Margin="0,1,0,0"
@@ -298,8 +363,13 @@
                             <Setter TargetName="EditorNavItem" Property="Background" Value="{DynamicResource NavigationSelectionColor}" />
                             <Setter TargetName="EditorNavItem" Property="BorderBrush" Value="{DynamicResource AccentColor}" />
                             <Setter TargetName="EditorNavGlyph" Property="Foreground" Value="{DynamicResource AccentColor}" />
+                            <Setter TargetName="EditorNavTriggerGlyph" Property="Foreground" Value="{DynamicResource AccentColor}" />
                             <Setter Property="Foreground" Value="{DynamicResource ForegroundColor}" />
                             <Setter Property="FontWeight" Value="SemiBold" />
+                        </Trigger>
+                        <Trigger Property="Tag" Value="TriggerPair">
+                            <Setter TargetName="EditorNavGlyph" Property="Visibility" Value="Collapsed" />
+                            <Setter TargetName="EditorNavTriggerGlyph" Property="Visibility" Value="Visible" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -576,7 +646,7 @@
                                         <ListBoxItem Content="Touchpad" Tag="&#x25A1;" ToolTip="Mouse, gestures, passthrough, and positioning" />
                                         <ListBoxItem Content="Gyro" Tag="&#x25CE;" ToolTip="Motion aiming, steering, and swipes" />
                                         <ListBoxItem Content="Audio Haptics" Tag="&#xE767;" ToolTip="Turn system or app audio into advanced haptics" />
-                                        <ListBoxItem Content="Trigger Lab" Tag="L2" ToolTip="Build persistent adaptive-trigger effects" />
+                                        <ListBoxItem Content="Trigger Lab" Tag="TriggerPair" ToolTip="Build persistent adaptive-trigger effects" />
                                         <ListBoxItem Content="Advanced" Tag="&#x2699;" ToolTip="Output, rumble, latency, and compatibility" />
                                         <ListBoxItem Content="Log" Tag="&#x2261;" ToolTip="Service events without leaving the editor" />
                                     </ListBox>

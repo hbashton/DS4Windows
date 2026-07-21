@@ -9,6 +9,7 @@ the Free Software Foundation, either version 3 of the License, or
 */
 
 using System;
+using System.Diagnostics;
 using System.Threading;
 
 namespace DS4Windows
@@ -16,9 +17,10 @@ namespace DS4Windows
     /// <summary>
     /// Preallocated hand-off between VIIPER's framed TCP reader and the
     /// potentially blocking physical-controller feedback paths. Speaker PCM
-    /// is lossless while capacity remains. Time-bearing native feedback uses
-    /// an ordered FIFO, while ordinary controller state can intentionally
-    /// coalesce because only the newest rumble/light/trigger state matters.
+    /// and native haptics retain order only inside explicit live-latency
+    /// budgets; expired frames are never replayed after a stall. Ordinary
+    /// controller state can intentionally coalesce because only the newest
+    /// rumble/light/trigger state matters.
     /// </summary>
     internal sealed class ViiperFeedbackDispatchBuffer
     {
@@ -26,12 +28,16 @@ namespace DS4Windows
         private readonly byte[][] speakerSlots;
         private readonly int[] speakerLengths;
         private readonly long[] speakerGenerations;
+        private readonly long[] speakerEnqueueTimestamps;
         private readonly int speakerSlotLength;
+        private readonly long speakerMaximumAgeTicks;
         private readonly byte[] controlSlot;
         private readonly byte[][] orderedControlSlots;
         private readonly int[] orderedControlLengths;
         private readonly long[] orderedControlGenerations;
         private readonly int[] orderedControlDeviceIndexes;
+        private readonly long[] orderedControlEnqueueTimestamps;
+        private readonly long orderedControlMaximumAgeTicks;
         private int speakerReadIndex;
         private int speakerWriteIndex;
         private int speakerCount;
@@ -45,7 +51,9 @@ namespace DS4Windows
         private long speakerEnqueued;
         private long speakerDequeued;
         private long speakerDropped;
+        private long speakerExpired;
         private long speakerHighWater;
+        private long speakerMaximumQueueAgeTicks;
         private long controlEnqueued;
         private long controlDequeued;
         private long controlCoalesced;
@@ -53,11 +61,15 @@ namespace DS4Windows
         private long orderedControlEnqueued;
         private long orderedControlDequeued;
         private long orderedControlDropped;
+        private long orderedControlExpired;
         private long orderedControlHighWater;
+        private long orderedControlMaximumQueueAgeTicks;
 
         internal ViiperFeedbackDispatchBuffer(int speakerCapacity,
             int speakerSlotLength, int controlSlotLength,
-            int orderedControlCapacity = 0)
+            int orderedControlCapacity = 0,
+            int speakerMaximumAgeMilliseconds = 0,
+            int orderedControlMaximumAgeMilliseconds = 0)
         {
             if (speakerCapacity <= 0)
             {
@@ -78,6 +90,14 @@ namespace DS4Windows
             speakerSlots = new byte[speakerCapacity][];
             speakerLengths = new int[speakerCapacity];
             speakerGenerations = new long[speakerCapacity];
+            speakerEnqueueTimestamps = new long[speakerCapacity];
+            if (speakerMaximumAgeMilliseconds < 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(speakerMaximumAgeMilliseconds));
+            }
+            speakerMaximumAgeTicks = MillisecondsToStopwatchTicks(
+                speakerMaximumAgeMilliseconds);
             for (int index = 0; index < speakerSlots.Length; index++)
             {
                 speakerSlots[index] = new byte[speakerSlotLength];
@@ -94,6 +114,15 @@ namespace DS4Windows
             orderedControlLengths = new int[orderedControlCapacity];
             orderedControlGenerations = new long[orderedControlCapacity];
             orderedControlDeviceIndexes = new int[orderedControlCapacity];
+            orderedControlEnqueueTimestamps =
+                new long[orderedControlCapacity];
+            if (orderedControlMaximumAgeMilliseconds < 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(orderedControlMaximumAgeMilliseconds));
+            }
+            orderedControlMaximumAgeTicks = MillisecondsToStopwatchTicks(
+                orderedControlMaximumAgeMilliseconds);
             for (int index = 0; index < orderedControlSlots.Length; index++)
             {
                 orderedControlSlots[index] = new byte[controlSlotLength];
@@ -128,7 +157,11 @@ namespace DS4Windows
         internal long SpeakerEnqueued => Interlocked.Read(ref speakerEnqueued);
         internal long SpeakerDequeued => Interlocked.Read(ref speakerDequeued);
         internal long SpeakerDropped => Interlocked.Read(ref speakerDropped);
+        internal long SpeakerExpired => Interlocked.Read(ref speakerExpired);
         internal long SpeakerHighWater => Interlocked.Read(ref speakerHighWater);
+        internal double SpeakerMaximumQueueAgeMilliseconds =>
+            StopwatchTicksToMilliseconds(
+                Interlocked.Read(ref speakerMaximumQueueAgeTicks));
         internal long ControlEnqueued => Interlocked.Read(ref controlEnqueued);
         internal long ControlDequeued => Interlocked.Read(ref controlDequeued);
         internal long ControlCoalesced => Interlocked.Read(ref controlCoalesced);
@@ -139,8 +172,13 @@ namespace DS4Windows
             Interlocked.Read(ref orderedControlDequeued);
         internal long OrderedControlDropped =>
             Interlocked.Read(ref orderedControlDropped);
+        internal long OrderedControlExpired =>
+            Interlocked.Read(ref orderedControlExpired);
         internal long OrderedControlHighWater =>
             Interlocked.Read(ref orderedControlHighWater);
+        internal double OrderedControlMaximumQueueAgeMilliseconds =>
+            StopwatchTicksToMilliseconds(
+                Interlocked.Read(ref orderedControlMaximumQueueAgeTicks));
 
         internal bool TryEnqueueSpeaker(byte[] source, int length,
             long generation)
@@ -166,6 +204,7 @@ namespace DS4Windows
                     // controller permanently seconds behind after a stall.
                     speakerLengths[speakerReadIndex] = 0;
                     speakerGenerations[speakerReadIndex] = 0;
+                    speakerEnqueueTimestamps[speakerReadIndex] = 0;
                     speakerReadIndex = (speakerReadIndex + 1) %
                         speakerSlots.Length;
                     speakerCount--;
@@ -176,6 +215,8 @@ namespace DS4Windows
                     0, length);
                 speakerLengths[speakerWriteIndex] = length;
                 speakerGenerations[speakerWriteIndex] = generation;
+                speakerEnqueueTimestamps[speakerWriteIndex] =
+                    Stopwatch.GetTimestamp();
                 speakerWriteIndex = (speakerWriteIndex + 1) %
                     speakerSlots.Length;
                 speakerCount++;
@@ -195,6 +236,7 @@ namespace DS4Windows
 
             lock (syncRoot)
             {
+                DropExpiredSpeakerFrames(Stopwatch.GetTimestamp());
                 if (speakerCount == 0)
                 {
                     length = 0;
@@ -213,8 +255,12 @@ namespace DS4Windows
                 Buffer.BlockCopy(speakerSlots[speakerReadIndex], 0,
                     destination, 0, length);
                 generation = speakerGenerations[speakerReadIndex];
+                RecordMaximum(ref speakerMaximumQueueAgeTicks,
+                    Stopwatch.GetTimestamp() -
+                        speakerEnqueueTimestamps[speakerReadIndex]);
                 speakerLengths[speakerReadIndex] = 0;
                 speakerGenerations[speakerReadIndex] = 0;
+                speakerEnqueueTimestamps[speakerReadIndex] = 0;
                 speakerReadIndex = (speakerReadIndex + 1) %
                     speakerSlots.Length;
                 speakerCount--;
@@ -280,6 +326,8 @@ namespace DS4Windows
                     orderedControlLengths[orderedControlReadIndex] = 0;
                     orderedControlGenerations[orderedControlReadIndex] = 0;
                     orderedControlDeviceIndexes[orderedControlReadIndex] = -1;
+                    orderedControlEnqueueTimestamps[
+                        orderedControlReadIndex] = 0;
                     orderedControlReadIndex =
                         (orderedControlReadIndex + 1) %
                         orderedControlSlots.Length;
@@ -294,6 +342,8 @@ namespace DS4Windows
                     generation;
                 orderedControlDeviceIndexes[orderedControlWriteIndex] =
                     deviceIndex;
+                orderedControlEnqueueTimestamps[orderedControlWriteIndex] =
+                    Stopwatch.GetTimestamp();
                 orderedControlWriteIndex = (orderedControlWriteIndex + 1) %
                     orderedControlSlots.Length;
                 orderedControlCount++;
@@ -314,6 +364,7 @@ namespace DS4Windows
 
             lock (syncRoot)
             {
+                DropExpiredOrderedControlFrames(Stopwatch.GetTimestamp());
                 if (orderedControlCount == 0)
                 {
                     length = 0;
@@ -337,9 +388,15 @@ namespace DS4Windows
                     orderedControlGenerations[orderedControlReadIndex];
                 deviceIndex =
                     orderedControlDeviceIndexes[orderedControlReadIndex];
+                RecordMaximum(ref orderedControlMaximumQueueAgeTicks,
+                    Stopwatch.GetTimestamp() -
+                        orderedControlEnqueueTimestamps[
+                            orderedControlReadIndex]);
                 orderedControlLengths[orderedControlReadIndex] = 0;
                 orderedControlGenerations[orderedControlReadIndex] = 0;
                 orderedControlDeviceIndexes[orderedControlReadIndex] = -1;
+                orderedControlEnqueueTimestamps[
+                    orderedControlReadIndex] = 0;
                 orderedControlReadIndex = (orderedControlReadIndex + 1) %
                     orderedControlSlots.Length;
                 orderedControlCount--;
@@ -388,6 +445,8 @@ namespace DS4Windows
                     Array.Clear(orderedControlGenerations, 0,
                         orderedControlGenerations.Length);
                     Array.Fill(orderedControlDeviceIndexes, -1);
+                    Array.Clear(orderedControlEnqueueTimestamps, 0,
+                        orderedControlEnqueueTimestamps.Length);
                 }
                 orderedControlReadIndex = 0;
                 orderedControlWriteIndex = 0;
@@ -404,6 +463,8 @@ namespace DS4Windows
                 Array.Clear(speakerLengths, 0, speakerLengths.Length);
                 Array.Clear(speakerGenerations, 0,
                     speakerGenerations.Length);
+                Array.Clear(speakerEnqueueTimestamps, 0,
+                    speakerEnqueueTimestamps.Length);
                 speakerReadIndex = 0;
                 speakerWriteIndex = 0;
                 speakerCount = 0;
@@ -416,6 +477,8 @@ namespace DS4Windows
                 Array.Clear(orderedControlGenerations, 0,
                     orderedControlGenerations.Length);
                 Array.Fill(orderedControlDeviceIndexes, -1);
+                Array.Clear(orderedControlEnqueueTimestamps, 0,
+                    orderedControlEnqueueTimestamps.Length);
                 orderedControlReadIndex = 0;
                 orderedControlWriteIndex = 0;
                 orderedControlCount = 0;
@@ -428,7 +491,9 @@ namespace DS4Windows
             Interlocked.Exchange(ref speakerEnqueued, 0);
             Interlocked.Exchange(ref speakerDequeued, 0);
             Interlocked.Exchange(ref speakerDropped, 0);
+            Interlocked.Exchange(ref speakerExpired, 0);
             Interlocked.Exchange(ref speakerHighWater, 0);
+            Interlocked.Exchange(ref speakerMaximumQueueAgeTicks, 0);
             Interlocked.Exchange(ref controlEnqueued, 0);
             Interlocked.Exchange(ref controlDequeued, 0);
             Interlocked.Exchange(ref controlCoalesced, 0);
@@ -436,8 +501,60 @@ namespace DS4Windows
             Interlocked.Exchange(ref orderedControlEnqueued, 0);
             Interlocked.Exchange(ref orderedControlDequeued, 0);
             Interlocked.Exchange(ref orderedControlDropped, 0);
+            Interlocked.Exchange(ref orderedControlExpired, 0);
             Interlocked.Exchange(ref orderedControlHighWater, 0);
+            Interlocked.Exchange(ref orderedControlMaximumQueueAgeTicks, 0);
         }
+
+        private void DropExpiredSpeakerFrames(long nowTimestamp)
+        {
+            while (speakerCount > 0 && speakerMaximumAgeTicks > 0 &&
+                nowTimestamp - speakerEnqueueTimestamps[speakerReadIndex] >
+                    speakerMaximumAgeTicks)
+            {
+                RecordMaximum(ref speakerMaximumQueueAgeTicks,
+                    nowTimestamp - speakerEnqueueTimestamps[speakerReadIndex]);
+                speakerLengths[speakerReadIndex] = 0;
+                speakerGenerations[speakerReadIndex] = 0;
+                speakerEnqueueTimestamps[speakerReadIndex] = 0;
+                speakerReadIndex = (speakerReadIndex + 1) %
+                    speakerSlots.Length;
+                speakerCount--;
+                Interlocked.Increment(ref speakerDropped);
+                Interlocked.Increment(ref speakerExpired);
+            }
+        }
+
+        private void DropExpiredOrderedControlFrames(long nowTimestamp)
+        {
+            while (orderedControlCount > 0 &&
+                orderedControlMaximumAgeTicks > 0 &&
+                nowTimestamp - orderedControlEnqueueTimestamps[
+                    orderedControlReadIndex] >
+                        orderedControlMaximumAgeTicks)
+            {
+                RecordMaximum(ref orderedControlMaximumQueueAgeTicks,
+                    nowTimestamp - orderedControlEnqueueTimestamps[
+                        orderedControlReadIndex]);
+                orderedControlLengths[orderedControlReadIndex] = 0;
+                orderedControlGenerations[orderedControlReadIndex] = 0;
+                orderedControlDeviceIndexes[orderedControlReadIndex] = -1;
+                orderedControlEnqueueTimestamps[
+                    orderedControlReadIndex] = 0;
+                orderedControlReadIndex = (orderedControlReadIndex + 1) %
+                    orderedControlSlots.Length;
+                orderedControlCount--;
+                Interlocked.Increment(ref orderedControlDropped);
+                Interlocked.Increment(ref orderedControlExpired);
+            }
+        }
+
+        private static long MillisecondsToStopwatchTicks(int milliseconds) =>
+            milliseconds <= 0 ? 0 :
+                (Stopwatch.Frequency * (long)milliseconds) / 1000L;
+
+        private static double StopwatchTicksToMilliseconds(long ticks) =>
+            ticks <= 0 ? 0.0 : ticks * 1000.0 / Stopwatch.Frequency;
 
         private static void RecordMaximum(ref long target, long candidate)
         {

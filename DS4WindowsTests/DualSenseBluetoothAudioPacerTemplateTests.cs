@@ -262,18 +262,30 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
-        public void ProducerReservoirCoversLongWindowsCallbackStall()
+        public void LowLatencyProducerReservoirCoversMeasuredWindowsCallbackStall()
         {
-            double protectedMilliseconds =
+            double presentationReserveMilliseconds =
                 DualSenseBluetoothSpeakerPassthrough
                     .PacerReservoirTargetFrames * 1000.0 *
                 DualSenseBluetoothAudioPacerScheduler.CadenceNumerator /
                 DualSenseBluetoothAudioPacerScheduler.CadenceDenominator;
+            double protectedMilliseconds = presentationReserveMilliseconds +
+                DualSenseBluetoothSpeakerPassthrough.TargetBufferMs;
 
-            Assert.IsTrue(protectedMilliseconds >= 160.0,
-                $"The host presentation reserve covers only " +
-                $"{protectedMilliseconds:F1} ms; observed Windows callback " +
-                "stalls can exceed 120 ms.");
+            Assert.IsTrue(protectedMilliseconds >= 100.0,
+                $"The combined reserve covers only " +
+                $"{protectedMilliseconds:F1} ms; the measured callback stall " +
+                "was 86.7 ms and requires scheduling margin.");
+            Assert.IsTrue(protectedMilliseconds <= 125.0,
+                $"The low-latency path still buffers " +
+                $"{protectedMilliseconds:F1} ms before presentation.");
+            Assert.IsTrue(
+                DualSenseBluetoothSpeakerPassthrough.InitialBufferMs <= 32,
+                "Startup must not add a second long media-style prebuffer.");
+            Assert.IsTrue(
+                DualSenseBluetoothSpeakerPassthrough
+                    .LowLatencyCaptureBufferMs <= 5,
+                "Loopback capture should request a sub-10 ms period.");
             Assert.IsTrue(
                 DualSenseBluetoothSpeakerPassthrough
                     .PacerReservoirTargetFrames >

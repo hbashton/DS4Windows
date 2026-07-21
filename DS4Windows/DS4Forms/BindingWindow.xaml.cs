@@ -86,10 +86,7 @@ namespace DS4WinWPF.DS4Forms
             InitKeyBindings();
             InitInfoMaps();
 
-            if (!bindingVM.Using360Mode)
-            {
-                InitDS4Canvas();
-            }
+            ConfigureOutputControllerCanvas(bindingVM.OutputControllerType);
 
             bindingVM.ActionBinding = bindingVM.CurrentOutBind;
             if (expose == ExposeMode.Full)
@@ -126,29 +123,28 @@ namespace DS4WinWPF.DS4Forms
             double left = Canvas.GetLeft(button);
             double top = Canvas.GetTop(button);
 
-            Canvas.SetLeft(highlightImg, left + (button.Width / 2.0) - (highlightImg.Height / 2.0));
-            Canvas.SetTop(highlightImg, top + (button.Height / 2.0) - (highlightImg.Height / 2.0));
+            bool circular = button == aBtn || button == bBtn || button == xBtn ||
+                button == yBtn || button == guideBtn || button == lsbBtn ||
+                button == rsbBtn;
+            Rect highlightBounds = new Rect(left + 1, top + 1,
+                Math.Max(1, button.Width - 2), Math.Max(1, button.Height - 2));
+            outputControllerHighlight.Data = circular
+                ? new EllipseGeometry(highlightBounds)
+                : new RectangleGeometry(highlightBounds, 5, 5);
+            outputControllerHighlight.Visibility = Visibility.Visible;
 
             Canvas.SetLeft(highlightLb, left + (button.Width / 2.0) - (highlightLb.ActualWidth / 2.0));
             Canvas.SetTop(highlightLb, top - 30);
 
-            highlightImg.Visibility = Visibility.Visible;
             highlightLb.Visibility = Visibility.Visible;
         }
 
         private string GetControlString(Button button)
         {
             string result;
-            if (bindingVM.Using360Mode)
-            {
-                DS4Windows.X360Controls xboxcontrol = associatedBindings[button].control;
-                result = DS4Windows.Global.xboxDefaultNames[xboxcontrol];
-            }
-            else
-            {
-                DS4Windows.X360Controls xboxcontrol = associatedBindings[button].control;
-                result = DS4Windows.Global.ds4DefaultNames[xboxcontrol];
-            }
+            DS4Windows.X360Controls xboxcontrol = associatedBindings[button].control;
+            result = DS4Windows.Global.getX360ControlString(
+                xboxcontrol, bindingVM.OutputControllerType);
 
             return result;
         }
@@ -156,6 +152,7 @@ namespace DS4WinWPF.DS4Forms
         private void OutConBtn_MouseLeave(object sender, MouseEventArgs e)
         {
             highlightImg.Visibility = Visibility.Hidden;
+            outputControllerHighlight.Visibility = Visibility.Collapsed;
             highlightLb.Visibility = Visibility.Hidden;
         }
 
@@ -770,12 +767,188 @@ namespace DS4WinWPF.DS4Forms
             numEnterBtn.Click += OutputKeyBtn_Click;
         }
 
-        private void InitDS4Canvas()
+        private static ImageSource LoadControllerImage(string fileName)
         {
             ImageSourceConverter sourceConverter = new ImageSourceConverter();
-            ImageSource temp = sourceConverter.
-                ConvertFromString($"{DS4Windows.Global.ASSEMBLY_RESOURCE_PREFIX}component/Resources/{App.Current.FindResource("DS4ConfigImg")}") as ImageSource;
-            conImageBrush.ImageSource = temp;
+            return sourceConverter.ConvertFromString(
+                $"{DS4Windows.Global.ASSEMBLY_RESOURCE_PREFIX}component/Resources/{fileName}") as ImageSource;
+        }
+
+        private static void SetOutputButtonBounds(Button button, double left,
+            double top, double width, double height)
+        {
+            Canvas.SetLeft(button, left);
+            Canvas.SetTop(button, top);
+            button.Width = width;
+            button.Height = height;
+        }
+
+        private void ConfigureOutputControllerCanvas(OutContType outputType)
+        {
+            touchpadClickBtn.Visibility = Visibility.Collapsed;
+            outputType = outputType.Normalize();
+            switch (outputType)
+            {
+                case OutContType.ViiperDS4:
+                    ConfigureDualShock4OutputCanvas();
+                    break;
+                case OutContType.ViiperDualSense:
+                    ConfigureDualSenseOutputCanvas();
+                    break;
+                case OutContType.ViiperDualSenseEdge:
+                    ConfigureDualSenseEdgeOutputCanvas();
+                    break;
+                case OutContType.ViiperSwitch2Pro:
+                    ConfigureSwitch2ProOutputCanvas();
+                    break;
+                default:
+                    ConfigureXbox360OutputCanvas();
+                    break;
+            }
+        }
+
+        private void ConfigureXbox360OutputCanvas()
+        {
+            conImageBrush.ImageSource = LoadControllerImage("360 map.png");
+        }
+
+        private void ConfigureDualShock4OutputCanvas()
+        {
+            conImageBrush.ImageSource = LoadControllerImage("DualShock 4 Controller.png");
+
+            SetOutputButtonBounds(aBtn, 419, 138, 25, 25);
+            SetOutputButtonBounds(bBtn, 446, 114, 25, 25);
+            SetOutputButtonBounds(xBtn, 390, 114, 25, 25);
+            SetOutputButtonBounds(yBtn, 419, 90, 25, 25);
+            SetOutputButtonBounds(lbBtn, 178, 40, 53, 24);
+            SetOutputButtonBounds(rbBtn, 399, 40, 53, 24);
+            SetOutputButtonBounds(ltBtn, 184, 18, 45, 25);
+            SetOutputButtonBounds(rtBtn, 401, 18, 45, 25);
+            SetOutputButtonBounds(backBtn, 231, 79, 17, 25);
+            SetOutputButtonBounds(startBtn, 382, 79, 17, 25);
+            SetOutputButtonBounds(guideBtn, 305, 158, 20, 18);
+            SetOutputButtonBounds(lsbBtn, 235, 160, 43, 43);
+            SetOutputButtonBounds(lsuBtn, 246, 153, 21, 16);
+            SetOutputButtonBounds(lsrBtn, 271, 171, 17, 20);
+            SetOutputButtonBounds(lsdBtn, 246, 196, 21, 16);
+            SetOutputButtonBounds(lslBtn, 225, 171, 17, 20);
+            SetOutputButtonBounds(rsbBtn, 352, 160, 43, 43);
+            SetOutputButtonBounds(rsuBtn, 363, 153, 21, 16);
+            SetOutputButtonBounds(rsrBtn, 388, 171, 17, 20);
+            SetOutputButtonBounds(rsdBtn, 363, 196, 21, 16);
+            SetOutputButtonBounds(rslBtn, 342, 171, 17, 20);
+            SetOutputButtonBounds(dpadUBtn, 188, 96, 22, 25);
+            SetOutputButtonBounds(dpadRBtn, 209, 117, 25, 22);
+            SetOutputButtonBounds(dpadDBtn, 188, 137, 22, 25);
+            SetOutputButtonBounds(dpadLBtn, 166, 117, 25, 22);
+            SetOutputButtonBounds(touchpadClickBtn, 254, 62, 123, 72);
+            touchpadClickBtn.Visibility = Visibility.Visible;
+        }
+
+        private void ConfigureDualSenseOutputCanvas()
+        {
+            conImageBrush.ImageSource = LoadControllerImage("DualSense Config.png");
+
+            SetOutputButtonBounds(aBtn, 442, 142, 30, 30);
+            SetOutputButtonBounds(bBtn, 476, 112, 30, 30);
+            SetOutputButtonBounds(xBtn, 409, 112, 30, 30);
+            SetOutputButtonBounds(yBtn, 442, 85, 30, 30);
+            SetOutputButtonBounds(lbBtn, 145, 28, 72, 30);
+            SetOutputButtonBounds(rbBtn, 415, 28, 72, 30);
+            SetOutputButtonBounds(ltBtn, 149, 0, 64, 30);
+            SetOutputButtonBounds(rtBtn, 421, 0, 64, 30);
+            SetOutputButtonBounds(backBtn, 198, 61, 23, 34);
+            SetOutputButtonBounds(startBtn, 412, 61, 23, 34);
+            SetOutputButtonBounds(guideBtn, 304, 170, 25, 26);
+            SetOutputButtonBounds(lsbBtn, 218, 163, 53, 54);
+            SetOutputButtonBounds(lsuBtn, 234, 155, 21, 18);
+            SetOutputButtonBounds(lsrBtn, 264, 180, 20, 20);
+            SetOutputButtonBounds(lsdBtn, 234, 207, 21, 18);
+            SetOutputButtonBounds(lslBtn, 204, 180, 20, 20);
+            SetOutputButtonBounds(rsbBtn, 361, 163, 53, 54);
+            SetOutputButtonBounds(rsuBtn, 377, 155, 21, 18);
+            SetOutputButtonBounds(rsrBtn, 407, 180, 20, 20);
+            SetOutputButtonBounds(rsdBtn, 377, 207, 21, 18);
+            SetOutputButtonBounds(rslBtn, 347, 180, 20, 20);
+            SetOutputButtonBounds(dpadUBtn, 163, 85, 26, 35);
+            SetOutputButtonBounds(dpadRBtn, 185, 108, 37, 26);
+            SetOutputButtonBounds(dpadDBtn, 163, 125, 26, 35);
+            SetOutputButtonBounds(dpadLBtn, 130, 108, 37, 26);
+            SetOutputButtonBounds(touchpadClickBtn, 231, 55, 177, 93);
+            touchpadClickBtn.Visibility = Visibility.Visible;
+        }
+
+        private void ConfigureDualSenseEdgeOutputCanvas()
+        {
+            conImageBrush.ImageSource = LoadControllerImage("DualSense Edge Controller.png");
+
+            SetOutputButtonBounds(aBtn, 419, 86, 28, 28);
+            SetOutputButtonBounds(bBtn, 447, 57, 28, 28);
+            SetOutputButtonBounds(xBtn, 390, 57, 28, 28);
+            SetOutputButtonBounds(yBtn, 419, 28, 28, 28);
+            SetOutputButtonBounds(lbBtn, 157, 0, 78, 26);
+            SetOutputButtonBounds(rbBtn, 395, 0, 78, 26);
+            SetOutputButtonBounds(ltBtn, 166, 0, 61, 15);
+            SetOutputButtonBounds(rtBtn, 403, 0, 61, 15);
+            SetOutputButtonBounds(backBtn, 224, 20, 19, 25);
+            SetOutputButtonBounds(startBtn, 387, 20, 19, 25);
+            SetOutputButtonBounds(guideBtn, 305, 138, 20, 20);
+            SetOutputButtonBounds(lsbBtn, 229, 100, 45, 45);
+            SetOutputButtonBounds(lsuBtn, 241, 92, 21, 17);
+            SetOutputButtonBounds(lsrBtn, 267, 111, 17, 21);
+            SetOutputButtonBounds(lsdBtn, 241, 139, 21, 17);
+            SetOutputButtonBounds(lslBtn, 219, 111, 17, 21);
+            SetOutputButtonBounds(rsbBtn, 356, 100, 45, 45);
+            SetOutputButtonBounds(rsuBtn, 368, 92, 21, 17);
+            SetOutputButtonBounds(rsrBtn, 394, 111, 17, 21);
+            SetOutputButtonBounds(rsdBtn, 368, 139, 21, 17);
+            SetOutputButtonBounds(rslBtn, 346, 111, 17, 21);
+            SetOutputButtonBounds(dpadUBtn, 183, 28, 23, 27);
+            SetOutputButtonBounds(dpadRBtn, 205, 57, 27, 23);
+            SetOutputButtonBounds(dpadDBtn, 183, 85, 23, 27);
+            SetOutputButtonBounds(dpadLBtn, 156, 57, 27, 23);
+            SetOutputButtonBounds(touchpadClickBtn, 234, 7, 162, 92);
+            touchpadClickBtn.Visibility = Visibility.Visible;
+        }
+
+        private void ConfigureSwitch2ProOutputCanvas()
+        {
+            conImageBrush.ImageSource = LoadControllerImage("Switch 2 Pro Controller.png");
+
+            // The canonical mapping names already translate to Nintendo's
+            // physical B/A/Y/X ordering; place each hit target on that glyph.
+            SetOutputButtonBounds(aBtn, 392, 90, 25, 25);
+            SetOutputButtonBounds(bBtn, 419, 67, 25, 25);
+            SetOutputButtonBounds(xBtn, 366, 67, 25, 25);
+            SetOutputButtonBounds(yBtn, 392, 43, 25, 25);
+            SetOutputButtonBounds(lbBtn, 183, 7, 78, 24);
+            SetOutputButtonBounds(rbBtn, 369, 7, 78, 24);
+            SetOutputButtonBounds(ltBtn, 193, 0, 61, 15);
+            SetOutputButtonBounds(rtBtn, 376, 0, 61, 15);
+            SetOutputButtonBounds(backBtn, 260, 42, 25, 25);
+            SetOutputButtonBounds(startBtn, 344, 42, 25, 25);
+            SetOutputButtonBounds(guideBtn, 327, 67, 25, 25);
+            SetOutputButtonBounds(touchpadClickBtn, 279, 67, 25, 25);
+            SetOutputButtonBounds(lsbBtn, 201, 58, 42, 42);
+            SetOutputButtonBounds(lsuBtn, 212, 51, 20, 16);
+            SetOutputButtonBounds(lsrBtn, 236, 69, 16, 20);
+            SetOutputButtonBounds(lsdBtn, 212, 94, 20, 16);
+            SetOutputButtonBounds(lslBtn, 192, 69, 16, 20);
+            SetOutputButtonBounds(rsbBtn, 338, 105, 43, 43);
+            SetOutputButtonBounds(rsuBtn, 350, 98, 20, 16);
+            SetOutputButtonBounds(rsrBtn, 374, 116, 16, 20);
+            SetOutputButtonBounds(rsdBtn, 350, 142, 20, 16);
+            SetOutputButtonBounds(rslBtn, 330, 116, 16, 20);
+            SetOutputButtonBounds(dpadUBtn, 253, 101, 21, 25);
+            SetOutputButtonBounds(dpadRBtn, 273, 124, 25, 21);
+            SetOutputButtonBounds(dpadDBtn, 253, 143, 21, 25);
+            SetOutputButtonBounds(dpadLBtn, 231, 124, 25, 21);
+            touchpadClickBtn.Visibility = Visibility.Visible;
+        }
+
+        private void InitDS4Canvas()
+        {
+            ConfigureDualShock4OutputCanvas();
 
             Canvas.SetLeft(aBtn, 442); Canvas.SetTop(aBtn, 148);
             Canvas.SetLeft(bBtn, 474); Canvas.SetTop(bBtn, 120);

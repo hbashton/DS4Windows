@@ -39,6 +39,102 @@
                 </DataTrigger>
             </Style.Triggers>
         </Style>
+
+        <Style x:Key="OverviewQuickSliderStyle" TargetType="Slider">
+            <Setter Property="Height" Value="28" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid Height="28" VerticalAlignment="Center">
+                            <Track x:Name="PART_Track" VerticalAlignment="Center">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="Slider.DecreaseLarge" IsTabStop="False">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Height="6" Background="{DynamicResource AccentColor}"
+                                                        CornerRadius="3" />
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.DecreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Width="18" Height="18">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Border x:Name="Knob" Background="{DynamicResource ForegroundColor}"
+                                                        BorderBrush="{DynamicResource AccentColor}"
+                                                        BorderThickness="2" CornerRadius="9" />
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="Knob" Property="BorderThickness" Value="3" />
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="Slider.IncreaseLarge" IsTabStop="False">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Height="6" Background="{DynamicResource BorderColor}"
+                                                        CornerRadius="3" />
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.IncreaseRepeatButton>
+                            </Track>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.42" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="OverviewToggleStyle" TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{DynamicResource ForegroundColor}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="38" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border x:Name="ToggleTrack" Width="36" Height="20"
+                                    HorizontalAlignment="Left" CornerRadius="10"
+                                    Background="{DynamicResource BorderColor}">
+                                <Ellipse x:Name="ToggleKnob" Width="14" Height="14" Margin="3"
+                                         HorizontalAlignment="Left"
+                                         Fill="{DynamicResource ForegroundColor}" />
+                            </Border>
+                            <ContentPresenter Grid.Column="1" Margin="10,0,0,0"
+                                              VerticalAlignment="Center"
+                                              RecognizesAccessKey="True" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="ToggleTrack" Property="Background" Value="{DynamicResource AccentColor}" />
+                                <Setter TargetName="ToggleKnob" Property="HorizontalAlignment" Value="Right" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ToggleTrack" Property="Opacity" Value="0.82" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.42" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </UserControl.Resources>
 
     <Grid>
@@ -158,7 +254,8 @@
                             <TextBlock Text="ACTIVE PROFILE" Style="{StaticResource OverviewEyebrowStyle}" />
                             <TextBlock Text="{Binding CurrentProfileName}" Margin="0,11,0,3"
                                        Style="{StaticResource OverviewValueStyle}" />
-                            <TextBlock Text="Settings below save to this profile"
+                             <TextBlock Text="Settings below save to this profile"
+                                        TextWrapping="Wrap"
                                        Foreground="{DynamicResource MutedForegroundColor}" />
                         </StackPanel>
                     </Border>
@@ -168,7 +265,8 @@
                             <TextBlock Text="EMULATED DEVICE" Style="{StaticResource OverviewEyebrowStyle}" />
                             <TextBlock Margin="0,11,0,3" Style="{StaticResource OverviewValueStyle}"
                                        Text="{Binding SelectedOutputControllerName}" />
-                            <TextBlock Text="Applied through the active profile"
+                             <TextBlock Text="Applied through the active profile"
+                                        TextWrapping="Wrap"
                                        Foreground="{DynamicResource MutedForegroundColor}" />
                         </StackPanel>
                     </Border>
@@ -178,7 +276,8 @@
                             <TextBlock Text="CONTROLLER STATUS" Style="{StaticResource OverviewEyebrowStyle}" />
                             <TextBlock Text="Ready" Margin="0,11,0,3" Style="{StaticResource OverviewValueStyle}"
                                        Foreground="{DynamicResource SuccessColor}" />
-                            <TextBlock Text="Profile and output are active"
+                             <TextBlock Text="Profile and output are active"
+                                        TextWrapping="Wrap"
                                        Foreground="{DynamicResource MutedForegroundColor}" />
                         </StackPanel>
                     </Border>
@@ -199,8 +298,9 @@
 
                         <StackPanel Grid.ColumnSpan="3" Margin="0,0,0,18">
                             <TextBlock Text="Quick profile controls" FontSize="18" FontWeight="SemiBold" />
-                            <TextBlock Text="Changes are saved to the selected controller's active profile and applied automatically."
-                                       Margin="0,3,0,0" Foreground="{DynamicResource MutedForegroundColor}" />
+                             <TextBlock Text="Changes are saved to the selected controller's active profile and applied automatically."
+                                        Margin="0,3,0,0" TextWrapping="Wrap"
+                                        Foreground="{DynamicResource MutedForegroundColor}" />
                         </StackPanel>
 
                         <Grid Grid.Row="1">
@@ -217,17 +317,19 @@
                                        FontWeight="SemiBold" />
                             <TextBlock Grid.Column="1" Text="{Binding HapticStrengthPercent, StringFormat={}{0}%}"
                                        FontWeight="SemiBold" Foreground="{DynamicResource AccentColor}" />
-                            <Slider Grid.Row="1" Grid.ColumnSpan="2" Margin="0,9,0,0"
+                             <Slider Grid.Row="1" Grid.ColumnSpan="2" Margin="0,9,0,0"
+                                     Style="{StaticResource OverviewQuickSliderStyle}"
                                     Minimum="0" Maximum="100" TickFrequency="1"
                                     Value="{Binding HapticStrengthPercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
                         </Grid>
 
                         <StackPanel Grid.Row="2" Margin="0,19,0,0">
                             <TextBlock Text="Emulated device" FontWeight="SemiBold" />
-                            <ComboBox ItemsSource="{Binding OutputControllerChoices}"
+                             <ComboBox ItemsSource="{Binding OutputControllerChoices}"
                                       DisplayMemberPath="Name" SelectedValuePath="Type"
                                       SelectedValue="{Binding SelectedOutputController, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                      Style="{StaticResource BridgeProfileComboBoxStyle}" Margin="0,8,0,0" />
+                                       Style="{StaticResource BridgeProfileComboBoxStyle}"
+                                       HorizontalAlignment="Left" Margin="0,8,0,0" />
                             <TextBlock Text="Changing the output device briefly reloads this controller's profile."
                                        Margin="0,6,0,0" TextWrapping="Wrap"
                                        Foreground="{DynamicResource MutedForegroundColor}" FontSize="11" />
@@ -266,20 +368,23 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
 
-                                <CheckBox Grid.ColumnSpan="2" Content="Mirror audio to controller speaker"
+                                 <CheckBox Grid.ColumnSpan="2" Content="Mirror audio to controller speaker"
+                                           Style="{StaticResource OverviewToggleStyle}"
                                           IsChecked="{Binding SpeakerOutputEnabled, Mode=TwoWay}"
                                           Margin="0,0,0,12" />
                                 <TextBlock Grid.Row="1" Text="Speaker level" VerticalAlignment="Center" />
                                 <TextBlock Grid.Row="1" Grid.Column="1"
                                            Text="{Binding SpeakerVolumePercent, StringFormat={}{0}%}"
                                            Foreground="{DynamicResource AccentColor}" />
-                                <Slider Grid.Row="2" Grid.ColumnSpan="2" Margin="0,7,0,14"
+                                 <Slider Grid.Row="2" Grid.ColumnSpan="2" Margin="0,7,0,14"
+                                         Style="{StaticResource OverviewQuickSliderStyle}"
                                         Minimum="0" Maximum="100" TickFrequency="1"
                                         Value="{Binding SpeakerVolumePercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
                             </Grid>
 
                             <StackPanel Grid.Row="4" Grid.ColumnSpan="2">
-                                <CheckBox Content="{Binding SelectedController.MicrophoneToggleLabel}"
+                                 <CheckBox Content="{Binding SelectedController.MicrophoneToggleLabel}"
+                                           Style="{StaticResource OverviewToggleStyle}"
                                           IsChecked="{Binding MicrophoneInputEnabled, Mode=TwoWay}"
                                           IsEnabled="{Binding CanChangeMicrophoneInput}"
                                           ToolTip="{Binding MicrophoneAvailabilityText}"
@@ -304,7 +409,8 @@
                                     <TextBlock Grid.Column="1"
                                                Text="{Binding MicrophoneVolumePercent, StringFormat={}{0}%}"
                                                Foreground="{DynamicResource AccentColor}" />
-                                    <Slider Grid.Row="1" Grid.ColumnSpan="2" Margin="0,7,0,0"
+                                     <Slider Grid.Row="1" Grid.ColumnSpan="2" Margin="0,7,0,0"
+                                             Style="{StaticResource OverviewQuickSliderStyle}"
                                             Minimum="0" Maximum="100" TickFrequency="1"
                                             Value="{Binding MicrophoneVolumePercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
                                 </Grid>
@@ -317,8 +423,9 @@
                     <StackPanel>
                         <StackPanel>
                             <TextBlock Text="Quick actions" FontSize="18" FontWeight="SemiBold" />
-                            <TextBlock Text="Jump into the full editor or manage the selected physical controller."
-                                       Margin="0,3,0,0" Foreground="{DynamicResource MutedForegroundColor}" />
+                             <TextBlock Text="Jump into the full editor or manage the selected physical controller."
+                                        Margin="0,3,0,0" TextWrapping="Wrap"
+                                        Foreground="{DynamicResource MutedForegroundColor}" />
                         </StackPanel>
                         <WrapPanel Margin="0,15,0,0">
                             <Button Content="Edit active profile" Margin="0,0,8,0"

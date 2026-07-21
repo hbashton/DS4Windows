@@ -344,6 +344,12 @@
 Changes to this option takes effect at the gamepad connection time.</value>
     <comment>To enter a line break into a string resource value in VisualStudio resource editor press Shift+Enter.</comment>
   </data>
+  <data name="SendGameFeedbackToPhysicalController" xml:space="preserve">
+    <value>Send game feedback to physical controller</value>
+  </data>
+  <data name="SendGameFeedbackToPhysicalControllerTip" xml:space="preserve">
+    <value>Recommended. Sends rumble, converted DualSense haptics, compatible adaptive-trigger effects, and controller lighting from games to the connected physical controller. Turn this off only when a controller cannot receive output; disabling it removes those game-feedback effects. Reconnect the controller after changing this setting.</value>
+  </data>
   <data name="Apply" xml:space="preserve">
     <value>Apply</value>
   </data>

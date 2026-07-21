@@ -79,8 +79,9 @@ correctly.
 - Duplicate Auto Profile rules with per-device matching for DualSense, DS4, DS3, Switch Pro, and Joy-Con controllers.
 - An apply-to-all-controllers option for Auto Profiles.
 - Xbox Game Bar profile switching with Game Bar priority over normal Auto Profiles while the overlay is visible.
-- Per-profile Game Bar compatibility for VIIPER DualSense outputs, using a temporary
-  XInput companion only while the overlay is visible without changing the loaded profile.
+- Per-profile Game Bar compatibility for VIIPER DualSense outputs. It uses a
+  temporary XInput companion only while the overlay is visible and does not
+  change the loaded profile.
 - Per-profile DualSense adaptive-trigger configuration and fixed full-pull trigger actions.
 - More reliable profile transitions, including duplicate-rule crash and profile-switch latency fixes.
 - Profile and Auto Profile search with live filtering and one-click clearing.
@@ -113,7 +114,7 @@ DualSense or DualShock 4 selected by the profile. Supported paths include:
 - A profile option that lets the DualSense mute button mute and restore the
   microphone while keeping the recording stream active.
 
-Audio, microphone, and advanced-haptics support require matching DS4Windows and
+Audio, microphone, and advanced haptics support require matching DS4Windows and
 VIIPER preview builds. They are not part of the current stable 4.0.2.x backend.
 
 ### Quality of life
@@ -127,10 +128,12 @@ VIIPER preview builds. They are not part of the current stable 4.0.2.x backend.
 
 ## Requirements
 
-- Windows 10 or Windows 11. VIIPER requires Windows x64 and the x64 DS4Windows build; x86 is not compatible with VIIPER.
+- Windows 10 or Windows 11. VIIPER requires 64-bit Windows and the x64
+  DS4Windows build. It is not compatible with x86 Windows.
 - [Microsoft .NET 8 Desktop Runtime](https://dotnet.microsoft.com/en-us/download/dotnet/8.0).
 - [Microsoft Visual C++ 2015-2022 Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe).
-- [HidHide](https://github.com/nefarius/HidHide) strongly recommended to prevent games from seeing both the physical and virtual controller.
+- [HidHide](https://github.com/nefarius/HidHide) is strongly recommended to
+  prevent games from seeing both the physical and virtual controllers.
 - `usbip-win2` and [hbashton/VIIPER](https://github.com/hbashton/VIIPER), installed through the built-in guided setup.
 
 Supported physical inputs include first-party DualShock 4, DualSense,

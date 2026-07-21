@@ -13,12 +13,6 @@ Jays2Kings, Ryochan7, Schmaldeo, and the wider DS4Windows community.
 This is the hbashton fork. Downloads, update checks, bug reports, and VIIPER
 integration documented here all refer to hbashton repositories.
 
-## UI preview
-
-![Profile editor with controller-aware remapping](docs/images/profile-editor-current.png)
-
-![Per-profile Audio Haptics controls](docs/images/audio-haptics.png)
-
 ## Download and install
 
 ### Stable release
@@ -125,6 +119,115 @@ VIIPER preview builds. They are not part of the current stable 4.0.2.x backend.
 - Game Bar installation/elevation guidance and safer visibility detection.
 - Update checks and updater downloads pointed at hbashton releases.
 - Optional verbose logging and VIIPER diagnostics in preview builds.
+
+## Interface tour
+
+The redesigned interface keeps everyday controls easy to reach while preserving
+the complete DS4Windows feature set for advanced users.
+
+### Overview
+
+Choose a connected controller and see its battery, connection, active profile,
+emulated device, and output status at a glance. Quick profile controls let you
+adjust rumble, output type, speaker routing, and microphone input without opening
+the full profile editor.
+
+<p align="center">
+  <img src="docs/images/tour/overview.png" width="1000" alt="DS4Windows Overview showing a connected DualShock 4 and quick profile controls">
+</p>
+
+### Controllers
+
+Manage every connected controller from one screen. Each device card exposes its
+active profile, HidHide state, battery level, lightbar color, and profile-linking
+controls.
+
+<p align="center">
+  <img src="docs/images/tour/controllers.png" width="1000" alt="DS4Windows Controllers screen with a connected DualShock 4">
+</p>
+
+### Audio Haptics
+
+Turn the system mix, an emulated-controller endpoint, or one running app into
+DualSense haptic feedback. Choose the source, strength, response curve, frequency
+focus, ramp, fade, and whether the generated feedback mixes with or replaces
+native game haptics.
+
+<p align="center">
+  <img src="docs/images/tour/audio-haptics.png" width="1000" alt="DS4Windows Audio Haptics source and response controls">
+</p>
+
+### Trigger Lab
+
+Build persistent adaptive-trigger effects for the active profile. Start with a
+ready-made effect, tune its mode, start point, wall, and force, then preview it
+before saving. L2 and R2 can be armed independently; **Linked** shares one effect
+design, while **Split** restores separate settings for each trigger.
+
+<p align="center">
+  <img src="docs/images/tour/trigger-lab.png" width="1000" alt="DS4Windows Trigger Lab with independent L2 and R2 effect controls">
+</p>
+
+### Profiles
+
+Search, create, duplicate, rename, import, export, or delete controller profiles.
+Profile cards provide a clear overview and open directly into the focused editor.
+
+<p align="center">
+  <img src="docs/images/tour/profiles.png" width="1000" alt="DS4Windows searchable profile library">
+</p>
+
+### Profile editor and button mapping
+
+Editing a profile opens a dedicated workspace for button mapping, special
+actions, controller readings, axis curves, lighting, touchpad behavior, gyro,
+Audio Haptics, Trigger Lab, and advanced settings. The controller map defaults
+to the selected physical controller and can be changed without altering the
+profile's emulated output.
+
+<p align="center">
+  <img src="docs/images/tour/profile-editor.png" width="1000" alt="DS4Windows focused profile editor with controller-aware button mapping">
+</p>
+
+### Remapping dialog
+
+Assign keyboard, mouse, media, macro, or virtual-controller actions. The diagram
+matches the profile's emulated controller, and hovering a control highlights the
+exact button target directly on the controller.
+
+<p align="center">
+  <img src="docs/images/tour/remapping-dialog.png" width="900" alt="DS4Windows remapping dialog with the Cross button highlighted on a DualShock 4">
+</p>
+
+### Auto Profiles
+
+Switch profiles automatically by executable path, window title, or controller.
+Live search filters rules as you type, while the detail panel controls per-device
+assignments, temporary controller shutdown, and fallback behavior.
+
+<p align="center">
+  <img src="docs/images/tour/auto-profiles.png" width="1000" alt="DS4Windows Auto Profiles rules and per-controller assignments">
+</p>
+
+### Output Slots
+
+Inspect the relationship between input controllers and virtual output devices.
+The slot table shows the current and requested output modes and supports manual
+plugging or unplugging when a fixed slot layout is needed.
+
+<p align="center">
+  <img src="docs/images/tour/output-slots.png" width="1000" alt="DS4Windows virtual controller output slots">
+</p>
+
+### Settings
+
+Common startup, notification, charging, appearance, and update options stay in
+the main Settings view. Diagnostic, networking, compatibility, device-support,
+and backend tools remain available under the advanced sections.
+
+<p align="center">
+  <img src="docs/images/tour/settings.png" width="1000" alt="DS4Windows Settings screen">
+</p>
 
 ## Requirements
 

@@ -1270,7 +1270,7 @@ namespace DS4WinWPF.Properties {
         }
         
         /// <summary>
-        ///   Looks up a localized string similar to Step 1: Install the ViGEmBus Driver.
+        ///   Looks up a localized string similar to Step 1: Install the VIIPER backend.
         /// </summary>
         public static string Step1 {
             get {

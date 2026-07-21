@@ -173,9 +173,6 @@ namespace DS4WinWPF
             // Allow sleep time durations less than 16 ms
             DS4Windows.Util.timeBeginPeriod(1);
 
-            // Retrieve info about installed ViGEmBus device if found
-            DS4Windows.Global.RefreshViGEmBusInfo();
-
             // Create the Event handle
             try
             {
@@ -273,6 +270,22 @@ namespace DS4WinWPF
                 }
 
                 logger.Info("Default config created");
+            }
+
+            // VIIPER is the only virtual-controller backend. Make a missing
+            // backend actionable at startup instead of letting profile output
+            // fail later with an opaque device error. The installer requests
+            // elevation itself, so DS4Windows does not need to stay elevated.
+            if (Environment.Is64BitProcess)
+            {
+                DS4Windows.ViiperSetupManager.EnsureReadyWithPrompt(null);
+            }
+            else
+            {
+                MessageBox.Show(
+                    "This build cannot create VIIPER virtual controllers. Install the x64 DS4Windows build on 64-bit Windows.",
+                    "DS4Windows virtual controller setup",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
             }
 
             skipSave = false;
@@ -478,10 +491,6 @@ namespace DS4WinWPF
             }
             else if (parser.Driverinstall)
             {
-                // Retrieve info about installed ViGEmBus device if found.
-                // Might not be needed here
-                DS4Windows.Global.RefreshViGEmBusInfo();
-
                 // Load DS4Windows config if it exists
                 DS4Windows.Global.FindConfigLocation();
                 bool readAppConfig = DS4Windows.Global.Load();
@@ -869,7 +878,7 @@ namespace DS4WinWPF
                     {
                         if (rootHub.running)
                         {
-                            rootHub.Stop(immediateUnplug: true, disposeViGEm: false);
+                            rootHub.Stop(immediateUnplug: true);
                         }
 
                         rootHub.ShutDown();

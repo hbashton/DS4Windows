@@ -1,0 +1,163 @@
+using System.IO;
+using System.Xml.Serialization;
+using DS4Windows;
+using DS4WinWPF.DS4Control.DTOXml;
+
+namespace DS4WindowsTests
+{
+    [TestClass]
+    public class TriggerLabProfileTests
+    {
+        [TestMethod]
+        public void DefaultWeaponEffectMatchesDualSenseProtocol()
+        {
+            TriggerLabEffectEncoder.Effect effect = TriggerLabEffectEncoder.Encode(
+                new TriggerLabEffectSettings(), true);
+
+            Assert.AreEqual(0x25, effect.Mode);
+            Assert.AreEqual(0x44, effect.ZoneMaskLow);
+            Assert.AreEqual(0x00, effect.ZoneMaskHigh);
+            Assert.AreEqual(0x06, effect.Data0);
+            Assert.AreEqual(0x00, effect.Frequency);
+        }
+
+        [TestMethod]
+        public void InactiveEffectWritesACompleteOffBlock()
+        {
+            byte[] report = Enumerable.Repeat((byte)0xFF, 32).ToArray();
+
+            TriggerLabEffectEncoder.WriteNativeBlock(report, 7,
+                new TriggerLabEffectSettings(), false);
+
+            Assert.AreEqual(0x05, report[7]);
+            CollectionAssert.AreEqual(new byte[10], report.Skip(8).Take(10).ToArray());
+            Assert.AreEqual(0xFF, report[6]);
+            Assert.AreEqual(0xFF, report[18]);
+        }
+
+        [TestMethod]
+        public void TriggerLabStateRoundTripsInsideProfileXml()
+        {
+            ProfileDTO original = new ProfileDTO
+            {
+                TriggerLabSettings = new TriggerLabProfileSettings
+                {
+                    Enabled = true,
+                    Linked = false,
+                    LeftActive = true,
+                    RightActive = true,
+                    Left = new TriggerLabEffectSettings
+                    {
+                        ProfileId = "custom-left",
+                        Mode = TriggerLabMode.Feedback,
+                        StartPercent = 35,
+                        WallPercent = 55,
+                        ForcePercent = 70,
+                    },
+                    Right = new TriggerLabEffectSettings
+                    {
+                        ProfileId = "custom-right",
+                        Mode = TriggerLabMode.Vibration,
+                        StartPercent = 15,
+                        WallPercent = 80,
+                        ForcePercent = 90,
+                    },
+                    CustomProfiles =
+                    {
+                        new TriggerLabCustomProfile
+                        {
+                            Id = "custom-left",
+                            Name = "Left wall",
+                            Mode = TriggerLabMode.Feedback,
+                            StartPercent = 35,
+                            WallPercent = 55,
+                            ForcePercent = 70,
+                            Active = true,
+                        },
+                        new TriggerLabCustomProfile
+                        {
+                            Id = "custom-right",
+                            Name = "Right pulse",
+                            Mode = TriggerLabMode.Vibration,
+                            StartPercent = 15,
+                            WallPercent = 80,
+                            ForcePercent = 90,
+                            Active = true,
+                        },
+                    },
+                },
+            };
+            XmlSerializer serializer = new XmlSerializer(typeof(ProfileDTO),
+                ProfileDTO.GetAttributeOverrides());
+
+            string xml;
+            using (StringWriter writer = new StringWriter())
+            {
+                serializer.Serialize(writer, original);
+                xml = writer.ToString();
+            }
+
+            ProfileDTO restored;
+            using (StringReader reader = new StringReader(xml))
+            {
+                restored = (ProfileDTO)serializer.Deserialize(reader);
+            }
+
+            Assert.IsTrue(xml.Contains("<TriggerLab>"));
+            Assert.IsTrue(restored.TriggerLabSettings.Enabled);
+            Assert.IsFalse(restored.TriggerLabSettings.Linked);
+            Assert.AreEqual(TriggerLabMode.Feedback,
+                restored.TriggerLabSettings.Left.Mode);
+            Assert.AreEqual(TriggerLabMode.Vibration,
+                restored.TriggerLabSettings.Right.Mode);
+            Assert.AreEqual(2, restored.TriggerLabSettings.CustomProfiles.Count);
+            Assert.AreEqual("Right pulse",
+                restored.TriggerLabSettings.CustomProfiles[1].Name);
+        }
+
+        [TestMethod]
+        public void CloningPreservesRememberedSplitDesign()
+        {
+            TriggerLabProfileSettings original = new TriggerLabProfileSettings
+            {
+                Linked = true,
+                HasSplitState = true,
+                SplitLeftActive = true,
+                SplitRightActive = false,
+                SplitLeft = new TriggerLabEffectSettings
+                {
+                    ProfileId = "custom",
+                    Mode = TriggerLabMode.Feedback,
+                    ForcePercent = 65,
+                },
+                SplitRight = new TriggerLabEffectSettings
+                {
+                    ProfileId = "custom-right",
+                    Mode = TriggerLabMode.Vibration,
+                    ForcePercent = 45,
+                },
+                CustomProfiles =
+                {
+                    new TriggerLabCustomProfile
+                    {
+                        Id = "custom",
+                        Name = "Custom",
+                    },
+                    new TriggerLabCustomProfile
+                    {
+                        Id = "custom-right",
+                        Name = "Right",
+                    },
+                },
+            };
+
+            TriggerLabProfileSettings clone = original.Clone();
+
+            Assert.IsTrue(clone.HasSplitState);
+            Assert.IsTrue(clone.SplitLeftActive);
+            Assert.IsFalse(clone.SplitRightActive);
+            Assert.AreEqual(TriggerLabMode.Vibration, clone.SplitRight.Mode);
+            Assert.AreNotSame(original.SplitRight, clone.SplitRight);
+        }
+    }
+}

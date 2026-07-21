@@ -395,6 +395,29 @@
                             <Button Content="{lex:Loc ExportSpecialActions}" Margin="5 0 0 0" Click="ExportSpecialActions_OnClick"/>
                         </UniformGrid>
 
+                        <Border x:Name="triggerLabSpecialActionBadge" DockPanel.Dock="Top"
+                                Margin="0,10,0,0" Padding="12,9" CornerRadius="5"
+                                BorderThickness="1" BorderBrush="#80FFB020"
+                                Background="#24FFB020" Visibility="Collapsed">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="L2/R2" FontWeight="Bold" Foreground="#FFFFB020"
+                                           VerticalAlignment="Center" Margin="0,0,12,0" />
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Text="Made with Trigger Lab" FontWeight="SemiBold" />
+                                    <TextBlock Text="This protected profile effect overrides incoming game adaptive-trigger output. Edit it in Trigger Lab."
+                                               Foreground="{DynamicResource MutedForegroundColor}"
+                                               TextWrapping="Wrap" Margin="0,2,0,0" />
+                                </StackPanel>
+                                <TextBlock Grid.Column="2" Text="PROTECTED" FontSize="9" FontWeight="Bold"
+                                           Foreground="#FFFFB020" VerticalAlignment="Center" Margin="12,0,0,0" />
+                            </Grid>
+                        </Border>
+
                         <ListView x:Name="specialActionsLV" ItemsSource="{Binding ActionCol}" SelectedIndex="{Binding SpecialActionIndex}" SelectedItem="{Binding CurrentSpecialActionItem,Mode=OneWayToSource}" DockPanel.Dock="Bottom" Margin="0,10,0,0">
                             <ListView.View>
                                 <GridView>
@@ -1455,11 +1478,7 @@
                         </TabItem>
 
                         <TabItem Header="{lex:Loc Passthru}" Visibility="Collapsed">
-                            <StackPanel>
-                                <TextBlock Foreground="Red" Text="{lex:Loc DS4LightbarPassthruDisabled}" TextWrapping="Wrap"
-                                           Visibility="{Binding UsingMinViGEm173333, Mode=OneWay, Converter={StaticResource InvertBoolToVisibilityConverter}}">
-                                </TextBlock>
-                            </StackPanel>
+                            <StackPanel />
                         </TabItem>
                     </TabControl>
 
@@ -1769,11 +1788,7 @@
                                 </StackPanel>
                             </TabItem>
                             <TabItem Header="{lex:Loc Passthru}" Visibility="Collapsed">
-                                <StackPanel>
-                                    <TextBlock Foreground="Red" Visibility="{Binding UsingMinViGEm173333, Mode=OneWay, Converter={StaticResource InvertBoolToVisibilityConverter}}"
-                                               Text="{lex:Loc ViGEm117MinNeeded}">
-                                    </TextBlock>
-                                </StackPanel>
+                                <StackPanel />
 
                             </TabItem>
                         </TabControl>
@@ -2224,11 +2239,6 @@
 
                             <TabItem Header="{lex:Loc Passthru}" Visibility="Collapsed">
                                 <StackPanel x:Name="passthruPanel">
-                                    <TextBlock Foreground="Red"
-                                               Visibility="{Binding UsingMinViGEm173333, Mode=OneWay, Converter={StaticResource InvertBoolToVisibilityConverter}}"
-                                               Text="{lex:Loc ViGEm117MinNeeded}">
-                                    </TextBlock>
-
                                     <StackPanel Orientation="Horizontal" Margin="0,8,0,8">
                                         <Button x:Name="gyroCalBtn3" Content="Gyro Calibration" Width="100"  Click="GyroCalibration_Click" />
                                     </StackPanel>
@@ -2245,6 +2255,15 @@
                 </ScrollViewer>
             </TabItem>
 
+            <TabItem Header="Audio Haptics" Tag="Turn system or app audio into advanced controller haptics">
+                <local:AudioHapticsControl x:Name="profileAudioHapticsControl" />
+            </TabItem>
+
+            <TabItem Header="Trigger Lab" Tag="Build persistent adaptive-trigger effects for this profile">
+                <local:TriggerLabControl x:Name="profileTriggerLabControl"
+                                         SettingsChanged="ProfileTriggerLabControl_SettingsChanged" />
+            </TabItem>
+
             <TabItem Header="Advanced" Tag="Output device, rumble, audio, latency, compatibility, and custom hooks">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel>
@@ -2254,9 +2273,8 @@
                                     <Label Content="{lex:Loc EmulatedController}" ToolTip="{lex:Loc OutContNotice}" />
                                     <ComboBox x:Name="outConTypeCombo" SelectedIndex="{Binding TempControllerIndex, FallbackValue=0}" IsEnabled="{Binding DInputOnly, Converter={StaticResource InverseBoolConverter}}" MinWidth="140"
                                       ToolTip="{lex:Loc OutContNotice}">
-                                        <ComboBoxItem Content="Xbox 360"/>
-                                        <ComboBoxItem Content="DualShock 4 (VIIPER)"/>
-                                        <ComboBoxItem Content="Xbox 360 (VIIPER)"/>
+                                        <ComboBoxItem Content="Viiper DualShock 4"/>
+                                        <ComboBoxItem Content="Viiper Xbox 360"/>
                                         <ComboBoxItem Content="DualSense"/>
                                         <ComboBoxItem Content="DualSense Edge"/>
                                         <ComboBoxItem Content="Switch 2 Pro"/>

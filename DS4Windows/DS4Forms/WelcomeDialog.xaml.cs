@@ -1,63 +1,29 @@
-﻿/*
+/*
 DS4Windows
-Copyright (C) 2023  Travis Nickles
+Copyright (C) 2026 hbashton
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
 the Free Software Foundation, either version 3 of the License, or
 (at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 using System;
 using System.Diagnostics;
 using System.IO;
-using System.Net.Http;
+using System.Threading.Tasks;
 using System.Windows;
-using HttpProgress;
-using NonFormTimer = System.Timers.Timer;
 
 namespace DS4WinWPF.DS4Forms
 {
-    /// <summary>
-    /// Interaction logic for WelcomeDialog.xaml
-    /// </summary>
     public partial class WelcomeDialog : Window
     {
-        private const string InstallerDL1_16 =
-            "https://github.com/nefarius/ViGEmBus/releases/download/setup-v1.16.116/ViGEmBus_Setup_1.16.116.exe";
-        private const string InstallerDLX64 =
-            "https://github.com/nefarius/ViGEmBus/releases/download/v1.22.0/ViGEmBus_1.22.0_x64_x86_arm64.exe";
-        private const string InstallerDLX86 =
-            "https://github.com/nefarius/ViGEmBus/releases/download/v1.22.0/ViGEmBus_1.22.0_x64_x86_arm64.exe";
-
-        private const string InstallerHidHideX64 = "https://github.com/nefarius/HidHide/releases/download/v1.5.230.0/HidHide_1.5.230_x64.exe";
-        private const string InstallerFakerInputX64 = "https://github.com/Ryochan7/FakerInput/releases/download/v0.1.0/FakerInput_0.1.0_x64.msi";
-        private const string InstallerFakerInputX86 = "https://github.com/Ryochan7/FakerInput/releases/download/v0.1.0/FakerInput_0.1.0_x86.msi";
-
-        private const string InstFileName1_16 = "ViGEmBus_Setup_1.16.116.exe";
-        private string InstFileNameX64 = Path.GetFileName(InstallerDLX64);
-        private string InstFileNameX86 = Path.GetFileName(InstallerDLX86);
-        private string tempInstFileName;
-
-        private string InstHidHideFileNameX64 = Path.GetFileName(InstallerHidHideX64);
-
-        private string installFakerInputDL = "";
-        private string instFakerInputFileName = "";
-
-        // Default to latest known ViGEmBus installer
-        private string installDL = InstallerDLX64;
-        private string installFileName;
-
-        Process monitorProc;
-        NonFormTimer monitorTimer;
+        private const string HidHideInstaller =
+            "https://github.com/nefarius/HidHide/releases/download/v1.5.230.0/HidHide_1.5.230_x64.exe";
+        private const string FakerInputX64 =
+            "https://github.com/Ryochan7/FakerInput/releases/download/v0.1.0/FakerInput_0.1.0_x64.msi";
+        private const string FakerInputX86 =
+            "https://github.com/Ryochan7/FakerInput/releases/download/v0.1.0/FakerInput_0.1.0_x86.msi";
 
         public WelcomeDialog(bool loadConfig = false)
         {
@@ -65,440 +31,123 @@ namespace DS4WinWPF.DS4Forms
             {
                 DS4Windows.Global.FindConfigLocation();
                 DS4Windows.Global.Load();
-                //DS4Windows.Global.SetCulture(DS4Windows.Global.UseLang);
             }
 
             InitializeComponent();
+            step4HidHidePanel.IsEnabled = IsHidHideCompatible();
+            step5FakerInputPanel.IsEnabled = DS4Windows.Global.IsWin8OrGreater();
 
-            // Establish default before system checks
-            installFileName = InstFileNameX64;
-
-            // Run checks for compatible version of ViGEmBus
-            if (!DS4Windows.Global.IsWin10OrGreater())
+            DS4Windows.ViiperPrerequisiteStatus status =
+                DS4Windows.ViiperSetupManager.GetStatus(tryStartServer: true);
+            if (status.Ready)
             {
-                installDL = InstallerDL1_16;
-                installFileName = InstFileName1_16;
+                viiperInstallBtn.Content = "VIIPER is ready";
             }
-            else if (!Environment.Is64BitOperatingSystem)
+        }
+
+        private void ViiperInstallBtn_Click(object sender, RoutedEventArgs e)
+        {
+            DS4Windows.ViiperPrerequisiteStatus status =
+                DS4Windows.ViiperSetupManager.GetStatus(tryStartServer: true);
+            if (status.Ready)
             {
-                installDL = InstallerDLX86;
-                installFileName = InstFileNameX86;
+                viiperInstallBtn.Content = "VIIPER is ready";
+                return;
             }
 
-            // Run checks for FakerInput driver
-            if (DS4Windows.Global.IsWin8OrGreater())
+            bool launched = DS4Windows.ViiperSetupManager.LaunchInstaller(status, this);
+            viiperInstallBtn.Content = launched
+                ? "Setup opened — finish it, then click here to verify"
+                : "VIIPER setup needs attention";
+        }
+
+        private async void HidHideInstall_Click(object sender, RoutedEventArgs e)
+        {
+            await DownloadAndRunInstallerAsync(HidHideInstaller,
+                hidHideInstallBtn, "HidHide");
+        }
+
+        private async void FakerInputInstallBtn_Click(object sender, RoutedEventArgs e)
+        {
+            string url = Environment.Is64BitOperatingSystem ?
+                FakerInputX64 : FakerInputX86;
+            await DownloadAndRunInstallerAsync(url, fakerInputInstallBtn,
+                "FakerInput");
+        }
+
+        private async Task DownloadAndRunInstallerAsync(string url,
+            System.Windows.Controls.Button button, string componentName)
+        {
+            string target = Path.Combine(Path.GetTempPath(),
+                Path.GetFileName(new Uri(url).AbsolutePath));
+            try
             {
-                if (Environment.Is64BitOperatingSystem)
+                SetInstallerControlsEnabled(false);
+                button.Content = $"Downloading {componentName}…";
+                byte[] payload = await App.requestClient.GetByteArrayAsync(url);
+                await File.WriteAllBytesAsync(target, payload);
+
+                button.Content = $"Installing {componentName}…";
+                using Process process = Process.Start(new ProcessStartInfo
                 {
-                    installFakerInputDL = InstallerFakerInputX64;
-                    instFakerInputFileName = new FileInfo(InstallerFakerInputX64).Name;
-                }
-                else if (!Environment.Is64BitOperatingSystem)
+                    FileName = target,
+                    UseShellExecute = true,
+                    Verb = "runas",
+                });
+                if (process != null)
                 {
-                    installDL = InstallerDLX86;
-                    installFileName = InstFileNameX86;
-
-                    installFakerInputDL = InstallerFakerInputX86;
-                    instFakerInputFileName = new FileInfo(InstallerFakerInputX86).Name;
-                }
-            }
-            else
-            {
-                step5FakerInputPanel.IsEnabled = false;
-            }
-
-            tempInstFileName = Path.Combine(Path.GetTempPath(), $"{installFileName}.tmp");
-
-            // HidHide requires Windows 10 (or later) x64
-            if (!IsHidHideControlCompatible())
-            {
-                step4HidHidePanel.IsEnabled = false;
-            }
-        }
-
-        private bool IsHidHideControlCompatible()
-        {
-            // HidHide requires Windows 10 (or later) x64
-            return DS4Windows.Global.IsWin10OrGreater() &&
-                Environment.Is64BitOperatingSystem;
-        }
-
-        private bool IsFakerInputControlCompatible()
-        {
-            // FakerInput works on Windows 8.1 and later. Going to attempt
-            // to support x64 and x86 arch
-            return DS4Windows.Global.IsWin8OrGreater();
-        }
-
-        private void FinishedBtn_Click(object sender, RoutedEventArgs e)
-        {
-            monitorTimer.Stop();
-            monitorTimer = null;
-
-            this.Close();
-        }
-
-        private void VigemInstallBtn_Click(object sender, RoutedEventArgs e)
-        {
-            string tempFilePath = Path.Combine(Path.GetTempPath(), $"{installFileName}");
-            if (File.Exists(tempFilePath))
-            {
-                File.Delete(tempFilePath);
-            }
-
-            if (File.Exists(tempInstFileName))
-            {
-                File.Delete(tempInstFileName);
-            }
-
-            EnableControls(false);
-            ViGEmDownloadLaunch();
-
-            /*WebClient wb = new WebClient();
-            wb.DownloadFileAsync(new Uri(InstallerDL), exepath + $"\\{installFileName}");
-
-            wb.DownloadProgressChanged += wb_DownloadProgressChanged;
-            wb.DownloadFileCompleted += wb_DownloadFileCompleted;
-            */
-        }
-
-        private async void ViGEmDownloadLaunch()
-        {
-            Progress<ICopyProgress> progress = new Progress<ICopyProgress>(x => // Please see "Notes on IProgress<T>"
-            {
-                // This is your progress event!
-                // It will fire on every buffer fill so don't do anything expensive.
-                // Writing to the console IS expensive, so don't do the following in practice...
-                vigemInstallBtn.Content = Properties.Resources.Downloading.Replace("*number*%",
-                    x.PercentComplete.ToString("P"));
-                //Console.WriteLine(x.PercentComplete.ToString("P"));
-            });
-
-            string finalFilename = Path.Combine(Path.GetTempPath(), $"{installFileName}");
-            bool success = false;
-            using (var downloadStream = new FileStream(tempInstFileName, FileMode.CreateNew))
-            {
-                HttpResponseMessage response = await App.requestClient.GetAsync(installDL,
-                    downloadStream, progress);
-                success = response.IsSuccessStatusCode;
-            }
-
-            if (success)
-            {
-                File.Move(tempInstFileName, finalFilename);
-            }
-            success = false; // Reset for later check
-
-            if (File.Exists(finalFilename))
-            {
-                //vigemInstallBtn.Content = Properties.Resources.OpeningInstaller;
-                ProcessStartInfo startInfo = new ProcessStartInfo(finalFilename);
-                startInfo.UseShellExecute = true; // Needed to run program as admin
-                monitorProc = Process.Start(startInfo);
-                vigemInstallBtn.Content = Properties.Resources.Installing;
-                success = true;
-            }
-
-            if (success)
-            {
-                EnableControls(false);
-
-                monitorTimer = new NonFormTimer();
-                monitorTimer.Elapsed += ViGEmInstallTimer_Tick;
-                monitorTimer.Start();
-            }
-            else
-            {
-                vigemInstallBtn.Content = Properties.Resources.InstallFailed;
-                EnableControls(true);
-            }
-        }
-
-        private void ViGEmInstallTimer_Tick(object sender, System.Timers.ElapsedEventArgs e)
-        {
-            ((NonFormTimer)sender).Stop();
-            bool finished = false;
-            if (monitorProc != null && monitorProc.HasExited)
-            {
-                // Retrieve info about installed ViGEmBus device if found
-                DS4Windows.Global.RefreshViGEmBusInfo();
-                if (DS4Windows.Global.IsViGEmBusInstalled())
-                {
-                    Dispatcher.BeginInvoke((Action)(() =>
-                    {
-                        vigemInstallBtn.Content = Properties.Resources.InstallComplete;
-                        EnableControls(true);
-                    }));
-                }
-                else
-                {
-                    Dispatcher.BeginInvoke((Action)(() =>
-                    {
-                        vigemInstallBtn.Content = Properties.Resources.InstallFailed;
-                        EnableControls(true);
-                    }), null);
+                    await process.WaitForExitAsync();
                 }
 
-                string currentFilePath = Path.Combine(Path.GetTempPath(), $"{installFileName}");
-                File.Delete(currentFilePath);
-                ((NonFormTimer)sender).Stop();
-                finished = true;
+                DS4Windows.Global.RefreshHidHideInfo();
+                button.Content = $"{componentName} setup complete";
             }
-
-            if (!finished)
+            catch (Exception ex)
             {
-                ((NonFormTimer)sender).Start();
+                button.Content = $"{componentName} setup failed";
+                MessageBox.Show(this,
+                    $"Could not install {componentName}: {ex.Message}",
+                    $"{componentName} setup", MessageBoxButton.OK,
+                    MessageBoxImage.Error);
             }
-        }
-
-        private void Step2Btn_Click(object sender, RoutedEventArgs e)
-        {
-            Process.Start("http://www.microsoft.com/accessories/en-gb/d/xbox-360-controller-for-windows");
-        }
-
-        private void BluetoothSetLink_Click(object sender, RoutedEventArgs e)
-        {
-            Process.Start("control", "bthprops.cpl");
-        }
-
-        private void HidHideInstall_Click(object sender, RoutedEventArgs e)
-        {
-            string tempFilePath = Path.Combine(Path.GetTempPath(), $"{InstHidHideFileNameX64}");
-            if (File.Exists(tempFilePath))
+            finally
             {
-                File.Delete(tempFilePath);
-            }
-
-            string tempInstHidFileName = Path.Combine(Path.GetTempPath(), $"{InstHidHideFileNameX64}.tmp");
-            if (File.Exists(tempInstHidFileName))
-            {
-                File.Delete(tempInstHidFileName);
-            }
-
-            EnableControls(false);
-            HidHideDownloadLaunch();
-        }
-
-        private async void HidHideDownloadLaunch()
-        {
-            Progress<ICopyProgress> progress = new Progress<ICopyProgress>(x => // Please see "Notes on IProgress<T>"
-            {
-                // This is your progress event!
-                // It will fire on every buffer fill so don't do anything expensive.
-                // Writing to the console IS expensive, so don't do the following in practice...
-                hidHideInstallBtn.Content = Properties.Resources.Downloading.Replace("*number*%",
-                    x.PercentComplete.ToString("P"));
-                //Console.WriteLine(x.PercentComplete.ToString("P"));
-            });
-
-            string tempInstHidFileName = Path.Combine(Path.GetTempPath(), $"{InstHidHideFileNameX64}.tmp");
-            string finalFilename = Path.Combine(Path.GetTempPath(), $"{InstHidHideFileNameX64}");
-            bool success = false;
-            using (var downloadStream = new FileStream(tempInstHidFileName, FileMode.CreateNew))
-            {
-                HttpResponseMessage response = await App.requestClient.GetAsync(InstallerHidHideX64,
-                    downloadStream, progress);
-                success = response.IsSuccessStatusCode;
-            }
-
-            if (success)
-            {
-                File.Move(tempInstHidFileName, finalFilename);
-            }
-            success = false; // Reset for later check
-
-            if (File.Exists(finalFilename))
-            {
-                //vigemInstallBtn.Content = Properties.Resources.OpeningInstaller;
-                ProcessStartInfo startInfo = new ProcessStartInfo(finalFilename);
-                startInfo.UseShellExecute = true; // Needed to run program as admin
-                monitorProc = Process.Start(startInfo);
-                hidHideInstallBtn.Content = Properties.Resources.Installing;
-                success = true;
-            }
-
-            if (success)
-            {
-                monitorTimer = new NonFormTimer();
-                monitorTimer.Elapsed += HidHideInstallTimer_Elapsed;
-                monitorTimer.Start();
-            }
-            else
-            {
-                hidHideInstallBtn.Content = Properties.Resources.InstallFailed;
-                EnableControls(true);
-            }
-        }
-
-        private void HidHideInstallTimer_Elapsed(object sender,
-            System.Timers.ElapsedEventArgs e)
-        {
-            ((NonFormTimer)sender).Stop();
-            bool finished = false;
-            if (monitorProc != null && monitorProc.HasExited)
-            {
-                if (DS4Windows.Global.IsHidHideInstalled())
+                try
                 {
-                    Dispatcher.BeginInvoke((Action)(() =>
-                    {
-                        hidHideInstallBtn.Content = Properties.Resources.InstallComplete;
-                        EnableControls(true);
-                    }));
+                    if (File.Exists(target)) File.Delete(target);
                 }
-                else
-                {
-                    Dispatcher.BeginInvoke((Action)(() =>
-                    {
-                        hidHideInstallBtn.Content = Properties.Resources.InstallFailed;
-                        EnableControls(true);
-                    }), null);
-                }
+                catch { }
 
-                string currentFilePath = Path.Combine(Path.GetTempPath(), $"{InstHidHideFileNameX64}");
-                File.Delete(currentFilePath);
-                ((NonFormTimer)sender).Stop();
-                finished = true;
-            }
-
-            if (!finished)
-            {
-                ((NonFormTimer)sender).Start();
+                SetInstallerControlsEnabled(true);
             }
         }
 
-        private void FakerInputInstallBtn_Click(object sender, RoutedEventArgs e)
+        private void SetInstallerControlsEnabled(bool enabled)
         {
-            string tempFilePath = Path.Combine(Path.GetTempPath(), $"{installFileName}");
-            if (File.Exists(tempFilePath))
-            {
-                File.Delete(tempFilePath);
-            }
-
-            string tempInstFakerInputName = Path.Combine(Path.GetTempPath(), $"{instFakerInputFileName}.tmp");
-            if (File.Exists(tempInstFakerInputName))
-            {
-                File.Delete(tempInstFakerInputName);
-            }
-
-            EnableControls(false);
-            FakerInputDownloadLaunch();
+            viiperInstallBtn.IsEnabled = enabled;
+            step4HidHidePanel.IsEnabled = enabled && IsHidHideCompatible();
+            step5FakerInputPanel.IsEnabled = enabled &&
+                DS4Windows.Global.IsWin8OrGreater();
         }
 
-        private async void FakerInputDownloadLaunch()
-        {
-            Progress<ICopyProgress> progress = new Progress<ICopyProgress>(x => // Please see "Notes on IProgress<T>"
-            {
-                // This is your progress event!
-                // It will fire on every buffer fill so don't do anything expensive.
-                // Writing to the console IS expensive, so don't do the following in practice...
-                fakerInputInstallBtn.Content = Properties.Resources.Downloading.Replace("*number*%",
-                    x.PercentComplete.ToString("P"));
-                //Console.WriteLine(x.PercentComplete.ToString("P"));
-            });
+        private static bool IsHidHideCompatible() =>
+            DS4Windows.Global.IsWin10OrGreater() &&
+            Environment.Is64BitOperatingSystem;
 
-            string tempInstFakerInputFileName = Path.Combine(Path.GetTempPath(),
-                $"{instFakerInputFileName}.tmp");
-            string finalFilename = Path.Combine(Path.GetTempPath(), $"{instFakerInputFileName}");
-            bool success = false;
-            using (var downloadStream = new FileStream(tempInstFakerInputFileName, FileMode.CreateNew))
-            {
-                HttpResponseMessage response = await App.requestClient.GetAsync(installFakerInputDL,
-                    downloadStream, progress);
-                success = response.IsSuccessStatusCode;
-            }
+        private void Step2Btn_Click(object sender, RoutedEventArgs e) =>
+            DS4Windows.Util.StartProcessHelper(
+                "https://support.xbox.com/help/hardware-network/controller/connect-xbox-wireless-controller-to-pc");
 
-            if (success)
-            {
-                File.Move(tempInstFakerInputFileName, finalFilename);
-            }
-            success = false; // Reset for later check
+        private void BluetoothSetLink_Click(object sender,
+            RoutedEventArgs e) => Process.Start("control", "bthprops.cpl");
 
-            if (File.Exists(finalFilename))
-            {
-                //vigemInstallBtn.Content = Properties.Resources.OpeningInstaller;
-                ProcessStartInfo startInfo = new ProcessStartInfo(finalFilename);
-                startInfo.UseShellExecute = true; // Needed to run program as admin
-                monitorProc = Process.Start(startInfo);
-                fakerInputInstallBtn.Content = Properties.Resources.Installing;
-                success = true;
-            }
-
-            if (success)
-            {
-                monitorTimer = new NonFormTimer();
-                monitorTimer.Elapsed += FakerInputInstallTimer_Elapsed;
-                monitorTimer.Start();
-            }
-            else
-            {
-                fakerInputInstallBtn.Content = Properties.Resources.InstallFailed;
-                EnableControls(true);
-            }
-        }
-
-        private void FakerInputInstallTimer_Elapsed(object sender,
-            System.Timers.ElapsedEventArgs e)
-        {
-            ((NonFormTimer)sender).Stop();
-            bool finished = false;
-            if (monitorProc != null && monitorProc.HasExited)
-            {
-                if (DS4Windows.Global.IsFakerInputInstalled())
-                {
-                    Dispatcher.BeginInvoke((Action)(() =>
-                    {
-                        fakerInputInstallBtn.Content = Properties.Resources.InstallComplete;
-                        EnableControls(true);
-                    }));
-                }
-                else
-                {
-                    Dispatcher.BeginInvoke((Action)(() =>
-                    {
-                        fakerInputInstallBtn.Content = Properties.Resources.InstallFailed;
-                        EnableControls(true);
-                    }), null);
-                }
-
-                string currentFilePath = Path.Combine(Path.GetTempPath(), $"{instFakerInputFileName}");
-                File.Delete(currentFilePath);
-                ((NonFormTimer)sender).Stop();
-                finished = true;
-            }
-
-            if (!finished)
-            {
-                ((NonFormTimer)sender).Start();
-            }
-        }
-
-        private void EnableControls(bool on)
-        {
-            vigemInstallBtn.IsEnabled = on;
-            step4HidHidePanel.IsEnabled = on;
-            step5FakerInputPanel.IsEnabled = on;
-
-            // Perform compatibility checks for controls that might need
-            // to be disabled when on is set to true
-            if (on)
-            {
-                LateControlsCheck();
-            }
-        }
-
-        /// <summary>
-        /// Possibly disable some controls for components that are not compatible
-        /// with the installed version of Windows or system configuration
-        /// </summary>
-        private void LateControlsCheck()
-        {
-            step4HidHidePanel.IsEnabled = IsHidHideControlCompatible();
-            step5FakerInputPanel.IsEnabled = IsFakerInputControlCompatible();
-        }
+        private void FinishedBtn_Click(object sender, RoutedEventArgs e) =>
+            Close();
     }
 
     public class WelcomeDialogResourcePaths
     {
-        public string PairmodePNG { get => $"{DS4Windows.Global.RESOURCES_PREFIX}/Pairmode.png"; }
+        public string PairmodePNG =>
+            $"{DS4Windows.Global.RESOURCES_PREFIX}/Pairmode.png";
     }
 }

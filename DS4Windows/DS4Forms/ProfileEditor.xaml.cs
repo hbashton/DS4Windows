@@ -41,6 +41,7 @@ namespace DS4WinWPF.DS4Forms
         }
 
         private int deviceNum;
+        private readonly int triggerPreviewDeviceIndex;
         private ProfileSettingsViewModel profileSettingsVM;
         private MappingListViewModel mappingListVM;
         private ProfileEntity currentProfile;
@@ -98,6 +99,12 @@ namespace DS4WinWPF.DS4Forms
             InitializeComponent();
 
             deviceNum = device;
+            triggerPreviewDeviceIndex = controllerContextDevice >= 0 &&
+                controllerContextDevice < ControlService.CURRENT_DS4_CONTROLLER_LIMIT
+                    ? controllerContextDevice
+                    : device >= 0 && device < ControlService.CURRENT_DS4_CONTROLLER_LIMIT
+                        ? device
+                        : -1;
             emptyColorGB.Visibility = Visibility.Collapsed;
             DS4Device physicalController = ResolveControllerContext(
                 device, controllerContextDevice);
@@ -142,6 +149,9 @@ namespace DS4WinWPF.DS4Forms
 
             inputTimer = new NonFormTimer(100);
             inputTimer.Elapsed += InputDS4;
+            profileAudioHapticsControl.SetDevice(deviceNum);
+            profileTriggerLabControl.SetDevice(deviceNum, triggerPreviewDeviceIndex);
+            UpdateTriggerLabSpecialActionBadge();
             SetupEvents();
         }
 
@@ -1223,7 +1233,7 @@ namespace DS4WinWPF.DS4Forms
 
         public void SelectWorkspaceSection(int sectionIndex)
         {
-            int nextSection = Math.Clamp(sectionIndex, 0, 7);
+            int nextSection = Math.Clamp(sectionIndex, 0, 9);
             if (nextSection <= 2)
             {
                 profileSettingsTabCon.Visibility = Visibility.Collapsed;
@@ -1312,6 +1322,10 @@ namespace DS4WinWPF.DS4Forms
                     Global.LoadBlankDevProfile(device, false, App.rootHub, false);
                 }
             }
+
+            profileAudioHapticsControl.SetDevice(deviceNum);
+            profileTriggerLabControl.SetDevice(deviceNum, triggerPreviewDeviceIndex);
+            UpdateTriggerLabSpecialActionBadge();
 
             ColorByBatteryPerCheck();
 
@@ -1442,7 +1456,8 @@ namespace DS4WinWPF.DS4Forms
                 App.rootHub.setRumble(0, 0, profileSettingsVM.FuncDevNum);
             }
 
-            Global.outDevTypeTemp[deviceNum] = OutContType.X360;
+            Global.outDevTypeTemp[deviceNum] = OutContType.ViiperX360;
+            profileTriggerLabControl.RestorePhysicalProfileEffects();
             // Run profile loading in Task. Need to still wait for Task to finish
             Task.Run(() =>
             {
@@ -1553,6 +1568,23 @@ namespace DS4WinWPF.DS4Forms
             HideControllerHover();
         }
 
+        private void ProfileTriggerLabControl_SettingsChanged(object sender,
+            ProfileFeatureSettingsChangedEventArgs e)
+        {
+            UpdateTriggerLabSpecialActionBadge();
+        }
+
+        private void UpdateTriggerLabSpecialActionBadge()
+        {
+            TriggerLabProfileSettings settings = deviceNum >= 0 &&
+                deviceNum < Global.TEST_PROFILE_ITEM_COUNT
+                    ? Global.store.triggerLabSettings[deviceNum]
+                    : null;
+            triggerLabSpecialActionBadge.Visibility = settings?.HasActiveOverride == true
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+
         private void HideControllerHover()
         {
             Canvas.SetLeft(picBoxHover, 0);
@@ -1579,7 +1611,7 @@ namespace DS4WinWPF.DS4Forms
             Global.OutContType[deviceNum] = profileSettingsVM.TempConType;
             if (fullSave)
             {
-                Global.outDevTypeTemp[deviceNum] = OutContType.X360;
+                Global.outDevTypeTemp[deviceNum] = OutContType.ViiperX360;
             }
         }
 
@@ -1610,6 +1642,7 @@ namespace DS4WinWPF.DS4Forms
             bool saved = ApplyProfileStep(false);
             if (saved)
             {
+                profileTriggerLabControl.RestorePhysicalProfileEffects();
                 Closed?.Invoke(this, EventArgs.Empty);
             }
         }
@@ -1691,6 +1724,7 @@ namespace DS4WinWPF.DS4Forms
                 App.rootHub.setRumble(0, 0, profileSettingsVM.FuncDevNum);
             }
 
+            profileTriggerLabControl.RestorePhysicalProfileEffects();
             Closed?.Invoke(this, EventArgs.Empty);
         }
 

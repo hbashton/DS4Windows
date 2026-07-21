@@ -26,7 +26,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Threading;
 using DS4WinWPF.DS4Control;
-using Nefarius.ViGEm.Client;
 
 namespace DS4Windows
 {
@@ -77,11 +76,6 @@ namespace DS4Windows
             int slotNum, OutSlotDevice outSlotDev);
         public event SlotUnassignedDelegate SlotUnassigned;
 
-        public event EventHandler<int> ViGEmFailure;
-
-        // First ViGEmBus version that has usable XInput slot grabbing
-        private static Version xinputSlotMinVersion = new Version("1.17.333.0");
-
         public OutputSlotManager()
         {
             outputSlots = new OutSlotDevice[ControlService.CURRENT_DS4_CONTROLLER_LIMIT];
@@ -117,24 +111,12 @@ namespace DS4Windows
             revDeviceDict.Clear();
         }
 
-        public OutputDevice AllocateController(OutContType contType, ViGEmClient client)
+        public OutputDevice AllocateController(OutContType contType)
         {
             contType = contType.Normalize();
             OutputDevice outputDevice = null;
             switch (contType)
             {
-                case OutContType.X360:
-                    if (xinputSlotMinVersion.CompareTo(Global.vigemBusVersionInfo) <= 0)
-                    {
-                        outputDevice = new Xbox360OutDevice(client,
-                            Xbox360OutDevice.X360Features.XInputSlotNum);
-                    }
-                    else
-                    {
-                        outputDevice = new Xbox360OutDevice(client);
-                    }
-
-                    break;
                 case OutContType.ViiperX360:
                     outputDevice = new ViiperOutDevice(contType, ViiperVirtualDeviceType.Xbox360);
                     break;
@@ -210,14 +192,7 @@ namespace DS4Windows
                         ControlService.StartupDiag($"OutputSlotManager.Connect Win32Exception slot={slot + 1} type={contType} error={e.ErrorCode} message={e.Message}");
                         // Leave task immediately if connect call failed
                         //queuedTasks--;
-                        if (ViiperOutDevice.IsViiperType(contType))
-                        {
-                            AppLogger.LogToGui($"Failed to plug in virtual {contType} controller: {e.Message}", true);
-                        }
-                        else
-                        {
-                            ViGEmFailure?.Invoke(this, e.ErrorCode);
-                        }
+                        AppLogger.LogToGui($"Failed to plug in virtual {contType} controller: {e.Message}", true);
 
                         if (beforeVirtualSony != null)
                         {
@@ -246,15 +221,7 @@ namespace DS4Windows
                         beforeVirtualSony = null;
                     }
 
-                    if (contType == OutContType.X360)
-                    {
-                        var tempXbox = outputDevice as Xbox360OutDevice;
-                        AppLogger.LogToGui($"Plugging in virtual X360 controller (XInput slot #{(tempXbox.XinputSlotNum < 0 ? "?" : tempXbox.XinputSlotNum + 1 )}) in output slot #{slot + 1}", false);
-                    }
-                    else
-                    {
-                        AppLogger.LogToGui($"Plugging in virtual {contType} Controller in output slot #{slot + 1}",false);
-                    }
+                    AppLogger.LogToGui($"Plugging in virtual {contType} Controller in output slot #{slot + 1}", false);
 
                     outputDevices[slot] = outputDevice;
                     deviceDict.Add(slot, outputDevice);

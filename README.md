@@ -1,5 +1,10 @@
 # DS4Windows
 
+[![CI Build](https://github.com/hbashton/DS4Windows/actions/workflows/ci-build.yml/badge.svg?branch=viiper-ui-rebuild)](https://github.com/hbashton/DS4Windows/actions/workflows/ci-build.yml?query=branch%3Aviiper-ui-rebuild)
+[![Download CI builds](https://img.shields.io/badge/download-CI%20artifacts-2f81f7?logo=githubactions&logoColor=white)](https://github.com/hbashton/DS4Windows/actions/workflows/ci-build.yml?query=branch%3Aviiper-ui-rebuild)
+[![Reddit](https://img.shields.io/badge/community-Reddit-ff4500?logo=reddit&logoColor=white)](https://www.reddit.com/r/DS4Windows/)
+[![Support on PayPal](https://img.shields.io/badge/support-PayPal-0070ba?logo=paypal&logoColor=white)](https://www.paypal.com/paypalme/hbashton)
+
 DS4Windows is a Windows controller mapper maintained by hbashton. It reads
 supported PlayStation and Nintendo controllers, applies per-profile mappings,
 and presents the output expected by games. This fork continues the work of
@@ -8,6 +13,12 @@ Jays2Kings, Ryochan7, Schmaldeo, and the wider DS4Windows community.
 This is the hbashton fork. Downloads, update checks, bug reports, and VIIPER
 integration documented here all refer to hbashton repositories.
 
+## UI preview
+
+![Profile editor with controller-aware remapping](docs/images/profile-editor-current.png)
+
+![Per-profile Audio Haptics controls](docs/images/audio-haptics.png)
+
 ## Download and install
 
 ### Stable release
@@ -15,7 +26,7 @@ integration documented here all refer to hbashton repositories.
 Most users should start with the stable build.
 
 1. Open the [latest stable release](https://github.com/hbashton/DS4Windows/releases/latest).
-2. Download `DS4Windows_<version>_x64.zip`. Use x86 only on a 32-bit Windows installation.
+2. Download `DS4Windows_<version>_x64.zip`. This VIIPER-based fork supports x64 Windows only.
 3. Extract the entire `DS4Windows` folder to a permanent location such as
    `%LOCALAPPDATA%\DS4Windows` or `C:\Tools\DS4Windows`.
 4. Run `DS4Windows.exe`. Do not run it from inside the ZIP archive.
@@ -46,8 +57,13 @@ After installing a VIIPER-capable DS4Windows build:
 3. Accept the administrator prompt. The setup installs the hbashton VIIPER
    backend and the required `usbip-win2` driver.
 4. Restart Windows if the setup installed or updated `usbip-win2`.
-5. Edit a profile and select **DualSense (VIIPER)**, **DualSense Edge (VIIPER)**,
-   or another VIIPER output type.
+5. Edit a profile and select **DualSense**, **DualSense Edge**, **Viiper
+   DualShock 4**, **Viiper Xbox 360**, or **Switch 2 Pro**.
+
+The installer also registers a hidden `RunVIIPER` task at sign-in. It starts
+the backend elevated without a recurring console or UAC popup. DS4Windows
+checks the backend at startup, starts it when possible, and opens a guided,
+self-elevating repair flow when VIIPER or usbip-win2 is missing.
 
 The matching VIIPER backend is published at
 [hbashton/VIIPER](https://github.com/hbashton/VIIPER). Use DS4Windows' built-in
@@ -66,15 +82,21 @@ correctly.
   XInput companion only while the overlay is visible without changing the loaded profile.
 - Per-profile DualSense adaptive-trigger configuration and fixed full-pull trigger actions.
 - More reliable profile transitions, including duplicate-rule crash and profile-switch latency fixes.
+- Profile and Auto Profile search with live filtering and one-click clearing.
+- Profile-scoped Audio Haptics and Trigger Lab settings.
 
 ### Controller output
 
-- Standard Xbox 360 and DualShock 4 virtual output through ViGEmBus.
-- VIIPER virtual Xbox 360, DualShock 4, DualSense, DualSense Edge, and Switch 2 Pro output in preview builds.
+- VIIPER virtual Xbox 360, DualShock 4, DualSense, DualSense Edge, and Switch 2 Pro output.
+- Automatic migration of old Xbox 360 and DualShock 4 output selections to
+  their VIIPER equivalents; ViGEmBus is not required.
 - Native-style DualSense buttons, sticks, triggers, touch, gyro, accelerometer,
   lightbar, player LEDs, mute button, and Edge controls through VIIPER.
 - Adaptive-trigger feedback forwarded from games to a physical DualSense or DualSense Edge.
 - Advanced DualSense haptics transported from the virtual USB audio interface to a physical Bluetooth controller.
+- Audio Haptics can capture the full system mix, an emulated-controller audio
+  endpoint, or one selected running app (including its child processes) and
+  turn it into profile-controlled DualSense haptic feedback.
 
 ### PlayStation controller audio
 
@@ -107,14 +129,17 @@ VIIPER preview builds. They are not part of the current stable 4.0.2.x backend.
 - Windows 10 or Windows 11. VIIPER requires Windows x64 and the x64 DS4Windows build; x86 is not compatible with VIIPER.
 - [Microsoft .NET 8 Desktop Runtime](https://dotnet.microsoft.com/en-us/download/dotnet/8.0).
 - [Microsoft Visual C++ 2015-2022 Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe).
-- [ViGEmBus](https://github.com/nefarius/ViGEmBus) for standard Xbox 360 and DualShock 4 output.
 - [HidHide](https://github.com/nefarius/HidHide) strongly recommended to prevent games from seeing both the physical and virtual controller.
-- `usbip-win2` and [hbashton/VIIPER](https://github.com/hbashton/VIIPER) only for VIIPER output profiles.
+- `usbip-win2` and [hbashton/VIIPER](https://github.com/hbashton/VIIPER), installed through the built-in guided setup.
 
 Supported physical inputs include first-party DualShock 4, DualSense,
 DualSense Edge, DualShock 3, Switch Pro, and Joy-Con controllers. Some compatible
 third-party and streamed virtual controllers are also supported when their HID
 reports match a supported device type.
+
+Moonlight/Sunshine virtual controllers are accepted when the corresponding
+Device Options setting is enabled and Sunshine is running. DS4Windows still
+rejects its own VIIPER outputs to prevent recursive virtual controllers.
 
 ## First setup
 
@@ -164,9 +189,12 @@ notes call for a matching backend update.
 
 Report bugs at [hbashton/DS4Windows Issues](https://github.com/hbashton/DS4Windows/issues).
 
+If this work is useful, you can [support continued development through
+PayPal](https://www.paypal.com/paypalme/hbashton).
+
 ## Development
 
-The solution targets .NET 8 and includes x64/x86 GitHub Actions builds. Pull
+The solution targets .NET 8 and publishes x64 GitHub Actions builds. Pull
 requests should keep stable behavior intact when adding preview backends and
 should include focused tests for profile persistence, controller state, or
 transport changes where practical.
@@ -179,6 +207,6 @@ DS4Windows is licensed under the GNU General Public License version 3. See
 ## Credits
 
 This fork exists because of the work of Jays2Kings, Ryochan7, Schmaldeo, the
-DS4Windows contributors, Nefarius and the ViGEm/HidHide projects, the VIIPER
+DS4Windows contributors, Nefarius and the HidHide project, the VIIPER
 project, `usbip-win2`, and the controller-protocol research shared by the wider
 community.

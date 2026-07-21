@@ -65,11 +65,6 @@ namespace DS4WinWPF.DS4Forms
             Util.StartProcessHelper("https://code.google.com/r/brianfundakowskifeldman-ds4windows/");
         }
 
-        private void ViGEmBusLink_Click(object sender, RoutedEventArgs e)
-        {
-            Util.StartProcessHelper("https://github.com/nefarius/ViGEmBus");
-        }
-
         private void HidHideLink_Click(object sender, RoutedEventArgs e)
         {
             Util.StartProcessHelper("https://github.com/nefarius/HidHide/");

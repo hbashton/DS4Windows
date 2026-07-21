@@ -101,7 +101,6 @@
 		<PackageReference Include="NAudio" Version="2.2.1" />
 		<PackageReference Include="NLog" Version="5.1.1" />
 		<PackageReference Include="YellowDogMan.RRNoise.NET" Version="0.1.9" GeneratePathProperty="true" PrivateAssets="all" ExcludeAssets="all" />
-		<!--<PackageReference Include="Nefarius.ViGEm.Client" Version="1.21.230" />-->
 		<PackageReference Include="Ookii.Dialogs.Wpf" Version="5.0.1" />
 		<PackageReference Include="System.Management" Version="7.0.2" />
 		<PackageReference Include="System.Memory" Version="4.5.5" />
@@ -117,9 +116,6 @@
 			<HintPath>..\libs\$(Platform)\SharpOSC\SharpOSC.dll</HintPath>
 		</Reference>
 
-		<Reference Include="Nefarius.ViGEm.Client">
-			<HintPath>..\libs\$(Platform)\Nefarius.ViGEm.Client\Nefarius.ViGEm.Client.dll</HintPath>
-		</Reference>
 	</ItemGroup>
 
 	<!-- Apparently the None tags are needed as well as the Resource tags.

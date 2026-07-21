@@ -77,7 +77,7 @@ namespace DS4WinWPF.DS4Forms
         private AutoProfileChecker autoprofileChecker;
         private ProfileEditor editor;
         private bool profileEditorLoading;
-        private int profileEditorReturnTabIndex = 2;
+        private int profileEditorReturnTabIndex = -1;
         private bool profileEditorNavigationChanging;
         private readonly HashSet<int> overviewDirtyControllerIndices = new();
         private DispatcherTimer overviewProfileSaveTimer;
@@ -100,11 +100,13 @@ namespace DS4WinWPF.DS4Forms
         public MainWindow(ArgumentParser parser)
         {
             InitializeComponent();
+            profileEditorReturnTabIndex = mainTabCon.Items.IndexOf(profilesTab);
 
             mainWinVM = new MainWindowsViewModel();
             DataContext = mainWinVM;
             mainWinVM.ProfileEditorNavigationIndexChanged += MainWinVM_ProfileEditorNavigationIndexChanged;
             mainWinVM.QuickProfileSettingChanged += MainWinVM_QuickProfileSettingChanged;
+            mainWinVM.SelectedControllerChanged += MainWinVM_SelectedControllerChanged;
 
             overviewProfileSaveTimer = new DispatcherTimer
             {
@@ -145,6 +147,8 @@ namespace DS4WinWPF.DS4Forms
             controllerLV.DataContext = conLvViewModel;
             controllerLV.ItemsSource = conLvViewModel.ControllerCol;
             mainWinVM.SelectedController = conLvViewModel.ControllerCol.FirstOrDefault();
+            audioHapticsControl.SetDevice(mainWinVM.SelectedController?.DevIndex ?? -1);
+            triggerLabControl.SetDevice(mainWinVM.SelectedController?.DevIndex ?? -1);
             ChangeControllerPanel();
 
             // Sort device by input slot number
@@ -1061,8 +1065,27 @@ Suspend support not enabled.", true);
             }
         }
 
+        private void SupportPayPalBtn_Click(object sender, RoutedEventArgs e)
+        {
+            Util.StartProcessHelper("https://www.paypal.com/paypalme/hbashton");
+        }
+
         private void MainWinVM_QuickProfileSettingChanged(object sender,
             QuickProfileSettingChangedEventArgs e)
+        {
+            overviewDirtyControllerIndices.Add(e.DeviceIndex);
+            overviewProfileSaveTimer.Stop();
+            overviewProfileSaveTimer.Start();
+        }
+
+        private void MainWinVM_SelectedControllerChanged(object sender, EventArgs e)
+        {
+            audioHapticsControl.SetDevice(mainWinVM.SelectedController?.DevIndex ?? -1);
+            triggerLabControl.SetDevice(mainWinVM.SelectedController?.DevIndex ?? -1);
+        }
+
+        private void ProfileFeatureControl_SettingsChanged(object sender,
+            ProfileFeatureSettingsChangedEventArgs e)
         {
             overviewDirtyControllerIndices.Add(e.DeviceIndex);
             overviewProfileSaveTimer.Stop();
@@ -1222,10 +1245,18 @@ Suspend support not enabled.", true);
                     description = "Configure motion aiming, steering, mouse control, and directional swipes.";
                     break;
                 case 8:
+                    title = "Audio Haptics";
+                    description = "Turn system audio or one app session into advanced haptic feedback for this profile.";
+                    break;
+                case 9:
+                    title = "Trigger Lab";
+                    description = "Build persistent L2 and R2 adaptive-trigger effects saved directly in this profile.";
+                    break;
+                case 10:
                     title = "Advanced";
                     description = "Manage output devices, rumble, audio, latency, compatibility, and custom hooks.";
                     break;
-                case 9:
+                case 11:
                     title = "Log";
                     description = "View live service events without leaving the profile editing workspace.";
                     break;
@@ -1236,7 +1267,7 @@ Suspend support not enabled.", true);
             mainWinVM.ProfileEditorSectionTitle = title;
             mainWinVM.ProfileEditorSectionDescription = description;
 
-            if (navigationIndex == 9)
+            if (navigationIndex == 11)
             {
                 editor.DeactivateLiveReadings();
                 mainTabCon.SelectedItem = logTab;
@@ -1596,7 +1627,7 @@ Suspend support not enabled.", true);
                                         else if (strData[2] == "plugds4")
                                             Program.rootHub.AttachUnboundOutDev(slotDevice, OutContType.ViiperDS4);
                                         else if (strData[2] == "plugx360")
-                                            Program.rootHub.AttachUnboundOutDev(slotDevice, OutContType.X360);
+                                            Program.rootHub.AttachUnboundOutDev(slotDevice, OutContType.ViiperX360);
                                         else if (strData[2] == "plugviiperx360")
                                             Program.rootHub.AttachUnboundOutDev(slotDevice, OutContType.ViiperX360);
                                         else if (strData[2] == "plugviiperds4")

@@ -22,9 +22,9 @@
                 <CheckBox Content="{lex:Loc ControllerSupportSwitchPro}" IsChecked="{Binding SwitchProDeviceOpts.Enabled}" />
                 <CheckBox Content="{lex:Loc ControllerSupportJoyCon}" IsChecked="{Binding JoyConDeviceOpts.Enabled}" />
                 <CheckBox Content="{lex:Loc ControllerSupportDS3}" IsChecked="{Binding DS3DeviceOpts.Enabled}" />
-                <CheckBox Content="{lex:Loc ControllerSupportMoonlight}" IsChecked="{Binding UseMoonlight}" />
-                <CheckBox Content="{lex:Loc AdvancedSupport}" IsChecked="{Binding UseAdvancedMoonlight}"
-                          Visibility="{Binding Path=UseMoonlight, Converter={StaticResource BooleanToVisibilityConverter}}" Margin="20 0 0 0"/>
+                <CheckBox Content="Accept Moonlight / Sunshine virtual controllers"
+                          IsChecked="{Binding UseMoonlight}"
+                          ToolTip="Accept every supported virtual controller created while Sunshine is running. DS4Windows' own VIIPER outputs are always excluded." />
                 <TextBlock>
                     <Hyperlink NavigateUri="https://github.com/schmaldeo/DS4Windows/blob/moonlight/doc/moonlight_support.md"
                                RequestNavigate="Hyperlink_RequestNavigate">

@@ -32,7 +32,7 @@ profile.
 ## Build / CI
 
 - The three local DLL references (`FakerInputWrapper`, `SharpOSC`,
-  `Nefarius.ViGEm.Client`) are committed under `DS4Windows/libs/{x64,x86}/` and
+  required runtime libraries are committed under `DS4Windows/libs/{x64,x86}/` and
   are explicitly un-ignored in `.gitignore`, so a fresh clone builds.
 - `.github/workflows/ci-build.yml` (new) builds on every push / PR / manual
   dispatch: runs the test project on x64, then publishes and packages x64 and

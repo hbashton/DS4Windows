@@ -256,7 +256,7 @@ namespace DS4WindowsTests
                 int selectedIndex = 1;
                 Assert.IsTrue(ProfileSettingsViewModel
                     .ApplyTemporaryOutputControllerSelection(device,
-                        ref selectedIndex, 3));
+                        ref selectedIndex, 2));
 
                 Assert.AreEqual(OutContType.ViiperDualSense,
                     ProfileSettingsViewModel.GetOutputControllerType(

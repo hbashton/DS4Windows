@@ -1,0 +1,912 @@
+/*
+DS4Windows
+Copyright (C) 2026  DS4Windows contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+*/
+
+using DS4Windows.InputDevices;
+using NAudio.CoreAudioApi;
+using NAudio.CoreAudioApi.Interfaces;
+using NAudio.Wave;
+using System;
+using System.Buffers.Binary;
+using System.Diagnostics;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Threading;
+
+namespace DS4Windows
+{
+    /// <summary>
+    /// Owns per-controller audio capture and presentation for profile-scoped
+    /// Audio Haptics. Captured audio is shaped into the native DualSense 3 kHz
+    /// stereo haptics lane and merged into game carriers when one is active.
+    /// </summary>
+    public sealed class AudioHapticsService : IDisposable
+    {
+        private const int ControllerCount = ControlService.MAX_DS4_CONTROLLER_COUNT;
+        private readonly object[] slotLocks = Enumerable.Range(0,
+            ControllerCount).Select(_ => new object()).ToArray();
+        private readonly SlotRuntime[] slots = new SlotRuntime[ControllerCount];
+        private bool disposed;
+
+        public void Start(int slot, DS4Device device,
+            AudioHapticsProfileSettings settings, OutContType outputType,
+            string requestedPhysicalEndpointId)
+        {
+            if (slot < 0 || slot >= slots.Length)
+            {
+                return;
+            }
+
+            settings = (settings ?? new AudioHapticsProfileSettings()).Clone();
+            if (!settings.Enabled || device is not DualSenseDevice dualSense)
+            {
+                Stop(slot);
+                if (settings.Enabled && device != null)
+                {
+                    AppLogger.LogToGui(
+                        "Audio Haptics requires a physical DualSense or DualSense Edge controller.",
+                        true);
+                }
+                return;
+            }
+
+            lock (slotLocks[slot])
+            {
+                if (disposed)
+                {
+                    return;
+                }
+
+                slots[slot]?.Dispose();
+                slots[slot] = null;
+                SlotRuntime runtime = new SlotRuntime(slot, dualSense,
+                    settings, outputType.Normalize(), requestedPhysicalEndpointId);
+                try
+                {
+                    runtime.Start();
+                    slots[slot] = runtime;
+                    AppLogger.LogToGui(
+                        $"Audio Haptics started for controller {slot + 1}: {runtime.SourceDisplayName}.",
+                        false);
+                }
+                catch (Exception exception)
+                {
+                    runtime.Dispose();
+                    AppLogger.LogToGui(
+                        $"Audio Haptics could not start for controller {slot + 1}: {exception.Message}",
+                        true);
+                }
+            }
+        }
+
+        public void Stop(int slot)
+        {
+            if (slot < 0 || slot >= slots.Length)
+            {
+                return;
+            }
+
+            lock (slotLocks[slot])
+            {
+                SlotRuntime runtime = slots[slot];
+                slots[slot] = null;
+                runtime?.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Applies the newest audio-derived haptic frame directly to an
+        /// incoming game haptics block. Calling this also grants the game
+        /// carrier ownership of cadence for a short lease, preventing a second
+        /// standalone write stream from competing with it.
+        /// </summary>
+        public bool ApplyToGameHaptics(int slot, byte[] report,
+            int sampleOffset, int sampleLength)
+        {
+            if (slot < 0 || slot >= slots.Length || report == null ||
+                sampleOffset < 0 || sampleLength < SlotRuntime.FrameBytes ||
+                sampleOffset + SlotRuntime.FrameBytes > report.Length)
+            {
+                return false;
+            }
+
+            SlotRuntime runtime;
+            lock (slotLocks[slot])
+            {
+                runtime = slots[slot];
+            }
+            return runtime?.ApplyToGameHaptics(report, sampleOffset) == true;
+        }
+
+        public AudioHapticsRuntimeStatus GetStatus(int slot)
+        {
+            if (slot < 0 || slot >= slots.Length)
+            {
+                return AudioHapticsRuntimeStatus.Inactive;
+            }
+            lock (slotLocks[slot])
+            {
+                return slots[slot]?.Status ??
+                    AudioHapticsRuntimeStatus.Inactive;
+            }
+        }
+
+        public void Dispose()
+        {
+            if (disposed)
+            {
+                return;
+            }
+            disposed = true;
+            for (int slot = 0; slot < slots.Length; slot++)
+            {
+                Stop(slot);
+            }
+        }
+
+        private sealed class SlotRuntime : IDisposable
+        {
+            internal const int TargetSampleRate = 3000;
+            internal const int FramesPerPacket = 32;
+            internal const int FrameBytes = FramesPerPacket * 2;
+            private const int QueueCapacity = 12;
+            private const int WriterPrebufferFrames = 3;
+            private const int GameCarrierLeaseMilliseconds = 42;
+            private const int CaptureBufferMilliseconds = 10;
+            private const long PacketIntervalNumerator =
+                FramesPerPacket * 10000000L;
+
+            private readonly int slot;
+            private readonly DualSenseDevice device;
+            private readonly AudioHapticsProfileSettings settings;
+            private readonly OutContType outputType;
+            private readonly string requestedPhysicalEndpointId;
+            private readonly object frameLock = new object();
+            private readonly byte[][] frameQueue = Enumerable.Range(0,
+                QueueCapacity).Select(_ => new byte[FrameBytes]).ToArray();
+            private readonly byte[] captureFrame = new byte[FrameBytes];
+            private readonly byte[] latestFrame = new byte[FrameBytes];
+            private readonly byte[] writerFrame = new byte[FrameBytes];
+            private readonly ManualResetEventSlim stopped = new(false);
+
+            private WasapiCapture capture;
+            private AudioClient directCaptureAudioClient;
+            private AudioCaptureClient directCaptureClient;
+            private EventWaitHandle directCaptureEvent;
+            private Thread directCaptureThread;
+            private Thread writerThread;
+            private AudioHapticsProcessor processor;
+            private WaveFormat captureFormat;
+            private MMDevice captureEndpoint;
+            private MMDevice usbOutputEndpoint;
+            private WasapiOut usbOutput;
+            private BufferedWaveProvider usbProvider;
+            private byte[] directCaptureScratch = Array.Empty<byte>();
+            private byte[] usbScratch = Array.Empty<byte>();
+            private int captureFramePosition;
+            private int queueRead;
+            private int queueWrite;
+            private int queuedFrames;
+            private bool latestFrameAvailable;
+            private double resampleCredit;
+            private long lastGameCarrierTimestamp;
+            private int started;
+            private int disposed;
+            private string sourceDisplayName = "audio source";
+            private AudioHapticsRuntimeStatus status =
+                AudioHapticsRuntimeStatus.Starting;
+
+            public SlotRuntime(int slot, DualSenseDevice device,
+                AudioHapticsProfileSettings settings, OutContType outputType,
+                string requestedPhysicalEndpointId)
+            {
+                this.slot = slot;
+                this.device = device;
+                this.settings = settings;
+                this.outputType = outputType;
+                this.requestedPhysicalEndpointId =
+                    requestedPhysicalEndpointId ?? string.Empty;
+            }
+
+            public string SourceDisplayName => sourceDisplayName;
+            public AudioHapticsRuntimeStatus Status => status;
+
+            public void Start()
+            {
+                if (Interlocked.Exchange(ref started, 1) != 0)
+                {
+                    return;
+                }
+
+                if (settings.Source == AudioHapticsSourceKind.AppSession)
+                {
+                    StartProcessCapture(ResolveProcessId());
+                }
+                else
+                {
+                    StartEndpointCapture();
+                }
+
+                if (device.ConnectionType != ConnectionType.BT)
+                {
+                    StartUsbHapticsOutput();
+                }
+                else if (!device.EnsureBluetoothCombinedOutputTransport())
+                {
+                    throw new InvalidOperationException(
+                        device.LastBluetoothHapticsWriteStatus);
+                }
+
+                writerThread = new Thread(WriterLoop)
+                {
+                    IsBackground = true,
+                    Name = $"DS4W Audio Haptics {slot + 1}",
+                    Priority = ThreadPriority.Highest,
+                };
+                writerThread.Start();
+                status = AudioHapticsRuntimeStatus.Running;
+            }
+
+            public bool ApplyToGameHaptics(byte[] report, int sampleOffset)
+            {
+                if (Volatile.Read(ref disposed) != 0)
+                {
+                    return false;
+                }
+
+                lock (frameLock)
+                {
+                    Volatile.Write(ref lastGameCarrierTimestamp,
+                        Stopwatch.GetTimestamp());
+                    if (settings.Mode == AudioHapticsMode.Replace)
+                    {
+                        if (latestFrameAvailable)
+                        {
+                            Buffer.BlockCopy(latestFrame, 0, report,
+                                sampleOffset, FrameBytes);
+                        }
+                        else
+                        {
+                            Array.Clear(report, sampleOffset, FrameBytes);
+                        }
+                        return true;
+                    }
+
+                    if (!latestFrameAvailable)
+                    {
+                        return false;
+                    }
+                    for (int index = 0; index < FrameBytes; index++)
+                    {
+                        report[sampleOffset + index] =
+                            AudioHapticsProcessor.MixSigned8(
+                                report[sampleOffset + index],
+                                latestFrame[index]);
+                    }
+                    return true;
+                }
+            }
+
+            private void StartEndpointCapture()
+            {
+                MMDeviceEnumerator enumerator = new MMDeviceEnumerator();
+                MMDevice endpoint = null;
+                if (settings.Source == AudioHapticsSourceKind.ControllerAudio)
+                {
+                    endpoint = DualSenseAudioPassthrough.FindActiveGameAudioEndpoint(
+                        enumerator, null,
+                        DualSenseAudioPassthrough.GetEndpointKind(outputType));
+                    if (endpoint == null)
+                    {
+                        enumerator.Dispose();
+                        throw new InvalidOperationException(
+                            "The emulated controller audio endpoint is not available yet.");
+                    }
+                }
+                else
+                {
+                    endpoint = enumerator.GetDefaultAudioEndpoint(DataFlow.Render,
+                        Role.Multimedia);
+                }
+
+                enumerator.Dispose();
+                captureEndpoint = endpoint;
+                sourceDisplayName = endpoint.FriendlyName;
+                capture = new LowLatencyLoopbackCapture(endpoint,
+                    CaptureBufferMilliseconds);
+                captureFormat = capture.WaveFormat;
+                processor = new AudioHapticsProcessor(settings,
+                    captureFormat.SampleRate);
+                capture.DataAvailable += Capture_DataAvailable;
+                capture.RecordingStopped += Capture_RecordingStopped;
+                capture.StartRecording();
+            }
+
+            private void StartProcessCapture(int processId)
+            {
+                directCaptureAudioClient = ProcessLoopbackAudioClient.Activate(
+                    processId, TimeSpan.FromSeconds(5));
+                captureFormat = new WaveFormat(44100, 16, 2);
+                long bufferDuration = CaptureBufferMilliseconds * 10000L;
+                directCaptureAudioClient.Initialize(AudioClientShareMode.Shared,
+                    AudioClientStreamFlags.Loopback |
+                        AudioClientStreamFlags.EventCallback,
+                    bufferDuration, 0, captureFormat, Guid.Empty);
+                directCaptureEvent = new EventWaitHandle(false,
+                    EventResetMode.AutoReset);
+                directCaptureAudioClient.SetEventHandle(
+                    directCaptureEvent.SafeWaitHandle.DangerousGetHandle());
+                directCaptureClient = directCaptureAudioClient.AudioCaptureClient;
+                processor = new AudioHapticsProcessor(settings,
+                    captureFormat.SampleRate);
+                sourceDisplayName = string.IsNullOrWhiteSpace(settings.DisplayName)
+                    ? $"process {processId}" : settings.DisplayName;
+                directCaptureThread = new Thread(DirectCaptureLoop)
+                {
+                    IsBackground = true,
+                    Name = $"DS4W App Haptics Capture {slot + 1}",
+                    Priority = ThreadPriority.Highest,
+                };
+                directCaptureThread.Start();
+                directCaptureAudioClient.Start();
+            }
+
+            private int ResolveProcessId()
+            {
+                if (settings.ProcessId > 0)
+                {
+                    try
+                    {
+                        using Process process = Process.GetProcessById(
+                            settings.ProcessId);
+                        if (!process.HasExited)
+                        {
+                            return settings.ProcessId;
+                        }
+                    }
+                    catch { }
+                }
+
+                foreach (Process process in Process.GetProcesses())
+                {
+                    using (process)
+                    {
+                        try
+                        {
+                            string path = process.MainModule?.FileName ??
+                                string.Empty;
+                            if (!string.IsNullOrWhiteSpace(settings.ProcessPath) &&
+                                string.Equals(path, settings.ProcessPath,
+                                    StringComparison.OrdinalIgnoreCase))
+                            {
+                                return process.Id;
+                            }
+                            if (!string.IsNullOrWhiteSpace(
+                                    settings.ExecutableName) &&
+                                string.Equals(process.ProcessName,
+                                    settings.ExecutableName,
+                                    StringComparison.OrdinalIgnoreCase))
+                            {
+                                return process.Id;
+                            }
+                        }
+                        catch { }
+                    }
+                }
+                throw new InvalidOperationException(
+                    "The selected application is not currently producing an audio session.");
+            }
+
+            private void Capture_DataAvailable(object sender,
+                WaveInEventArgs eventArgs)
+            {
+                if (eventArgs.BytesRecorded > 0 && captureFormat != null)
+                {
+                    ProcessPcm(eventArgs.Buffer, eventArgs.BytesRecorded,
+                        captureFormat);
+                }
+            }
+
+            private void Capture_RecordingStopped(object sender,
+                StoppedEventArgs eventArgs)
+            {
+                if (eventArgs.Exception != null &&
+                    Volatile.Read(ref disposed) == 0)
+                {
+                    status = new AudioHapticsRuntimeStatus(false,
+                        $"Capture stopped: {eventArgs.Exception.Message}");
+                    AppLogger.LogToGui(
+                        $"Audio Haptics capture stopped for controller {slot + 1}: {eventArgs.Exception.Message}",
+                        true);
+                }
+            }
+
+            private void DirectCaptureLoop()
+            {
+                WaitHandle[] waits = { stopped.WaitHandle, directCaptureEvent };
+                try
+                {
+                    while (Volatile.Read(ref disposed) == 0)
+                    {
+                        int signaled = WaitHandle.WaitAny(waits, 1000);
+                        if (signaled == 0)
+                        {
+                            break;
+                        }
+                        if (signaled == 1)
+                        {
+                            DrainDirectCapture();
+                        }
+                    }
+                }
+                catch (Exception exception) when (
+                    Volatile.Read(ref disposed) == 0)
+                {
+                    status = new AudioHapticsRuntimeStatus(false,
+                        $"App capture stopped: {exception.Message}");
+                    AppLogger.LogToGui(
+                        $"Per-app Audio Haptics stopped for controller {slot + 1}: {exception.Message}",
+                        true);
+                }
+            }
+
+            private void DrainDirectCapture()
+            {
+                while (Volatile.Read(ref disposed) == 0)
+                {
+                    int nextFrames = directCaptureClient.GetNextPacketSize();
+                    if (nextFrames <= 0)
+                    {
+                        return;
+                    }
+
+                    IntPtr buffer = directCaptureClient.GetBuffer(
+                        out int framesAvailable, out AudioClientBufferFlags flags,
+                        out _, out _);
+                    try
+                    {
+                        if (framesAvailable <= 0)
+                        {
+                            continue;
+                        }
+                        int byteCount = checked(framesAvailable *
+                            captureFormat.BlockAlign);
+                        if (directCaptureScratch.Length < byteCount)
+                        {
+                            directCaptureScratch = new byte[byteCount];
+                        }
+                        if ((flags & AudioClientBufferFlags.Silent) != 0 ||
+                            buffer == IntPtr.Zero)
+                        {
+                            Array.Clear(directCaptureScratch, 0, byteCount);
+                        }
+                        else
+                        {
+                            Marshal.Copy(buffer, directCaptureScratch, 0,
+                                byteCount);
+                        }
+                        ProcessPcm(directCaptureScratch, byteCount,
+                            captureFormat);
+                    }
+                    finally
+                    {
+                        directCaptureClient.ReleaseBuffer(framesAvailable);
+                    }
+                }
+            }
+
+            private void ProcessPcm(byte[] buffer, int byteCount,
+                WaveFormat format)
+            {
+                int channels = Math.Max(1, format.Channels);
+                int bytesPerSample = Math.Max(1, format.BitsPerSample / 8);
+                int frameBytes = Math.Max(1, format.BlockAlign);
+                int frameCount = byteCount / frameBytes;
+                double outputPerInput = TargetSampleRate /
+                    (double)format.SampleRate;
+                bool preserveCapturedNativeHaptics =
+                    device.ConnectionType != ConnectionType.BT &&
+                    settings.Source == AudioHapticsSourceKind.ControllerAudio &&
+                    channels >= 4 && settings.Mode == AudioHapticsMode.Mix;
+
+                for (int frame = 0; frame < frameCount; frame++)
+                {
+                    int offset = frame * frameBytes;
+                    float left = ReadSample(buffer, byteCount, offset, format);
+                    float right = channels > 1 ? ReadSample(buffer, byteCount,
+                        offset + bytesPerSample, format) : left;
+                    processor.Process(left, right, out float hapticLeft,
+                        out float hapticRight);
+
+                    if (preserveCapturedNativeHaptics)
+                    {
+                        byte nativeLeft = AudioHapticsProcessor.Quantize(
+                            ReadSample(buffer, byteCount,
+                                offset + bytesPerSample * 2, format));
+                        byte nativeRight = AudioHapticsProcessor.Quantize(
+                            ReadSample(buffer, byteCount,
+                                offset + bytesPerSample * 3, format));
+                        hapticLeft = unchecked((sbyte)
+                            AudioHapticsProcessor.MixSigned8(nativeLeft,
+                                AudioHapticsProcessor.Quantize(hapticLeft))) /
+                            127.0f;
+                        hapticRight = unchecked((sbyte)
+                            AudioHapticsProcessor.MixSigned8(nativeRight,
+                                AudioHapticsProcessor.Quantize(hapticRight))) /
+                            127.0f;
+                    }
+
+                    resampleCredit += outputPerInput;
+                    while (resampleCredit >= 1.0)
+                    {
+                        PushHapticSample(hapticLeft, hapticRight);
+                        resampleCredit -= 1.0;
+                    }
+                }
+            }
+
+            private void PushHapticSample(float left, float right)
+            {
+                captureFrame[captureFramePosition++] =
+                    AudioHapticsProcessor.Quantize(left);
+                captureFrame[captureFramePosition++] =
+                    AudioHapticsProcessor.Quantize(right);
+                if (captureFramePosition < FrameBytes)
+                {
+                    return;
+                }
+
+                lock (frameLock)
+                {
+                    Buffer.BlockCopy(captureFrame, 0, latestFrame, 0,
+                        FrameBytes);
+                    latestFrameAvailable = true;
+                    if (queuedFrames == QueueCapacity)
+                    {
+                        queueRead = (queueRead + 1) % QueueCapacity;
+                        queuedFrames--;
+                    }
+                    Buffer.BlockCopy(captureFrame, 0, frameQueue[queueWrite], 0,
+                        FrameBytes);
+                    queueWrite = (queueWrite + 1) % QueueCapacity;
+                    queuedFrames++;
+                }
+                captureFramePosition = 0;
+            }
+
+            private void WriterLoop()
+            {
+                Stopwatch clock = Stopwatch.StartNew();
+                long nextPacketTicks = clock.ElapsedTicks;
+                long packetIntervalTicks = Stopwatch.Frequency *
+                    PacketIntervalNumerator / 10000000L / TargetSampleRate;
+                bool prebuffered = false;
+
+                while (Volatile.Read(ref disposed) == 0)
+                {
+                    WaitUntil(clock, nextPacketTicks);
+                    nextPacketTicks += packetIntervalTicks;
+                    if (clock.ElapsedTicks - nextPacketTicks >
+                        packetIntervalTicks * 3)
+                    {
+                        nextPacketTicks = clock.ElapsedTicks +
+                            packetIntervalTicks;
+                    }
+
+                    bool hasFrame = false;
+                    lock (frameLock)
+                    {
+                        if (!prebuffered)
+                        {
+                            prebuffered = queuedFrames >=
+                                WriterPrebufferFrames;
+                        }
+                        if (prebuffered && queuedFrames > 0)
+                        {
+                            Buffer.BlockCopy(frameQueue[queueRead], 0,
+                                writerFrame, 0, FrameBytes);
+                            queueRead = (queueRead + 1) % QueueCapacity;
+                            queuedFrames--;
+                            hasFrame = true;
+                        }
+                    }
+                    if (!hasFrame)
+                    {
+                        Array.Clear(writerFrame, 0, FrameBytes);
+                    }
+
+                    if (device.ConnectionType == ConnectionType.BT)
+                    {
+                        long carrierTimestamp = Volatile.Read(
+                            ref lastGameCarrierTimestamp);
+                        bool gameCarrierOwnsCadence = carrierTimestamp > 0 &&
+                            Stopwatch.GetTimestamp() - carrierTimestamp <=
+                                Stopwatch.Frequency *
+                                    GameCarrierLeaseMilliseconds / 1000;
+                        if (!gameCarrierOwnsCadence)
+                        {
+                            device.WriteBluetoothHapticsSamples(writerFrame,
+                                0, FrameBytes);
+                        }
+                    }
+                    else
+                    {
+                        WriteUsbFrame(writerFrame);
+                    }
+                }
+            }
+
+            private void StartUsbHapticsOutput()
+            {
+                using MMDeviceEnumerator enumerator = new MMDeviceEnumerator();
+                MMDevice endpoint = null;
+                if (!string.IsNullOrWhiteSpace(requestedPhysicalEndpointId))
+                {
+                    try
+                    {
+                        MMDevice requested = enumerator.GetDevice(
+                            requestedPhysicalEndpointId);
+                        if (requested.State == DeviceState.Active &&
+                            requested.AudioClient.MixFormat.Channels >= 4)
+                        {
+                            endpoint = requested;
+                        }
+                    }
+                    catch { }
+                }
+
+                endpoint ??= enumerator.EnumerateAudioEndPoints(DataFlow.Render,
+                        DeviceState.Active)
+                    .Where(candidate => captureEndpoint == null ||
+                        !string.Equals(candidate.ID, captureEndpoint.ID,
+                            StringComparison.OrdinalIgnoreCase))
+                    .FirstOrDefault(candidate =>
+                        candidate.AudioClient.MixFormat.Channels >= 4 &&
+                        DualSenseAudioPassthrough.IsDualSenseEndpoint(candidate));
+                if (endpoint == null)
+                {
+                    throw new InvalidOperationException(
+                        "No four-channel physical DualSense audio endpoint was found for USB haptics.");
+                }
+
+                usbOutputEndpoint = endpoint;
+                WaveFormat format = endpoint.AudioClient.MixFormat;
+                usbProvider = new BufferedWaveProvider(format)
+                {
+                    BufferDuration = TimeSpan.FromMilliseconds(250),
+                    DiscardOnBufferOverflow = true,
+                    ReadFully = true,
+                };
+                usbOutput = new WasapiOut(endpoint,
+                    AudioClientShareMode.Shared, true, 30);
+                usbOutput.Init(usbProvider);
+                usbOutput.Play();
+
+                Array.Clear(writerFrame, 0, writerFrame.Length);
+                for (int index = 0; index < WriterPrebufferFrames; index++)
+                {
+                    WriteUsbFrame(writerFrame);
+                }
+            }
+
+            private void WriteUsbFrame(byte[] frame)
+            {
+                WaveFormat format = usbProvider?.WaveFormat;
+                if (format == null)
+                {
+                    return;
+                }
+
+                int outputFrames = Math.Max(1, (int)Math.Round(
+                    format.SampleRate * FramesPerPacket /
+                    (double)TargetSampleRate));
+                int bytesNeeded = checked(outputFrames * format.BlockAlign);
+                if (usbScratch.Length < bytesNeeded)
+                {
+                    usbScratch = new byte[bytesNeeded];
+                }
+                Array.Clear(usbScratch, 0, bytesNeeded);
+                int bytesPerSample = Math.Max(1, format.BitsPerSample / 8);
+                for (int outputFrame = 0; outputFrame < outputFrames;
+                    outputFrame++)
+                {
+                    double sourcePosition = (outputFrame + 0.5) *
+                        FramesPerPacket / outputFrames - 0.5;
+                    int sourceIndex = Math.Clamp((int)Math.Floor(
+                        sourcePosition), 0, FramesPerPacket - 1);
+                    int nextIndex = Math.Min(sourceIndex + 1,
+                        FramesPerPacket - 1);
+                    float fraction = (float)Math.Clamp(sourcePosition -
+                        sourceIndex, 0.0, 1.0);
+                    float left = Lerp(unchecked((sbyte)frame[sourceIndex * 2]) /
+                            127.0f,
+                        unchecked((sbyte)frame[nextIndex * 2]) / 127.0f,
+                        fraction);
+                    float right = Lerp(unchecked((sbyte)frame[
+                            sourceIndex * 2 + 1]) / 127.0f,
+                        unchecked((sbyte)frame[nextIndex * 2 + 1]) /
+                            127.0f, fraction);
+                    int outputOffset = outputFrame * format.BlockAlign;
+                    WriteSample(usbScratch,
+                        outputOffset + bytesPerSample * 2, format, left);
+                    WriteSample(usbScratch,
+                        outputOffset + bytesPerSample * 3, format, right);
+                }
+                usbProvider.AddSamples(usbScratch, 0, bytesNeeded);
+            }
+
+            private static float ReadSample(byte[] buffer, int byteCount,
+                int offset, WaveFormat format)
+            {
+                if (offset < 0 || offset >= byteCount)
+                {
+                    return 0.0f;
+                }
+                if (format.Encoding == WaveFormatEncoding.IeeeFloat &&
+                    format.BitsPerSample == 32 && offset + 3 < byteCount)
+                {
+                    return Math.Clamp(BitConverter.ToSingle(buffer, offset),
+                        -1.0f, 1.0f);
+                }
+                return format.BitsPerSample switch
+                {
+                    16 when offset + 1 < byteCount =>
+                        BinaryPrimitives.ReadInt16LittleEndian(
+                            buffer.AsSpan(offset, 2)) / 32768.0f,
+                    24 when offset + 2 < byteCount => ReadInt24(buffer,
+                        offset) / 8388608.0f,
+                    32 when offset + 3 < byteCount =>
+                        BinaryPrimitives.ReadInt32LittleEndian(
+                            buffer.AsSpan(offset, 4)) / 2147483648.0f,
+                    _ => 0.0f,
+                };
+            }
+
+            private static int ReadInt24(byte[] buffer, int offset)
+            {
+                int value = buffer[offset] | buffer[offset + 1] << 8 |
+                    buffer[offset + 2] << 16;
+                return (value & 0x800000) == 0 ? value :
+                    value | unchecked((int)0xFF000000);
+            }
+
+            private static void WriteSample(byte[] buffer, int offset,
+                WaveFormat format, float sample)
+            {
+                sample = Math.Clamp(sample, -1.0f, 1.0f);
+                if (format.Encoding == WaveFormatEncoding.IeeeFloat &&
+                    format.BitsPerSample == 32)
+                {
+                    BitConverter.TryWriteBytes(buffer.AsSpan(offset, 4),
+                        sample);
+                    return;
+                }
+                switch (format.BitsPerSample)
+                {
+                    case 16:
+                        BinaryPrimitives.WriteInt16LittleEndian(
+                            buffer.AsSpan(offset, 2),
+                            (short)Math.Round(sample * short.MaxValue));
+                        break;
+                    case 24:
+                        int value24 = (int)Math.Round(sample * 8388607.0f);
+                        buffer[offset] = (byte)value24;
+                        buffer[offset + 1] = (byte)(value24 >> 8);
+                        buffer[offset + 2] = (byte)(value24 >> 16);
+                        break;
+                    case 32:
+                        BinaryPrimitives.WriteInt32LittleEndian(
+                            buffer.AsSpan(offset, 4),
+                            (int)Math.Round(sample * int.MaxValue));
+                        break;
+                }
+            }
+
+            private static float Lerp(float left, float right,
+                float amount) => left + (right - left) * amount;
+
+            private static void WaitUntil(Stopwatch clock, long targetTicks)
+            {
+                while (true)
+                {
+                    long remaining = targetTicks - clock.ElapsedTicks;
+                    if (remaining <= 0)
+                    {
+                        return;
+                    }
+                    double remainingMs = remaining * 1000.0 /
+                        Stopwatch.Frequency;
+                    if (remainingMs > 1.5)
+                    {
+                        Thread.Sleep(1);
+                    }
+                    else if (remainingMs > 0.25)
+                    {
+                        Thread.Yield();
+                    }
+                    else
+                    {
+                        Thread.SpinWait(80);
+                    }
+                }
+            }
+
+            public void Dispose()
+            {
+                if (Interlocked.Exchange(ref disposed, 1) != 0)
+                {
+                    return;
+                }
+                status = AudioHapticsRuntimeStatus.Inactive;
+                stopped.Set();
+                try { directCaptureAudioClient?.Stop(); } catch { }
+                try { directCaptureEvent?.Set(); } catch { }
+                if (capture != null)
+                {
+                    capture.DataAvailable -= Capture_DataAvailable;
+                    capture.RecordingStopped -= Capture_RecordingStopped;
+                    try { capture.StopRecording(); } catch { }
+                }
+                if (writerThread != null &&
+                    !ReferenceEquals(writerThread, Thread.CurrentThread))
+                {
+                    writerThread.Join(1200);
+                }
+                if (directCaptureThread != null &&
+                    !ReferenceEquals(directCaptureThread,
+                        Thread.CurrentThread))
+                {
+                    directCaptureThread.Join(1200);
+                }
+                capture?.Dispose();
+                directCaptureClient?.Dispose();
+                directCaptureAudioClient?.Dispose();
+                directCaptureEvent?.Dispose();
+                try { usbOutput?.Stop(); } catch { }
+                usbOutput?.Dispose();
+                usbOutputEndpoint?.Dispose();
+                captureEndpoint?.Dispose();
+                stopped.Dispose();
+            }
+
+            private sealed class LowLatencyLoopbackCapture : WasapiCapture
+            {
+                public LowLatencyLoopbackCapture(MMDevice device,
+                    int bufferMilliseconds) : base(device, false,
+                        bufferMilliseconds)
+                {
+                }
+
+                protected override AudioClientStreamFlags
+                    GetAudioClientStreamFlags() =>
+                    AudioClientStreamFlags.Loopback |
+                        base.GetAudioClientStreamFlags();
+            }
+        }
+    }
+
+    public readonly struct AudioHapticsRuntimeStatus
+    {
+        public static AudioHapticsRuntimeStatus Inactive =>
+            new AudioHapticsRuntimeStatus(false, "Audio Haptics is disabled.");
+        public static AudioHapticsRuntimeStatus Starting =>
+            new AudioHapticsRuntimeStatus(false, "Audio Haptics is starting.");
+        public static AudioHapticsRuntimeStatus Running =>
+            new AudioHapticsRuntimeStatus(true, "Audio Haptics is active.");
+
+        public AudioHapticsRuntimeStatus(bool active, string message)
+        {
+            Active = active;
+            Message = message ?? string.Empty;
+        }
+
+        public bool Active { get; }
+        public string Message { get; }
+    }
+}

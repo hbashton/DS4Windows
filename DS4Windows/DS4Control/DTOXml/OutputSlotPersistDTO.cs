@@ -53,7 +53,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
                     OutputSlotSerializer tempSlot = new OutputSlotSerializer()
                     {
                         Index = dev.Index,
-                        DeviceType = dev.PermanentType,
+                        DeviceType = dev.PermanentType.Normalize(),
                     };
 
                     SlotItems.Add(tempSlot);
@@ -80,7 +80,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
                     }
 
                     tempDev.CurrentReserveStatus = OutSlotDevice.ReserveStatus.Permanent;
-                    tempDev.PermanentType = tempSlot.DeviceType;
+                    tempDev.PermanentType = tempSlot.DeviceType.Normalize();
                 }
             }
         }
@@ -97,7 +97,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
                 case "Xbox 360":
                 case "Xbox360":
                 case "X360":
-                    return OutContType.X360;
+                    return OutContType.ViiperX360;
                 case "DualShock 4":
                 case "DualShock4":
                 case "DS4":
@@ -139,14 +139,13 @@ namespace DS4WinWPF.DS4Control.DTOXml
         {
             return value.Normalize() switch
             {
-                OutContType.X360 => "X360",
                 OutContType.None => "None",
                 OutContType.ViiperX360 => "ViiperX360",
                 OutContType.ViiperDS4 => "ViiperDS4",
                 OutContType.ViiperDualSense => "ViiperDualSense",
                 OutContType.ViiperDualSenseEdge => "ViiperDualSenseEdge",
                 OutContType.ViiperSwitch2Pro => "ViiperSwitch2Pro",
-                _ => "X360",
+                _ => "ViiperX360",
             };
         }
     }

@@ -322,8 +322,8 @@ namespace DS4WindowsTests
             dto.MapTo(tempStore);
 
             // Check settings
-            Assert.AreEqual(OutContType.X360, dto.OutputContDevice);
-            Assert.AreEqual(OutContType.X360, tempStore.outputDevType[0]);
+            Assert.AreEqual(OutContType.ViiperX360, dto.OutputContDevice);
+            Assert.AreEqual(OutContType.ViiperX360, tempStore.outputDevType[0]);
         }
 
         [TestMethod]

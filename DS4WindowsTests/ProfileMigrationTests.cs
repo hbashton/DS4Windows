@@ -406,7 +406,7 @@ namespace DS4WindowsTests
                 $"{profileColor.red},{profileColor.green},{profileColor.blue}");
 
             // Test if output device type has been set properly. Uses default value from ProfileDTO
-            Assert.AreEqual(OutContType.X360, tempStore.outputDevType[0]);
+            Assert.AreEqual(OutContType.ViiperX360, tempStore.outputDevType[0]);
             Assert.AreEqual(BackingStore.DEFAULT_DINPUT_ONLY, tempStore.dinputOnly[0]);
 
             // Check that profile migration worked as expected

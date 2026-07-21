@@ -42,11 +42,3 @@ jobs:
       run: gh release upload ${{github.event.release.tag_name}} .\bin\x64\Release\DS4Windows_${{env.VERSION}}_x64.zip
       env:
         GITHUB_TOKEN: ${{ github.TOKEN }}
-    - name: Build X86
-      run: dotnet publish .\DS4Windows\DS4WinWPF.csproj -c Release  /p:platform=x86 /p:AssemblyVersion=${{ env.SHORT_VERSION }} /p:FileVersion=${{ env.SHORT_VERSION }} /p:Version=${{ env.VERSION }} /p:InformationalVersion=${{ env.VERSION }} -o .\bin\x86\Release\output
-    - name: Post-Build script X86
-      run: python .\utils\post-build.py .\bin\x86\Release\output . ${{env.VERSION}}
-    - name: Publish release Build X86
-      run: gh release upload ${{github.event.release.tag_name}} .\bin\x86\Release\DS4Windows_${{env.VERSION}}_x86.zip
-      env:
-        GITHUB_TOKEN: ${{ github.TOKEN }}

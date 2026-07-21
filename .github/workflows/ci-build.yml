@@ -2,7 +2,7 @@ name: CI Build
 
 # Autobuild that runs on every push and pull request, plus manual triggers.
 # Complements release.yml (which only runs when a GitHub Release is published).
-# Produces runnable x64 and x86 packages as downloadable build artifacts.
+# Produces a runnable x64 package as a downloadable build artifact.
 
 on:
   push:
@@ -46,7 +46,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [ x64, x86 ]
+        platform: [ x64 ]
     steps:
       - uses: actions/checkout@v4
 

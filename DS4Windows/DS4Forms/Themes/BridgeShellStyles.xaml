@@ -347,6 +347,8 @@
         <Setter Property="ItemContainerStyle" Value="{StaticResource BridgeNavigationTabItemStyle}" />
         <Setter Property="Background" Value="{DynamicResource SurfaceBackgroundColor}" />
         <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Stretch" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="TabControl">
@@ -573,6 +575,8 @@
                                         <ListBoxItem Content="Lightbar" Tag="&#x25C9;" ToolTip="Color, battery, flash, and charging" />
                                         <ListBoxItem Content="Touchpad" Tag="&#x25A1;" ToolTip="Mouse, gestures, passthrough, and positioning" />
                                         <ListBoxItem Content="Gyro" Tag="&#x25CE;" ToolTip="Motion aiming, steering, and swipes" />
+                                        <ListBoxItem Content="Audio Haptics" Tag="&#xE767;" ToolTip="Turn system or app audio into advanced haptics" />
+                                        <ListBoxItem Content="Trigger Lab" Tag="L2" ToolTip="Build persistent adaptive-trigger effects" />
                                         <ListBoxItem Content="Advanced" Tag="&#x2699;" ToolTip="Output, rumble, latency, and compatibility" />
                                         <ListBoxItem Content="Log" Tag="&#x2261;" ToolTip="Service events without leaving the editor" />
                                     </ListBox>
@@ -626,7 +630,8 @@
                                 </Grid>
                             </Border>
                             <ContentPresenter Grid.Row="1" x:Name="PART_SelectedContentHost"
-                                              ContentSource="SelectedContent" Margin="28,22" />
+                                              ContentSource="SelectedContent" Margin="28,22"
+                                              HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
                         </Grid>
                     </Grid>
                 </ControlTemplate>

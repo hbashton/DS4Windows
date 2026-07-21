@@ -2894,6 +2894,28 @@ namespace DS4Windows.InputDevices
                 return false;
             }
 
+            return WriteBluetoothHapticsSamples(report, offset + 13,
+                BluetoothCombinedHapticsDataLength, waitForWrite);
+        }
+
+        /// <summary>
+        /// Publishes one native 3 kHz stereo haptics packet through the same
+        /// combined Bluetooth transport used by controller speaker audio,
+        /// microphone control, and game feedback. This keeps a single owner of
+        /// the physical HID handle and avoids competing report streams.
+        /// </summary>
+        public bool WriteBluetoothHapticsSamples(byte[] samples, int offset,
+            int length, bool waitForWrite = false)
+        {
+            if (samples == null || offset < 0 ||
+                length != BluetoothCombinedHapticsDataLength ||
+                offset + length > samples.Length)
+            {
+                LastBluetoothHapticsWriteStatus =
+                    "Rejected: invalid Bluetooth haptics sample block.";
+                return false;
+            }
+
             if (!EnsureBluetoothCombinedOutputTransport())
             {
                 return false;
@@ -2907,7 +2929,7 @@ namespace DS4Windows.InputDevices
                 latestBluetoothCombinedSpeakerReport[
                     BluetoothCombinedHapticsOffset + 1] =
                     BluetoothCombinedHapticsDataLength;
-                Array.Copy(report, offset + 13,
+                Array.Copy(samples, offset,
                     latestBluetoothCombinedSpeakerReport,
                     BluetoothCombinedHapticsDataOffset,
                     BluetoothCombinedHapticsDataLength);

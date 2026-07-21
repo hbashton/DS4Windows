@@ -58,21 +58,18 @@ namespace DS4WinWPF.DS4Forms
             switch (devTypeCombo.SelectedIndex)
             {
                 case 0:
-                    contType = OutContType.X360;
-                    break;
-                case 1:
                     contType = OutContType.ViiperDS4;
                     break;
-                case 2:
+                case 1:
                     contType = OutContType.ViiperX360;
                     break;
-                case 3:
+                case 2:
                     contType = OutContType.ViiperDualSense;
                     break;
-                case 4:
+                case 3:
                     contType = OutContType.ViiperDualSenseEdge;
                     break;
-                case 5:
+                case 4:
                     contType = OutContType.ViiperSwitch2Pro;
                     break;
                 default:

@@ -2038,7 +2038,7 @@ namespace DS4Windows
 
             if (rumbleAutostopTimer.IsRunning)
             {
-                // Workaround to a bug in ViGem driver. Force stop potentially stuck rumble motor on the next output report if there haven't been new rumble events within X seconds
+                // Force-stop a potentially stuck virtual-output rumble motor when no new feedback has arrived within the timeout.
                 if (rumbleAutostopTimer.ElapsedMilliseconds >= rumbleAutostopTime)
                     setRumble(0, 0);
             }
@@ -2284,9 +2284,9 @@ namespace DS4Windows
             if (rumbleAutostopTime > 0)
             {
                 if (testRumble.rumbleState.RumbleMotorsExplicitlyOff)
-                    rumbleAutostopTimer.Reset();   // Stop an autostop timer because ViGem driver sent properly a zero rumble notification
+                    rumbleAutostopTimer.Reset();   // A proper zero-rumble notification arrived; no safety stop is needed.
                 else if (currentHap.rumbleState.RumbleMotorStrengthLeftHeavySlow != leftHeavySlowMotor || currentHap.rumbleState.RumbleMotorStrengthRightLightFast != rightLightFastMotor)
-                    rumbleAutostopTimer.Restart(); // Start an autostop timer to stop potentially stuck rumble motor because of lost rumble notification events from ViGem driver
+                    rumbleAutostopTimer.Restart(); // Guard against a lost virtual-output zero-rumble notification.
             }
         }
 

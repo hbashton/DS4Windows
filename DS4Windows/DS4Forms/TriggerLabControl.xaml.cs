@@ -112,8 +112,8 @@ namespace DS4WinWPF.DS4Forms
 
                 settings.Normalize();
                 labEnabledToggle.IsChecked = settings.Enabled;
-                linkedButton.Content = settings.Linked ? "Linked" : "Split";
                 linkedButton.Style = FindResource(settings.Linked ? "BridgePrimaryButtonStyle" : "BridgeSecondaryButtonStyle") as Style;
+                splitButton.Style = FindResource(settings.Linked ? "BridgeSecondaryButtonStyle" : "BridgePrimaryButtonStyle") as Style;
                 LoadSide(leftUi, settings.Left, settings.LeftActive,
                     settings.Enabled, settings.CustomProfiles);
                 LoadSide(rightUi, settings.Right, settings.RightActive,
@@ -289,7 +289,7 @@ namespace DS4WinWPF.DS4Forms
             update(CurrentSettings);
             if (!CurrentSettings.Linked)
             {
-                SaveSplitState(CurrentSettings);
+                CurrentSettings.RememberSplitState();
             }
             CurrentSettings.Normalize();
             SettingsChanged?.Invoke(this, new ProfileFeatureSettingsChangedEventArgs(deviceIndex));
@@ -325,26 +325,11 @@ namespace DS4WinWPF.DS4Forms
             }
         });
 
-        private void LinkedButton_Click(object sender, RoutedEventArgs e) => Commit(settings =>
-        {
-            if (!settings.Linked)
-            {
-                SaveSplitState(settings);
-                settings.Linked = true;
-                settings.Right = settings.Left.Clone();
-            }
-            else
-            {
-                settings.Linked = false;
-                if (settings.HasSplitState)
-                {
-                    settings.Left = settings.SplitLeft.Clone();
-                    settings.Right = settings.SplitRight.Clone();
-                    settings.LeftActive = settings.SplitLeftActive;
-                    settings.RightActive = settings.SplitRightActive;
-                }
-            }
-        });
+        private void LinkedButton_Click(object sender, RoutedEventArgs e) =>
+            Commit(settings => settings.SetLinkedMode(true));
+
+        private void SplitButton_Click(object sender, RoutedEventArgs e) =>
+            Commit(settings => settings.SetLinkedMode(false));
 
         private void ChangeMode(SideUi ui, TriggerLabMode mode) => Commit(settings =>
         {
@@ -405,17 +390,7 @@ namespace DS4WinWPF.DS4Forms
 
         private static void MirrorIfLinked(TriggerLabProfileSettings settings, SideUi ui)
         {
-            if (!settings.Linked) return;
-            if (ui.IsLeft) settings.Right = settings.Left.Clone(); else settings.Left = settings.Right.Clone();
-        }
-
-        private static void SaveSplitState(TriggerLabProfileSettings settings)
-        {
-            settings.HasSplitState = true;
-            settings.SplitLeft = settings.Left.Clone();
-            settings.SplitRight = settings.Right.Clone();
-            settings.SplitLeftActive = settings.LeftActive;
-            settings.SplitRightActive = settings.RightActive;
+            settings.MirrorLinkedEffect(ui.IsLeft);
         }
 
         private static void SetSelectedProfileActive(TriggerLabProfileSettings settings,

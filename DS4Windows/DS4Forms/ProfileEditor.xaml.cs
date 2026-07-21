@@ -2081,9 +2081,9 @@ namespace DS4WinWPF.DS4Forms
                 OutContType.ViiperDualSenseEdge =>
                     "DualSense Edge output exposes native Edge identity with mute, touch, gyro, Fn buttons, back paddles, rumble, lightbar, and player LEDs. Adaptive triggers require the raw-output follow-up.",
                 OutContType.ViiperDS4 =>
-                    "VIIPER DualShock 4 uses USB/IP output with DS4 buttons, touch, gyro, rumble, lightbar, and flash feedback.",
+                    "DualShock 4 output provides DS4 buttons, touch, gyro, rumble, lightbar, and flash feedback.",
                 OutContType.ViiperX360 =>
-                    "VIIPER Xbox 360 uses USB/IP output with standard XInput-style buttons, sticks, triggers, and rumble.",
+                    "Xbox 360 output provides standard XInput-style buttons, sticks, triggers, and rumble.",
                 _ => string.Empty,
             };
 

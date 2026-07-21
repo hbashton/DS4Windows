@@ -1498,7 +1498,7 @@ namespace DS4Windows
 
                 if (success && slotDevice.OutputDevice != null)
                 {
-                    LogDebug($"Associated input controller #{index + 1} ({device.DisplayName}) to virtual {slotDevice.OutputDevice.GetDeviceType()} Controller in{(slotDevice.PermanentType != OutContType.None ? " permanent" : "")} output slot #{slotDevice.Index + 1}");
+                    LogDebug($"Associated input controller #{index + 1} ({device.DisplayName}) to virtual {slotDevice.CurrentType.ToDisplayName()} Controller in{(slotDevice.PermanentType != OutContType.None ? " permanent" : "")} output slot #{slotDevice.Index + 1}");
                     useDInputOnly[index] = false;
                     StartupDiag($"PluginOutDev success index={index} slot={slotDevice.Index + 1} output={slotDevice.OutputDevice.GetDeviceType()}");
                 }
@@ -1525,7 +1525,7 @@ namespace DS4Windows
                     OutSlotDevice slotDevice = outputslotMan.GetOutSlotDevice(dev);
                     if (dev != null && slotDevice != null)
                     {
-                        string tempType = dev.GetDeviceType();
+                        string tempType = slotDevice.CurrentType.ToDisplayName();
                         LogDebug($"Disassociated virtual {tempType} Controller in{(slotDevice.CurrentReserveStatus == OutSlotDevice.ReserveStatus.Permanent ? " permanent" : "")} output slot #{slotDevice.Index + 1} from input controller #{index + 1} ({device.DisplayName})", false);
 
                         OutContType currentType = activeOutDevType[index];

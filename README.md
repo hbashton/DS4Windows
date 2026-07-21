@@ -57,8 +57,9 @@ After installing a VIIPER-capable DS4Windows build:
 3. Accept the administrator prompt. The setup installs the hbashton VIIPER
    backend and the required `usbip-win2` driver.
 4. Restart Windows if the setup installed or updated `usbip-win2`.
-5. Edit a profile and select **DualSense**, **DualSense Edge**, **Viiper
-   DualShock 4**, **Viiper Xbox 360**, or **Switch 2 Pro**.
+5. Edit a profile and select **DualSense**, **DualSense Edge**, **DualShock 4**,
+   **Xbox 360**, or **Switch 2 Pro**. VIIPER is the backend for every virtual
+   controller type; it is not repeated in the device names.
 
 The installer also registers a hidden `RunVIIPER` task at sign-in. It starts
 the backend elevated without a recurring console or UAC popup. DS4Windows

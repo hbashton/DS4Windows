@@ -75,8 +75,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public IReadOnlyList<OverviewOutputControllerChoice> OutputControllerChoices { get; } =
             new List<OverviewOutputControllerChoice>
             {
-                new("Viiper Xbox 360", OutContType.ViiperX360),
-                new("Viiper DualShock 4", OutContType.ViiperDS4),
+                new("Xbox 360", OutContType.ViiperX360),
+                new("DualShock 4", OutContType.ViiperDS4),
                 new("DualSense", OutContType.ViiperDualSense),
                 new("DualSense Edge", OutContType.ViiperDualSenseEdge),
                 new("Switch 2 Pro", OutContType.ViiperSwitch2Pro),

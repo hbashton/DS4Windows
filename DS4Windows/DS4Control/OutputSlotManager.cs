@@ -192,7 +192,7 @@ namespace DS4Windows
                         ControlService.StartupDiag($"OutputSlotManager.Connect Win32Exception slot={slot + 1} type={contType} error={e.ErrorCode} message={e.Message}");
                         // Leave task immediately if connect call failed
                         //queuedTasks--;
-                        AppLogger.LogToGui($"Failed to plug in virtual {contType} controller: {e.Message}", true);
+                        AppLogger.LogToGui($"Failed to plug in virtual {contType.ToDisplayName()} controller: {e.Message}", true);
 
                         if (beforeVirtualSony != null)
                         {
@@ -203,7 +203,7 @@ namespace DS4Windows
                     }
                     catch (Exception e)
                     {
-                        AppLogger.LogToGui($"Failed to plug in virtual {contType} controller: {e.Message}", true);
+                        AppLogger.LogToGui($"Failed to plug in virtual {contType.ToDisplayName()} controller: {e.Message}", true);
                         if (beforeVirtualSony != null)
                         {
                             DS4Devices.EndOwnVirtualSonyConnect();
@@ -221,7 +221,7 @@ namespace DS4Windows
                         beforeVirtualSony = null;
                     }
 
-                    AppLogger.LogToGui($"Plugging in virtual {contType} Controller in output slot #{slot + 1}", false);
+                    AppLogger.LogToGui($"Plugging in virtual {contType.ToDisplayName()} Controller in output slot #{slot + 1}", false);
 
                     outputDevices[slot] = outputDevice;
                     deviceDict.Add(slot, outputDevice);
@@ -275,9 +275,10 @@ namespace DS4Windows
                         outdevs[inIdx] = null;
                     }
 
+                    OutContType removedType = outputSlots[slot].CurrentType;
                     outputSlots[slot].DetachDevice();
                     SlotUnassigned?.Invoke(this, slot, outputSlots[slot]);
-                    AppLogger.LogToGui($"Unplugging virtual {outputDevice.GetDeviceType()} Controller from output slot #{slot + 1}",false);
+                    AppLogger.LogToGui($"Unplugging virtual {removedType.ToDisplayName()} Controller from output slot #{slot + 1}",false);
                     ControlService.StartupDiag($"OutputSlotManager.DeferredRemoval unassigned slot={slot + 1}");
 
                     //if (!immediate)

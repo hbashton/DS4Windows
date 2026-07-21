@@ -52,7 +52,14 @@
                     <Border x:Name="overrideBadge" Margin="0,0,14,0" Padding="9,4" CornerRadius="4" Background="#4DFFB020" Visibility="Collapsed">
                         <TextBlock Text="LAB OVERRIDE" Foreground="#FFFFB020" FontSize="10" FontWeight="Bold" />
                     </Border>
-                    <Button x:Name="linkedButton" MinWidth="90" Height="36" Margin="0,0,14,0" Click="LinkedButton_Click" />
+                    <TextBlock Text="Effect design" Foreground="{DynamicResource MutedForegroundColor}"
+                               FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <Button x:Name="linkedButton" Content="Linked" MinWidth="76" Height="36" Margin="0,0,6,0"
+                            Click="LinkedButton_Click" ToolTipService.ShowDuration="15000"
+                            ToolTip="Use one shared effect design for L2 and R2. Presets, modes, and sliders mirror between both sides; each trigger's Active switch remains independent." />
+                    <Button x:Name="splitButton" Content="Split" MinWidth="76" Height="36" Margin="0,0,14,0"
+                            Click="SplitButton_Click" ToolTipService.ShowDuration="15000"
+                            ToolTip="Configure separate effect designs for L2 and R2. Returning to Split restores your last independent settings, including which trigger was active." />
                     <TextBlock Text="Enabled" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,9,0" />
                     <CheckBox x:Name="labEnabledToggle" Style="{StaticResource LabToggle}" Click="LabEnabledToggle_Click" />
                 </StackPanel>

@@ -325,6 +325,66 @@ namespace DS4Windows
 
         public bool HasActiveOverride => Enabled && (LeftActive || RightActive);
 
+        public void RememberSplitState()
+        {
+            HasSplitState = true;
+            SplitLeft = (Left ?? new TriggerLabEffectSettings()).Clone();
+            SplitRight = (Right ?? new TriggerLabEffectSettings()).Clone();
+            SplitLeftActive = LeftActive;
+            SplitRightActive = RightActive;
+        }
+
+        public void SetLinkedMode(bool linked)
+        {
+            if (Linked == linked)
+            {
+                return;
+            }
+
+            if (linked)
+            {
+                RememberSplitState();
+                Linked = true;
+                Right = (Left ?? new TriggerLabEffectSettings()).Clone();
+            }
+            else
+            {
+                Linked = false;
+                if (HasSplitState)
+                {
+                    Left = (SplitLeft ?? new TriggerLabEffectSettings()).Clone();
+                    Right = (SplitRight ?? new TriggerLabEffectSettings()).Clone();
+                    LeftActive = SplitLeftActive;
+                    RightActive = SplitRightActive;
+                }
+                else
+                {
+                    // The first switch to Split starts with two independent copies
+                    // of the currently linked design.
+                    RememberSplitState();
+                }
+            }
+
+            Normalize();
+        }
+
+        public void MirrorLinkedEffect(bool sourceIsLeft)
+        {
+            if (!Linked)
+            {
+                return;
+            }
+
+            if (sourceIsLeft)
+            {
+                Right = (Left ?? new TriggerLabEffectSettings()).Clone();
+            }
+            else
+            {
+                Left = (Right ?? new TriggerLabEffectSettings()).Clone();
+            }
+        }
+
         public TriggerLabProfileSettings Normalize()
         {
             Left = (Left ?? new TriggerLabEffectSettings()).Normalize();

@@ -46,6 +46,9 @@ namespace DS4WindowsTests
                     Linked = false,
                     LeftActive = true,
                     RightActive = true,
+                    HasSplitState = true,
+                    SplitLeftActive = true,
+                    SplitRightActive = false,
                     Left = new TriggerLabEffectSettings
                     {
                         ProfileId = "custom-left",
@@ -55,6 +58,22 @@ namespace DS4WindowsTests
                         ForcePercent = 70,
                     },
                     Right = new TriggerLabEffectSettings
+                    {
+                        ProfileId = "custom-right",
+                        Mode = TriggerLabMode.Vibration,
+                        StartPercent = 15,
+                        WallPercent = 80,
+                        ForcePercent = 90,
+                    },
+                    SplitLeft = new TriggerLabEffectSettings
+                    {
+                        ProfileId = "custom-left",
+                        Mode = TriggerLabMode.Feedback,
+                        StartPercent = 35,
+                        WallPercent = 55,
+                        ForcePercent = 70,
+                    },
+                    SplitRight = new TriggerLabEffectSettings
                     {
                         ProfileId = "custom-right",
                         Mode = TriggerLabMode.Vibration,
@@ -110,6 +129,11 @@ namespace DS4WindowsTests
                 restored.TriggerLabSettings.Left.Mode);
             Assert.AreEqual(TriggerLabMode.Vibration,
                 restored.TriggerLabSettings.Right.Mode);
+            Assert.IsTrue(restored.TriggerLabSettings.HasSplitState);
+            Assert.IsTrue(restored.TriggerLabSettings.SplitLeftActive);
+            Assert.IsFalse(restored.TriggerLabSettings.SplitRightActive);
+            Assert.AreEqual(TriggerLabMode.Vibration,
+                restored.TriggerLabSettings.SplitRight.Mode);
             Assert.AreEqual(2, restored.TriggerLabSettings.CustomProfiles.Count);
             Assert.AreEqual("Right pulse",
                 restored.TriggerLabSettings.CustomProfiles[1].Name);
@@ -179,6 +203,58 @@ namespace DS4WindowsTests
             Assert.IsFalse(settings.RightActive);
             Assert.AreEqual(settings.Left.ProfileId, settings.Right.ProfileId,
                 "Linked should mirror the effect shape.");
+        }
+
+        [TestMethod]
+        public void LinkedAndSplitModesRoundTripIndependentEffects()
+        {
+            TriggerLabProfileSettings settings = new TriggerLabProfileSettings
+            {
+                Enabled = true,
+                Linked = false,
+                LeftActive = true,
+                RightActive = false,
+                Left = TriggerLabPresetCatalog.Presets[1].CreateEffect(),
+                Right = TriggerLabPresetCatalog.Presets[4].CreateEffect(),
+            };
+            string leftProfile = settings.Left.ProfileId;
+            string rightProfile = settings.Right.ProfileId;
+
+            settings.SetLinkedMode(true);
+
+            Assert.IsTrue(settings.Linked);
+            Assert.AreEqual(leftProfile, settings.Left.ProfileId);
+            Assert.AreEqual(leftProfile, settings.Right.ProfileId);
+            Assert.IsTrue(settings.LeftActive);
+            Assert.IsFalse(settings.RightActive,
+                "Linking effect design must not enable the other trigger.");
+
+            settings.SetLinkedMode(false);
+
+            Assert.IsFalse(settings.Linked);
+            Assert.AreEqual(leftProfile, settings.Left.ProfileId);
+            Assert.AreEqual(rightProfile, settings.Right.ProfileId,
+                "Split should restore the last independent right-trigger design.");
+            Assert.IsTrue(settings.LeftActive);
+            Assert.IsFalse(settings.RightActive);
+        }
+
+        [TestMethod]
+        public void SelectingCurrentLinkedModeDoesNotToggleItOff()
+        {
+            TriggerLabProfileSettings settings = new TriggerLabProfileSettings
+            {
+                Linked = true,
+                Left = TriggerLabPresetCatalog.Presets[2].CreateEffect(),
+            };
+            settings.Normalize();
+
+            settings.SetLinkedMode(true);
+
+            Assert.IsTrue(settings.Linked);
+            Assert.AreEqual(settings.Left.ProfileId, settings.Right.ProfileId);
+            Assert.IsFalse(settings.HasSplitState,
+                "Selecting an already-selected mode should be a no-op.");
         }
 
         [TestMethod]

@@ -161,14 +161,17 @@ namespace DS4Windows
         private const int InitialStreamRecoveryBackoffMilliseconds = 50;
         private const int MaximumStreamRecoveryBackoffMilliseconds = 1000;
         private const int MicrophoneDisableRetryMilliseconds = 250;
-        // DualSense virtual speaker packets are normally 1,920 bytes and can
-        // reach 1,960 bytes. A 4 KiB slot leaves protocol headroom. Keep only
-        // an 80 ms live handoff window: the physical Bluetooth transport owns
-        // its separate, proven dropout reservoir, so replaying older virtual
-        // PCM here would add latency without adding protection.
+        // Virtual speaker formats have different proven buffering contracts.
+        // DualSense's atomic 10 ms carriers feed a physical transport with its
+        // own reservoir and must stay inside an 80 ms live window. DualShock 4
+        // packets feed the historical SBC production lane, whose validated
+        // 160 ms handoff reserve must not inherit the DualSense expiry policy.
+        // A 4 KiB slot covers either virtual format without allocations.
         private const int FeedbackSpeakerSlotLength = 4096;
-        internal const int FeedbackSpeakerQueueCapacity = 8;
-        internal const int FeedbackSpeakerMaximumAgeMilliseconds = 80;
+        internal const int DualSenseFeedbackSpeakerQueueCapacity = 8;
+        internal const int DualSenseFeedbackSpeakerMaximumAgeMilliseconds = 80;
+        internal const int DualShock4FeedbackSpeakerQueueCapacity = 16;
+        internal const int DualShock4FeedbackSpeakerMaximumAgeMilliseconds = 0;
         // Native DualSense feedback arrives at roughly 150 Hz and is valid for
         // only 30 ms in the physical combined transport. Four ordered reports
         // preserve waveform continuity while preventing a stalled callback
@@ -227,13 +230,7 @@ namespace DS4Windows
         private readonly MicrophoneDisableRetryTracker<DS4Device>
             microphoneDisableRetries =
                 new MicrophoneDisableRetryTracker<DS4Device>();
-        private readonly ViiperFeedbackDispatchBuffer feedbackDispatchBuffer =
-            new ViiperFeedbackDispatchBuffer(FeedbackSpeakerQueueCapacity,
-                FeedbackSpeakerSlotLength,
-                DualSenseCombinedExtendedFeedbackLength,
-                FeedbackOrderedControlQueueCapacity,
-                FeedbackSpeakerMaximumAgeMilliseconds,
-                FeedbackOrderedControlMaximumAgeMilliseconds);
+        private readonly ViiperFeedbackDispatchBuffer feedbackDispatchBuffer;
         private ViiperDeviceStream deviceStream;
         private Thread feedbackThread;
         private Thread feedbackSpeakerDispatchThread;
@@ -366,7 +363,92 @@ namespace DS4Windows
         {
             this.outputType = outputType;
             this.viiperType = viiperType;
+            feedbackDispatchBuffer = new ViiperFeedbackDispatchBuffer(
+                // The buffer implementation requires one preallocated slot.
+                // Non-audio devices never enqueue it; their public policy is
+                // still zero so they cannot inherit a Sony audio contract.
+                Math.Max(1, GetFeedbackSpeakerQueueCapacity(viiperType)),
+                FeedbackSpeakerSlotLength,
+                DualSenseCombinedExtendedFeedbackLength,
+                IsDualSenseVirtualType(viiperType) ?
+                    FeedbackOrderedControlQueueCapacity : 0,
+                GetFeedbackSpeakerMaximumAgeMilliseconds(viiperType),
+                IsDualSenseVirtualType(viiperType) ?
+                    FeedbackOrderedControlMaximumAgeMilliseconds : 0);
             client = new ViiperClient(DefaultHost, DefaultPort);
+        }
+
+        internal static int GetFeedbackSpeakerQueueCapacity(
+            ViiperVirtualDeviceType type)
+        {
+            return type switch
+            {
+                ViiperVirtualDeviceType.DualShock4 =>
+                    DualShock4FeedbackSpeakerQueueCapacity,
+                ViiperVirtualDeviceType.DualSense or
+                    ViiperVirtualDeviceType.DualSenseEdge =>
+                    DualSenseFeedbackSpeakerQueueCapacity,
+                _ => 0,
+            };
+        }
+
+        internal static int GetFeedbackSpeakerMaximumAgeMilliseconds(
+            ViiperVirtualDeviceType type)
+        {
+            return type switch
+            {
+                ViiperVirtualDeviceType.DualShock4 =>
+                    DualShock4FeedbackSpeakerMaximumAgeMilliseconds,
+                ViiperVirtualDeviceType.DualSense or
+                    ViiperVirtualDeviceType.DualSenseEdge =>
+                    DualSenseFeedbackSpeakerMaximumAgeMilliseconds,
+                _ => 0,
+            };
+        }
+
+        internal static int GetVirtualSpeakerPcmSampleRate(
+            ViiperVirtualDeviceType type)
+        {
+            return type switch
+            {
+                ViiperVirtualDeviceType.DualShock4 =>
+                    DualShock4BluetoothAudioProtocol.SpeakerSampleRate,
+                ViiperVirtualDeviceType.DualSense or
+                    ViiperVirtualDeviceType.DualSenseEdge => 48000,
+                _ => 0,
+            };
+        }
+
+        internal static bool CanDispatchVirtualSpeaker(
+            bool streamUsesAtomicFrames, bool hasPcmSubscriber,
+            bool hasAtomicSubscriber)
+        {
+            return streamUsesAtomicFrames ?
+                hasAtomicSubscriber || hasPcmSubscriber : hasPcmSubscriber;
+        }
+
+        internal static bool TryGetAtomicAudioHapticsLayout(byte[] payload,
+            int length, out int feedbackOffset, out int feedbackLength,
+            out int speakerPcmOffset, out int speakerPcmLength)
+        {
+            feedbackOffset = AtomicAudioHapticsFeedbackLengthPrefix;
+            feedbackLength = 0;
+            speakerPcmOffset = 0;
+            speakerPcmLength = 0;
+            if (payload == null || length > payload.Length || length <=
+                AtomicAudioHapticsFeedbackLengthPrefix)
+            {
+                return false;
+            }
+
+            feedbackLength = BinaryPrimitives.ReadUInt16LittleEndian(
+                payload.AsSpan(0,
+                    AtomicAudioHapticsFeedbackLengthPrefix));
+            speakerPcmOffset = feedbackOffset + feedbackLength;
+            speakerPcmLength = length - speakerPcmOffset;
+            return feedbackLength == DualSenseCombinedExtendedFeedbackLength &&
+                speakerPcmOffset <= length && speakerPcmLength > 0 &&
+                (speakerPcmLength & (sizeof(short) * 2 - 1)) == 0;
         }
 
         private Action<ViiperOutDevice, byte[], int>
@@ -447,14 +529,11 @@ namespace DS4Windows
         }
 
         internal bool CanProvideDirectSpeakerPcm =>
-            viiperType == ViiperVirtualDeviceType.DualShock4 ||
-            viiperType == ViiperVirtualDeviceType.DualSense ||
-            viiperType == ViiperVirtualDeviceType.DualSenseEdge;
+            GetVirtualSpeakerPcmSampleRate(viiperType) > 0;
 
         internal int DirectSpeakerPcmSampleRate =>
-            SupportsDirectSpeakerPcm && IsDualSenseType() ? 48000 :
             SupportsDirectSpeakerPcm ?
-                DualShock4BluetoothAudioProtocol.SpeakerSampleRate : 0;
+                GetVirtualSpeakerPcmSampleRate(viiperType) : 0;
 
         internal int DirectSpeakerUsbipPort =>
             Volatile.Read(ref deviceStream)?.UsbipPort ?? -1;
@@ -1271,6 +1350,8 @@ namespace DS4Windows
         private void FeedbackSpeakerDispatchLoop(long generation)
         {
             byte[] payload = new byte[FeedbackSpeakerSlotLength];
+            byte[] atomicFeedbackScratch =
+                new byte[DualSenseCombinedExtendedFeedbackLength];
             try
             {
                 while (IsFeedbackDispatchGenerationActive(generation))
@@ -1279,9 +1360,9 @@ namespace DS4Windows
                         GetVirtualSpeakerPcmSubscriber();
                     ViiperAtomicAudioHapticsHandler atomicSubscriber =
                         GetVirtualAtomicAudioHapticsSubscriber();
-                    bool subscriberAvailable =
-                        activeStreamSupportsAtomicAudioHaptics ?
-                            atomicSubscriber != null : subscriber != null;
+                    bool subscriberAvailable = CanDispatchVirtualSpeaker(
+                        activeStreamSupportsAtomicAudioHaptics,
+                        subscriber != null, atomicSubscriber != null);
                     if (!subscriberAvailable)
                     {
                         if (feedbackDispatchBuffer.PendingSpeakerCount > 0)
@@ -1329,37 +1410,48 @@ namespace DS4Windows
                             if (speakerKind ==
                                 FeedbackSpeakerKindAtomicAudioHaptics)
                             {
-                                if (atomicSubscriber == null || length <
-                                    AtomicAudioHapticsFeedbackLengthPrefix)
+                                if ((atomicSubscriber == null &&
+                                        subscriber == null) ||
+                                    !TryGetAtomicAudioHapticsLayout(payload,
+                                        length, out int feedbackOffset,
+                                        out int atomicFeedbackLength,
+                                        out int speakerPcmOffset,
+                                        out int speakerPcmLength))
                                 {
                                     Interlocked.Increment(
                                         ref feedbackSpeakerStale);
                                     continue;
                                 }
 
-                                int atomicFeedbackLength =
-                                    BinaryPrimitives.ReadUInt16LittleEndian(
-                                        payload.AsSpan(0,
-                                            AtomicAudioHapticsFeedbackLengthPrefix));
-                                int speakerPcmOffset =
-                                    AtomicAudioHapticsFeedbackLengthPrefix +
-                                    atomicFeedbackLength;
-                                int speakerPcmLength = length - speakerPcmOffset;
-                                if (atomicFeedbackLength !=
-                                        DualSenseCombinedExtendedFeedbackLength ||
-                                    speakerPcmLength <= 0 ||
-                                    (speakerPcmLength &
-                                        (sizeof(short) * 2 - 1)) != 0)
+                                if (atomicSubscriber != null)
                                 {
-                                    Interlocked.Increment(
-                                        ref feedbackSpeakerStale);
-                                    continue;
+                                    atomicSubscriber(this, payload,
+                                        feedbackOffset,
+                                        atomicFeedbackLength, speakerPcmOffset,
+                                        speakerPcmLength, targetDeviceIndex);
                                 }
-
-                                atomicSubscriber(this, payload,
-                                    AtomicAudioHapticsFeedbackLengthPrefix,
-                                    atomicFeedbackLength, speakerPcmOffset,
-                                    speakerPcmLength, targetDeviceIndex);
+                                else
+                                {
+                                    // A physical DS4 consumes the DualSense
+                                    // virtual endpoint's PCM but cannot consume
+                                    // its atomic carrier. Translate the native
+                                    // feedback first, then present only PCM to
+                                    // the proven DS4 speaker encoder. The two
+                                    // physical protocols never share a packet,
+                                    // queue clock, or transport writer.
+                                    Buffer.BlockCopy(payload,
+                                        feedbackOffset,
+                                        atomicFeedbackScratch, 0,
+                                        atomicFeedbackLength);
+                                    ApplyFeedback(atomicFeedbackScratch,
+                                        atomicFeedbackLength,
+                                        targetDeviceIndex);
+                                    Buffer.BlockCopy(payload,
+                                        speakerPcmOffset, payload, 0,
+                                        speakerPcmLength);
+                                    subscriber(this, payload,
+                                        speakerPcmLength);
+                                }
                             }
                             else
                             {
@@ -2857,8 +2949,14 @@ namespace DS4Windows
 
         private bool IsDualSenseType()
         {
-            return viiperType == ViiperVirtualDeviceType.DualSense ||
-                viiperType == ViiperVirtualDeviceType.DualSenseEdge;
+            return IsDualSenseVirtualType(viiperType);
+        }
+
+        private static bool IsDualSenseVirtualType(
+            ViiperVirtualDeviceType type)
+        {
+            return type == ViiperVirtualDeviceType.DualSense ||
+                type == ViiperVirtualDeviceType.DualSenseEdge;
         }
 
         private void UpdateBluetoothMicrophoneSource(int deviceIndex,
@@ -3165,6 +3263,8 @@ namespace DS4Windows
                 $"preProcessorZeroFrames={microphoneTelemetry.PreProcessorAllZeroFrames} " +
                 $"postProcessorZeroFrames={microphoneTelemetry.PostProcessorAllZeroFrames} " +
                 $"postProcessorZeroUnmutedFrames={microphoneTelemetry.PostProcessorAllZeroUnmutedFrames} " +
+                $"preProcessorPeak={microphoneTelemetry.PreProcessorPeak} " +
+                $"postProcessorPeak={microphoneTelemetry.PostProcessorPeak} " +
                 $"queueDepth={microphoneQueueDepth} " +
                 $"queueHighWater={microphoneTelemetry.CompressedQueueHighWaterMark} " +
                 $"queueDrops={Interlocked.Read(ref microphoneFramesDropped)} " +

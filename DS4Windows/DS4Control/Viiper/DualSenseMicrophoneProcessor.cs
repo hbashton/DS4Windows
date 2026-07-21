@@ -15,7 +15,6 @@ namespace DS4Windows
         public const int SampleRate = 48000;
         public const int FrameSize = 480;
 
-        private const float SafeInputTrim = 0.25f;
         private const float LimiterCeiling = 0.8912509f;
         private const float LimiterReleasePerFrame = 0.10f;
         private const float StrongGateClosedGain = 0.18f;
@@ -72,7 +71,11 @@ namespace DS4Windows
             lock (syncRoot)
             {
                 float userGain = Math.Clamp(volume / 128.0f, 0.0f, 2.0f);
-                float inputGain = SafeInputTrim * userGain * userGain;
+                // Preserve DS4Windows' established profile response. VIIPER's
+                // virtual microphone presents this already decoded PCM at
+                // unity; transport-level compensation here would amplify
+                // codec noise and force ordinary speech into the limiter.
+                float inputGain = userGain;
                 for (int i = 0; i < sampleCount; i++)
                 {
                     float input = samples[i] / 32768.0f;

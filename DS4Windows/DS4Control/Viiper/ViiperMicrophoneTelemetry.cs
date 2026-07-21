@@ -16,6 +16,8 @@ namespace DS4Windows
         private long preProcessorAllZeroFrames;
         private long postProcessorAllZeroFrames;
         private long postProcessorAllZeroUnmutedFrames;
+        private long preProcessorPeak;
+        private long postProcessorPeak;
         private long compressedQueueHighWaterMark;
 
         internal long LastSubmissionGapTicks =>
@@ -36,6 +38,12 @@ namespace DS4Windows
         internal long PostProcessorAllZeroUnmutedFrames =>
             Interlocked.Read(ref postProcessorAllZeroUnmutedFrames);
 
+        internal long PreProcessorPeak =>
+            Interlocked.Read(ref preProcessorPeak);
+
+        internal long PostProcessorPeak =>
+            Interlocked.Read(ref postProcessorPeak);
+
         internal long CompressedQueueHighWaterMark =>
             Interlocked.Read(ref compressedQueueHighWaterMark);
 
@@ -48,6 +56,8 @@ namespace DS4Windows
             Interlocked.Exchange(ref preProcessorAllZeroFrames, 0);
             Interlocked.Exchange(ref postProcessorAllZeroFrames, 0);
             Interlocked.Exchange(ref postProcessorAllZeroUnmutedFrames, 0);
+            Interlocked.Exchange(ref preProcessorPeak, 0);
+            Interlocked.Exchange(ref postProcessorPeak, 0);
             Interlocked.Exchange(ref compressedQueueHighWaterMark, 0);
         }
 
@@ -65,6 +75,8 @@ namespace DS4Windows
         internal void ObservePreProcessorFrame(short[] samples,
             int sampleCount)
         {
+            RecordMaximum(ref preProcessorPeak,
+                FindPeakAbsoluteSample(samples, sampleCount));
             if (IsFrameAllZero(samples, sampleCount))
             {
                 IncrementSaturating(ref preProcessorAllZeroFrames);
@@ -74,6 +86,8 @@ namespace DS4Windows
         internal void ObservePostProcessorFrame(short[] samples,
             int sampleCount, bool muted)
         {
+            RecordMaximum(ref postProcessorPeak,
+                FindPeakAbsoluteSample(samples, sampleCount));
             if (!IsFrameAllZero(samples, sampleCount))
             {
                 return;
@@ -146,6 +160,24 @@ namespace DS4Windows
             }
 
             return true;
+        }
+
+        private static int FindPeakAbsoluteSample(short[] samples,
+            int sampleCount)
+        {
+            if (samples == null || sampleCount <= 0 ||
+                sampleCount > samples.Length)
+            {
+                return 0;
+            }
+
+            int peak = 0;
+            for (int index = 0; index < sampleCount; index++)
+            {
+                peak = System.Math.Max(peak,
+                    System.Math.Abs((int)samples[index]));
+            }
+            return peak;
         }
 
         internal static void IncrementSaturating(ref long target)

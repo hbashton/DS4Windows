@@ -3720,8 +3720,25 @@ namespace DS4Windows.InputDevices
 
         private void ApplyBluetoothMicrophoneStreamingRequest(byte[] report)
         {
-            ApplyBluetoothMicrophoneStreamingRequest(report,
-                Volatile.Read(ref bluetoothMicrophoneStreamingRequested) != 0);
+            bool enabled =
+                Volatile.Read(ref bluetoothMicrophoneStreamingRequested) != 0;
+            ApplyBluetoothMicrophoneStreamingRequest(report, enabled);
+
+            // Apply microphone gain as a dedicated controller state transition
+            // (0x40 validity bit plus the profile's full 0x00-0xFF value).
+            // This preserves DS4Windows' established DualSense output behavior;
+            // capping the value at 0x40 made Bluetooth capture substantially
+            // quieter than the earlier 0x31 transport.
+            // Speaker snapshots intentionally strip that state, so restore it
+            // only while an enable transition is awaiting physical proof. This
+            // prevents a mic enabled after the speaker clock started from
+            // inheriting the controller's quiet/default ADC level without
+            // replaying mic control on every 10.667 ms audio frame forever.
+            if (enabled && Volatile.Read(
+                    ref bluetoothMicrophoneControlUpdatePending) != 0)
+            {
+                ApplyBluetoothMicrophoneVolume(report, microphoneVolume);
+            }
         }
 
         private static void ApplyBluetoothMicrophoneStreamingRequest(
@@ -3776,6 +3793,21 @@ namespace DS4Windows.InputDevices
                 DualSenseAudioControlOutputSpeaker;
             combined[BluetoothCombinedStateAudioControl2Offset] =
                 DualSenseSpeakerPreGain;
+        }
+
+        private static void ApplyBluetoothMicrophoneVolume(byte[] combined,
+            byte profileVolume)
+        {
+            if (combined == null ||
+                combined.Length <= BluetoothCombinedStateMicrophoneVolumeOffset)
+            {
+                return;
+            }
+
+            combined[BluetoothCombinedStateFlag0Offset] |=
+                DualSenseOutputFlag0MicrophoneVolumeEnable;
+            combined[BluetoothCombinedStateMicrophoneVolumeOffset] =
+                profileVolume;
         }
 
         private static void SanitizeBluetoothSpeakerAudioSnapshot(

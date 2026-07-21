@@ -167,6 +167,7 @@ namespace DS4Windows
             internal const int UsbOutputLatencyMilliseconds = 10;
             private const long PacketIntervalNumerator =
                 FramesPerPacket * 10000000L;
+            private const int TelemetryIntervalMilliseconds = 5000;
 
             private readonly int slot;
             private readonly DualSenseDevice device;
@@ -205,6 +206,14 @@ namespace DS4Windows
             private long latestFrameTimestamp;
             private double resampleCredit;
             private long lastGameCarrierTimestamp;
+            private long capturedPackets;
+            private long capturedNonSilentPackets;
+            private long gameCarrierMixes;
+            private long gameCarrierMisses;
+            private long standaloneWrites;
+            private long standaloneWriteFailures;
+            private long standaloneCarrierDeferrals;
+            private int maximumCapturedMagnitude;
             private int started;
             private int disposed;
             private string sourceDisplayName = "audio source";
@@ -271,38 +280,50 @@ namespace DS4Windows
 
                 lock (frameLock)
                 {
-                    Volatile.Write(ref lastGameCarrierTimestamp,
-                        Stopwatch.GetTimestamp());
+                    long now = Stopwatch.GetTimestamp();
                     bool liveFrameAvailable = latestFrameAvailable &&
                         !IsLivePacketExpired(latestFrameTimestamp,
-                            Stopwatch.GetTimestamp());
-                    if (settings.Mode == AudioHapticsMode.Replace)
+                            now);
+                    if (!ApplyLiveFrame(settings.Mode, latestFrame,
+                            liveFrameAvailable, report, sampleOffset))
                     {
-                        if (liveFrameAvailable)
-                        {
-                            Buffer.BlockCopy(latestFrame, 0, report,
-                                sampleOffset, FrameBytes);
-                        }
-                        else
-                        {
-                            Array.Clear(report, sampleOffset, FrameBytes);
-                        }
-                        return true;
-                    }
-
-                    if (!liveFrameAvailable)
-                    {
+                        Interlocked.Increment(ref gameCarrierMisses);
                         return false;
                     }
-                    for (int index = 0; index < FrameBytes; index++)
-                    {
-                        report[sampleOffset + index] =
-                            AudioHapticsProcessor.MixSigned8(
-                                report[sampleOffset + index],
-                                latestFrame[index]);
-                    }
+                    Volatile.Write(ref lastGameCarrierTimestamp, now);
+                    Interlocked.Increment(ref gameCarrierMixes);
                     return true;
                 }
+            }
+
+            internal static bool ApplyLiveFrame(AudioHapticsMode mode,
+                byte[] derivedFrame, bool liveFrameAvailable, byte[] report,
+                int sampleOffset)
+            {
+                // With no fresh audio-derived packet, leave native game
+                // haptics intact and do not suppress the standalone cadence.
+                // A carrier is only a carrier after it actually receives
+                // Audio Haptics.
+                if (!liveFrameAvailable)
+                {
+                    return false;
+                }
+
+                if (mode == AudioHapticsMode.Replace)
+                {
+                    Buffer.BlockCopy(derivedFrame, 0, report, sampleOffset,
+                        FrameBytes);
+                    return true;
+                }
+
+                for (int index = 0; index < FrameBytes; index++)
+                {
+                    report[sampleOffset + index] =
+                        AudioHapticsProcessor.MixSigned8(
+                            report[sampleOffset + index],
+                            derivedFrame[index]);
+                }
+                return true;
             }
 
             private void StartEndpointCapture()
@@ -592,6 +613,14 @@ namespace DS4Windows
                     queueWrite = (queueWrite + 1) % QueueCapacity;
                     queuedFrames++;
                 }
+                int maximumMagnitude = MaximumSignedMagnitude(captureFrame);
+                Interlocked.Increment(ref capturedPackets);
+                if (maximumMagnitude > 0)
+                {
+                    Interlocked.Increment(ref capturedNonSilentPackets);
+                    UpdateMaximum(ref maximumCapturedMagnitude,
+                        maximumMagnitude);
+                }
                 captureFramePosition = 0;
             }
 
@@ -601,6 +630,8 @@ namespace DS4Windows
                 long nextPacketTicks = clock.ElapsedTicks;
                 long packetIntervalTicks = Stopwatch.Frequency *
                     PacketIntervalNumerator / 10000000L / TargetSampleRate;
+                long nextTelemetryTimestamp = Stopwatch.GetTimestamp() +
+                    Stopwatch.Frequency * TelemetryIntervalMilliseconds / 1000;
                 bool prebuffered = false;
 
                 while (Volatile.Read(ref disposed) == 0)
@@ -658,15 +689,84 @@ namespace DS4Windows
                                     GameCarrierLeaseMilliseconds / 1000;
                         if (!gameCarrierOwnsCadence)
                         {
-                            device.WriteBluetoothHapticsSamples(writerFrame,
-                                0, FrameBytes);
+                            if (device.WriteBluetoothHapticsSamples(writerFrame,
+                                    0, FrameBytes))
+                            {
+                                Interlocked.Increment(ref standaloneWrites);
+                            }
+                            else
+                            {
+                                Interlocked.Increment(
+                                    ref standaloneWriteFailures);
+                            }
+                        }
+                        else
+                        {
+                            Interlocked.Increment(
+                                ref standaloneCarrierDeferrals);
                         }
                     }
                     else
                     {
                         WriteUsbFrame(writerFrame);
                     }
+
+                    long telemetryNow = Stopwatch.GetTimestamp();
+                    if (telemetryNow >= nextTelemetryTimestamp)
+                    {
+                        LogTelemetry();
+                        nextTelemetryTimestamp = telemetryNow +
+                            Stopwatch.Frequency *
+                                TelemetryIntervalMilliseconds / 1000;
+                    }
                 }
+            }
+
+            private void LogTelemetry()
+            {
+                if (!Global.VerboseStartupLogging)
+                {
+                    return;
+                }
+
+                AppLogger.LogToGui(
+                    $"Audio Haptics stats controller={slot + 1} " +
+                    $"source='{sourceDisplayName}' " +
+                    $"captured={Interlocked.Read(ref capturedPackets)} " +
+                    $"nonSilent={Interlocked.Read(ref capturedNonSilentPackets)} " +
+                    $"peak={Volatile.Read(ref maximumCapturedMagnitude)} " +
+                    $"carrierMixes={Interlocked.Read(ref gameCarrierMixes)} " +
+                    $"carrierMisses={Interlocked.Read(ref gameCarrierMisses)} " +
+                    $"standaloneWrites={Interlocked.Read(ref standaloneWrites)} " +
+                    $"standaloneFailures={Interlocked.Read(ref standaloneWriteFailures)} " +
+                    $"carrierDeferrals={Interlocked.Read(ref standaloneCarrierDeferrals)}.",
+                    false);
+            }
+
+            private static int MaximumSignedMagnitude(byte[] frame)
+            {
+                int maximum = 0;
+                for (int index = 0; index < frame.Length; index++)
+                {
+                    int magnitude = Math.Abs((int)unchecked((sbyte)frame[index]));
+                    maximum = Math.Max(maximum, magnitude);
+                }
+                return maximum;
+            }
+
+            private static void UpdateMaximum(ref int target, int candidate)
+            {
+                int observed;
+                do
+                {
+                    observed = Volatile.Read(ref target);
+                    if (candidate <= observed)
+                    {
+                        return;
+                    }
+                }
+                while (Interlocked.CompareExchange(ref target, candidate,
+                    observed) != observed);
             }
 
             internal static bool IsLivePacketExpired(long capturedAt,

@@ -61,6 +61,13 @@ namespace DS4WindowsTests
                 "RecordBluetoothMicrophoneFrame",
                 BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly MethodInfo
+            ApplyBluetoothMicrophoneStreamingRequestMethod =
+                typeof(DualSenseDevice).GetMethod(
+                    "ApplyBluetoothMicrophoneStreamingRequest",
+                    BindingFlags.Instance | BindingFlags.NonPublic,
+                    binder: null, types: new[] { typeof(byte[]) },
+                    modifiers: null);
+        private static readonly MethodInfo
             RequiresCompletionAwareBluetoothControlWriteMethod =
                 typeof(DualSenseDevice).GetMethod(
                     "RequiresCompletionAwareBluetoothControlWrite",
@@ -364,6 +371,54 @@ namespace DS4WindowsTests
                 MicrophoneControlPendingField, device),
                 "An in-flight microphone packet falsely committed disable.");
             Assert.AreEqual(0L, device.BluetoothMicrophoneFramesReceived);
+        }
+
+        [TestMethod]
+        public void PendingMicrophoneEnableAppliesMaximumPhysicalAdcGain()
+        {
+            DualSenseDevice device = CreateBluetoothDevice();
+            device.MicrophoneVolume = byte.MaxValue;
+            SetFieldValue(MicrophoneStreamingRequestedField, device, 1);
+            SetFieldValue(MicrophoneControlPendingField, device, 1);
+            byte[] report = BuildCombinedControlReport(
+                sequence: 0, packetSequence: 0, microphoneEnabled: false);
+            report[13] &= unchecked((byte)~0x40);
+            report[19] = 0;
+
+            Assert.IsNotNull(
+                ApplyBluetoothMicrophoneStreamingRequestMethod);
+            ApplyBluetoothMicrophoneStreamingRequestMethod.Invoke(device,
+                new object[] { report });
+
+            Assert.AreNotEqual(0, report[4] & 0x01,
+                "The physical microphone stream-enable bit was not set.");
+            Assert.AreNotEqual(0, report[13] & 0x40,
+                "The controller was not told that microphone volume is valid.");
+            Assert.AreEqual(byte.MaxValue, report[19],
+                "The combined transport must preserve the full microphone value used by the legacy DualSense report path.");
+        }
+
+        [TestMethod]
+        public void CommittedMicrophoneEnableDoesNotReplayAdcControl()
+        {
+            DualSenseDevice device = CreateBluetoothDevice();
+            device.MicrophoneVolume = byte.MaxValue;
+            SetFieldValue(MicrophoneStreamingRequestedField, device, 1);
+            SetFieldValue(MicrophoneControlPendingField, device, 0);
+            byte[] report = BuildCombinedControlReport(
+                sequence: 0, packetSequence: 0, microphoneEnabled: false);
+            report[13] &= unchecked((byte)~0x40);
+            report[19] = 0;
+
+            Assert.IsNotNull(
+                ApplyBluetoothMicrophoneStreamingRequestMethod);
+            ApplyBluetoothMicrophoneStreamingRequestMethod.Invoke(device,
+                new object[] { report });
+
+            Assert.AreNotEqual(0, report[4] & 0x01);
+            Assert.AreEqual(0, report[13] & 0x40,
+                "Steady-state audio frames must not replay the one-shot ADC control bit.");
+            Assert.AreEqual((byte)0, report[19]);
         }
 
         [DataTestMethod]

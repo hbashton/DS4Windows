@@ -169,18 +169,18 @@ namespace DS4WindowsTests
         [DataRow((int)ControllerAudioEndpointKind.DualSense,
             (int)ControllerAudioEndpointKind.DualShock4, true)]
         [DataRow((int)ControllerAudioEndpointKind.DualSense,
-            (int)ControllerAudioEndpointKind.DualSense, false)]
+            (int)ControllerAudioEndpointKind.DualSense, true)]
         [DataRow((int)ControllerAudioEndpointKind.DualShock4,
-            (int)ControllerAudioEndpointKind.DualShock4, false)]
+            (int)ControllerAudioEndpointKind.DualShock4, true)]
         [DataRow((int)ControllerAudioEndpointKind.Any,
             (int)ControllerAudioEndpointKind.DualSense, false)]
         [DataRow((int)ControllerAudioEndpointKind.DualSense,
             (int)ControllerAudioEndpointKind.Any, false)]
-        public void OnlyCrossPersonaControllerEndpointsBecomeDirectSelections(
+        public void EverySonyControllerEndpointFollowsTheCurrentVirtualPersona(
             int savedEndpointKind, int currentOutputKind, bool expected)
         {
             Assert.AreEqual(expected,
-                DualSenseAudioPassthrough.IsStaleControllerEndpointSelection(
+                DualSenseAudioPassthrough.IsControllerEndpointSelection(
                     (ControllerAudioEndpointKind)savedEndpointKind,
                     (ControllerAudioEndpointKind)currentOutputKind));
         }
@@ -590,7 +590,7 @@ namespace DS4WindowsTests
             var telemetry = new ViiperMicrophoneTelemetry();
             short[] silence = new short[480];
             short[] signal = new short[480];
-            signal[200] = 1;
+            signal[200] = -1234;
 
             telemetry.ObservePreProcessorFrame(silence, silence.Length);
             telemetry.ObservePreProcessorFrame(signal, signal.Length);
@@ -607,6 +607,12 @@ namespace DS4WindowsTests
             Assert.AreEqual(2L, telemetry.PostProcessorAllZeroFrames);
             Assert.AreEqual(1L,
                 telemetry.PostProcessorAllZeroUnmutedFrames);
+            Assert.AreEqual(1234L, telemetry.PreProcessorPeak);
+            Assert.AreEqual(1234L, telemetry.PostProcessorPeak);
+
+            telemetry.Reset();
+            Assert.AreEqual(0L, telemetry.PreProcessorPeak);
+            Assert.AreEqual(0L, telemetry.PostProcessorPeak);
         }
 
         [TestMethod]

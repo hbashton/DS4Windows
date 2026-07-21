@@ -236,6 +236,7 @@ namespace DS4Windows
         private long bluetoothEffectReportsDuringAudio;
         private long bluetoothEffectReportsDeferredDuringAudio;
         private long lastBluetoothEffectReportDuringAudioTick;
+        private int bluetoothEffectRefreshPending;
         private long lastBluetoothInputReportTick;
         protected int inputReportErrorCount = 0; // Num of consequtive input report errors (fex if BT device fails 5 times in crc32 and 0x11 data type check then switch over to handle incoming BT packets as those were usb PC-friendly packets. Some fake DS4 gamepads needs this)
         protected readonly DS4Touchpad touchpad = null;
@@ -405,9 +406,11 @@ namespace DS4Windows
 
         internal static bool ShouldDeferBluetoothEffectDuringSpeaker(
             bool usingBluetooth, bool speakerEnabled, bool force,
-            bool reportPending, long elapsedMilliseconds)
+            bool reportPending, long elapsedMilliseconds,
+            bool audioControlRefreshPending = false)
         {
             return usingBluetooth && speakerEnabled && !force &&
+                !audioControlRefreshPending &&
                 reportPending && elapsedMilliseconds >= 0 &&
                 elapsedMilliseconds <
                     BLUETOOTH_EFFECT_INTERVAL_DURING_SPEAKER_MS;
@@ -1156,6 +1159,16 @@ namespace DS4Windows
                     if (!written)
                     {
                         BluetoothAudioWriteFailures++;
+                    }
+                    else
+                    {
+                        // Audio report 0x11 carries the rumble/lightbar
+                        // validity bits and therefore applies its zeroed effect
+                        // bytes. Reassert the current profile effects on the
+                        // next output tick instead of waiting for a user-visible
+                        // state change that may never occur.
+                        Interlocked.Exchange(
+                            ref bluetoothEffectRefreshPending, 1);
                     }
 
                     return written;
@@ -1984,6 +1997,8 @@ namespace DS4Windows
 
             bool quitOutputThread = false;
             bool usingBT = conType == ConnectionType.BT;
+            bool audioControlRefreshPending = usingBT &&
+                Volatile.Read(ref bluetoothEffectRefreshPending) != 0;
 
             // Some gamepads don't support lightbar and rumble, so no need to write out anything (writeOut always fails, so DS4Windows would accidentally force quit the gamepad connection).
             // If noOutputData featureSet flag is set then don't try to write out anything to the gamepad device.
@@ -2000,7 +2015,7 @@ namespace DS4Windows
             }
 
             //bool output = outputPendCount > 0, change = force;
-            bool change = force;
+            bool change = force || audioControlRefreshPending;
             // Speaker streaming writes an audio report every 4 ms. A
             // microphone-only stream is inbound, so it still needs an A1
             // effect keepalive before the controller's roughly four-second
@@ -2009,7 +2024,8 @@ namespace DS4Windows
                 bluetoothAudio.SpeakerEnabled;
             long keepAliveInterval = bluetoothAudio.MicrophoneEnabled ?
                 1000L : 4000L;
-            bool haptime = force || (!audioKeepsBluetoothAlive &&
+            bool haptime = force || audioControlRefreshPending ||
+                (!audioKeepsBluetoothAlive &&
                 standbySw.ElapsedMilliseconds >= keepAliveInterval);
 
             PrepareOutputReportInner(ref change, ref haptime,
@@ -2024,7 +2040,7 @@ namespace DS4Windows
                         Environment.TickCount64 - lastEffectTick);
                 if (ShouldDeferBluetoothEffectDuringSpeaker(usingBT,
                     bluetoothAudio.SpeakerEnabled, force, haptime,
-                    elapsedMilliseconds))
+                    elapsedMilliseconds, audioControlRefreshPending))
                 {
                     // outReportBuffer retains the newest merged state. Because
                     // outputReport still contains the last transmitted state,
@@ -2087,6 +2103,11 @@ namespace DS4Windows
                             Interlocked.Exchange(
                                 ref lastBluetoothEffectReportDuringAudioTick,
                                 Environment.TickCount64);
+                        }
+                        if (outputWritten && audioControlRefreshPending)
+                        {
+                            Interlocked.CompareExchange(
+                                ref bluetoothEffectRefreshPending, 0, 1);
                         }
                         if (!outputWritten)
                         {

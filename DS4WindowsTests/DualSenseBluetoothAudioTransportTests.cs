@@ -374,7 +374,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void PendingMicrophoneEnableAppliesMaximumPhysicalAdcGain()
+        public void PendingMicrophoneEnableMapsProfileMaximumToPhysicalAdcCeiling()
         {
             DualSenseDevice device = CreateBluetoothDevice();
             device.MicrophoneVolume = byte.MaxValue;
@@ -394,8 +394,8 @@ namespace DS4WindowsTests
                 "The physical microphone stream-enable bit was not set.");
             Assert.AreNotEqual(0, report[13] & 0x40,
                 "The controller was not told that microphone volume is valid.");
-            Assert.AreEqual(byte.MaxValue, report[19],
-                "The combined transport must preserve the full microphone value used by the legacy DualSense report path.");
+            Assert.AreEqual((byte)0x40, report[19],
+                "The combined transport must not overdrive the physical DualSense ADC.");
         }
 
         [TestMethod]

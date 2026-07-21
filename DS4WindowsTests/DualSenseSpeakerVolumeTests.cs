@@ -10,6 +10,10 @@ namespace DS4WindowsTests
             typeof(DualSenseDevice).GetMethod(
                 "MapDualSenseSpeakerVolume",
                 BindingFlags.NonPublic | BindingFlags.Static);
+        private static readonly MethodInfo MapMicrophoneVolumeMethod =
+            typeof(DualSenseDevice).GetMethod(
+                "MapDualSenseMicrophoneVolume",
+                BindingFlags.NonPublic | BindingFlags.Static);
         private static readonly MethodInfo ApplyVolumeMethod =
             typeof(DualSenseDevice).GetMethod(
                 "ApplyBluetoothSpeakerVolumeAndRouting",
@@ -66,6 +70,25 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void MicrophoneProfileRangeMapsToPhysicalAdcRange()
+        {
+            Assert.AreEqual((byte)0x00, MapMicrophoneVolume(0));
+            Assert.AreEqual((byte)0x20, MapMicrophoneVolume(128));
+            Assert.AreEqual((byte)0x40, MapMicrophoneVolume(255));
+
+            byte previous = MapMicrophoneVolume(0);
+            for (int value = 1; value <= byte.MaxValue; value++)
+            {
+                byte mapped = MapMicrophoneVolume((byte)value);
+                Assert.IsTrue(mapped >= previous,
+                    $"Mapped microphone volume decreased at profile value {value}.");
+                Assert.IsTrue(mapped <= 0x40,
+                    "Physical DualSense ADC gain exceeded the protocol ceiling.");
+                previous = mapped;
+            }
+        }
+
+        [TestMethod]
         public void SpeakerSnapshotDoesNotRepeatMicrophoneAndDspControls()
         {
             byte[] report = new byte[64];
@@ -109,6 +132,13 @@ namespace DS4WindowsTests
         {
             Assert.IsNotNull(MapVolumeMethod);
             return (byte)MapVolumeMethod.Invoke(null, new object[] { value });
+        }
+
+        private static byte MapMicrophoneVolume(byte value)
+        {
+            Assert.IsNotNull(MapMicrophoneVolumeMethod);
+            return (byte)MapMicrophoneVolumeMethod.Invoke(null,
+                new object[] { value });
         }
     }
 }

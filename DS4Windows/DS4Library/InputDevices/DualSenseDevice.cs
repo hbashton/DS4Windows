@@ -387,6 +387,7 @@ namespace DS4Windows.InputDevices
             1000;
         private const byte DualSenseSpeakerVolumeMinimum = 0x3D;
         private const byte DualSenseSpeakerVolumeMaximum = 0x64;
+        private const byte DualSenseMicrophoneVolumeMaximum = 0x40;
         private const byte DualSenseSpeakerPreGain = 0x03;
         private const byte DualSenseOutputFlag0SpeakerVolumeEnable = 0x20;
         private const byte DualSenseOutputFlag0MicrophoneVolumeEnable = 0x40;
@@ -2566,7 +2567,8 @@ namespace DS4Windows.InputDevices
                 // Internal speaker volume
                 outputReport[6] = MapDualSenseSpeakerVolume(speakerVolume);
                 // Internal microphone volume
-                outputReport[7] = microphoneVolume;
+                outputReport[7] = MapDualSenseMicrophoneVolume(
+                    microphoneVolume);
                 // 0x01 Enable internal microphone, 0x10 Disable attached headphones (must set 0x20 as well)
                 // 0x20 Enable internal speaker
                 outputReport[8] = enableSpeakerOutput ? (byte)0x20 : (byte)0x00;
@@ -2705,7 +2707,8 @@ namespace DS4Windows.InputDevices
                 // Internal speaker volume
                 outputReport[7] = MapDualSenseSpeakerVolume(speakerVolume);
                 // Internal microphone volume
-                outputReport[8] = microphoneVolume;
+                outputReport[8] = MapDualSenseMicrophoneVolume(
+                    microphoneVolume);
                 // 0x01 Enable internal microphone, 0x10 Disable attached headphones (must set 0x20 as well)
                 // 0x20 Enable internal speaker
                 outputReport[9] = enableSpeakerOutput ? (byte)0x20 : (byte)0x00;
@@ -3747,11 +3750,11 @@ namespace DS4Windows.InputDevices
                 Volatile.Read(ref bluetoothMicrophoneStreamingRequested) != 0;
             ApplyBluetoothMicrophoneStreamingRequest(report, enabled);
 
-            // Apply microphone gain as a dedicated controller state transition
-            // (0x40 validity bit plus the profile's full 0x00-0xFF value).
-            // This preserves DS4Windows' established DualSense output behavior;
-            // capping the value at 0x40 made Bluetooth capture substantially
-            // quieter than the earlier 0x31 transport.
+            // Apply microphone gain as a dedicated controller state transition.
+            // The profile keeps its full 0x00-0xFF software-gain range, while
+            // the physical controller receives its documented 0x00-0x40 ADC
+            // range. Sending 0xFF here clips the ADC before the decoded PCM can
+            // reach the shared limiter.
             // Speaker snapshots intentionally strip that state, so restore it
             // only while an enable transition is awaiting physical proof. This
             // prevents a mic enabled after the speaker clock started from
@@ -3818,6 +3821,15 @@ namespace DS4Windows.InputDevices
                 DualSenseSpeakerPreGain;
         }
 
+        private static byte MapDualSenseMicrophoneVolume(byte profileVolume)
+        {
+            // Sony's physical output report and DS5 Bridge both use 0x40 as
+            // the maximum microphone level. Keep the profile/UI byte range and
+            // map it once at the hardware protocol boundary.
+            return (byte)((profileVolume * DualSenseMicrophoneVolumeMaximum +
+                byte.MaxValue / 2) / byte.MaxValue);
+        }
+
         private static void ApplyBluetoothMicrophoneVolume(byte[] combined,
             byte profileVolume)
         {
@@ -3830,7 +3842,7 @@ namespace DS4Windows.InputDevices
             combined[BluetoothCombinedStateFlag0Offset] |=
                 DualSenseOutputFlag0MicrophoneVolumeEnable;
             combined[BluetoothCombinedStateMicrophoneVolumeOffset] =
-                profileVolume;
+                MapDualSenseMicrophoneVolume(profileVolume);
         }
 
         private static void SanitizeBluetoothSpeakerAudioSnapshot(

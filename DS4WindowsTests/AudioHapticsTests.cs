@@ -222,5 +222,31 @@ namespace DS4WindowsTests
             Assert.IsTrue(applied);
             CollectionAssert.AreEqual(derived, carrier);
         }
+
+        [TestMethod]
+        public void SilentStandaloneFramesDoNotCreateACompetingCadence()
+        {
+            Assert.IsFalse(
+                AudioHapticsService.SlotRuntime.ShouldPublishStandaloneFrame(
+                    hasFrame: false, maximumMagnitude: 0,
+                    hapticsActive: false));
+            Assert.IsFalse(
+                AudioHapticsService.SlotRuntime.ShouldPublishStandaloneFrame(
+                    hasFrame: true, maximumMagnitude: 0,
+                    hapticsActive: false));
+            Assert.IsTrue(
+                AudioHapticsService.SlotRuntime.ShouldPublishStandaloneFrame(
+                    hasFrame: true, maximumMagnitude: 24,
+                    hapticsActive: false));
+        }
+
+        [TestMethod]
+        public void OneSilentStandaloneFrameReleasesAnActiveEffect()
+        {
+            Assert.IsTrue(
+                AudioHapticsService.SlotRuntime.ShouldPublishStandaloneFrame(
+                    hasFrame: true, maximumMagnitude: 0,
+                    hapticsActive: true));
+        }
     }
 }

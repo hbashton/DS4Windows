@@ -542,6 +542,29 @@ namespace DS4Windows.InputDevices
                 }
             }
         }
+
+        public long BluetoothAudioPacerLatePresentations
+        {
+            get
+            {
+                lock (bluetoothAudioPacerLock)
+                {
+                    return bluetoothAudioPacer?.LatePresentationCount ?? 0;
+                }
+            }
+        }
+
+        public double BluetoothAudioPacerMaximumPresentationGapMilliseconds
+        {
+            get
+            {
+                lock (bluetoothAudioPacerLock)
+                {
+                    return bluetoothAudioPacer?.
+                        MaximumPresentationGapMilliseconds ?? 0.0;
+                }
+            }
+        }
         public long BluetoothAudioPacerRejectedReports
         {
             get

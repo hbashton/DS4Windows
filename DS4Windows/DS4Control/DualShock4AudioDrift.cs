@@ -108,6 +108,14 @@ namespace DS4Windows
         private short carryLeft;
         private short carryRight;
 
+        internal void Reset()
+        {
+            sourcePosition = 0.0;
+            hasCarry = false;
+            carryLeft = 0;
+            carryRight = 0;
+        }
+
         internal int Convert(byte[] source, int length, short[] destination,
             double outputRatio)
         {

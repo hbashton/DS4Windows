@@ -429,8 +429,8 @@ namespace DS4Windows
         // Start as soon as a few causal source packets exist. The isolated
         // writer already requires eight 10.667 ms reports; a 160 ms source
         // prebuffer duplicated that protection and made game audio feel late.
-        internal const int InitialBufferMs = 32;
-        internal const int TargetBufferMs = 16;
+        internal const int InitialBufferMs = 20;
+        internal const int TargetBufferMs = 20;
         // Keep two reports beyond the helper's eight-report prime. Together
         // with the causal source target this protects roughly 123 ms, above the
         // 86.7 ms callback stall measured in a live trace, without the former
@@ -443,13 +443,12 @@ namespace DS4Windows
         private const int DirectPcmMaximumOutputFrames =
             (DirectPcmChunkBytes / (sizeof(short) * Channels) * 3 / 2) + 2;
         private const int IdleKeepAliveMs = 2000;
+        internal const int TransientCaptureShortageLeaseMs = 50;
         private const int PacerPrewarmRetryMs = 2000;
         private const double BluetoothSpeakerCadenceMs = 10.0 + (2.0 / 3.0);
-        private const double CaptureClockMaximumCorrection = 0.001;
-        private const double CaptureClockCorrectionGain = 1.0 / 65536.0;
-        private const double CaptureClockRatioSlewPerPacket = 0.000002;
         private const double CaptureClockSmoothingAlpha = 0.005319148936170213;
-        private const double CaptureClockErrorDeadbandFrames = 2.0;
+        internal const int CaptureClockLagDeadbandFrames = 240;
+        internal const int CaptureClockTrimFrames = 4;
 
         private readonly object syncRoot = new object();
         private readonly object directPcmSync = new object();
@@ -531,6 +530,7 @@ namespace DS4Windows
         private long captureInputFrames;
         private long captureUnderruns;
         private long activeCaptureUnderruns;
+        private long transientCaptureDeferrals;
         private long captureDriftAdjustments;
         private long captureOverflowFrames;
         private long directPcmCallbacks;
@@ -1199,15 +1199,14 @@ namespace DS4Windows
             {
                 if (captureRingBufferedFrames < SourcePullFrames)
                 {
-                    // Once a primed stream runs dry, none of its residual
-                    // samples or filter history belong at the front of a later
-                    // playback generation.
-                    captureRingReadIndex = captureRingWriteIndex;
-                    captureRingBufferedFrames = 0;
-                    capturePrimed = false;
-                    captureClockInitialized = false;
-                    directPcmRateConverter?.Reset();
-                    ResetSpeakerResamplingLocked();
+                    // A continuous VIIPER stream arrives in 320-frame source
+                    // callbacks while this lane consumes 512 frames per radio
+                    // tick. Seeing the ring briefly below one pull is normal
+                    // callback phase, not a new audio generation. Preserve the
+                    // partial source-converter block, ring tail, fractional
+                    // resampler phase, and output FIFO. Resetting any of them
+                    // here throws away real samples and turns a harmless
+                    // producer wait into a self-sustaining audible dropout.
                     return false;
                 }
 
@@ -1305,16 +1304,45 @@ namespace DS4Windows
             speakerResampleFifoFrames = 0;
         }
 
+        private void ResetCapturePipelineAtSegmentBoundary()
+        {
+            if (directSpeakerSource != null)
+            {
+                lock (directPcmSync)
+                {
+                    lock (syncRoot)
+                    {
+                        ResetCapturePipelineAtSegmentBoundaryLocked();
+                    }
+                }
+                return;
+            }
+
+            lock (syncRoot)
+            {
+                ResetCapturePipelineAtSegmentBoundaryLocked();
+            }
+        }
+
+        private void ResetCapturePipelineAtSegmentBoundaryLocked()
+        {
+            captureRingReadIndex = captureRingWriteIndex;
+            captureRingBufferedFrames = 0;
+            capturePrimed = false;
+            captureClockInitialized = false;
+            directPcmRateConverter?.Reset();
+            ResetSpeakerResamplingLocked();
+        }
+
         private void UpdateCaptureClockRatioLocked()
         {
             int targetFrames = (SampleRate * TargetBufferMs) / 1000;
             if (!captureClockInitialized)
             {
-                // Start neutral rather than biasing the servo with whichever
-                // side of the 480/512 callback sawtooth happened to prime it.
-                captureSmoothedBufferedFrames = targetFrames;
-                captureCurrentClockRatio = 1.0;
-                captureTargetClockRatio = 1.0;
+                captureSmoothedBufferedFrames = captureRingBufferedFrames;
+                captureTargetClockRatio = CalculateCaptureClockRatio(
+                    captureRingBufferedFrames, targetFrames);
+                captureCurrentClockRatio = captureTargetClockRatio;
                 captureClockInitialized = true;
                 return;
             }
@@ -1322,24 +1350,39 @@ namespace DS4Windows
             captureSmoothedBufferedFrames +=
                 (captureRingBufferedFrames - captureSmoothedBufferedFrames) *
                 CaptureClockSmoothingAlpha;
-            double errorFrames = captureSmoothedBufferedFrames - targetFrames;
-            if (Math.Abs(errorFrames) <= CaptureClockErrorDeadbandFrames)
-            {
-                errorFrames = 0.0;
-            }
-
-            captureTargetClockRatio = 1.0 + Math.Clamp(
-                errorFrames * CaptureClockCorrectionGain,
-                -CaptureClockMaximumCorrection,
-                CaptureClockMaximumCorrection);
-            captureCurrentClockRatio += Math.Clamp(
-                captureTargetClockRatio - captureCurrentClockRatio,
-                -CaptureClockRatioSlewPerPacket,
-                CaptureClockRatioSlewPerPacket);
+            // Match PadForge's proven DualSense transport discipline: keep a
+            // 20 ms source cushion and trim the 512 -> 480 conversion by four
+            // source frames only when lag leaves a +/-5 ms deadband. The
+            // correction happens inside the continuous resampler, so the
+            // physical 10.667 ms report clock never skips, catches up, or
+            // receives a fabricated zero packet.
+            captureTargetClockRatio = CalculateCaptureClockRatio(
+                captureRingBufferedFrames, targetFrames);
+            captureCurrentClockRatio = captureTargetClockRatio;
             if (Math.Abs(captureCurrentClockRatio - 1.0) > 0.000001)
             {
                 Interlocked.Increment(ref captureDriftAdjustments);
             }
+        }
+
+        internal static double CalculateCaptureClockRatio(
+            int bufferedFrames, int targetFrames)
+        {
+            if (bufferedFrames >
+                targetFrames + CaptureClockLagDeadbandFrames)
+            {
+                return (SourcePullFrames + CaptureClockTrimFrames) /
+                    (double)SourcePullFrames;
+            }
+
+            if (bufferedFrames <
+                targetFrames - CaptureClockLagDeadbandFrames)
+            {
+                return (SourcePullFrames - CaptureClockTrimFrames) /
+                    (double)SourcePullFrames;
+            }
+
+            return 1.0;
         }
 
         private void WaitForInitialCaptureBuffer()
@@ -1508,12 +1551,21 @@ namespace DS4Windows
             Volatile.Write(ref pacerFinalClearRequested, 1);
         }
 
-        private bool HasRecentRawAudible(long now)
+        private bool HasRecentRawAudible(long now,
+            int maximumAgeMilliseconds = IdleKeepAliveMs)
         {
             long rawAudible = Interlocked.Read(ref lastRawAudibleTimestamp);
             long age = now - rawAudible;
             return rawAudible != 0 && age >= 0 && age <=
-                Stopwatch.Frequency * IdleKeepAliveMs / 1000;
+                Stopwatch.Frequency * maximumAgeMilliseconds / 1000;
+        }
+
+        internal static bool ShouldDeferTransientCaptureShortage(
+            bool captureUnderrun, bool wasAudioSegmentActive,
+            bool rawAudioIsFresh)
+        {
+            return captureUnderrun && wasAudioSegmentActive &&
+                rawAudioIsFresh;
         }
 
         private void PacerLifecycleLoop()
@@ -1851,6 +1903,26 @@ namespace DS4Windows
                         }
                     }
 
+                    long frameTimestamp = Stopwatch.GetTimestamp();
+                    bool rawAudioIsFresh = HasRecentRawAudible(frameTimestamp,
+                        TransientCaptureShortageLeaseMs);
+                    if (ShouldDeferTransientCaptureShortage(captureUnderrun,
+                            wasAudioSegmentActive, rawAudioIsFresh))
+                    {
+                        // The isolated writer reservoir already contains the
+                        // next physical reports. Do not replace one of them
+                        // with an invented zero frame just because the drift
+                        // resampler is waiting for the next callback block.
+                        // Backpressure here lets that reservoir bridge the
+                        // producer phase and preserves the continuous PCM
+                        // timeline on the following attempt.
+                        Interlocked.Increment(
+                            ref transientCaptureDeferrals);
+                        ScheduleNextStreamTick(false, ref nextTick,
+                            cadenceTicks, highResolutionTimer);
+                        continue;
+                    }
+
                     bool audible = captured &&
                         HasAudibleSamples(frame, frame.Length);
                     if (audible)
@@ -1945,6 +2017,7 @@ namespace DS4Windows
                             ref pacerPrewarmAttemptedForSegment, 0);
                         Interlocked.Exchange(
                             ref lastRawAudibleTimestamp, 0);
+                        ResetCapturePipelineAtSegmentBoundary();
                         Interlocked.Increment(ref audioSegmentStops);
                     }
 
@@ -2053,6 +2126,7 @@ namespace DS4Windows
                         $"capturePrimed={IsCapturePrimed()} " +
                          $"captureUnderruns={Interlocked.Read(ref captureUnderruns)} " +
                          $"activeCaptureUnderruns={Interlocked.Read(ref activeCaptureUnderruns)} " +
+                         $"transientCaptureDeferrals={Interlocked.Read(ref transientCaptureDeferrals)} " +
                          $"captureOverflowFrames={Interlocked.Read(ref captureOverflowFrames)} " +
                          $"driftAdjustments={Interlocked.Read(ref captureDriftAdjustments)} " +
                          $"clockRatio={GetCaptureCurrentClockRatio():F7}/" +
@@ -2081,6 +2155,8 @@ namespace DS4Windows
                          $"writerMaximumSubmissionGapMs={device.BluetoothRealtimeWriterMaximumSubmissionGapMilliseconds:F1} " +
                          $"isolatedPacer={device.BluetoothAudioPacerActive} " +
                          $"pacerPresented={device.BluetoothAudioPacerPresentedReports} " +
+                         $"pacerLate={device.BluetoothAudioPacerLatePresentations} " +
+                         $"pacerGapMaxMs={device.BluetoothAudioPacerMaximumPresentationGapMilliseconds:F2} " +
                          $"pacerRejected={device.BluetoothAudioPacerRejectedReports} " +
                          $"pacerError='{device.BluetoothAudioPacerLastError}' " +
                         $"speakerWrites={device.BluetoothCombinedSpeakerReportsWritten} " +

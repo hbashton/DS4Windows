@@ -213,6 +213,7 @@ namespace DS4Windows
             private long standaloneWrites;
             private long standaloneWriteFailures;
             private long standaloneCarrierDeferrals;
+            private bool standaloneHapticsActive;
             private int maximumCapturedMagnitude;
             private int started;
             private int disposed;
@@ -679,6 +680,11 @@ namespace DS4Windows
                         Array.Clear(writerFrame, 0, FrameBytes);
                     }
 
+                    int frameMagnitude = hasFrame ?
+                        MaximumSignedMagnitude(writerFrame) : 0;
+                    bool publishStandaloneFrame = ShouldPublishStandaloneFrame(
+                        hasFrame, frameMagnitude, standaloneHapticsActive);
+
                     if (device.ConnectionType == ConnectionType.BT)
                     {
                         long carrierTimestamp = Volatile.Read(
@@ -687,12 +693,13 @@ namespace DS4Windows
                             Stopwatch.GetTimestamp() - carrierTimestamp <=
                                 Stopwatch.Frequency *
                                     GameCarrierLeaseMilliseconds / 1000;
-                        if (!gameCarrierOwnsCadence)
+                        if (!gameCarrierOwnsCadence && publishStandaloneFrame)
                         {
                             if (device.WriteBluetoothHapticsSamples(writerFrame,
                                     0, FrameBytes))
                             {
                                 Interlocked.Increment(ref standaloneWrites);
+                                standaloneHapticsActive = frameMagnitude > 0;
                             }
                             else
                             {
@@ -700,7 +707,7 @@ namespace DS4Windows
                                     ref standaloneWriteFailures);
                             }
                         }
-                        else
+                        else if (gameCarrierOwnsCadence && publishStandaloneFrame)
                         {
                             Interlocked.Increment(
                                 ref standaloneCarrierDeferrals);
@@ -708,7 +715,11 @@ namespace DS4Windows
                     }
                     else
                     {
-                        WriteUsbFrame(writerFrame);
+                        if (publishStandaloneFrame)
+                        {
+                            WriteUsbFrame(writerFrame);
+                            standaloneHapticsActive = frameMagnitude > 0;
+                        }
                     }
 
                     long telemetryNow = Stopwatch.GetTimestamp();
@@ -720,6 +731,18 @@ namespace DS4Windows
                                 TelemetryIntervalMilliseconds / 1000;
                     }
                 }
+            }
+
+            internal static bool ShouldPublishStandaloneFrame(bool hasFrame,
+                int maximumMagnitude, bool hapticsActive)
+            {
+                // Endpoint and app-session capture continue yielding valid
+                // zero-filled packets while the selected source is silent.
+                // Publishing every one of those packets creates a second HID
+                // cadence that can contend with controller speaker audio. A
+                // silent frame only needs publication once: to release a
+                // previously active derived effect.
+                return hasFrame && (maximumMagnitude > 0 || hapticsActive);
             }
 
             private void LogTelemetry()

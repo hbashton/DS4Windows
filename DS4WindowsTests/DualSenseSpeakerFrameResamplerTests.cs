@@ -224,6 +224,25 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
+        public void PcmThirtyTwoToFortyEightPreservesPhaseAcrossViiperCallbacks()
+        {
+            const int callbackFrames = 320;
+            const int callbackCount = 1000;
+            const int sourceFrames = callbackFrames * callbackCount;
+            byte[] source = CreateStereoPcm16(sourceFrames, 32000,
+                997.0, 1499.0, 0.7);
+
+            float[] converted = ConvertPcmInChunks(source, 32000, 48000,
+                callbackFrames);
+
+            Assert.AreEqual((sourceFrames * 3 / 2 - 1) * 2,
+                converted.Length,
+                "A transient consumer shortage must not reset the converter " +
+                "between VIIPER's 320-frame callbacks or discard its staged " +
+                "source frame.");
+        }
+
+        [TestMethod]
         public void PcmFortyEightToFortyEightIsBitExactAcrossArbitraryChunks()
         {
             const int sourceFrames = 48000 * 5 + 137;

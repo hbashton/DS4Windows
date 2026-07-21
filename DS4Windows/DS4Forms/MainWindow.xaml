@@ -176,7 +176,7 @@
                 <local:AudioHapticsControl x:Name="audioHapticsControl" SettingsChanged="ProfileFeatureControl_SettingsChanged" />
             </TabItem>
 
-            <TabItem x:Name="triggerLabTab" Header="Trigger Lab" Tag="L2" ToolTip="Build adaptive-trigger effects in the selected controller's active profile." IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">
+            <TabItem x:Name="triggerLabTab" Header="Trigger Lab" Tag="TriggerPair" ToolTip="Build adaptive-trigger effects in the selected controller's active profile." IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">
                 <local:TriggerLabControl x:Name="triggerLabControl" SettingsChanged="ProfileFeatureControl_SettingsChanged" />
             </TabItem>
 

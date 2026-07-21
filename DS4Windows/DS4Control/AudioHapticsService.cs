@@ -150,15 +150,21 @@ namespace DS4Windows
             }
         }
 
-        private sealed class SlotRuntime : IDisposable
+        internal sealed class SlotRuntime : IDisposable
         {
             internal const int TargetSampleRate = 3000;
             internal const int FramesPerPacket = 32;
             internal const int FrameBytes = FramesPerPacket * 2;
-            private const int QueueCapacity = 12;
-            private const int WriterPrebufferFrames = 3;
+            private const int QueueCapacity = 4;
+            // Audio-derived haptics are live feedback, not media playback.
+            // Waiting for a jitter reservoir makes an impact feel detached
+            // from the sound that caused it, so begin with the first complete
+            // 10.667 ms DualSense haptics packet.
+            internal const int WriterPrebufferFrames = 1;
             private const int GameCarrierLeaseMilliseconds = 42;
-            private const int CaptureBufferMilliseconds = 10;
+            internal const int CaptureBufferMilliseconds = 5;
+            internal const int MaximumLivePacketAgeMilliseconds = 24;
+            internal const int UsbOutputLatencyMilliseconds = 10;
             private const long PacketIntervalNumerator =
                 FramesPerPacket * 10000000L;
 
@@ -170,6 +176,8 @@ namespace DS4Windows
             private readonly object frameLock = new object();
             private readonly byte[][] frameQueue = Enumerable.Range(0,
                 QueueCapacity).Select(_ => new byte[FrameBytes]).ToArray();
+            private readonly long[] frameQueueTimestamps =
+                new long[QueueCapacity];
             private readonly byte[] captureFrame = new byte[FrameBytes];
             private readonly byte[] latestFrame = new byte[FrameBytes];
             private readonly byte[] writerFrame = new byte[FrameBytes];
@@ -194,6 +202,7 @@ namespace DS4Windows
             private int queueWrite;
             private int queuedFrames;
             private bool latestFrameAvailable;
+            private long latestFrameTimestamp;
             private double resampleCredit;
             private long lastGameCarrierTimestamp;
             private int started;
@@ -264,9 +273,12 @@ namespace DS4Windows
                 {
                     Volatile.Write(ref lastGameCarrierTimestamp,
                         Stopwatch.GetTimestamp());
+                    bool liveFrameAvailable = latestFrameAvailable &&
+                        !IsLivePacketExpired(latestFrameTimestamp,
+                            Stopwatch.GetTimestamp());
                     if (settings.Mode == AudioHapticsMode.Replace)
                     {
-                        if (latestFrameAvailable)
+                        if (liveFrameAvailable)
                         {
                             Buffer.BlockCopy(latestFrame, 0, report,
                                 sampleOffset, FrameBytes);
@@ -278,7 +290,7 @@ namespace DS4Windows
                         return true;
                     }
 
-                    if (!latestFrameAvailable)
+                    if (!liveFrameAvailable)
                     {
                         return false;
                     }
@@ -564,9 +576,11 @@ namespace DS4Windows
 
                 lock (frameLock)
                 {
+                    long capturedAt = Stopwatch.GetTimestamp();
                     Buffer.BlockCopy(captureFrame, 0, latestFrame, 0,
                         FrameBytes);
                     latestFrameAvailable = true;
+                    latestFrameTimestamp = capturedAt;
                     if (queuedFrames == QueueCapacity)
                     {
                         queueRead = (queueRead + 1) % QueueCapacity;
@@ -574,6 +588,7 @@ namespace DS4Windows
                     }
                     Buffer.BlockCopy(captureFrame, 0, frameQueue[queueWrite], 0,
                         FrameBytes);
+                    frameQueueTimestamps[queueWrite] = capturedAt;
                     queueWrite = (queueWrite + 1) % QueueCapacity;
                     queuedFrames++;
                 }
@@ -600,6 +615,7 @@ namespace DS4Windows
                     }
 
                     bool hasFrame = false;
+                    long frameTimestamp = 0;
                     lock (frameLock)
                     {
                         if (!prebuffered)
@@ -609,12 +625,23 @@ namespace DS4Windows
                         }
                         if (prebuffered && queuedFrames > 0)
                         {
-                            Buffer.BlockCopy(frameQueue[queueRead], 0,
+                            // Always consume the newest complete packet. A
+                            // delayed vibration cannot catch up meaningfully;
+                            // replaying queued history only creates latency.
+                            int newest = (queueWrite + QueueCapacity - 1) %
+                                QueueCapacity;
+                            Buffer.BlockCopy(frameQueue[newest], 0,
                                 writerFrame, 0, FrameBytes);
-                            queueRead = (queueRead + 1) % QueueCapacity;
-                            queuedFrames--;
+                            frameTimestamp = frameQueueTimestamps[newest];
+                            queueRead = queueWrite;
+                            queuedFrames = 0;
                             hasFrame = true;
                         }
+                    }
+                    if (hasFrame && IsLivePacketExpired(frameTimestamp,
+                        Stopwatch.GetTimestamp()))
+                    {
+                        hasFrame = false;
                     }
                     if (!hasFrame)
                     {
@@ -640,6 +667,14 @@ namespace DS4Windows
                         WriteUsbFrame(writerFrame);
                     }
                 }
+            }
+
+            internal static bool IsLivePacketExpired(long capturedAt,
+                long now)
+            {
+                return capturedAt <= 0 || now < capturedAt ||
+                    now - capturedAt > Stopwatch.Frequency *
+                        MaximumLivePacketAgeMilliseconds / 1000;
             }
 
             private void StartUsbHapticsOutput()
@@ -684,15 +719,10 @@ namespace DS4Windows
                     ReadFully = true,
                 };
                 usbOutput = new WasapiOut(endpoint,
-                    AudioClientShareMode.Shared, true, 30);
+                    AudioClientShareMode.Shared, true,
+                    UsbOutputLatencyMilliseconds);
                 usbOutput.Init(usbProvider);
                 usbOutput.Play();
-
-                Array.Clear(writerFrame, 0, writerFrame.Length);
-                for (int index = 0; index < WriterPrebufferFrames; index++)
-                {
-                    WriteUsbFrame(writerFrame);
-                }
             }
 
             private void WriteUsbFrame(byte[] frame)

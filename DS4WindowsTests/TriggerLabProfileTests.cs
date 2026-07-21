@@ -159,5 +159,50 @@ namespace DS4WindowsTests
             Assert.AreEqual(TriggerLabMode.Vibration, clone.SplitRight.Mode);
             Assert.AreNotSame(original.SplitRight, clone.SplitRight);
         }
+
+        [TestMethod]
+        public void LinkedEffectsKeepPerTriggerActivationIndependent()
+        {
+            TriggerLabProfileSettings settings = new TriggerLabProfileSettings
+            {
+                Enabled = true,
+                Linked = true,
+                LeftActive = true,
+                RightActive = false,
+                Left = TriggerLabPresetCatalog.Presets[3].CreateEffect(),
+                Right = TriggerLabPresetCatalog.Presets[1].CreateEffect(),
+            };
+
+            settings.Normalize();
+
+            Assert.IsTrue(settings.LeftActive);
+            Assert.IsFalse(settings.RightActive);
+            Assert.AreEqual(settings.Left.ProfileId, settings.Right.ProfileId,
+                "Linked should mirror the effect shape.");
+        }
+
+        [TestMethod]
+        public void PresetCatalogProvidesReadyMadeEffectsForEveryMode()
+        {
+            Assert.IsTrue(TriggerLabPresetCatalog.Presets.Count >= 6);
+            Assert.AreEqual(TriggerLabPresetCatalog.Presets.Count,
+                TriggerLabPresetCatalog.Presets.Select(preset => preset.Id)
+                    .Distinct(StringComparer.Ordinal).Count());
+
+            foreach (TriggerLabMode mode in Enum.GetValues<TriggerLabMode>())
+            {
+                Assert.IsTrue(TriggerLabPresetCatalog.Presets.Any(
+                    preset => preset.Mode == mode),
+                    $"No ready-made {mode} effect was provided.");
+            }
+
+            foreach (TriggerLabPreset preset in TriggerLabPresetCatalog.Presets)
+            {
+                Assert.IsTrue(TriggerLabPresetCatalog.TryCreateEffect(
+                    preset.Id, out TriggerLabEffectSettings effect));
+                Assert.AreEqual(preset.Id, effect.ProfileId);
+                Assert.IsTrue(effect.ForcePercent > 0);
+            }
+        }
     }
 }

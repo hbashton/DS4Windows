@@ -421,26 +421,21 @@ namespace DS4Windows
         private const int FrameSamples = 480;
         private const int SourcePullFrames = 512;
         private const int OpusBytes = 200;
-        private const int LowLatencyCaptureBufferMs = 10;
+        internal const int LowLatencyCaptureBufferMs = 5;
         // Ownership recovery is bounded by helper process-exit plus startup
-        // waits. Keep normal target latency at 64 ms, but retain source history
-        // for the entire bounded transition instead of silently draining it.
+        // waits. Retain source history for the entire bounded transition
+        // instead of silently draining it.
         private const int CaptureBufferMs = 24000;
-        // The isolated writer primes eight 10.667 ms reports (about 85 ms).
-        // Retain another ~64 ms in the source ring, matching the proven DS4
-        // production strategy of a hardware queue plus an independent source
-        // cushion. This absorbs the 100-120 ms Windows/virtual-endpoint stalls
-        // seen in long repeat-playback traces without changing packet cadence.
-        private const int InitialBufferMs = 160;
-        private const int TargetBufferMs = 64;
-        // Eight queued reports cover only about 85 ms. A long-running duplex
-        // trace observed a 97.7 ms virtual-endpoint callback stall: the helper
-        // exhausted that reserve, re-armed its eight-report prime gate, and the
-        // controller produced an audible ~100 ms gap even though no PCM or HID
-        // write was dropped. Keep sixteen reports ready (about 171 ms). The
-        // helper patches the newest haptics/control template at presentation,
-        // so this speaker-audio cushion does not add haptics latency.
-        internal const int PacerReservoirTargetFrames = 16;
+        // Start as soon as a few causal source packets exist. The isolated
+        // writer already requires eight 10.667 ms reports; a 160 ms source
+        // prebuffer duplicated that protection and made game audio feel late.
+        internal const int InitialBufferMs = 32;
+        internal const int TargetBufferMs = 16;
+        // Keep two reports beyond the helper's eight-report prime. Together
+        // with the causal source target this protects roughly 123 ms, above the
+        // 86.7 ms callback stall measured in a live trace, without the former
+        // ~235 ms steady-state presentation delay.
+        internal const int PacerReservoirTargetFrames = 10;
         internal const int StartupWarmupReportCount = 6;
         private const int CaptureRingFrames = (SampleRate * CaptureBufferMs) / 1000;
         private const int CapturePumpBufferFrames = 2048;

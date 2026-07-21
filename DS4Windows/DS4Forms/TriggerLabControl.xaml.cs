@@ -16,7 +16,11 @@ namespace DS4WinWPF.DS4Forms
         {
             public bool IsLeft;
             public ComboBox Profile;
+            public TextBlock ProfileDescription;
+            public TextBlock ActiveLabel;
             public CheckBox Active;
+            public Button RenameProfile;
+            public Button DeleteProfile;
             public Button Feedback;
             public Button Weapon;
             public Button Vibration;
@@ -32,6 +36,8 @@ namespace DS4WinWPF.DS4Forms
         {
             public string Id { get; init; }
             public string Name { get; init; }
+            public string Description { get; init; }
+            public bool IsCustom { get; init; }
             public override string ToString() => Name;
         }
 
@@ -106,10 +112,12 @@ namespace DS4WinWPF.DS4Forms
 
                 settings.Normalize();
                 labEnabledToggle.IsChecked = settings.Enabled;
-                linkedButton.Content = settings.Linked ? "🔗  Linked" : "⛓  Split";
+                linkedButton.Content = settings.Linked ? "Linked" : "Split";
                 linkedButton.Style = FindResource(settings.Linked ? "BridgePrimaryButtonStyle" : "BridgeSecondaryButtonStyle") as Style;
-                LoadSide(leftUi, settings.Left, settings.LeftActive, settings.CustomProfiles);
-                LoadSide(rightUi, settings.Right, settings.RightActive, settings.CustomProfiles);
+                LoadSide(leftUi, settings.Left, settings.LeftActive,
+                    settings.Enabled, settings.CustomProfiles);
+                LoadSide(rightUi, settings.Right, settings.RightActive,
+                    settings.Enabled, settings.CustomProfiles);
                 UpdateStatus(settings);
             }
             finally
@@ -150,7 +158,13 @@ namespace DS4WinWPF.DS4Forms
             title.Children.Add(new TextBlock { Text = $"Shape the {(ui.IsLeft ? "L2" : "R2")} trigger feel", Foreground = FindBrush("MutedForegroundColor", Brushes.Gray) });
             Grid.SetColumn(title, 1); heading.Children.Add(title);
             StackPanel active = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-            active.Children.Add(new TextBlock { Text = "Active", Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center });
+            ui.ActiveLabel = new TextBlock
+            {
+                Text = "Active",
+                Margin = new Thickness(0, 0, 8, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            active.Children.Add(ui.ActiveLabel);
             ui.Active = new CheckBox { Style = FindResource("LabToggle") as Style };
             ui.Active.Click += (_, _) => SideActiveChanged(ui);
             active.Children.Add(ui.Active); Grid.SetColumn(active, 2); heading.Children.Add(active);
@@ -165,10 +179,19 @@ namespace DS4WinWPF.DS4Forms
             StackPanel profileActions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(8, 0, 0, 0) };
             Grid.SetColumn(profileActions, 1);
             profileActions.Children.Add(MakeIconButton("\uE74E", "Save new trigger profile", (_, _) => SaveCustomProfile(ui)));
-            profileActions.Children.Add(MakeIconButton("\uE70F", "Rename trigger profile", (_, _) => RenameCustomProfile(ui)));
-            profileActions.Children.Add(MakeIconButton("\uE74D", "Delete trigger profile", (_, _) => DeleteCustomProfile(ui)));
+            ui.RenameProfile = MakeIconButton("\uE70F", "Rename trigger profile", (_, _) => RenameCustomProfile(ui));
+            ui.DeleteProfile = MakeIconButton("\uE74D", "Delete trigger profile", (_, _) => DeleteCustomProfile(ui));
+            profileActions.Children.Add(ui.RenameProfile);
+            profileActions.Children.Add(ui.DeleteProfile);
             profileRow.Children.Add(profileActions);
             root.Children.Add(profileRow);
+            ui.ProfileDescription = new TextBlock
+            {
+                Margin = new Thickness(0, -4, 0, 12),
+                Foreground = FindBrush("MutedForegroundColor", Brushes.Gray),
+                TextWrapping = TextWrapping.Wrap,
+            };
+            root.Children.Add(ui.ProfileDescription);
 
             Grid modes = new Grid();
             for (int i = 0; i < 3; i++) modes.ColumnDefinitions.Add(new ColumnDefinition());
@@ -184,10 +207,10 @@ namespace DS4WinWPF.DS4Forms
 
             Grid actions = new Grid { Margin = new Thickness(0, 14, 0, 0) };
             actions.ColumnDefinitions.Add(new ColumnDefinition()); actions.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(8) }); actions.ColumnDefinitions.Add(new ColumnDefinition());
-            Button preview = new Button { Content = "▶  Preview", MinHeight = 38, Style = FindResource("BridgeSecondaryButtonStyle") as Style };
+            Button preview = new Button { Content = "\u25B6  Preview", MinHeight = 38, Style = FindResource("BridgeSecondaryButtonStyle") as Style };
             preview.Click += (_, _) => Preview(ui);
-            Button reset = new Button { Content = "↻  Reset", MinHeight = 38, Style = FindResource("BridgeSecondaryButtonStyle") as Style };
-            reset.Click += (_, _) => ResetAll(); Grid.SetColumn(reset, 2);
+            Button reset = new Button { Content = $"\u21BB  Reset {(ui.IsLeft ? "L2" : "R2")}", MinHeight = 38, Style = FindResource("BridgeSecondaryButtonStyle") as Style };
+            reset.Click += (_, _) => ResetSide(ui); Grid.SetColumn(reset, 2);
             actions.Children.Add(preview); actions.Children.Add(reset); root.Children.Add(actions);
             return root;
         }
@@ -223,13 +246,36 @@ namespace DS4WinWPF.DS4Forms
             return grid;
         }
 
-        private void LoadSide(SideUi ui, TriggerLabEffectSettings effect, bool active, IList<TriggerLabCustomProfile> customProfiles)
+        private void LoadSide(SideUi ui, TriggerLabEffectSettings effect,
+            bool active, bool labEnabled,
+            IList<TriggerLabCustomProfile> customProfiles)
         {
-            List<ProfileChoice> profiles = new List<ProfileChoice> { new ProfileChoice { Id = TriggerLabProfileSettings.DefaultProfileId, Name = "Default" } };
-            profiles.AddRange(customProfiles.Select(profile => new ProfileChoice { Id = profile.Id, Name = profile.Name }));
+            List<ProfileChoice> profiles = TriggerLabPresetCatalog.Presets
+                .Select(preset => new ProfileChoice
+                {
+                    Id = preset.Id,
+                    Name = preset.Name,
+                    Description = preset.Description,
+                }).ToList();
+            profiles.AddRange(customProfiles.Select(profile => new ProfileChoice
+            {
+                Id = profile.Id,
+                Name = profile.Name,
+                Description = "Saved custom effect.",
+                IsCustom = true,
+            }));
             ui.Profile.ItemsSource = profiles;
             ui.Profile.SelectedItem = profiles.FirstOrDefault(profile => profile.Id == effect.ProfileId) ?? profiles[0];
+            ProfileChoice selected = (ProfileChoice)ui.Profile.SelectedItem;
+            ui.ProfileDescription.Text = selected.Description;
+            ui.Profile.ToolTip = selected.Description;
+            ui.RenameProfile.IsEnabled = selected.IsCustom;
+            ui.DeleteProfile.IsEnabled = selected.IsCustom;
+            ui.ActiveLabel.Text = labEnabled ? "Active" : "Armed";
             ui.Active.IsChecked = active;
+            ui.Active.ToolTip = labEnabled
+                ? $"Enable or disable this effect for {(ui.IsLeft ? "L2" : "R2")} only."
+                : $"This {(ui.IsLeft ? "L2" : "R2")} choice is saved, but Trigger Lab is globally paused.";
             ui.Start.Value = effect.StartPercent; ui.Wall.Value = effect.WallPercent; ui.Force.Value = effect.ForcePercent;
             ui.StartValue.Text = $"{effect.StartPercent}%"; ui.WallValue.Text = $"{effect.WallPercent}%"; ui.ForceValue.Text = $"{effect.ForcePercent}%";
             SetModeVisuals(ui, effect.Mode);
@@ -262,13 +308,8 @@ namespace DS4WinWPF.DS4Forms
         {
             TriggerLabEffectSettings effect = CurrentEffect(ui);
             bool value = ui.Active.IsChecked == true && effect.ForcePercent > 0;
-            if (value && effect.ProfileId == TriggerLabProfileSettings.DefaultProfileId)
-            {
-                effect.ProfileId = EnsureAutoCustomProfile(settings, effect);
-                MirrorIfLinked(settings, ui);
-            }
-            if (settings.Linked) settings.LeftActive = settings.RightActive = value;
-            else if (ui.IsLeft) settings.LeftActive = value; else settings.RightActive = value;
+            if (ui.IsLeft) settings.LeftActive = value;
+            else settings.RightActive = value;
             if (value) settings.Enabled = true;
             SetSelectedProfileActive(settings, effect.ProfileId, value);
         });
@@ -279,16 +320,7 @@ namespace DS4WinWPF.DS4Forms
             settings.Enabled = enable;
             if (enable && !settings.LeftActive && !settings.RightActive)
             {
-                if (settings.Left.ProfileId == TriggerLabProfileSettings.DefaultProfileId)
-                {
-                    settings.Left.ProfileId = EnsureAutoCustomProfile(settings, settings.Left);
-                }
                 settings.LeftActive = settings.Left.ForcePercent > 0;
-                if (settings.Linked)
-                {
-                    settings.Right = settings.Left.Clone();
-                    settings.RightActive = settings.LeftActive;
-                }
                 SetSelectedProfileActive(settings, settings.Left.ProfileId, settings.LeftActive);
             }
         });
@@ -300,7 +332,6 @@ namespace DS4WinWPF.DS4Forms
                 SaveSplitState(settings);
                 settings.Linked = true;
                 settings.Right = settings.Left.Clone();
-                settings.RightActive = settings.LeftActive;
             }
             else
             {
@@ -349,11 +380,18 @@ namespace DS4WinWPF.DS4Forms
             if (loading || ui.Profile.SelectedItem is not ProfileChoice choice) return;
             Commit(settings =>
             {
-                TriggerLabEffectSettings selected = choice.Id == TriggerLabProfileSettings.DefaultProfileId
-                    ? new TriggerLabEffectSettings()
-                    : ToEffect(settings.CustomProfiles.First(profile => profile.Id == choice.Id));
+                TriggerLabEffectSettings selected;
+                if (!TriggerLabPresetCatalog.TryCreateEffect(choice.Id,
+                    out selected))
+                {
+                    TriggerLabCustomProfile custom = settings.CustomProfiles
+                        .FirstOrDefault(profile => profile.Id == choice.Id);
+                    if (custom == null) return;
+                    selected = ToEffect(custom);
+                }
+                bool active = (ui.IsLeft ? settings.LeftActive :
+                    settings.RightActive) && selected.ForcePercent > 0;
                 if (ui.IsLeft) settings.Left = selected; else settings.Right = selected;
-                bool active = choice.Id != TriggerLabProfileSettings.DefaultProfileId && settings.CustomProfiles.First(profile => profile.Id == choice.Id).Active && selected.ForcePercent > 0;
                 if (ui.IsLeft) settings.LeftActive = active; else settings.RightActive = active;
                 MirrorIfLinked(settings, ui);
             });
@@ -393,7 +431,7 @@ namespace DS4WinWPF.DS4Forms
 
         private static string EnsureAutoCustomProfile(TriggerLabProfileSettings settings, TriggerLabEffectSettings effect)
         {
-            string profileId = effect.ProfileId == TriggerLabProfileSettings.DefaultProfileId
+            string profileId = TriggerLabPresetCatalog.IsBuiltIn(effect.ProfileId)
                 ? "custom"
                 : effect.ProfileId;
             TriggerLabCustomProfile custom = settings.CustomProfiles
@@ -470,12 +508,23 @@ namespace DS4WinWPF.DS4Forms
             previewResetTimer.Start();
         }
 
-        private void ResetAll() => Commit(settings =>
+        private void ResetSide(SideUi ui) => Commit(settings =>
         {
-            SetSelectedProfileActive(settings, settings.Left.ProfileId, false);
-            SetSelectedProfileActive(settings, settings.Right.ProfileId, false);
-            settings.Enabled = false; settings.LeftActive = false; settings.RightActive = false;
-            settings.Linked = true; settings.Left = new TriggerLabEffectSettings(); settings.Right = new TriggerLabEffectSettings();
+            TriggerLabEffectSettings effect = CurrentEffect(ui);
+            SetSelectedProfileActive(settings, effect.ProfileId, false);
+            TriggerLabEffectSettings reset = TriggerLabPresetCatalog.Presets[0]
+                .CreateEffect();
+            if (ui.IsLeft)
+            {
+                settings.Left = reset;
+                settings.LeftActive = false;
+            }
+            else
+            {
+                settings.Right = reset;
+                settings.RightActive = false;
+            }
+            MirrorIfLinked(settings, ui);
         });
 
         public void ApplyPersistentEffects()
@@ -524,9 +573,29 @@ namespace DS4WinWPF.DS4Forms
             overrideBadge.Visibility = settings.HasActiveOverride
                 ? Visibility.Visible
                 : Visibility.Collapsed;
+            if (!settings.Enabled)
+            {
+                bool anyArmed = settings.LeftActive || settings.RightActive;
+                labStatusText.Text = anyArmed
+                    ? $"Trigger Lab is paused. {ActiveTriggerLabel(settings)} " +
+                        $"{(settings.LeftActive && settings.RightActive ? "are" : "is")} armed and will resume when Enabled is turned on."
+                    : "Trigger Lab is paused. Choose an effect and arm L2 or R2, then turn Enabled on.";
+                labBehaviorText.Text =
+                    "Armed effects are saved per trigger and do not override the game while paused.";
+                return;
+            }
+
             labStatusText.Text = settings.HasActiveOverride
-                ? "Made with Trigger Lab - this profile is overriding game adaptive-trigger effects."
-                : "Trigger Lab is ready. Activate L2 or R2 to persist an effect in this profile.";
+                ? $"Made with Trigger Lab - {ActiveTriggerLabel(settings)} overrides incoming game trigger effects."
+                : "Trigger Lab is enabled. Arm L2 or R2 to persist an effect in this profile.";
+            labBehaviorText.Text =
+                "Active lab effects override incoming game adaptive-trigger output.";
+        }
+
+        private static string ActiveTriggerLabel(TriggerLabProfileSettings settings)
+        {
+            if (settings.LeftActive && settings.RightActive) return "L2 and R2";
+            return settings.LeftActive ? "L2" : "R2";
         }
 
         private Brush FindBrush(string key, Brush fallback) => TryFindResource(key) as Brush ?? fallback;

@@ -81,6 +81,7 @@ namespace DS4WinWPF.DS4Forms
                 enabledToggle.IsChecked = settings.Enabled;
                 gainSlider.Value = settings.GainPercent;
                 gainValueText.Text = $"{settings.GainPercent}%";
+                UpdateGainPresetVisuals(settings.GainPercent);
                 bassFocusCombo.SelectedIndex = (int)settings.BassFocus;
                 responseCombo.SelectedIndex = (int)settings.Response;
                 attackCombo.SelectedIndex = (int)settings.Attack;
@@ -229,6 +230,20 @@ namespace DS4WinWPF.DS4Forms
                 : "Replace ignores game-provided advanced haptics and uses only the selected audio source.";
         }
 
+        private void UpdateGainPresetVisuals(int gainPercent)
+        {
+            if (lowGainButton == null || mediumGainButton == null ||
+                highGainButton == null)
+            {
+                return;
+            }
+            Style primary = FindResource("ActivePresetButton") as Style;
+            Style secondary = FindResource("PresetButton") as Style;
+            lowGainButton.Style = gainPercent == 50 ? primary : secondary;
+            mediumGainButton.Style = gainPercent == 100 ? primary : secondary;
+            highGainButton.Style = gainPercent == 150 ? primary : secondary;
+        }
+
         private void UpdateStatus(AudioHapticsProfileSettings settings)
         {
             if (settings == null)
@@ -291,6 +306,7 @@ namespace DS4WinWPF.DS4Forms
         {
             int value = (int)Math.Round(e.NewValue);
             gainValueText.Text = $"{value}%";
+            UpdateGainPresetVisuals(value);
             Commit(settings => settings.GainPercent = value);
         }
         private void GainPreset_Click(object sender, RoutedEventArgs e)

@@ -69,7 +69,7 @@
                     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <TextBlock Text="&#xE946;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource AccentColor}" VerticalAlignment="Center" />
                     <TextBlock x:Name="labStatusText" Grid.Column="1" Margin="10,0" TextWrapping="Wrap" VerticalAlignment="Center" />
-                    <TextBlock Grid.Column="2" Text="Active lab effects override incoming game adaptive-trigger output." Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                    <TextBlock x:Name="labBehaviorText" Grid.Column="2" Text="Active lab effects override incoming game adaptive-trigger output." Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap" VerticalAlignment="Center" />
                 </Grid>
             </Border>
         </Grid>

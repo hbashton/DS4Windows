@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Xml.Serialization;
 using DS4Windows;
@@ -115,6 +116,73 @@ namespace DS4WindowsTests
             }
 
             Assert.IsFalse(xml.Contains("<AudioHaptics>"));
+        }
+
+        [TestMethod]
+        public void Ds5BridgeAudioHapticsConfigurationMatrixClonesWithoutLoss()
+        {
+            foreach (AudioHapticsSourceKind source in
+                Enum.GetValues<AudioHapticsSourceKind>())
+            foreach (AudioHapticsMode mode in Enum.GetValues<AudioHapticsMode>())
+            foreach (AudioHapticsBassFocus bass in
+                Enum.GetValues<AudioHapticsBassFocus>())
+            foreach (AudioHapticsResponse response in
+                Enum.GetValues<AudioHapticsResponse>())
+            foreach (AudioHapticsAttack attack in
+                Enum.GetValues<AudioHapticsAttack>())
+            foreach (AudioHapticsRelease release in
+                Enum.GetValues<AudioHapticsRelease>())
+            {
+                AudioHapticsProfileSettings clone =
+                    new AudioHapticsProfileSettings
+                    {
+                        Enabled = true,
+                        Source = source,
+                        Mode = mode,
+                        GainPercent = 150,
+                        BassFocus = bass,
+                        Response = response,
+                        Attack = attack,
+                        Release = release,
+                    }.Clone();
+
+                Assert.AreEqual(source, clone.Source);
+                Assert.AreEqual(mode, clone.Mode);
+                Assert.AreEqual(bass, clone.BassFocus);
+                Assert.AreEqual(response, clone.Response);
+                Assert.AreEqual(attack, clone.Attack);
+                Assert.AreEqual(release, clone.Release);
+                Assert.AreEqual(150, clone.GainPercent);
+            }
+        }
+
+        [TestMethod]
+        public void LiveAudioHapticsDoesNotWaitForAPlaybackReservoir()
+        {
+            Assert.AreEqual(1,
+                AudioHapticsService.SlotRuntime.WriterPrebufferFrames,
+                "Live audio haptics must start with the first complete packet.");
+            Assert.IsTrue(
+                AudioHapticsService.SlotRuntime.CaptureBufferMilliseconds <= 5,
+                "Loopback capture should request a sub-10 ms period.");
+            Assert.IsTrue(
+                AudioHapticsService.SlotRuntime
+                    .UsbOutputLatencyMilliseconds <= 10,
+                "USB haptics must not use a media-playback latency buffer.");
+        }
+
+        [TestMethod]
+        public void StaleAudioHapticsPacketIsNeverReplayed()
+        {
+            long now = Stopwatch.GetTimestamp();
+            long stale = now - Stopwatch.Frequency *
+                (AudioHapticsService.SlotRuntime
+                    .MaximumLivePacketAgeMilliseconds + 1) / 1000;
+
+            Assert.IsTrue(AudioHapticsService.SlotRuntime
+                .IsLivePacketExpired(stale, now));
+            Assert.IsFalse(AudioHapticsService.SlotRuntime
+                .IsLivePacketExpired(now, now));
         }
     }
 }

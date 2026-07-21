@@ -779,6 +779,28 @@ namespace DS4Windows.InputDevices
             }
         }
 
+        internal bool BeginBluetoothAtomicSpeakerFrame(long speakerSession)
+        {
+            lock (bluetoothCombinedTransportWriteLock)
+            {
+                if (speakerSession == 0 ||
+                    bluetoothActiveSpeakerSession != speakerSession ||
+                    conType != ConnectionType.BT || !enableSpeakerOutput ||
+                    Volatile.Read(ref bluetoothOutputTransportStopping) != 0 ||
+                    Volatile.Read(ref bluetoothAudioLifecycleTransitioning) != 0)
+                {
+                    return false;
+                }
+
+                // The paired haptics update follows before the PCM callback
+                // releases its generation lock. Claiming here makes that update
+                // template-only, so the first haptics and speaker data cannot
+                // be presented as competing physical HID reports.
+                return ClaimBluetoothSpeakerClock(
+                    BluetoothSpeakerClockPresentedLeaseMilliseconds) != 0;
+            }
+        }
+
         internal bool EndBluetoothSpeakerGeneration(long speakerSession,
             long speakerGeneration)
         {

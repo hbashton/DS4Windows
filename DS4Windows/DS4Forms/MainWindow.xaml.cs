@@ -1080,6 +1080,23 @@ Suspend support not enabled.", true);
 
         private void MainWinVM_SelectedControllerChanged(object sender, EventArgs e)
         {
+            // Controller status notifications originate on the HID input
+            // thread. Both feature controls update WPF dependency properties,
+            // so marshal the complete selection refresh back to this window's
+            // dispatcher instead of allowing a connect/status event to tear
+            // down the process with VerifyAccess.
+            if (!Dispatcher.CheckAccess())
+            {
+                if (!Dispatcher.HasShutdownStarted &&
+                    !Dispatcher.HasShutdownFinished)
+                {
+                    Dispatcher.BeginInvoke(DispatcherPriority.DataBind,
+                        new Action(() =>
+                            MainWinVM_SelectedControllerChanged(sender, e)));
+                }
+                return;
+            }
+
             audioHapticsControl.SetDevice(mainWinVM.SelectedController?.DevIndex ?? -1);
             triggerLabControl.SetDevice(mainWinVM.SelectedController?.DevIndex ?? -1);
         }

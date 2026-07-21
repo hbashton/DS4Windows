@@ -40,6 +40,27 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
+        public void SpeakerQueueKeepsAtomicKindAndTargetBesidePayload()
+        {
+            var buffer = new ViiperFeedbackDispatchBuffer(2, 32, 12);
+            byte[] atomicGeneration = { 0xda, 0x01, 0x36, 0x92, 1, 2, 3, 4 };
+            byte[] destination = new byte[32];
+
+            Assert.IsTrue(buffer.TryEnqueueSpeaker(atomicGeneration,
+                atomicGeneration.Length, generation: 77, kind: 1,
+                deviceIndex: 3));
+            Assert.IsTrue(buffer.TryDequeueSpeaker(destination,
+                out int length, out long generation, out byte kind,
+                out int deviceIndex));
+
+            CollectionAssert.AreEqual(atomicGeneration,
+                destination[..length]);
+            Assert.AreEqual(77L, generation);
+            Assert.AreEqual((byte)1, kind);
+            Assert.AreEqual(3, deviceIndex);
+        }
+
+        [TestMethod]
         public void FullSpeakerQueueDropsOldestAndKeepsLiveAudioCurrent()
         {
             var buffer = new ViiperFeedbackDispatchBuffer(2, 8, 8);

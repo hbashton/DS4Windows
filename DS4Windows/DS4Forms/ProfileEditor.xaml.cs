@@ -45,7 +45,17 @@ namespace DS4WinWPF.DS4Forms
         private MappingListViewModel mappingListVM;
         private ProfileEntity currentProfile;
         private SpecialActionsListViewModel specialActionsVM;
-        private bool usingDualSenseDiagram;
+        private enum ControllerDiagramKind
+        {
+            DualShock4,
+            DualSense,
+            DualSenseEdge,
+        }
+
+        private ControllerDiagramKind controllerDiagramKind;
+        private bool controllerDiagramSelectorReady;
+        private bool usingDualSenseDiagram =>
+            controllerDiagramKind == ControllerDiagramKind.DualSense;
 
         public event EventHandler Closed;
         public event EventHandler ProfileNameChanged;
@@ -61,6 +71,7 @@ namespace DS4WinWPF.DS4Forms
         private Dictionary<Button, int> hoverIndexes = new Dictionary<Button, int>();
         private Dictionary<int, Button> reverseHoverIndexes = new Dictionary<int, Button>();
         private Dictionary<Button, ImageSource> dualSenseHoverImages = new Dictionary<Button, ImageSource>();
+        private Dictionary<Button, Geometry> vectorHoverGeometries = new Dictionary<Button, Geometry>();
 
         private bool keepsize;
         private bool controllerReadingsTabActive = false;
@@ -98,10 +109,15 @@ namespace DS4WinWPF.DS4Forms
             picBoxHover.Visibility = Visibility.Hidden;
             picBoxHover2.Visibility = Visibility.Hidden;
 
-            ConfigureControllerDiagram(physicalController?.DeviceType);
-
             bool physicalControllerIsDualSenseEdge =
                 physicalController?.HidDevice?.Attributes?.ProductId == 0x0DF2;
+            ControllerDiagramKind defaultDiagram = physicalControllerIsDualSenseEdge
+                ? ControllerDiagramKind.DualSenseEdge
+                : physicalController?.DeviceType == InputDeviceType.DualSense
+                    ? ControllerDiagramKind.DualSense
+                    : ControllerDiagramKind.DualShock4;
+            ConfigureControllerDiagram(defaultDiagram, true);
+
             mappingListVM = new MappingListViewModel(deviceNum,
                 profileSettingsVM.ContType, physicalController?.DeviceType,
                 physicalControllerIsDualSenseEdge);
@@ -129,15 +145,46 @@ namespace DS4WinWPF.DS4Forms
             SetupEvents();
         }
 
-        private void ConfigureControllerDiagram(InputDeviceType? physicalControllerType)
+        private void ConfigureControllerDiagram(ControllerDiagramKind diagramKind,
+            bool updateSelector = false)
         {
-            usingDualSenseDiagram =
-                physicalControllerType == InputDeviceType.DualSense;
-            if (!usingDualSenseDiagram)
+            controllerDiagramKind = diagramKind;
+            dualSenseHoverImages.Clear();
+            vectorHoverGeometries.Clear();
+            HideControllerHover();
+
+            muteConBtn.Visibility = Visibility.Collapsed;
+            fnlConBtn.Visibility = Visibility.Collapsed;
+            fnrConBtn.Visibility = Visibility.Collapsed;
+            blpConBtn.Visibility = Visibility.Collapsed;
+            brpConBtn.Visibility = Visibility.Collapsed;
+
+            lightbarRect.OpacityMask = null;
+            lightbarRect.RadiusX = 2;
+            lightbarRect.RadiusY = 2;
+
+            if (updateSelector)
             {
-                return;
+                controllerDiagramSelector.SelectedIndex = (int)diagramKind;
+                controllerDiagramSelectorReady = true;
             }
 
+            switch (diagramKind)
+            {
+                case ControllerDiagramKind.DualSense:
+                    ConfigureDualSenseDiagram();
+                    break;
+                case ControllerDiagramKind.DualSenseEdge:
+                    ConfigureDualSenseEdgeDiagram();
+                    break;
+                default:
+                    ConfigureDualShock4Diagram();
+                    break;
+            }
+        }
+
+        private void ConfigureDualSenseDiagram()
+        {
             controllerDiagram.Source = LoadResourceImage("DualSense Config.png");
             controllerDiagram.ToolTip = "DualSense remapping layout";
 
@@ -186,6 +233,203 @@ namespace DS4WinWPF.DS4Forms
             lightbarRect.OpacityMask = new ImageBrush(LoadResourceImage("DualSense lightbar.png"));
 
             PopulateDualSenseHoverImages();
+        }
+
+        private void ConfigureDualShock4Diagram()
+        {
+            controllerDiagram.Source = LoadResourceImage("DualShock 4 Controller.png");
+            controllerDiagram.ToolTip = "DualShock 4 remapping layout";
+
+            SetCanvasButtonBounds(crossConBtn, 312, 123, 24, 24);
+            SetCanvasButtonBounds(circleConBtn, 337, 101, 24, 24);
+            SetCanvasButtonBounds(squareConBtn, 287, 101, 24, 24);
+            SetCanvasButtonBounds(triangleConBtn, 311, 80, 24, 24);
+
+            SetCanvasButtonBounds(l1ConBtn, 96, 35, 48, 21);
+            SetCanvasButtonBounds(r1ConBtn, 297, 35, 48, 21);
+            SetCanvasButtonBounds(l2ConBtn, 101, 16, 39, 23);
+            SetCanvasButtonBounds(r2ConBtn, 301, 16, 39, 23);
+            SetCanvasButtonBounds(shareConBtn, 145, 70, 15, 23);
+            SetCanvasButtonBounds(optionsConBtn, 280, 70, 15, 23);
+            SetCanvasButtonBounds(guideConBtn, 211, 143, 19, 15);
+
+            SetCanvasButtonBounds(leftTouchConBtn, 166, 57, 54, 61);
+            SetCanvasButtonBounds(multiTouchConBtn, 207, 57, 27, 61);
+            SetCanvasButtonBounds(rightTouchConBtn, 220, 57, 55, 61);
+            SetCanvasButtonBounds(topTouchConBtn, 166, 44, 109, 16);
+
+            SetCanvasButtonBounds(l3ConBtn, 148, 142, 39, 39);
+            SetCanvasButtonBounds(lsuConBtn, 158, 136, 19, 14);
+            SetCanvasButtonBounds(lsrConBtn, 181, 152, 15, 18);
+            SetCanvasButtonBounds(lsdConBtn, 158, 175, 19, 14);
+            SetCanvasButtonBounds(lslConBtn, 139, 152, 15, 18);
+
+            SetCanvasButtonBounds(r3ConBtn, 252, 142, 39, 39);
+            SetCanvasButtonBounds(rsuConBtn, 262, 136, 19, 14);
+            SetCanvasButtonBounds(rsrConBtn, 285, 152, 15, 18);
+            SetCanvasButtonBounds(rsdConBtn, 262, 175, 19, 14);
+            SetCanvasButtonBounds(rslConBtn, 243, 152, 15, 18);
+
+            SetCanvasButtonBounds(upConBtn, 107, 86, 20, 23);
+            SetCanvasButtonBounds(rightConBtn, 126, 105, 23, 20);
+            SetCanvasButtonBounds(downConBtn, 107, 123, 20, 23);
+            SetCanvasButtonBounds(leftConBtn, 87, 105, 23, 20);
+
+            Canvas.SetLeft(ds4LightbarColorBtn, 165);
+            Canvas.SetTop(ds4LightbarColorBtn, 45);
+            ds4LightbarColorBtn.Width = 111;
+            ds4LightbarColorBtn.Height = 6;
+
+            PopulateDualShock4VectorHighlights();
+        }
+
+        private void ConfigureDualSenseEdgeDiagram()
+        {
+            controllerDiagram.Source = LoadResourceImage("DualSense Edge Controller.png");
+            controllerDiagram.ToolTip = "DualSense Edge remapping layout";
+
+            SetCanvasButtonBounds(crossConBtn, 312, 77, 25, 25);
+            SetCanvasButtonBounds(circleConBtn, 337, 51, 25, 25);
+            SetCanvasButtonBounds(squareConBtn, 286, 51, 25, 25);
+            SetCanvasButtonBounds(triangleConBtn, 312, 25, 25, 25);
+
+            SetCanvasButtonBounds(l1ConBtn, 83, 0, 69, 23);
+            SetCanvasButtonBounds(r1ConBtn, 289, 0, 69, 23);
+            SetCanvasButtonBounds(l2ConBtn, 91, 0, 55, 13);
+            SetCanvasButtonBounds(r2ConBtn, 295, 0, 55, 13);
+            SetCanvasButtonBounds(shareConBtn, 132, 18, 16, 22);
+            SetCanvasButtonBounds(optionsConBtn, 292, 18, 16, 22);
+            SetCanvasButtonBounds(guideConBtn, 211, 123, 19, 18);
+            SetCanvasButtonBounds(muteConBtn, 211, 153, 19, 14);
+            muteConBtn.Visibility = Visibility.Visible;
+
+            SetCanvasButtonBounds(leftTouchConBtn, 149, 18, 71, 70);
+            SetCanvasButtonBounds(multiTouchConBtn, 208, 18, 25, 70);
+            SetCanvasButtonBounds(rightTouchConBtn, 220, 18, 71, 70);
+            SetCanvasButtonBounds(topTouchConBtn, 149, 4, 142, 17);
+
+            SetCanvasButtonBounds(l3ConBtn, 144, 89, 39, 39);
+            SetCanvasButtonBounds(lsuConBtn, 154, 83, 19, 14);
+            SetCanvasButtonBounds(lsrConBtn, 177, 99, 15, 18);
+            SetCanvasButtonBounds(lsdConBtn, 154, 122, 19, 14);
+            SetCanvasButtonBounds(lslConBtn, 135, 99, 15, 18);
+            SetCanvasButtonBounds(r3ConBtn, 258, 89, 39, 39);
+            SetCanvasButtonBounds(rsuConBtn, 268, 83, 19, 14);
+            SetCanvasButtonBounds(rsrConBtn, 291, 99, 15, 18);
+            SetCanvasButtonBounds(rsdConBtn, 268, 122, 19, 14);
+            SetCanvasButtonBounds(rslConBtn, 249, 99, 15, 18);
+
+            SetCanvasButtonBounds(upConBtn, 104, 25, 21, 24);
+            SetCanvasButtonBounds(rightConBtn, 124, 51, 24, 21);
+            SetCanvasButtonBounds(downConBtn, 104, 76, 21, 24);
+            SetCanvasButtonBounds(leftConBtn, 80, 51, 24, 21);
+
+            SetCanvasButtonBounds(fnlConBtn, 142, 143, 30, 12);
+            SetCanvasButtonBounds(fnrConBtn, 269, 143, 30, 12);
+            SetCanvasButtonBounds(blpConBtn, 111, 150, 37, 15);
+            SetCanvasButtonBounds(brpConBtn, 293, 150, 37, 15);
+            fnlConBtn.Visibility = Visibility.Visible;
+            fnrConBtn.Visibility = Visibility.Visible;
+            blpConBtn.Visibility = Visibility.Visible;
+            brpConBtn.Visibility = Visibility.Visible;
+
+            Canvas.SetLeft(ds4LightbarColorBtn, 148);
+            Canvas.SetTop(ds4LightbarColorBtn, 4);
+            ds4LightbarColorBtn.Width = 144;
+            ds4LightbarColorBtn.Height = 5;
+
+            PopulateDualSenseEdgeVectorHighlights();
+        }
+
+        private static Geometry EllipseHighlight(double x, double y, double width, double height)
+        {
+            return new EllipseGeometry(new Rect(x, y, width, height));
+        }
+
+        private static Geometry RoundedHighlight(double x, double y, double width,
+            double height, double radius = 4)
+        {
+            return new RectangleGeometry(new Rect(x, y, width, height), radius, radius);
+        }
+
+        private void AddStickHighlights(Button stick, Button up, Button right,
+            Button down, Button left, Geometry geometry)
+        {
+            vectorHoverGeometries[stick] = geometry;
+            vectorHoverGeometries[up] = geometry;
+            vectorHoverGeometries[right] = geometry;
+            vectorHoverGeometries[down] = geometry;
+            vectorHoverGeometries[left] = geometry;
+        }
+
+        private void PopulateDualShock4VectorHighlights()
+        {
+            vectorHoverGeometries[crossConBtn] = EllipseHighlight(313, 124, 22, 22);
+            vectorHoverGeometries[circleConBtn] = EllipseHighlight(338, 102, 22, 22);
+            vectorHoverGeometries[squareConBtn] = EllipseHighlight(288, 102, 22, 22);
+            vectorHoverGeometries[triangleConBtn] = EllipseHighlight(312, 81, 22, 22);
+            vectorHoverGeometries[l1ConBtn] = RoundedHighlight(97, 36, 46, 19, 7);
+            vectorHoverGeometries[r1ConBtn] = RoundedHighlight(298, 36, 46, 19, 7);
+            vectorHoverGeometries[l2ConBtn] = RoundedHighlight(102, 17, 37, 21, 8);
+            vectorHoverGeometries[r2ConBtn] = RoundedHighlight(302, 17, 37, 21, 8);
+            vectorHoverGeometries[shareConBtn] = RoundedHighlight(146, 71, 13, 21, 6);
+            vectorHoverGeometries[optionsConBtn] = RoundedHighlight(281, 71, 13, 21, 6);
+            vectorHoverGeometries[guideConBtn] = EllipseHighlight(212, 144, 17, 13);
+            vectorHoverGeometries[leftTouchConBtn] = RoundedHighlight(167, 58, 53, 59, 3);
+            vectorHoverGeometries[multiTouchConBtn] = RoundedHighlight(207, 58, 27, 59, 3);
+            vectorHoverGeometries[rightTouchConBtn] = RoundedHighlight(220, 58, 54, 59, 3);
+            vectorHoverGeometries[topTouchConBtn] = RoundedHighlight(167, 45, 108, 14, 5);
+            AddStickHighlights(l3ConBtn, lsuConBtn, lsrConBtn, lsdConBtn, lslConBtn,
+                EllipseHighlight(149, 143, 37, 37));
+            AddStickHighlights(r3ConBtn, rsuConBtn, rsrConBtn, rsdConBtn, rslConBtn,
+                EllipseHighlight(253, 143, 37, 37));
+            vectorHoverGeometries[upConBtn] = RoundedHighlight(108, 87, 18, 21, 4);
+            vectorHoverGeometries[rightConBtn] = RoundedHighlight(127, 106, 21, 18, 4);
+            vectorHoverGeometries[downConBtn] = RoundedHighlight(108, 124, 18, 21, 4);
+            vectorHoverGeometries[leftConBtn] = RoundedHighlight(88, 106, 21, 18, 4);
+        }
+
+        private void PopulateDualSenseEdgeVectorHighlights()
+        {
+            vectorHoverGeometries[crossConBtn] = EllipseHighlight(313, 78, 23, 23);
+            vectorHoverGeometries[circleConBtn] = EllipseHighlight(338, 52, 23, 23);
+            vectorHoverGeometries[squareConBtn] = EllipseHighlight(287, 52, 23, 23);
+            vectorHoverGeometries[triangleConBtn] = EllipseHighlight(313, 26, 23, 23);
+            vectorHoverGeometries[l1ConBtn] = RoundedHighlight(84, 1, 67, 21, 8);
+            vectorHoverGeometries[r1ConBtn] = RoundedHighlight(290, 1, 67, 21, 8);
+            vectorHoverGeometries[l2ConBtn] = RoundedHighlight(92, 0, 53, 12, 6);
+            vectorHoverGeometries[r2ConBtn] = RoundedHighlight(296, 0, 53, 12, 6);
+            vectorHoverGeometries[shareConBtn] = RoundedHighlight(133, 19, 14, 20, 7);
+            vectorHoverGeometries[optionsConBtn] = RoundedHighlight(293, 19, 14, 20, 7);
+            vectorHoverGeometries[guideConBtn] = EllipseHighlight(212, 124, 17, 16);
+            vectorHoverGeometries[muteConBtn] = RoundedHighlight(212, 154, 17, 12, 5);
+            vectorHoverGeometries[leftTouchConBtn] = RoundedHighlight(150, 19, 70, 68, 8);
+            vectorHoverGeometries[multiTouchConBtn] = RoundedHighlight(208, 19, 25, 68, 8);
+            vectorHoverGeometries[rightTouchConBtn] = RoundedHighlight(220, 19, 70, 68, 8);
+            vectorHoverGeometries[topTouchConBtn] = RoundedHighlight(150, 5, 140, 15, 7);
+            AddStickHighlights(l3ConBtn, lsuConBtn, lsrConBtn, lsdConBtn, lslConBtn,
+                EllipseHighlight(145, 90, 37, 37));
+            AddStickHighlights(r3ConBtn, rsuConBtn, rsrConBtn, rsdConBtn, rslConBtn,
+                EllipseHighlight(259, 90, 37, 37));
+            vectorHoverGeometries[upConBtn] = RoundedHighlight(105, 26, 19, 22, 5);
+            vectorHoverGeometries[rightConBtn] = RoundedHighlight(125, 52, 22, 19, 5);
+            vectorHoverGeometries[downConBtn] = RoundedHighlight(105, 77, 19, 22, 5);
+            vectorHoverGeometries[leftConBtn] = RoundedHighlight(81, 52, 22, 19, 5);
+            vectorHoverGeometries[fnlConBtn] = RoundedHighlight(143, 144, 28, 10, 4);
+            vectorHoverGeometries[fnrConBtn] = RoundedHighlight(270, 144, 28, 10, 4);
+            vectorHoverGeometries[blpConBtn] = RoundedHighlight(112, 151, 35, 13, 5);
+            vectorHoverGeometries[brpConBtn] = RoundedHighlight(294, 151, 35, 13, 5);
+        }
+
+        private void ControllerDiagramSelector_SelectionChanged(object sender,
+            SelectionChangedEventArgs e)
+        {
+            if (!controllerDiagramSelectorReady || controllerDiagramSelector.SelectedIndex < 0)
+            {
+                return;
+            }
+
+            ConfigureControllerDiagram((ControllerDiagramKind)controllerDiagramSelector.SelectedIndex);
         }
 
         private void PopulateDualSenseHoverImages()
@@ -799,14 +1043,12 @@ namespace DS4WinWPF.DS4Forms
 
         private void PopulateHoverImages()
         {
-            if (usingDualSenseDiagram)
-            {
-                // Every DualSense highlight, including the illustrated touch
-                // gestures, uses the full-canvas overlay dictionary populated by
-                // PopulateDualSenseHoverImages. Do not load legacy per-button DS4
-                // artwork into this mode.
-                return;
-            }
+            // All current diagrams use either the exact full-canvas DualSense
+            // atlas or controller-specific vector masks. Avoid decoding the old
+            // per-button DS4 bitmap set every time the editor opens.
+            return;
+
+#pragma warning disable CS0162
 
             ImageSourceConverter sourceConverter = new ImageSourceConverter();
 
@@ -976,6 +1218,7 @@ namespace DS4WinWPF.DS4Forms
             hoverImages[fnrConBtn] = guideHover;
             hoverImages[blpConBtn] = guideHover;
             hoverImages[brpConBtn] = guideHover;
+#pragma warning restore CS0162
         }
 
         public void SelectWorkspaceSection(int sectionIndex)
@@ -1221,6 +1464,15 @@ namespace DS4WinWPF.DS4Forms
 
         private void HoverConBtn_Click(object sender, RoutedEventArgs e)
         {
+            if (sender is not Button button ||
+                !hoverIndexes.TryGetValue(button, out int mappingIndex) ||
+                mappingIndex < 0 || mappingIndex >= mappingListVM.Mappings.Count ||
+                !mappingListVM.Mappings[mappingIndex].IsAvailableOnPhysicalController)
+            {
+                return;
+            }
+
+            mappingListVM.SelectedIndex = mappingIndex;
             MappedControl mpControl = mappingListVM.Mappings[mappingListVM.SelectedIndex];
             BindingWindow window = new BindingWindow(deviceNum, mpControl.Setting);
             window.Owner = App.Current.MainWindow;
@@ -1232,7 +1484,11 @@ namespace DS4WinWPF.DS4Forms
 
         private void InputControlHighlight(Button control)
         {
-            if (usingDualSenseDiagram && dualSenseHoverImages.TryGetValue(control, out ImageSource dualSenseHover))
+            controllerVectorHighlight.Visibility = Visibility.Collapsed;
+            picBoxHover.Visibility = Visibility.Hidden;
+
+            if (controllerDiagramKind == ControllerDiagramKind.DualSense &&
+                dualSenseHoverImages.TryGetValue(control, out ImageSource dualSenseHover))
             {
                 picBoxHover.Source = dualSenseHover;
                 Canvas.SetLeft(picBoxHover, 0);
@@ -1241,6 +1497,11 @@ namespace DS4WinWPF.DS4Forms
                 picBoxHover.Height = 220;
                 picBoxHover.Stretch = Stretch.Fill;
                 picBoxHover.Visibility = Visibility.Visible;
+            }
+            else if (vectorHoverGeometries.TryGetValue(control, out Geometry geometry))
+            {
+                controllerVectorHighlight.Data = geometry;
+                controllerVectorHighlight.Visibility = Visibility.Visible;
             }
             else
             {
@@ -1297,6 +1558,7 @@ namespace DS4WinWPF.DS4Forms
             Canvas.SetLeft(picBoxHover, 0);
             Canvas.SetTop(picBoxHover, 0);
             picBoxHover.Visibility = Visibility.Hidden;
+            controllerVectorHighlight.Visibility = Visibility.Collapsed;
         }
 
         private void GyroOutModeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -2076,8 +2338,16 @@ namespace DS4WinWPF.DS4Forms
 
         private void ConBtn_MouseRightButtonUp(object sender, MouseButtonEventArgs e)
         {
-            Button btn = sender as Button;
-            MappedControl mpControl = mappingListVM.Mappings[mappingListVM.SelectedIndex];
+            if (sender is not Button btn ||
+                !hoverIndexes.TryGetValue(btn, out int mappingIndex) ||
+                mappingIndex < 0 || mappingIndex >= mappingListVM.Mappings.Count ||
+                !mappingListVM.Mappings[mappingIndex].IsAvailableOnPhysicalController)
+            {
+                return;
+            }
+
+            mappingListVM.SelectedIndex = mappingIndex;
+            MappedControl mpControl = mappingListVM.Mappings[mappingIndex];
             profileSettingsVM.PresetMenuUtil.SetHighlightControl(mpControl.Control);
             ContextMenu cm = conCanvas.FindResource("presetMenu") as ContextMenu;
             MenuItem temp = cm.Items[0] as MenuItem;

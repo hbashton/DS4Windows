@@ -32,6 +32,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
     {
         private int deviceNum;
         private bool use360Mode;
+        private OutContType outputControllerType;
         private DS4ControlSettings settings;
         private OutBinding currentOutBind;
         private OutBinding shiftOutBind;
@@ -42,6 +43,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         {
             get => use360Mode;
         }
+        public OutContType OutputControllerType => outputControllerType;
         public int DeviceNum { get => deviceNum; }
         public OutBinding CurrentOutBind { get => currentOutBind; }
         public OutBinding ShiftOutBind { get => shiftOutBind; }
@@ -54,8 +56,9 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public BindingWindowViewModel(int deviceNum, DS4ControlSettings settings)
         {
             this.deviceNum = deviceNum;
-            use360Mode = Global.outDevTypeTemp[deviceNum] == OutContType.X360 ||
-                Global.outDevTypeTemp[deviceNum] == OutContType.ViiperX360;
+            outputControllerType = Global.outDevTypeTemp[deviceNum].Normalize();
+            use360Mode = outputControllerType == OutContType.X360 ||
+                outputControllerType == OutContType.ViiperX360;
             this.settings = settings;
             currentOutBind = new OutBinding();
             shiftOutBind = new OutBinding();

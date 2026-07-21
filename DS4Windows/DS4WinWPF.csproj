@@ -181,6 +181,8 @@
 		<None Include="Resources\Pairmode.png" />
 		<None Include="Resources\USB.png" />
 		<None Include="Resources\DualSense Controller.png" />
+		<None Include="Resources\DualSense Edge Controller.png" />
+		<None Include="Resources\Switch 2 Pro Controller.png" />
 		<None Include="Resources\DualShock 4 Controller.png" />
 		<None Include="Resources\DualSense Config.png" />
 		<None Include="Resources\DualSense lightbar.png" />
@@ -274,6 +276,8 @@
 		<Resource Include="Resources\Pairmode.png" />
 		<Resource Include="Resources\USB.png" />
 		<Resource Include="Resources\DualSense Controller.png" />
+		<Resource Include="Resources\DualSense Edge Controller.png" />
+		<Resource Include="Resources\Switch 2 Pro Controller.png" />
 		<Resource Include="Resources\DualShock 4 Controller.png" />
 		<Resource Include="Resources\DualSense Config.png" />
 		<Resource Include="Resources\DualSense lightbar.png" />

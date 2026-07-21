@@ -62,6 +62,7 @@ namespace DS4WinWPF.DS4Forms
         private MainWindowsViewModel mainWinVM;
         private StatusLogMsg lastLogMsg = new StatusLogMsg();
         private ProfileList profileListHolder = new ProfileList();
+        private ListCollectionView profilesCollectionView;
         private LogViewModel logvm;
         private ControllerListViewModel conLvViewModel;
         private TrayIconViewModel trayIconVM;
@@ -130,7 +131,11 @@ namespace DS4WinWPF.DS4Forms
             ProcessPriorityComboBox.ItemsSource = ProcessPriorityClasses;
 
             profileListHolder.Refresh();
-            profilesListBox.ItemsSource = profileListHolder.ProfileListCol;
+            profilesCollectionView = new ListCollectionView(profileListHolder.ProfileListCol)
+            {
+                Filter = ProfileMatchesSearch,
+            };
+            profilesListBox.ItemsSource = profilesCollectionView;
 
             StartStopBtn.Content = App.rootHub.running ? Translations.Strings.StopText :
                 Translations.Strings.StartText;
@@ -2078,7 +2083,7 @@ Suspend support not enabled.", true);
 
         private void ExportProfBtn_Click(object sender, RoutedEventArgs e)
         {
-            if (profilesListBox.SelectedIndex >= 0)
+            if (profilesListBox.SelectedItem is ProfileEntity entity)
             {
                 SaveFileDialog dialog = new SaveFileDialog();
                 dialog.AddExtension = true;
@@ -2086,8 +2091,7 @@ Suspend support not enabled.", true);
                 dialog.Filter = "DS4Windows Profile (*.xml)|*.xml";
                 dialog.Title = "Select Profile to Export File";
                 Stream stream;
-                int idx = profilesListBox.SelectedIndex;
-                Stream profile = new StreamReader(Global.appdatapath + "\\Profiles\\" + profileListHolder.ProfileListCol[idx].Name + ".xml").BaseStream;
+                Stream profile = new StreamReader(Global.appdatapath + "\\Profiles\\" + entity.Name + ".xml").BaseStream;
                 if (dialog.ShowDialog() == true)
                 {
                     if ((stream = dialog.OpenFile()) != null)
@@ -2103,10 +2107,9 @@ Suspend support not enabled.", true);
         private void DupProfBtn_Click(object sender, RoutedEventArgs e)
         {
             string filename = "";
-            if (profilesListBox.SelectedIndex >= 0)
+            if (profilesListBox.SelectedItem is ProfileEntity entity)
             {
-                int idx = profilesListBox.SelectedIndex;
-                filename = profileListHolder.ProfileListCol[idx].Name;
+                filename = entity.Name;
                 dupBox.OldFilename = filename;
                 dupBoxBar.Visibility = Visibility.Visible;
                 dupBox.Save -= DupBox_Save;
@@ -2129,17 +2132,15 @@ Suspend support not enabled.", true);
 
         private void DeleteProfBtn_Click(object sender, RoutedEventArgs e)
         {
-            if (profilesListBox.SelectedIndex >= 0)
+            if (profilesListBox.SelectedItem is ProfileEntity entity)
             {
-                int idx = profilesListBox.SelectedIndex;
-                ProfileEntity entity = profileListHolder.ProfileListCol[idx];
                 string filename = entity.Name;
                 if (MessageBox.Show(Properties.Resources.ProfileCannotRestore.Replace("*Profile name*", "\"" + filename + "\""),
                     Properties.Resources.DeleteProfile,
                     MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
                 {
                     entity.DeleteFile();
-                    profileListHolder.ProfileListCol.RemoveAt(idx);
+                    profileListHolder.ProfileListCol.Remove(entity);
                 }
             }
         }
@@ -2200,9 +2201,8 @@ Suspend support not enabled.", true);
 
         private void EditProfBtn_Click(object sender, RoutedEventArgs e)
         {
-            if (profilesListBox.SelectedIndex >= 0)
+            if (profilesListBox.SelectedItem is ProfileEntity entity)
             {
-                ProfileEntity entity = profileListHolder.ProfileListCol[profilesListBox.SelectedIndex];
                 ShowProfileEditor(Global.TEST_PROFILE_INDEX, entity);
             }
         }
@@ -2246,6 +2246,16 @@ Suspend support not enabled.", true);
                 return;
             }
 
+            Stopwatch openTimer = Stopwatch.StartNew();
+            long previousPhaseMs = 0;
+            void LogOpenPhase(string phase)
+            {
+                long totalMs = openTimer.ElapsedMilliseconds;
+                AppLogger.LogToGui($"[ProfileEditorTiming] {phase}: " +
+                    $"phase={totalMs - previousPhaseMs}ms total={totalMs}ms", false);
+                previousPhaseMs = totalMs;
+            }
+
             int controllerContextDevice =
                 device >= 0 && device < ControlService.CURRENT_DS4_CONTROLLER_LIMIT
                     ? device
@@ -2283,6 +2293,7 @@ Suspend support not enabled.", true);
             profileEditorNavigationChanging = true;
             mainWinVM.ProfileEditorNavigationIndex = 1;
             profileEditorNavigationChanging = false;
+            LogOpenPhase("workspace prepared");
 
             try
             {
@@ -2290,6 +2301,7 @@ Suspend support not enabled.", true);
                 // parsing begins. Profile loading is file and XML heavy, and does
                 // not need to block WPF's dispatcher.
                 await Dispatcher.Yield(DispatcherPriority.Render);
+                LogOpenPhase("loading view rendered");
 
                 bool profileAlreadyLoaded = false;
                 if (entity != null)
@@ -2302,21 +2314,27 @@ Suspend support not enabled.", true);
                     await Task.Run(() => Global.LoadProfile(device, false, App.rootHub, false));
                     profileAlreadyLoaded = true;
                 }
+                LogOpenPhase("profile loaded");
 
                 editor = new ProfileEditor(device, controllerContextDevice);
+                LogOpenPhase("editor shell constructed");
                 editor.CreatedProfile += Editor_CreatedProfile;
                 editor.Closed += ProfileEditor_Closed;
                 editor.ProfileNameChanged += Editor_ProfileNameChanged;
                 editor.Reload(device, entity, profileAlreadyLoaded);
+                LogOpenPhase("editor bindings refreshed");
 
                 profileEditorLoadingPanel.Visibility = Visibility.Collapsed;
                 profDockPanel.Children.Add(editor);
                 mainWinVM.EditingProfileName = editor.ProfileName;
                 NavigateProfileEditor(1);
+                await Dispatcher.Yield(DispatcherPriority.Render);
+                LogOpenPhase("first frame rendered");
             }
             catch (Exception ex)
             {
-                AppLogger.LogToGui($"Failed to open profile editor: {ex.Message}", true);
+                AppLogger.LogToGui($"Failed to open profile editor after " +
+                    $"{openTimer.ElapsedMilliseconds}ms: {ex.Message}", true);
                 profileEditorLoadingPanel.Visibility = Visibility.Collapsed;
                 profilesBrowserPanel.Visibility = Visibility.Visible;
                 profOptsToolbar.Visibility = Visibility.Visible;
@@ -2371,9 +2389,8 @@ Suspend support not enabled.", true);
 
         private void ProfilesListBox_MouseDoubleClick(object sender, MouseButtonEventArgs e)
         {
-            if (profilesListBox.SelectedIndex >= 0)
+            if (profilesListBox.SelectedItem is ProfileEntity entity)
             {
-                ProfileEntity entity = profileListHolder.ProfileListCol[profilesListBox.SelectedIndex];
                 ShowProfileEditor(Global.TEST_PROFILE_INDEX, entity);
             }
         }
@@ -2456,10 +2473,8 @@ Suspend support not enabled.", true);
 
         private void RenameProfBtn_Click(object sender, RoutedEventArgs e)
         {
-            if (profilesListBox.SelectedIndex >= 0)
+            if (profilesListBox.SelectedItem is ProfileEntity entity)
             {
-                int idx = profilesListBox.SelectedIndex;
-                ProfileEntity entity = profileListHolder.ProfileListCol[idx];
                 string filename = Path.Combine(Global.appdatapath,
                     "Profiles", $"{entity.Name}.xml");
 
@@ -2473,10 +2488,42 @@ Suspend support not enabled.", true);
                     if (result.HasValue && result.Value)
                     {
                         entity.RenameProfile(renameWin.RenameProfileVM.ProfileName);
+                        profilesCollectionView?.Refresh();
                         trayIconVM.PopulateContextMenu();
                     }
                 }
             }
+        }
+
+        private bool ProfileMatchesSearch(object value)
+        {
+            if (value is not ProfileEntity profile)
+            {
+                return false;
+            }
+
+            string query = profilesSearchTextBox?.Text?.Trim();
+            return string.IsNullOrEmpty(query) ||
+                profile.Name?.IndexOf(query, StringComparison.CurrentCultureIgnoreCase) >= 0;
+        }
+
+        private void ProfilesSearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            bool hasQuery = !string.IsNullOrWhiteSpace(profilesSearchTextBox.Text);
+            clearProfilesSearchBtn.Visibility = hasQuery
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            profilesEmptyTitle.Text = hasQuery ? "No matching profiles" : "No profiles yet";
+            profilesEmptyDescription.Text = hasQuery
+                ? "Try a different profile name or clear the search."
+                : "Create or import a profile to get started.";
+            profilesCollectionView?.Refresh();
+        }
+
+        private void ClearProfilesSearchBtn_Click(object sender, RoutedEventArgs e)
+        {
+            profilesSearchTextBox.Clear();
+            profilesSearchTextBox.Focus();
         }
 
         private void ProcessPriorityComboBox_OnSelectionChanged(object sender, SelectionChangedEventArgs e)

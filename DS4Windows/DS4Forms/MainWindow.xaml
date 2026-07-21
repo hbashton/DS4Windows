@@ -45,7 +45,7 @@
             </DockPanel>
         </StackPanel>
         <TabControl x:Name="mainTabCon" DockPanel.Dock="Top" SelectionChanged="MainTabCon_SelectionChanged" Style="{StaticResource BridgeMainTabControlStyle}">
-            <TabItem x:Name="overviewTab" Header="Overview" Tag="At-a-glance status and quick profile controls for the selected controller." IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">
+            <TabItem x:Name="overviewTab" Header="Overview" Tag="&#xE80F;" ToolTip="At-a-glance status and quick profile controls for the selected controller." IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">
                 <local:ControllerOverviewControl x:Name="controllerOverviewControl"
                                                  EditProfileRequested="ControllerOverview_EditProfileRequested"
                                                  ControllerDetailsRequested="ControllerOverview_ControllerDetailsRequested"
@@ -53,7 +53,7 @@
                                                  DisconnectRequested="ControllerOverview_DisconnectRequested" />
             </TabItem>
 
-            <TabItem x:Name="controllersTab" Header="{lex:Loc Controllers}" Tag="Connected devices, active profiles, battery state, and lightbar controls." IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">
+            <TabItem x:Name="controllersTab" Header="{lex:Loc Controllers}" Tag="&#xE7FC;" ToolTip="Connected devices, active profiles, battery state, and lightbar controls." IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">
                 <Grid>
                     <Label x:Name="noContLb" Visibility="Hidden" Content="{lex:Loc NoControllersConnected}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" />
                     <ListView x:Name="controllerLV" ItemsSource="{Binding ControllerCol}" SelectionMode="Single"
@@ -131,6 +131,7 @@
                                             <TextBlock Text="ACTIVE PROFILE" FontSize="10" FontWeight="Bold"
                                                        Foreground="{DynamicResource MutedForegroundColor}" Margin="0,0,0,5" />
                                             <ComboBox x:Name="selectProfCombo" Style="{StaticResource BridgeProfileComboBoxStyle}"
+                                                      HorizontalAlignment="Left"
                                                       ItemsSource="{Binding ProfileListCol}" SelectedIndex="{Binding SelectedIndex}"
                                                       Tag="{Binding DevIndex, Mode=OneTime}"
                                                       Visibility="{Binding PrimaryDevice, Converter={StaticResource BooleanToVisibilityConverter}}"
@@ -171,7 +172,7 @@
                 </Grid>
             </TabItem>
 
-            <TabItem x:Name="profilesTab" Header="{lex:Loc Profiles}" Tag="Create and manage complete controller configurations.">
+            <TabItem x:Name="profilesTab" Header="{lex:Loc Profiles}" Tag="&#xE8A5;" ToolTip="Create and manage complete controller configurations.">
                 <Grid x:Name="profDockPanel">
                     <Grid x:Name="profilesBrowserPanel">
                         <Grid.RowDefinitions>
@@ -260,6 +261,10 @@
                                 <Border Padding="18,14" BorderBrush="{DynamicResource BorderColor}"
                                         BorderThickness="0,0,0,1">
                                     <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
@@ -276,6 +281,32 @@
                                             <TextBlock Text="{Binding ElementName=profilesListBox, Path=Items.Count, StringFormat={}{0} profiles}"
                                                        FontSize="11" FontWeight="SemiBold"
                                                        Foreground="{DynamicResource MutedForegroundColor}" />
+                                        </Border>
+                                        <Border Grid.Row="1" Grid.ColumnSpan="2" Margin="0,12,0,0"
+                                                Width="340" MaxWidth="340" HorizontalAlignment="Left"
+                                                Background="{DynamicResource RaisedBackgroundColor}"
+                                                BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
+                                                CornerRadius="6">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="34" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="36" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="&#xE721;" FontFamily="Segoe Fluent Icons"
+                                                           Foreground="{DynamicResource MutedForegroundColor}"
+                                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                <TextBox x:Name="profilesSearchTextBox" Grid.Column="1"
+                                                         BorderThickness="0" Background="Transparent"
+                                                         Padding="2,8" VerticalContentAlignment="Center"
+                                                         TextChanged="ProfilesSearchTextBox_TextChanged"
+                                                         ToolTip="Search profiles by name" />
+                                                <Button x:Name="clearProfilesSearchBtn" Grid.Column="2" Content="&#xE711;"
+                                                        FontFamily="Segoe Fluent Icons" FontSize="11"
+                                                        Background="Transparent" BorderThickness="0"
+                                                        Visibility="Collapsed" ToolTip="Clear search"
+                                                        Click="ClearProfilesSearchBtn_Click" />
+                                            </Grid>
                                         </Border>
                                     </Grid>
                                 </Border>
@@ -376,9 +407,9 @@
                                                        Foreground="{DynamicResource AccentColor}"
                                                        HorizontalAlignment="Center" VerticalAlignment="Center" />
                                         </Border>
-                                        <TextBlock Text="No profiles yet" Margin="0,12,0,3" FontSize="15"
+                                        <TextBlock x:Name="profilesEmptyTitle" Text="No profiles yet" Margin="0,12,0,3" FontSize="15"
                                                    FontWeight="SemiBold" HorizontalAlignment="Center" />
-                                        <TextBlock Text="Create or import a profile to get started."
+                                        <TextBlock x:Name="profilesEmptyDescription" Text="Create or import a profile to get started."
                                                    Foreground="{DynamicResource MutedForegroundColor}" />
                                     </StackPanel>
                                 </Grid>
@@ -401,17 +432,17 @@
                     </Border>
                 </Grid>
             </TabItem>
-            <TabItem Header="{lex:Loc AutoProfiles}" Tag="Switch profiles automatically when a game or application starts." IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">
+            <TabItem Header="{lex:Loc AutoProfiles}" Tag="&#xE823;" ToolTip="Switch profiles automatically when a game or application starts." IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">
                 <local:AutoProfiles x:Name="autoProfControl">
 
                 </local:AutoProfiles>
             </TabItem>
-            <TabItem Header="{lex:Loc OutputSlots}" Tag="Inspect and control virtual controller slots and output devices." IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">
+            <TabItem Header="{lex:Loc OutputSlots}" Tag="&#xE950;" ToolTip="Inspect and control virtual controller slots and output devices." IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">
                 <local:OutputSlotManagerControl x:Name="slotManControl">
 
                 </local:OutputSlotManagerControl>
             </TabItem>
-            <TabItem x:Name="settingsTab" Header="{lex:Loc Settings}" Tag="Everyday preferences first; diagnostics, networking, and compatibility tools under Advanced." IsEnabled="{Binding ViewEnabled,Mode=OneWay}">
+            <TabItem x:Name="settingsTab" Header="{lex:Loc Settings}" Tag="&#xE713;" ToolTip="Everyday preferences first; diagnostics, networking, and compatibility tools under Advanced." IsEnabled="{Binding ViewEnabled,Mode=OneWay}">
                 <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Background="{DynamicResource SurfaceBackgroundColor}">
                     <StackPanel Margin="0,0,14,8" MaxWidth="900" HorizontalAlignment="Left">
                         <StackPanel.Resources>
@@ -702,7 +733,7 @@
                 </ScrollViewer>
 
             </TabItem>
-            <TabItem x:Name="logTab" Header="{lex:Loc Log}" Tag="Live service events and diagnostic messages.">
+            <TabItem x:Name="logTab" Header="{lex:Loc Log}" Tag="&#xE9D9;" ToolTip="Live service events and diagnostic messages.">
                 <DockPanel>
                     <DockPanel Height="20" DockPanel.Dock="Bottom" Margin="4,8">
                         <Button x:Name="exportLogBtn" Content="{lex:Loc Export}" HorizontalAlignment="Left" Padding="20,1" Click="ExportLogBtn_Click" />

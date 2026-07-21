@@ -80,12 +80,26 @@
                                 <RowDefinition Height="*" />
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
-                            <StackPanel>
-                                <TextBlock Text="Controller map" FontSize="16" FontWeight="SemiBold" />
-                                <TextBlock Text="Choose a control directly on the controller."
-                                           Margin="0,3,0,0" FontSize="11"
-                                           Foreground="{DynamicResource MutedForegroundColor}" />
-                            </StackPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Margin="0,0,12,0">
+                                    <TextBlock Text="Controller map" FontSize="16" FontWeight="SemiBold" />
+                                    <TextBlock Text="Choose a control directly on the controller."
+                                               Margin="0,3,0,0" FontSize="11" TextWrapping="Wrap"
+                                               Foreground="{DynamicResource MutedForegroundColor}" />
+                                </StackPanel>
+                                <ComboBox x:Name="controllerDiagramSelector" Grid.Column="1"
+                                          Width="156" MinHeight="34" VerticalAlignment="Center"
+                                          SelectionChanged="ControllerDiagramSelector_SelectionChanged"
+                                          ToolTip="Choose the controller artwork used by the remapping diagram">
+                                    <ComboBoxItem Content="DualShock 4" />
+                                    <ComboBoxItem Content="DualSense" />
+                                    <ComboBoxItem Content="DualSense Edge" />
+                                </ComboBox>
+                            </Grid>
                             <Viewbox Grid.Row="1" Stretch="Uniform" StretchDirection="DownOnly"
                                      HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,10">
                     <Canvas x:Name="conCanvas" Width="440" Height="240">
@@ -147,6 +161,10 @@
 
                         <Image x:Name="controllerDiagram" Source="{Binding Source={StaticResource resourcesPaths}, Path=DS4ConfigPNG}" Width="440" Height="220" Stretch="Uniform"/>
 
+                        <Path x:Name="controllerVectorHighlight" Visibility="Collapsed"
+                              Fill="{DynamicResource AccentColor}" Stroke="{DynamicResource AccentColor}"
+                              StrokeThickness="1.5" Opacity="0.62" IsHitTestVisible="False" />
+
                         <Button x:Name="ds4LightbarColorBtn" Width="138" Height="12" Canvas.Left="150" Canvas.Top="28"
                                 Background="{x:Null}" BorderBrush="{x:Null}" MouseEnter="Ds4LightbarColorBtn_MouseEnter" MouseLeave="Ds4LightbarColorBtn_MouseLeave" Click="Ds4LightbarColorBtn_Click">
                             <Button.Style>
@@ -193,10 +211,14 @@
                         <Button Content="Guide" x:Name="guideConBtn" Canvas.Left="211" Canvas.Top="144" Width="20" Height="20" Style="{StaticResource NoBGHoverBtn}" Click="HoverConBtn_Click" MouseEnter="ContBtn_MouseEnter" MouseLeave="ContBtn_MouseLeave" />
                         <Button Content="Mute" x:Name="muteConBtn" Canvas.Left="0" Canvas.Top="0" Width="0" Height="0" Style="{StaticResource NoBGHoverBtn}" Visibility="Collapsed"
                                 Click="HoverConBtn_Click" MouseEnter="ContBtn_MouseEnter" MouseLeave="ContBtn_MouseLeave" />
-                        <Button Content="Function Left" x:Name="fnlConBtn" Canvas.Left="0" Canvas.Top="0" Width="0" Height="0" Style="{StaticResource NoBGHoverBtn}" Visibility="Collapsed" />
-                        <Button Content="Function Right" x:Name="fnrConBtn" Canvas.Left="0" Canvas.Top="0" Width="0" Height="0" Style="{StaticResource NoBGHoverBtn}" Visibility="Collapsed" />
-                        <Button Content="Bottom Left Paddle" x:Name="blpConBtn" Canvas.Left="0" Canvas.Top="0" Width="0" Height="0" Style="{StaticResource NoBGHoverBtn}" Visibility="Collapsed" />
-                        <Button Content="Bottom Right Paddle" x:Name="brpConBtn" Canvas.Left="0" Canvas.Top="0" Width="0" Height="0" Style="{StaticResource NoBGHoverBtn}" Visibility="Collapsed" />
+                        <Button Content="Function Left" x:Name="fnlConBtn" Canvas.Left="0" Canvas.Top="0" Width="0" Height="0" Style="{StaticResource NoBGHoverBtn}" Visibility="Collapsed"
+                                Click="HoverConBtn_Click" MouseEnter="ContBtn_MouseEnter" MouseLeave="ContBtn_MouseLeave" />
+                        <Button Content="Function Right" x:Name="fnrConBtn" Canvas.Left="0" Canvas.Top="0" Width="0" Height="0" Style="{StaticResource NoBGHoverBtn}" Visibility="Collapsed"
+                                Click="HoverConBtn_Click" MouseEnter="ContBtn_MouseEnter" MouseLeave="ContBtn_MouseLeave" />
+                        <Button Content="Bottom Left Paddle" x:Name="blpConBtn" Canvas.Left="0" Canvas.Top="0" Width="0" Height="0" Style="{StaticResource NoBGHoverBtn}" Visibility="Collapsed"
+                                Click="HoverConBtn_Click" MouseEnter="ContBtn_MouseEnter" MouseLeave="ContBtn_MouseLeave" />
+                        <Button Content="Bottom Right Paddle" x:Name="brpConBtn" Canvas.Left="0" Canvas.Top="0" Width="0" Height="0" Style="{StaticResource NoBGHoverBtn}" Visibility="Collapsed"
+                                Click="HoverConBtn_Click" MouseEnter="ContBtn_MouseEnter" MouseLeave="ContBtn_MouseLeave" />
 
                         <Button Content="Left Touch" x:Name="leftTouchConBtn" Canvas.Left="158" Canvas.Top="69" Width="37" Height="51" Style="{StaticResource NoBGHoverBtn}" Click="HoverConBtn_Click" MouseEnter="ContBtn_MouseEnter" MouseLeave="ContBtn_MouseLeave" />
                         <Button Content="Multi Touch" x:Name="multiTouchConBtn" Canvas.Left="199" Canvas.Top="74" Width="41" Height="45" Style="{StaticResource NoBGHoverBtn}" Click="HoverConBtn_Click" MouseEnter="ContBtn_MouseEnter" MouseLeave="ContBtn_MouseLeave" />
@@ -2563,7 +2585,18 @@
                         <CheckBox Content="{lex:Loc MouseAcceleration}" IsChecked="{Binding MouseAcceleration}" Margin="0,6,0,0" />
                         <CheckBox Content="{lex:Loc EnableTouchpadToggle}" IsChecked="{Binding EnableTouchpadToggle}" Margin="0,6,0,0"
                               ToolTip="{lex:Loc Resources:EnableTouchToggle}" />
-                        <CheckBox Content="{lex:Loc EnableOutputDataToDS4}" IsChecked="{Binding EnableOutputDataToDS4}" Margin="0,6,0,0" ToolTip="{lex:Loc EnableOutputDataToDS4Tip}" />
+                        <StackPanel Margin="0,8,0,2">
+                            <CheckBox Content="{lex:Loc SendGameFeedbackToPhysicalController}"
+                                      IsChecked="{Binding EnableOutputDataToDS4}"
+                                      FontWeight="SemiBold"
+                                      ToolTip="{lex:Loc SendGameFeedbackToPhysicalControllerTip}" />
+                            <TextBlock Text="{lex:Loc SendGameFeedbackToPhysicalControllerTip}"
+                                       Margin="20,4,8,0"
+                                       MaxWidth="560"
+                                       FontSize="11"
+                                       TextWrapping="Wrap"
+                                       Foreground="{DynamicResource MutedForegroundColor}" />
+                        </StackPanel>
                         <GroupBox Header="Game Bar" Margin="0,8,0,0" Padding="2,4">
                             <Grid>
                                 <Grid.RowDefinitions>

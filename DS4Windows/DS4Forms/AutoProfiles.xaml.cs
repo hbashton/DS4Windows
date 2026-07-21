@@ -50,6 +50,7 @@ namespace DS4WinWPF.DS4Forms
         private AutoProfilesViewModel autoProfVM;
         private AutoProfileHolder autoProfileHolder;
         private ProfileList profileList;
+        private ListCollectionView autoProfilesCollectionView;
         private bool autoDebug;
 
         public AutoProfileHolder AutoProfileHolder { get => autoProfileHolder;
@@ -93,7 +94,11 @@ namespace DS4WinWPF.DS4Forms
         {
             autoProfVM = new AutoProfilesViewModel(autoProfileHolder, profileList);
             programListLV.DataContext = autoProfVM;
-            programListLV.ItemsSource = autoProfVM.ProgramColl;
+            autoProfilesCollectionView = new ListCollectionView(autoProfVM.ProgramColl)
+            {
+                Filter = AutoProfileMatchesSearch,
+            };
+            programListLV.ItemsSource = autoProfilesCollectionView;
             
             revertDefaultProfileOnUnknownCk.DataContext = autoProfVM;
 
@@ -106,10 +111,10 @@ namespace DS4WinWPF.DS4Forms
             this.profileList = profileList;
 
             // Sort auto profile list by application file name
-            CollectionView view = (CollectionView)CollectionViewSource.GetDefaultView(programListLV.ItemsSource);
-            view.SortDescriptions.Clear();
-            view.SortDescriptions.Add(new SortDescription("Filename", ListSortDirection.Ascending));
-            view.Refresh();
+            autoProfilesCollectionView.SortDescriptions.Clear();
+            autoProfilesCollectionView.SortDescriptions.Add(
+                new SortDescription("Filename", ListSortDirection.Ascending));
+            autoProfilesCollectionView.Refresh();
 
             sidebarScrollViewer.ScrollToTop();
         }
@@ -299,7 +304,7 @@ namespace DS4WinWPF.DS4Forms
         private void AppsSearchFinished(object sender, EventArgs e)
         {
             autoProfVM.SearchFinished -= AppsSearchFinished;
-            programListLV.ItemsSource = autoProfVM.ProgramColl;
+            programListLV.ItemsSource = autoProfilesCollectionView;
         }
 
         private void AddProgramsBtn_Click(object sender, RoutedEventArgs e)
@@ -315,7 +320,7 @@ namespace DS4WinWPF.DS4Forms
             steamMenuItem.Visibility = Visibility.Visible;
             startMenuItem.Visibility = Visibility.Visible;
             browseProgsMenuItem.Visibility = Visibility.Visible;
-            programListLV.ItemsSource = autoProfVM.ProgramColl;
+            programListLV.ItemsSource = autoProfilesCollectionView;
         }
 
         private void ShowAutoDebugCk_Click(object sender, RoutedEventArgs e)
@@ -323,6 +328,42 @@ namespace DS4WinWPF.DS4Forms
             bool state = showAutoDebugCk.IsChecked == true;
             autoDebug = state;
             AutoDebugChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        private bool AutoProfileMatchesSearch(object value)
+        {
+            if (value is not ProgramItem item)
+            {
+                return false;
+            }
+
+            string query = autoProfilesSearchTextBox?.Text?.Trim();
+            if (string.IsNullOrEmpty(query))
+            {
+                return true;
+            }
+
+            bool Contains(string candidate) =>
+                candidate?.IndexOf(query, StringComparison.CurrentCultureIgnoreCase) >= 0;
+
+            return Contains(item.Filename) || Contains(item.Path) || Contains(item.Title) ||
+                (item.MatchedAutoProfile?.ProfileNames?.Any(Contains) ?? false);
+        }
+
+        private void AutoProfilesSearchTextBox_TextChanged(object sender,
+            TextChangedEventArgs e)
+        {
+            clearAutoProfilesSearchBtn.Visibility =
+                string.IsNullOrWhiteSpace(autoProfilesSearchTextBox.Text)
+                    ? Visibility.Collapsed
+                    : Visibility.Visible;
+            autoProfilesCollectionView?.Refresh();
+        }
+
+        private void ClearAutoProfilesSearchBtn_Click(object sender, RoutedEventArgs e)
+        {
+            autoProfilesSearchTextBox.Clear();
+            autoProfilesSearchTextBox.Focus();
         }
 
         private void RemoveAutoBtn_Click(object sender, RoutedEventArgs e)

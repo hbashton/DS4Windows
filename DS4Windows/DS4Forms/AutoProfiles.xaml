@@ -318,6 +318,32 @@
             </Border>
 
         <DockPanel>
+            <Border DockPanel.Dock="Top" Width="390" MaxWidth="390"
+                    HorizontalAlignment="Left" Margin="0,0,0,10"
+                    Background="{DynamicResource RaisedBackgroundColor}"
+                    BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
+                    CornerRadius="6">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="34" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="36" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="&#xE721;" FontFamily="Segoe Fluent Icons"
+                               Foreground="{DynamicResource MutedForegroundColor}"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    <TextBox x:Name="autoProfilesSearchTextBox" Grid.Column="1"
+                             BorderThickness="0" Background="Transparent"
+                             Padding="2,8" VerticalContentAlignment="Center"
+                             TextChanged="AutoProfilesSearchTextBox_TextChanged"
+                             ToolTip="Search by profile, window title, executable, or path" />
+                    <Button x:Name="clearAutoProfilesSearchBtn" Grid.Column="2" Content="&#xE711;"
+                            FontFamily="Segoe Fluent Icons" FontSize="11"
+                            Background="Transparent" BorderThickness="0"
+                            Visibility="Collapsed" ToolTip="Clear search"
+                            Click="ClearAutoProfilesSearchBtn_Click" />
+                </Grid>
+            </Border>
             <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,10">
                 <Button x:Name="addProgramsBtn" Content="{lex:Loc AddPrograms}" Click="AddProgramsBtn_Click"
                         Style="{StaticResource BridgeSecondaryButtonStyle}" Margin="0,0,8,0">

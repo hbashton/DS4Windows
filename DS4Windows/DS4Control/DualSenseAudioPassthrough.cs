@@ -643,10 +643,55 @@ namespace DS4Windows
 
         public static bool IsControllerAudioEndpoint(MMDevice device)
         {
-            string identity = GetEndpointIdentity(device);
+            string identity = GetEndpointQuickIdentity(device);
+            if (LooksLikeControllerAudioIdentity(identity))
+            {
+                return true;
+            }
+
+            // Avoid opening slow driver property stores for ordinary desktop
+            // speakers, HDMI outputs, and virtual mixers. Only ambiguous devices
+            // whose visible identity suggests a controller need the full probe.
+            if (!LooksLikeAmbiguousControllerIdentity(identity))
+            {
+                return false;
+            }
+
+            identity = GetEndpointIdentity(device);
+            return LooksLikeControllerAudioIdentity(identity);
+        }
+
+        private static string GetEndpointQuickIdentity(MMDevice endpoint)
+        {
+            if (endpoint == null)
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                return string.Join(" ", endpoint.ID ?? string.Empty,
+                    endpoint.FriendlyName ?? string.Empty);
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private static bool LooksLikeControllerAudioIdentity(string identity)
+        {
             return ClassifyEndpointIdentity(identity) != ControllerAudioEndpointKind.Any ||
                 identity.IndexOf("Wireless Controller", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 identity.IndexOf("VIIPER", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool LooksLikeAmbiguousControllerIdentity(string identity)
+        {
+            return identity.IndexOf("controller", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                identity.IndexOf("sony", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                identity.IndexOf("playstation", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                identity.IndexOf("054c", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         internal static MMDevice FindActiveGameAudioEndpoint(MMDeviceEnumerator enumerator,

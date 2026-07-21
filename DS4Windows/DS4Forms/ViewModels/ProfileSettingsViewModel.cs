@@ -31,7 +31,6 @@ using DS4Windows;
 using DS4Windows.StickModifiers;
 using DS4WinWPF.DS4Forms.ViewModels.Util;
 using DS4Windows.InputDevices;
-using NAudio.CoreAudioApi;
 
 namespace DS4WinWPF.DS4Forms.ViewModels
 {
@@ -3219,21 +3218,17 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                         DualSenseAudioPassthrough.DefaultSystemAudioEndpointId),
                 };
 
-                try
+                foreach (AudioEndpointSnapshot endpoint in
+                    AudioEndpointChoiceCache.RenderEndpoints)
                 {
-                    using var enumerator = new MMDeviceEnumerator();
-                    foreach (MMDevice endpoint in enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active))
+                    string name = endpoint.Name;
+                    if (endpoint.IsControllerAudio)
                     {
-                        string name = endpoint.FriendlyName;
-                        if (DualSenseAudioPassthrough.IsControllerAudioEndpoint(endpoint))
-                        {
-                            name += " (controller / game audio)";
-                        }
-
-                        choices.Add(new AudioEndpointChoice(name, endpoint.ID));
+                        name += " (controller / game audio)";
                     }
+
+                    choices.Add(new AudioEndpointChoice(name, endpoint.EndpointId));
                 }
-                catch { }
 
                 string savedEndpointId = DualSenseAudioCaptureEndpointId;
                 if (!string.IsNullOrEmpty(savedEndpointId) && !choices.Exists(item => item.EndpointId == savedEndpointId))
@@ -3266,15 +3261,12 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     new AudioEndpointChoice("Auto-detect controller speaker", string.Empty),
                 };
 
-                try
+                foreach (AudioEndpointSnapshot endpoint in
+                    AudioEndpointChoiceCache.RenderEndpoints)
                 {
-                    using var enumerator = new MMDeviceEnumerator();
-                    foreach (MMDevice endpoint in enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active))
-                    {
-                        choices.Add(new AudioEndpointChoice(endpoint.FriendlyName, endpoint.ID));
-                    }
+                    choices.Add(new AudioEndpointChoice(endpoint.Name,
+                        endpoint.EndpointId));
                 }
-                catch { }
 
                 string savedEndpointId = DualSenseAudioSpeakerEndpointId;
                 if (!string.IsNullOrEmpty(savedEndpointId) && !choices.Exists(item => item.EndpointId == savedEndpointId))
@@ -3328,15 +3320,12 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     new AudioEndpointChoice("Auto-detect controller microphone", string.Empty),
                 };
 
-                try
+                foreach (AudioEndpointSnapshot endpoint in
+                    AudioEndpointChoiceCache.CaptureEndpoints)
                 {
-                    using var enumerator = new MMDeviceEnumerator();
-                    foreach (MMDevice endpoint in enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active))
-                    {
-                        choices.Add(new AudioEndpointChoice(endpoint.FriendlyName, endpoint.ID));
-                    }
+                    choices.Add(new AudioEndpointChoice(endpoint.Name,
+                        endpoint.EndpointId));
                 }
-                catch { }
 
                 string savedEndpointId = DualSenseMicrophoneCaptureEndpointId;
                 if (!string.IsNullOrEmpty(savedEndpointId) && !choices.Exists(item => item.EndpointId == savedEndpointId))
@@ -3363,18 +3352,15 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     new AudioEndpointChoice("Select virtual audio device", string.Empty),
                 };
 
-                try
+                foreach (AudioEndpointSnapshot endpoint in
+                    AudioEndpointChoiceCache.RenderEndpoints)
                 {
-                    using var enumerator = new MMDeviceEnumerator();
-                    foreach (MMDevice endpoint in enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active))
+                    if (!endpoint.IsControllerAudio)
                     {
-                        if (!DualSenseAudioPassthrough.IsControllerAudioEndpoint(endpoint))
-                        {
-                            choices.Add(new AudioEndpointChoice(endpoint.FriendlyName, endpoint.ID));
-                        }
+                        choices.Add(new AudioEndpointChoice(endpoint.Name,
+                            endpoint.EndpointId));
                     }
                 }
-                catch { }
 
                 string savedEndpointId = DualSenseMicrophoneOutputEndpointId;
                 if (!string.IsNullOrEmpty(savedEndpointId) && !choices.Exists(item => item.EndpointId == savedEndpointId))
@@ -3507,7 +3493,33 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             gyroMouseStickSmoothMethodIndex = FindGyroMouseStickSmoothMethodIndex();
 
             SetupEvents();
+            _ = RefreshAudioEndpointChoicesAsync();
         }
+
+        private async System.Threading.Tasks.Task RefreshAudioEndpointChoicesAsync()
+        {
+            await AudioEndpointChoiceCache.RefreshAsync().ConfigureAwait(false);
+
+            System.Windows.Threading.Dispatcher dispatcher =
+                Application.Current?.Dispatcher;
+            if (dispatcher == null || dispatcher.HasShutdownStarted)
+            {
+                return;
+            }
+
+            await dispatcher.InvokeAsync(() =>
+            {
+                AudioCaptureEndpointChoicesChanged?.Invoke(this, EventArgs.Empty);
+                AudioSpeakerEndpointChoicesChanged?.Invoke(this, EventArgs.Empty);
+                MicrophoneCaptureEndpointChoicesChanged?.Invoke(this, EventArgs.Empty);
+                MicrophoneOutputEndpointChoicesChanged?.Invoke(this, EventArgs.Empty);
+            });
+        }
+
+        public event EventHandler AudioCaptureEndpointChoicesChanged;
+        public event EventHandler AudioSpeakerEndpointChoicesChanged;
+        public event EventHandler MicrophoneCaptureEndpointChoicesChanged;
+        public event EventHandler MicrophoneOutputEndpointChoicesChanged;
 
         public void CreateGyroTriggerMenuItems(ContextMenu menu, RoutedEventHandler itemClickHandler)
         {

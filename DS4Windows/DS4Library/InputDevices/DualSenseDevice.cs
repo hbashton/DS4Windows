@@ -369,7 +369,12 @@ namespace DS4Windows.InputDevices
         private const int BluetoothCombinedNativeStateLength = USB_OUTPUT_CHANGE_LENGTH - 1;
         private const byte BluetoothCombinedLowLatencyBufferLength = 16;
         private const byte BluetoothCombinedSpeakerBufferLength = 64;
-        private const int BluetoothCombinedHapticsFreshnessMilliseconds = 30;
+        // The game, not a wall-clock timeout in DS4Windows, owns the end of a
+        // native DualSense effect by publishing an explicit silent haptics
+        // block. Expiring the newest block between otherwise valid virtual-
+        // device callbacks creates audible and tactile holes in sustained
+        // effects.
+        private const long PersistentBluetoothHapticsExpiryQpc = long.MaxValue;
         private const int BluetoothCombinedNativeStateFreshnessMilliseconds = 100;
         // Presented Opus frames refresh this lease on every 10.667 ms tick.
         // The normal idle boundary clears it explicitly; expiry is the
@@ -723,7 +728,7 @@ namespace DS4Windows.InputDevices
                 }
 
                 bool hapticsSynchronized =
-                    HasPendingFreshBluetoothCombinedHaptics();
+                    HasPendingBluetoothCombinedHaptics();
                 bool written = TryWriteCachedBluetoothCombinedSpeakerReportCore(
                     hapticsSynchronized);
                 if (written)
@@ -844,7 +849,7 @@ namespace DS4Windows.InputDevices
                     Volatile.Read(ref bluetoothOutputTransportStopping) == 0)
                 {
                     TryWriteCachedBluetoothCombinedControlReport(
-                        includeFreshHaptics: false,
+                        includeNativeHaptics: false,
                         reportDescription:
                             "speaker-boundary microphone control",
                         waitForCompletion: true);
@@ -951,11 +956,8 @@ namespace DS4Windows.InputDevices
                         }
 
                         initialHapticsExpiry =
-                            latestBluetoothCombinedSpeakerReportTimestamp <= 0 ?
-                                0 : latestBluetoothCombinedSpeakerReportTimestamp +
-                                    (Stopwatch.Frequency *
-                                        BluetoothCombinedHapticsFreshnessMilliseconds) /
-                                    1000;
+                            bluetoothCombinedSpeakerReportAvailable ?
+                                PersistentBluetoothHapticsExpiryQpc : 0;
                     }
                 }
 
@@ -1204,10 +1206,8 @@ namespace DS4Windows.InputDevices
         {
             lock (bluetoothCombinedSpeakerReportLock)
             {
-                return latestBluetoothCombinedSpeakerReportTimestamp <= 0 ? 0 :
-                    latestBluetoothCombinedSpeakerReportTimestamp +
-                    (Stopwatch.Frequency *
-                        BluetoothCombinedHapticsFreshnessMilliseconds) / 1000;
+                return bluetoothCombinedSpeakerReportAvailable ?
+                    PersistentBluetoothHapticsExpiryQpc : 0;
             }
         }
 
@@ -1317,10 +1317,7 @@ namespace DS4Windows.InputDevices
                     Array.Copy(latestBluetoothCombinedSpeakerReport, template,
                         template.Length);
                     hapticsExpiryQpc =
-                        latestBluetoothCombinedSpeakerReportTimestamp <= 0 ? 0 :
-                        latestBluetoothCombinedSpeakerReportTimestamp +
-                        (Stopwatch.Frequency *
-                            BluetoothCombinedHapticsFreshnessMilliseconds) / 1000;
+                        PersistentBluetoothHapticsExpiryQpc;
                 }
 
                 ApplyBluetoothSpeakerVolumeAndRouting(template,
@@ -1336,7 +1333,7 @@ namespace DS4Windows.InputDevices
         }
 
         private bool TryPublishCachedBluetoothCombinedState(
-            bool includeFreshHaptics, string activeStatus,
+            bool includeNativeHaptics, string activeStatus,
             string idleReportDescription, out bool deferredToSpeakerClock)
         {
             lock (bluetoothCombinedTransportWriteLock)
@@ -1357,7 +1354,7 @@ namespace DS4Windows.InputDevices
 
                 deferredToSpeakerClock = false;
                 return TryWriteCachedBluetoothCombinedControlReport(
-                    includeFreshHaptics, idleReportDescription);
+                    includeNativeHaptics, idleReportDescription);
             }
         }
 
@@ -1386,17 +1383,13 @@ namespace DS4Windows.InputDevices
             }
         }
 
-        private bool HasPendingFreshBluetoothCombinedHaptics()
+        private bool HasPendingBluetoothCombinedHaptics()
         {
             lock (bluetoothCombinedSpeakerReportLock)
             {
                 return bluetoothCombinedSpeakerReportAvailable &&
                     bluetoothCombinedHapticsGeneration >
-                        bluetoothCombinedSubmittedHapticsGeneration &&
-                    Stopwatch.GetTimestamp() -
-                        latestBluetoothCombinedSpeakerReportTimestamp <=
-                        (Stopwatch.Frequency *
-                            BluetoothCombinedHapticsFreshnessMilliseconds) / 1000;
+                        bluetoothCombinedSubmittedHapticsGeneration;
             }
         }
 
@@ -2374,7 +2367,7 @@ namespace DS4Windows.InputDevices
             }
 
             bool written = TryWriteCachedBluetoothCombinedControlReport(
-                includeFreshHaptics: false,
+                includeNativeHaptics: false,
                 reportDescription: "final microphone disable",
                 waitForCompletion: true,
                 allowDuringStopping: true);
@@ -2837,7 +2830,7 @@ namespace DS4Windows.InputDevices
                     UpdateCachedBluetoothCombinedState(report, offset))
                 {
                     TryPublishCachedBluetoothCombinedState(
-                        includeFreshHaptics: true,
+                        includeNativeHaptics: true,
                         activeStatus:
                             "Merged game output state into the next speaker-clocked combined Bluetooth report.",
                         idleReportDescription: "native controller state",
@@ -2940,7 +2933,7 @@ namespace DS4Windows.InputDevices
             }
 
             bool written = TryPublishCachedBluetoothCombinedState(
-                includeFreshHaptics: true,
+                includeNativeHaptics: true,
                 activeStatus:
                     "Converted Bluetooth haptics to the next combined speaker-clocked report.",
                 idleReportDescription: "converted haptics",
@@ -3003,9 +2996,9 @@ namespace DS4Windows.InputDevices
             long hapticsGeneration = CacheBluetoothCombinedSpeakerReport(report, offset);
 
             bool written = TryPublishCachedBluetoothCombinedState(
-                includeFreshHaptics: true,
+                includeNativeHaptics: true,
                 activeStatus:
-                    "Cached fresh Bluetooth haptics for the next speaker-clocked frame.",
+                    "Cached native Bluetooth haptics for the next speaker-clocked frame.",
                 idleReportDescription: "combined haptics/audio",
                 out bool deferredToSpeakerClock);
             if (written && !deferredToSpeakerClock)
@@ -3154,7 +3147,7 @@ namespace DS4Windows.InputDevices
                         UpdateCachedBluetoothCombinedStateFromBluetoothOutput(
                             outputReport) &&
                         TryPublishCachedBluetoothCombinedState(
-                            includeFreshHaptics: false,
+                            includeNativeHaptics: false,
                             activeStatus:
                                 "Merged controller state into the next speaker-clocked combined Bluetooth report.",
                             idleReportDescription: "controller state",
@@ -3267,7 +3260,7 @@ namespace DS4Windows.InputDevices
         }
 
         private bool TryWriteCachedBluetoothCombinedControlReport(
-            bool includeFreshHaptics, string reportDescription,
+            bool includeNativeHaptics, string reportDescription,
             bool waitForCompletion = false,
             bool allowDuringStopping = false)
         {
@@ -3314,7 +3307,6 @@ namespace DS4Windows.InputDevices
                     (waitForCompletion || !speakerClockActive);
 
                 byte[] combined = bluetoothCombinedSpeakerWorkingReport;
-                long cachedTimestamp;
                 long hapticsGeneration;
                 lock (bluetoothCombinedSpeakerReportLock)
                 {
@@ -3325,18 +3317,14 @@ namespace DS4Windows.InputDevices
 
                     Array.Copy(latestBluetoothCombinedSpeakerReport, combined,
                         combined.Length);
-                    cachedTimestamp = latestBluetoothCombinedSpeakerReportTimestamp;
                     hapticsGeneration = bluetoothCombinedHapticsGeneration;
                 }
 
-                bool hapticsFresh = includeFreshHaptics && cachedTimestamp > 0 &&
-                    Stopwatch.GetTimestamp() - cachedTimestamp <=
-                        (Stopwatch.Frequency *
-                            BluetoothCombinedHapticsFreshnessMilliseconds) / 1000;
+                bool includeHaptics = includeNativeHaptics;
                 combined[BluetoothCombinedHapticsOffset] = 0x92;
                 combined[BluetoothCombinedHapticsOffset + 1] =
                     BluetoothCombinedHapticsDataLength;
-                if (!hapticsFresh)
+                if (!includeHaptics)
                 {
                     Array.Clear(combined, BluetoothCombinedHapticsDataOffset,
                         BluetoothCombinedHapticsDataLength);
@@ -3383,9 +3371,8 @@ namespace DS4Windows.InputDevices
                 bool written;
                 if (commitThroughPacer)
                 {
-                    long hapticsExpiryQpc = cachedTimestamp <= 0 ? 0 :
-                        cachedTimestamp + (Stopwatch.Frequency *
-                            BluetoothCombinedHapticsFreshnessMilliseconds) / 1000;
+                    long hapticsExpiryQpc = includeHaptics ?
+                        PersistentBluetoothHapticsExpiryQpc : 0;
                     written = TryCommitBluetoothControlThroughAudioPacer(
                         combined, hapticsExpiryQpc, waitForCompletion,
                         out bool pacerStillOwnsTransport);
@@ -3433,7 +3420,7 @@ namespace DS4Windows.InputDevices
                     return false;
                 }
 
-                if (hapticsFresh)
+                if (includeHaptics)
                 {
                     MarkBluetoothCombinedHapticsSubmitted(hapticsGeneration);
                 }
@@ -3477,7 +3464,6 @@ namespace DS4Windows.InputDevices
             }
 
             byte[] combined = bluetoothCombinedSpeakerWorkingReport;
-            long cachedTimestamp;
             long hapticsGeneration;
             lock (bluetoothCombinedSpeakerReportLock)
             {
@@ -3487,21 +3473,7 @@ namespace DS4Windows.InputDevices
                 }
 
                 Array.Copy(latestBluetoothCombinedSpeakerReport, combined, combined.Length);
-                cachedTimestamp = latestBluetoothCombinedSpeakerReportTimestamp;
                 hapticsGeneration = bluetoothCombinedHapticsGeneration;
-            }
-
-            bool hapticsFresh = cachedTimestamp > 0 &&
-                Stopwatch.GetTimestamp() - cachedTimestamp <=
-                (Stopwatch.Frequency * BluetoothCombinedHapticsFreshnessMilliseconds) / 1000;
-            if (!hapticsFresh)
-            {
-                combined[BluetoothCombinedHapticsOffset] = 0x92;
-                combined[BluetoothCombinedHapticsOffset + 1] =
-                    BluetoothCombinedHapticsDataLength;
-                Array.Clear(combined, BluetoothCombinedHapticsDataOffset,
-                    BluetoothCombinedHapticsDataLength);
-                Interlocked.Increment(ref bluetoothCombinedSpeakerStaleHapticsSilenced);
             }
 
             // Empty speaker TLVs can make the controller emit an alert tone.
@@ -3545,9 +3517,7 @@ namespace DS4Windows.InputDevices
             ApplyNextBluetoothCombinedSequence(combined);
             ApplyBluetoothCombinedCrc(combined);
 
-            long hapticsExpiryQpc = cachedTimestamp <= 0 ? 0 :
-                cachedTimestamp + (Stopwatch.Frequency *
-                    BluetoothCombinedHapticsFreshnessMilliseconds) / 1000;
+            long hapticsExpiryQpc = PersistentBluetoothHapticsExpiryQpc;
             bool written = TryQueueBluetoothAudioPacerReport(combined,
                 hapticsExpiryQpc, out bool pacerOwnsTransport);
             if (!pacerOwnsTransport)
@@ -3716,7 +3686,7 @@ namespace DS4Windows.InputDevices
                 }
 
                 bool written = TryWriteCachedBluetoothCombinedControlReport(
-                    includeFreshHaptics: false,
+                    includeNativeHaptics: false,
                     reportDescription: enabled ?
                         "microphone enable" : "microphone disable",
                     waitForCompletion: true);

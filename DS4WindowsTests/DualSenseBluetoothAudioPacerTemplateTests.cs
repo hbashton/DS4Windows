@@ -71,6 +71,27 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
+        public void NativeLatestTemplateHapticsRemainUntilGameSendsSilence()
+        {
+            const long nowQpc = 500_000_000;
+            byte[] queued = CreateReport(0x34);
+            byte[] latestTemplate = CreateReport(0x79);
+            FillHaptics(latestTemplate, 0x2C);
+
+            DualSenseBluetoothAudioReportPatcher.PatchForPresentation(
+                queued, latestTemplate, long.MaxValue, nowQpc);
+
+            for (int index = 0; index < HapticsLength; index++)
+            {
+                Assert.AreEqual(latestTemplate[HapticsOffset + index],
+                    queued[HapticsOffset + index],
+                    $"Native haptics were muted by wall-clock age at byte {index}.");
+            }
+
+            AssertCrcIsValid(queued);
+        }
+
+        [TestMethod]
         public void QueuedSpeakerBufferDepthSurvivesControlTemplateOverlay()
         {
             const byte speakerBufferDepth = 64;

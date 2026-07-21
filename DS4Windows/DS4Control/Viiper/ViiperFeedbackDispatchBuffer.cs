@@ -28,6 +28,8 @@ namespace DS4Windows
         private readonly byte[][] speakerSlots;
         private readonly int[] speakerLengths;
         private readonly long[] speakerGenerations;
+        private readonly byte[] speakerKinds;
+        private readonly int[] speakerDeviceIndexes;
         private readonly long[] speakerEnqueueTimestamps;
         private readonly int speakerSlotLength;
         private readonly long speakerMaximumAgeTicks;
@@ -90,6 +92,8 @@ namespace DS4Windows
             speakerSlots = new byte[speakerCapacity][];
             speakerLengths = new int[speakerCapacity];
             speakerGenerations = new long[speakerCapacity];
+            speakerKinds = new byte[speakerCapacity];
+            speakerDeviceIndexes = new int[speakerCapacity];
             speakerEnqueueTimestamps = new long[speakerCapacity];
             if (speakerMaximumAgeMilliseconds < 0)
             {
@@ -101,6 +105,7 @@ namespace DS4Windows
             for (int index = 0; index < speakerSlots.Length; index++)
             {
                 speakerSlots[index] = new byte[speakerSlotLength];
+                speakerDeviceIndexes[index] = -1;
             }
 
             controlSlot = new byte[controlSlotLength];
@@ -183,6 +188,13 @@ namespace DS4Windows
         internal bool TryEnqueueSpeaker(byte[] source, int length,
             long generation)
         {
+            return TryEnqueueSpeaker(source, length, generation, kind: 0,
+                deviceIndex: -1);
+        }
+
+        internal bool TryEnqueueSpeaker(byte[] source, int length,
+            long generation, byte kind, int deviceIndex)
+        {
             if (source == null)
             {
                 throw new ArgumentNullException(nameof(source));
@@ -204,6 +216,8 @@ namespace DS4Windows
                     // controller permanently seconds behind after a stall.
                     speakerLengths[speakerReadIndex] = 0;
                     speakerGenerations[speakerReadIndex] = 0;
+                    speakerKinds[speakerReadIndex] = 0;
+                    speakerDeviceIndexes[speakerReadIndex] = -1;
                     speakerEnqueueTimestamps[speakerReadIndex] = 0;
                     speakerReadIndex = (speakerReadIndex + 1) %
                         speakerSlots.Length;
@@ -215,6 +229,8 @@ namespace DS4Windows
                     0, length);
                 speakerLengths[speakerWriteIndex] = length;
                 speakerGenerations[speakerWriteIndex] = generation;
+                speakerKinds[speakerWriteIndex] = kind;
+                speakerDeviceIndexes[speakerWriteIndex] = deviceIndex;
                 speakerEnqueueTimestamps[speakerWriteIndex] =
                     Stopwatch.GetTimestamp();
                 speakerWriteIndex = (speakerWriteIndex + 1) %
@@ -229,6 +245,13 @@ namespace DS4Windows
         internal bool TryDequeueSpeaker(byte[] destination, out int length,
             out long generation)
         {
+            return TryDequeueSpeaker(destination, out length, out generation,
+                out _, out _);
+        }
+
+        internal bool TryDequeueSpeaker(byte[] destination, out int length,
+            out long generation, out byte kind, out int deviceIndex)
+        {
             if (destination == null)
             {
                 throw new ArgumentNullException(nameof(destination));
@@ -241,6 +264,8 @@ namespace DS4Windows
                 {
                     length = 0;
                     generation = 0;
+                    kind = 0;
+                    deviceIndex = -1;
                     return false;
                 }
 
@@ -255,11 +280,15 @@ namespace DS4Windows
                 Buffer.BlockCopy(speakerSlots[speakerReadIndex], 0,
                     destination, 0, length);
                 generation = speakerGenerations[speakerReadIndex];
+                kind = speakerKinds[speakerReadIndex];
+                deviceIndex = speakerDeviceIndexes[speakerReadIndex];
                 RecordMaximum(ref speakerMaximumQueueAgeTicks,
                     Stopwatch.GetTimestamp() -
                         speakerEnqueueTimestamps[speakerReadIndex]);
                 speakerLengths[speakerReadIndex] = 0;
                 speakerGenerations[speakerReadIndex] = 0;
+                speakerKinds[speakerReadIndex] = 0;
+                speakerDeviceIndexes[speakerReadIndex] = -1;
                 speakerEnqueueTimestamps[speakerReadIndex] = 0;
                 speakerReadIndex = (speakerReadIndex + 1) %
                     speakerSlots.Length;
@@ -463,6 +492,8 @@ namespace DS4Windows
                 Array.Clear(speakerLengths, 0, speakerLengths.Length);
                 Array.Clear(speakerGenerations, 0,
                     speakerGenerations.Length);
+                Array.Clear(speakerKinds, 0, speakerKinds.Length);
+                Array.Fill(speakerDeviceIndexes, -1);
                 Array.Clear(speakerEnqueueTimestamps, 0,
                     speakerEnqueueTimestamps.Length);
                 speakerReadIndex = 0;
@@ -516,6 +547,8 @@ namespace DS4Windows
                     nowTimestamp - speakerEnqueueTimestamps[speakerReadIndex]);
                 speakerLengths[speakerReadIndex] = 0;
                 speakerGenerations[speakerReadIndex] = 0;
+                speakerKinds[speakerReadIndex] = 0;
+                speakerDeviceIndexes[speakerReadIndex] = -1;
                 speakerEnqueueTimestamps[speakerReadIndex] = 0;
                 speakerReadIndex = (speakerReadIndex + 1) %
                     speakerSlots.Length;

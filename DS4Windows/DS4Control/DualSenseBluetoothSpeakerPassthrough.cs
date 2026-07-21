@@ -469,6 +469,8 @@ namespace DS4Windows
         private Pcm16WaveTraceWriter preOpusPcmTrace;
         private readonly float[] directPcmFrame = new float[
             DirectPcmMaximumOutputFrames * Channels];
+        private readonly byte[] atomicFeedback = new byte[
+            ViiperOutDevice.DualSenseAtomicFeedbackLength];
         private readonly float[] frame = new float[FrameSamples * Channels];
         private readonly float[] speakerResampleInput = new float[
             SourcePullFrames * Channels];
@@ -685,8 +687,16 @@ namespace DS4Windows
                     }
 
                     isGameAudioEndpoint = true;
-                    directSpeakerSource.VirtualSpeakerPcmReceived +=
-                        DirectSpeakerSource_VirtualSpeakerPcmReceived;
+                    if (directSpeakerSource.SupportsAtomicAudioHaptics)
+                    {
+                        directSpeakerSource.VirtualAtomicAudioHapticsReceived +=
+                            DirectSpeakerSource_VirtualAtomicAudioHapticsReceived;
+                    }
+                    else
+                    {
+                        directSpeakerSource.VirtualSpeakerPcmReceived +=
+                            DirectSpeakerSource_VirtualSpeakerPcmReceived;
+                    }
                     worker = new Thread(StreamLoop)
                     {
                         IsBackground = true,
@@ -861,76 +871,15 @@ namespace DS4Windows
         private void DirectSpeakerSource_VirtualSpeakerPcmReceived(
             ViiperOutDevice source, byte[] pcm, int length)
         {
-            if (stopping || !ReferenceEquals(source, directSpeakerSource) ||
-                pcm == null || length <= 0)
-            {
-                return;
-            }
-
-            int alignedLength = Math.Min(length, pcm.Length) &
-                ~(sizeof(short) * Channels - 1);
-            if (alignedLength <= 0)
-            {
-                return;
-            }
-
             long callbackEntered = Stopwatch.GetTimestamp();
-            long previousCallback = Interlocked.Exchange(
-                ref directPcmPreviousCallbackTimestamp, callbackEntered);
-            if (previousCallback != 0)
-            {
-                UpdateMaximum(ref directPcmMaximumCallbackGapTicks,
-                    callbackEntered - previousCallback);
-            }
-
             try
             {
-                // Stream recovery may briefly overlap the retiring and
-                // replacement VIIPER feedback readers. Serialize the stateful
-                // converter and its shared scratch buffer, and make this lock
-                // the outer lock whenever both directPcmSync and syncRoot are
-                // needed.
                 lock (directPcmSync)
                 {
                     UpdateMaximum(ref directPcmMaximumCallbackLockWaitTicks,
                         Stopwatch.GetTimestamp() - callbackEntered);
-                    if (stopping || !ReferenceEquals(source,
-                        directSpeakerSource))
-                    {
-                        return;
-                    }
-
-                    Interlocked.Increment(ref directPcmCallbacks);
-                    Interlocked.Add(ref directPcmInputFrames,
-                        alignedLength / (sizeof(short) * Channels));
-                    rawDirectPcmTrace?.Write(pcm, 0, alignedLength);
-                    int offset = 0;
-                    while (offset < alignedLength && !stopping)
-                    {
-                        int chunkLength = Math.Min(DirectPcmChunkBytes,
-                            alignedLength - offset) &
-                            ~(sizeof(short) * Channels - 1);
-                        if (chunkLength <= 0)
-                        {
-                            break;
-                        }
-
-                        int convertedFrames = directPcmRateConverter.Convert(
-                            pcm, offset, chunkLength, directPcmFrame);
-                        if (convertedFrames > 0)
-                        {
-                            AppendCaptureSamples(directPcmFrame,
-                                convertedFrames * Channels);
-                            Interlocked.Add(ref directPcmOutputFrames,
-                                convertedFrames);
-                            Interlocked.Add(ref captureInputFrames,
-                                convertedFrames);
-                        }
-
-                        offset += chunkLength;
-                    }
-
-                    Interlocked.Increment(ref captureCallbackCount);
+                    ProcessDirectSpeakerPcmLocked(source, pcm, 0, length,
+                        callbackEntered);
                 }
             }
             catch (Exception ex)
@@ -945,6 +894,123 @@ namespace DS4Windows
                         $"DualSense direct speaker PCM conversion failed: {message}",
                         true));
                 }
+            }
+        }
+
+        private void DirectSpeakerSource_VirtualAtomicAudioHapticsReceived(
+            ViiperOutDevice source, byte[] payload, int feedbackOffset,
+            int feedbackLength, int speakerPcmOffset, int speakerPcmLength,
+            int targetDeviceIndex)
+        {
+            long callbackEntered = Stopwatch.GetTimestamp();
+            try
+            {
+                lock (directPcmSync)
+                {
+                    UpdateMaximum(ref directPcmMaximumCallbackLockWaitTicks,
+                        Stopwatch.GetTimestamp() - callbackEntered);
+                    if (stopping || !ReferenceEquals(source,
+                            directSpeakerSource) || payload == null ||
+                        feedbackLength != atomicFeedback.Length ||
+                        feedbackOffset < 0 || speakerPcmOffset < 0 ||
+                        feedbackOffset + feedbackLength > payload.Length ||
+                        speakerPcmOffset + speakerPcmLength > payload.Length)
+                    {
+                        return;
+                    }
+
+                    // Claim the physical speaker clock before publishing this
+                    // generation's haptics. The feedback update can therefore
+                    // only refresh the speaker template; it cannot escape as a
+                    // separate control report at the exact segment boundary.
+                    bool speakerAudible = HasAudiblePcm16(payload,
+                        speakerPcmOffset, speakerPcmLength);
+                    if (speakerAudible &&
+                        !device.BeginBluetoothAtomicSpeakerFrame(
+                            speakerSessionId))
+                    {
+                        return;
+                    }
+
+                    Buffer.BlockCopy(payload, feedbackOffset, atomicFeedback,
+                        0, feedbackLength);
+                    source.ApplyAtomicAudioHapticsFeedback(atomicFeedback,
+                        feedbackLength, targetDeviceIndex);
+                    ProcessDirectSpeakerPcmLocked(source, payload,
+                        speakerPcmOffset, speakerPcmLength, callbackEntered);
+                }
+            }
+            catch (Exception ex)
+            {
+                LogDirectPcmFailure(ex);
+            }
+        }
+
+        private void ProcessDirectSpeakerPcmLocked(ViiperOutDevice source,
+            byte[] pcm, int offset, int length, long callbackEntered)
+        {
+            if (stopping || !ReferenceEquals(source, directSpeakerSource) ||
+                pcm == null || offset < 0 || length <= 0 ||
+                offset + length > pcm.Length)
+            {
+                return;
+            }
+
+            int alignedLength = length & ~(sizeof(short) * Channels - 1);
+            if (alignedLength <= 0)
+            {
+                return;
+            }
+
+            long previousCallback = Interlocked.Exchange(
+                ref directPcmPreviousCallbackTimestamp, callbackEntered);
+            if (previousCallback != 0)
+            {
+                UpdateMaximum(ref directPcmMaximumCallbackGapTicks,
+                    callbackEntered - previousCallback);
+            }
+
+            Interlocked.Increment(ref directPcmCallbacks);
+            Interlocked.Add(ref directPcmInputFrames,
+                alignedLength / (sizeof(short) * Channels));
+            rawDirectPcmTrace?.Write(pcm, offset, alignedLength);
+            int consumed = 0;
+            while (consumed < alignedLength && !stopping)
+            {
+                int chunkLength = Math.Min(DirectPcmChunkBytes,
+                    alignedLength - consumed) &
+                    ~(sizeof(short) * Channels - 1);
+                if (chunkLength <= 0)
+                {
+                    break;
+                }
+
+                int convertedFrames = directPcmRateConverter.Convert(
+                    pcm, offset + consumed, chunkLength, directPcmFrame);
+                if (convertedFrames > 0)
+                {
+                    AppendCaptureSamples(directPcmFrame,
+                        convertedFrames * Channels);
+                    Interlocked.Add(ref directPcmOutputFrames,
+                        convertedFrames);
+                    Interlocked.Add(ref captureInputFrames,
+                        convertedFrames);
+                }
+
+                consumed += chunkLength;
+            }
+
+            Interlocked.Increment(ref captureCallbackCount);
+        }
+
+        private void LogDirectPcmFailure(Exception ex)
+        {
+            if (Interlocked.Exchange(ref loggedDirectPcmFailure, 1) == 0)
+            {
+                string message = ex.Message;
+                ThreadPool.QueueUserWorkItem(_ => AppLogger.LogToGui(
+                    $"DualSense direct speaker PCM conversion failed: {message}",
+                    true));
             }
         }
 
@@ -2298,6 +2364,27 @@ namespace DS4Windows
             return true;
         }
 
+        private static bool HasAudiblePcm16(byte[] pcm, int offset, int length)
+        {
+            if (pcm == null || offset < 0 || length <= 0 ||
+                offset + length > pcm.Length)
+            {
+                return false;
+            }
+
+            int end = offset + (length & ~1);
+            for (int index = offset; index < end; index += sizeof(short))
+            {
+                short sample = (short)(pcm[index] | (pcm[index + 1] << 8));
+                if (sample > 4 || sample < -4)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         private bool SendEncodedFrame()
         {
             try
@@ -2332,6 +2419,8 @@ namespace DS4Windows
             {
                 directSpeakerSource.VirtualSpeakerPcmReceived -=
                     DirectSpeakerSource_VirtualSpeakerPcmReceived;
+                directSpeakerSource.VirtualAtomicAudioHapticsReceived -=
+                    DirectSpeakerSource_VirtualAtomicAudioHapticsReceived;
                 // Unsubscription does not cancel a delegate already in
                 // flight. This is the drain barrier for the reused VIIPER PCM
                 // buffer and the stateful converter.

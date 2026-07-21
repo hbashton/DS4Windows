@@ -759,6 +759,35 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void FramedReaderAcceptsAtomicV4GenerationWithoutChangingIt()
+        {
+            var cleanup = new CleanupCounters();
+            var lifetime = cleanup.CreateLifetime(82, "9", 15);
+            var payloadStream = new CountingMemoryStream();
+            var transport = new CountingDisposable();
+            var stream = new ViiperDeviceStream(payloadStream, transport,
+                lifetime);
+            byte[] generation = Enumerable.Range(0, 2524)
+                .Select(index => (byte)(index * 23 + 5)).ToArray();
+
+            stream.WriteFrame(0x04, 0x83, generation);
+            payloadStream.Position = 0;
+            byte[] received = new byte[4096];
+
+            int length = stream.ReadFrame(0x04, out byte frameType,
+                received);
+
+            Assert.AreEqual(0x83, frameType);
+            Assert.AreEqual(generation.Length, length);
+            CollectionAssert.AreEqual(generation, received[..length]);
+
+            stream.Dispose();
+            Assert.AreEqual(1, payloadStream.DisposeCount);
+            Assert.AreEqual(1, transport.DisposeCount);
+            cleanup.AssertCleanedExactlyOnce(82, "9", 15);
+        }
+
+        [TestMethod]
         public void ConcurrentFinalDisposalCleansVirtualDeviceExactlyOnce()
         {
             var cleanup = new CleanupCounters();

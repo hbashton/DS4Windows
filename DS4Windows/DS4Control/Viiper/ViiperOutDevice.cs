@@ -9,6 +9,7 @@ the Free Software Foundation, either version 3 of the License, or
 */
 
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -23,6 +24,11 @@ using SBC;
 
 namespace DS4Windows
 {
+    internal delegate void ViiperAtomicAudioHapticsHandler(
+        ViiperOutDevice source, byte[] payload, int feedbackOffset,
+        int feedbackLength, int speakerPcmOffset, int speakerPcmLength,
+        int targetDeviceIndex);
+
     internal static class ViiperStateWriteRateSettings
     {
         internal const string EnvironmentVariableName =
@@ -121,6 +127,8 @@ namespace DS4Windows
         private const int DualSenseCombinedBluetoothReportLength = 398;
         private const int DualSenseCombinedBluetoothReportOffset = DualSenseNativeOutputReportOffset + DualSenseNativeOutputReportLength;
         private const int DualSenseCombinedExtendedFeedbackLength = DualSenseCombinedBluetoothReportOffset + DualSenseCombinedBluetoothReportLength;
+        internal const int DualSenseAtomicFeedbackLength =
+            DualSenseCombinedExtendedFeedbackLength;
         private const int DualSenseMicrophoneOpusFrameLength = 71;
         private const int DualSenseMicrophoneFramesPerPacket = 480;
         private const int DualSenseMicrophonePcmFrameLength = DualSenseMicrophoneFramesPerPacket * 2 * sizeof(short);
@@ -142,8 +150,13 @@ namespace DS4Windows
         private const byte ViiperStreamFrameMicrophonePcm = 0x02;
         private const byte ViiperStreamFrameOutputState = 0x81;
         private const byte ViiperStreamFrameSpeakerPcm = 0x82;
+        private const byte ViiperStreamFrameAtomicAudioHaptics = 0x83;
         private const byte ViiperStreamFrameVersionV2 = 0x02;
         private const byte ViiperStreamFrameVersionV3 = 0x03;
+        private const byte ViiperStreamFrameVersionV4 = 0x04;
+        private const byte FeedbackSpeakerKindPcm = 0;
+        private const byte FeedbackSpeakerKindAtomicAudioHaptics = 1;
+        private const int AtomicAudioHapticsFeedbackLengthPrefix = 2;
         private const int MaxStreamRecoveryAttempts = 8;
         private const int InitialStreamRecoveryBackoffMilliseconds = 50;
         private const int MaximumStreamRecoveryBackoffMilliseconds = 1000;
@@ -248,6 +261,7 @@ namespace DS4Windows
         private bool activeStreamUsesFramedProtocol;
         private bool activeStreamSupportsMicrophone;
         private bool activeStreamSupportsDirectSpeaker;
+        private bool activeStreamSupportsAtomicAudioHaptics;
         private byte activeStreamFrameVersion;
         private int microphoneVolume = 128;
         private int microphoneNoiseSuppression = (int)DualSenseMicrophoneNoiseSuppression.Balanced;
@@ -357,6 +371,8 @@ namespace DS4Windows
 
         private Action<ViiperOutDevice, byte[], int>
             virtualSpeakerPcmReceived;
+        private ViiperAtomicAudioHapticsHandler
+            virtualAtomicAudioHapticsReceived;
 
         internal event Action<ViiperOutDevice, byte[], int>
             VirtualSpeakerPcmReceived
@@ -388,8 +404,47 @@ namespace DS4Windows
             }
         }
 
+        internal event ViiperAtomicAudioHapticsHandler
+            VirtualAtomicAudioHapticsReceived
+        {
+            add
+            {
+                lock (virtualSpeakerSubscriberLock)
+                {
+                    virtualAtomicAudioHapticsReceived += value;
+                }
+
+                feedbackSpeakerSignal.Set();
+            }
+            remove
+            {
+                lock (virtualSpeakerSubscriberLock)
+                {
+                    virtualAtomicAudioHapticsReceived -= value;
+                }
+            }
+        }
+
+        private ViiperAtomicAudioHapticsHandler
+            GetVirtualAtomicAudioHapticsSubscriber()
+        {
+            lock (virtualSpeakerSubscriberLock)
+            {
+                return virtualAtomicAudioHapticsReceived;
+            }
+        }
+
         internal bool SupportsDirectSpeakerPcm =>
             connected && activeStreamSupportsDirectSpeaker;
+
+        internal bool SupportsAtomicAudioHaptics =>
+            connected && activeStreamSupportsAtomicAudioHaptics;
+
+        internal void ApplyAtomicAudioHapticsFeedback(byte[] feedback,
+            int feedbackLength, int expectedDeviceIndex)
+        {
+            ApplyFeedback(feedback, feedbackLength, expectedDeviceIndex);
+        }
 
         internal bool CanProvideDirectSpeakerPcm =>
             viiperType == ViiperVirtualDeviceType.DualShock4 ||
@@ -530,12 +585,32 @@ namespace DS4Windows
             activeStreamUsesFramedProtocol = false;
             activeStreamSupportsMicrophone = false;
             activeStreamSupportsDirectSpeaker = false;
+            activeStreamSupportsAtomicAudioHaptics = false;
             activeStreamFrameVersion = 0;
             Volatile.Write(ref virtualMicrophoneInterfaceActive, 0);
             Volatile.Write(ref virtualMicrophoneInterfaceStateKnown, 0);
 
             if (viiperType == ViiperVirtualDeviceType.DualSense)
             {
+                try
+                {
+                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
+                        "dualsensecombinedaudioduplexv4");
+                    activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
+                    activeStreamUsesFramedProtocol = true;
+                    activeStreamSupportsMicrophone = true;
+                    activeStreamSupportsDirectSpeaker = true;
+                    activeStreamSupportsAtomicAudioHaptics = true;
+                    activeStreamFrameVersion = ViiperStreamFrameVersionV4;
+                    return stream;
+                }
+                catch (IOException ex)
+                {
+                    AppLogger.LogToGui(
+                        $"VIIPER DualSense atomic audio/haptics stream unavailable, trying V3: {ex.Message}",
+                        false);
+                }
+
                 try
                 {
                     ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
@@ -594,6 +669,25 @@ namespace DS4Windows
 
             if (viiperType == ViiperVirtualDeviceType.DualSenseEdge)
             {
+                try
+                {
+                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
+                        "dualsenseedgecombinedaudioduplexv4");
+                    activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
+                    activeStreamUsesFramedProtocol = true;
+                    activeStreamSupportsMicrophone = true;
+                    activeStreamSupportsDirectSpeaker = true;
+                    activeStreamSupportsAtomicAudioHaptics = true;
+                    activeStreamFrameVersion = ViiperStreamFrameVersionV4;
+                    return stream;
+                }
+                catch (IOException ex)
+                {
+                    AppLogger.LogToGui(
+                        $"VIIPER DualSense Edge atomic audio/haptics stream unavailable, trying V3: {ex.Message}",
+                        false);
+                }
+
                 try
                 {
                     ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
@@ -1183,7 +1277,12 @@ namespace DS4Windows
                 {
                     Action<ViiperOutDevice, byte[], int> subscriber =
                         GetVirtualSpeakerPcmSubscriber();
-                    if (subscriber == null)
+                    ViiperAtomicAudioHapticsHandler atomicSubscriber =
+                        GetVirtualAtomicAudioHapticsSubscriber();
+                    bool subscriberAvailable =
+                        activeStreamSupportsAtomicAudioHaptics ?
+                            atomicSubscriber != null : subscriber != null;
+                    if (!subscriberAvailable)
                     {
                         if (feedbackDispatchBuffer.PendingSpeakerCount > 0)
                         {
@@ -1196,7 +1295,8 @@ namespace DS4Windows
                     }
 
                     if (!feedbackDispatchBuffer.TryDequeueSpeaker(payload,
-                        out int length, out long streamItemGeneration))
+                        out int length, out long streamItemGeneration,
+                        out byte speakerKind, out int targetDeviceIndex))
                     {
                         feedbackSpeakerSignal.WaitOne(100);
                         continue;
@@ -1226,7 +1326,45 @@ namespace DS4Windows
 
                         try
                         {
-                            subscriber(this, payload, length);
+                            if (speakerKind ==
+                                FeedbackSpeakerKindAtomicAudioHaptics)
+                            {
+                                if (atomicSubscriber == null || length <
+                                    AtomicAudioHapticsFeedbackLengthPrefix)
+                                {
+                                    Interlocked.Increment(
+                                        ref feedbackSpeakerStale);
+                                    continue;
+                                }
+
+                                int atomicFeedbackLength =
+                                    BinaryPrimitives.ReadUInt16LittleEndian(
+                                        payload.AsSpan(0,
+                                            AtomicAudioHapticsFeedbackLengthPrefix));
+                                int speakerPcmOffset =
+                                    AtomicAudioHapticsFeedbackLengthPrefix +
+                                    atomicFeedbackLength;
+                                int speakerPcmLength = length - speakerPcmOffset;
+                                if (atomicFeedbackLength !=
+                                        DualSenseCombinedExtendedFeedbackLength ||
+                                    speakerPcmLength <= 0 ||
+                                    (speakerPcmLength &
+                                        (sizeof(short) * 2 - 1)) != 0)
+                                {
+                                    Interlocked.Increment(
+                                        ref feedbackSpeakerStale);
+                                    continue;
+                                }
+
+                                atomicSubscriber(this, payload,
+                                    AtomicAudioHapticsFeedbackLengthPrefix,
+                                    atomicFeedbackLength, speakerPcmOffset,
+                                    speakerPcmLength, targetDeviceIndex);
+                            }
+                            else
+                            {
+                                subscriber(this, payload, length);
+                            }
                             Interlocked.Increment(ref feedbackSpeakerDelivered);
                         }
                         catch (Exception ex)
@@ -2498,7 +2636,7 @@ namespace DS4Windows
                     if (activeStreamSupportsDirectSpeaker)
                     {
                         int payloadLength = stream.ReadFrame(
-                            ViiperStreamFrameVersionV3, out byte frameType,
+                            activeStreamFrameVersion, out byte frameType,
                             framedPayload);
                         feedbackDispatchGenerationBarrier.EnterReadLock();
                         try
@@ -2536,7 +2674,36 @@ namespace DS4Windows
                             {
                                 if (feedbackDispatchBuffer.TryEnqueueSpeaker(
                                     framedPayload, payloadLength,
-                                    readStreamGeneration))
+                                    readStreamGeneration,
+                                    FeedbackSpeakerKindPcm,
+                                    Volatile.Read(ref lastInputDeviceIndex)))
+                                {
+                                    feedbackSpeakerSignal.Set();
+                                }
+                            }
+                            else if (frameType ==
+                                    ViiperStreamFrameAtomicAudioHaptics &&
+                                activeStreamSupportsAtomicAudioHaptics &&
+                                payloadLength >
+                                    AtomicAudioHapticsFeedbackLengthPrefix)
+                            {
+                                int atomicFeedbackLength =
+                                    BinaryPrimitives.ReadUInt16LittleEndian(
+                                        framedPayload.AsSpan(0,
+                                            AtomicAudioHapticsFeedbackLengthPrefix));
+                                int speakerPcmLength = payloadLength -
+                                    AtomicAudioHapticsFeedbackLengthPrefix -
+                                    atomicFeedbackLength;
+                                if (atomicFeedbackLength ==
+                                        DualSenseCombinedExtendedFeedbackLength &&
+                                    speakerPcmLength > 0 &&
+                                    (speakerPcmLength &
+                                        (sizeof(short) * 2 - 1)) == 0 &&
+                                    feedbackDispatchBuffer.TryEnqueueSpeaker(
+                                        framedPayload, payloadLength,
+                                        readStreamGeneration,
+                                        FeedbackSpeakerKindAtomicAudioHaptics,
+                                        Volatile.Read(ref lastInputDeviceIndex)))
                                 {
                                     feedbackSpeakerSignal.Set();
                                 }
@@ -4808,6 +4975,7 @@ namespace DS4Windows
         private const byte FrameMagic3 = (byte)'M';
         private const byte FrameVersionV2 = 0x02;
         private const byte FrameVersionV3 = 0x03;
+        private const byte FrameVersionV4 = 0x04;
 
         public ViiperDeviceStream(TcpClient tcp, Stream stream,
             ViiperVirtualDeviceLifetime deviceLifetime)
@@ -4863,7 +5031,8 @@ namespace DS4Windows
             {
                 throw new ArgumentOutOfRangeException(nameof(data));
             }
-            if (version != FrameVersionV2 && version != FrameVersionV3)
+            if (version != FrameVersionV2 && version != FrameVersionV3 &&
+                version != FrameVersionV4)
             {
                 throw new ArgumentOutOfRangeException(nameof(version));
             }

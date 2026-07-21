@@ -2,6 +2,7 @@
 from pathlib import Path
 import sys
 import shutil
+import subprocess
 
 target_dir = Path(sys.argv[1])
 project_dir = Path(sys.argv[2])
@@ -30,7 +31,7 @@ for lang in langs:
 # run the script injecting new dependency paths to DS4Windows.deps.json
 lang_script = project_dir.parent / "utils" / "inject_deps_path.py"
 deps_json_path = target_dir / "DS4Windows.deps.json"
-os.system(f"python {lang_script} {deps_json_path}")
+subprocess.run([sys.executable, str(lang_script), str(deps_json_path)], check=True)
 
 
 # write the version to newest.txt

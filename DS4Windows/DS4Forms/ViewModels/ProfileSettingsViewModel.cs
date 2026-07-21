@@ -985,28 +985,24 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 int type = 0;
                 switch (Global.OutContType[device].Normalize())
                 {
-                    case OutContType.X360:
+                    case OutContType.ViiperDS4:
                         type = 0;
                         break;
 
-                    case OutContType.ViiperDS4:
+                    case OutContType.ViiperX360:
                         type = 1;
                         break;
 
-                    case OutContType.ViiperX360:
+                    case OutContType.ViiperDualSense:
                         type = 2;
                         break;
 
-                    case OutContType.ViiperDualSense:
+                    case OutContType.ViiperDualSenseEdge:
                         type = 3;
                         break;
 
-                    case OutContType.ViiperDualSenseEdge:
-                        type = 4;
-                        break;
-
                     case OutContType.ViiperSwitch2Pro:
-                        type = 5;
+                        type = 4;
                         break;
 
                     default: break;
@@ -1049,13 +1045,12 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         {
             return controllerIndex switch
             {
-                0 => OutContType.X360,
-                1 => OutContType.ViiperDS4,
-                2 => OutContType.ViiperX360,
-                3 => OutContType.ViiperDualSense,
-                4 => OutContType.ViiperDualSenseEdge,
-                5 => OutContType.ViiperSwitch2Pro,
-                _ => OutContType.X360,
+                0 => OutContType.ViiperDS4,
+                1 => OutContType.ViiperX360,
+                2 => OutContType.ViiperDualSense,
+                3 => OutContType.ViiperDualSenseEdge,
+                4 => OutContType.ViiperSwitch2Pro,
+                _ => OutContType.ViiperX360,
             };
         }
 
@@ -3440,12 +3435,6 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 (byte)Math.Clamp(value, 0, 2);
         }
 
-        public bool UsingMinViGEm173333
-        {
-            get => Global.IsUsingMinViGEm117333();
-        }
-
-
         public bool InverseRumbleMotors
         {
             get => Global.InverseRumbleMotors[device];
@@ -3468,7 +3457,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                         physicalControllerProductId);
             funcDevNum = device < ControlService.CURRENT_DS4_CONTROLLER_LIMIT ? device : 0;
             tempControllerIndex = ControllerTypeIndex;
-            Global.outDevTypeTemp[device] = OutContType.X360;
+            Global.outDevTypeTemp[device] = OutContType.ViiperX360;
             tempBtPollRate = Global.BTPollRate[device];
 
             outputMouseSpeed = CalculateOutputMouseSpeed(ButtonMouseSensitivity);

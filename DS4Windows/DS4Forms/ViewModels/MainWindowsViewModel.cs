@@ -75,9 +75,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public IReadOnlyList<OverviewOutputControllerChoice> OutputControllerChoices { get; } =
             new List<OverviewOutputControllerChoice>
             {
-                new("Xbox 360", OutContType.X360),
-                new("Xbox 360 (VIIPER)", OutContType.ViiperX360),
-                new("DualShock 4 (VIIPER)", OutContType.ViiperDS4),
+                new("Viiper Xbox 360", OutContType.ViiperX360),
+                new("Viiper DualShock 4", OutContType.ViiperDS4),
                 new("DualSense", OutContType.ViiperDualSense),
                 new("DualSense Edge", OutContType.ViiperDualSenseEdge),
                 new("Switch 2 Pro", OutContType.ViiperSwitch2Pro),
@@ -656,21 +655,10 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public void CheckDrivers()
         {
-            bool deriverinstalled = Global.IsViGEmBusInstalled();
-            if (!deriverinstalled || !Global.IsRunningSupportedViGEmBus())
+            ViiperPrerequisiteStatus status = ViiperSetupManager.GetStatus(tryStartServer: true);
+            if (!status.Ready)
             {
-                ProcessStartInfo startInfo = new ProcessStartInfo();
-                startInfo.FileName = $"{Global.exelocation}";
-                startInfo.Arguments = "-driverinstall";
-                startInfo.Verb = "runas";
-                startInfo.UseShellExecute = true;
-                try
-                {
-                    using (Process temp = Process.Start(startInfo))
-                    {
-                    }
-                }
-                catch { }
+                ViiperSetupManager.EnsureReadyWithPrompt(null, forcePrompt: true);
             }
         }
 

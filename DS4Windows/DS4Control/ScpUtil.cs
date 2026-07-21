@@ -63,7 +63,7 @@ namespace DS4Windows
         X360,
         // Retained only so existing XML and output-slot files deserialize with
         // their original numeric value. Runtime code normalizes this retired
-        // ViGEm DS4 value to ViiperDS4.
+        // Legacy serialized DS4 value to ViiperDS4.
         DS4,
         ViiperX360,
         ViiperDS4,
@@ -76,7 +76,12 @@ namespace DS4Windows
     {
         public static OutContType Normalize(this OutContType type)
         {
-            return type == OutContType.DS4 ? OutContType.ViiperDS4 : type;
+            return type switch
+            {
+                OutContType.X360 => OutContType.ViiperX360,
+                OutContType.DS4 => OutContType.ViiperDS4,
+                _ => type,
+            };
         }
     }
 
@@ -625,11 +630,11 @@ namespace DS4Windows
         public static bool[] linkedProfileCheck = new bool[MAX_DS4_CONTROLLER_COUNT] { false, false, false, false, false, false, false, false };
         public static bool[] touchpadActive = new bool[TEST_PROFILE_ITEM_COUNT] { true, true, true, true, true, true, true, true, true };
         // Used to hold device type desired from Profile Editor
-        public static OutContType[] outDevTypeTemp = new OutContType[TEST_PROFILE_ITEM_COUNT] { DS4Windows.OutContType.X360, DS4Windows.OutContType.X360,
-            DS4Windows.OutContType.X360, DS4Windows.OutContType.X360,
-            DS4Windows.OutContType.X360, DS4Windows.OutContType.X360,
-            DS4Windows.OutContType.X360, DS4Windows.OutContType.X360,
-            DS4Windows.OutContType.X360};
+        public static OutContType[] outDevTypeTemp = new OutContType[TEST_PROFILE_ITEM_COUNT] { DS4Windows.OutContType.ViiperX360, DS4Windows.OutContType.ViiperX360,
+            DS4Windows.OutContType.ViiperX360, DS4Windows.OutContType.ViiperX360,
+            DS4Windows.OutContType.ViiperX360, DS4Windows.OutContType.ViiperX360,
+            DS4Windows.OutContType.ViiperX360, DS4Windows.OutContType.ViiperX360,
+            DS4Windows.OutContType.ViiperX360};
         // Used to hold the currently active controller output type in use for a slot
         public static OutContType[] activeOutDevType = new OutContType[TEST_PROFILE_ITEM_COUNT] { DS4Windows.OutContType.None, DS4Windows.OutContType.None,
             DS4Windows.OutContType.None, DS4Windows.OutContType.None,
@@ -637,18 +642,6 @@ namespace DS4Windows
             DS4Windows.OutContType.None, DS4Windows.OutContType.None,
             DS4Windows.OutContType.None};
 
-        public const string BLANK_VIGEMBUS_VERSION = "0.0.0.0";
-        public const string MIN_SUPPORTED_VIGEMBUS_VERSION = "1.16.112.0";
-        public const string MIN_TOUCHPAD_PASSTHRU_VIGEMBUS_VERSION = "1.17.333.0";
-
-        //public static bool vigemInstalled = IsViGEmBusInstalled();
-        public static bool vigemInstalled = false;
-        //public static string vigembusVersion = ViGEmBusVersion();
-        public static string vigembusVersion = BLANK_VIGEMBUS_VERSION;
-        public static Version vigemBusVersionInfo =
-            new Version(!string.IsNullOrEmpty(vigembusVersion) ? vigembusVersion :
-                BLANK_VIGEMBUS_VERSION);
-        public static Version minSupportedViGEmBusVersionInfo = new Version(MIN_SUPPORTED_VIGEMBUS_VERSION);
         public static bool hidHideInstalled = IsHidHideInstalled();
 
         public static bool openRGBSyncEnabled = false;
@@ -1105,119 +1098,6 @@ namespace DS4Windows
             return result;
         }
 
-        private class ViGEmBusInfo
-        {
-            //public string path;
-            public string instanceId;
-            public string deviceName;
-            public string deviceVersionStr;
-            public Version deviceVersion;
-            public string manufacturer;
-            public string driverProviderName;
-        }
-
-        private static void FindViGEmDeviceInfo()
-        {
-            bool result = false;
-            Guid deviceGuid = Guid.Parse(VIGEMBUS_GUID);
-            NativeMethods.SP_DEVINFO_DATA deviceInfoData =
-                new NativeMethods.SP_DEVINFO_DATA();
-            deviceInfoData.cbSize =
-                System.Runtime.InteropServices.Marshal.SizeOf(deviceInfoData);
-
-            var dataBuffer = new byte[4096];
-            ulong propertyType = 0;
-            var requiredSize = 0;
-
-            // Properties to retrieve
-            NativeMethods.DEVPROPKEY[] lookupProperties = new NativeMethods.DEVPROPKEY[]
-            {
-                NativeMethods.DEVPKEY_Device_DriverVersion, NativeMethods.DEVPKEY_Device_InstanceId,
-                NativeMethods.DEVPKEY_Device_Manufacturer, NativeMethods.DEVPKEY_Device_Provider,
-                NativeMethods.DEVPKEY_Device_DeviceDesc,
-            };
-
-            List<ViGEmBusInfo> tempViGEmBusInfoList = new List<ViGEmBusInfo>();
-
-            IntPtr deviceInfoSet = NativeMethods.SetupDiGetClassDevs(ref deviceGuid, null, 0,
-                NativeMethods.DIGCF_DEVICEINTERFACE);
-            for (int i = 0; !result && NativeMethods.SetupDiEnumDeviceInfo(deviceInfoSet, i, ref deviceInfoData); i++)
-            {
-                ViGEmBusInfo tempBusInfo = new ViGEmBusInfo();
-
-                foreach (NativeMethods.DEVPROPKEY currentDevKey in lookupProperties)
-                {
-                    NativeMethods.DEVPROPKEY tempKey = currentDevKey;
-                    if (NativeMethods.SetupDiGetDeviceProperty(deviceInfoSet, ref deviceInfoData,
-                        ref tempKey, ref propertyType,
-                        dataBuffer, dataBuffer.Length, ref requiredSize, 0))
-                    {
-                        string temp = dataBuffer.ToUTF16String();
-                        if (currentDevKey.fmtid == NativeMethods.DEVPKEY_Device_DriverVersion.fmtid &&
-                            currentDevKey.pid == NativeMethods.DEVPKEY_Device_DriverVersion.pid)
-                        {
-                            try
-                            {
-                                tempBusInfo.deviceVersion = new Version(temp);
-                                tempBusInfo.deviceVersionStr = temp;
-                            }
-                            catch (ArgumentException)
-                            {
-                                // Default to unknown version
-                                tempBusInfo.deviceVersionStr = BLANK_VIGEMBUS_VERSION;
-                                tempBusInfo.deviceVersion = new Version(tempBusInfo.deviceVersionStr);
-                            }
-                        }
-                        else if (currentDevKey.fmtid == NativeMethods.DEVPKEY_Device_InstanceId.fmtid &&
-                            currentDevKey.pid == NativeMethods.DEVPKEY_Device_InstanceId.pid)
-                        {
-                            tempBusInfo.instanceId = temp;
-                        }
-                        else if (currentDevKey.fmtid == NativeMethods.DEVPKEY_Device_Manufacturer.fmtid &&
-                            currentDevKey.pid == NativeMethods.DEVPKEY_Device_Manufacturer.pid)
-                        {
-                            tempBusInfo.manufacturer = temp;
-                        }
-                        else if (currentDevKey.fmtid == NativeMethods.DEVPKEY_Device_Provider.fmtid &&
-                            currentDevKey.pid == NativeMethods.DEVPKEY_Device_Provider.pid)
-                        {
-                            tempBusInfo.driverProviderName = temp;
-                        }
-                        else if (currentDevKey.fmtid == NativeMethods.DEVPKEY_Device_DeviceDesc.fmtid &&
-                            currentDevKey.pid == NativeMethods.DEVPKEY_Device_DeviceDesc.pid)
-                        {
-                            tempBusInfo.deviceName = temp;
-                        }
-                    }
-                }
-
-                tempViGEmBusInfoList.Add(tempBusInfo);
-            }
-
-            if (deviceInfoSet.ToInt64() != NativeMethods.INVALID_HANDLE_VALUE)
-            {
-                NativeMethods.SetupDiDestroyDeviceInfoList(deviceInfoSet);
-            }
-
-            // Iterate over list and find most recent version number
-            //IEnumerable<ViGEmBusInfo> tempResults = tempViGEmBusInfoList.Where(item => minSupportedViGEmBusVersionInfo.CompareTo(item.deviceVersion) <= 0);
-            Version latestKnown = new Version(BLANK_VIGEMBUS_VERSION);
-            string deviceInstanceId = string.Empty;
-            foreach (ViGEmBusInfo item in tempViGEmBusInfoList)
-            {
-                if (latestKnown.CompareTo(item.deviceVersion) <= 0)
-                {
-                    latestKnown = item.deviceVersion;
-                    deviceInstanceId = item.instanceId;
-                }
-            }
-
-            // Get bus info for most recent version found and save info
-            ViGEmBusInfo latestBusInfo =
-                tempViGEmBusInfoList.SingleOrDefault(item => item.instanceId == deviceInstanceId);
-            PopulateFromViGEmBusInfo(latestBusInfo);
-        }
-
         private static bool CheckForSysDevice(string searchHardwareId)
         {
             bool result = false;
@@ -1312,50 +1192,9 @@ namespace DS4Windows
             return CheckForSysDevice(@"root\FakerInput");
         }
 
-        const string VIGEMBUS_GUID = "{96E42B22-F5E9-42F8-B043-ED0F932F014F}";
-        public static bool IsViGEmBusInstalled()
-        {
-            return vigemInstalled;
-        }
-
-        public static bool IsRunningSupportedViGEmBus()
-        {
-            //return vigemInstalled;
-            return vigemInstalled &&
-                minSupportedViGEmBusVersionInfo.CompareTo(vigemBusVersionInfo) <= 0;
-        }
-
-        public static bool IsUsingMinViGEm117333()
-        {
-            bool result = Global.vigemBusVersionInfo.CompareTo(
-                new Version(Global.MIN_TOUCHPAD_PASSTHRU_VIGEMBUS_VERSION)) >= 0;
-            return result;
-        }
-
-        public static void RefreshViGEmBusInfo()
-        {
-            FindViGEmDeviceInfo();
-        }
-
         public static void RefreshHidHideInfo()
         {
             hidHideInstalled = IsHidHideInstalled();
-        }
-
-        private static void PopulateFromViGEmBusInfo(ViGEmBusInfo busInfo)
-        {
-            if (busInfo != null)
-            {
-                vigemInstalled = true;
-                vigembusVersion = busInfo.deviceVersionStr;
-                vigemBusVersionInfo = busInfo.deviceVersion;
-            }
-            else
-            {
-                vigemInstalled = false;
-                vigembusVersion = BLANK_VIGEMBUS_VERSION;
-                vigemBusVersionInfo = new Version(BLANK_VIGEMBUS_VERSION);
-            }
         }
 
         private static string FakerInputVersion()
@@ -3741,7 +3580,7 @@ namespace DS4Windows
         public const double DEFAULT_SX_TILT_MAXZONE = 1.0;
         public const string DEFAULT_SA_TRIGGERS = "-1";
         public const string DEFAULT_GYRO_MSTICK_TRIGGERS = "-1";
-        public const OutContType DEFAULT_OUT_CONT_TYPE = OutContType.X360;
+        public const OutContType DEFAULT_OUT_CONT_TYPE = OutContType.ViiperX360;
         public const bool DEFAULT_OUTPUT_TO_DS4 = true;
         public const bool DEFAULT_TOUCH_TOGGLE = true;
         public const bool DEFAULT_TOUCHPAD_JITTER_COMP = true;
@@ -4355,6 +4194,12 @@ namespace DS4Windows
           DEFAULT_OUT_CONT_TYPE, DEFAULT_OUT_CONT_TYPE, DEFAULT_OUT_CONT_TYPE,
           DEFAULT_OUT_CONT_TYPE, DEFAULT_OUT_CONT_TYPE, DEFAULT_OUT_CONT_TYPE};
 
+        public AudioHapticsProfileSettings[] audioHapticsSettings = Enumerable.Range(0, Global.TEST_PROFILE_ITEM_COUNT)
+            .Select(_ => new AudioHapticsProfileSettings()).ToArray();
+
+        public TriggerLabProfileSettings[] triggerLabSettings = Enumerable.Range(0, Global.TEST_PROFILE_ITEM_COUNT)
+            .Select(_ => new TriggerLabProfileSettings()).ToArray();
+
         public const bool DEFAULT_OUTPUT_VIRTUAL_TRIG_BUTTONS = true;
         public bool[] outputVirtualTriggerButtons = new bool[Global.TEST_PROFILE_ITEM_COUNT]
         {
@@ -4594,8 +4439,7 @@ namespace DS4Windows
             string result = "X360";
             switch (id)
             {
-                case OutContType.None:
-                case OutContType.X360: result = "X360"; break;
+                case OutContType.None: result = "None"; break;
                 case OutContType.ViiperX360: result = "ViiperX360"; break;
                 case OutContType.ViiperDS4: result = "ViiperDS4"; break;
                 case OutContType.ViiperDualSense: result = "ViiperDualSense"; break;
@@ -4609,11 +4453,11 @@ namespace DS4Windows
 
         private OutContType OutContDeviceId(string name)
         {
-            OutContType id = OutContType.X360;
+            OutContType id = OutContType.ViiperX360;
             switch (name)
             {
-                case "None":
-                case "X360": id = OutContType.X360; break;
+                case "None": id = OutContType.None; break;
+                case "X360": id = OutContType.ViiperX360; break;
                 case "DS4": id = OutContType.ViiperDS4; break;
                 case "DualSense": id = OutContType.ViiperDualSense; break;
                 case "ViiperX360": id = OutContType.ViiperX360; break;
@@ -8142,7 +7986,7 @@ namespace DS4Windows
                 }
 
                 try { Item = m_Xdoc.SelectSingleNode("/" + rootname + "/OutputContDevice"); outputDevType[device] = OutContDeviceId(Item.InnerText).Normalize(); }
-                catch { outputDevType[device] = OutContType.X360; missingSetting = true; }
+                catch { outputDevType[device] = OutContType.ViiperX360; missingSetting = true; }
 
                 // Only change xinput devices under certain conditions. Avoid
                 // performing this upon program startup before loading devices.
@@ -10277,6 +10121,8 @@ namespace DS4Windows
             touchMStickInfo[device].Reset();
             touchpadButtonMode[device] = TouchButtonActivationMode.Click;
             outputDevType[device] = DEFAULT_OUT_CONT_TYPE;
+            audioHapticsSettings[device] = new AudioHapticsProfileSettings();
+            triggerLabSettings[device] = new TriggerLabProfileSettings();
             ds4Mapping = false;
         }
 

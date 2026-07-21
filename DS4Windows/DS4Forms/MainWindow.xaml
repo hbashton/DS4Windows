@@ -172,6 +172,14 @@
                 </Grid>
             </TabItem>
 
+            <TabItem x:Name="audioHapticsTab" Header="Audio Haptics" Tag="&#xE767;" ToolTip="Turn system or app audio into advanced haptic feedback for the selected controller." IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">
+                <local:AudioHapticsControl x:Name="audioHapticsControl" SettingsChanged="ProfileFeatureControl_SettingsChanged" />
+            </TabItem>
+
+            <TabItem x:Name="triggerLabTab" Header="Trigger Lab" Tag="L2" ToolTip="Build adaptive-trigger effects in the selected controller's active profile." IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">
+                <local:TriggerLabControl x:Name="triggerLabControl" SettingsChanged="ProfileFeatureControl_SettingsChanged" />
+            </TabItem>
+
             <TabItem x:Name="profilesTab" Header="{lex:Loc Profiles}" Tag="&#xE8A5;" ToolTip="Create and manage complete controller configurations.">
                 <Grid x:Name="profDockPanel">
                     <Grid x:Name="profilesBrowserPanel">
@@ -726,6 +734,24 @@
                                     Visibility="{Binding IsChecked, ElementName=verboseLoggingCheck, Converter={StaticResource BooleanToVisibilityConverter}}"
                                     Click="ViiperDebuggerBtn_Click" />
                         </StackPanel>
+                        <Border Margin="0,16,0,4" Padding="14,12" CornerRadius="6"
+                                Background="{DynamicResource RaisedBackgroundColor}"
+                                BorderBrush="{DynamicResource BorderColor}" BorderThickness="1">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="Support DS4Windows" FontWeight="SemiBold" />
+                                    <TextBlock Text="Help fund controller hardware, testing, and development."
+                                               Margin="0,3,18,0" TextWrapping="Wrap"
+                                               Foreground="{DynamicResource MutedForegroundColor}" />
+                                </StackPanel>
+                                <Button Grid.Column="1" Content="❤  PayPal" Padding="14,7"
+                                        VerticalAlignment="Center" Click="SupportPayPalBtn_Click" />
+                            </Grid>
+                        </Border>
                                 </StackPanel>
                             </Border>
                         </Expander>

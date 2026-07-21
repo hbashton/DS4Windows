@@ -1,0 +1,408 @@
+<UserControl x:Class="DS4WinWPF.DS4Forms.AudioHapticsControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignHeight="760" d:DesignWidth="1040"
+             HorizontalAlignment="Left" VerticalAlignment="Stretch"
+             Width="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType={x:Type Window}}, Converter={StaticResource ShellViewportWidth}, ConverterParameter=318}">
+    <UserControl.Resources>
+        <Style x:Key="FeatureCard" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource CardBackgroundColor}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderColor}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="7" />
+            <Setter Property="Padding" Value="0" />
+        </Style>
+        <Style x:Key="FeatureCardHeader" TargetType="Border">
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderColor}" />
+            <Setter Property="BorderThickness" Value="0,0,0,1" />
+            <Setter Property="Padding" Value="18,14" />
+        </Style>
+        <Style x:Key="FeatureLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource MutedForegroundColor}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,0,0,7" />
+        </Style>
+        <Style x:Key="PresetButton" TargetType="Button" BasedOn="{StaticResource BridgeSecondaryButtonStyle}">
+            <Setter Property="MinHeight" Value="42" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style x:Key="ModernToggle" TargetType="CheckBox">
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Grid Width="46" Height="26">
+                            <Border x:Name="Track" CornerRadius="5" Background="{DynamicResource BorderColor}"
+                                    BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" />
+                            <Border x:Name="Thumb" Width="18" Height="18" Margin="4" CornerRadius="3"
+                                    Background="{DynamicResource ForegroundColor}" HorizontalAlignment="Left" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Track" Property="Background" Value="{DynamicResource AccentColor}" />
+                                <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource AccentColor}" />
+                                <Setter TargetName="Thumb" Property="HorizontalAlignment" Value="Right" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Track" Property="Opacity" Value="0.84" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.42" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="HapticsSlider" TargetType="Slider">
+            <Setter Property="Height" Value="34" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid Height="34">
+                            <Track x:Name="PART_Track" VerticalAlignment="Center">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="Slider.DecreaseLarge" IsTabStop="False">
+                                        <RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Height="7" CornerRadius="4" Background="{DynamicResource AccentColor}" /></ControlTemplate></RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.DecreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Width="22" Height="22">
+                                        <Thumb.Template><ControlTemplate TargetType="Thumb"><Border CornerRadius="11" Background="{DynamicResource ForegroundColor}" BorderBrush="{DynamicResource AccentColor}" BorderThickness="2" /></ControlTemplate></Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="Slider.IncreaseLarge" IsTabStop="False">
+                                        <RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Height="7" CornerRadius="4" Background="{DynamicResource BorderColor}" /></ControlTemplate></RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.IncreaseRepeatButton>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="StatusPill" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource RaisedBackgroundColor}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderColor}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Padding" Value="10,6" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+        </Style>
+    </UserControl.Resources>
+
+    <ScrollViewer x:Name="audioHapticsScroll" VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled"
+                  HorizontalContentAlignment="Stretch">
+        <Grid Margin="0,0,0,16" HorizontalAlignment="Stretch"
+              Width="{Binding ActualWidth, ElementName=audioHapticsScroll}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Grid Margin="0,0,0,18">
+                <Border Style="{StaticResource FeatureCard}" Padding="14,9"
+                        HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="Enabled" FontWeight="SemiBold" VerticalAlignment="Center"
+                                   Margin="0,0,12,0" />
+                        <CheckBox x:Name="enabledToggle" Style="{StaticResource ModernToggle}"
+                                  Click="EnabledToggle_Click" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" MinWidth="240" />
+                    <ColumnDefinition Width="16" />
+                    <ColumnDefinition Width="*" MinWidth="240" />
+                </Grid.ColumnDefinitions>
+
+                <Border Style="{StaticResource FeatureCard}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Border Style="{StaticResource FeatureCardHeader}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="50" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Width="42" Height="42" CornerRadius="6"
+                                        Background="{DynamicResource RaisedBackgroundColor}"
+                                        BorderBrush="{DynamicResource BorderColor}" BorderThickness="1">
+                                    <TextBlock Text="&#xE767;" FontFamily="Segoe MDL2 Assets" FontSize="20"
+                                               Foreground="{DynamicResource AccentColor}"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock Text="Audio Haptics" FontSize="17" FontWeight="SemiBold" />
+                                    <TextBlock Text="Audio-driven controller feedback" TextWrapping="Wrap"
+                                               Foreground="{DynamicResource MutedForegroundColor}" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <StackPanel Grid.Row="1" Margin="20">
+                            <Border Background="{DynamicResource RaisedBackgroundColor}"
+                                    BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
+                                    CornerRadius="6" Padding="18,15">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="42" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="58" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="0%" VerticalAlignment="Center" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource MutedForegroundColor}" />
+                                    <Slider x:Name="gainSlider" Grid.Column="1" Style="{StaticResource HapticsSlider}"
+                                            Minimum="0" Maximum="200" TickFrequency="5"
+                                            ValueChanged="GainSlider_ValueChanged" />
+                                    <TextBlock x:Name="gainValueText" Grid.Column="2" HorizontalAlignment="Right"
+                                               VerticalAlignment="Center" FontWeight="SemiBold" FontSize="14" />
+                                </Grid>
+                            </Border>
+
+                            <Grid Margin="0,14,0,14">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition />
+                                    <ColumnDefinition Width="10" />
+                                    <ColumnDefinition />
+                                    <ColumnDefinition Width="10" />
+                                    <ColumnDefinition />
+                                </Grid.ColumnDefinitions>
+                                <Button Content="Low" Tag="50" Style="{StaticResource PresetButton}"
+                                        Click="GainPreset_Click" />
+                                <Button Grid.Column="2" Content="Medium" Tag="100"
+                                        Style="{StaticResource PresetButton}" Click="GainPreset_Click" />
+                                <Button Grid.Column="4" Content="High" Tag="150"
+                                        Style="{StaticResource PresetButton}" Click="GainPreset_Click" />
+                            </Grid>
+
+                            <TextBlock Text="SOURCE" Style="{StaticResource FeatureLabel}" />
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <ComboBox x:Name="sourceCombo" MinHeight="42"
+                                          SelectionChanged="SourceCombo_SelectionChanged"
+                                          DisplayMemberPath="DisplayName" />
+                                <Button Grid.Column="1" Content="&#xE72C;" FontFamily="Segoe MDL2 Assets"
+                                        Width="42" Height="42" Margin="8,0,0,0"
+                                        ToolTip="Refresh running audio sessions"
+                                        Click="RefreshSources_Click" />
+                            </Grid>
+
+                            <TextBlock Text="MODE" Style="{StaticResource FeatureLabel}"
+                                       Margin="0,15,0,7" />
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition />
+                                    <ColumnDefinition />
+                                </Grid.ColumnDefinitions>
+                                <Button x:Name="mixModeButton" Content="Mix" MinHeight="40"
+                                        Click="MixMode_Click"
+                                        ToolTip="Add audio-derived feedback to game haptics and rumble." />
+                                <Button x:Name="replaceModeButton" Grid.Column="1" Content="Replace"
+                                        MinHeight="40" Click="ReplaceMode_Click"
+                                        ToolTip="Use only audio-derived feedback." />
+                            </Grid>
+                            <TextBlock x:Name="modeHelpText" Margin="0,8,0,0" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource MutedForegroundColor}" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <Border Grid.Column="2" Style="{StaticResource FeatureCard}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Border Style="{StaticResource FeatureCardHeader}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="50" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Width="42" Height="42" CornerRadius="6"
+                                        Background="{DynamicResource RaisedBackgroundColor}"
+                                        BorderBrush="{DynamicResource BorderColor}" BorderThickness="1">
+                                    <TextBlock Text="&#xE9D9;" FontFamily="Segoe MDL2 Assets" FontSize="20"
+                                               Foreground="{DynamicResource AccentColor}"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock Text="Response" FontSize="17" FontWeight="SemiBold" />
+                                    <TextBlock Text="Frequency focus and strength" TextWrapping="Wrap"
+                                               Foreground="{DynamicResource MutedForegroundColor}" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <Grid Grid.Row="1" Margin="20">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Border Background="{DynamicResource RaisedBackgroundColor}"
+                                    BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
+                                    CornerRadius="6" Padding="16">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="16" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition />
+                                        <ColumnDefinition Width="16" />
+                                        <ColumnDefinition />
+                                    </Grid.ColumnDefinitions>
+
+                                    <StackPanel>
+                                        <TextBlock Text="Bass Focus" Style="{StaticResource FeatureLabel}"
+                                                   ToolTip="Choose which low-frequency region becomes vibration." />
+                                        <ComboBox x:Name="bassFocusCombo" MinHeight="38"
+                                                  SelectionChanged="BassFocusCombo_SelectionChanged">
+                                            <ComboBoxItem Content="80 Hz" />
+                                            <ComboBoxItem Content="160 Hz" />
+                                            <ComboBoxItem Content="240 Hz" />
+                                            <ComboBoxItem Content="400 Hz" />
+                                        </ComboBox>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="Response" Style="{StaticResource FeatureLabel}"
+                                                   ToolTip="Control how strongly haptics react, especially to peaks." />
+                                        <ComboBox x:Name="responseCombo" MinHeight="38"
+                                                  SelectionChanged="ResponseCombo_SelectionChanged">
+                                            <ComboBoxItem Content="Subtle" />
+                                            <ComboBoxItem Content="Dynamic" />
+                                            <ComboBoxItem Content="Aggressive" />
+                                        </ComboBox>
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Row="2">
+                                        <TextBlock Text="Ramp" Style="{StaticResource FeatureLabel}"
+                                                   ToolTip="Control how quickly haptics rise with the sound." />
+                                        <ComboBox x:Name="attackCombo" MinHeight="38"
+                                                  SelectionChanged="AttackCombo_SelectionChanged">
+                                            <ComboBoxItem Content="Slow Ramp" />
+                                            <ComboBoxItem Content="Medium Ramp" />
+                                            <ComboBoxItem Content="Fast Ramp" />
+                                            <ComboBoxItem Content="Instant Ramp" />
+                                        </ComboBox>
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="2" Grid.Column="2">
+                                        <TextBlock Text="Fade" Style="{StaticResource FeatureLabel}"
+                                                   ToolTip="Control how quickly haptics fade after the sound drops." />
+                                        <ComboBox x:Name="releaseCombo" MinHeight="38"
+                                                  SelectionChanged="ReleaseCombo_SelectionChanged">
+                                            <ComboBoxItem Content="Fast Fade" />
+                                            <ComboBoxItem Content="Medium Fade" />
+                                            <ComboBoxItem Content="Slow Fade" />
+                                            <ComboBoxItem Content="Long Fade" />
+                                        </ComboBox>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <WrapPanel Grid.Row="2" Margin="0,16,0,0">
+                                <Border Style="{StaticResource StatusPill}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Ellipse x:Name="statusDot" Width="8" Height="8"
+                                                 Fill="{DynamicResource MutedForegroundColor}"
+                                                 VerticalAlignment="Center" />
+                                        <TextBlock x:Name="statusText" Margin="8,0,0,0"
+                                                   Text="Audio Haptics is disabled." FontWeight="SemiBold"
+                                                   TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Style="{StaticResource StatusPill}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Ellipse Width="8" Height="8" Fill="{DynamicResource MutedForegroundColor}"
+                                                 VerticalAlignment="Center" />
+                                        <TextBlock x:Name="sourceStatusText" Margin="8,0,0,0"
+                                                   Text="System audio" FontWeight="SemiBold" />
+                                    </StackPanel>
+                                </Border>
+                            </WrapPanel>
+                        </Grid>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <Border Grid.Row="2" Style="{StaticResource FeatureCard}" Margin="0,16,0,0"
+                    Padding="20,16">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <TextBlock Text="?" FontSize="18" Foreground="{DynamicResource AccentColor}"
+                                   FontWeight="SemiBold" Margin="0,0,10,0" />
+                        <TextBlock Text="Tips" FontSize="16" FontWeight="SemiBold" />
+                    </StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition />
+                            <ColumnDefinition Width="24" />
+                            <ColumnDefinition />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="14" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE767;" FontFamily="Segoe MDL2 Assets" FontSize="18"
+                                       Foreground="{DynamicResource AccentColor}" Width="32" />
+                            <StackPanel>
+                                <TextBlock Text="Choose a source" FontWeight="SemiBold" />
+                                <TextBlock Text="System audio follows the full Windows mix; App Session follows only one running app."
+                                           TextWrapping="Wrap" Foreground="{DynamicResource MutedForegroundColor}" />
+                            </StackPanel>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Orientation="Horizontal">
+                            <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="18"
+                                       Foreground="{DynamicResource AccentColor}" Width="32" />
+                            <StackPanel>
+                                <TextBlock Text="Unavailable sources" FontWeight="SemiBold" />
+                                <TextBlock Text="Start the app, then refresh the session list. Saved profiles reacquire restarted apps by identity."
+                                           TextWrapping="Wrap" Foreground="{DynamicResource MutedForegroundColor}" />
+                            </StackPanel>
+                        </StackPanel>
+                        <StackPanel Grid.Row="2" Orientation="Horizontal">
+                            <TextBlock Text="&#xE945;" FontFamily="Segoe MDL2 Assets" FontSize="18"
+                                       Foreground="{DynamicResource AccentColor}" Width="32" />
+                            <StackPanel>
+                                <TextBlock Text="Audio Haptics" FontWeight="SemiBold" />
+                                <TextBlock Text="Audio energy is filtered, gated, and soft-clipped into the native DualSense haptic lane."
+                                           TextWrapping="Wrap" Foreground="{DynamicResource MutedForegroundColor}" />
+                            </StackPanel>
+                        </StackPanel>
+                        <StackPanel Grid.Row="2" Grid.Column="2" Orientation="Horizontal">
+                            <TextBlock Text="&#xE9D9;" FontFamily="Segoe MDL2 Assets" FontSize="18"
+                                       Foreground="{DynamicResource AccentColor}" Width="32" />
+                            <StackPanel>
+                                <TextBlock Text="Mix / Replace" FontWeight="SemiBold" />
+                                <TextBlock Text="Mix preserves game haptics and adds audio detail; Replace uses only the derived audio feel."
+                                           TextWrapping="Wrap" Foreground="{DynamicResource MutedForegroundColor}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </ScrollViewer>
+</UserControl>

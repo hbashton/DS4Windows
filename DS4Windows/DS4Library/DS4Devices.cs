@@ -187,18 +187,6 @@ namespace DS4Windows
         };
 
 
-        private static bool detectNewControllers = true;
-        private static long timestamp;
-        private static bool DetectNewControllers
-        {
-            get => detectNewControllers;
-            set
-            {
-                if (detectNewControllers) timestamp = Stopwatch.GetTimestamp();
-
-                detectNewControllers = value;
-            }
-        }
         // Registry of Sony HID paths created by DS4Windows through VIIPER. These
         // complete USB/IP devices look physical to Windows and must never be
         // re-ingested as input, regardless of the selected virtual Sony persona.
@@ -208,13 +196,13 @@ namespace DS4Windows
         private static int pendingOwnVirtualSonyConnects;
         private static long pendingOwnVirtualSonyTimestamp;
 
-        // ViGEm-created DS4 controllers report the Sony VID with one of these PIDs.
+        // Moonlight/Sunshine DS4 streams report the Sony VID with one of these PIDs.
         private static readonly int[] VirtualDS4Pids = { 0x05C4, 0x09CC };
         private static readonly int[] ViiperSonyPids =
             { 0x05C4, 0x09CC, 0x0CE6, 0x0DF2 };
         private static readonly TimeSpan OwnVirtualSonyPendingTimeout =
             TimeSpan.FromSeconds(15);
-        private const string VigemVirtualDS4MacPrefix = "C0:13:37";
+        private const string MoonlightVirtualDS4MacPrefix = "C0:13:37";
 
         internal static bool IsViiperSonyProductId(int productId)
         {
@@ -382,19 +370,12 @@ namespace DS4Windows
                 ViiperUsbipPortManager.IsActivePort(port);
         }
 
-        private static bool HasViGEmVirtualDS4Identity(HidDevice hDevice, string serial)
+        private static bool HasMoonlightVirtualDS4Identity(HidDevice hDevice, string serial)
         {
             return hDevice.Attributes.VendorId == SONY_VID &&
                 VirtualDS4Pids.Contains(hDevice.Attributes.ProductId) &&
                 !string.IsNullOrEmpty(serial) &&
-                serial.StartsWith(VigemVirtualDS4MacPrefix, StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static bool IsKnownVirtualDS4(HidDevice hDevice, bool isVirtualDevice)
-        {
-            return isVirtualDevice &&
-                hDevice.Attributes.VendorId == SONY_VID &&
-                VirtualDS4Pids.Contains(hDevice.Attributes.ProductId);
+                serial.StartsWith(MoonlightVirtualDS4MacPrefix, StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsRealDS4(HidDevice hDevice)
@@ -415,42 +396,11 @@ namespace DS4Windows
                 return false;
             }
 
-            if (!Global.UseMoonlight)
-            {
-                bool decision = !isVirtualDevice;
-                return decision;
-            }
-            if (!Global.UseAdvancedMoonlight)
-            {
-                // this approach should work on most devices, but not on my pc for some reason
-                if (IsKnownVirtualDS4(hDevice, isVirtualDevice))
-                {
-                    return true;
-                }
-            }
-            else
-            {
-                // all of this basically tries to add a 5 seconds cooldown when a new device is connected and moonlight
-                // support is on to avoid getting 8 virtual connected devices from one physical one
-                if (!DetectNewControllers)
-                {
-                    var curTimestamp = Stopwatch.GetTimestamp();
-                    if (curTimestamp - timestamp > 5 * Stopwatch.Frequency) DetectNewControllers = true;
-                }
-
-                // Moonlight detection
-                if (IsKnownVirtualDS4(hDevice, isVirtualDevice))
-                {
-                    if (DetectNewControllers)
-                    {
-                        DetectNewControllers = false;
-                        return true;
-                    }
-                    return DetectNewControllers;
-                }
-            }
-            bool defaultDecision = !isVirtualDevice;
-            return defaultDecision;
+            return MoonlightVirtualDevicePolicy.ShouldAccept(
+                isOwnOutput: false,
+                isVirtualDevice,
+                Global.UseMoonlight,
+                MoonlightVirtualDevicePolicy.IsSunshineHostRunning());
         }
 
         // Enumerates ds4 controllers in the system
@@ -566,7 +516,7 @@ namespace DS4Windows
                             serial = hDevice.ReadSerial(DS4Device.SERIAL_FEATURE_ID);
                         }
 
-                        if (HasViGEmVirtualDS4Identity(hDevice, serial) &&
+                        if (HasMoonlightVirtualDS4Identity(hDevice, serial) &&
                             !Global.UseMoonlight)
                         {
                             hDevice.Dispose();

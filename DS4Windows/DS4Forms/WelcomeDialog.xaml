@@ -23,12 +23,9 @@
     </Window.Resources>
     <ScrollViewer>
         <DockPanel Margin="10,10,10,10" LastChildFill="False">
-            <Button x:Name="vigemInstallBtn" Content="{lex:Loc Welcome.Step1Text}" Style="{StaticResource CommonMargin}" DockPanel.Dock="Top" Click="VigemInstallBtn_Click" />
-            <TextBlock TextAlignment="Center" DockPanel.Dock="Top" TextWrapping="Wrap">
-                <TextBlock.Text>
-                    <lex:Loc Key="Welcome.Step1HelpText" />
-                </TextBlock.Text>
-            </TextBlock>
+            <Button x:Name="viiperInstallBtn" Content="Install / Repair VIIPER" Style="{StaticResource CommonMargin}" DockPanel.Dock="Top" Click="ViiperInstallBtn_Click" />
+            <TextBlock TextAlignment="Center" DockPanel.Dock="Top" TextWrapping="Wrap"
+                       Text="Required virtual-controller backend. DS4Windows requests administrator access and installs VIIPER plus usbip-win2 for you." />
             <Button x:Name="step2Btn" IsEnabled="False" Content="{lex:Loc Welcome.Step2Text}" Style="{StaticResource CommonMargin}" DockPanel.Dock="Top"
                 Click="Step2Btn_Click" />
             <TextBlock TextAlignment="Center" DockPanel.Dock="Top">

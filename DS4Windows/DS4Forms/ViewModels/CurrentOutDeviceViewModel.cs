@@ -230,9 +230,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         {
             return type.Normalize() switch
             {
-                OutContType.X360 => "Xbox 360",
-                OutContType.ViiperX360 => "Xbox 360 (VIIPER)",
-                OutContType.ViiperDS4 => "DualShock 4 (VIIPER)",
+                OutContType.ViiperX360 => "Viiper Xbox 360",
+                OutContType.ViiperDS4 => "Viiper DualShock 4",
                 OutContType.ViiperDualSense => "DualSense",
                 OutContType.ViiperDualSenseEdge => "DualSense Edge",
                 OutContType.ViiperSwitch2Pro => "Switch 2 Pro",
@@ -289,34 +288,9 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public event EventHandler UnplugRequest;
         int idx;
 
-        public bool DisplayXInputSlotNum
-        {
-            get
-            {
-                bool result = false;
+        public bool DisplayXInputSlotNum => false;
 
-                result = outSlotDevice.CurrentType == OutContType.X360 &&
-                    (outSlotDevice.OutputDevice as Xbox360OutDevice).Features.HasFlag(Xbox360OutDevice.X360Features.XInputSlotNum);
-
-                return result;
-            }
-        }
-
-
-        public string XInputSlotNum
-        {
-            get
-            {
-                var xinputSlot = "?";
-                if (outSlotDevice.CurrentType == OutContType.X360)
-                {
-                    var tempX360 = outSlotDevice.OutputDevice as Xbox360OutDevice;
-                    if (tempX360.XinputSlotNum >= 0) xinputSlot = $"{tempX360.XinputSlotNum + 1}";
-                }
-                return xinputSlot;
-            }
-
-        }
+        public string XInputSlotNum => string.Empty;
 
         public event EventHandler DisplayXInputSlotNumChanged;
         public event EventHandler XInputSlotNumChanged;
@@ -394,23 +368,20 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 case OutContType.None:
                     result = 0;
                     break;
-                case OutContType.X360:
+                case OutContType.ViiperDS4:
                     result = 1;
                     break;
-                case OutContType.ViiperDS4:
+                case OutContType.ViiperX360:
                     result = 2;
                     break;
-                case OutContType.ViiperX360:
+                case OutContType.ViiperDualSense:
                     result = 3;
                     break;
-                case OutContType.ViiperDualSense:
+                case OutContType.ViiperDualSenseEdge:
                     result = 4;
                     break;
-                case OutContType.ViiperDualSenseEdge:
-                    result = 5;
-                    break;
                 case OutContType.ViiperSwitch2Pro:
-                    result = 6;
+                    result = 5;
                     break;
                 default:
                     break;
@@ -445,21 +416,18 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     result = OutContType.None;
                     break;
                 case 1:
-                    result = OutContType.X360;
-                    break;
-                case 2:
                     result = OutContType.ViiperDS4;
                     break;
-                case 3:
+                case 2:
                     result = OutContType.ViiperX360;
                     break;
-                case 4:
+                case 3:
                     result = OutContType.ViiperDualSense;
                     break;
-                case 5:
+                case 4:
                     result = OutContType.ViiperDualSenseEdge;
                     break;
-                case 6:
+                case 5:
                     result = OutContType.ViiperSwitch2Pro;
                     break;
                 default:

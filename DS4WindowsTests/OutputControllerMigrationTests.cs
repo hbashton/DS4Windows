@@ -15,6 +15,13 @@ namespace DS4WindowsTests
                 OutContType.ViiperDS4.Normalize());
         }
 
+        [TestMethod]
+        public void RetiredXbox360AlwaysNormalizesToViiper()
+        {
+            Assert.AreEqual(OutContType.ViiperX360,
+                OutContType.X360.Normalize());
+        }
+
         [DataTestMethod]
         [DataRow("DS4")]
         [DataRow("DualShock 4")]
@@ -39,6 +46,21 @@ namespace DS4WindowsTests
             };
 
             Assert.AreEqual("ViiperDS4", slot.DeviceTypeString);
+        }
+
+        [DataTestMethod]
+        [DataRow("X360")]
+        [DataRow("Xbox360")]
+        [DataRow("Xbox 360")]
+        public void LegacyXbox360NamesLoadAsViiperXbox360(string value)
+        {
+            var slot = new OutputSlotSerializer
+            {
+                DeviceTypeString = value,
+            };
+
+            Assert.AreEqual(OutContType.ViiperX360, slot.DeviceType);
+            Assert.AreEqual("ViiperX360", slot.DeviceTypeString);
         }
     }
 }

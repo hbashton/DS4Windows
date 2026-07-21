@@ -1490,6 +1490,24 @@ namespace DS4WinWPF.DS4Control.DTOXml
             set => OutputContDevice = OutputSlotPersistDTO.ParseOutputDeviceType(value, BackingStore.DEFAULT_OUT_CONT_TYPE);
         }
 
+        [XmlElement("AudioHaptics")]
+        public AudioHapticsProfileSettings AudioHapticsSettings
+        {
+            get; set;
+        } = new AudioHapticsProfileSettings();
+
+        [XmlElement("TriggerLab")]
+        public TriggerLabProfileSettings TriggerLabSettings
+        {
+            get; set;
+        } = new TriggerLabProfileSettings();
+
+        public bool ShouldSerializeAudioHapticsSettings() =>
+            AudioHapticsSettings?.IsDefaultConfiguration() == false;
+
+        public bool ShouldSerializeTriggerLabSettings() =>
+            TriggerLabSettings?.IsDefaultConfiguration() == false;
+
         [XmlElement("DS4OutputTriggerMode")]
         public DS4TriggerOutputMode OutputDS4TriggerMode
         {
@@ -1546,6 +1564,8 @@ namespace DS4WinWPF.DS4Control.DTOXml
             AbsMouseRegionSettings = new AbsMouseRegionSettingsSerializer();
             Control = new DS4ControlAssignementSerializer();
             ShiftControl = new DS4ControlAssignementSerializer();
+            AudioHapticsSettings = new AudioHapticsProfileSettings();
+            TriggerLabSettings = new TriggerLabProfileSettings();
         }
 
         public void MapFrom(BackingStore source)
@@ -1903,7 +1923,9 @@ namespace DS4WinWPF.DS4Control.DTOXml
                 SnapToCenter = source.buttonAbsMouseInfos[deviceIndex].snapToCenter,
             };
 
-            OutputContDevice = source.outputDevType[deviceIndex];
+            OutputContDevice = source.outputDevType[deviceIndex].Normalize();
+            AudioHapticsSettings = source.audioHapticsSettings[deviceIndex].Clone();
+            TriggerLabSettings = source.triggerLabSettings[deviceIndex].Clone();
             OutputDS4TriggerMode = source.outputDS4TriggerMode[deviceIndex];
 
             ProfileActions = string.Join("/", source.profileActions[deviceIndex]);
@@ -2550,7 +2572,9 @@ namespace DS4WinWPF.DS4Control.DTOXml
                 destination.buttonAbsMouseInfos[deviceIndex].snapToCenter = AbsMouseRegionSettings.SnapToCenter;
             };
 
-            destination.outputDevType[deviceIndex] = OutputContDevice;
+            destination.outputDevType[deviceIndex] = OutputContDevice.Normalize();
+            destination.audioHapticsSettings[deviceIndex] = (AudioHapticsSettings ?? new AudioHapticsProfileSettings()).Clone();
+            destination.triggerLabSettings[deviceIndex] = (TriggerLabSettings ?? new TriggerLabProfileSettings()).Clone();
             destination.outputDS4TriggerMode[deviceIndex] = OutputDS4TriggerMode;
 
             if (!string.IsNullOrEmpty(ProfileActions))

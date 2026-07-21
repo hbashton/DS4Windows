@@ -19,7 +19,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 using DS4Windows.DS4Control;
 using DS4WinWPF.DS4Control;
 using Microsoft.Win32;
-using Nefarius.ViGEm.Client;
 using NLog;
 using Sensorit.Base;
 using SharpOSC;
@@ -39,10 +38,10 @@ namespace DS4Windows
 {
     public class ControlService
     {
-        public ViGEmClient vigemTestClient = null;
         private readonly DualSenseAudioPassthrough dualSenseAudioPassthrough = new DualSenseAudioPassthrough();
         private readonly DualShock4AudioPassthrough dualShock4AudioPassthrough = new DualShock4AudioPassthrough();
         private readonly DualSenseMicrophonePassthrough dualSenseMicrophonePassthrough = new DualSenseMicrophonePassthrough();
+        private readonly AudioHapticsService audioHapticsService = new AudioHapticsService();
         private readonly GameBarIntegration gameBarIntegration = new GameBarIntegration();
         private readonly object hidHideSessionLock = new object();
         private readonly HashSet<string> hidHideSessionManagedInstanceIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -88,8 +87,6 @@ namespace DS4Windows
             new OneEuroFilter3D(), new OneEuroFilter3D(),
             new OneEuroFilter3D(), new OneEuroFilter3D(),
         };
-        Thread tempThread;
-        Thread tempBusThread;
         Thread eventDispatchThread;
         Dispatcher eventDispatcher;
         public bool suspending;
@@ -244,7 +241,6 @@ namespace DS4Windows
             DS4Devices.PrepareDS4Init = PrepareDS4DeviceInit;
             DS4Devices.PostDS4Init = PostDS4DeviceInit;
             DS4Devices.PreparePendingDevice = CheckForSupportedDevice;
-            outputslotMan.ViGEmFailure += OutputslotMan_ViGEmFailure;
 
             Global.UDPServerSmoothingMincutoffChanged += ChangeUdpSmoothingAttrs;
             Global.UDPServerSmoothingBetaChanged += ChangeUdpSmoothingAttrs;
@@ -648,20 +644,6 @@ namespace DS4Windows
                     Global.RefreshActionAlias(setting, true);
                 }
             }
-        }
-
-        private void OutputslotMan_ViGEmFailure(object sender, int errorCode)
-        {
-            eventDispatcher.BeginInvoke((Action)(() =>
-            {
-                loopControllers = false;
-                while (inServiceTask)
-                    Thread.SpinWait(1000);
-
-                LogDebug(string.Format(DS4WinWPF.Translations.Strings.ViGEmPluginFailure, errorCode),
-                    true);
-                Stop();
-            }));
         }
 
         public void PostDS4DeviceInit(DS4Device device)
@@ -1184,8 +1166,7 @@ namespace DS4Windows
                 return;
             }
 
-            if (contType != OutContType.X360 &&
-                !ViiperOutDevice.IsViiperType(contType))
+            if (!ViiperOutDevice.IsViiperType(contType))
             {
                 return;
             }
@@ -1389,51 +1370,6 @@ namespace DS4Windows
             }
         }
 
-        private void StartViGEm()
-        {
-            StartupDiag("StartViGEm begin");
-            // Refresh internal ViGEmBus info
-            Global.RefreshViGEmBusInfo();
-            StartupDiag($"StartViGEm info installed={Global.vigemInstalled} version={Global.vigembusVersion} supported={Global.IsRunningSupportedViGEmBus()}");
-            if (Global.IsRunningSupportedViGEmBus())
-            {
-                tempThread = new Thread(() =>
-                {
-                    try
-                    {
-                        StartupDiag("ViGEmClient ctor begin");
-                        vigemTestClient = new ViGEmClient();
-                        StartupDiag("ViGEmClient ctor end success");
-                    }
-                    catch (Exception ex)
-                    {
-                        StartupDiag($"ViGEmClient ctor exception {ex.GetType().Name}: {ex.Message}");
-                    }
-                });
-                tempThread.Priority = ThreadPriority.AboveNormal;
-                tempThread.IsBackground = true;
-                tempThread.Start();
-                while (tempThread.IsAlive)
-                {
-                    Thread.SpinWait(500);
-                }
-            }
-
-            tempThread = null;
-            StartupDiag($"StartViGEm end clientCreated={vigemTestClient != null}");
-        }
-
-        private void StopViGEm()
-        {
-            if (vigemTestClient != null)
-            {
-                StartupDiag("StopViGEm Dispose begin");
-                vigemTestClient.Dispose();
-                StartupDiag("StopViGEm Dispose end");
-                vigemTestClient = null;
-            }
-        }
-
         public void AssignInitialDevices()
         {
             foreach (OutSlotDevice slotDevice in outputslotMan.OutputSlots)
@@ -1474,261 +1410,10 @@ namespace DS4Windows
         private OutputDevice EstablishOutDevice(int index, OutContType contType)
         {
             contType = contType.Normalize();
-            StartupDiag($"EstablishOutDevice begin index={index} contType={contType} client={vigemTestClient != null}");
-            OutputDevice temp = null;
-            temp = outputslotMan.AllocateController(contType, vigemTestClient);
+            StartupDiag($"EstablishOutDevice begin index={index} contType={contType}");
+            OutputDevice temp = outputslotMan.AllocateController(contType);
             StartupDiag($"EstablishOutDevice end index={index} contType={contType} result={temp?.GetType().Name ?? "null"}");
             return temp;
-        }
-
-        public void EstablishOutFeedback(int index, OutContType contType,
-            OutputDevice outDevice, DS4Device device)
-        {
-            contType = contType.Normalize();
-            int devIndex = index;
-
-            if (contType == OutContType.X360)
-            {
-                Xbox360OutDevice tempXbox = outDevice as Xbox360OutDevice;
-                Nefarius.ViGEm.Client.Targets.Xbox360FeedbackReceivedEventHandler p = (sender, args) =>
-                {
-                    //Trace.WriteLine(string.Format("Rumble ({0}, {1}) {2}",
-                    //    args.LargeMotor, args.SmallMotor, DateTime.Now.ToString("hh:mm:ss.FFFF")));
-                    SetDevRumble(device, args.LargeMotor, args.SmallMotor, devIndex);
-                };
-                tempXbox.cont.FeedbackReceived += p;
-                tempXbox.forceFeedbacksDict.Add(index, p);
-            }
-            else if (contType == OutContType.DS4)
-            {
-                DS4OutDevice tempDS4 = outDevice as DS4OutDevice;
-                if (tempDS4.CanUseAwaitOutputBuffer)
-                {
-                    DS4OutDeviceExt.ReceivedOutBufferHandler processOutBuffAction = (DS4OutDeviceExt sender, byte[] reportData) =>
-                    {
-                        /*
-                        //DS4OutputBufferData outputData = new DS4OutputBufferData();
-                        DS4OutputBufferData outputData =
-                            DS4OutDeviceExtras.ConvertOutputBufferArrayToStruct(reportData);
-
-                        bool useRumble = false; bool useLight = false;
-                        byte flashOn = 0; byte flashOff = 0;
-                        DS4Color? color = null;
-
-                        //Trace.WriteLine(string.Join(" ", reportData));
-
-                        if ((outputData.featureFlags & DS4OutDevice.RUMBLE_FEATURE_FLAG) != 0)
-                        {
-                            useRumble = true;
-                            device.setRumble(outputData.rightFastRumble, outputData.leftSlowRumble);
-                            //SetDevRumble(device, devour[4], devour[5], devIndex);
-                        }
-
-                        if ((outputData.featureFlags & DS4OutDevice.LIGHTBAR_FEATURE_FLAG) != 0)
-                        {
-                            useLight = true;
-                            color = new DS4Color(outputData.lightbarRedColor,
-                                outputData.lightbarGreenColor,
-                                outputData.lightbarBlueColor);
-                        }
-                        else
-                        {
-                            color = device.LightBarColor;
-                        }
-
-                        if ((outputData.featureFlags & DS4OutDevice.FLASH_FEATURE_FLAG) != 0)
-                        {
-                            useLight = true;
-                            flashOn = outputData.flashOnDuration;
-                            flashOff = outputData.flashOffDuration;
-                        }
-                        else
-                        {
-                            ref DS4LightbarState currentLight =
-                                ref device.GetLightbarStateRef();
-
-                            flashOn = currentLight.LightBarFlashDurationOn;
-                            flashOff = currentLight.LightBarFlashDurationOff;
-                        }
-
-                        if (useLight)
-                        {
-                            DS4LightbarState lightState = new DS4LightbarState
-                            {
-                                LightBarColor = (DS4Color)color,
-                                LightBarFlashDurationOn = flashOn,
-                                LightBarFlashDurationOff = flashOff,
-                            };
-                            device.SetLightbarState(ref lightState);
-                        }
-                        //*/
-
-                        //*
-                        unchecked
-                        {
-                            //Trace.WriteLine($"INDEX: {devIndex}");
-                            //Trace.WriteLine(string.Join(" ", reportData));
-                            //Trace.WriteLine("");
-
-                            bool useRumble = false; bool useLight = false;
-                            byte flashOn = 0; byte flashOff = 0;
-                            DS4Color? color = null;
-                            if ((reportData[1] & DS4OutDevice.RUMBLE_FEATURE_FLAG) != 0)
-                            {
-                                useRumble = true;
-                                if (Global.InverseRumbleMotors[devIndex])
-                                    device.setRumble(reportData[5], reportData[4]);
-                                else
-                                    device.setRumble(reportData[4], reportData[5]);
-                                //SetDevRumble(device, devour[4], devour[5], devIndex);
-                            }
-
-                            if ((reportData[1] & DS4OutDevice.LIGHTBAR_FEATURE_FLAG) != 0)
-                            {
-                                useLight = true;
-                                color = new DS4Color(reportData[6],
-                                    reportData[7],
-                                    reportData[8]);
-                            }
-                            else
-                            {
-                                color = device.LightBarColor;
-                            }
-
-                            if ((reportData[1] & DS4OutDevice.FLASH_FEATURE_FLAG) != 0)
-                            {
-                                useLight = true;
-                                flashOn = reportData[9];
-                                flashOff = reportData[10];
-                            }
-                            else
-                            {
-                                ref DS4LightbarState currentLight =
-                                    ref device.GetLightbarStateRef();
-
-                                flashOn = currentLight.LightBarFlashDurationOn;
-                                flashOff = currentLight.LightBarFlashDurationOff;
-                            }
-
-                            if (useLight)
-                            {
-                                DS4LightbarState lightState = new DS4LightbarState
-                                {
-                                    LightBarColor = (DS4Color)color,
-                                    LightBarFlashDurationOn = flashOn,
-                                    LightBarFlashDurationOff = flashOff,
-                                };
-                                device.SetLightbarState(ref lightState);
-                            }
-                        }
-                        //*/
-                    };
-
-                    DS4OutDeviceExt tempDS4Ext = tempDS4 as DS4OutDeviceExt;
-                    tempDS4Ext.ReceivedOutBuffer += processOutBuffAction;
-                    tempDS4Ext.outBufferFeedbacksDict.TryAdd(index, processOutBuffAction);
-                    tempDS4Ext.StartOutputBufferThread();
-                }
-            }
-            //else if (contType == OutContType.DS4)
-            //{
-            //    DS4OutDevice tempDS4 = outDevice as DS4OutDevice;
-            //    LightbarSettingInfo deviceLightbarSettingsInfo = Global.LightbarSettingsInfo[devIndex];
-
-            //    Nefarius.ViGEm.Client.Targets.DualShock4FeedbackReceivedEventHandler p = (sender, args) =>
-            //    {
-            //        bool useRumble = false; bool useLight = false;
-            //        byte largeMotor = args.LargeMotor;
-            //        byte smallMotor = args.SmallMotor;
-            //        //SetDevRumble(device, largeMotor, smallMotor, devIndex);
-            //        DS4Color color = new DS4Color(args.LightbarColor.Red,
-            //                args.LightbarColor.Green,
-            //                args.LightbarColor.Blue);
-
-            //        //Console.WriteLine("IN EVENT");
-            //        //Console.WriteLine("Rumble ({0}, {1}) | Light ({2}, {3}, {4}) {5}",
-            //        //    largeMotor, smallMotor, color.red, color.green, color.blue, DateTime.Now.ToString("hh:mm:ss.FFFF"));
-
-            //        if (largeMotor != 0 || smallMotor != 0)
-            //        {
-            //            useRumble = true;
-            //        }
-
-            //        // Let games to control lightbar only when the mode is Passthru (otherwise DS4Windows controls the light)
-            //        if (deviceLightbarSettingsInfo.Mode == LightbarMode.Passthru && (color.red != 0 || color.green != 0 || color.blue != 0))
-            //        {
-            //            useLight = true;
-            //        }
-
-            //        if (!useRumble && !useLight)
-            //        {
-            //            //Console.WriteLine("Fallback");
-            //            if (device.LeftHeavySlowRumble != 0 || device.RightLightFastRumble != 0)
-            //            {
-            //                useRumble = true;
-            //            }
-            //            else if (deviceLightbarSettingsInfo.Mode == LightbarMode.Passthru &&
-            //                (device.LightBarColor.red != 0 ||
-            //                device.LightBarColor.green != 0 ||
-            //                device.LightBarColor.blue != 0))
-            //            {
-            //                useLight = true;
-            //            }
-            //        }
-
-            //        if (useRumble)
-            //        {
-            //            //Console.WriteLine("Perform rumble");
-            //            SetDevRumble(device, largeMotor, smallMotor, devIndex);
-            //        }
-
-            //        if (useLight)
-            //        {
-            //            //Console.WriteLine("Change lightbar color");
-            //            /*DS4HapticState haptics = new DS4HapticState
-            //            {
-            //                LightBarColor = color,
-            //            };
-            //            device.SetHapticState(ref haptics);
-            //            */
-
-            //            DS4LightbarState lightState = new DS4LightbarState
-            //            {
-            //                LightBarColor = color,
-            //            };
-            //            device.SetLightbarState(ref lightState);
-            //        }
-
-            //        //Console.WriteLine();
-            //    };
-
-            //    tempDS4.cont.FeedbackReceived += p;
-            //    tempDS4.forceFeedbacksDict.Add(index, p);
-            //}
-        }
-
-        public void RemoveOutFeedback(OutContType contType, OutputDevice outDevice, int inIdx)
-        {
-            contType = contType.Normalize();
-            if (contType == OutContType.X360)
-            {
-                Xbox360OutDevice tempXbox = outDevice as Xbox360OutDevice;
-                tempXbox.RemoveFeedback(inIdx);
-                //tempXbox.cont.FeedbackReceived -= tempXbox.forceFeedbackCall;
-                //tempXbox.forceFeedbackCall = null;
-            }
-            else if (contType == OutContType.DS4)
-            {
-                DS4OutDevice tempDS4 = outDevice as DS4OutDevice;
-                tempDS4.RemoveFeedback(inIdx);
-            }
-            //else if (contType == OutContType.DS4)
-            //{
-            //    DS4OutDevice tempDS4 = outDevice as DS4OutDevice;
-            //    tempDS4.RemoveFeedback(inIdx);
-            //    //tempDS4.cont.FeedbackReceived -= tempDS4.forceFeedbackCall;
-            //    //tempDS4.forceFeedbackCall = null;
-            //}
         }
 
         public void AttachNewUnboundOutDev(OutContType contType)
@@ -1784,152 +1469,7 @@ namespace DS4Windows
                 EnsureHidHideForVirtualOutput(index, device, contType);
 
                 bool success = false;
-                if (contType == OutContType.X360)
-                {
-                    activeOutDevType[index] = OutContType.X360;
-
-                    if (slotDevice == null)
-                    {
-                        slotDevice = outputslotMan.FindOpenSlot();
-                        StartupDiag($"PluginOutDev X360 openSlot index={index} found={slotDevice != null} slot={(slotDevice != null ? slotDevice.Index + 1 : 0)}");
-                        if (slotDevice != null)
-                        {
-                            Xbox360OutDevice tempXbox = EstablishOutDevice(index, OutContType.X360)
-                            as Xbox360OutDevice;
-                            StartupDiag($"PluginOutDev X360 established index={index} null={tempXbox == null}");
-                            //outputDevices[index] = tempXbox;
-
-                            // Enable ViGem feedback callback handler only if lightbar/rumble data output is enabled (if those are disabled then no point enabling ViGem callback handler call)
-                            if (Global.EnableOutputDataToDS4[index])
-                            {
-                                EstablishOutFeedback(index, OutContType.X360, tempXbox, device);
-
-                                if (device.JointDeviceSlotNumber != -1)
-                                {
-                                    DS4Device tempDS4Device = DS4Controllers[device.JointDeviceSlotNumber];
-                                    if (tempDS4Device != null)
-                                    {
-                                        EstablishOutFeedback(device.JointDeviceSlotNumber, OutContType.X360, tempXbox, tempDS4Device);
-                                    }
-                                }
-                            }
-
-                            StartupDiag($"PluginOutDev X360 DeferredPlugin begin index={index}");
-                            outputslotMan.DeferredPlugin(tempXbox, index, $"{device.DisplayName} [{device.MacAddress}]", outputDevices, contType);
-                            StartupDiag($"PluginOutDev X360 DeferredPlugin end index={index}");
-                            //slotDevice.CurrentInputBound = OutSlotDevice.InputBound.Bound;
-
-                            success = true;
-                        }
-                        else
-                        {
-                            LogDebug("Failed. No open output slot found");
-                        }
-                    }
-                    else
-                    {
-                        StartupDiag($"PluginOutDev X360 reusing slot index={index} slot={slotDevice.Index + 1}");
-                        slotDevice.CurrentInputBound = OutSlotDevice.InputBound.Bound;
-                        Xbox360OutDevice tempXbox = slotDevice.OutputDevice as Xbox360OutDevice;
-
-                        // Enable ViGem feedback callback handler only if lightbar/rumble data output is enabled (if those are disabled then no point enabling ViGem callback handler call)
-                        if (Global.EnableOutputDataToDS4[index])
-                        {
-                            EstablishOutFeedback(index, OutContType.X360, tempXbox, device);
-
-                            if (device.JointDeviceSlotNumber != -1)
-                            {
-                                DS4Device tempDS4Device = DS4Controllers[device.JointDeviceSlotNumber];
-                                if (tempDS4Device != null)
-                                {
-                                    EstablishOutFeedback(device.JointDeviceSlotNumber, OutContType.X360, tempXbox, tempDS4Device);
-                                }
-                            }
-                        }
-
-                        outputDevices[index] = tempXbox;
-                        slotDevice.CurrentType = contType;
-                        success = true;
-                    }
-
-                    //tempXbox.Connect();
-                    //LogDebug("X360 Controller #" + (index + 1) + " connected");
-                }
-                else if (contType == OutContType.DS4)
-                {
-                    activeOutDevType[index] = OutContType.DS4;
-                    if (slotDevice == null)
-                    {
-                        slotDevice = outputslotMan.FindOpenSlot();
-                        StartupDiag($"PluginOutDev DS4 openSlot index={index} found={slotDevice != null} slot={(slotDevice != null ? slotDevice.Index + 1 : 0)}");
-                        if (slotDevice != null)
-                        {
-                            DS4OutDevice tempDS4 = EstablishOutDevice(index, OutContType.DS4)
-                            as DS4OutDevice;
-                            StartupDiag($"PluginOutDev DS4 established index={index} null={tempDS4 == null}");
-
-                            // Enable ViGem feedback callback handler only if DS4 lightbar/rumble data output is enabled (if those are disabled then no point enabling ViGem callback handler call)
-                            if (Global.EnableOutputDataToDS4[index])
-                            {
-                                EstablishOutFeedback(index, OutContType.DS4, tempDS4, device);
-
-                                if (device.JointDeviceSlotNumber != -1)
-                                {
-                                    DS4Device tempDS4Device = DS4Controllers[device.JointDeviceSlotNumber];
-                                    if (tempDS4Device != null)
-                                    {
-                                        EstablishOutFeedback(device.JointDeviceSlotNumber, OutContType.DS4, tempDS4, tempDS4Device);
-                                    }
-                                }
-                            }
-
-                            StartupDiag($"PluginOutDev DS4 DeferredPlugin begin index={index}");
-                            outputslotMan.DeferredPlugin(tempDS4, index, $"{device.DisplayName} [{device.MacAddress}]", outputDevices, contType);
-                            StartupDiag($"PluginOutDev DS4 DeferredPlugin end index={index}");
-                            //slotDevice.CurrentInputBound = OutSlotDevice.InputBound.Bound;
-
-                            success = true;
-                        }
-                        else
-                        {
-                            LogDebug("Failed. No open output slot found");
-                        }
-                    }
-                    else
-                    {
-                        StartupDiag($"PluginOutDev DS4 reusing slot index={index} slot={slotDevice.Index + 1}");
-                        slotDevice.CurrentInputBound = OutSlotDevice.InputBound.Bound;
-                        DS4OutDevice tempDS4 = slotDevice.OutputDevice as DS4OutDevice;
-
-                        // Enable ViGem feedback callback handler only if lightbar/rumble data output is enabled (if those are disabled then no point enabling ViGem callback handler call)
-                        if (Global.EnableOutputDataToDS4[index])
-                        {
-                            EstablishOutFeedback(index, OutContType.DS4, tempDS4, device);
-
-                            if (device.JointDeviceSlotNumber != -1)
-                            {
-                                DS4Device tempDS4Device = DS4Controllers[device.JointDeviceSlotNumber];
-                                if (tempDS4Device != null)
-                                {
-                                    EstablishOutFeedback(device.JointDeviceSlotNumber, OutContType.DS4, tempDS4, tempDS4Device);
-                                }
-                            }
-                        }
-
-                        outputDevices[index] = tempDS4;
-                        slotDevice.CurrentType = contType;
-                        success = true;
-                    }
-
-                    //DS4OutDevice tempDS4 = new DS4OutDevice(vigemTestClient);
-                    //DS4OutDevice tempDS4 = outputslotMan.AllocateController(OutContType.DS4, vigemTestClient)
-                    //    as DS4OutDevice;
-                    //outputDevices[index] = tempDS4;
-
-                    //tempDS4.Connect();
-                    //LogDebug("DS4 Controller #" + (index + 1) + " connected");
-                }
-                else if (ViiperOutDevice.IsViiperType(contType))
+                if (ViiperOutDevice.IsViiperType(contType))
                 {
                     activeOutDevType[index] = contType;
                     if (slotDevice == null)
@@ -1956,7 +1496,6 @@ namespace DS4Windows
                     }
                 }
 
-                // Need to check for possible ViGEmBus failure here
                 if (success && slotDevice.OutputDevice != null)
                 {
                     LogDebug($"Associated input controller #{index + 1} ({device.DisplayName}) to virtual {slotDevice.OutputDevice.GetDeviceType()} Controller in{(slotDevice.PermanentType != OutContType.None ? " permanent" : "")} output slot #{slotDevice.Index + 1}");
@@ -2003,7 +1542,6 @@ namespace DS4Windows
                             slotDevice.CurrentInputBound = OutSlotDevice.InputBound.Unbound;
                             dev.ResetState();
                             dev.RemoveFeedbacks();
-                            //RemoveOutFeedback(currentType, dev);
                         }
                         //dev.Disconnect();
                         //LogDebug(tempType + " Controller # " + (index + 1) + " unplugged");
@@ -2022,11 +1560,6 @@ namespace DS4Windows
         {
             StartupDiag($"ControlService.Start enter showlog={showlog} running={running} inServiceTask={inServiceTask} admin={Global.IsAdministrator()}");
             inServiceTask = true;
-            StartupDiag("ControlService.Start before StartViGEm");
-            StartViGEm();
-            StartupDiag($"ControlService.Start after StartViGEm client={vigemTestClient != null}");
-            if (vigemTestClient != null)
-            //if (x360Bus.Open() && x360Bus.Start())
             {
                 // Initialize output KBM handler at start of ControlService
                 StartupDiag("ControlService.Start before InitOutputKBMHandler");
@@ -2046,7 +1579,7 @@ namespace DS4Windows
                 }
 
                 LogDebug($"Using output KB+M handler: {Global.outputKBMHandler.GetFullDisplayName()}");
-                LogDebug($"Connection to ViGEmBus {Global.vigembusVersion} established");
+                LogDebug("VIIPER virtual-controller backend ready");
 
                 DS4Devices.isExclusiveMode = getUseExclusiveMode(); //Re-enable Exclusive Mode
 
@@ -2213,27 +1746,6 @@ namespace DS4Windows
                     }
                 }
             }
-            else
-            {
-                StartupDiag("ControlService.Start no ViGEm client");
-                string logMessage = string.Empty;
-                if (!vigemInstalled)
-                {
-                    logMessage = "ViGEmBus is not installed";
-                }
-                else if (!Global.IsRunningSupportedViGEmBus())
-                {
-                    logMessage = string.Format("Unsupported ViGEmBus found ({0}). Please install at least ViGEmBus 1.17.333.0", Global.vigembusVersion);
-                }
-                else
-                {
-                    logMessage = "Could not connect to ViGEmBus. Please check the status of the System device in Device Manager and if Visual C++ 2017 Redistributable is installed.";
-                }
-
-                LogDebug(logMessage);
-                AppLogger.LogToTray(logMessage);
-            }
-
             inServiceTask = false;
             runHotPlug = true;
             StartupDiag("ControlService.Start before ServiceStarted events");
@@ -2307,9 +1819,9 @@ namespace DS4Windows
             }
         }
 
-        public bool Stop(bool showlog = true, bool immediateUnplug = false, bool disposeViGEm = true)
+        public bool Stop(bool showlog = true, bool immediateUnplug = false)
         {
-            StartupDiag($"ControlService.Stop enter showlog={showlog} immediate={immediateUnplug} disposeViGEm={disposeViGEm} running={running}");
+            StartupDiag($"ControlService.Stop enter showlog={showlog} immediate={immediateUnplug} running={running}");
             if (running)
             {
                 if (OpenRGBServer.Instance.IsRunning)
@@ -2331,7 +1843,7 @@ namespace DS4Windows
                 if (showlog)
                     LogDebug(DS4WinWPF.Properties.Resources.StoppingX360);
 
-                LogDebug("Closing connection to ViGEmBus");
+                LogDebug("Closing VIIPER virtual-controller connections");
 
                 bool anyUnplugged = false;
                 for (int i = 0, arlength = DS4Controllers.Length; i < arlength; i++)
@@ -2408,6 +1920,9 @@ namespace DS4Windows
                 StartupDiag("ControlService.Stop DualSenseMicrophone dispose begin");
                 dualSenseMicrophonePassthrough.Dispose();
                 StartupDiag("ControlService.Stop DualSenseMicrophone dispose end");
+                StartupDiag("ControlService.Stop AudioHaptics dispose begin");
+                audioHapticsService.Dispose();
+                StartupDiag("ControlService.Stop AudioHaptics dispose end");
                 StartupDiag("ControlService.Stop DS4Devices.stopControllers begin");
                 DS4Devices.stopControllers();
                 StartupDiag("ControlService.Stop DS4Devices.stopControllers end");
@@ -2451,16 +1966,6 @@ namespace DS4Windows
                 if (anyUnplugged)
                 {
                     Thread.Sleep(OutputSlotManager.DELAY_TIME);
-                }
-
-                if (disposeViGEm)
-                {
-                    StopViGEm();
-                }
-                else
-                {
-                    StartupDiag("ControlService.Stop skipping ViGEm Dispose during app exit");
-                    vigemTestClient = null;
                 }
 
                 // Disconnect from KBM system when stopping ControlService
@@ -2689,7 +2194,6 @@ namespace DS4Windows
                         if (tempOutDev != null)
                         {
                             OutContType tempConType = activeOutDevType[otherIdx];
-                            EstablishOutFeedback(index, tempConType, tempOutDev, device);
                             outputDevices[index] = tempOutDev;
                             Global.activeOutDevType[index] = tempConType;
                         }
@@ -2825,10 +2329,23 @@ namespace DS4Windows
                 Global.R2OutputSettings[ind].TrigEffectSettings.maxValue = (byte)(Math.Max(Global.R2ModInfo[ind].maxOutput, Global.R2ModInfo[ind].maxZone) / 100.0 * 255);
             }
 
-            device.PrepareTriggerEffect(InputDevices.TriggerId.LeftTrigger, Global.L2OutputSettings[ind].TriggerEffect,
-                Global.L2OutputSettings[ind].TrigEffectSettings);
-            device.PrepareTriggerEffect(InputDevices.TriggerId.RightTrigger, Global.R2OutputSettings[ind].TriggerEffect,
-                Global.R2OutputSettings[ind].TrigEffectSettings);
+            TriggerLabProfileSettings triggerLab = Global.store.triggerLabSettings[ind].Normalize();
+            if (device is InputDevices.DualSenseDevice triggerLabDevice && triggerLab.HasActiveOverride)
+            {
+                TriggerLabEffectEncoder.ApplyToDevice(triggerLabDevice,
+                    InputDevices.TriggerId.LeftTrigger, triggerLab.Left,
+                    triggerLab.LeftActive);
+                TriggerLabEffectEncoder.ApplyToDevice(triggerLabDevice,
+                    InputDevices.TriggerId.RightTrigger, triggerLab.Right,
+                    triggerLab.RightActive);
+            }
+            else
+            {
+                device.PrepareTriggerEffect(InputDevices.TriggerId.LeftTrigger, Global.L2OutputSettings[ind].TriggerEffect,
+                    Global.L2OutputSettings[ind].TrigEffectSettings);
+                device.PrepareTriggerEffect(InputDevices.TriggerId.RightTrigger, Global.R2OutputSettings[ind].TriggerEffect,
+                    Global.R2OutputSettings[ind].TrigEffectSettings);
+            }
 
             device.RumbleAutostopTime = getRumbleAutostopTime(ind);
             device.setRumble(0, 0);
@@ -2944,10 +2461,28 @@ namespace DS4Windows
                 dualSenseMicrophonePassthrough.Stop();
             }
 
+            audioHapticsService.Start(ind, device,
+                Global.store.audioHapticsSettings[ind],
+                Global.OutContType[ind],
+                DualSenseAudioSpeakerEndpointId[ind]);
+
             if (!startUp)
             {
                 CheckLauchProfileOption(ind, device);
             }
+        }
+
+        internal bool ApplyAudioHapticsToGameReport(int deviceIndex,
+            byte[] report, int sampleOffset, int sampleLength)
+        {
+            return audioHapticsService.ApplyToGameHaptics(deviceIndex,
+                report, sampleOffset, sampleLength);
+        }
+
+        public AudioHapticsRuntimeStatus GetAudioHapticsStatus(
+            int deviceIndex)
+        {
+            return audioHapticsService.GetStatus(deviceIndex);
         }
 
         private void CheckLauchProfileOption(int ind, DS4Device device)
@@ -3018,6 +2553,8 @@ namespace DS4Windows
             Global.L2ModInfo[ind].ResetEvents();
             Global.L2OutputSettings[ind].TriggerEffectChanged += (sender, e) =>
             {
+                if (Global.store.triggerLabSettings[tempIdx].HasActiveOverride &&
+                    Global.store.triggerLabSettings[tempIdx].LeftActive) return;
                 device.PrepareTriggerEffect(InputDevices.TriggerId.LeftTrigger, Global.L2OutputSettings[tempIdx].TriggerEffect,
                     Global.L2OutputSettings[tempIdx].TrigEffectSettings);
             };
@@ -3027,6 +2564,8 @@ namespace DS4Windows
                 L2OutputSettings[tempIdx].TrigEffectSettings.maxValue = (byte)(Math.Max(tempInfo.maxOutput, tempInfo.maxZone) / 100.0 * 255.0);
 
                 // Refresh trigger effect
+                if (Global.store.triggerLabSettings[tempIdx].HasActiveOverride &&
+                    Global.store.triggerLabSettings[tempIdx].LeftActive) return;
                 device.PrepareTriggerEffect(InputDevices.TriggerId.LeftTrigger, Global.L2OutputSettings[tempIdx].TriggerEffect,
                     Global.L2OutputSettings[tempIdx].TrigEffectSettings);
             };
@@ -3036,6 +2575,8 @@ namespace DS4Windows
                 L2OutputSettings[tempIdx].TrigEffectSettings.maxValue = (byte)(Math.Max(tempInfo.maxOutput, tempInfo.maxZone) / 100.0 * 255.0);
 
                 // Refresh trigger effect
+                if (Global.store.triggerLabSettings[tempIdx].HasActiveOverride &&
+                    Global.store.triggerLabSettings[tempIdx].LeftActive) return;
                 device.PrepareTriggerEffect(InputDevices.TriggerId.LeftTrigger, Global.L2OutputSettings[tempIdx].TriggerEffect,
                     Global.L2OutputSettings[tempIdx].TrigEffectSettings);
             };
@@ -3043,6 +2584,8 @@ namespace DS4Windows
             Global.R2OutputSettings[ind].ResetEvents();
             Global.R2OutputSettings[ind].TriggerEffectChanged += (sender, e) =>
             {
+                if (Global.store.triggerLabSettings[tempIdx].HasActiveOverride &&
+                    Global.store.triggerLabSettings[tempIdx].RightActive) return;
                 device.PrepareTriggerEffect(InputDevices.TriggerId.RightTrigger, Global.R2OutputSettings[tempIdx].TriggerEffect,
                     Global.R2OutputSettings[tempIdx].TrigEffectSettings);
             };
@@ -3052,6 +2595,8 @@ namespace DS4Windows
                 R2OutputSettings[tempIdx].TrigEffectSettings.maxValue = (byte)(tempInfo.maxOutput / 100.0 * 255.0);
 
                 // Refresh trigger effect
+                if (Global.store.triggerLabSettings[tempIdx].HasActiveOverride &&
+                    Global.store.triggerLabSettings[tempIdx].RightActive) return;
                 device.PrepareTriggerEffect(InputDevices.TriggerId.RightTrigger, Global.R2OutputSettings[tempIdx].TriggerEffect,
                     Global.R2OutputSettings[tempIdx].TrigEffectSettings);
             };
@@ -3061,6 +2606,8 @@ namespace DS4Windows
                 R2OutputSettings[tempIdx].TrigEffectSettings.maxValue = (byte)(tempInfo.maxOutput / 100.0 * 255.0);
 
                 // Refresh trigger effect
+                if (Global.store.triggerLabSettings[tempIdx].HasActiveOverride &&
+                    Global.store.triggerLabSettings[tempIdx].RightActive) return;
                 device.PrepareTriggerEffect(InputDevices.TriggerId.RightTrigger, Global.R2OutputSettings[tempIdx].TriggerEffect,
                     Global.R2OutputSettings[tempIdx].TrigEffectSettings);
             };
@@ -3257,6 +2804,7 @@ namespace DS4Windows
                     dualSenseAudioPassthrough.Stop(ind);
                     dualShock4AudioPassthrough.Stop(ind);
                     dualSenseMicrophonePassthrough.Stop();
+                    audioHapticsService.Stop(ind);
                     /*Stopwatch sw = new Stopwatch();
                     sw.Start();
                     while (sw.ElapsedMilliseconds < XINPUT_UNPLUG_SETTLE_TIME)
@@ -3590,7 +3138,7 @@ namespace DS4Windows
             try
             {
                 nativeOutput.ResetState();
-                compatibilityOutput = EstablishOutDevice(index, OutContType.X360);
+                compatibilityOutput = EstablishOutDevice(index, OutContType.ViiperX360);
                 if (compatibilityOutput == null)
                 {
                     throw new InvalidOperationException(
@@ -3599,7 +3147,7 @@ namespace DS4Windows
 
                 outputslotMan.DeferredPlugin(compatibilityOutput, -1,
                     $"Game Bar compatibility for controller {index + 1}",
-                    outputDevices, OutContType.X360);
+                    outputDevices, OutContType.ViiperX360);
                 if (outputslotMan.GetOutSlotDevice(compatibilityOutput) == null)
                 {
                     throw new InvalidOperationException(

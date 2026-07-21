@@ -2623,13 +2623,14 @@ namespace DS4Windows
                     {
                         bool nativeForwardingAllowed = IsNativeDualSenseFeedbackCompatible(device);
                         if (nativeForwardingAllowed &&
-                            TryApplyBluetoothCombinedHapticsOutputReport(device, feedback, feedbackLength))
+                            TryApplyBluetoothCombinedHapticsOutputReport(device, deviceIndex, feedback, feedbackLength))
                         {
                             break;
                         }
 
                         if (nativeForwardingAllowed &&
-                            TryApplyBluetoothHapticsOutputReport(device, feedback, feedbackLength))
+                            TryApplyBluetoothHapticsOutputReport(device,
+                                deviceIndex, feedback, feedbackLength))
                         {
                             break;
                         }
@@ -2661,7 +2662,7 @@ namespace DS4Windows
                                 heavySlow, deviceIndex);
                         }
                         ApplyLightbar(device, feedback[2], feedback[3], feedback[4], 0, 0);
-                        ApplyDualSenseTriggerFeedback(device, feedback, feedbackLength);
+                        ApplyDualSenseTriggerFeedback(device, deviceIndex, feedback, feedbackLength);
                     }
                     break;
 
@@ -3286,7 +3287,8 @@ namespace DS4Windows
             microphoneWriterSignal.Set();
         }
 
-        private void ApplyDualSenseTriggerFeedback(DS4Device device, byte[] feedback, int feedbackLength)
+        private void ApplyDualSenseTriggerFeedback(DS4Device device, int deviceIndex,
+            byte[] feedback, int feedbackLength)
         {
             if (feedbackLength < DualSenseExtendedFeedbackLength ||
                 device is not DualSenseDevice dualSenseDevice ||
@@ -3297,19 +3299,28 @@ namespace DS4Windows
 
             int r2Offset = DualSenseTriggerFeedbackOffset;
             int l2Offset = DualSenseTriggerFeedbackOffset + DualSenseTriggerEffectLength;
+            TriggerLabProfileSettings triggerLab = TriggerLabForDevice(deviceIndex);
             bool r2Changed = !TriggerFeedbackEquals(feedback, r2Offset, lastR2TriggerFeedback);
             bool l2Changed = !TriggerFeedbackEquals(feedback, l2Offset, lastL2TriggerFeedback);
 
             if (r2Changed)
             {
                 CopyTriggerFeedback(feedback, r2Offset, lastR2TriggerFeedback);
-                ApplyRawTriggerEffect(dualSenseDevice, TriggerId.RightTrigger, feedback, r2Offset);
+                if (triggerLab?.HasActiveOverride == true && triggerLab.RightActive)
+                    TriggerLabEffectEncoder.ApplyToDevice(dualSenseDevice,
+                        TriggerId.RightTrigger, triggerLab.Right, true);
+                else
+                    ApplyRawTriggerEffect(dualSenseDevice, TriggerId.RightTrigger, feedback, r2Offset);
             }
 
             if (l2Changed)
             {
                 CopyTriggerFeedback(feedback, l2Offset, lastL2TriggerFeedback);
-                ApplyRawTriggerEffect(dualSenseDevice, TriggerId.LeftTrigger, feedback, l2Offset);
+                if (triggerLab?.HasActiveOverride == true && triggerLab.LeftActive)
+                    TriggerLabEffectEncoder.ApplyToDevice(dualSenseDevice,
+                        TriggerId.LeftTrigger, triggerLab.Left, true);
+                else
+                    ApplyRawTriggerEffect(dualSenseDevice, TriggerId.LeftTrigger, feedback, l2Offset);
             }
         }
 
@@ -3335,13 +3346,15 @@ namespace DS4Windows
                 return false;
             }
 
-            byte[] report = PrepareNativeDualSenseOutputReportForProfile(feedback);
+            byte[] report = PrepareNativeDualSenseOutputReportForProfile(feedback,
+                deviceIndex);
             return dualSenseDevice.WriteRawOutputReportFromGame(report,
                 0,
                 DualSenseNativeOutputReportLength);
         }
 
-        private static byte[] PrepareNativeDualSenseOutputReportForProfile(byte[] feedback)
+        private static byte[] PrepareNativeDualSenseOutputReportForProfile(byte[] feedback,
+            int deviceIndex)
         {
             byte[] report = new byte[DualSenseNativeOutputReportLength];
             Array.Copy(feedback, DualSenseNativeOutputReportOffset, report, 0, report.Length);
@@ -3356,10 +3369,28 @@ namespace DS4Windows
                 report[10] = 0x00;
             }
 
+            TriggerLabProfileSettings triggerLab = TriggerLabForDevice(deviceIndex);
+            if (triggerLab?.HasActiveOverride == true)
+            {
+                if (triggerLab.RightActive)
+                {
+                    report[1] |= 0x04;
+                    TriggerLabEffectEncoder.WriteNativeBlock(report, 11,
+                        triggerLab.Right, true);
+                }
+                if (triggerLab.LeftActive)
+                {
+                    report[1] |= 0x08;
+                    TriggerLabEffectEncoder.WriteNativeBlock(report, 22,
+                        triggerLab.Left, true);
+                }
+            }
+
             return report;
         }
 
-        private static bool TryApplyBluetoothHapticsOutputReport(DS4Device device, byte[] feedback, int feedbackLength)
+        private static bool TryApplyBluetoothHapticsOutputReport(DS4Device device,
+            int deviceIndex, byte[] feedback, int feedbackLength)
         {
             if (feedbackLength < DualSenseExtendedFeedbackLength ||
                 device is not DualSenseDevice dualSenseDevice ||
@@ -3368,12 +3399,16 @@ namespace DS4Windows
                 return false;
             }
 
+            Program.rootHub?.ApplyAudioHapticsToGameReport(deviceIndex,
+                feedback, DualSenseBluetoothHapticsReportOffset + 13, 64);
+
             return dualSenseDevice.WriteBluetoothHapticsOutputReport(feedback,
                 DualSenseBluetoothHapticsReportOffset,
                 DualSenseBluetoothHapticsReportLength);
         }
 
-        private static bool TryApplyBluetoothCombinedHapticsOutputReport(DS4Device device, byte[] feedback, int feedbackLength)
+        private static bool TryApplyBluetoothCombinedHapticsOutputReport(
+            DS4Device device, int deviceIndex, byte[] feedback, int feedbackLength)
         {
             if (feedbackLength < DualSenseCombinedExtendedFeedbackLength ||
                 device is not DualSenseDevice dualSenseDevice ||
@@ -3382,9 +3417,41 @@ namespace DS4Windows
                 return false;
             }
 
-            return dualSenseDevice.WriteBluetoothCombinedHapticsAudioOutputReport(feedback,
+            // The dispatch buffer owns this frame until ApplyFeedback returns,
+            // so patching it in place avoids a managed allocation on every
+            // combined audio/HID feedback packet.
+            byte[] report = feedback;
+            int reportOffset = DualSenseCombinedBluetoothReportOffset;
+            Program.rootHub?.ApplyAudioHapticsToGameReport(deviceIndex,
+                report, reportOffset + 78, 64);
+            TriggerLabProfileSettings triggerLab = TriggerLabForDevice(deviceIndex);
+            if (triggerLab?.HasActiveOverride == true)
+            {
+                int stateOffset = reportOffset + 13;
+                if (triggerLab.RightActive)
+                {
+                    report[stateOffset] |= 0x04;
+                    TriggerLabEffectEncoder.WriteNativeBlock(report,
+                        stateOffset + 10, triggerLab.Right, true);
+                }
+                if (triggerLab.LeftActive)
+                {
+                    report[stateOffset] |= 0x08;
+                    TriggerLabEffectEncoder.WriteNativeBlock(report,
+                        stateOffset + 21, triggerLab.Left, true);
+                }
+            }
+
+            return dualSenseDevice.WriteBluetoothCombinedHapticsAudioOutputReport(report,
                 DualSenseCombinedBluetoothReportOffset,
                 DualSenseCombinedBluetoothReportLength);
+        }
+
+        private static TriggerLabProfileSettings TriggerLabForDevice(int deviceIndex)
+        {
+            if (deviceIndex < 0 || deviceIndex >= Global.TEST_PROFILE_ITEM_COUNT)
+                return null;
+            return Global.store.triggerLabSettings[deviceIndex];
         }
 
         private bool IsNativeDualSenseFeedbackCompatible(DS4Device device)

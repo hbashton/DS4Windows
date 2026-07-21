@@ -19,12 +19,11 @@
         </StackPanel>
 
         <ComboBox x:Name="devTypeCombo" SelectedIndex="0" DockPanel.Dock="Top">
-            <ComboBoxItem Tag="0" Content="Xbox 360" />
-            <ComboBoxItem Tag="1" Content="DualShock 4 (VIIPER)" />
-            <ComboBoxItem Tag="2" Content="Xbox 360 (VIIPER)" />
-            <ComboBoxItem Tag="3" Content="DualSense" />
-            <ComboBoxItem Tag="4" Content="DualSense Edge" />
-            <ComboBoxItem Tag="5" Content="Switch 2 Pro" />
+            <ComboBoxItem Tag="0" Content="Viiper DualShock 4" />
+            <ComboBoxItem Tag="1" Content="Viiper Xbox 360" />
+            <ComboBoxItem Tag="2" Content="DualSense" />
+            <ComboBoxItem Tag="3" Content="DualSense Edge" />
+            <ComboBoxItem Tag="4" Content="Switch 2 Pro" />
         </ComboBox>
 
         <ComboBox x:Name="reserveTypeCombo" SelectedIndex="0" DockPanel.Dock="Top">

@@ -175,6 +175,27 @@ catch {
     Write-Host "VIIPER install command failed: $($_.Exception.Message)" -ForegroundColor Yellow
 }
 
+# Keep the backend available after sign-in without a console window or UAC
+# prompt. Re-registering makes repair/update runs idempotent and refreshes the
+# executable path if the install location ever changes.
+try {
+    $taskName = "RunVIIPER"
+    $quotedViiper = $viiperPath.Replace("'", "''")
+    $taskCommand = "& '$quotedViiper' server"
+    $taskAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument (
+        "-NoProfile -NonInteractive -WindowStyle Hidden -Command `"$taskCommand`"")
+    $taskUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $taskTrigger = New-ScheduledTaskTrigger -AtLogOn -User $taskUser
+    $taskPrincipal = New-ScheduledTaskPrincipal -UserId $taskUser -RunLevel Highest -LogonType Interactive
+    $taskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
+    Register-ScheduledTask -TaskName $taskName -Action $taskAction -Trigger $taskTrigger -Principal $taskPrincipal -Settings $taskSettings -Force | Out-Null
+    Write-Host "Registered hidden logon task '$taskName'." -ForegroundColor Green
+}
+catch {
+    Write-Host "Could not register the VIIPER logon task: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Host "DS4Windows will still attempt to start VIIPER when it launches." -ForegroundColor Yellow
+}
+
 try {
     Start-Process -FilePath $viiperPath -ArgumentList "server" -WindowStyle Hidden
     Start-Sleep -Seconds 2

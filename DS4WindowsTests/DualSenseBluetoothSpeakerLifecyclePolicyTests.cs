@@ -123,6 +123,49 @@ namespace DS4WindowsTests
                 "Content remained gated after all six warmup reports were accepted.");
         }
 
+        [TestMethod]
+        public void FreshActiveCaptureShortageUsesReservoirBackpressure()
+        {
+            Assert.AreEqual(50,
+                DualSenseBluetoothSpeakerPassthrough.
+                    TransientCaptureShortageLeaseMs);
+            Assert.IsTrue(DualSenseBluetoothSpeakerPassthrough.
+                ShouldDeferTransientCaptureShortage(true, true, true));
+            Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
+                ShouldDeferTransientCaptureShortage(false, true, true));
+            Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
+                ShouldDeferTransientCaptureShortage(true, false, true));
+            Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
+                ShouldDeferTransientCaptureShortage(true, true, false));
+        }
+
+        [TestMethod]
+        public void CaptureClockUsesPadForgeTwentyMillisecondDeadbandTrim()
+        {
+            int targetFrames = 48000 *
+                DualSenseBluetoothSpeakerPassthrough.TargetBufferMs / 1000;
+
+            Assert.AreEqual(1.0,
+                DualSenseBluetoothSpeakerPassthrough.
+                    CalculateCaptureClockRatio(targetFrames, targetFrames),
+                1.0e-12);
+            Assert.AreEqual(1.0,
+                DualSenseBluetoothSpeakerPassthrough.
+                    CalculateCaptureClockRatio(
+                        targetFrames + 240, targetFrames),
+                1.0e-12);
+            Assert.AreEqual(516.0 / 512.0,
+                DualSenseBluetoothSpeakerPassthrough.
+                    CalculateCaptureClockRatio(
+                        targetFrames + 241, targetFrames),
+                1.0e-12);
+            Assert.AreEqual(508.0 / 512.0,
+                DualSenseBluetoothSpeakerPassthrough.
+                    CalculateCaptureClockRatio(
+                        targetFrames - 241, targetFrames),
+                1.0e-12);
+        }
+
         [DataTestMethod]
         [DataRow(6, true, false, true)]
         [DataRow(6, false, true, true)]

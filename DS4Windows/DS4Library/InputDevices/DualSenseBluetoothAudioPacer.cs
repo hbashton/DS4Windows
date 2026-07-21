@@ -25,7 +25,7 @@ namespace DS4Windows.InputDevices
         internal const int HostReservoirCapacity = 64;
 
         private const string HelperArgument = "--dualsense-bt-audio-pacer-helper";
-        private const int ProtocolVersion = 1;
+        private const int ProtocolVersion = 2;
         private const int PipeConnectTimeoutMilliseconds = 5000;
         private const int HelperReadyTimeoutMilliseconds = 5000;
         private const int HelperStopTimeoutMilliseconds = 3000;
@@ -104,6 +104,9 @@ namespace DS4Windows.InputDevices
         private long acknowledgedReports;
         private long rejectedReports;
         private long presentedReports;
+        private long lastPresentedTimestamp;
+        private long maximumPresentationGapTicks;
+        private long latePresentationCount;
         private long clearedReports;
         private long transportFaultReports;
         private int currentEpoch = InitialEpoch;
@@ -144,6 +147,11 @@ namespace DS4Windows.InputDevices
         public long AcknowledgedReports => Interlocked.Read(ref acknowledgedReports);
         public long RejectedReports => Interlocked.Read(ref rejectedReports);
         public long PresentedReports => Interlocked.Read(ref presentedReports);
+        public long LatePresentationCount =>
+            Interlocked.Read(ref latePresentationCount);
+        public double MaximumPresentationGapMilliseconds =>
+            Interlocked.Read(ref maximumPresentationGapTicks) * 1000.0 /
+            Stopwatch.Frequency;
         public long ClearedReports => Interlocked.Read(ref clearedReports);
         public long TransportFaultReports =>
             Interlocked.Read(ref transportFaultReports);
@@ -743,7 +751,7 @@ namespace DS4Windows.InputDevices
 
         private void ProcessAcknowledgement(byte[] payload)
         {
-            if (payload.Length != sizeof(long) + sizeof(byte))
+            if (payload.Length != sizeof(long) + sizeof(byte) + sizeof(long))
             {
                 throw new InvalidDataException("Invalid pacer acknowledgement length.");
             }
@@ -752,6 +760,8 @@ namespace DS4Windows.InputDevices
                 payload.AsSpan(0, sizeof(long)));
             AcknowledgementDisposition disposition =
                 (AcknowledgementDisposition)payload[sizeof(long)];
+            long presentedTimestamp = BinaryPrimitives.ReadInt64LittleEndian(
+                payload.AsSpan(sizeof(long) + sizeof(byte), sizeof(long)));
 
             PendingReportCompletion completion = null;
             lock (stateLock)
@@ -775,6 +785,7 @@ namespace DS4Windows.InputDevices
             {
                 case AcknowledgementDisposition.Presented:
                     Interlocked.Increment(ref presentedReports);
+                    RecordPresentationTimestamp(presentedTimestamp);
                     break;
                 case AcknowledgementDisposition.Cleared:
                     Interlocked.Increment(ref clearedReports);
@@ -798,6 +809,44 @@ namespace DS4Windows.InputDevices
                 // dispose this pacer (which is a hard ownership barrier) before
                 // selecting another writer.
                 SetError("The isolated DualSense audio pacer reported a fatal HID transport fault.");
+            }
+        }
+
+        private void RecordPresentationTimestamp(long presentedTimestamp)
+        {
+            if (presentedTimestamp <= 0)
+            {
+                return;
+            }
+
+            long previous = Interlocked.Exchange(
+                ref lastPresentedTimestamp, presentedTimestamp);
+            if (previous <= 0 || presentedTimestamp <= previous)
+            {
+                return;
+            }
+
+            long gap = presentedTimestamp - previous;
+            UpdateMaximum(ref maximumPresentationGapTicks, gap);
+            if (gap > Stopwatch.Frequency * 15 / 1000)
+            {
+                Interlocked.Increment(ref latePresentationCount);
+            }
+        }
+
+        private static void UpdateMaximum(ref long target, long candidate)
+        {
+            long observed = Interlocked.Read(ref target);
+            while (candidate > observed)
+            {
+                long previous = Interlocked.CompareExchange(ref target,
+                    candidate, observed);
+                if (previous == observed)
+                {
+                    return;
+                }
+
+                observed = previous;
             }
         }
 
@@ -1340,12 +1389,15 @@ namespace DS4Windows.InputDevices
             {
                 public readonly long ReportId;
                 public readonly AcknowledgementDisposition Disposition;
+                public readonly long PresentedTimestamp;
 
                 public QueuedAcknowledgement(long reportId,
-                    AcknowledgementDisposition disposition)
+                    AcknowledgementDisposition disposition,
+                    long presentedTimestamp)
                 {
                     ReportId = reportId;
                     Disposition = disposition;
+                    PresentedTimestamp = presentedTimestamp;
                 }
             }
 
@@ -1699,6 +1751,7 @@ namespace DS4Windows.InputDevices
                         AcknowledgementDisposition disposition;
                         long presentedAt;
                         bool advanceScheduler;
+                        bool controlOnly;
                         lock (stateLock)
                         {
                             if (controlPrimeBypass)
@@ -1732,8 +1785,7 @@ namespace DS4Windows.InputDevices
                             // WriteFile would feed fixed processing overhead
                             // into the clock and slowly drain the reservoir.
                             presentedAt = Stopwatch.GetTimestamp();
-                            bool controlOnly =
-                                !IsSpeakerAudioReport(item.Report);
+                            controlOnly = !IsSpeakerAudioReport(item.Report);
 
                             if (item.Epoch != currentEpoch)
                             {
@@ -1781,7 +1833,8 @@ namespace DS4Windows.InputDevices
                                 !primeRequired;
                         }
 
-                        QueueAcknowledgement(itemId, disposition);
+                        QueueAcknowledgement(itemId, disposition,
+                            controlOnly ? 0 : presentedAt);
                         if (IsFatalAcknowledgementDisposition(disposition))
                         {
                             // The writer is permanently unusable until a new
@@ -1822,10 +1875,11 @@ namespace DS4Windows.InputDevices
             }
 
             private void QueueAcknowledgement(long reportId,
-                AcknowledgementDisposition disposition)
+                AcknowledgementDisposition disposition,
+                long presentedTimestamp = 0)
             {
                 if (!acknowledgements.TryEnqueue(new QueuedAcknowledgement(
-                    reportId, disposition)))
+                    reportId, disposition, presentedTimestamp)))
                 {
                     // Continuing without an acknowledgement would permanently
                     // consume a parent-side reservoir credit. Fail closed.
@@ -1839,7 +1893,8 @@ namespace DS4Windows.InputDevices
 
             private void AcknowledgementLoop()
             {
-                byte[] payload = new byte[sizeof(long) + sizeof(byte)];
+                byte[] payload = new byte[
+                    sizeof(long) + sizeof(byte) + sizeof(long)];
                 try
                 {
                     while (!stopRequested.WaitOne(0) || acknowledgements.Count != 0)
@@ -1855,6 +1910,10 @@ namespace DS4Windows.InputDevices
                             sizeof(long)), acknowledgement.ReportId);
                         payload[sizeof(long)] =
                             (byte)acknowledgement.Disposition;
+                        BinaryPrimitives.WriteInt64LittleEndian(
+                            payload.AsSpan(sizeof(long) + sizeof(byte),
+                                sizeof(long)),
+                            acknowledgement.PresentedTimestamp);
                         lock (pipeWriteLock)
                         {
                             WriteFrame(pipe, MessageKind.ReportAcknowledged,

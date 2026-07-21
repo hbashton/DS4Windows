@@ -26,6 +26,13 @@ namespace DS4Windows
         private float carryLeft;
         private float carryRight;
 
+        internal void Reset()
+        {
+            phase = 0.0;
+            carryLeft = 0.0f;
+            carryRight = 0.0f;
+        }
+
         internal int Convert(float[] source, int frameCount,
             byte[] destination)
         {
@@ -270,6 +277,7 @@ namespace DS4Windows
         private long directWriteSaturations;
         private long directHardWriteFailures;
         private long lastDirectPacketTimestamp;
+        private long lastDirectAudibleTimestamp;
         private long maximumDirectPacketGapTicks;
         private long lastDirectReportTimestamp;
         private long maximumDirectReportGapTicks;
@@ -406,15 +414,11 @@ namespace DS4Windows
                     DirectSpeakerPcmReceived;
                 try
                 {
-                    // Open the dedicated lane now, but do not arm the physical
-                    // speaker until the virtual endpoint has delivered a
-                    // complete source cushion. This keeps startup contiguous
-                    // and avoids an idle physical audio session.
-                    if (!EnsureSpeakerWritePool())
-                    {
-                        throw new IOException(
-                            "Could not open the DualShock 4 Bluetooth audio transport.");
-                    }
+                    // Open the dedicated HID audio lane only when a complete
+                    // audible source cushion exists. A handle that sits idle
+                    // for minutes can inherit the controller's low-duty
+                    // Bluetooth state and complete fewer than the required
+                    // 250 reports/sec on its first segment.
                     worker = new Thread(DirectStreamLoop)
                     {
                         IsBackground = true,
@@ -583,6 +587,35 @@ namespace DS4Windows
                 ref lastDirectPacketTimestamp, now);
             int completeLength = length - length %
                 (Channels * sizeof(short));
+            int packetPeak = 0;
+            for (int offset = 0; offset < completeLength;
+                offset += sizeof(short))
+            {
+                short sample = (short)(pcm[offset] |
+                    pcm[offset + 1] << 8);
+                int magnitude = sample == short.MinValue ?
+                    short.MaxValue : Math.Abs(sample);
+                packetPeak = Math.Max(packetPeak, magnitude);
+            }
+            bool packetAudible = packetPeak > 16;
+            if (packetAudible)
+            {
+                Interlocked.Exchange(ref lastDirectAudibleTimestamp, now);
+            }
+            else
+            {
+                long lastAudible = Interlocked.Read(
+                    ref lastDirectAudibleTimestamp);
+                if (lastAudible == 0 || now - lastAudible >
+                    Stopwatch.Frequency * IdleStreamTimeoutMs / 1000)
+                {
+                    // Windows can keep a virtual USB audio interface in its
+                    // streaming alternate setting and submit zero PCM forever
+                    // after the client closes. Do not turn that host silence
+                    // into a permanent 250 Hz Bluetooth audio stream.
+                    return;
+                }
+            }
             if (Global.VerboseStartupLogging)
             {
                 if (previous != 0)
@@ -592,19 +625,12 @@ namespace DS4Windows
                 }
                 Interlocked.Increment(ref directPacketsReceived);
                 Interlocked.Add(ref directPcmBytesReceived, length);
-                int peak = 0;
                 ulong fingerprint = 1469598103934665603UL;
                 for (int offset = 0; offset < completeLength;
                     offset += sizeof(short))
                 {
                     short sample = (short)(pcm[offset] |
                         pcm[offset + 1] << 8);
-                    int magnitude = sample == short.MinValue ?
-                        short.MaxValue : Math.Abs(sample);
-                    if (magnitude > peak)
-                    {
-                        peak = magnitude;
-                    }
                     fingerprint ^= pcm[offset];
                     fingerprint *= 1099511628211UL;
                     fingerprint ^= pcm[offset + 1];
@@ -642,8 +668,8 @@ namespace DS4Windows
                         }
                     }
                 }
-                RecordMaximum(ref directPeakSample, peak);
-                if (peak <= 16)
+                RecordMaximum(ref directPeakSample, packetPeak);
+                if (!packetAudible)
                 {
                     Interlocked.Increment(ref directSilentPackets);
                     long run = Interlocked.Increment(
@@ -1114,11 +1140,15 @@ namespace DS4Windows
                     {
                         availableFrames = encodedFrames.Count;
                     }
-                    long lastPacket = Interlocked.Read(
-                        ref lastDirectPacketTimestamp);
-                    long sourceIdleMilliseconds = lastPacket == 0 ? 0 :
-                        Math.Max(0, (Stopwatch.GetTimestamp() - lastPacket) *
+                    long lastAudible = Interlocked.Read(
+                        ref lastDirectAudibleTimestamp);
+                    long sourceIdleMilliseconds = lastAudible == 0 ? 0 :
+                        Math.Max(0, (Stopwatch.GetTimestamp() - lastAudible) *
                             1000 / Stopwatch.Frequency);
+                    if (sourceIdleMilliseconds < IdleStreamTimeoutMs)
+                    {
+                        sourceIdleMilliseconds = 0;
+                    }
                     if (!sourceReprimePending &&
                         DualShock4AudioTransportSettings.
                             ShouldBeginProductionReplayReprime(availableFrames,
@@ -1126,12 +1156,18 @@ namespace DS4Windows
                     {
                         sourceReprimePending = true;
                         SetProductionReplaySourceServo(enabled: false);
+                        DiscardQueuedDirectAudio();
+                        availableFrames = 0;
                     }
 
                     if (sourceReprimePending &&
                         DualShock4AudioTransportSettings.
                             ShouldStartProductionReplay(availableFrames))
                     {
+                        if (!PrepareSpeakerTransportForNewSegment())
+                        {
+                            return;
+                        }
                         if (!SubmitProductionReplayPrime())
                         {
                             return;
@@ -1143,6 +1179,18 @@ namespace DS4Windows
                     }
                     else
                     {
+                        if (sourceReprimePending &&
+                            !IsDualShock4MicrophoneActive())
+                        {
+                            // The virtual USB endpoint may continue producing
+                            // zero packets after its client closes. Leave the
+                            // physical audio link quiescent until a complete
+                            // new audible cushion exists.
+                            nextTick = Stopwatch.GetTimestamp() + cadenceTicks;
+                            captureAvailable.WaitOne(2);
+                            TraceDirectStreamStatus();
+                            continue;
+                        }
                         ProductionReplaySubmissionResult result =
                             SubmitProductionReplayFrame(
                                 allowSilence: true,
@@ -1173,6 +1221,50 @@ namespace DS4Windows
                     CloseNativeHandle(highResolutionTimer);
                 }
                 timeEndPeriod(1);
+            }
+        }
+
+        private bool IsDualShock4MicrophoneActive()
+        {
+            bool active = false;
+            device.ReadDualShock4BluetoothAudioModeSynchronized(
+                microphoneEnabled => active = microphoneEnabled);
+            return active;
+        }
+
+        private bool PrepareSpeakerTransportForNewSegment()
+        {
+            if (IsDualShock4MicrophoneActive())
+            {
+                return EnsureSpeakerTransportEnabled();
+            }
+
+            DisableSpeakerTransport();
+            device.UnregisterDualShock4BluetoothAudioControlLane(this);
+            speakerWritePool?.Dispose();
+            speakerWritePool = null;
+            speakerWriteHandle?.Dispose();
+            speakerWriteHandle = null;
+            return EnsureSpeakerTransportEnabled();
+        }
+
+        private void DiscardQueuedDirectAudio()
+        {
+            lock (syncRoot)
+            {
+                while (encodedFrames.Count > 0)
+                {
+                    freeEncodedFrames.Enqueue(encodedFrames.Dequeue());
+                }
+                pendingPcmCount = 0;
+                directPcmPacketOffset = 0;
+                directHasPreviousSample = false;
+                directPreviousLeft = 0;
+                directPreviousRight = 0;
+                directDriftCorrectionAccumulator = 0.0;
+                directResampler.Reset();
+                directFractionalResampler.Reset();
+                frameNumber = 0;
             }
         }
 

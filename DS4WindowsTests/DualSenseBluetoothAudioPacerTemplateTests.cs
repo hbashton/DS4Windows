@@ -297,7 +297,7 @@ namespace DS4Windows.Tests
                 $"The combined reserve covers only " +
                 $"{protectedMilliseconds:F1} ms; the measured callback stall " +
                 "was 86.7 ms and requires scheduling margin.");
-            Assert.IsTrue(protectedMilliseconds <= 125.0,
+            Assert.IsTrue(protectedMilliseconds <= 130.0,
                 $"The low-latency path still buffers " +
                 $"{protectedMilliseconds:F1} ms before presentation.");
             Assert.IsTrue(

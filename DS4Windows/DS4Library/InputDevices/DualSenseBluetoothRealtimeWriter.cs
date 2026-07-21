@@ -263,30 +263,22 @@ namespace DS4Windows.InputDevices
 
                 ObserveCompletedWrites();
                 long now = Stopwatch.GetTimestamp();
-                WriteSlot slot = null;
-                int slotIndex = -1;
-                for (int offset = 0; offset < slots.Length; offset++)
+                // Preserve the exact kernel submission order used by
+                // PadForge's proven eight-slot pool. Skipping over the oldest
+                // in-flight slot to reuse a later completion can place a newer
+                // Opus packet ahead of an older HID IRP on stacks that complete
+                // overlapped requests out of order. One rejected late frame is
+                // concealable; reordered audio is an audible phase hiccup.
+                int slotIndex = nextSlot;
+                WriteSlot slot = slots[slotIndex];
+                uint waitResult = WaitForSingleObject(slot.EventHandle, 0);
+                if (waitResult == WAIT_FAILED)
                 {
-                    int candidateIndex = (nextSlot + offset) % slots.Length;
-                    WriteSlot candidate = slots[candidateIndex];
-                    uint waitResult = WaitForSingleObject(candidate.EventHandle, 0);
-                    if (waitResult == WAIT_FAILED)
-                    {
-                        transportFault = true;
-                        return false;
-                    }
-
-                    if (waitResult != WAIT_OBJECT_0)
-                    {
-                        continue;
-                    }
-
-                    slot = candidate;
-                    slotIndex = candidateIndex;
-                    break;
+                    transportFault = true;
+                    return false;
                 }
 
-                if (slot == null)
+                if (waitResult != WAIT_OBJECT_0)
                 {
                     return false;
                 }

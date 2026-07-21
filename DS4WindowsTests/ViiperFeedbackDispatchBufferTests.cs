@@ -150,7 +150,7 @@ namespace DS4Windows.Tests
                 ViiperOutDevice.FeedbackOrderedControlQueueCapacity * 1000.0 /
                 dualSenseFeedbackPacketsPerSecond;
             double speakerWindowMilliseconds =
-                ViiperOutDevice.FeedbackSpeakerQueueCapacity *
+                ViiperOutDevice.DualSenseFeedbackSpeakerQueueCapacity *
                 speakerPacketMilliseconds;
 
             Assert.IsTrue(hapticsWindowMilliseconds <= 30.0,
@@ -162,8 +162,147 @@ namespace DS4Windows.Tests
                     20,
                 "A paused haptics frame can outlive the presentation budget.");
             Assert.IsTrue(
-                ViiperOutDevice.FeedbackSpeakerMaximumAgeMilliseconds <= 80,
+                ViiperOutDevice.DualSenseFeedbackSpeakerMaximumAgeMilliseconds <= 80,
                 "A paused direct-speaker frame can outlive the handoff budget.");
+        }
+
+        [TestMethod]
+        public void VirtualSpeakerPoliciesKeepDs4AndDualSenseIndependent()
+        {
+            Assert.AreEqual(16,
+                ViiperOutDevice.GetFeedbackSpeakerQueueCapacity(
+                    ViiperVirtualDeviceType.DualShock4));
+            Assert.AreEqual(0,
+                ViiperOutDevice.GetFeedbackSpeakerMaximumAgeMilliseconds(
+                    ViiperVirtualDeviceType.DualShock4));
+            Assert.AreEqual(8,
+                ViiperOutDevice.GetFeedbackSpeakerQueueCapacity(
+                    ViiperVirtualDeviceType.DualSense));
+            Assert.AreEqual(80,
+                ViiperOutDevice.GetFeedbackSpeakerMaximumAgeMilliseconds(
+                    ViiperVirtualDeviceType.DualSense));
+            Assert.AreEqual(0,
+                ViiperOutDevice.GetFeedbackSpeakerQueueCapacity(
+                    ViiperVirtualDeviceType.Xbox360));
+            Assert.AreEqual(0,
+                ViiperOutDevice.GetFeedbackSpeakerMaximumAgeMilliseconds(
+                    ViiperVirtualDeviceType.Xbox360));
+        }
+
+        [TestMethod]
+        public void VirtualSonySpeakerFormatsAreExplicitAndIndependent()
+        {
+            Assert.AreEqual(32000,
+                ViiperOutDevice.GetVirtualSpeakerPcmSampleRate(
+                    ViiperVirtualDeviceType.DualShock4));
+            Assert.AreEqual(48000,
+                ViiperOutDevice.GetVirtualSpeakerPcmSampleRate(
+                    ViiperVirtualDeviceType.DualSense));
+            Assert.AreEqual(48000,
+                ViiperOutDevice.GetVirtualSpeakerPcmSampleRate(
+                    ViiperVirtualDeviceType.DualSenseEdge));
+            Assert.AreEqual(0,
+                ViiperOutDevice.GetVirtualSpeakerPcmSampleRate(
+                    ViiperVirtualDeviceType.Xbox360));
+        }
+
+        [TestMethod]
+        public void EveryVirtualPersonaConstructsWithoutBorrowingSonyAudio()
+        {
+            foreach (ViiperVirtualDeviceType type in
+                Enum.GetValues<ViiperVirtualDeviceType>())
+            {
+                _ = new ViiperOutDevice(OutContType.None, type);
+            }
+        }
+
+        [TestMethod]
+        public void DualShock4HistoricalReserveNeverInheritsDualSenseExpiry()
+        {
+            int capacity = ViiperOutDevice.GetFeedbackSpeakerQueueCapacity(
+                ViiperVirtualDeviceType.DualShock4);
+            var buffer = new ViiperFeedbackDispatchBuffer(capacity, 8, 8,
+                speakerMaximumAgeMilliseconds:
+                    ViiperOutDevice.GetFeedbackSpeakerMaximumAgeMilliseconds(
+                        ViiperVirtualDeviceType.DualShock4));
+            byte[] destination = new byte[8];
+
+            for (int index = 0; index < capacity; index++)
+            {
+                Assert.IsTrue(buffer.TryEnqueueSpeaker(
+                    new byte[] { (byte)index }, 1, index));
+            }
+
+            Thread.Sleep(100);
+            for (int index = 0; index < capacity; index++)
+            {
+                Assert.IsTrue(buffer.TryDequeueSpeaker(destination,
+                    out int length, out long generation));
+                Assert.AreEqual(1, length);
+                Assert.AreEqual(index, generation);
+                Assert.AreEqual((byte)index, destination[0]);
+            }
+
+            Assert.AreEqual(0L, buffer.SpeakerExpired);
+            Assert.AreEqual(0L, buffer.SpeakerDropped);
+        }
+
+        [TestMethod]
+        public void AtomicDualSenseFramesCanFeedAPcmOnlyPhysicalRoute()
+        {
+            Assert.IsTrue(ViiperOutDevice.CanDispatchVirtualSpeaker(
+                streamUsesAtomicFrames: true, hasPcmSubscriber: true,
+                hasAtomicSubscriber: false));
+            Assert.IsTrue(ViiperOutDevice.CanDispatchVirtualSpeaker(
+                streamUsesAtomicFrames: true, hasPcmSubscriber: false,
+                hasAtomicSubscriber: true));
+            Assert.IsFalse(ViiperOutDevice.CanDispatchVirtualSpeaker(
+                streamUsesAtomicFrames: true, hasPcmSubscriber: false,
+                hasAtomicSubscriber: false));
+            Assert.IsFalse(ViiperOutDevice.CanDispatchVirtualSpeaker(
+                streamUsesAtomicFrames: false, hasPcmSubscriber: false,
+                hasAtomicSubscriber: true));
+        }
+
+        [TestMethod]
+        public void AtomicDualSenseCarrierSplitsFeedbackFromPhysicalPcm()
+        {
+            const int pcmLength = 1920;
+            byte[] carrier = new byte[sizeof(ushort) +
+                ViiperOutDevice.DualSenseAtomicFeedbackLength + pcmLength];
+            carrier[0] = (byte)(
+                ViiperOutDevice.DualSenseAtomicFeedbackLength & 0xFF);
+            carrier[1] = (byte)(
+                ViiperOutDevice.DualSenseAtomicFeedbackLength >> 8);
+            carrier[sizeof(ushort)] = 0x36;
+            carrier[sizeof(ushort) +
+                ViiperOutDevice.DualSenseAtomicFeedbackLength] = 0x5A;
+
+            Assert.IsTrue(ViiperOutDevice.TryGetAtomicAudioHapticsLayout(
+                carrier, carrier.Length, out int feedbackOffset,
+                out int feedbackLength, out int pcmOffset,
+                out int actualPcmLength));
+            Assert.AreEqual(sizeof(ushort), feedbackOffset);
+            Assert.AreEqual(ViiperOutDevice.DualSenseAtomicFeedbackLength,
+                feedbackLength);
+            Assert.AreEqual(sizeof(ushort) + feedbackLength, pcmOffset);
+            Assert.AreEqual(pcmLength, actualPcmLength);
+            Assert.AreEqual((byte)0x36, carrier[feedbackOffset]);
+            Assert.AreEqual((byte)0x5A, carrier[pcmOffset]);
+        }
+
+        [TestMethod]
+        public void AtomicDualSenseCarrierRejectsMisalignedPcm()
+        {
+            byte[] carrier = new byte[sizeof(ushort) +
+                ViiperOutDevice.DualSenseAtomicFeedbackLength + 3];
+            carrier[0] = (byte)(
+                ViiperOutDevice.DualSenseAtomicFeedbackLength & 0xFF);
+            carrier[1] = (byte)(
+                ViiperOutDevice.DualSenseAtomicFeedbackLength >> 8);
+
+            Assert.IsFalse(ViiperOutDevice.TryGetAtomicAudioHapticsLayout(
+                carrier, carrier.Length, out _, out _, out _, out _));
         }
 
         [TestMethod]

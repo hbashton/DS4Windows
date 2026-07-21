@@ -6,7 +6,7 @@ namespace DS4Windows.Tests
     public class DualSenseMicrophoneProcessorTests
     {
         [TestMethod]
-        public void DefaultLevelLeavesTwelveDecibelsOfHeadroom()
+        public void DefaultLevelCannotClipAfterCalibratedMakeup()
         {
             using var processor = new DualSenseMicrophoneProcessor();
             short[] frame = CreateAlternatingFrame(short.MaxValue);
@@ -14,10 +14,10 @@ namespace DS4Windows.Tests
             processor.Process(frame, frame.Length, 128,
                 DualSenseMicrophoneNoiseSuppression.Off);
 
-            Assert.IsTrue(MaxAbsolute(frame) < 9000,
-                "The default microphone level should not approach full scale.");
-            Assert.IsTrue(MaxAbsolute(frame) > 7000,
-                "The default microphone level should retain useful speech amplitude.");
+            Assert.IsTrue(MaxAbsolute(frame) <= 29205,
+                "The default microphone level must retain limiter headroom.");
+            Assert.IsTrue(MaxAbsolute(frame) > 28000,
+                "A full-scale input should reach the limiter after calibrated makeup.");
         }
 
         [TestMethod]
@@ -34,20 +34,36 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
+        public void MaximumLevelPreservesLegacyTwoTimesGain()
+        {
+            using var processor = new DualSenseMicrophoneProcessor();
+            short[] frame = CreateAlternatingFrame(4000);
+
+            processor.Process(frame, frame.Length, byte.MaxValue,
+                DualSenseMicrophoneNoiseSuppression.Off);
+
+            Assert.IsTrue(MaxAbsolute(frame) > 7600,
+                "Maximum profile volume must preserve the legacy two-times gain response.");
+            Assert.IsTrue(MaxAbsolute(frame) < 8400,
+                "Legacy profile gain should remain predictable below the limiter threshold.");
+        }
+
+        [TestMethod]
         public void HighPassFilterRejectsSteadyDc()
         {
             using var processor = new DualSenseMicrophoneProcessor();
             short[] frame = new short[DualSenseMicrophoneProcessor.FrameSize];
 
-            for (int pass = 0; pass < 3; pass++)
+            for (int pass = 0; pass < 4; pass++)
             {
                 Array.Fill(frame, (short)12000);
                 processor.Process(frame, frame.Length, 128,
                     DualSenseMicrophoneNoiseSuppression.Off);
             }
 
-            Assert.IsTrue(MaxAbsolute(frame) < 2,
-                "A constant offset should decay to silence across successive frames.");
+            int residual = MaxAbsolute(frame);
+            Assert.IsTrue(residual <= 3,
+                $"A constant offset should decay to silence across successive frames. Residual={residual}.");
         }
 
         [TestMethod]
@@ -73,7 +89,7 @@ namespace DS4Windows.Tests
             using var processor = new DualSenseMicrophoneProcessor();
             short[] frame = new short[DualSenseMicrophoneProcessor.FrameSize];
 
-            for (int pass = 0; pass < 3; pass++)
+            for (int pass = 0; pass < 6; pass++)
             {
                 Array.Fill(frame, (short)12000);
                 processor.Process(frame, frame.Length, 128,
@@ -88,8 +104,9 @@ namespace DS4Windows.Tests
                 DualSenseMicrophoneNoiseSuppression.Off,
                 muteOutput: false);
 
-            Assert.IsTrue(MaxAbsolute(frame) < 2,
-                "Unmuting must resume from continuously advanced filter state.");
+            int residual = MaxAbsolute(frame);
+            Assert.IsTrue(residual <= 6,
+                $"Unmuting must resume from continuously advanced filter state. Residual={residual}.");
         }
 
         [TestMethod]

@@ -851,6 +851,12 @@ namespace DS4Windows
                             StringComparison.Ordinal));
                     if (exactEndpoint != null)
                     {
+                        if (IsControllerEndpointSelection(
+                                ClassifyEndpoint(exactEndpoint), endpointKind))
+                        {
+                            return DirectSpeakerEndpointOwnership.Owned;
+                        }
+
                         return ResolveEndpointOwnership(exactEndpoint,
                             endpointKind, directSpeakerSource);
                     }
@@ -860,6 +866,12 @@ namespace DS4Windows
                     foreach (MMDevice candidate in activeEndpoints.Where(
                         endpoint => EndpointReplaces(endpoint, endpointId)))
                     {
+                        if (IsControllerEndpointSelection(
+                                ClassifyEndpoint(candidate), endpointKind))
+                        {
+                            return DirectSpeakerEndpointOwnership.Owned;
+                        }
+
                         DirectSpeakerEndpointOwnership candidateResult =
                             ResolveEndpointOwnership(candidate, endpointKind,
                                 directSpeakerSource);
@@ -894,28 +906,19 @@ namespace DS4Windows
                 {
                     using MMDevice savedEndpoint =
                         enumerator.GetDevice(endpointId);
+                    if (savedEndpoint != null &&
+                        IsControllerEndpointSelection(
+                            ClassifyEndpoint(savedEndpoint), endpointKind))
+                    {
+                        return DirectSpeakerEndpointOwnership.Owned;
+                    }
+
                     if (savedEndpoint?.State == DeviceState.Active)
                     {
                         return ResolveEndpointOwnership(savedEndpoint,
                             endpointKind, directSpeakerSource);
                     }
 
-                    // Profiles retain the concrete render-endpoint GUID that
-                    // was active when they were saved. Switching the VIIPER
-                    // persona recreates that endpoint with a different Sony
-                    // identity and GUID (for example DS4 -> DualSense). An
-                    // inactive controller endpoint of the other kind can never
-                    // become the current direct source, so treating it as a
-                    // transient enumeration failure leaves a healthy V3 stream
-                    // stuck in Pending forever. Route the current controller's
-                    // direct PCM in that one cross-persona case. Non-controller
-                    // endpoints remain explicit and are never silently changed.
-                    if (savedEndpoint != null &&
-                        IsStaleControllerEndpointSelection(
-                            ClassifyEndpoint(savedEndpoint), endpointKind))
-                    {
-                        return DirectSpeakerEndpointOwnership.Owned;
-                    }
                 }
                 catch
                 {
@@ -931,7 +934,7 @@ namespace DS4Windows
             }
         }
 
-        internal static bool IsStaleControllerEndpointSelection(
+        internal static bool IsControllerEndpointSelection(
             ControllerAudioEndpointKind savedEndpointKind,
             ControllerAudioEndpointKind currentOutputKind)
         {
@@ -941,8 +944,11 @@ namespace DS4Windows
             bool currentIsSpecificController =
                 currentOutputKind == ControllerAudioEndpointKind.DualShock4 ||
                 currentOutputKind == ControllerAudioEndpointKind.DualSense;
-            return savedIsSpecificController && currentIsSpecificController &&
-                savedEndpointKind != currentOutputKind;
+            // Concrete Sony endpoint GUIDs are recreated when VIIPER restarts
+            // or changes persona. Preserve the user's controller-audio intent
+            // across both same-persona recreation and DS4/DualSense changes.
+            // Non-controller endpoints keep literal loopback semantics.
+            return savedIsSpecificController && currentIsSpecificController;
         }
 
         private static DirectSpeakerEndpointOwnership ResolveEndpointOwnership(

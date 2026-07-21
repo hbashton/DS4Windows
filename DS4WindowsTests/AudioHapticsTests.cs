@@ -184,5 +184,43 @@ namespace DS4WindowsTests
             Assert.IsFalse(AudioHapticsService.SlotRuntime
                 .IsLivePacketExpired(now, now));
         }
+
+        [TestMethod]
+        public void MissingReplaceFrameLeavesNativeGameHapticsIntact()
+        {
+            byte[] carrier = Enumerable.Repeat((byte)37,
+                AudioHapticsService.SlotRuntime.FrameBytes).ToArray();
+            byte[] derived = Enumerable.Repeat((byte)99,
+                AudioHapticsService.SlotRuntime.FrameBytes).ToArray();
+
+            bool applied = AudioHapticsService.SlotRuntime.ApplyLiveFrame(
+                AudioHapticsMode.Replace, derived,
+                liveFrameAvailable: false, carrier, 0);
+
+            Assert.IsFalse(applied,
+                "A missing Audio Haptics frame must not claim game-carrier cadence.");
+            CollectionAssert.AreEqual(
+                Enumerable.Repeat((byte)37,
+                    AudioHapticsService.SlotRuntime.FrameBytes).ToArray(),
+                carrier,
+                "Replace mode must not erase native game haptics while capture is stale.");
+        }
+
+        [TestMethod]
+        public void LiveReplaceFrameClaimsCarrierAndReplacesSamples()
+        {
+            byte[] carrier = new byte[
+                AudioHapticsService.SlotRuntime.FrameBytes];
+            byte[] derived = Enumerable.Range(0,
+                    AudioHapticsService.SlotRuntime.FrameBytes)
+                .Select(value => (byte)value).ToArray();
+
+            bool applied = AudioHapticsService.SlotRuntime.ApplyLiveFrame(
+                AudioHapticsMode.Replace, derived,
+                liveFrameAvailable: true, carrier, 0);
+
+            Assert.IsTrue(applied);
+            CollectionAssert.AreEqual(derived, carrier);
+        }
     }
 }

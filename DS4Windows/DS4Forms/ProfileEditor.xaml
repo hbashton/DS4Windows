@@ -2273,8 +2273,8 @@
                                     <Label Content="{lex:Loc EmulatedController}" ToolTip="{lex:Loc OutContNotice}" />
                                     <ComboBox x:Name="outConTypeCombo" SelectedIndex="{Binding TempControllerIndex, FallbackValue=0}" IsEnabled="{Binding DInputOnly, Converter={StaticResource InverseBoolConverter}}" MinWidth="140"
                                       ToolTip="{lex:Loc OutContNotice}">
-                                        <ComboBoxItem Content="Viiper DualShock 4"/>
-                                        <ComboBoxItem Content="Viiper Xbox 360"/>
+                                        <ComboBoxItem Content="DualShock 4"/>
+                                        <ComboBoxItem Content="Xbox 360"/>
                                         <ComboBoxItem Content="DualSense"/>
                                         <ComboBoxItem Content="DualSense Edge"/>
                                         <ComboBoxItem Content="Switch 2 Pro"/>

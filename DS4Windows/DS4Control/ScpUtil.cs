@@ -83,6 +83,19 @@ namespace DS4Windows
                 _ => type,
             };
         }
+
+        public static string ToDisplayName(this OutContType type)
+        {
+            return type.Normalize() switch
+            {
+                OutContType.ViiperX360 => "Xbox 360",
+                OutContType.ViiperDS4 => "DualShock 4",
+                OutContType.ViiperDualSense => "DualSense",
+                OutContType.ViiperDualSenseEdge => "DualSense Edge",
+                OutContType.ViiperSwitch2Pro => "Switch 2 Pro",
+                _ => "None",
+            };
+        }
     }
 
     public enum GyroOutMode : uint

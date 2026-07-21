@@ -228,15 +228,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         private static string GetOutputTypeDisplayName(OutContType type)
         {
-            return type.Normalize() switch
-            {
-                OutContType.ViiperX360 => "Viiper Xbox 360",
-                OutContType.ViiperDS4 => "Viiper DualShock 4",
-                OutContType.ViiperDualSense => "DualSense",
-                OutContType.ViiperDualSenseEdge => "DualSense Edge",
-                OutContType.ViiperSwitch2Pro => "Switch 2 Pro",
-                _ => "Empty",
-            };
+            return type.Normalize() == OutContType.None ? "Empty" :
+                type.ToDisplayName();
         }
 
         public bool BoundInput

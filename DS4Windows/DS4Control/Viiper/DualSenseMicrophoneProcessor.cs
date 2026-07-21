@@ -107,7 +107,13 @@ namespace DS4Windows
 
                 for (int i = 0; i < sampleCount; i++)
                 {
-                    workingFrame[i] *= inputGain;
+                    float processed = workingFrame[i] * inputGain;
+                    // A damaged codec/denoiser sample must become silence,
+                    // never Int16.MinValue. Casting NaN or infinity through
+                    // the integer quantizer otherwise creates full-scale
+                    // impulses that sound like clipping.
+                    workingFrame[i] = float.IsFinite(processed) ?
+                        processed : 0.0f;
                 }
 
                 if (suppression == DualSenseMicrophoneNoiseSuppression.Strong &&
@@ -203,7 +209,14 @@ namespace DS4Windows
             float peak = 0.0f;
             for (int i = 0; i < sampleCount; i++)
             {
-                peak = Math.Max(peak, Math.Abs(workingFrame[i]));
+                float sample = workingFrame[i];
+                if (!float.IsFinite(sample))
+                {
+                    workingFrame[i] = 0.0f;
+                    continue;
+                }
+
+                peak = Math.Max(peak, Math.Abs(sample));
             }
 
             float requiredGain = peak > LimiterCeiling ? LimiterCeiling / peak : 1.0f;

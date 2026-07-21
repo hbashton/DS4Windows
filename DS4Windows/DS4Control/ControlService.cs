@@ -2382,8 +2382,9 @@ namespace DS4Windows
                         DualSenseEnableMicrophonePassthrough[ind], dualsense,
                         Global.OutContType[ind], viiperMicrophoneOutput);
                 // The profile volume is applied once in the shared software
-                // microphone processor. Keep the physical ADC at full scale so
-                // cross-emulation does not attenuate the signal a second time.
+                // microphone processor. Request the top of the profile range;
+                // DualSenseDevice maps it to the controller's 0x40 ADC ceiling
+                // at the physical protocol boundary.
                 dualsense.MicrophoneVolume = useViiperControllerMicrophone ?
                     byte.MaxValue : DualSenseMicrophoneVolume[ind];
 

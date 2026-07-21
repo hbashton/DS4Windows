@@ -3844,97 +3844,21 @@ namespace DS4Windows
                     return false;
                 }
 
-                lock (gate)
+                // Queue the mode change in the same OVERLAPPED slot ring as
+                // speaker data. WriteFile submissions on this handle retain
+                // ordering, so older audio precedes the control report and new
+                // mode data follows it. The former implementation drained all
+                // outstanding writes while holding gate; a slow HID completion
+                // consequently stopped the 4 ms producer for up to a second.
+                bool submitted = TrySend(report, out bool hardFailure);
+                if (!submitted)
                 {
-                    if (disposed)
-                    {
-                        error = "audio transport disposed";
-                        return false;
-                    }
-                    if (!DrainOutstandingNoLock(1000, out error))
-                    {
-                        return false;
-                    }
-
-                    byte[] nativeReport = new byte[Math.Max(report.Length,
-                        NativeBackingBufferLength)];
-                    Buffer.BlockCopy(report, 0, nativeReport, 0,
-                        report.Length);
-                    GCHandle pin = GCHandle.Alloc(nativeReport,
-                        GCHandleType.Pinned);
-                    IntPtr completionEvent = CreateEventW(IntPtr.Zero, true,
-                        false, null);
-                    IntPtr controlOverlapped = Marshal.AllocHGlobal(
-                        OverlappedSize);
-                    bool leak = false;
-                    try
-                    {
-                        if (completionEvent == IntPtr.Zero)
-                        {
-                            error = $"CreateEvent failed: Win32 " +
-                                Marshal.GetLastWin32Error();
-                            return false;
-                        }
-
-                        ZeroOverlapped(controlOverlapped, completionEvent);
-                        bool submitted = WriteFile(handle,
-                            pin.AddrOfPinnedObject(), (uint)report.Length,
-                            IntPtr.Zero, controlOverlapped);
-                        int submitError = submitted ? 0 :
-                            Marshal.GetLastWin32Error();
-                        if (submitted)
-                        {
-                            // This is the common HIDCLASS fast path. PadForge's
-                            // WriteOneShot returns immediately here as well; a
-                            // synchronous overlapped WriteFile need not report
-                            // the transfer count through a second result query.
-                            return true;
-                        }
-                        if (submitError != ErrorIoPending)
-                        {
-                            error = $"WriteFile failed: Win32 {submitError}";
-                            return false;
-                        }
-
-                        uint wait = WaitForSingleObject(completionEvent, 1000);
-                        // PadForge's WriteOneShot treats a signaled OVERLAPPED
-                        // event as completion. HIDCLASS commonly reports zero
-                        // via GetOverlappedResult even though the output report
-                        // was accepted, so requiring a byte count creates false
-                        // failures and retry storms.
-                        if (wait == WaitObject0)
-                        {
-                            return true;
-                        }
-
-                        CancelIoEx(handle, controlOverlapped);
-                        leak = WaitForSingleObject(completionEvent, 250) !=
-                            WaitObject0;
-                        error = wait == WaitTimeout ?
-                            "control report timed out" :
-                            $"control wait failed: Win32 " +
-                            $"{Marshal.GetLastWin32Error()}";
-                        return false;
-                    }
-                    finally
-                    {
-                        if (!leak)
-                        {
-                            if (controlOverlapped != IntPtr.Zero)
-                            {
-                                Marshal.FreeHGlobal(controlOverlapped);
-                            }
-                            if (completionEvent != IntPtr.Zero)
-                            {
-                                CloseHandle(completionEvent);
-                            }
-                            if (pin.IsAllocated)
-                            {
-                                pin.Free();
-                            }
-                        }
-                    }
+                    error = hardFailure ?
+                        "audio control submission failed" :
+                        "audio control queue saturated";
                 }
+
+                return submitted;
             }
 
             public bool TryDrainOutstanding(int timeoutMilliseconds,

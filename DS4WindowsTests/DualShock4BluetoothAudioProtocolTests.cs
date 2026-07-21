@@ -26,6 +26,11 @@ namespace DS4WindowsTests
                 usingBluetooth: true, speakerEnabled: true, force: true,
                 reportPending: true, elapsedMilliseconds: 0));
             Assert.IsFalse(DS4Device.ShouldDeferBluetoothEffectDuringSpeaker(
+                usingBluetooth: true, speakerEnabled: true, force: false,
+                reportPending: true, elapsedMilliseconds: 0,
+                audioControlRefreshPending: true),
+                "An audio control packet may have zeroed the lightbar and must be followed by an immediate effect refresh.");
+            Assert.IsFalse(DS4Device.ShouldDeferBluetoothEffectDuringSpeaker(
                 usingBluetooth: true, speakerEnabled: false, force: false,
                 reportPending: true, elapsedMilliseconds: 0));
         }

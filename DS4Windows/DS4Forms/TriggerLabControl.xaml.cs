@@ -7,6 +7,8 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using DS4Windows;
 using DS4Windows.InputDevices;
+using DS4WinWPF.DS4Forms.ViewModels;
+using IntegerUpDown = Xceed.Wpf.Toolkit.IntegerUpDown;
 
 namespace DS4WinWPF.DS4Forms
 {
@@ -30,6 +32,13 @@ namespace DS4WinWPF.DS4Forms
             public TextBlock StartValue;
             public TextBlock WallValue;
             public TextBlock ForceValue;
+            public MappedControl FullPullMapping;
+            public Button FullPullAction;
+            public TextBlock FullPullActionName;
+            public ComboBox FullPullMode;
+            public TextBlock FullPullModeDescription;
+            public Grid HipFireDelayRow;
+            public IntegerUpDown HipFireDelay;
         }
 
         private sealed class ProfileChoice
@@ -40,6 +49,56 @@ namespace DS4WinWPF.DS4Forms
             public bool IsCustom { get; init; }
             public override string ToString() => Name;
         }
+
+        private sealed class FullPullModeChoice
+        {
+            public string Name { get; init; }
+            public string Description { get; init; }
+            public TwoStageTriggerMode Mode { get; init; }
+            public bool UsesDelay => Mode == TwoStageTriggerMode.HipFire ||
+                Mode == TwoStageTriggerMode.HipFireExclusiveButtons;
+        }
+
+        private static readonly IReadOnlyList<FullPullModeChoice> FullPullModes =
+            new List<FullPullModeChoice>
+            {
+                new FullPullModeChoice
+                {
+                    Name = "Off",
+                    Mode = TwoStageTriggerMode.Disabled,
+                    Description = "Only the regular trigger action runs.",
+                },
+                new FullPullModeChoice
+                {
+                    Name = "Add at full pull",
+                    Mode = TwoStageTriggerMode.Normal,
+                    Description = "Keep the regular trigger action active and also run the full-pull action at the end of travel.",
+                },
+                new FullPullModeChoice
+                {
+                    Name = "Replace at full pull",
+                    Mode = TwoStageTriggerMode.ExclusiveButtons,
+                    Description = "Release the regular trigger action and replace it with the full-pull action at the end of travel.",
+                },
+                new FullPullModeChoice
+                {
+                    Name = "Hair trigger",
+                    Mode = TwoStageTriggerMode.HairTrigger,
+                    Description = "Run both actions at full pull, then release both as soon as the trigger backs away from the end stop.",
+                },
+                new FullPullModeChoice
+                {
+                    Name = "Hip fire",
+                    Mode = TwoStageTriggerMode.HipFire,
+                    Description = "Wait for the chosen delay, then run the regular or full-pull action based on how far the trigger was pressed.",
+                },
+                new FullPullModeChoice
+                {
+                    Name = "Hip fire (exclusive)",
+                    Mode = TwoStageTriggerMode.HipFireExclusiveButtons,
+                    Description = "Wait for the chosen delay and run only one action: regular pull or full pull.",
+                },
+            };
 
         private int deviceIndex = -1;
         private int physicalDeviceIndex = -1;
@@ -93,7 +152,24 @@ namespace DS4WinWPF.DS4Forms
                             : -1;
             liveApplyPersistent = deviceIndex >= 0 &&
                 deviceIndex == physicalDeviceIndex;
+            InitializeFullPullMappings();
             RefreshSettings();
+        }
+
+        private void InitializeFullPullMappings()
+        {
+            leftUi.FullPullMapping = null;
+            rightUi.FullPullMapping = null;
+            if (deviceIndex < 0 || deviceIndex >= Global.TEST_PROFILE_ITEM_COUNT)
+            {
+                return;
+            }
+
+            OutContType outputType = Global.outDevTypeTemp[deviceIndex].Normalize();
+            leftUi.FullPullMapping = new MappedControl(deviceIndex,
+                DS4Controls.L2FullPull, "L2 Full Pull", outputType, true);
+            rightUi.FullPullMapping = new MappedControl(deviceIndex,
+                DS4Controls.R2FullPull, "R2 Full Pull", outputType, true);
         }
 
         public void RefreshSettings()
@@ -205,6 +281,8 @@ namespace DS4WinWPF.DS4Forms
             root.Children.Add(MakeMeter("Wall", ui, out ui.Wall, out ui.WallValue));
             root.Children.Add(MakeMeter("Force", ui, out ui.Force, out ui.ForceValue));
 
+            root.Children.Add(BuildFullPullSection(ui));
+
             Grid actions = new Grid { Margin = new Thickness(0, 14, 0, 0) };
             actions.ColumnDefinitions.Add(new ColumnDefinition()); actions.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(8) }); actions.ColumnDefinitions.Add(new ColumnDefinition());
             Button preview = new Button { Content = "\u25B6  Preview", MinHeight = 38, Style = FindResource("BridgeSecondaryButtonStyle") as Style };
@@ -213,6 +291,191 @@ namespace DS4WinWPF.DS4Forms
             reset.Click += (_, _) => ResetSide(ui); Grid.SetColumn(reset, 2);
             actions.Children.Add(preview); actions.Children.Add(reset); root.Children.Add(actions);
             return root;
+        }
+
+        private Border BuildFullPullSection(SideUi ui)
+        {
+            StackPanel content = new StackPanel();
+            Grid heading = new Grid();
+            heading.ColumnDefinitions.Add(new ColumnDefinition());
+            heading.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = GridLength.Auto,
+            });
+            heading.Children.Add(new TextBlock
+            {
+                Text = "Full-pull action",
+                FontSize = 15,
+                FontWeight = FontWeights.SemiBold,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            Border badge = new Border
+            {
+                Background = FindBrush("RaisedBackgroundColor", Brushes.Transparent),
+                BorderBrush = FindBrush("BorderColor", Brushes.Gray),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(7, 3, 7, 3),
+                Child = new TextBlock
+                {
+                    Text = "END OF TRAVEL",
+                    FontSize = 9,
+                    FontWeight = FontWeights.Bold,
+                    Foreground = FindBrush("MutedForegroundColor", Brushes.Gray),
+                },
+            };
+            Grid.SetColumn(badge, 1);
+            heading.Children.Add(badge);
+            content.Children.Add(heading);
+            content.Children.Add(new TextBlock
+            {
+                Text = $"When {(ui.IsLeft ? "L2" : "R2")} is pressed completely, run the action below using the selected behavior.",
+                Margin = new Thickness(0, 4, 0, 10),
+                Foreground = FindBrush("MutedForegroundColor", Brushes.Gray),
+                TextWrapping = TextWrapping.Wrap,
+            });
+
+            Grid actionContent = new Grid();
+            actionContent.ColumnDefinitions.Add(new ColumnDefinition());
+            actionContent.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = GridLength.Auto,
+            });
+            StackPanel actionText = new StackPanel();
+            actionText.Children.Add(new TextBlock
+            {
+                Text = "Assigned action",
+                FontSize = 10,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = FindBrush("MutedForegroundColor", Brushes.Gray),
+            });
+            ui.FullPullActionName = new TextBlock
+            {
+                Text = "Unassigned",
+                Margin = new Thickness(0, 2, 10, 0),
+                FontWeight = FontWeights.SemiBold,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            };
+            actionText.Children.Add(ui.FullPullActionName);
+            actionContent.Children.Add(actionText);
+            TextBlock changeLabel = new TextBlock
+            {
+                Text = "Change  ›",
+                Foreground = FindBrush("AccentColor", Brushes.DodgerBlue),
+                FontWeight = FontWeights.SemiBold,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            Grid.SetColumn(changeLabel, 1);
+            actionContent.Children.Add(changeLabel);
+            ui.FullPullAction = new Button
+            {
+                Content = actionContent,
+                MinHeight = 54,
+                Padding = new Thickness(12, 8, 12, 8),
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                Style = FindResource("BridgeSecondaryButtonStyle") as Style,
+            };
+            System.Windows.Automation.AutomationProperties.SetName(
+                ui.FullPullAction,
+                $"Change {(ui.IsLeft ? "L2" : "R2")} full-pull action");
+            System.Windows.Automation.AutomationProperties.SetAutomationId(
+                ui.FullPullAction,
+                ui.IsLeft ? "l2FullPullActionButton" : "r2FullPullActionButton");
+            ui.FullPullAction.Click += (_, _) => EditFullPullAction(ui);
+            content.Children.Add(ui.FullPullAction);
+
+            Grid modeRow = new Grid { Margin = new Thickness(0, 12, 0, 0) };
+            modeRow.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = new GridLength(90),
+            });
+            modeRow.ColumnDefinitions.Add(new ColumnDefinition());
+            modeRow.Children.Add(new TextBlock
+            {
+                Text = "Behavior",
+                FontWeight = FontWeights.SemiBold,
+                Foreground = FindBrush("MutedForegroundColor", Brushes.Gray),
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            ui.FullPullMode = new ComboBox
+            {
+                ItemsSource = FullPullModes,
+                DisplayMemberPath = nameof(FullPullModeChoice.Name),
+                MinHeight = 34,
+            };
+            System.Windows.Automation.AutomationProperties.SetName(
+                ui.FullPullMode,
+                $"{(ui.IsLeft ? "L2" : "R2")} full-pull behavior");
+            System.Windows.Automation.AutomationProperties.SetAutomationId(
+                ui.FullPullMode,
+                ui.IsLeft ? "l2FullPullModeCombo" : "r2FullPullModeCombo");
+            ui.FullPullMode.SelectionChanged += (_, _) => FullPullModeChanged(ui);
+            Grid.SetColumn(ui.FullPullMode, 1);
+            modeRow.Children.Add(ui.FullPullMode);
+            content.Children.Add(modeRow);
+            ui.FullPullModeDescription = new TextBlock
+            {
+                Margin = new Thickness(90, 6, 0, 0),
+                Foreground = FindBrush("MutedForegroundColor", Brushes.Gray),
+                TextWrapping = TextWrapping.Wrap,
+            };
+            content.Children.Add(ui.FullPullModeDescription);
+
+            ui.HipFireDelayRow = new Grid { Margin = new Thickness(0, 10, 0, 0) };
+            ui.HipFireDelayRow.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = new GridLength(90),
+            });
+            ui.HipFireDelayRow.ColumnDefinitions.Add(new ColumnDefinition());
+            ui.HipFireDelayRow.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = GridLength.Auto,
+            });
+            ui.HipFireDelayRow.Children.Add(new TextBlock
+            {
+                Text = "Delay",
+                FontWeight = FontWeights.SemiBold,
+                Foreground = FindBrush("MutedForegroundColor", Brushes.Gray),
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            ui.HipFireDelay = new IntegerUpDown
+            {
+                Minimum = 0,
+                Maximum = 5000,
+                Increment = 10,
+                Value = TriggerOutputSettings.DEFAULT_HIP_TIME,
+                MinHeight = 34,
+            };
+            System.Windows.Automation.AutomationProperties.SetName(
+                ui.HipFireDelay,
+                $"{(ui.IsLeft ? "L2" : "R2")} hip-fire delay");
+            System.Windows.Automation.AutomationProperties.SetAutomationId(
+                ui.HipFireDelay,
+                ui.IsLeft ? "l2HipFireDelay" : "r2HipFireDelay");
+            ui.HipFireDelay.ValueChanged += (_, _) => FullPullDelayChanged(ui);
+            Grid.SetColumn(ui.HipFireDelay, 1);
+            ui.HipFireDelayRow.Children.Add(ui.HipFireDelay);
+            TextBlock milliseconds = new TextBlock
+            {
+                Text = "ms",
+                Margin = new Thickness(8, 0, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = FindBrush("MutedForegroundColor", Brushes.Gray),
+            };
+            Grid.SetColumn(milliseconds, 2);
+            ui.HipFireDelayRow.Children.Add(milliseconds);
+            content.Children.Add(ui.HipFireDelayRow);
+
+            return new Border
+            {
+                Background = FindBrush("RaisedBackgroundColor", Brushes.Transparent),
+                BorderBrush = FindBrush("BorderColor", Brushes.Gray),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(12),
+                Margin = new Thickness(0, 16, 0, 0),
+                Child = content,
+            };
         }
 
         private Button MakeIconButton(string glyph, string tooltip, RoutedEventHandler click)
@@ -279,6 +542,165 @@ namespace DS4WinWPF.DS4Forms
             ui.Start.Value = effect.StartPercent; ui.Wall.Value = effect.WallPercent; ui.Force.Value = effect.ForcePercent;
             ui.StartValue.Text = $"{effect.StartPercent}%"; ui.WallValue.Text = $"{effect.WallPercent}%"; ui.ForceValue.Text = $"{effect.ForcePercent}%";
             SetModeVisuals(ui, effect.Mode);
+            RefreshFullPullUi(ui);
+        }
+
+        private TriggerOutputSettings FullPullOutputSettings(SideUi ui)
+        {
+            if (deviceIndex < 0 || deviceIndex >= Global.TEST_PROFILE_ITEM_COUNT)
+            {
+                return null;
+            }
+
+            return ui.IsLeft
+                ? Global.L2OutputSettings[deviceIndex]
+                : Global.R2OutputSettings[deviceIndex];
+        }
+
+        private void RefreshFullPullUi(SideUi ui)
+        {
+            TriggerOutputSettings outputSettings = FullPullOutputSettings(ui);
+            bool available = outputSettings != null && ui.FullPullMapping != null;
+            ui.FullPullAction.IsEnabled = available;
+            ui.FullPullMode.IsEnabled = available;
+            ui.HipFireDelay.IsEnabled = available;
+            if (!available)
+            {
+                ui.FullPullActionName.Text = "Select a controller or profile";
+                ui.FullPullModeDescription.Text = string.Empty;
+                ui.HipFireDelayRow.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            ui.FullPullMapping.UpdateMappingName();
+            ui.FullPullActionName.Text = ui.FullPullMapping.MappingName;
+            ui.FullPullAction.ToolTip =
+                $"Choose what happens when {(ui.IsLeft ? "L2" : "R2")} reaches full travel.";
+            FullPullModeChoice mode = FullPullModes.FirstOrDefault(choice =>
+                choice.Mode == outputSettings.twoStageMode) ?? FullPullModes[0];
+            ui.FullPullMode.SelectedItem = mode;
+            ui.FullPullModeDescription.Text = mode.Description;
+            ui.HipFireDelay.Value = Math.Max(0, Math.Min(5000,
+                outputSettings.hipFireMS));
+            ui.HipFireDelayRow.Visibility = mode.UsesDelay
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+
+        private void FullPullModeChanged(SideUi ui)
+        {
+            if (loading || ui.FullPullMode.SelectedItem is not FullPullModeChoice choice)
+            {
+                return;
+            }
+
+            TriggerOutputSettings outputSettings = FullPullOutputSettings(ui);
+            if (outputSettings == null || outputSettings.twoStageMode == choice.Mode)
+            {
+                return;
+            }
+
+            outputSettings.TwoStageMode = choice.Mode;
+            ui.FullPullModeDescription.Text = choice.Description;
+            ui.HipFireDelayRow.Visibility = choice.UsesDelay
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            NotifyFullPullSettingsChanged();
+        }
+
+        private void FullPullDelayChanged(SideUi ui)
+        {
+            if (loading)
+            {
+                return;
+            }
+
+            TriggerOutputSettings outputSettings = FullPullOutputSettings(ui);
+            int value = ui.HipFireDelay.Value ?? TriggerOutputSettings.DEFAULT_HIP_TIME;
+            if (outputSettings == null || outputSettings.hipFireMS == value)
+            {
+                return;
+            }
+
+            outputSettings.hipFireMS = value;
+            NotifyFullPullSettingsChanged();
+        }
+
+        private void EditFullPullAction(SideUi ui)
+        {
+            if (ui.FullPullMapping == null)
+            {
+                return;
+            }
+
+            DS4ControlSettings setting = ui.FullPullMapping.Setting;
+            string before = FullPullBindingSignature(setting);
+            BindingWindow window = new BindingWindow(deviceIndex, setting)
+            {
+                Owner = Window.GetWindow(this) ?? App.Current.MainWindow,
+            };
+            window.ShowDialog();
+            string after = FullPullBindingSignature(setting);
+            ui.FullPullMapping.UpdateMappingName();
+            ui.FullPullActionName.Text = ui.FullPullMapping.MappingName;
+            if (before == after)
+            {
+                return;
+            }
+
+            TriggerOutputSettings outputSettings = FullPullOutputSettings(ui);
+            if (outputSettings != null)
+            {
+                if (setting.IsDefault && setting.IsShiftDefault)
+                {
+                    outputSettings.TwoStageMode = TwoStageTriggerMode.Disabled;
+                }
+                else if (outputSettings.twoStageMode == TwoStageTriggerMode.Disabled)
+                {
+                    outputSettings.TwoStageMode = TwoStageTriggerMode.Normal;
+                }
+            }
+
+            NotifyFullPullSettingsChanged();
+            loading = true;
+            try
+            {
+                RefreshFullPullUi(ui);
+            }
+            finally
+            {
+                loading = false;
+            }
+        }
+
+        private static string FullPullBindingSignature(DS4ControlSettings setting)
+        {
+            string actionMacro = setting.action.actionMacro == null
+                ? string.Empty
+                : string.Join(",", setting.action.actionMacro);
+            string shiftMacro = setting.shiftAction.actionMacro == null
+                ? string.Empty
+                : string.Join(",", setting.shiftAction.actionMacro);
+            return string.Join("|",
+                setting.actionType, setting.action.actionKey,
+                setting.action.actionBtn, actionMacro, setting.extras,
+                setting.keyType, setting.LightbarMacroString,
+                setting.shiftActionType, setting.shiftAction.actionKey,
+                setting.shiftAction.actionBtn, shiftMacro,
+                setting.shiftExtras, setting.shiftKeyType,
+                setting.shiftTrigger);
+        }
+
+        private void NotifyFullPullSettingsChanged()
+        {
+            if (deviceIndex < 0 || deviceIndex >= Global.TEST_PROFILE_ITEM_COUNT)
+            {
+                return;
+            }
+
+            Global.CacheProfileCustomsFlags(deviceIndex);
+            SettingsChanged?.Invoke(this,
+                new ProfileFeatureSettingsChangedEventArgs(deviceIndex));
         }
 
         private TriggerLabEffectSettings CurrentEffect(SideUi ui) => ui.IsLeft ? CurrentSettings.Left : CurrentSettings.Right;

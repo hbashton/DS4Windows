@@ -11,6 +11,19 @@ namespace DS4WindowsTests
     [TestClass]
     public class DualSenseBluetoothAudioTransportTests
     {
+        [TestMethod]
+        public void RealtimeWriterBoundsNormalFragmentedAudioToTwoIrps()
+        {
+            Assert.IsFalse(DualSenseBluetoothRealtimeWriter
+                .ShouldThrottleFragmentedAudioWrites(0));
+            Assert.IsFalse(DualSenseBluetoothRealtimeWriter
+                .ShouldThrottleFragmentedAudioWrites(1));
+            Assert.IsTrue(DualSenseBluetoothRealtimeWriter
+                .ShouldThrottleFragmentedAudioWrites(2));
+            Assert.IsTrue(DualSenseBluetoothRealtimeWriter
+                .ShouldThrottleFragmentedAudioWrites(3));
+        }
+
         private static readonly FieldInfo ConnectionTypeField =
             typeof(DS4Device).GetField("conType",
                 BindingFlags.Instance | BindingFlags.NonPublic);

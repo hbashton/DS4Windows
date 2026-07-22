@@ -28,6 +28,8 @@ namespace DS4Windows.InputDevices
         private const uint CancellationCompletionGraceMilliseconds = 100;
         private const int LateSubmissionMilliseconds = 15;
         private const int SlowCompletionMilliseconds = 20;
+        private const int NormalAudioInFlightLimit = 2;
+        private const uint InFlightLimitWaitMilliseconds = 3;
 
         [StructLayout(LayoutKind.Sequential)]
         private struct NativeOverlappedData
@@ -98,6 +100,9 @@ namespace DS4Windows.InputDevices
         private long lateSubmissionCount;
         private long maximumSubmissionGapTicks;
         private long lastSubmissionTimestamp;
+        private long inFlightLimitWaitCount;
+        private long inFlightLimitEscapeCount;
+        private long maximumInFlightLimitWaitTicks;
         private readonly TaskCompletionSource<bool> disposalCompletion =
             new TaskCompletionSource<bool>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
@@ -109,8 +114,20 @@ namespace DS4Windows.InputDevices
             Interlocked.Read(ref maximumCompletionTicks) * 1000.0 / Stopwatch.Frequency;
         public double MaximumSubmissionGapMilliseconds =>
             Interlocked.Read(ref maximumSubmissionGapTicks) * 1000.0 / Stopwatch.Frequency;
+        public long InFlightLimitWaitCount =>
+            Interlocked.Read(ref inFlightLimitWaitCount);
+        public long InFlightLimitEscapeCount =>
+            Interlocked.Read(ref inFlightLimitEscapeCount);
+        public long MaximumInFlightLimitWaitTicks =>
+            Interlocked.Read(ref maximumInFlightLimitWaitTicks);
         public bool NativeResourcesReleased =>
             disposalCompletion.Task.IsCompletedSuccessfully;
+
+        internal static bool ShouldThrottleFragmentedAudioWrites(
+            int pendingWriteCount)
+        {
+            return pendingWriteCount >= NormalAudioInFlightLimit;
+        }
 
         public void ResetSubmissionClock()
         {
@@ -262,6 +279,10 @@ namespace DS4Windows.InputDevices
                 }
 
                 ObserveCompletedWrites();
+                if (!WaitForNormalAudioInFlightWindow(out transportFault))
+                {
+                    return false;
+                }
                 long now = Stopwatch.GetTimestamp();
                 // Preserve the exact kernel submission order used by
                 // PadForge's proven eight-slot pool. Skipping over the oldest
@@ -328,6 +349,80 @@ namespace DS4Windows.InputDevices
                 nextSlot = (slotIndex + 1) % slots.Length;
                 return true;
             }
+        }
+
+        /// <summary>
+        /// A 398-byte 0x36 report takes about 21.8 ms to complete on the live
+        /// Bluetooth stack while reports are presented every 10.667 ms. Two
+        /// overlapping IRPs therefore sustain the stream. Briefly wait for the
+        /// oldest of those two before admitting a third fragmented report; if
+        /// the adapter is experiencing a longer abnormal stall, escape rather
+        /// than dropping the audio frame or growing a latency queue.
+        /// </summary>
+        private bool WaitForNormalAudioInFlightWindow(
+            out bool transportFault)
+        {
+            transportFault = false;
+            int pendingCount = 0;
+            WriteSlot oldest = null;
+            foreach (WriteSlot candidate in slots)
+            {
+                if (!candidate.Pending)
+                {
+                    continue;
+                }
+
+                pendingCount++;
+                if (oldest == null || candidate.SubmittedTimestamp <
+                    oldest.SubmittedTimestamp)
+                {
+                    oldest = candidate;
+                }
+            }
+
+            if (!ShouldThrottleFragmentedAudioWrites(pendingCount) ||
+                oldest == null)
+            {
+                return true;
+            }
+
+            long waitStarted = Stopwatch.GetTimestamp();
+            uint waitResult = WaitForSingleObject(oldest.EventHandle,
+                InFlightLimitWaitMilliseconds);
+            long waitedTicks = Stopwatch.GetTimestamp() - waitStarted;
+            Interlocked.Increment(ref inFlightLimitWaitCount);
+            UpdateMaximum(ref maximumInFlightLimitWaitTicks, waitedTicks);
+            if (waitResult == WAIT_FAILED)
+            {
+                transportFault = true;
+                return false;
+            }
+
+            if (waitResult == WAIT_TIMEOUT)
+            {
+                // Preserve the existing low-latency failure policy for a real
+                // adapter stall. This is an escape from the normal two-IRP
+                // window, not permission to buffer or discard the frame.
+                Interlocked.Increment(ref inFlightLimitEscapeCount);
+                return true;
+            }
+
+            if (oldest.Pending)
+            {
+                if (!GetOverlappedResult(deviceHandle, oldest.Overlapped,
+                    out _, false))
+                {
+                    transportFault = true;
+                    return false;
+                }
+
+                RecordCompletion(Stopwatch.GetTimestamp() -
+                    oldest.SubmittedTimestamp);
+                oldest.Pending = false;
+                oldest.SubmittedTimestamp = 0;
+            }
+
+            return true;
         }
 
         /// <summary>

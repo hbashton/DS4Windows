@@ -25,7 +25,7 @@ namespace DS4Windows.InputDevices
         internal const int HostReservoirCapacity = 64;
 
         private const string HelperArgument = "--dualsense-bt-audio-pacer-helper";
-        private const int ProtocolVersion = 2;
+        private const int ProtocolVersion = 3;
         private const int PipeConnectTimeoutMilliseconds = 5000;
         private const int HelperReadyTimeoutMilliseconds = 5000;
         private const int HelperStopTimeoutMilliseconds = 3000;
@@ -107,6 +107,9 @@ namespace DS4Windows.InputDevices
         private long lastPresentedTimestamp;
         private long maximumPresentationGapTicks;
         private long latePresentationCount;
+        private long helperInFlightLimitWaitCount;
+        private long helperInFlightLimitEscapeCount;
+        private long helperMaximumInFlightLimitWaitTicks;
         private long clearedReports;
         private long transportFaultReports;
         private int currentEpoch = InitialEpoch;
@@ -152,6 +155,13 @@ namespace DS4Windows.InputDevices
         public double MaximumPresentationGapMilliseconds =>
             Interlocked.Read(ref maximumPresentationGapTicks) * 1000.0 /
             Stopwatch.Frequency;
+        public long HelperInFlightLimitWaitCount =>
+            Interlocked.Read(ref helperInFlightLimitWaitCount);
+        public long HelperInFlightLimitEscapeCount =>
+            Interlocked.Read(ref helperInFlightLimitEscapeCount);
+        public double HelperMaximumInFlightLimitWaitMilliseconds =>
+            Interlocked.Read(ref helperMaximumInFlightLimitWaitTicks) *
+            1000.0 / Stopwatch.Frequency;
         public long ClearedReports => Interlocked.Read(ref clearedReports);
         public long TransportFaultReports =>
             Interlocked.Read(ref transportFaultReports);
@@ -751,7 +761,10 @@ namespace DS4Windows.InputDevices
 
         private void ProcessAcknowledgement(byte[] payload)
         {
-            if (payload.Length != sizeof(long) + sizeof(byte) + sizeof(long))
+            const int writerMetricCount = 3;
+            int metricOffset = sizeof(long) + sizeof(byte) + sizeof(long);
+            if (payload.Length != metricOffset +
+                writerMetricCount * sizeof(long))
             {
                 throw new InvalidDataException("Invalid pacer acknowledgement length.");
             }
@@ -762,6 +775,17 @@ namespace DS4Windows.InputDevices
                 (AcknowledgementDisposition)payload[sizeof(long)];
             long presentedTimestamp = BinaryPrimitives.ReadInt64LittleEndian(
                 payload.AsSpan(sizeof(long) + sizeof(byte), sizeof(long)));
+            Interlocked.Exchange(ref helperInFlightLimitWaitCount,
+                BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
+                    metricOffset, sizeof(long))));
+            metricOffset += sizeof(long);
+            Interlocked.Exchange(ref helperInFlightLimitEscapeCount,
+                BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
+                    metricOffset, sizeof(long))));
+            metricOffset += sizeof(long);
+            Interlocked.Exchange(ref helperMaximumInFlightLimitWaitTicks,
+                BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
+                    metricOffset, sizeof(long))));
 
             PendingReportCompletion completion = null;
             lock (stateLock)
@@ -1893,8 +1917,10 @@ namespace DS4Windows.InputDevices
 
             private void AcknowledgementLoop()
             {
+                const int writerMetricCount = 3;
                 byte[] payload = new byte[
-                    sizeof(long) + sizeof(byte) + sizeof(long)];
+                    sizeof(long) + sizeof(byte) + sizeof(long) +
+                    writerMetricCount * sizeof(long)];
                 try
                 {
                     while (!stopRequested.WaitOne(0) || acknowledgements.Count != 0)
@@ -1914,6 +1940,19 @@ namespace DS4Windows.InputDevices
                             payload.AsSpan(sizeof(long) + sizeof(byte),
                                 sizeof(long)),
                             acknowledgement.PresentedTimestamp);
+                        int metricOffset = sizeof(long) + sizeof(byte) +
+                            sizeof(long);
+                        BinaryPrimitives.WriteInt64LittleEndian(
+                            payload.AsSpan(metricOffset, sizeof(long)),
+                            writer.InFlightLimitWaitCount);
+                        metricOffset += sizeof(long);
+                        BinaryPrimitives.WriteInt64LittleEndian(
+                            payload.AsSpan(metricOffset, sizeof(long)),
+                            writer.InFlightLimitEscapeCount);
+                        metricOffset += sizeof(long);
+                        BinaryPrimitives.WriteInt64LittleEndian(
+                            payload.AsSpan(metricOffset, sizeof(long)),
+                            writer.MaximumInFlightLimitWaitTicks);
                         lock (pipeWriteLock)
                         {
                             WriteFrame(pipe, MessageKind.ReportAcknowledged,

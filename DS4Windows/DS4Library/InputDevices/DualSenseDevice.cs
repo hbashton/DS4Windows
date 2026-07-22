@@ -576,6 +576,39 @@ namespace DS4Windows.InputDevices
                 }
             }
         }
+        public long BluetoothAudioPacerInFlightLimitWaits
+        {
+            get
+            {
+                lock (bluetoothAudioPacerLock)
+                {
+                    return bluetoothAudioPacer?.
+                        HelperInFlightLimitWaitCount ?? 0;
+                }
+            }
+        }
+        public long BluetoothAudioPacerInFlightLimitEscapes
+        {
+            get
+            {
+                lock (bluetoothAudioPacerLock)
+                {
+                    return bluetoothAudioPacer?.
+                        HelperInFlightLimitEscapeCount ?? 0;
+                }
+            }
+        }
+        public double BluetoothAudioPacerMaximumInFlightLimitWaitMilliseconds
+        {
+            get
+            {
+                lock (bluetoothAudioPacerLock)
+                {
+                    return bluetoothAudioPacer?.
+                        HelperMaximumInFlightLimitWaitMilliseconds ?? 0.0;
+                }
+            }
+        }
         public string BluetoothAudioPacerLastError
         {
             get

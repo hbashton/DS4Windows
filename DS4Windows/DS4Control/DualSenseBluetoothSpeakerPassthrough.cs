@@ -2158,6 +2158,9 @@ namespace DS4Windows
                          $"pacerLate={device.BluetoothAudioPacerLatePresentations} " +
                          $"pacerGapMaxMs={device.BluetoothAudioPacerMaximumPresentationGapMilliseconds:F2} " +
                          $"pacerRejected={device.BluetoothAudioPacerRejectedReports} " +
+                         $"inFlightWaits={device.BluetoothAudioPacerInFlightLimitWaits} " +
+                         $"inFlightEscapes={device.BluetoothAudioPacerInFlightLimitEscapes} " +
+                         $"inFlightWaitMaxMs={device.BluetoothAudioPacerMaximumInFlightLimitWaitMilliseconds:F2} " +
                          $"pacerError='{device.BluetoothAudioPacerLastError}' " +
                         $"speakerWrites={device.BluetoothCombinedSpeakerReportsWritten} " +
                         $"speakerWriteFailures={device.BluetoothCombinedSpeakerWriteFailures} " +

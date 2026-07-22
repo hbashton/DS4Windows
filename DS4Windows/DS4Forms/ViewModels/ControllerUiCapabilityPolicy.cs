@@ -288,8 +288,10 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                         "DualShock 4 microphone input comes from a headset connected to the controller's 3.5 mm jack."),
                 InputDeviceType.DualSense => new ControllerUiCapabilities(
                     deviceType,
-                    "DualSense",
-                    "DualSense Controller.png",
+                    productId == 0x0DF2 ? "DualSense Edge" : "DualSense",
+                    productId == 0x0DF2
+                        ? "DualSense Edge Controller.png"
+                        : "DualSense Controller.png",
                     isPlayStationController: true,
                     showControllerAudioSettings: true,
                     showDualSenseHardwareControls: true,
@@ -300,6 +302,46 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     microphoneToggleLabel: "Enable controller microphone input",
                     microphoneDescription:
                         "Uses the DualSense built-in microphone or a headset connected to the controller."),
+                InputDeviceType.SwitchPro => new ControllerUiCapabilities(
+                    deviceType,
+                    productId == 0x2069 ? "Switch 2 Pro" : "Switch Pro",
+                    "Switch 2 Pro Controller.png",
+                    isPlayStationController: false,
+                    showControllerAudioSettings: false,
+                    showDualSenseHardwareControls: false,
+                    feedbackLabel: "Rumble strength",
+                    audioHeader: "Controller audio",
+                    audioDescription: "Controller audio is not available on this device.",
+                    microphoneToggleLabel: "Enable controller microphone input",
+                    microphoneDescription: "Controller microphone input is not available on this device."),
+                InputDeviceType.JoyConL or
+                InputDeviceType.JoyConR or
+                InputDeviceType.JoyConGrip => new ControllerUiCapabilities(
+                    deviceType,
+                    deviceType == InputDeviceType.JoyConL ? "Joy-Con (L)" :
+                        deviceType == InputDeviceType.JoyConR ? "Joy-Con (R)" :
+                        "Joy-Con Grip",
+                    "Switch 2 Pro Controller.png",
+                    isPlayStationController: false,
+                    showControllerAudioSettings: false,
+                    showDualSenseHardwareControls: false,
+                    feedbackLabel: "Rumble strength",
+                    audioHeader: "Controller audio",
+                    audioDescription: "Controller audio is not available on this device.",
+                    microphoneToggleLabel: "Enable controller microphone input",
+                    microphoneDescription: "Controller microphone input is not available on this device."),
+                InputDeviceType.DS3 => new ControllerUiCapabilities(
+                    deviceType,
+                    "DualShock 3",
+                    "DualShock 4 Controller.png",
+                    isPlayStationController: true,
+                    showControllerAudioSettings: false,
+                    showDualSenseHardwareControls: false,
+                    feedbackLabel: "Rumble strength",
+                    audioHeader: "Controller audio",
+                    audioDescription: "Controller audio is not available on DualShock 3.",
+                    microphoneToggleLabel: "Enable controller microphone input",
+                    microphoneDescription: "Controller microphone input is not available on DualShock 3."),
                 null => new ControllerUiCapabilities(
                     null,
                     "Generic profile",

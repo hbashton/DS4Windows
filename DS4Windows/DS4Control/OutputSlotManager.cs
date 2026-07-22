@@ -64,6 +64,8 @@ namespace DS4Windows
 
         private int queuedTasks = 0;
         private ReaderWriterLockSlim queueLocker;
+        private readonly Action<IReadOnlyCollection<string>>
+            virtualSonyRegisteredCallback;
 
         public bool RunningQueue { get => queuedTasks > 0; }
         public OutSlotDevice[] OutputSlots { get => outputSlots; }
@@ -76,8 +78,10 @@ namespace DS4Windows
             int slotNum, OutSlotDevice outSlotDev);
         public event SlotUnassignedDelegate SlotUnassigned;
 
-        public OutputSlotManager()
+        public OutputSlotManager(
+            Action<IReadOnlyCollection<string>> virtualSonyRegisteredCallback = null)
         {
+            this.virtualSonyRegisteredCallback = virtualSonyRegisteredCallback;
             outputSlots = new OutSlotDevice[ControlService.CURRENT_DS4_CONTROLLER_LIMIT];
             for (int i = 0; i < ControlService.CURRENT_DS4_CONTROLLER_LIMIT; i++)
             {
@@ -215,7 +219,7 @@ namespace DS4Windows
                     if (beforeVirtualSony != null)
                     {
                         DS4Devices.RegisterOwnVirtualSonyAsync(
-                            beforeVirtualSony);
+                            beforeVirtualSony, virtualSonyRegisteredCallback);
                         // The asynchronous registration worker now owns the
                         // matching EndOwnVirtualSonyConnect call.
                         beforeVirtualSony = null;

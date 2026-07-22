@@ -967,7 +967,6 @@ namespace DS4Windows
             StopFeedbackReader();
             StopFeedbackDispatchWorkers();
             feedbackDispatchBuffer.ClearPending();
-            ViiperUsbipPortManager.DetachStaleLocalViiperPorts();
         }
 
         private void StopFeedbackReader()
@@ -4661,7 +4660,12 @@ namespace DS4Windows
             // become visible more than half a second after the first detach, so
             // require a sustained clean window before input enumeration starts.
             int cleanSnapshots = 0;
-            const int requiredCleanSnapshots = 10;
+            // A sustained clean window is required only when no device from
+            // this process owns a port (startup/crash recovery). Creating or
+            // removing a temporary companion while a native output is active
+            // can use one clean snapshot; registered ports protect the native
+            // device and PnP is already established.
+            int requiredCleanSnapshots = activePorts.Count > 0 ? 1 : 10;
             for (int attempt = 0; attempt < 32 && cleanSnapshots < requiredCleanSnapshots; attempt++)
             {
                 bool detachedAny = false;

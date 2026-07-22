@@ -160,6 +160,7 @@ namespace DS4WinWPF.DS4Forms
             controllerDiagramKind = diagramKind;
             dualSenseHoverImages.Clear();
             vectorHoverGeometries.Clear();
+            ClearControllerButtonClips();
             HideControllerHover();
 
             muteConBtn.Visibility = Visibility.Collapsed;
@@ -219,16 +220,16 @@ namespace DS4WinWPF.DS4Forms
             SetCanvasButtonBounds(topTouchConBtn, 143, 49, 158, 28);
 
             SetCanvasButtonBounds(l3ConBtn, 133, 145, 47, 48);
-            SetCanvasButtonBounds(lsuConBtn, 147, 138, 19, 16);
-            SetCanvasButtonBounds(lsrConBtn, 174, 160, 18, 18);
-            SetCanvasButtonBounds(lsdConBtn, 147, 184, 19, 16);
-            SetCanvasButtonBounds(lslConBtn, 121, 160, 18, 18);
+            SetCanvasButtonBounds(lsuConBtn, 146, 145, 21, 15);
+            SetCanvasButtonBounds(lsrConBtn, 166, 161, 14, 21);
+            SetCanvasButtonBounds(lsdConBtn, 146, 178, 21, 15);
+            SetCanvasButtonBounds(lslConBtn, 133, 161, 14, 21);
 
             SetCanvasButtonBounds(r3ConBtn, 261, 145, 47, 48);
-            SetCanvasButtonBounds(rsuConBtn, 275, 138, 19, 16);
-            SetCanvasButtonBounds(rsrConBtn, 302, 160, 18, 18);
-            SetCanvasButtonBounds(rsdConBtn, 275, 184, 19, 16);
-            SetCanvasButtonBounds(rslConBtn, 249, 160, 18, 18);
+            SetCanvasButtonBounds(rsuConBtn, 274, 145, 21, 15);
+            SetCanvasButtonBounds(rsrConBtn, 294, 161, 14, 21);
+            SetCanvasButtonBounds(rsdConBtn, 274, 178, 21, 15);
+            SetCanvasButtonBounds(rslConBtn, 261, 161, 14, 21);
 
             SetCanvasButtonBounds(upConBtn, 84, 76, 23, 31);
             SetCanvasButtonBounds(rightConBtn, 103, 96, 33, 23);
@@ -242,6 +243,8 @@ namespace DS4WinWPF.DS4Forms
             lightbarRect.OpacityMask = new ImageBrush(LoadResourceImage("DualSense lightbar.png"));
 
             PopulateDualSenseHoverImages();
+            PopulateDualSenseHitGeometries();
+            ApplyControllerButtonClips();
         }
 
         private void ConfigureDualShock4Diagram()
@@ -249,40 +252,43 @@ namespace DS4WinWPF.DS4Forms
             controllerDiagram.Source = LoadResourceImage("DualShock 4 Controller.png");
             controllerDiagram.ToolTip = "DualShock 4 remapping layout";
 
-            SetCanvasButtonBounds(crossConBtn, 312, 123, 24, 24);
-            SetCanvasButtonBounds(circleConBtn, 337, 101, 24, 24);
-            SetCanvasButtonBounds(squareConBtn, 287, 101, 24, 24);
-            SetCanvasButtonBounds(triangleConBtn, 311, 80, 24, 24);
+            SetCanvasButtonBounds(crossConBtn, 311, 108, 23, 23);
+            SetCanvasButtonBounds(circleConBtn, 335, 88, 23, 23);
+            SetCanvasButtonBounds(squareConBtn, 287, 88, 23, 23);
+            SetCanvasButtonBounds(triangleConBtn, 311, 68, 23, 23);
 
-            SetCanvasButtonBounds(l1ConBtn, 96, 35, 48, 21);
-            SetCanvasButtonBounds(r1ConBtn, 297, 35, 48, 21);
-            SetCanvasButtonBounds(l2ConBtn, 101, 16, 39, 23);
-            SetCanvasButtonBounds(r2ConBtn, 301, 16, 39, 23);
-            SetCanvasButtonBounds(shareConBtn, 145, 70, 15, 23);
-            SetCanvasButtonBounds(optionsConBtn, 280, 70, 15, 23);
-            SetCanvasButtonBounds(guideConBtn, 211, 143, 19, 15);
+            SetCanvasButtonBounds(l1ConBtn, 79, 39, 49, 18);
+            SetCanvasButtonBounds(r1ConBtn, 312, 39, 49, 18);
+            SetCanvasButtonBounds(l2ConBtn, 82, 17, 45, 24);
+            SetCanvasButtonBounds(r2ConBtn, 313, 17, 45, 24);
+            SetCanvasButtonBounds(shareConBtn, 143, 69, 16, 23);
+            SetCanvasButtonBounds(optionsConBtn, 282, 69, 16, 23);
+            SetCanvasButtonBounds(guideConBtn, 211, 136, 19, 17);
 
-            SetCanvasButtonBounds(leftTouchConBtn, 166, 57, 54, 61);
-            SetCanvasButtonBounds(multiTouchConBtn, 207, 57, 27, 61);
-            SetCanvasButtonBounds(rightTouchConBtn, 220, 57, 55, 61);
-            SetCanvasButtonBounds(topTouchConBtn, 166, 44, 109, 16);
+            // Keep the four touch gestures distinct and non-overlapping. The
+            // previous bounds placed the multi-touch target underneath both
+            // side targets, making most of it impossible to select.
+            SetCanvasButtonBounds(topTouchConBtn, 165, 57, 111, 18);
+            SetCanvasButtonBounds(leftTouchConBtn, 165, 75, 43, 45);
+            SetCanvasButtonBounds(multiTouchConBtn, 208, 75, 24, 45);
+            SetCanvasButtonBounds(rightTouchConBtn, 232, 75, 44, 45);
 
-            SetCanvasButtonBounds(l3ConBtn, 148, 142, 39, 39);
-            SetCanvasButtonBounds(lsuConBtn, 158, 136, 19, 14);
-            SetCanvasButtonBounds(lsrConBtn, 181, 152, 15, 18);
-            SetCanvasButtonBounds(lsdConBtn, 158, 175, 19, 14);
-            SetCanvasButtonBounds(lslConBtn, 139, 152, 15, 18);
+            SetCanvasButtonBounds(l3ConBtn, 145, 123, 43, 43);
+            SetCanvasButtonBounds(lsuConBtn, 156, 123, 21, 13);
+            SetCanvasButtonBounds(lsrConBtn, 174, 134, 14, 21);
+            SetCanvasButtonBounds(lsdConBtn, 156, 153, 21, 13);
+            SetCanvasButtonBounds(lslConBtn, 145, 134, 14, 21);
 
-            SetCanvasButtonBounds(r3ConBtn, 252, 142, 39, 39);
-            SetCanvasButtonBounds(rsuConBtn, 262, 136, 19, 14);
-            SetCanvasButtonBounds(rsrConBtn, 285, 152, 15, 18);
-            SetCanvasButtonBounds(rsdConBtn, 262, 175, 19, 14);
-            SetCanvasButtonBounds(rslConBtn, 243, 152, 15, 18);
+            SetCanvasButtonBounds(r3ConBtn, 253, 123, 43, 43);
+            SetCanvasButtonBounds(rsuConBtn, 264, 123, 21, 13);
+            SetCanvasButtonBounds(rsrConBtn, 282, 134, 14, 21);
+            SetCanvasButtonBounds(rsdConBtn, 264, 153, 21, 13);
+            SetCanvasButtonBounds(rslConBtn, 253, 134, 14, 21);
 
-            SetCanvasButtonBounds(upConBtn, 107, 86, 20, 23);
-            SetCanvasButtonBounds(rightConBtn, 126, 105, 23, 20);
-            SetCanvasButtonBounds(downConBtn, 107, 123, 20, 23);
-            SetCanvasButtonBounds(leftConBtn, 87, 105, 23, 20);
+            SetCanvasButtonBounds(upConBtn, 104, 80, 20, 22);
+            SetCanvasButtonBounds(rightConBtn, 122, 98, 22, 20);
+            SetCanvasButtonBounds(downConBtn, 104, 114, 20, 22);
+            SetCanvasButtonBounds(leftConBtn, 84, 98, 22, 20);
 
             Canvas.SetLeft(ds4LightbarColorBtn, 165);
             Canvas.SetTop(ds4LightbarColorBtn, 45);
@@ -290,6 +296,7 @@ namespace DS4WinWPF.DS4Forms
             ds4LightbarColorBtn.Height = 6;
 
             PopulateDualShock4VectorHighlights();
+            ApplyControllerButtonClips();
         }
 
         private void ConfigureDualSenseEdgeDiagram()
@@ -297,57 +304,61 @@ namespace DS4WinWPF.DS4Forms
             controllerDiagram.Source = LoadResourceImage("DualSense Edge Controller.png");
             controllerDiagram.ToolTip = "DualSense Edge remapping layout";
 
-            SetCanvasButtonBounds(crossConBtn, 312, 77, 25, 25);
-            SetCanvasButtonBounds(circleConBtn, 337, 51, 25, 25);
-            SetCanvasButtonBounds(squareConBtn, 286, 51, 25, 25);
-            SetCanvasButtonBounds(triangleConBtn, 312, 25, 25, 25);
+            SetCanvasButtonBounds(crossConBtn, 300, 91, 25, 25);
+            SetCanvasButtonBounds(circleConBtn, 324, 68, 25, 25);
+            SetCanvasButtonBounds(squareConBtn, 276, 68, 25, 25);
+            SetCanvasButtonBounds(triangleConBtn, 300, 45, 25, 25);
 
-            SetCanvasButtonBounds(l1ConBtn, 83, 0, 69, 23);
-            SetCanvasButtonBounds(r1ConBtn, 289, 0, 69, 23);
-            SetCanvasButtonBounds(l2ConBtn, 91, 0, 55, 13);
-            SetCanvasButtonBounds(r2ConBtn, 295, 0, 55, 13);
-            SetCanvasButtonBounds(shareConBtn, 132, 18, 16, 22);
-            SetCanvasButtonBounds(optionsConBtn, 292, 18, 16, 22);
-            SetCanvasButtonBounds(guideConBtn, 211, 123, 19, 18);
-            SetCanvasButtonBounds(muteConBtn, 211, 153, 19, 14);
+            SetCanvasButtonBounds(l1ConBtn, 104, 21, 49, 23);
+            SetCanvasButtonBounds(r1ConBtn, 287, 21, 50, 23);
+            SetCanvasButtonBounds(l2ConBtn, 105, 5, 43, 19);
+            SetCanvasButtonBounds(r2ConBtn, 294, 5, 43, 19);
+            SetCanvasButtonBounds(shareConBtn, 137, 43, 16, 22);
+            SetCanvasButtonBounds(optionsConBtn, 287, 43, 16, 22);
+            SetCanvasButtonBounds(guideConBtn, 211, 119, 19, 18);
+            SetCanvasButtonBounds(muteConBtn, 211, 149, 19, 14);
             muteConBtn.Visibility = Visibility.Visible;
 
-            SetCanvasButtonBounds(leftTouchConBtn, 149, 18, 71, 70);
-            SetCanvasButtonBounds(multiTouchConBtn, 208, 18, 25, 70);
-            SetCanvasButtonBounds(rightTouchConBtn, 220, 18, 71, 70);
-            SetCanvasButtonBounds(topTouchConBtn, 149, 4, 142, 17);
+            SetCanvasButtonBounds(topTouchConBtn, 158, 39, 124, 16);
+            SetCanvasButtonBounds(leftTouchConBtn, 158, 55, 49, 40);
+            SetCanvasButtonBounds(multiTouchConBtn, 207, 55, 26, 40);
+            SetCanvasButtonBounds(rightTouchConBtn, 233, 55, 49, 40);
 
-            SetCanvasButtonBounds(l3ConBtn, 144, 89, 39, 39);
-            SetCanvasButtonBounds(lsuConBtn, 154, 83, 19, 14);
-            SetCanvasButtonBounds(lsrConBtn, 177, 99, 15, 18);
-            SetCanvasButtonBounds(lsdConBtn, 154, 122, 19, 14);
-            SetCanvasButtonBounds(lslConBtn, 135, 99, 15, 18);
-            SetCanvasButtonBounds(r3ConBtn, 258, 89, 39, 39);
-            SetCanvasButtonBounds(rsuConBtn, 268, 83, 19, 14);
-            SetCanvasButtonBounds(rsrConBtn, 291, 99, 15, 18);
-            SetCanvasButtonBounds(rsdConBtn, 268, 122, 19, 14);
-            SetCanvasButtonBounds(rslConBtn, 249, 99, 15, 18);
+            SetCanvasButtonBounds(l3ConBtn, 149, 105, 45, 45);
+            SetCanvasButtonBounds(lsuConBtn, 161, 105, 21, 14);
+            SetCanvasButtonBounds(lsrConBtn, 180, 116, 14, 22);
+            SetCanvasButtonBounds(lsdConBtn, 161, 136, 21, 14);
+            SetCanvasButtonBounds(lslConBtn, 149, 116, 14, 22);
+            SetCanvasButtonBounds(r3ConBtn, 247, 105, 45, 45);
+            SetCanvasButtonBounds(rsuConBtn, 259, 105, 21, 14);
+            SetCanvasButtonBounds(rsrConBtn, 278, 116, 14, 22);
+            SetCanvasButtonBounds(rsdConBtn, 259, 136, 21, 14);
+            SetCanvasButtonBounds(rslConBtn, 247, 116, 14, 22);
 
-            SetCanvasButtonBounds(upConBtn, 104, 25, 21, 24);
-            SetCanvasButtonBounds(rightConBtn, 124, 51, 24, 21);
-            SetCanvasButtonBounds(downConBtn, 104, 76, 21, 24);
-            SetCanvasButtonBounds(leftConBtn, 80, 51, 24, 21);
+            SetCanvasButtonBounds(upConBtn, 116, 54, 22, 24);
+            SetCanvasButtonBounds(rightConBtn, 135, 75, 24, 22);
+            SetCanvasButtonBounds(downConBtn, 116, 94, 22, 24);
+            SetCanvasButtonBounds(leftConBtn, 94, 75, 24, 22);
 
-            SetCanvasButtonBounds(fnlConBtn, 142, 143, 30, 12);
-            SetCanvasButtonBounds(fnrConBtn, 269, 143, 30, 12);
-            SetCanvasButtonBounds(blpConBtn, 111, 150, 37, 15);
-            SetCanvasButtonBounds(brpConBtn, 293, 150, 37, 15);
+            // The two lower surfaces are the visible Edge function controls.
+            // Rear paddles remain selectable from the mapping list and use the
+            // adjacent underside surfaces rather than floating over the shell.
+            SetCanvasButtonBounds(fnlConBtn, 158, 158, 26, 11);
+            SetCanvasButtonBounds(fnrConBtn, 257, 158, 26, 11);
+            SetCanvasButtonBounds(blpConBtn, 124, 158, 34, 13);
+            SetCanvasButtonBounds(brpConBtn, 283, 158, 34, 13);
             fnlConBtn.Visibility = Visibility.Visible;
             fnrConBtn.Visibility = Visibility.Visible;
             blpConBtn.Visibility = Visibility.Visible;
             brpConBtn.Visibility = Visibility.Visible;
 
-            Canvas.SetLeft(ds4LightbarColorBtn, 148);
-            Canvas.SetTop(ds4LightbarColorBtn, 4);
-            ds4LightbarColorBtn.Width = 144;
-            ds4LightbarColorBtn.Height = 5;
+            Canvas.SetLeft(ds4LightbarColorBtn, 154);
+            Canvas.SetTop(ds4LightbarColorBtn, 34);
+            ds4LightbarColorBtn.Width = 132;
+            ds4LightbarColorBtn.Height = 6;
 
             PopulateDualSenseEdgeVectorHighlights();
+            ApplyControllerButtonClips();
         }
 
         private static Geometry EllipseHighlight(double x, double y, double width, double height)
@@ -359,6 +370,46 @@ namespace DS4WinWPF.DS4Forms
             double height, double radius = 4)
         {
             return new RectangleGeometry(new Rect(x, y, width, height), radius, radius);
+        }
+
+        private static Geometry PolygonHighlight(params Point[] points)
+        {
+            var geometry = new StreamGeometry();
+            using (StreamGeometryContext context = geometry.Open())
+            {
+                context.BeginFigure(points[0], true, true);
+                for (int i = 1; i < points.Length; i++)
+                {
+                    context.LineTo(points[i], true, false);
+                }
+            }
+
+            geometry.Freeze();
+            return geometry;
+        }
+
+        private static Geometry TouchSegment(Geometry touchpadOutline,
+            double x, double y, double width, double height)
+        {
+            var segment = new CombinedGeometry(GeometryCombineMode.Intersect,
+                touchpadOutline, new RectangleGeometry(new Rect(x, y, width, height)));
+            segment.Freeze();
+            return segment;
+        }
+
+        private static Geometry DpadHighlight(double x, double y, double width,
+            double height, int direction)
+        {
+            Point[] normalized = direction switch
+            {
+                0 => new[] { new Point(.22, 1), new Point(.08, .78), new Point(.10, .22), new Point(.28, .04), new Point(.72, .04), new Point(.90, .22), new Point(.92, .78), new Point(.78, 1) },
+                1 => new[] { new Point(0, .22), new Point(.22, .08), new Point(.78, .10), new Point(.96, .28), new Point(.96, .72), new Point(.78, .90), new Point(.22, .92), new Point(0, .78) },
+                2 => new[] { new Point(.22, 0), new Point(.08, .22), new Point(.10, .78), new Point(.28, .96), new Point(.72, .96), new Point(.90, .78), new Point(.92, .22), new Point(.78, 0) },
+                _ => new[] { new Point(1, .22), new Point(.78, .08), new Point(.22, .10), new Point(.04, .28), new Point(.04, .72), new Point(.22, .90), new Point(.78, .92), new Point(1, .78) },
+            };
+
+            return PolygonHighlight(normalized.Select(point =>
+                new Point(x + point.X * width, y + point.Y * height)).ToArray());
         }
 
         private void AddStickHighlights(Button stick, Button up, Button right,
@@ -373,61 +424,107 @@ namespace DS4WinWPF.DS4Forms
 
         private void PopulateDualShock4VectorHighlights()
         {
-            vectorHoverGeometries[crossConBtn] = EllipseHighlight(313, 124, 22, 22);
-            vectorHoverGeometries[circleConBtn] = EllipseHighlight(338, 102, 22, 22);
-            vectorHoverGeometries[squareConBtn] = EllipseHighlight(288, 102, 22, 22);
-            vectorHoverGeometries[triangleConBtn] = EllipseHighlight(312, 81, 22, 22);
-            vectorHoverGeometries[l1ConBtn] = RoundedHighlight(97, 36, 46, 19, 7);
-            vectorHoverGeometries[r1ConBtn] = RoundedHighlight(298, 36, 46, 19, 7);
-            vectorHoverGeometries[l2ConBtn] = RoundedHighlight(102, 17, 37, 21, 8);
-            vectorHoverGeometries[r2ConBtn] = RoundedHighlight(302, 17, 37, 21, 8);
-            vectorHoverGeometries[shareConBtn] = RoundedHighlight(146, 71, 13, 21, 6);
-            vectorHoverGeometries[optionsConBtn] = RoundedHighlight(281, 71, 13, 21, 6);
-            vectorHoverGeometries[guideConBtn] = EllipseHighlight(212, 144, 17, 13);
-            vectorHoverGeometries[leftTouchConBtn] = RoundedHighlight(167, 58, 53, 59, 3);
-            vectorHoverGeometries[multiTouchConBtn] = RoundedHighlight(207, 58, 27, 59, 3);
-            vectorHoverGeometries[rightTouchConBtn] = RoundedHighlight(220, 58, 54, 59, 3);
-            vectorHoverGeometries[topTouchConBtn] = RoundedHighlight(167, 45, 108, 14, 5);
+            vectorHoverGeometries[crossConBtn] = EllipseHighlight(312, 109, 21, 21);
+            vectorHoverGeometries[circleConBtn] = EllipseHighlight(336, 89, 21, 21);
+            vectorHoverGeometries[squareConBtn] = EllipseHighlight(288, 89, 21, 21);
+            vectorHoverGeometries[triangleConBtn] = EllipseHighlight(312, 69, 21, 21);
+            vectorHoverGeometries[l1ConBtn] = RoundedHighlight(80, 40, 47, 16, 7);
+            vectorHoverGeometries[r1ConBtn] = RoundedHighlight(313, 40, 47, 16, 7);
+            vectorHoverGeometries[l2ConBtn] = RoundedHighlight(83, 18, 43, 22, 8);
+            vectorHoverGeometries[r2ConBtn] = RoundedHighlight(314, 18, 43, 22, 8);
+            vectorHoverGeometries[shareConBtn] = RoundedHighlight(144, 70, 14, 21, 6);
+            vectorHoverGeometries[optionsConBtn] = RoundedHighlight(283, 70, 14, 21, 6);
+            vectorHoverGeometries[guideConBtn] = EllipseHighlight(212, 137, 17, 15);
+
+            Geometry touchpad = PolygonHighlight(
+                new Point(165, 57), new Point(276, 57),
+                new Point(276, 111), new Point(272, 118),
+                new Point(169, 118), new Point(165, 111));
+            vectorHoverGeometries[topTouchConBtn] = TouchSegment(touchpad, 165, 57, 111, 18);
+            vectorHoverGeometries[leftTouchConBtn] = TouchSegment(touchpad, 165, 75, 43, 45);
+            vectorHoverGeometries[multiTouchConBtn] = TouchSegment(touchpad, 208, 75, 24, 45);
+            vectorHoverGeometries[rightTouchConBtn] = TouchSegment(touchpad, 232, 75, 44, 45);
             AddStickHighlights(l3ConBtn, lsuConBtn, lsrConBtn, lsdConBtn, lslConBtn,
-                EllipseHighlight(149, 143, 37, 37));
+                EllipseHighlight(146, 124, 41, 41));
             AddStickHighlights(r3ConBtn, rsuConBtn, rsrConBtn, rsdConBtn, rslConBtn,
-                EllipseHighlight(253, 143, 37, 37));
-            vectorHoverGeometries[upConBtn] = RoundedHighlight(108, 87, 18, 21, 4);
-            vectorHoverGeometries[rightConBtn] = RoundedHighlight(127, 106, 21, 18, 4);
-            vectorHoverGeometries[downConBtn] = RoundedHighlight(108, 124, 18, 21, 4);
-            vectorHoverGeometries[leftConBtn] = RoundedHighlight(88, 106, 21, 18, 4);
+                EllipseHighlight(254, 124, 41, 41));
+            vectorHoverGeometries[upConBtn] = DpadHighlight(104, 80, 20, 22, 0);
+            vectorHoverGeometries[rightConBtn] = DpadHighlight(122, 98, 22, 20, 1);
+            vectorHoverGeometries[downConBtn] = DpadHighlight(104, 114, 20, 22, 2);
+            vectorHoverGeometries[leftConBtn] = DpadHighlight(84, 98, 22, 20, 3);
+        }
+
+        private void PopulateDualSenseHitGeometries()
+        {
+            vectorHoverGeometries[crossConBtn] = EllipseHighlight(334, 128, 25, 25);
+            vectorHoverGeometries[circleConBtn] = EllipseHighlight(364, 101, 25, 25);
+            vectorHoverGeometries[squareConBtn] = EllipseHighlight(304, 101, 25, 25);
+            vectorHoverGeometries[triangleConBtn] = EllipseHighlight(334, 77, 25, 25);
+            vectorHoverGeometries[l1ConBtn] = RoundedHighlight(69, 26, 62, 25, 9);
+            vectorHoverGeometries[r1ConBtn] = RoundedHighlight(310, 26, 62, 25, 9);
+            vectorHoverGeometries[l2ConBtn] = RoundedHighlight(73, 1, 55, 25, 10);
+            vectorHoverGeometries[r2ConBtn] = RoundedHighlight(315, 1, 55, 25, 10);
+            vectorHoverGeometries[shareConBtn] = RoundedHighlight(116, 55, 18, 28, 7);
+            vectorHoverGeometries[optionsConBtn] = RoundedHighlight(307, 55, 18, 28, 7);
+            vectorHoverGeometries[guideConBtn] = EllipseHighlight(211, 152, 20, 21);
+            vectorHoverGeometries[muteConBtn] = RoundedHighlight(211, 178, 20, 12, 5);
+
+            Geometry touchpad = PolygonHighlight(
+                new Point(143, 49), new Point(301, 49),
+                new Point(299, 112), new Point(294, 124),
+                new Point(285, 130), new Point(157, 130),
+                new Point(148, 124), new Point(143, 112));
+            vectorHoverGeometries[topTouchConBtn] = TouchSegment(touchpad, 143, 49, 158, 28);
+            vectorHoverGeometries[leftTouchConBtn] = TouchSegment(touchpad, 143, 77, 54, 55);
+            vectorHoverGeometries[multiTouchConBtn] = TouchSegment(touchpad, 197, 77, 46, 55);
+            vectorHoverGeometries[rightTouchConBtn] = TouchSegment(touchpad, 243, 77, 58, 55);
+
+            AddStickHighlights(l3ConBtn, lsuConBtn, lsrConBtn, lsdConBtn, lslConBtn,
+                EllipseHighlight(134, 146, 45, 46));
+            AddStickHighlights(r3ConBtn, rsuConBtn, rsrConBtn, rsdConBtn, rslConBtn,
+                EllipseHighlight(262, 146, 45, 46));
+            vectorHoverGeometries[upConBtn] = DpadHighlight(84, 76, 23, 31, 0);
+            vectorHoverGeometries[rightConBtn] = DpadHighlight(103, 96, 33, 23, 1);
+            vectorHoverGeometries[downConBtn] = DpadHighlight(84, 111, 23, 31, 2);
+            vectorHoverGeometries[leftConBtn] = DpadHighlight(55, 96, 33, 23, 3);
         }
 
         private void PopulateDualSenseEdgeVectorHighlights()
         {
-            vectorHoverGeometries[crossConBtn] = EllipseHighlight(313, 78, 23, 23);
-            vectorHoverGeometries[circleConBtn] = EllipseHighlight(338, 52, 23, 23);
-            vectorHoverGeometries[squareConBtn] = EllipseHighlight(287, 52, 23, 23);
-            vectorHoverGeometries[triangleConBtn] = EllipseHighlight(313, 26, 23, 23);
-            vectorHoverGeometries[l1ConBtn] = RoundedHighlight(84, 1, 67, 21, 8);
-            vectorHoverGeometries[r1ConBtn] = RoundedHighlight(290, 1, 67, 21, 8);
-            vectorHoverGeometries[l2ConBtn] = RoundedHighlight(92, 0, 53, 12, 6);
-            vectorHoverGeometries[r2ConBtn] = RoundedHighlight(296, 0, 53, 12, 6);
-            vectorHoverGeometries[shareConBtn] = RoundedHighlight(133, 19, 14, 20, 7);
-            vectorHoverGeometries[optionsConBtn] = RoundedHighlight(293, 19, 14, 20, 7);
-            vectorHoverGeometries[guideConBtn] = EllipseHighlight(212, 124, 17, 16);
-            vectorHoverGeometries[muteConBtn] = RoundedHighlight(212, 154, 17, 12, 5);
-            vectorHoverGeometries[leftTouchConBtn] = RoundedHighlight(150, 19, 70, 68, 8);
-            vectorHoverGeometries[multiTouchConBtn] = RoundedHighlight(208, 19, 25, 68, 8);
-            vectorHoverGeometries[rightTouchConBtn] = RoundedHighlight(220, 19, 70, 68, 8);
-            vectorHoverGeometries[topTouchConBtn] = RoundedHighlight(150, 5, 140, 15, 7);
+            vectorHoverGeometries[crossConBtn] = EllipseHighlight(301, 92, 23, 23);
+            vectorHoverGeometries[circleConBtn] = EllipseHighlight(325, 69, 23, 23);
+            vectorHoverGeometries[squareConBtn] = EllipseHighlight(277, 69, 23, 23);
+            vectorHoverGeometries[triangleConBtn] = EllipseHighlight(301, 46, 23, 23);
+            vectorHoverGeometries[l1ConBtn] = RoundedHighlight(105, 22, 47, 21, 8);
+            vectorHoverGeometries[r1ConBtn] = RoundedHighlight(288, 22, 48, 21, 8);
+            vectorHoverGeometries[l2ConBtn] = RoundedHighlight(106, 6, 41, 17, 7);
+            vectorHoverGeometries[r2ConBtn] = RoundedHighlight(295, 6, 41, 17, 7);
+            vectorHoverGeometries[shareConBtn] = RoundedHighlight(138, 44, 14, 20, 7);
+            vectorHoverGeometries[optionsConBtn] = RoundedHighlight(288, 44, 14, 20, 7);
+            vectorHoverGeometries[guideConBtn] = EllipseHighlight(212, 120, 17, 16);
+            vectorHoverGeometries[muteConBtn] = RoundedHighlight(212, 150, 17, 12, 5);
+
+            Geometry touchpad = PolygonHighlight(
+                new Point(158, 39), new Point(282, 39),
+                new Point(278, 78), new Point(271, 89),
+                new Point(263, 94), new Point(177, 94),
+                new Point(169, 89), new Point(162, 78));
+            vectorHoverGeometries[topTouchConBtn] = TouchSegment(touchpad, 158, 39, 124, 16);
+            vectorHoverGeometries[leftTouchConBtn] = TouchSegment(touchpad, 158, 55, 49, 40);
+            vectorHoverGeometries[multiTouchConBtn] = TouchSegment(touchpad, 207, 55, 26, 40);
+            vectorHoverGeometries[rightTouchConBtn] = TouchSegment(touchpad, 233, 55, 49, 40);
             AddStickHighlights(l3ConBtn, lsuConBtn, lsrConBtn, lsdConBtn, lslConBtn,
-                EllipseHighlight(145, 90, 37, 37));
+                EllipseHighlight(150, 106, 43, 43));
             AddStickHighlights(r3ConBtn, rsuConBtn, rsrConBtn, rsdConBtn, rslConBtn,
-                EllipseHighlight(259, 90, 37, 37));
-            vectorHoverGeometries[upConBtn] = RoundedHighlight(105, 26, 19, 22, 5);
-            vectorHoverGeometries[rightConBtn] = RoundedHighlight(125, 52, 22, 19, 5);
-            vectorHoverGeometries[downConBtn] = RoundedHighlight(105, 77, 19, 22, 5);
-            vectorHoverGeometries[leftConBtn] = RoundedHighlight(81, 52, 22, 19, 5);
-            vectorHoverGeometries[fnlConBtn] = RoundedHighlight(143, 144, 28, 10, 4);
-            vectorHoverGeometries[fnrConBtn] = RoundedHighlight(270, 144, 28, 10, 4);
-            vectorHoverGeometries[blpConBtn] = RoundedHighlight(112, 151, 35, 13, 5);
-            vectorHoverGeometries[brpConBtn] = RoundedHighlight(294, 151, 35, 13, 5);
+                EllipseHighlight(248, 106, 43, 43));
+            vectorHoverGeometries[upConBtn] = DpadHighlight(116, 54, 22, 24, 0);
+            vectorHoverGeometries[rightConBtn] = DpadHighlight(135, 75, 24, 22, 1);
+            vectorHoverGeometries[downConBtn] = DpadHighlight(116, 94, 22, 24, 2);
+            vectorHoverGeometries[leftConBtn] = DpadHighlight(94, 75, 24, 22, 3);
+            vectorHoverGeometries[fnlConBtn] = RoundedHighlight(159, 159, 24, 9, 4);
+            vectorHoverGeometries[fnrConBtn] = RoundedHighlight(258, 159, 24, 9, 4);
+            vectorHoverGeometries[blpConBtn] = RoundedHighlight(125, 159, 32, 11, 5);
+            vectorHoverGeometries[brpConBtn] = RoundedHighlight(284, 159, 32, 11, 5);
         }
 
         private void ControllerDiagramSelector_SelectionChanged(object sender,
@@ -550,6 +647,83 @@ namespace DS4WinWPF.DS4Forms
             Canvas.SetTop(button, top);
             button.Width = width;
             button.Height = height;
+        }
+
+        private IEnumerable<Button> ControllerDiagramButtons()
+        {
+            yield return crossConBtn;
+            yield return circleConBtn;
+            yield return squareConBtn;
+            yield return triangleConBtn;
+            yield return l1ConBtn;
+            yield return r1ConBtn;
+            yield return l2ConBtn;
+            yield return r2ConBtn;
+            yield return shareConBtn;
+            yield return optionsConBtn;
+            yield return guideConBtn;
+            yield return muteConBtn;
+            yield return leftTouchConBtn;
+            yield return multiTouchConBtn;
+            yield return rightTouchConBtn;
+            yield return topTouchConBtn;
+            yield return l3ConBtn;
+            yield return lsuConBtn;
+            yield return lsrConBtn;
+            yield return lsdConBtn;
+            yield return lslConBtn;
+            yield return r3ConBtn;
+            yield return rsuConBtn;
+            yield return rsrConBtn;
+            yield return rsdConBtn;
+            yield return rslConBtn;
+            yield return upConBtn;
+            yield return rightConBtn;
+            yield return downConBtn;
+            yield return leftConBtn;
+            yield return fnlConBtn;
+            yield return fnrConBtn;
+            yield return blpConBtn;
+            yield return brpConBtn;
+        }
+
+        private void ClearControllerButtonClips()
+        {
+            foreach (Button button in ControllerDiagramButtons())
+            {
+                button.Clip = null;
+            }
+        }
+
+        private void ApplyControllerButtonClips()
+        {
+            foreach (KeyValuePair<Button, Geometry> entry in vectorHoverGeometries)
+            {
+                double left = Canvas.GetLeft(entry.Key);
+                double top = Canvas.GetTop(entry.Key);
+                if (double.IsNaN(left) || double.IsNaN(top))
+                {
+                    continue;
+                }
+
+                Geometry hitGeometry = IsStickDirectionButton(entry.Key)
+                    ? RoundedHighlight(left, top, entry.Key.Width,
+                        entry.Key.Height, Math.Min(entry.Key.Width,
+                            entry.Key.Height) / 2.0)
+                    : entry.Value;
+                Geometry localGeometry = hitGeometry.Clone();
+                localGeometry.Transform = new TranslateTransform(-left, -top);
+                localGeometry.Freeze();
+                entry.Key.Clip = localGeometry;
+            }
+        }
+
+        private bool IsStickDirectionButton(Button button)
+        {
+            return button == lsuConBtn || button == lsrConBtn ||
+                button == lsdConBtn || button == lslConBtn ||
+                button == rsuConBtn || button == rsrConBtn ||
+                button == rsdConBtn || button == rslConBtn;
         }
 
         private static ImageSource LoadResourceImage(string fileName)

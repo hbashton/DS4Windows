@@ -7,6 +7,7 @@ namespace DS4Windows.Tests
     public class DualSenseBluetoothAudioPacerTemplateTests
     {
         private const int ReportLength = 398;
+        private const int DoubleFrameReportLength = 547;
         private const int HapticsOffset = 78;
         private const int HapticsLength = 64;
 
@@ -283,6 +284,74 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
+        public void DoubleFrameSpeakerUsesFourReportPrimeAndTwoFrameCadence()
+        {
+            byte[] speaker = CreateDoubleFrameReport(0x31);
+
+            Assert.IsTrue(
+                DualSenseBluetoothAudioPacer.IsSpeakerAudioReport(speaker));
+            Assert.AreEqual(2,
+                DualSenseBluetoothAudioPacer.GetSpeakerAudioFrameCount(
+                    speaker, speaker.Length));
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.CanPresentFromPrimeGate(
+                    primeRequired: true, speakerReportCount: 3,
+                    nextReport: speaker));
+            Assert.IsTrue(
+                DualSenseBluetoothAudioPacer.CanPresentFromPrimeGate(
+                    primeRequired: true, speakerReportCount: 4,
+                    nextReport: speaker));
+
+            const long qpcFrequency = 10_000_000;
+            const long startQpc = 1_000_000;
+            var scheduler = new DualSenseBluetoothAudioPacerScheduler(
+                qpcFrequency);
+            scheduler.Start(startQpc);
+            long nextDeadline = scheduler.AdvanceAfterSend(startQpc,
+                audioFrameCount: 2);
+
+            Assert.AreEqual(startQpc + 213_333, nextDeadline,
+                "A 0x39 transaction must reserve exactly two rational 10.667 ms frames.");
+        }
+
+        [TestMethod]
+        public void DoubleFramePresentationSerializesBluetoothAclFragments()
+        {
+            byte[] doubleFrame = CreateDoubleFrameReport(0x31);
+            byte[] legacyFrame = CreateReport(0x31);
+            byte[] state = new byte[78];
+            state[0] = 0x31;
+
+            Assert.IsTrue(
+                DualSenseBluetoothAudioPacer.RequiresPriorWriteCompletion(
+                    doubleFrame, doubleFrame.Length));
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.RequiresPriorWriteCompletion(
+                    legacyFrame, legacyFrame.Length));
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.RequiresPriorWriteCompletion(
+                    state, state.Length));
+        }
+
+        [TestMethod]
+        public void SeparateStateReportBypassesDoubleFrameAudioPrime()
+        {
+            byte[] state = new byte[78];
+            state[0] = 0x31;
+            state[2] = 0x10;
+
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.IsSpeakerAudioReport(state));
+            Assert.AreEqual(0,
+                DualSenseBluetoothAudioPacer.GetSpeakerAudioFrameCount(state,
+                    state.Length));
+            Assert.IsTrue(
+                DualSenseBluetoothAudioPacer.CanPresentFromPrimeGate(
+                    primeRequired: true, speakerReportCount: 0,
+                    nextReport: state));
+        }
+
+        [TestMethod]
         public void LowLatencyProducerReservoirCoversMeasuredWindowsCallbackStall()
         {
             double presentationReserveMilliseconds =
@@ -416,6 +485,21 @@ namespace DS4Windows.Tests
             report[0] = 0x36;
             report[142] = 0x93;
             report[143] = 200;
+            return report;
+        }
+
+        private static byte[] CreateDoubleFrameReport(byte seed)
+        {
+            byte[] report = new byte[DoubleFrameReportLength];
+            for (int index = 0;
+                index < DoubleFrameReportLength - sizeof(uint); index++)
+            {
+                report[index] = (byte)(seed + index * 17);
+            }
+
+            report[0] = 0x39;
+            report[140] = 0xD3;
+            report[141] = 200;
             return report;
         }
 

@@ -166,6 +166,33 @@ namespace DS4WindowsTests
                 1.0e-12);
         }
 
+        [TestMethod]
+        public void DirectDualSenseClockRemainsUnityAcrossCallbackPhase()
+        {
+            int targetFrames = 48000 *
+                DualSenseBluetoothSpeakerPassthrough.TargetBufferMs / 1000;
+
+            Assert.AreEqual(1.0,
+                DualSenseBluetoothSpeakerPassthrough.
+                    CalculateCaptureClockRatio(
+                        targetFrames - 512, targetFrames,
+                        phaseLockedDirectDualSense: true),
+                1.0e-12);
+            Assert.AreEqual(1.0,
+                DualSenseBluetoothSpeakerPassthrough.
+                    CalculateCaptureClockRatio(
+                        targetFrames + 512, targetFrames,
+                        phaseLockedDirectDualSense: true),
+                1.0e-12);
+
+            Assert.AreNotEqual(1.0,
+                DualSenseBluetoothSpeakerPassthrough.
+                    CalculateCaptureClockRatio(
+                        targetFrames - 512, targetFrames,
+                        phaseLockedDirectDualSense: false),
+                "Non-DualSense source routes must retain their independent clock correction.");
+        }
+
         [DataTestMethod]
         [DataRow(6, true, false, true)]
         [DataRow(6, false, true, true)]

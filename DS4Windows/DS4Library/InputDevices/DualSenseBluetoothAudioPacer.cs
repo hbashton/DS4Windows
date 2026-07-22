@@ -21,17 +21,27 @@ namespace DS4Windows.InputDevices
     internal sealed class DualSenseBluetoothAudioPacer : IDisposable
     {
         internal const int ReportLength = 398;
+        internal const int DoubleFrameReportLength = 547;
+        internal const int StateReportLength = 78;
+        internal const int MaximumReportLength = DoubleFrameReportLength;
+        // A 0x39 transaction spans multiple Bluetooth ACL fragments. Use the
+        // largest jitter target accepted by the DualSense so a brief radio
+        // retransmission cannot underrun speaker or haptics presentation.
+        // Live acoustic measurements show this controller-side value does not
+        // increase host-to-controller onset latency.
+        internal const byte DoubleFrameBufferLength = 128;
         internal const int PrimeReportCount = 8;
         internal const int HostReservoirCapacity = 64;
 
         private const string HelperArgument = "--dualsense-bt-audio-pacer-helper";
-        private const int ProtocolVersion = 2;
+        private const int ProtocolVersion = 5;
         private const int PipeConnectTimeoutMilliseconds = 5000;
         private const int HelperReadyTimeoutMilliseconds = 5000;
         private const int HelperStopTimeoutMilliseconds = 3000;
         private const int HelperProcessExitTimeoutMilliseconds = 3000;
         private const uint HelperWriterReleaseTimeoutMilliseconds = 3000;
         private const uint HelperControlWriteTimeoutMilliseconds = 750;
+        private const uint HelperPresentationOrderingTimeoutMilliseconds = 100;
         private const int OutboundCommandCapacity = HostReservoirCapacity + 16;
         private const int InitialEpoch = 1;
         private const uint DuplicateSameAccess = 0x00000002;
@@ -107,6 +117,15 @@ namespace DS4Windows.InputDevices
         private long lastPresentedTimestamp;
         private long maximumPresentationGapTicks;
         private long latePresentationCount;
+        private long helperWriterCompletedWrites;
+        private long helperWriterSlowCompletionCount;
+        private long helperWriterMaximumCompletionTicks;
+        private long helperWriterLateSubmissionCount;
+        private long helperWriterMaximumSubmissionGapTicks;
+        private long helperInvalidLayoutCount;
+        private long helperInvalidCrcCount;
+        private long helperReportSequenceDiscontinuityCount;
+        private long helperPacketSequenceDiscontinuityCount;
         private long clearedReports;
         private long transportFaultReports;
         private int currentEpoch = InitialEpoch;
@@ -152,6 +171,26 @@ namespace DS4Windows.InputDevices
         public double MaximumPresentationGapMilliseconds =>
             Interlocked.Read(ref maximumPresentationGapTicks) * 1000.0 /
             Stopwatch.Frequency;
+        public long HelperWriterCompletedWrites =>
+            Interlocked.Read(ref helperWriterCompletedWrites);
+        public long HelperWriterSlowCompletionCount =>
+            Interlocked.Read(ref helperWriterSlowCompletionCount);
+        public double HelperWriterMaximumCompletionMilliseconds =>
+            Interlocked.Read(ref helperWriterMaximumCompletionTicks) * 1000.0 /
+            Stopwatch.Frequency;
+        public long HelperWriterLateSubmissionCount =>
+            Interlocked.Read(ref helperWriterLateSubmissionCount);
+        public double HelperWriterMaximumSubmissionGapMilliseconds =>
+            Interlocked.Read(ref helperWriterMaximumSubmissionGapTicks) *
+            1000.0 / Stopwatch.Frequency;
+        public long HelperInvalidLayoutCount =>
+            Interlocked.Read(ref helperInvalidLayoutCount);
+        public long HelperInvalidCrcCount =>
+            Interlocked.Read(ref helperInvalidCrcCount);
+        public long HelperReportSequenceDiscontinuityCount =>
+            Interlocked.Read(ref helperReportSequenceDiscontinuityCount);
+        public long HelperPacketSequenceDiscontinuityCount =>
+            Interlocked.Read(ref helperPacketSequenceDiscontinuityCount);
         public long ClearedReports => Interlocked.Read(ref clearedReports);
         public long TransportFaultReports =>
             Interlocked.Read(ref transportFaultReports);
@@ -418,7 +457,7 @@ namespace DS4Windows.InputDevices
             PendingReportCompletion completion, out long reportId)
         {
             reportId = 0;
-            if (report == null || report.Length != ReportLength || !IsRunning)
+            if (!IsSupportedQueuedReport(report) || !IsRunning)
             {
                 return false;
             }
@@ -464,16 +503,73 @@ namespace DS4Windows.InputDevices
 
         internal static bool IsSpeakerAudioReport(byte[] report)
         {
-            return report != null && report.Length == ReportLength &&
-                report[142] == 0x93 && report[143] == 200;
+            return IsSpeakerAudioReport(report, report?.Length ?? 0);
+        }
+
+        internal static bool IsSpeakerAudioReport(byte[] report,
+            int reportLength)
+        {
+            if (report == null || reportLength <= 0 ||
+                reportLength > report.Length)
+            {
+                return false;
+            }
+
+            return reportLength == ReportLength && report[0] == 0x36 &&
+                    report[142] == 0x93 && report[143] == 200 ||
+                reportLength == DoubleFrameReportLength &&
+                    report[0] == 0x39 && report[140] == 0xD3 &&
+                    report[141] == 200;
+        }
+
+        internal static int GetSpeakerAudioFrameCount(byte[] report,
+            int reportLength)
+        {
+            if (!IsSpeakerAudioReport(report, reportLength))
+            {
+                return 0;
+            }
+
+            return reportLength == DoubleFrameReportLength ? 2 : 1;
+        }
+
+        internal static bool RequiresPriorWriteCompletion(byte[] report,
+            int reportLength)
+        {
+            return report != null &&
+                reportLength == DoubleFrameReportLength &&
+                reportLength <= report.Length && report[0] == 0x39;
+        }
+
+        private static bool IsSupportedQueuedReport(byte[] report)
+        {
+            if (report == null)
+            {
+                return false;
+            }
+
+            return report.Length == ReportLength && report[0] == 0x36 ||
+                report.Length == DoubleFrameReportLength &&
+                    report[0] == 0x39 ||
+                report.Length == StateReportLength && report[0] == 0x31;
         }
 
         internal static bool CanPresentFromPrimeGate(bool primeRequired,
             int speakerReportCount, byte[] nextReport)
         {
+            return CanPresentFromPrimeGate(primeRequired,
+                speakerReportCount, nextReport, nextReport?.Length ?? 0);
+        }
+
+        internal static bool CanPresentFromPrimeGate(bool primeRequired,
+            int speakerReportCount, byte[] nextReport, int reportLength)
+        {
+            int requiredReports = reportLength == DoubleFrameReportLength ?
+                    Math.Max(1, PrimeReportCount / 2) : PrimeReportCount;
             return !primeRequired ||
-                (nextReport != null && !IsSpeakerAudioReport(nextReport)) ||
-                speakerReportCount >= PrimeReportCount;
+                (nextReport != null &&
+                    !IsSpeakerAudioReport(nextReport, reportLength)) ||
+                speakerReportCount >= requiredReports;
         }
 
         internal static bool ShouldRequireAudioPrimeAfterPresentation(
@@ -751,7 +847,11 @@ namespace DS4Windows.InputDevices
 
         private void ProcessAcknowledgement(byte[] payload)
         {
-            if (payload.Length != sizeof(long) + sizeof(byte) + sizeof(long))
+            const int writerMetricCount = 5;
+            const int reportMetricCount = 4;
+            int expectedLength = sizeof(long) + sizeof(byte) + sizeof(long) +
+                (writerMetricCount + reportMetricCount) * sizeof(long);
+            if (payload.Length != expectedLength)
             {
                 throw new InvalidDataException("Invalid pacer acknowledgement length.");
             }
@@ -762,6 +862,44 @@ namespace DS4Windows.InputDevices
                 (AcknowledgementDisposition)payload[sizeof(long)];
             long presentedTimestamp = BinaryPrimitives.ReadInt64LittleEndian(
                 payload.AsSpan(sizeof(long) + sizeof(byte), sizeof(long)));
+            int writerOffset = sizeof(long) + sizeof(byte) + sizeof(long);
+            Interlocked.Exchange(ref helperWriterCompletedWrites,
+                BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
+                    writerOffset, sizeof(long))));
+            writerOffset += sizeof(long);
+            Interlocked.Exchange(ref helperWriterSlowCompletionCount,
+                BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
+                    writerOffset, sizeof(long))));
+            writerOffset += sizeof(long);
+            Interlocked.Exchange(ref helperWriterMaximumCompletionTicks,
+                BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
+                    writerOffset, sizeof(long))));
+            writerOffset += sizeof(long);
+            Interlocked.Exchange(ref helperWriterLateSubmissionCount,
+                BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
+                    writerOffset, sizeof(long))));
+            writerOffset += sizeof(long);
+            Interlocked.Exchange(ref helperWriterMaximumSubmissionGapTicks,
+                BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
+                    writerOffset, sizeof(long))));
+            writerOffset += sizeof(long);
+            Interlocked.Exchange(ref helperInvalidLayoutCount,
+                BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
+                    writerOffset, sizeof(long))));
+            writerOffset += sizeof(long);
+            Interlocked.Exchange(ref helperInvalidCrcCount,
+                BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
+                    writerOffset, sizeof(long))));
+            writerOffset += sizeof(long);
+            Interlocked.Exchange(
+                ref helperReportSequenceDiscontinuityCount,
+                BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
+                    writerOffset, sizeof(long))));
+            writerOffset += sizeof(long);
+            Interlocked.Exchange(
+                ref helperPacketSequenceDiscontinuityCount,
+                BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
+                    writerOffset, sizeof(long))));
 
             PendingReportCompletion completion = null;
             lock (stateLock)
@@ -934,15 +1072,18 @@ namespace DS4Windows.InputDevices
             long hapticsExpiryQpc, byte[] report)
         {
             byte[] payload = new byte[sizeof(long) + sizeof(int) + sizeof(long) +
-                ReportLength];
+                sizeof(ushort) + report.Length];
             BinaryPrimitives.WriteInt64LittleEndian(payload.AsSpan(0,
                 sizeof(long)), reportId);
             BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(sizeof(long),
                 sizeof(int)), epoch);
             BinaryPrimitives.WriteInt64LittleEndian(payload.AsSpan(sizeof(long) +
                 sizeof(int), sizeof(long)), hapticsExpiryQpc);
+            int reportLengthOffset = sizeof(long) + sizeof(int) + sizeof(long);
+            BinaryPrimitives.WriteUInt16LittleEndian(payload.AsSpan(
+                reportLengthOffset, sizeof(ushort)), (ushort)report.Length);
             Buffer.BlockCopy(report, 0, payload,
-                sizeof(long) + sizeof(int) + sizeof(long), ReportLength);
+                reportLengthOffset + sizeof(ushort), report.Length);
             return payload;
         }
 
@@ -1185,7 +1326,8 @@ namespace DS4Windows.InputDevices
                 int writerError = 6;
                 if (duplicatedHandle.IsInvalid ||
                     !DualSenseBluetoothRealtimeWriter.TryCreate(duplicatedHandle,
-                        ReportLength, out DualSenseBluetoothRealtimeWriter writer,
+                        MaximumReportLength,
+                        out DualSenseBluetoothRealtimeWriter writer,
                         out writerError, slotCount: PrimeReportCount))
                 {
                     TryWriteError(helperPipe,
@@ -1372,16 +1514,20 @@ namespace DS4Windows.InputDevices
                 public long Id;
                 public int Epoch;
                 public long HapticsExpiryQpc;
-                public readonly byte[] Report = new byte[ReportLength];
+                public int Length;
+                public readonly byte[] Report =
+                    new byte[MaximumReportLength];
 
                 public void Reset(long id, int epoch,
-                    long hapticsExpiryQpc, byte[] source, int sourceOffset)
+                    long hapticsExpiryQpc, byte[] source, int sourceOffset,
+                    int reportLength)
                 {
                     Id = id;
                     Epoch = epoch;
                     HapticsExpiryQpc = hapticsExpiryQpc;
+                    Length = reportLength;
                     Buffer.BlockCopy(source, sourceOffset, Report, 0,
-                        ReportLength);
+                        reportLength);
                 }
             }
 
@@ -1390,14 +1536,42 @@ namespace DS4Windows.InputDevices
                 public readonly long ReportId;
                 public readonly AcknowledgementDisposition Disposition;
                 public readonly long PresentedTimestamp;
+                public readonly long WriterCompletedWrites;
+                public readonly long WriterSlowCompletionCount;
+                public readonly long WriterMaximumCompletionTicks;
+                public readonly long WriterLateSubmissionCount;
+                public readonly long WriterMaximumSubmissionGapTicks;
+                public readonly long InvalidLayoutCount;
+                public readonly long InvalidCrcCount;
+                public readonly long ReportSequenceDiscontinuityCount;
+                public readonly long PacketSequenceDiscontinuityCount;
 
                 public QueuedAcknowledgement(long reportId,
                     AcknowledgementDisposition disposition,
-                    long presentedTimestamp)
+                    long presentedTimestamp,
+                    DualSenseBluetoothRealtimeWriter writer,
+                    long invalidLayoutCount, long invalidCrcCount,
+                    long reportSequenceDiscontinuityCount,
+                    long packetSequenceDiscontinuityCount)
                 {
                     ReportId = reportId;
                     Disposition = disposition;
                     PresentedTimestamp = presentedTimestamp;
+                    WriterCompletedWrites = writer?.CompletedWrites ?? 0;
+                    WriterSlowCompletionCount =
+                        writer?.SlowCompletionCount ?? 0;
+                    WriterMaximumCompletionTicks =
+                        writer?.MaximumCompletionTicks ?? 0;
+                    WriterLateSubmissionCount =
+                        writer?.LateSubmissionCount ?? 0;
+                    WriterMaximumSubmissionGapTicks =
+                        writer?.MaximumSubmissionGapTicks ?? 0;
+                    InvalidLayoutCount = invalidLayoutCount;
+                    InvalidCrcCount = invalidCrcCount;
+                    ReportSequenceDiscontinuityCount =
+                        reportSequenceDiscontinuityCount;
+                    PacketSequenceDiscontinuityCount =
+                        packetSequenceDiscontinuityCount;
                 }
             }
 
@@ -1410,6 +1584,10 @@ namespace DS4Windows.InputDevices
             private readonly DualSenseBluetoothAudioPacerRing<QueuedReport>
                 reservoir = new DualSenseBluetoothAudioPacerRing<QueuedReport>(
                     HostReservoirCapacity);
+            private readonly DualSenseBluetoothAudioPacerRing<QueuedReport>
+                controlReservoir =
+                    new DualSenseBluetoothAudioPacerRing<QueuedReport>(
+                        HostReservoirCapacity);
             private readonly DualSenseBluetoothAudioPacerRing<QueuedReport>
                 availableReports =
                     new DualSenseBluetoothAudioPacerRing<QueuedReport>(
@@ -1429,13 +1607,26 @@ namespace DS4Windows.InputDevices
             private readonly byte[] commandHeader =
                 new byte[sizeof(byte) + sizeof(int)];
             private readonly byte[] commandPayload = new byte[
-                sizeof(long) + sizeof(int) + sizeof(long) + ReportLength];
+                sizeof(long) + sizeof(int) + sizeof(long) + sizeof(ushort) +
+                MaximumReportLength];
 
             private readonly byte[] latestTemplate = new byte[ReportLength];
             private long latestTemplateHapticsExpiryQpc;
             private bool latestTemplateAvailable;
             private int currentEpoch = InitialEpoch;
             private bool primeRequired = true;
+            private bool sequenceValidationInitialized;
+            private bool packetSequenceValidationInitialized;
+            private byte expectedReportSequence;
+            private byte expectedPacketSequence;
+            private bool presentationSequenceInitialized;
+            private bool presentationPacketSequenceInitialized;
+            private byte presentationReportSequence;
+            private byte presentationPacketSequence;
+            private long invalidLayoutCount;
+            private long invalidCrcCount;
+            private long reportSequenceDiscontinuityCount;
+            private long packetSequenceDiscontinuityCount;
             private int disposed;
 
             public HelperHost(Stream pipe,
@@ -1567,12 +1758,25 @@ namespace DS4Windows.InputDevices
 
             private void ReceiveQueuedReport(byte[] payload, int payloadLength)
             {
-                int expectedLength = sizeof(long) + sizeof(int) + sizeof(long) +
-                    ReportLength;
-                if (payloadLength != expectedLength)
+                int reportLengthOffset = sizeof(long) + sizeof(int) +
+                    sizeof(long);
+                int reportOffset = reportLengthOffset + sizeof(ushort);
+                if (payloadLength < reportOffset)
                 {
                     throw new InvalidDataException(
                         "Invalid queued DualSense report payload length.");
+                }
+
+                int reportLength = BinaryPrimitives.ReadUInt16LittleEndian(
+                    payload.AsSpan(reportLengthOffset, sizeof(ushort)));
+                if (reportLength <= 0 ||
+                    reportLength > MaximumReportLength ||
+                    payloadLength != reportOffset + reportLength ||
+                    !IsSupportedQueuedReport(payload, reportOffset,
+                        reportLength))
+                {
+                    throw new InvalidDataException(
+                        "Invalid queued DualSense report shape.");
                 }
 
                 long id = BinaryPrimitives.ReadInt64LittleEndian(
@@ -1599,7 +1803,7 @@ namespace DS4Windows.InputDevices
                     }
 
                     report.Reset(id, epoch, hapticsExpiryQpc, payload,
-                        sizeof(long) + sizeof(int) + sizeof(long));
+                        reportOffset, reportLength);
                     // Every queued speaker report already contains the current
                     // control/haptics snapshot. Make it the presentation
                     // template atomically with queue admission so the parent
@@ -1607,33 +1811,20 @@ namespace DS4Windows.InputDevices
                     // (and allocate another clone/payload/command) every
                     // 10.667 ms. Explicit UpdateTemplate remains available for
                     // state changes that arrive between audio reports.
-                    Buffer.BlockCopy(report.Report, 0, latestTemplate, 0,
-                        ReportLength);
-                    latestTemplateHapticsExpiryQpc = hapticsExpiryQpc;
-                    latestTemplateAvailable = true;
-
-                    if (!IsSpeakerAudioReport(report.Report))
+                    if (reportLength == ReportLength)
                     {
-                        // A completion-aware control is a physical barrier, not
-                        // an audio frame. Drop an incomplete/queued speaker
-                        // generation so the control can never be trapped behind
-                        // the eight-speaker prime gate, then force the following
-                        // generation to build a fresh full prime.
-                        primeRequired = true;
-                        foreach (QueuedReport removed in reservoir.RemoveWhere(
-                            IsQueuedSpeakerReport))
-                        {
-                            QueueAcknowledgement(removed.Id,
-                                AcknowledgementDisposition.Cleared);
-                            if (!availableReports.TryEnqueue(removed))
-                            {
-                                throw new InvalidOperationException(
-                                    "The pacer report pool overflowed while prioritizing a control report.");
-                            }
-                        }
+                        Buffer.BlockCopy(report.Report, 0, latestTemplate, 0,
+                            ReportLength);
+                        latestTemplateHapticsExpiryQpc = hapticsExpiryQpc;
+                        latestTemplateAvailable = true;
                     }
 
-                    if (!reservoir.TryEnqueue(report))
+                    bool speakerReport = IsSpeakerAudioReport(report.Report,
+                        report.Length);
+                    bool enqueued = speakerReport ?
+                        reservoir.TryEnqueue(report) :
+                        controlReservoir.TryEnqueue(report);
+                    if (!enqueued)
                     {
                         availableReports.TryEnqueue(report);
                         QueueAcknowledgement(id,
@@ -1643,6 +1834,21 @@ namespace DS4Windows.InputDevices
                 }
 
                 reservoirChanged.Set();
+            }
+
+            private static bool IsSupportedQueuedReport(byte[] source,
+                int offset, int length)
+            {
+                if (source == null || offset < 0 || length <= 0 ||
+                    offset + length > source.Length)
+                {
+                    return false;
+                }
+
+                return length == ReportLength && source[offset] == 0x36 ||
+                    length == DoubleFrameReportLength &&
+                        source[offset] == 0x39 ||
+                    length == StateReportLength && source[offset] == 0x31;
             }
 
             private void ReceiveTemplate(byte[] payload, int payloadLength)
@@ -1685,7 +1891,18 @@ namespace DS4Windows.InputDevices
                         if (!availableReports.TryEnqueue(report))
                         {
                             throw new InvalidOperationException(
-                                "The pacer report pool overflowed during Clear.");
+                            "The pacer report pool overflowed during Clear.");
+                        }
+                    }
+                    while (controlReservoir.TryDequeue(
+                        out QueuedReport controlReport))
+                    {
+                        QueueAcknowledgement(controlReport.Id,
+                            AcknowledgementDisposition.Cleared);
+                        if (!availableReports.TryEnqueue(controlReport))
+                        {
+                            throw new InvalidOperationException(
+                                "The pacer report pool overflowed while clearing controls.");
                         }
                     }
                 }
@@ -1709,14 +1926,16 @@ namespace DS4Windows.InputDevices
                         bool controlPrimeBypass;
                         lock (stateLock)
                         {
+                            controlReservoir.TryPeek(
+                                out QueuedReport nextControlReport);
                             reservoir.TryPeek(out QueuedReport nextReport);
                             int speakerReportCount = primeRequired ?
                                 reservoir.CountLeading(IsQueuedSpeakerReport) : 0;
-                            controlPrimeBypass = primeRequired &&
-                                nextReport != null &&
-                                !IsSpeakerAudioReport(nextReport.Report);
-                            canPresent = CanPresentFromPrimeGate(primeRequired,
-                                speakerReportCount, nextReport?.Report);
+                            controlPrimeBypass = nextControlReport != null;
+                            canPresent = controlPrimeBypass ||
+                                CanPresentFromPrimeGate(primeRequired,
+                                    speakerReportCount, nextReport?.Report,
+                                    nextReport?.Length ?? 0);
                             if (canPresent && primeRequired &&
                                 !controlPrimeBypass)
                             {
@@ -1752,14 +1971,12 @@ namespace DS4Windows.InputDevices
                         long presentedAt;
                         bool advanceScheduler;
                         bool controlOnly;
+                        int audioFrameCount;
                         lock (stateLock)
                         {
                             if (controlPrimeBypass)
                             {
-                                if (!primeRequired ||
-                                    !reservoir.TryPeek(
-                                        out QueuedReport bypassReport) ||
-                                    IsSpeakerAudioReport(bypassReport.Report))
+                                if (!controlReservoir.TryDequeue(out item))
                                 {
                                     continue;
                                 }
@@ -1769,7 +1986,7 @@ namespace DS4Windows.InputDevices
                                 continue;
                             }
 
-                            if (!reservoir.TryDequeue(out item))
+                            else if (!reservoir.TryDequeue(out item))
                             {
                                 primeRequired = true;
                                 scheduler.Reset();
@@ -1785,7 +2002,9 @@ namespace DS4Windows.InputDevices
                             // WriteFile would feed fixed processing overhead
                             // into the clock and slowly drain the reservoir.
                             presentedAt = Stopwatch.GetTimestamp();
-                            controlOnly = !IsSpeakerAudioReport(item.Report);
+                            audioFrameCount = GetSpeakerAudioFrameCount(
+                                item.Report, item.Length);
+                            controlOnly = audioFrameCount == 0;
 
                             if (item.Epoch != currentEpoch)
                             {
@@ -1794,17 +2013,50 @@ namespace DS4Windows.InputDevices
                             }
                             else
                             {
-                                DualSenseBluetoothAudioReportPatcher.PatchForPresentation(
-                                    item.Report, item.HapticsExpiryQpc,
-                                    latestTemplateAvailable ? latestTemplate : null,
-                                    latestTemplateHapticsExpiryQpc, presentedAt);
+                                if (item.Length == ReportLength &&
+                                    item.Report[0] == 0x36)
+                                {
+                                    DualSenseBluetoothAudioReportPatcher
+                                        .PatchForPresentation(
+                                            item.Report,
+                                            item.HapticsExpiryQpc,
+                                            latestTemplateAvailable ?
+                                                latestTemplate : null,
+                                            latestTemplateHapticsExpiryQpc,
+                                            presentedAt);
+                                }
+                                StampPresentationSequence(item.Report,
+                                    item.Length);
                                 bool transportFault;
-                                bool accepted = controlOnly ?
-                                    writer.TryWriteAndWait(item.Report,
+                                bool accepted;
+                                if (controlOnly)
+                                {
+                                    accepted = writer.TryWriteAndWait(
+                                        item.Report, item.Length,
                                         HelperControlWriteTimeoutMilliseconds,
-                                        out transportFault) :
-                                    writer.TryWrite(item.Report,
                                         out transportFault);
+                                }
+                                else if (RequiresPriorWriteCompletion(
+                                    item.Report, item.Length))
+                                {
+                                    accepted = writer
+                                        .TryWriteAfterPriorCompletion(
+                                            item.Report, item.Length,
+                                            HelperPresentationOrderingTimeoutMilliseconds,
+                                            out transportFault);
+                                }
+                                else
+                                {
+                                    accepted = writer.TryWrite(item.Report,
+                                        item.Length, out transportFault);
+                                }
+                                if (accepted)
+                                {
+                                    CommitPresentationSequence(item.Report,
+                                        item.Length);
+                                    ValidatePresentedReport(item.Report,
+                                        item.Length);
+                                }
                                 disposition = accepted ?
                                     AcknowledgementDisposition.Presented :
                                     transportFault ?
@@ -1812,15 +2064,12 @@ namespace DS4Windows.InputDevices
                                         AcknowledgementDisposition.Rejected;
                             }
 
-                            if (ShouldRequireAudioPrimeAfterPresentation(
-                                controlOnly, reservoir.Count))
+                            if (!controlOnly &&
+                                ShouldRequireAudioPrimeAfterPresentation(
+                                    false, reservoir.Count))
                             {
                                 primeRequired = true;
                                 scheduler.Reset();
-                                if (controlOnly)
-                                {
-                                    writer.ResetSubmissionClock();
-                                }
                             }
 
                             if (!availableReports.TryEnqueue(item))
@@ -1829,7 +2078,7 @@ namespace DS4Windows.InputDevices
                                     "The pacer report pool overflowed after presentation.");
                             }
 
-                            advanceScheduler = !controlPrimeBypass &&
+                            advanceScheduler = !controlOnly &&
                                 !primeRequired;
                         }
 
@@ -1849,7 +2098,8 @@ namespace DS4Windows.InputDevices
 
                         if (advanceScheduler)
                         {
-                            scheduler.AdvanceAfterSend(presentedAt);
+                            scheduler.AdvanceAfterSend(presentedAt,
+                                audioFrameCount);
                         }
                     }
                 }
@@ -1871,7 +2121,177 @@ namespace DS4Windows.InputDevices
 
             private static bool IsQueuedSpeakerReport(QueuedReport report)
             {
-                return report != null && IsSpeakerAudioReport(report.Report);
+                return report != null && IsSpeakerAudioReport(report.Report,
+                    report.Length);
+            }
+
+            /// <summary>
+            /// Assigns Sony sequence values at the one true presentation
+            /// boundary. Parent-side sequence reservations describe creation
+            /// order, but a latency-sensitive state report may legitimately
+            /// overtake queued audio. Stamping here keeps the physical stream
+            /// contiguous in actual WriteFile order.
+            /// </summary>
+            private void StampPresentationSequence(byte[] report,
+                int reportLength)
+            {
+                byte reportSequence = presentationSequenceInitialized ?
+                    presentationReportSequence : (byte)(report[1] >> 4);
+                report[1] = (byte)(reportSequence << 4);
+
+                int packetSequenceOffset = GetPacketSequenceOffset(report,
+                    reportLength);
+                if (packetSequenceOffset >= 0)
+                {
+                    byte packetSequence =
+                        presentationPacketSequenceInitialized ?
+                            presentationPacketSequence :
+                            report[packetSequenceOffset];
+                    report[packetSequenceOffset] = packetSequence;
+                }
+
+                WriteSonyCrc(report, reportLength);
+            }
+
+            private void CommitPresentationSequence(byte[] report,
+                int reportLength)
+            {
+                presentationReportSequence = (byte)(
+                    ((report[1] >> 4) + 1) & 0x0F);
+                presentationSequenceInitialized = true;
+
+                int packetSequenceOffset = GetPacketSequenceOffset(report,
+                    reportLength);
+                if (packetSequenceOffset >= 0)
+                {
+                    presentationPacketSequence = unchecked((byte)(
+                        report[packetSequenceOffset] +
+                        (report[0] == 0x39 ? 2 : 1)));
+                    presentationPacketSequenceInitialized = true;
+                }
+            }
+
+            private static int GetPacketSequenceOffset(byte[] report,
+                int reportLength)
+            {
+                if (report == null || reportLength <= 0)
+                {
+                    return -1;
+                }
+
+                return reportLength == DoubleFrameReportLength &&
+                    report[0] == 0x39 ? 9 :
+                    reportLength == ReportLength && report[0] == 0x36 ? 10 :
+                    -1;
+            }
+
+            private static void WriteSonyCrc(byte[] report, int reportLength)
+            {
+                const int crcLength = sizeof(uint);
+                uint crc = DualSenseBluetoothAudioReportPatcher.ComputeSonyCrc(
+                    report, reportLength - crcLength);
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    report.AsSpan(reportLength - crcLength, crcLength), crc);
+            }
+
+            /// <summary>
+            /// Validates the exact bytes presented to the physical controller.
+            /// This runs after the live state/haptics merge and CRC rewrite, so
+            /// it observes the same report that WriteFile receives.
+            /// </summary>
+            private void ValidatePresentedReport(byte[] report,
+                int reportLength)
+            {
+                bool validLayout = false;
+                if (report != null && reportLength > 0 &&
+                    reportLength <= report.Length &&
+                    (report[1] & 0x0F) == 0)
+                {
+                    if (reportLength == ReportLength && report[0] == 0x36)
+                    {
+                        bool speakerReport = IsSpeakerAudioReport(report,
+                            reportLength);
+                        validLayout = report[2] == 0x91 &&
+                            report[3] == 0x07 && report[11] == 0x90 &&
+                            report[12] == 63 && report[76] == 0x92 &&
+                            report[77] == 64;
+                        if (validLayout && speakerReport)
+                        {
+                            validLayout = report[5] == 64 &&
+                                report[6] == 64 && report[7] == 64 &&
+                                report[8] == 64 && report[9] == 64;
+                        }
+                    }
+                    else if (reportLength == DoubleFrameReportLength &&
+                        report[0] == 0x39)
+                    {
+                        validLayout = report[2] == 0x91 &&
+                            report[3] == 0x06 &&
+                            (report[4] == 0x7E || report[4] == 0x7F) &&
+                            report[5] == DoubleFrameBufferLength &&
+                            report[6] == DoubleFrameBufferLength &&
+                            report[7] == DoubleFrameBufferLength &&
+                            report[8] == DoubleFrameBufferLength &&
+                            report[10] == 0xD2 && report[11] == 64 &&
+                            report[140] == 0xD3 && report[141] == 200;
+                    }
+                    else if (reportLength == StateReportLength &&
+                        report[0] == 0x31)
+                    {
+                        validLayout = report[2] == 0x10;
+                    }
+                }
+
+                if (!validLayout)
+                {
+                    Interlocked.Increment(ref invalidLayoutCount);
+                }
+
+                if (report != null && reportLength > sizeof(uint) &&
+                    reportLength <= report.Length)
+                {
+                    uint expectedCrc =
+                        DualSenseBluetoothAudioReportPatcher.ComputeSonyCrc(
+                            report, reportLength - sizeof(uint));
+                    uint actualCrc = BinaryPrimitives.ReadUInt32LittleEndian(
+                        report.AsSpan(reportLength - sizeof(uint),
+                            sizeof(uint)));
+                    if (actualCrc != expectedCrc)
+                    {
+                        Interlocked.Increment(ref invalidCrcCount);
+                    }
+
+                    byte reportSequence = (byte)(report[1] >> 4);
+                    if (sequenceValidationInitialized)
+                    {
+                        if (reportSequence != expectedReportSequence)
+                        {
+                            Interlocked.Increment(
+                                ref reportSequenceDiscontinuityCount);
+                        }
+                    }
+
+                    expectedReportSequence =
+                        (byte)((reportSequence + 1) & 0x0F);
+                    sequenceValidationInitialized = true;
+
+                    int packetSequenceOffset = report[0] == 0x39 ? 9 :
+                        report[0] == 0x36 ? 10 : -1;
+                    if (packetSequenceOffset >= 0)
+                    {
+                        byte packetSequence = report[packetSequenceOffset];
+                        if (packetSequenceValidationInitialized &&
+                            packetSequence != expectedPacketSequence)
+                        {
+                            Interlocked.Increment(
+                                ref packetSequenceDiscontinuityCount);
+                        }
+
+                        expectedPacketSequence = unchecked((byte)(
+                            packetSequence + (report[0] == 0x39 ? 2 : 1)));
+                        packetSequenceValidationInitialized = true;
+                    }
+                }
             }
 
             private void QueueAcknowledgement(long reportId,
@@ -1879,7 +2299,13 @@ namespace DS4Windows.InputDevices
                 long presentedTimestamp = 0)
             {
                 if (!acknowledgements.TryEnqueue(new QueuedAcknowledgement(
-                    reportId, disposition, presentedTimestamp)))
+                    reportId, disposition, presentedTimestamp, writer,
+                    Interlocked.Read(ref invalidLayoutCount),
+                    Interlocked.Read(ref invalidCrcCount),
+                    Interlocked.Read(
+                        ref reportSequenceDiscontinuityCount),
+                    Interlocked.Read(
+                        ref packetSequenceDiscontinuityCount))))
                 {
                     // Continuing without an acknowledgement would permanently
                     // consume a parent-side reservoir credit. Fail closed.
@@ -1893,8 +2319,11 @@ namespace DS4Windows.InputDevices
 
             private void AcknowledgementLoop()
             {
+                const int writerMetricCount = 5;
+                const int reportMetricCount = 4;
                 byte[] payload = new byte[
-                    sizeof(long) + sizeof(byte) + sizeof(long)];
+                    sizeof(long) + sizeof(byte) + sizeof(long) +
+                    (writerMetricCount + reportMetricCount) * sizeof(long)];
                 try
                 {
                     while (!stopRequested.WaitOne(0) || acknowledgements.Count != 0)
@@ -1914,6 +2343,45 @@ namespace DS4Windows.InputDevices
                             payload.AsSpan(sizeof(long) + sizeof(byte),
                                 sizeof(long)),
                             acknowledgement.PresentedTimestamp);
+                        int writerOffset = sizeof(long) + sizeof(byte) +
+                            sizeof(long);
+                        BinaryPrimitives.WriteInt64LittleEndian(
+                            payload.AsSpan(writerOffset, sizeof(long)),
+                            acknowledgement.WriterCompletedWrites);
+                        writerOffset += sizeof(long);
+                        BinaryPrimitives.WriteInt64LittleEndian(
+                            payload.AsSpan(writerOffset, sizeof(long)),
+                            acknowledgement.WriterSlowCompletionCount);
+                        writerOffset += sizeof(long);
+                        BinaryPrimitives.WriteInt64LittleEndian(
+                            payload.AsSpan(writerOffset, sizeof(long)),
+                            acknowledgement.WriterMaximumCompletionTicks);
+                        writerOffset += sizeof(long);
+                        BinaryPrimitives.WriteInt64LittleEndian(
+                            payload.AsSpan(writerOffset, sizeof(long)),
+                            acknowledgement.WriterLateSubmissionCount);
+                        writerOffset += sizeof(long);
+                        BinaryPrimitives.WriteInt64LittleEndian(
+                            payload.AsSpan(writerOffset, sizeof(long)),
+                            acknowledgement.WriterMaximumSubmissionGapTicks);
+                        writerOffset += sizeof(long);
+                        BinaryPrimitives.WriteInt64LittleEndian(
+                            payload.AsSpan(writerOffset, sizeof(long)),
+                            acknowledgement.InvalidLayoutCount);
+                        writerOffset += sizeof(long);
+                        BinaryPrimitives.WriteInt64LittleEndian(
+                            payload.AsSpan(writerOffset, sizeof(long)),
+                            acknowledgement.InvalidCrcCount);
+                        writerOffset += sizeof(long);
+                        BinaryPrimitives.WriteInt64LittleEndian(
+                            payload.AsSpan(writerOffset, sizeof(long)),
+                            acknowledgement
+                                .ReportSequenceDiscontinuityCount);
+                        writerOffset += sizeof(long);
+                        BinaryPrimitives.WriteInt64LittleEndian(
+                            payload.AsSpan(writerOffset, sizeof(long)),
+                            acknowledgement
+                                .PacketSequenceDiscontinuityCount);
                         lock (pipeWriteLock)
                         {
                             WriteFrame(pipe, MessageKind.ReportAcknowledged,
@@ -2334,12 +2802,26 @@ namespace DS4Windows.InputDevices
 
         public long AdvanceAfterSend(long presentationQpc)
         {
+            return AdvanceAfterSend(presentationQpc, 1);
+        }
+
+        public long AdvanceAfterSend(long presentationQpc,
+            int audioFrameCount)
+        {
             if (!started)
             {
                 throw new InvalidOperationException("The pacer clock has not started.");
             }
+            if (audioFrameCount <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(audioFrameCount));
+            }
 
-            long interval = NextIntervalTicks();
+            long interval = 0;
+            for (int frame = 0; frame < audioFrameCount; frame++)
+            {
+                interval = checked(interval + NextIntervalTicks());
+            }
             long phaseDeadline = checked(nextDeadlineQpc + interval);
             long minimumPhaseGap = Math.Max(1,
                 interval - maximumCatchUpTicks);

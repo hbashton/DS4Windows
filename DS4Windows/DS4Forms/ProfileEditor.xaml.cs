@@ -1567,6 +1567,12 @@ namespace DS4WinWPF.DS4Forms
             UpdateTriggerLabSpecialActionBadge();
         }
 
+        private void ProfileAudioHapticsControl_SettingsChanged(object sender,
+            ProfileFeatureSettingsChangedEventArgs e)
+        {
+            profileSettingsVM.RaiseAudioHapticsSpeakerOverrideStateChanged();
+        }
+
         private void UpdateTriggerLabSpecialActionBadge()
         {
             TriggerLabProfileSettings settings = deviceNum >= 0 &&

@@ -519,6 +519,9 @@ namespace DS4Windows
         internal bool SupportsDirectSpeakerPcm =>
             connected && activeStreamSupportsDirectSpeaker;
 
+        internal bool IsRuntimeConnected =>
+            connected && Volatile.Read(ref deviceStream) != null;
+
         internal bool SupportsAtomicAudioHaptics =>
             connected && activeStreamSupportsAtomicAudioHaptics;
 

@@ -74,8 +74,8 @@ namespace DS4Windows
         bool[] held = new bool[MAX_DS4_CONTROLLER_COUNT];
         int[] oldmouse = new int[MAX_DS4_CONTROLLER_COUNT] { -1, -1, -1, -1, -1, -1, -1, -1 };
         private int[] startupReportDiagCounts = new int[MAX_DS4_CONTROLLER_COUNT];
-        private System.Threading.Timer gameBarProfileTimer;
-        private int gameBarProfileUpdateGate = 0;
+        private System.Threading.Timer gameBarStateTimer;
+        private int gameBarStateUpdateGate = 0;
         public OutputDevice[] outputDevices = new OutputDevice[MAX_DS4_CONTROLLER_COUNT] { null, null, null, null, null, null, null, null };
         private OneEuroFilter3D[] udpEuroPairAccel = new OneEuroFilter3D[UdpServer.NUMBER_SLOTS]
         {
@@ -1792,7 +1792,7 @@ namespace DS4Windows
 
                 StartupDiag("ControlService.Start setting running=true");
                 running = true;
-                StartGameBarProfileTimer();
+                StartGameBarStateTimer();
 
                 if (_udpServer != null)
                 {
@@ -1905,7 +1905,7 @@ namespace DS4Windows
                 running = false;
                 runHotPlug = false;
                 inServiceTask = true;
-                StopGameBarProfileTimer();
+                StopGameBarStateTimer();
                 StopAllGameBarCompatibilityOutputs();
                 StartupDiag("ControlService.Stop PreServiceStop begin");
                 PreServiceStop?.Invoke(this, EventArgs.Empty);
@@ -2443,9 +2443,13 @@ namespace DS4Windows
                         break;
                 }
                 dualsense.HapticPowerLevel = DualSenseHapticPowerLevel[ind];
-                dualsense.EnableSpeakerOutput = DualSenseEnableSpeakerOutput[ind];
+                bool speakerEnabled = IsControllerSpeakerEnabled(ind);
+                string speakerCaptureEndpointId =
+                    GetControllerSpeakerCaptureEndpointId(ind);
+                dualsense.EnableSpeakerOutput = speakerEnabled;
                 dualsense.SpeakerVolume = DualSenseSpeakerVolume[ind];
                 dualsense.HeadphoneVolume = DualSenseHeadphoneVolume[ind];
+                dualsense.HeadsetOnlyAudio = DualSenseHeadsetOnlyAudio[ind];
                 ViiperOutDevice viiperMicrophoneOutput =
                     outputDevices[ind] as ViiperOutDevice;
                 bool useViiperControllerMicrophone =
@@ -2459,7 +2463,7 @@ namespace DS4Windows
                 dualsense.MicrophoneVolume = useViiperControllerMicrophone ?
                     byte.MaxValue : DualSenseMicrophoneVolume[ind];
 
-                if (DualSenseEnableSpeakerOutput[ind])
+                if (speakerEnabled)
                 {
                     ViiperOutDevice directSpeakerSource =
                         outputDevices[ind] as ViiperOutDevice;
@@ -2467,7 +2471,7 @@ namespace DS4Windows
                     dualSenseAudioPassthrough.Start(ind, dualsense, DualSenseSpeakerVolume[ind],
                         (DualSenseSpeakerCompression)Global.DualSenseSpeakerCompression[ind],
                         Global.DualSenseSpeakerBassBoost[ind],
-                        DualSenseAudioCaptureEndpointId[ind],
+                        speakerCaptureEndpointId,
                         DualSenseAudioSpeakerEndpointId[ind],
                         Global.OutContType[ind], directSpeakerSource);
                 }
@@ -2491,7 +2495,12 @@ namespace DS4Windows
             else
             {
                 dualSenseAudioPassthrough.Stop(ind);
-                bool speakerEnabled = DualSenseEnableSpeakerOutput[ind];
+                bool speakerEnabled = IsControllerSpeakerEnabled(ind);
+                string speakerCaptureEndpointId =
+                    GetControllerSpeakerCaptureEndpointId(ind);
+                byte physicalSpeakerVolume = DualSenseHeadsetOnlyAudio[ind]
+                    ? (byte)0
+                    : DualSenseSpeakerVolume[ind];
                 ViiperOutDevice viiperMicrophoneOutput =
                     outputDevices[ind] as ViiperOutDevice;
                 bool useViiperControllerMicrophone =
@@ -2508,7 +2517,7 @@ namespace DS4Windows
                 bool audioConfigured = device.ConfigureBluetoothAudioForProfile(
                     speakerEnabled,
                     microphoneEnabled,
-                    DualSenseSpeakerVolume[ind],
+                    physicalSpeakerVolume,
                     DualSenseHeadphoneVolume[ind],
                     useViiperControllerMicrophone ? byte.MaxValue :
                         DualSenseMicrophoneVolume[ind]);
@@ -2519,10 +2528,10 @@ namespace DS4Windows
                         outputDevices[ind] as ViiperOutDevice;
 
                     dualShock4AudioPassthrough.Start(ind, device,
-                        DualSenseSpeakerVolume[ind],
+                        physicalSpeakerVolume,
                         (DualSenseSpeakerCompression)Global.DualSenseSpeakerCompression[ind],
                         Global.DualSenseSpeakerBassBoost[ind],
-                        DualSenseAudioCaptureEndpointId[ind],
+                        speakerCaptureEndpointId,
                         Global.OutContType[ind], directSpeakerSource);
                 }
                 else
@@ -2555,6 +2564,47 @@ namespace DS4Windows
             int deviceIndex)
         {
             return audioHapticsService.GetStatus(deviceIndex);
+        }
+
+        internal static bool IsAudioHapticsSpeakerOverrideActive(int index)
+        {
+            if (index < 0 || index >= Global.store.audioHapticsSettings.Length)
+            {
+                return false;
+            }
+
+            AudioHapticsProfileSettings settings =
+                Global.store.audioHapticsSettings[index];
+            return settings?.Enabled == true &&
+                settings.Source == AudioHapticsSourceKind.AppSession &&
+                settings.StreamAppAudioToController;
+        }
+
+        private static bool IsControllerSpeakerEnabled(int index) =>
+            Global.DualSenseEnableSpeakerOutput[index] ||
+            IsAudioHapticsSpeakerOverrideActive(index);
+
+        private static string GetControllerSpeakerCaptureEndpointId(int index)
+        {
+            if (!IsAudioHapticsSpeakerOverrideActive(index))
+            {
+                return Global.DualSenseAudioCaptureEndpointId[index];
+            }
+
+            AudioHapticsProfileSettings settings =
+                Global.store.audioHapticsSettings[index];
+            int processId = ProcessLoopbackWaveCapture.ResolveProcessId(settings);
+            if (processId <= 0)
+            {
+                // Keep this as an explicit app endpoint instead of silently
+                // falling back to system audio. The worker will remain in its
+                // starting/error state until the selected app is available.
+                processId = settings?.ProcessId ?? 0;
+            }
+
+            return processId > 0
+                ? ProcessLoopbackWaveCapture.BuildEndpointId(processId)
+                : ProcessLoopbackWaveCapture.EndpointPrefix + "unavailable";
         }
 
         private void CheckLauchProfileOption(int ind, DS4Device device)
@@ -2921,14 +2971,6 @@ namespace DS4Windows
         private byte[] currentBattery = new byte[MAX_DS4_CONTROLLER_COUNT] { 0, 0, 0, 0, 0, 0, 0, 0 };
         private bool[] charging = new bool[MAX_DS4_CONTROLLER_COUNT] { false, false, false, false, false, false, false, false };
         private string[] tempStrings = new string[MAX_DS4_CONTROLLER_COUNT] { string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty };
-        private bool[] gameBarProfileActive = new bool[MAX_DS4_CONTROLLER_COUNT] { false, false, false, false, false, false, false, false };
-        private bool[] gameBarProfilePending = new bool[MAX_DS4_CONTROLLER_COUNT] { false, false, false, false, false, false, false, false };
-        private DateTime[] gameBarProfileActivatedUtc = new DateTime[MAX_DS4_CONTROLLER_COUNT];
-        private DateTime[] gameBarProfileRequestedUtc = new DateTime[MAX_DS4_CONTROLLER_COUNT];
-        private string[] gameBarRequestedProfileName = new string[MAX_DS4_CONTROLLER_COUNT] { string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty };
-        private bool[] gameBarPreviousUseTempProfile = new bool[MAX_DS4_CONTROLLER_COUNT] { false, false, false, false, false, false, false, false };
-        private string[] gameBarPreviousTempProfileName = new string[MAX_DS4_CONTROLLER_COUNT] { string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty };
-        private string[] gameBarPreviousProfileName = new string[MAX_DS4_CONTROLLER_COUNT] { string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty };
         private DateTime[] gameBarHomeButtonIgnoreUntilUtc = new DateTime[MAX_DS4_CONTROLLER_COUNT];
         private readonly OutputDevice[] gameBarCompatibilityOutputDevices = new OutputDevice[MAX_DS4_CONTROLLER_COUNT];
         private readonly int[] gameBarCompatibilityRoutingActive = new int[MAX_DS4_CONTROLLER_COUNT];
@@ -2936,7 +2978,6 @@ namespace DS4Windows
         private readonly object gameBarCompatibilityOutputLock = new object();
 
         private DateTime gameBarLastVisibleUtc = DateTime.MinValue;
-        private DateTime gameBarInvisibleSinceUtc = DateTime.MinValue;
         private DateTime gameBarLastVisibilityCheckUtc = DateTime.MinValue;
         private bool gameBarVerboseDetectionLogInitialized = false;
         private bool gameBarVerboseLastVisible = false;
@@ -2948,23 +2989,106 @@ namespace DS4Windows
         private string[] dualSenseMuteRequestedProfileName = new string[MAX_DS4_CONTROLLER_COUNT] { string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty };
         private string[] dualSenseMuteRememberedOffProfileName = new string[MAX_DS4_CONTROLLER_COUNT] { string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty };
 
-        public bool IsGameBarProfilePriorityActive(int ind)
+        public ControllerRuntimeSignals GetControllerRuntimeSignals(int index)
         {
-            return ind >= 0 && ind < MAX_DS4_CONTROLLER_COUNT &&
-                (gameBarProfileActive[ind] || gameBarProfilePending[ind]);
-        }
-
-        public bool IsAnyGameBarProfilePriorityActive()
-        {
-            for (int i = 0; i < MAX_DS4_CONTROLLER_COUNT; i++)
+            if (index < 0 || index >= CURRENT_DS4_CONTROLLER_LIMIT)
             {
-                if (IsGameBarProfilePriorityActive(i))
+                return new ControllerRuntimeSignals(false, false, false,
+                    false, false, false,
+                    ControllerRuntimeLaneState.NotRequired,
+                    ControllerRuntimeLaneState.NotRequired,
+                    ControllerRuntimeLaneState.NotRequired,
+                    ControllerRuntimeLaneState.NotRequired,
+                    "virtual controller");
+            }
+
+            DS4Device device = DS4Controllers[index];
+            bool physicalPresent = device != null && !device.IsRemoving;
+            bool physicalSynced = physicalPresent && device.isSynced();
+            bool physicalAlive = physicalSynced && device.IsAlive();
+            bool virtualRequired = !Global.getDInputOnly(index);
+            OutContType desiredType = Global.OutContType[index].Normalize();
+            ViiperOutDevice viiperOutput = outputDevices[index] as ViiperOutDevice;
+            bool virtualConnected = !virtualRequired ||
+                viiperOutput?.IsRuntimeConnected == true;
+            bool virtualTypeMatches = !virtualRequired ||
+                Global.activeOutDevType[index].Normalize() == desiredType;
+
+            bool advancedHapticsRequired = virtualRequired &&
+                (desiredType == OutContType.ViiperDualSense ||
+                    desiredType == OutContType.ViiperDualSenseEdge);
+            ControllerRuntimeLaneState advancedHaptics =
+                !advancedHapticsRequired
+                    ? ControllerRuntimeLaneState.NotRequired
+                    : viiperOutput?.SupportsAtomicAudioHaptics == true
+                        ? ControllerRuntimeLaneState.Ready
+                        : virtualConnected
+                            ? ControllerRuntimeLaneState.Unavailable
+                            : ControllerRuntimeLaneState.Starting;
+
+            bool speakerRequired = physicalPresent &&
+                IsControllerSpeakerEnabled(index);
+            ControllerRuntimeLaneState speaker =
+                ControllerRuntimeLaneState.NotRequired;
+            if (speakerRequired)
+            {
+                speaker = device is InputDevices.DualSenseDevice
+                    ? dualSenseAudioPassthrough.GetStatus(index)
+                    : dualShock4AudioPassthrough.GetStatus(index);
+            }
+
+            bool microphoneRequired = physicalPresent &&
+                Global.DualSenseEnableMicrophonePassthrough[index];
+            ControllerRuntimeLaneState microphone =
+                ControllerRuntimeLaneState.NotRequired;
+            if (microphoneRequired)
+            {
+                bool directMicrophone =
+                    ControllerMicrophoneRoutePolicy.CanRouteDirectViiperMicrophone(
+                        true, device, desiredType, viiperOutput);
+                if (directMicrophone)
                 {
-                    return true;
+                    microphone = viiperOutput?.SupportsActiveVirtualMicrophone == true
+                        ? ControllerRuntimeLaneState.Ready
+                        : virtualConnected
+                            ? ControllerRuntimeLaneState.Unavailable
+                            : ControllerRuntimeLaneState.Starting;
+                }
+                else if (device is InputDevices.DualSenseDevice)
+                {
+                    microphone = dualSenseMicrophonePassthrough.IsRunningFor(
+                            Global.DualSenseMicrophoneCaptureEndpointId[index],
+                            Global.DualSenseMicrophoneOutputEndpointId[index])
+                        ? ControllerRuntimeLaneState.Ready
+                        : ControllerRuntimeLaneState.Unavailable;
+                }
+                else
+                {
+                    microphone = ControllerRuntimeLaneState.Unavailable;
                 }
             }
 
-            return false;
+            bool audioHapticsRequired = physicalPresent &&
+                Global.store.audioHapticsSettings[index]?.Enabled == true;
+            ControllerRuntimeLaneState audioHaptics =
+                ControllerRuntimeLaneState.NotRequired;
+            if (audioHapticsRequired)
+            {
+                AudioHapticsRuntimeStatus status =
+                    audioHapticsService.GetStatus(index);
+                audioHaptics = status.Active
+                    ? ControllerRuntimeLaneState.Ready
+                    : status.Message.IndexOf("starting",
+                        StringComparison.OrdinalIgnoreCase) >= 0
+                        ? ControllerRuntimeLaneState.Starting
+                        : ControllerRuntimeLaneState.Unavailable;
+            }
+
+            return new ControllerRuntimeSignals(physicalPresent,
+                physicalSynced, physicalAlive, virtualRequired,
+                virtualConnected, virtualTypeMatches, advancedHaptics,
+                speaker, microphone, audioHaptics,
+                desiredType.ToDisplayName());
         }
 
         internal static bool ShouldUseGameBarControllerCompatibility(bool enabled,
@@ -3023,94 +3147,6 @@ namespace DS4Windows
             return outputDevices[index];
         }
 
-        public bool TryDeferAutoProfileForGameBar(int ind, string profileName)
-        {
-            if (!IsGameBarProfilePriorityActive(ind))
-            {
-                return false;
-            }
-
-            gameBarPreviousUseTempProfile[ind] = true;
-            gameBarPreviousTempProfileName[ind] = profileName;
-            if (!string.IsNullOrEmpty(Global.ProfilePath[ind]))
-            {
-                gameBarPreviousProfileName[ind] = Global.ProfilePath[ind];
-            }
-
-            return true;
-        }
-
-        public bool TryDeferAutoProfileDefaultForGameBar(int ind)
-        {
-            if (!IsGameBarProfilePriorityActive(ind))
-            {
-                return false;
-            }
-
-            gameBarPreviousUseTempProfile[ind] = false;
-            gameBarPreviousTempProfileName[ind] = string.Empty;
-            if (!string.IsNullOrEmpty(Global.ProfilePath[ind]))
-            {
-                gameBarPreviousProfileName[ind] = Global.ProfilePath[ind];
-            }
-
-            return true;
-        }
-
-        private bool HasAnyConfiguredGameBarProfile()
-        {
-            for (int i = 0; i < MAX_DS4_CONTROLLER_COUNT; i++)
-            {
-                if (DS4Controllers[i] != null &&
-                    TryGetConfiguredGameBarProfileName(i, out _))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private bool TryGetConfiguredGameBarProfileName(int ind, out string profileName)
-        {
-            profileName = string.Empty;
-            if (!Global.GameBarHomeButtonSupport[ind] ||
-                Global.GameBarControllerCompatibility[ind])
-            {
-                return false;
-            }
-
-            profileName = Global.GameBarProfileName[ind];
-            if (string.IsNullOrEmpty(profileName))
-            {
-                return false;
-            }
-
-            string profilePath = Path.Combine(appdatapath, "Profiles", $"{profileName}.xml");
-            if (!File.Exists(profilePath))
-            {
-                return false;
-            }
-
-            return true;
-        }
-
-        private void RequestGameBarProfilePriority(int ind, string profileName, DateTime now)
-        {
-            if (IsGameBarProfilePriorityActive(ind))
-            {
-                return;
-            }
-
-            gameBarPreviousUseTempProfile[ind] = Global.useTempProfile[ind];
-            gameBarPreviousTempProfileName[ind] = Global.tempprofilename[ind];
-            gameBarPreviousProfileName[ind] = Global.ProfilePath[ind];
-            gameBarRequestedProfileName[ind] = profileName;
-            gameBarProfileRequestedUtc[ind] = now;
-            gameBarProfilePending[ind] = true;
-            StartupDiag($"GameBar profile requested controller={ind + 1} target='{profileName}' previousTemp={gameBarPreviousUseTempProfile[ind]} previousTempProfile='{gameBarPreviousTempProfileName[ind]}' previousProfile='{gameBarPreviousProfileName[ind]}'");
-        }
-
         private void CheckGameBarHomeButton(int ind, DS4State cState, DS4State tempControlState, DS4State pState)
         {
             if (!cState.PS)
@@ -3143,27 +3179,9 @@ namespace DS4Windows
                 return;
             }
 
-            if (gameBarProfileActive[ind] || gameBarProfilePending[ind])
-            {
-                cState.PS = false;
-                tempControlState.PS = false;
-                string openResult = gameBarIntegration.OpenGameBar();
-                StartupDiag($"GameBar home button controller={ind + 1} existingPriority active={gameBarProfileActive[ind]} pending={gameBarProfilePending[ind]} {openResult}");
-                gameBarHomeButtonIgnoreUntilUtc[ind] = now + TimeSpan.FromSeconds(1);
-                return;
-            }
-
-            if (!TryGetConfiguredGameBarProfileName(ind, out string profileName))
-            {
-                return;
-            }
-
-            cState.PS = false;
-            tempControlState.PS = false;
-            gameBarHomeButtonIgnoreUntilUtc[ind] = now + TimeSpan.FromSeconds(1);
-            RequestGameBarProfilePriority(ind, profileName, now);
-            string result = gameBarIntegration.OpenGameBar();
-            StartupDiag($"GameBar home button controller={ind + 1} requestedProfile='{profileName}' {result}");
+            // Profiles that do not request the modern compatibility route use
+            // their normal Home mapping. There is deliberately no legacy
+            // profile-switch fallback here.
         }
 
         private void UpdateGameBarCompatibilityOutputs(bool gameBarVisible)
@@ -3324,28 +3342,26 @@ namespace DS4Windows
             }
         }
 
-        public void UpdateGameBarProfileState()
+        public void UpdateGameBarState()
         {
             if (!running)
             {
                 return;
             }
 
-            if (Interlocked.Exchange(ref gameBarProfileUpdateGate, 1) == 1)
+            if (Interlocked.Exchange(ref gameBarStateUpdateGate, 1) == 1)
             {
                 return;
             }
 
             try
             {
-                bool anyActiveOrPending = IsAnyGameBarProfilePriorityActive();
-                bool anyConfigured = HasAnyConfiguredGameBarProfile();
                 bool anyMutePending = HasAnyPendingDualSenseMuteProfile();
                 bool anyCompatibilityConfigured = HasAnyConfiguredGameBarCompatibility();
                 bool anyCompatibilityActive = IsAnyGameBarCompatibilityActive();
 
-                if (!anyActiveOrPending && !anyConfigured && !anyMutePending &&
-                    !anyCompatibilityConfigured && !anyCompatibilityActive)
+                if (!anyMutePending && !anyCompatibilityConfigured &&
+                    !anyCompatibilityActive)
                 {
                     return;
                 }
@@ -3358,73 +3374,32 @@ namespace DS4Windows
 
                 gameBarLastVisibilityCheckUtc = now;
                 bool gameBarVisible = gameBarIntegration.IsGameBarVisible();
-                LogGameBarDetectionIfVerbose(now, gameBarVisible, anyConfigured,
-                    anyActiveOrPending, anyCompatibilityConfigured, anyCompatibilityActive);
+                LogGameBarDetectionIfVerbose(now, gameBarVisible,
+                    anyCompatibilityConfigured, anyCompatibilityActive);
                 if (gameBarVisible)
                 {
                     gameBarLastVisibleUtc = now;
-                    gameBarInvisibleSinceUtc = DateTime.MinValue;
                     UpdateGameBarCompatibilityOutputs(true);
-                    RequestVisibleGameBarProfiles(now);
-                    ActivatePendingGameBarProfiles(now);
                     return;
                 }
 
                 ProcessPendingDualSenseMuteProfiles();
-
-                if (gameBarInvisibleSinceUtc == DateTime.MinValue)
-                {
-                    gameBarInvisibleSinceUtc = now;
-                }
-
-                // The XInput companion is an input route, not a profile. On
-                // the first confirmed hidden state, publish the native route
-                // immediately and remove the temporary device. Keep the older
-                // grace period below only for legacy profile restoration.
+                // Publish the native route before removing the companion so
+                // the report path never observes a missing output device.
                 UpdateGameBarCompatibilityOutputs(false);
-
-                bool visibilityGraceElapsed = gameBarLastVisibleUtc == DateTime.MinValue ||
-                    now - gameBarLastVisibleUtc > TimeSpan.FromMilliseconds(1500);
-                bool invisibleStable = gameBarInvisibleSinceUtc != DateTime.MinValue &&
-                    now - gameBarInvisibleSinceUtc > TimeSpan.FromMilliseconds(1500);
-
-                for (int i = 0; i < MAX_DS4_CONTROLLER_COUNT; i++)
-                {
-                    if (gameBarProfilePending[i] && now - gameBarProfileRequestedUtc[i] > TimeSpan.FromSeconds(6))
-                    {
-                        ClearPendingGameBarProfile(i);
-                    }
-
-                    if (!gameBarProfileActive[i])
-                    {
-                        continue;
-                    }
-
-                    bool activationGraceElapsed = now - gameBarProfileActivatedUtc[i] > TimeSpan.FromSeconds(3);
-
-                    if (activationGraceElapsed && visibilityGraceElapsed && invisibleStable &&
-                        RestorePreviousGameBarProfile(i))
-                    {
-                        gameBarProfileActive[i] = false;
-                        gameBarPreviousUseTempProfile[i] = false;
-                        gameBarPreviousTempProfileName[i] = string.Empty;
-                        gameBarPreviousProfileName[i] = string.Empty;
-                        gameBarRequestedProfileName[i] = string.Empty;
-                    }
-                }
             }
             catch (Exception ex)
             {
-                StartupDiag($"UpdateGameBarProfileState exception {ex.GetType().Name}: {ex.Message}");
+                StartupDiag($"UpdateGameBarState exception {ex.GetType().Name}: {ex.Message}");
             }
             finally
             {
-                Interlocked.Exchange(ref gameBarProfileUpdateGate, 0);
+                Interlocked.Exchange(ref gameBarStateUpdateGate, 0);
             }
         }
 
         private void LogGameBarDetectionIfVerbose(DateTime now, bool gameBarVisible,
-            bool anyConfigured, bool anyActiveOrPending, bool anyCompatibilityConfigured, bool anyCompatibilityActive)
+            bool anyCompatibilityConfigured, bool anyCompatibilityActive)
         {
             if (!Global.VerboseStartupLogging)
             {
@@ -3443,7 +3418,7 @@ namespace DS4Windows
             gameBarVerboseDetectionLogInitialized = true;
             gameBarVerboseLastVisible = gameBarVisible;
             gameBarVerboseLastDetectionLogUtc = now;
-            StartupDiag($"GameBar detection visible={gameBarVisible} anyConfigured={anyConfigured} anyActiveOrPending={anyActiveOrPending} compatibilityConfigured={anyCompatibilityConfigured} compatibilityActive={anyCompatibilityActive} " +
+            StartupDiag($"GameBar detection visible={gameBarVisible} compatibilityConfigured={anyCompatibilityConfigured} compatibilityActive={anyCompatibilityActive} " +
                 $"{gameBarIntegration.CaptureLastDetectionSummary()} controllers={BuildGameBarPriorityStateSummary()}");
         }
 
@@ -3453,8 +3428,6 @@ namespace DS4Windows
             for (int i = 0; i < MAX_DS4_CONTROLLER_COUNT; i++)
             {
                 if (DS4Controllers[i] == null &&
-                    !gameBarProfileActive[i] &&
-                    !gameBarProfilePending[i] &&
                     Volatile.Read(ref gameBarCompatibilityRoutingActive[i]) == 0)
                 {
                     continue;
@@ -3469,129 +3442,14 @@ namespace DS4Windows
                 builder.Append(i + 1);
                 builder.Append("[connected=");
                 builder.Append(DS4Controllers[i] != null);
-                builder.Append(",enabled=");
-                builder.Append(Global.GameBarHomeButtonSupport[i]);
                 builder.Append(",compatibility=");
                 builder.Append(Global.GameBarControllerCompatibility[i]);
                 builder.Append(",compatibilityActive=");
                 builder.Append(Volatile.Read(ref gameBarCompatibilityRoutingActive[i]) == 1);
-                builder.Append(",target='");
-                builder.Append(Global.GameBarProfileName[i]);
-                builder.Append("',active=");
-                builder.Append(gameBarProfileActive[i]);
-                builder.Append(",pending=");
-                builder.Append(gameBarProfilePending[i]);
-                builder.Append(",requested='");
-                builder.Append(gameBarRequestedProfileName[i]);
-                builder.Append("']");
+                builder.Append("]");
             }
 
             return builder.Length == 0 ? "none" : builder.ToString();
-        }
-
-        private void RequestVisibleGameBarProfiles(DateTime now)
-        {
-            for (int i = 0; i < MAX_DS4_CONTROLLER_COUNT; i++)
-            {
-                if (DS4Controllers[i] == null || IsGameBarProfilePriorityActive(i))
-                {
-                    continue;
-                }
-
-                if (TryGetConfiguredGameBarProfileName(i, out string profileName))
-                {
-                    RequestGameBarProfilePriority(i, profileName, now);
-                }
-            }
-        }
-
-        private void ActivatePendingGameBarProfiles(DateTime now)
-        {
-            for (int i = 0; i < MAX_DS4_CONTROLLER_COUNT; i++)
-            {
-                if (!gameBarProfilePending[i])
-                {
-                    continue;
-                }
-
-                string profileName = gameBarRequestedProfileName[i];
-                bool actionRan = true;
-                bool profileLoaded = false;
-                if (!string.IsNullOrEmpty(profileName))
-                {
-                    actionRan = RunProfileActionWithReportingPaused(i,
-                        () => profileLoaded = Global.LoadTempProfile(i, profileName, false, this));
-                }
-
-                if (!actionRan)
-                {
-                    StartupDiag($"GameBar profile activation skipped controller={i + 1} target='{profileName}' reason=reporting-action-not-run");
-                    continue;
-                }
-
-                if (profileLoaded)
-                {
-                    gameBarProfileActive[i] = true;
-                    gameBarProfileActivatedUtc[i] = now;
-                    StartupDiag($"GameBar profile activated controller={i + 1} target='{profileName}'");
-                }
-                else
-                {
-                    StartupDiag($"GameBar profile activation failed controller={i + 1} target='{profileName}'");
-                }
-
-                ClearPendingGameBarProfile(i);
-            }
-        }
-
-        private void ClearPendingGameBarProfile(int ind)
-        {
-            gameBarProfilePending[ind] = false;
-            gameBarProfileRequestedUtc[ind] = DateTime.MinValue;
-
-            if (!gameBarProfileActive[ind])
-            {
-                gameBarRequestedProfileName[ind] = string.Empty;
-                gameBarPreviousUseTempProfile[ind] = false;
-                gameBarPreviousTempProfileName[ind] = string.Empty;
-                gameBarPreviousProfileName[ind] = string.Empty;
-            }
-        }
-
-        private bool RestorePreviousGameBarProfile(int ind)
-        {
-            bool actionRan = true;
-            bool restored = false;
-
-            if (gameBarPreviousUseTempProfile[ind] &&
-                !string.IsNullOrEmpty(gameBarPreviousTempProfileName[ind]))
-            {
-                actionRan = RunProfileActionWithReportingPaused(ind,
-                    () => restored = Global.LoadTempProfile(ind, gameBarPreviousTempProfileName[ind], false, this));
-                if (!actionRan)
-                {
-                    StartupDiag($"GameBar profile restore skipped controller={ind + 1} targetTemp='{gameBarPreviousTempProfileName[ind]}' reason=reporting-action-not-run");
-                    return false;
-                }
-
-                if (restored)
-                {
-                    StartupDiag($"GameBar profile restored controller={ind + 1} tempProfile='{gameBarPreviousTempProfileName[ind]}'");
-                    return true;
-                }
-            }
-
-            string previousProfileName = gameBarPreviousProfileName[ind];
-            if (!string.IsNullOrEmpty(previousProfileName))
-            {
-                Global.ProfilePath[ind] = previousProfileName;
-                Global.OlderProfilePath[ind] = previousProfileName;
-            }
-
-            actionRan = RunProfileActionWithReportingPaused(ind,
-                () => restored = Global.LoadProfile(ind, false, this));
-            StartupDiag($"GameBar profile restore controller={ind + 1} profile='{previousProfileName}' actionRan={actionRan} restored={restored}");
-            return actionRan && restored;
         }
 
         private bool RunProfileActionWithReportingPaused(int ind, Action action)
@@ -3744,20 +3602,20 @@ namespace DS4Windows
             dualSenseMuteButtonWasDown[ind] = muteDown;
         }
 
-        private void StartGameBarProfileTimer()
+        private void StartGameBarStateTimer()
         {
-            if (gameBarProfileTimer != null)
+            if (gameBarStateTimer != null)
             {
                 return;
             }
 
-            gameBarProfileTimer = new System.Threading.Timer(_ => UpdateGameBarProfileState(),
+            gameBarStateTimer = new System.Threading.Timer(_ => UpdateGameBarState(),
                 null, TimeSpan.FromMilliseconds(100), TimeSpan.FromMilliseconds(100));
         }
 
-        private void StopGameBarProfileTimer()
+        private void StopGameBarStateTimer()
         {
-            System.Threading.Timer timer = Interlocked.Exchange(ref gameBarProfileTimer, null);
+            System.Threading.Timer timer = Interlocked.Exchange(ref gameBarStateTimer, null);
             timer?.Dispose();
         }
 

@@ -231,7 +231,7 @@
                         <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="18,0,0,0">
                             <TextBlock Text="BATTERY" Style="{StaticResource OverviewEyebrowStyle}"
                                        HorizontalAlignment="Right" />
-                            <TextBlock Text="{Binding SelectedController.BatteryState}" Margin="0,5,0,0"
+                            <TextBlock Text="{Binding SelectedControllerBattery}" Margin="0,5,0,0"
                                        FontSize="20" FontWeight="SemiBold"
                                        Foreground="{DynamicResource SuccessColor}" HorizontalAlignment="Right" />
                         </StackPanel>
@@ -274,9 +274,23 @@
                     <Border Style="{StaticResource OverviewCardStyle}" Width="218" MinHeight="112" Margin="6">
                         <StackPanel>
                             <TextBlock Text="CONTROLLER STATUS" Style="{StaticResource OverviewEyebrowStyle}" />
-                            <TextBlock Text="Ready" Margin="0,11,0,3" Style="{StaticResource OverviewValueStyle}"
-                                       Foreground="{DynamicResource SuccessColor}" />
-                             <TextBlock Text="Profile and output are active"
+                            <TextBlock Text="{Binding SelectedControllerStartupTitle}"
+                                       Margin="0,11,0,3">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource OverviewValueStyle}">
+                                        <Setter Property="Foreground" Value="{DynamicResource AccentColor}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SelectedControllerIsReady}" Value="True">
+                                                <Setter Property="Foreground" Value="{DynamicResource SuccessColor}" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding SelectedControllerNeedsAttention}" Value="True">
+                                                <Setter Property="Foreground" Value="#FFFFB020" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                             <TextBlock Text="{Binding SelectedControllerStartupDetail}"
                                         TextWrapping="Wrap"
                                        Foreground="{DynamicResource MutedForegroundColor}" />
                         </StackPanel>
@@ -362,21 +376,30 @@
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
 
-                                 <CheckBox Grid.ColumnSpan="2" Content="Mirror audio to controller speaker"
+                                 <CheckBox Grid.ColumnSpan="2" Content="Stream audio to controller"
                                            Style="{StaticResource OverviewToggleStyle}"
                                           IsChecked="{Binding SpeakerOutputEnabled, Mode=TwoWay}"
+                                          ToolTip="Streams the selected audio to the controller speaker and to a headset connected to its AUX port."
                                           Margin="0,0,0,12" />
-                                <TextBlock Grid.Row="1" Text="Speaker level" VerticalAlignment="Center" />
-                                <TextBlock Grid.Row="1" Grid.Column="1"
+                                <CheckBox Grid.Row="1" Grid.ColumnSpan="2"
+                                          Content="Headset only (mute controller speaker)"
+                                          Style="{StaticResource OverviewToggleStyle}"
+                                          IsChecked="{Binding HeadsetOnlyAudio, Mode=TwoWay}"
+                                          IsEnabled="{Binding SpeakerOutputEnabled}"
+                                          ToolTip="Mutes the built-in speaker while continuing the same stream through a headset connected to the controller's AUX port."
+                                          Margin="0,0,0,12" />
+                                <TextBlock Grid.Row="2" Text="Speaker level" VerticalAlignment="Center" />
+                                <TextBlock Grid.Row="2" Grid.Column="1"
                                            Text="{Binding SpeakerVolumePercent, StringFormat={}{0}%}"
                                            Foreground="{DynamicResource AccentColor}" />
-                                 <Slider Grid.Row="2" Grid.ColumnSpan="2" Margin="0,7,0,14"
+                                 <Slider Grid.Row="3" Grid.ColumnSpan="2" Margin="0,7,0,14"
                                          Style="{StaticResource OverviewQuickSliderStyle}"
                                         Minimum="0" Maximum="100" TickFrequency="1"
                                         Value="{Binding SpeakerVolumePercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />

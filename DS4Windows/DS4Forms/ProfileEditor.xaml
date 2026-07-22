@@ -2163,7 +2163,8 @@
             </TabItem>
 
             <TabItem Header="Audio Haptics" Tag="Turn system or app audio into advanced controller haptics">
-                <local:AudioHapticsControl x:Name="profileAudioHapticsControl" />
+                <local:AudioHapticsControl x:Name="profileAudioHapticsControl"
+                                           SettingsChanged="ProfileAudioHapticsControl_SettingsChanged" />
             </TabItem>
 
             <TabItem Header="Trigger Lab" Tag="Build persistent adaptive-trigger effects for this profile">
@@ -2307,6 +2308,7 @@
                                                     <RowDefinition Height="Auto" />
                                                     <RowDefinition Height="Auto" />
                                                     <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
                                                     <RowDefinition Height="30" />
                                                     <RowDefinition Height="30" />
                                                     <RowDefinition Height="30" />
@@ -2319,15 +2321,29 @@
                                                     <ColumnDefinition />
                                                 </Grid.ColumnDefinitions>
 
-                                                <CheckBox Content="Mirror audio to controller speaker" IsChecked="{Binding DualSenseEnableSpeakerOutput}"
-                                                          Grid.Row="0" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}"
-                                                          ToolTip="Mirrors the selected Windows playback endpoint to a physical controller speaker. DualShock 4 and DualSense use their native Bluetooth audio streams; USB DualSense uses its Windows speaker endpoint." />
+                                                <StackPanel Grid.Row="0" Grid.ColumnSpan="2">
+                                                    <CheckBox Content="Stream audio to controller" IsChecked="{Binding DualSenseEnableSpeakerOutput}"
+                                                              Margin="{StaticResource spaceMargin}"
+                                                              ToolTip="Streams the selected audio to the controller speaker and to a headset connected to its AUX port." />
+                                                    <CheckBox Content="Headset only (mute controller speaker)"
+                                                              IsChecked="{Binding DualSenseHeadsetOnlyAudio}"
+                                                              IsEnabled="{Binding DualSenseEnableSpeakerOutput}"
+                                                              Margin="20,2,3,7"
+                                                              ToolTip="Mutes the built-in speaker while continuing the same stream through a headset connected to the controller's AUX port." />
+                                                </StackPanel>
                                                 <Label Content="Audio source:" Grid.Row="1" Grid.Column="0"
                                                        ToolTip="For game audio, select the virtual Wireless Controller endpoint created by a VIIPER PlayStation output. The first stereo pair is mirrored to the physical controller speaker." />
                                                 <ComboBox ItemsSource="{Binding AudioCaptureEndpointChoices}" DisplayMemberPath="Name" SelectedValuePath="EndpointId"
                                                           SelectedValue="{Binding DualSenseAudioCaptureEndpointId}" Grid.Row="1" Grid.Column="1"
                                                           Margin="{StaticResource spaceMargin}" />
-                                                <Grid Grid.Row="2" Grid.ColumnSpan="2" MinHeight="30"
+                                                <Border Grid.Row="2" Grid.ColumnSpan="2" Margin="3,2,3,7" Padding="9,6"
+                                                        Background="#26FFB020" BorderBrush="#80FFB020" BorderThickness="1"
+                                                        CornerRadius="3"
+                                                        Visibility="{Binding AudioHapticsSpeakerOverrideActive, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                    <TextBlock Text="Audio Haptics is currently supplying the selected app to this controller. Choose another Audio source here to release that override."
+                                                               TextWrapping="Wrap" FontSize="11" Foreground="#FFFFC45C" />
+                                                </Border>
+                                                <Grid Grid.Row="3" Grid.ColumnSpan="2" MinHeight="30"
                                                       Visibility="{Binding ShowUsbDualSenseSpeakerSelector, Converter={StaticResource BooleanToVisibilityConverter}}">
                                                     <Grid.ColumnDefinitions>
                                                         <ColumnDefinition Width="Auto" />
@@ -2339,22 +2355,22 @@
                                                               SelectedValue="{Binding DualSenseAudioSpeakerEndpointId}" Grid.Column="1"
                                                               Margin="{StaticResource spaceMargin}" />
                                                 </Grid>
-                                                <Label Content="Speaker volume:" Grid.Row="3" Grid.Column="0" />
-                                                <xctk:IntegerUpDown Value="{Binding DualSenseSpeakerVolume}" Minimum="0" Maximum="255" Grid.Row="3" Grid.Column="1"
+                                                <Label Content="Speaker volume:" Grid.Row="4" Grid.Column="0" />
+                                                <xctk:IntegerUpDown Value="{Binding DualSenseSpeakerVolume}" Minimum="0" Maximum="255" Grid.Row="4" Grid.Column="1"
                                                                     Margin="{StaticResource spaceMargin}" />
-                                                <Label Content="Dynamic range:" Grid.Row="4" Grid.Column="0"
+                                                <Label Content="Dynamic range:" Grid.Row="5" Grid.Column="0"
                                                        ToolTip="Bluetooth speaker processing. Balanced raises quieter details and restrains loud effects. Strong narrows the range further. Processing is applied before native encoding (Opus on DualSense, SBC on DualShock 4) without look-ahead latency." />
-                                                <ComboBox SelectedIndex="{Binding DualSenseSpeakerCompressionIndex}" Grid.Row="4" Grid.Column="1"
+                                                <ComboBox SelectedIndex="{Binding DualSenseSpeakerCompressionIndex}" Grid.Row="5" Grid.Column="1"
                                                           Margin="{StaticResource spaceMargin}">
                                                     <ComboBoxItem Content="Off" />
                                                     <ComboBoxItem Content="Balanced" />
                                                     <ComboBoxItem Content="Strong" />
                                                 </ComboBox>
-                                                <Label Content="Bass/body boost:" Grid.Row="5" Grid.Column="0"
+                                                <Label Content="Bass/body boost:" Grid.Row="6" Grid.Column="0"
                                                        ToolTip="Adds up to 6 dB around 200 Hz while filtering unusable sub-bass. Applies only to the Bluetooth controller speaker stream." />
-                                                <xctk:IntegerUpDown Value="{Binding DualSenseSpeakerBassBoost}" Minimum="0" Maximum="6" Grid.Row="5" Grid.Column="1"
+                                                <xctk:IntegerUpDown Value="{Binding DualSenseSpeakerBassBoost}" Minimum="0" Maximum="6" Grid.Row="6" Grid.Column="1"
                                                                     Margin="{StaticResource spaceMargin}" />
-                                                <StackPanel Grid.Row="6" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}">
+                                                <StackPanel Grid.Row="7" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}">
                                                     <CheckBox Content="{Binding ControllerMicrophoneToggleLabel}"
                                                               IsChecked="{Binding DualSenseEnableMicrophonePassthrough}"
                                                               IsEnabled="{Binding CanChangeControllerMicrophoneInput}"
@@ -2364,16 +2380,16 @@
                                                                Margin="20,4,0,3" FontSize="11" TextWrapping="Wrap"
                                                                Foreground="{DynamicResource MutedForegroundColor}" />
                                                 </StackPanel>
-                                                <Label Content="Microphone level:" Grid.Row="7" Grid.Column="0"
+                                                <Label Content="Microphone level:" Grid.Row="8" Grid.Column="0"
                                                        IsEnabled="{Binding ControllerMicrophoneLevelControlsEnabled}"
                                                        ToolTip="Adjusts the physical microphone level and the safely trimmed signal exposed to Windows." />
-                                                <xctk:IntegerUpDown Value="{Binding DualSenseMicrophoneVolume}" Minimum="0" Maximum="255" Grid.Row="7" Grid.Column="1"
+                                                <xctk:IntegerUpDown Value="{Binding DualSenseMicrophoneVolume}" Minimum="0" Maximum="255" Grid.Row="8" Grid.Column="1"
                                                                     IsEnabled="{Binding ControllerMicrophoneLevelControlsEnabled}"
                                                                     Margin="{StaticResource spaceMargin}" />
-                                                <Label Content="Noise suppression:" Grid.Row="8" Grid.Column="0"
+                                                <Label Content="Noise suppression:" Grid.Row="9" Grid.Column="0"
                                                        IsEnabled="{Binding ControllerMicrophoneLevelControlsEnabled}"
                                                        ToolTip="Balanced applies RNNoise speech cleanup. Strong also reduces low-level residual noise. Off retains only gain, high-pass, and clipping protection." />
-                                                <ComboBox SelectedIndex="{Binding DualSenseMicrophoneNoiseSuppressionIndex}" Grid.Row="8" Grid.Column="1"
+                                                <ComboBox SelectedIndex="{Binding DualSenseMicrophoneNoiseSuppressionIndex}" Grid.Row="9" Grid.Column="1"
                                                           IsEnabled="{Binding ControllerMicrophoneLevelControlsEnabled}"
                                                           Margin="{StaticResource spaceMargin}">
                                                     <ComboBoxItem Content="Off" />
@@ -2523,29 +2539,13 @@
                                        Foreground="{DynamicResource MutedForegroundColor}" />
                         </StackPanel>
                         <GroupBox Header="Game Bar" Margin="0,8,0,0" Padding="2,4">
-                            <Grid>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition />
-                                </Grid.ColumnDefinitions>
-
+                            <StackPanel>
                                 <CheckBox Content="Enable Game Bar controller compatibility" IsChecked="{Binding GameBarControllerCompatibility}"
-                                          Grid.Row="0" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}"
+                                          Margin="{StaticResource spaceMargin}"
                                           ToolTip="While Xbox Game Bar is visible, temporarily route this profile's mapped input through an Xbox-compatible controller. The selected profile and native DualSense output stay configured." />
-                                <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Margin="8,0,8,6" TextWrapping="Wrap"
-                                           Text="Keeps the current profile loaded. A temporary XInput companion is used only while Game Bar is open." />
-                                <CheckBox Content="Switch to a different profile while Game Bar is visible (legacy)" IsChecked="{Binding GameBarHomeButtonSupport}"
-                                          Grid.Row="2" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}"
-                                          ToolTip="Pressing Home opens Xbox Game Bar and switches this controller to the profile selected below while Game Bar is visible." />
-                                <Label Content="Profile:" Grid.Row="3" Grid.Column="0" />
-                                <ComboBox ItemsSource="{Binding GameBarProfileChoices}" SelectedItem="{Binding GameBarProfileName}" Grid.Row="3" Grid.Column="1" Margin="{StaticResource spaceMargin}" />
-                            </Grid>
+                                <TextBlock Margin="8,0,8,6" TextWrapping="Wrap"
+                                           Text="Keeps this profile and its native output active. Only mapped input is temporarily sent through an Xbox-compatible companion while Game Bar is open; audio, haptics, lighting, and microphone routing stay untouched." />
+                            </StackPanel>
                         </GroupBox>
                         <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
                             <CheckBox x:Name="launchProgCk" Content="{lex:Loc LaunchProgramWithProfile}" IsChecked="{Binding LaunchProgramExists}" IsEnabled="{Binding LaunchProgramExists}" />

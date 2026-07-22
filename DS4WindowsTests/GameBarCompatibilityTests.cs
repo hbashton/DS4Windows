@@ -79,5 +79,40 @@ namespace DS4WindowsTests
             StringAssert.Contains(writer.ToString(),
                 "<GameBarControllerCompatibility>True</GameBarControllerCompatibility>");
         }
+
+        [TestMethod]
+        public void LegacyProfileSwitcherMigratesToCompanionAndIsNotRewritten()
+        {
+            const string xml = """
+                <DS4Windows>
+                  <GameBarHomeButtonSupport>True</GameBarHomeButtonSupport>
+                  <GameBarProfileName>Legacy Game Bar</GameBarProfileName>
+                </DS4Windows>
+                """;
+            var serializer = new XmlSerializer(typeof(ProfileDTO),
+                ProfileDTO.GetAttributeOverrides());
+            ProfileDTO dto;
+            using (var reader = new StringReader(xml))
+            {
+                dto = (ProfileDTO)serializer.Deserialize(reader);
+            }
+
+            var store = new BackingStore();
+            dto.DeviceIndex = 0;
+            dto.MapTo(store);
+            Assert.IsTrue(store.gameBarControllerCompatibility[0]);
+            Assert.IsFalse(store.gameBarHomeButtonSupport[0]);
+            Assert.AreEqual(string.Empty, store.gameBarProfileName[0]);
+
+            var migrated = new ProfileDTO { DeviceIndex = 0 };
+            migrated.MapFrom(store);
+            using var writer = new StringWriter();
+            serializer.Serialize(writer, migrated);
+            string migratedXml = writer.ToString();
+            StringAssert.Contains(migratedXml,
+                "<GameBarControllerCompatibility>True</GameBarControllerCompatibility>");
+            Assert.IsFalse(migratedXml.Contains("GameBarHomeButtonSupport"));
+            Assert.IsFalse(migratedXml.Contains("GameBarProfileName"));
+        }
     }
 }

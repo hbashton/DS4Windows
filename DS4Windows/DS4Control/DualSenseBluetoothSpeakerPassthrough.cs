@@ -484,7 +484,7 @@ namespace DS4Windows
         private readonly AutoResetEvent pacerLifecycleRequested =
             new AutoResetEvent(false);
 
-        private WasapiCapture capture;
+        private IWaveIn capture;
         private BufferedWaveProvider captureBuffer;
         private Thread worker;
         private Thread capturePump;
@@ -762,9 +762,22 @@ namespace DS4Windows
             }
         }
 
-        private static WasapiCapture CreateCapture(string endpointId,
+        private static IWaveIn CreateCapture(string endpointId,
             ControllerAudioEndpointKind endpointKind, out string sourceName)
         {
+            if (ProcessLoopbackWaveCapture.TryParseEndpointId(endpointId,
+                    out int processId))
+            {
+                sourceName = $"selected app (process {processId})";
+                return new ProcessLoopbackWaveCapture(processId);
+            }
+
+            if (ProcessLoopbackWaveCapture.IsProcessEndpointId(endpointId))
+            {
+                throw new InvalidOperationException(
+                    "The selected app is not running, so its audio cannot be streamed to the controller.");
+            }
+
             bool useSystemDefault = string.Equals(endpointId,
                 DualSenseAudioPassthrough.DefaultSystemAudioEndpointId,
                 StringComparison.Ordinal) ||
@@ -2508,7 +2521,7 @@ namespace DS4Windows
                 }
             }
 
-            WasapiCapture oldCapture;
+            IWaveIn oldCapture;
             lock (syncRoot)
             {
                 oldCapture = capture;
@@ -2627,7 +2640,7 @@ namespace DS4Windows
                 device.ResetBluetoothSpeakerSession(speakerSessionId);
             }
 
-            WasapiCapture oldCapture;
+            IWaveIn oldCapture;
             lock (syncRoot)
             {
                 oldCapture = capture;

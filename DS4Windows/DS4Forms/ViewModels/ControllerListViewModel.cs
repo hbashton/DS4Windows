@@ -216,6 +216,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         private int selectedIndex = -1;
         private int devIndex;
 
+        public bool IsSynchronizingRuntimeProfile { get; private set; }
+
         private ControllerUiCapabilities UiCapabilities =>
             uiCapabilities ??= ControllerUiCapabilities.ForDevice(device);
 
@@ -482,7 +484,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public void ChangeSelectedProfile()
         {
-            if (selectedIndex == -1)
+            if (IsSynchronizingRuntimeProfile || selectedIndex == -1)
             {
                 return;
             }
@@ -529,6 +531,54 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             }
 
             LightColorChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        public bool SynchronizeRuntimeProfile()
+        {
+            string runtimeProfile = Global.ProfilePath[devIndex] ?? string.Empty;
+            if (SelectedProfile == runtimeProfile &&
+                ((string.IsNullOrEmpty(runtimeProfile) &&
+                    selectedEntity == null && selectedIndex == -1) ||
+                 selectedEntity?.Name == runtimeProfile))
+            {
+                return false;
+            }
+
+            ProfileEntity runtimeEntity = profileListHolder.ProfileListCol
+                .SingleOrDefault(item => item.Name == runtimeProfile);
+            int runtimeIndex = runtimeEntity == null
+                ? -1
+                : profileListHolder.ProfileListCol.IndexOf(runtimeEntity);
+            if (SelectedProfile == runtimeProfile &&
+                ReferenceEquals(selectedEntity, runtimeEntity) &&
+                selectedIndex == runtimeIndex)
+            {
+                return false;
+            }
+
+            IsSynchronizingRuntimeProfile = true;
+            try
+            {
+                if (selectedEntity != null)
+                {
+                    HookEvents(false);
+                }
+
+                selectedEntity = runtimeEntity;
+                SelectedProfile = runtimeProfile;
+                SelectedIndex = runtimeIndex;
+                if (selectedEntity != null)
+                {
+                    HookEvents(true);
+                }
+
+                LightColorChanged?.Invoke(this, EventArgs.Empty);
+                return true;
+            }
+            finally
+            {
+                IsSynchronizingRuntimeProfile = false;
+            }
         }
 
         private void HookEvents(bool state)

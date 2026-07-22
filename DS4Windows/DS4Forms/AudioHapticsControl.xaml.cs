@@ -87,7 +87,10 @@ namespace DS4WinWPF.DS4Forms
                 attackCombo.SelectedIndex = (int)settings.Attack;
                 releaseCombo.SelectedIndex = (int)settings.Release;
                 SelectStoredSource(settings);
+                streamAppToSpeakerToggle.IsChecked =
+                    settings.StreamAppAudioToController;
                 SetEditorEnabled(true);
+                UpdateAppSpeakerOption(settings);
                 UpdateModeVisuals(settings.Mode);
                 UpdateStatus(settings);
             }
@@ -215,6 +218,21 @@ namespace DS4WinWPF.DS4Forms
             responseCombo.IsEnabled = hasDevice;
             attackCombo.IsEnabled = hasDevice;
             releaseCombo.IsEnabled = hasDevice;
+            streamAppToSpeakerToggle.IsEnabled = hasDevice;
+        }
+
+        private void UpdateAppSpeakerOption(
+            AudioHapticsProfileSettings settings)
+        {
+            bool appSelected = settings?.Source ==
+                AudioHapticsSourceKind.AppSession;
+            streamAppToSpeakerPanel.Visibility = appSelected
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            streamAppToSpeakerToggle.IsEnabled =
+                CurrentSettings != null && appSelected;
+            streamAppToSpeakerToggle.IsChecked = appSelected &&
+                settings.StreamAppAudioToController;
         }
 
         private void UpdateModeVisuals(AudioHapticsMode mode)
@@ -297,6 +315,7 @@ namespace DS4WinWPF.DS4Forms
             update(CurrentSettings);
             CurrentSettings.Normalize();
             UpdateModeVisuals(CurrentSettings.Mode);
+            UpdateAppSpeakerOption(CurrentSettings);
             UpdateStatus(CurrentSettings);
             SettingsChanged?.Invoke(this, new ProfileFeatureSettingsChangedEventArgs(deviceIndex));
         }
@@ -328,6 +347,18 @@ namespace DS4WinWPF.DS4Forms
                 settings.SessionInstanceIdentifier = choice.SessionInstanceIdentifier;
             });
         }
+        private void StreamAppToSpeakerToggle_Click(object sender,
+            RoutedEventArgs e) => Commit(settings =>
+            {
+                settings.StreamAppAudioToController =
+                    streamAppToSpeakerToggle.IsChecked == true &&
+                    settings.Source == AudioHapticsSourceKind.AppSession;
+                if (settings.StreamAppAudioToController && deviceIndex >= 0 &&
+                    deviceIndex < Global.TEST_PROFILE_ITEM_COUNT)
+                {
+                    Global.DualSenseEnableSpeakerOutput[deviceIndex] = true;
+                }
+            });
         private void MixMode_Click(object sender, RoutedEventArgs e) => Commit(settings => settings.Mode = AudioHapticsMode.Mix);
         private void ReplaceMode_Click(object sender, RoutedEventArgs e) => Commit(settings => settings.Mode = AudioHapticsMode.Replace);
         private void BassFocusCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) => Commit(settings => settings.BassFocus = (AudioHapticsBassFocus)Math.Max(0, bassFocusCombo.SelectedIndex));

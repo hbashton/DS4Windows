@@ -760,22 +760,10 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             set => Global.EnableOutputDataToDS4[device] = value;
         }
 
-        public bool GameBarHomeButtonSupport
-        {
-            get => Global.GameBarHomeButtonSupport[device];
-            set => Global.GameBarHomeButtonSupport[device] = value;
-        }
-
         public bool GameBarControllerCompatibility
         {
             get => Global.GameBarControllerCompatibility[device];
             set => Global.GameBarControllerCompatibility[device] = value;
-        }
-
-        public string GameBarProfileName
-        {
-            get => Global.GameBarProfileName[device];
-            set => Global.GameBarProfileName[device] = value ?? string.Empty;
         }
 
         public bool DualSenseMuteButtonLightEnabled
@@ -800,11 +788,6 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         {
             get => Global.DualSenseMuteOffProfileName[device];
             set => Global.DualSenseMuteOffProfileName[device] = value ?? string.Empty;
-        }
-
-        public List<string> GameBarProfileChoices
-        {
-            get => GetProfileChoices(false);
         }
 
         public List<string> OptionalProfileChoices
@@ -3202,6 +3185,12 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             set => Global.DualSenseEnableSpeakerOutput[device] = value;
         }
 
+        public bool DualSenseHeadsetOnlyAudio
+        {
+            get => Global.DualSenseHeadsetOnlyAudio[device];
+            set => Global.DualSenseHeadsetOnlyAudio[device] = value;
+        }
+
         public List<AudioEndpointChoice> AudioCaptureEndpointChoices
         {
             get
@@ -3244,8 +3233,37 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     DualSenseAudioPassthrough.AutoDetectGameAudioEndpointId,
                     StringComparison.Ordinal) ? string.Empty : endpointId;
             }
-            set => Global.DualSenseAudioCaptureEndpointId[device] = value ?? string.Empty;
+            set
+            {
+                string normalized = value ?? string.Empty;
+                if (Global.DualSenseAudioCaptureEndpointId[device] == normalized)
+                {
+                    return;
+                }
+
+                Global.DualSenseAudioCaptureEndpointId[device] = normalized;
+                AudioHapticsProfileSettings audioHaptics =
+                    Global.store.audioHapticsSettings[device];
+                if (audioHaptics?.StreamAppAudioToController == true)
+                {
+                    audioHaptics.StreamAppAudioToController = false;
+                    RaiseAudioHapticsSpeakerOverrideStateChanged();
+                }
+            }
         }
+
+        public bool AudioHapticsSpeakerOverrideActive =>
+            Global.store.audioHapticsSettings[device]?.Enabled == true &&
+            Global.store.audioHapticsSettings[device]?.Source ==
+                AudioHapticsSourceKind.AppSession &&
+            Global.store.audioHapticsSettings[device]
+                .StreamAppAudioToController;
+
+        public event EventHandler AudioHapticsSpeakerOverrideActiveChanged;
+
+        public void RaiseAudioHapticsSpeakerOverrideStateChanged() =>
+            AudioHapticsSpeakerOverrideActiveChanged?.Invoke(this,
+                EventArgs.Empty);
 
         public List<AudioEndpointChoice> AudioSpeakerEndpointChoices
         {

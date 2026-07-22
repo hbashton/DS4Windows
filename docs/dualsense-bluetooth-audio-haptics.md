@@ -23,9 +23,9 @@ native sample rate and channel layout.
 ## In-game setup
 
 1. Install a VIIPER build containing the DualSense UAC interface.
-2. Select **DualSense (VIIPER)** in the DS4Windows profile.
+2. Select **DualSense** in the DS4Windows profile.
 3. Connect a physical DualSense or DualSense Edge over Bluetooth.
-4. In the profile's **DualSense Audio** section, enable **Mirror audio to controller speaker**.
+4. In the profile's **Controller audio** section, enable **Stream audio to controller**.
 5. Select the virtual `Wireless Controller` / DualSense render endpoint as **Audio source**.
 6. In the game, select that same endpoint when the game provides a controller-audio output choice.
 
@@ -39,7 +39,7 @@ The profile can optionally process the physical Bluetooth controller-speaker str
 - **Dynamic range: Strong** applies a narrower range for larger volume differences.
 - **Bass/body boost** adds 0-6 dB around 200 Hz and filters unusable sub-bass below 70 Hz.
 
-Selecting a VIIPER DualSense or DualSense Edge as the emulated controller initializes the profile to **Balanced** and **3 dB** of bass/body boost. The user can tune or disable those values afterward. The processor is stereo-linked and bufferless, so it adds no look-ahead frame or transport latency. **Off** and **0 dB** preserve the original PCM path. These controls affect speaker audio only; advanced-haptics channels remain untouched.
+Selecting a DualSense or DualSense Edge as the emulated controller initializes the profile to **Balanced** and **3 dB** of bass/body boost. The user can tune or disable those values afterward. The processor is stereo-linked and bufferless, so it adds no look-ahead frame or transport latency. **Off** and **0 dB** preserve the original PCM path. These controls affect speaker audio only; advanced-haptics channels remain untouched.
 
 ## Implementation references
 

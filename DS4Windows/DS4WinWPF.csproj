@@ -188,6 +188,9 @@
 		<None Include="Resources\DualSense-Config_TouchMulti.png" />
 		<None Include="Resources\DualSense-Config_TouchRight.png" />
 		<None Include="Resources\DualSense-Config_TouchUpper.png" />
+		<None Include="Resources\DualShock4-Config_Highlights.png" />
+		<None Include="Resources\DualSenseEdge-Config_Highlights.png" />
+		<None Include="Resources\Switch2Pro-Config_Highlights.png" />
 
 		<None Include="Resources\0.ico" />
 		<None Include="Resources\10.ico" />
@@ -283,6 +286,9 @@
 		<Resource Include="Resources\DualSense-Config_TouchMulti.png" />
 		<Resource Include="Resources\DualSense-Config_TouchRight.png" />
 		<Resource Include="Resources\DualSense-Config_TouchUpper.png" />
+		<Resource Include="Resources\DualShock4-Config_Highlights.png" />
+		<Resource Include="Resources\DualSenseEdge-Config_Highlights.png" />
+		<Resource Include="Resources\Switch2Pro-Config_Highlights.png" />
 
 		<Resource Include="Resources\0.ico" />
 		<Resource Include="Resources\10.ico" />

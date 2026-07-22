@@ -92,17 +92,42 @@
                                                Foreground="{DynamicResource MutedForegroundColor}" />
                                 </StackPanel>
                                 <ComboBox x:Name="controllerDiagramSelector" Grid.Column="1"
-                                          Width="156" MinHeight="34" VerticalAlignment="Center"
+                                          Width="218" MinHeight="38" VerticalAlignment="Center"
                                           SelectionChanged="ControllerDiagramSelector_SelectionChanged"
                                           ToolTip="Choose the controller artwork used by the remapping diagram">
-                                    <ComboBoxItem Content="DualShock 4" />
-                                    <ComboBoxItem Content="DualSense" />
-                                    <ComboBoxItem Content="DualSense Edge" />
+                                    <ComboBoxItem>
+                                        <StackPanel Orientation="Horizontal">
+                                            <Image Source="/DS4Windows;component/Resources/DualShock 4 Controller.png"
+                                                   Width="44" Height="26" Stretch="Uniform" Margin="0,0,9,0" />
+                                            <TextBlock Text="DualShock 4" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </ComboBoxItem>
+                                    <ComboBoxItem>
+                                        <StackPanel Orientation="Horizontal">
+                                            <Image Source="/DS4Windows;component/Resources/DualSense Controller.png"
+                                                   Width="44" Height="26" Stretch="Uniform" Margin="0,0,9,0" />
+                                            <TextBlock Text="DualSense" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </ComboBoxItem>
+                                    <ComboBoxItem>
+                                        <StackPanel Orientation="Horizontal">
+                                            <Image Source="/DS4Windows;component/Resources/DualSense Edge Controller.png"
+                                                   Width="44" Height="26" Stretch="Uniform" Margin="0,0,9,0" />
+                                            <TextBlock Text="DualSense Edge" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </ComboBoxItem>
+                                    <ComboBoxItem>
+                                        <StackPanel Orientation="Horizontal">
+                                            <Image Source="/DS4Windows;component/Resources/Switch 2 Pro Controller.png"
+                                                   Width="44" Height="26" Stretch="Uniform" Margin="0,0,9,0" />
+                                            <TextBlock Text="Switch 2 Pro" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </ComboBoxItem>
                                 </ComboBox>
                             </Grid>
                             <Viewbox Grid.Row="1" Stretch="Uniform" StretchDirection="DownOnly"
                                      HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,10">
-                    <Canvas x:Name="conCanvas" Width="440" Height="240">
+                    <Canvas x:Name="conCanvas" Width="440" Height="244">
                         <Canvas.Resources>
                             <ContextMenu x:Key="presetMenu">
                                 <MenuItem x:Name="controlNameItem" Header="Name" IsEnabled="False" />
@@ -209,6 +234,8 @@
                         <Button Content="Share" x:Name="shareConBtn" Canvas.Left="134" Canvas.Top="63" Width="16" Height="24" Style="{StaticResource NoBGHoverBtn}" Click="HoverConBtn_Click" MouseEnter="ContBtn_MouseEnter" MouseLeave="ContBtn_MouseLeave" />
                         <Button Content="Options" x:Name="optionsConBtn" Canvas.Left="291" Canvas.Top="63" Width="16" Height="24" Style="{StaticResource NoBGHoverBtn}" Click="HoverConBtn_Click" MouseEnter="ContBtn_MouseEnter" MouseLeave="ContBtn_MouseLeave" />
                         <Button Content="Guide" x:Name="guideConBtn" Canvas.Left="211" Canvas.Top="144" Width="20" Height="20" Style="{StaticResource NoBGHoverBtn}" Click="HoverConBtn_Click" MouseEnter="ContBtn_MouseEnter" MouseLeave="ContBtn_MouseLeave" />
+                        <Button Content="Capture" x:Name="captureConBtn" Canvas.Left="0" Canvas.Top="0" Width="0" Height="0" Style="{StaticResource NoBGHoverBtn}" Visibility="Collapsed"
+                                Click="HoverConBtn_Click" MouseEnter="ContBtn_MouseEnter" MouseLeave="ContBtn_MouseLeave" />
                         <Button Content="Mute" x:Name="muteConBtn" Canvas.Left="0" Canvas.Top="0" Width="0" Height="0" Style="{StaticResource NoBGHoverBtn}" Visibility="Collapsed"
                                 Click="HoverConBtn_Click" MouseEnter="ContBtn_MouseEnter" MouseLeave="ContBtn_MouseLeave" />
                         <Button Content="Function Left" x:Name="fnlConBtn" Canvas.Left="0" Canvas.Top="0" Width="0" Height="0" Style="{StaticResource NoBGHoverBtn}" Visibility="Collapsed"
@@ -256,7 +283,7 @@
                         <Button Content="Left" x:Name="leftConBtn" Canvas.Left="56" Canvas.Top="103" Width="35" Height="20" Style="{StaticResource NoBGHoverBtn}" Click="HoverConBtn_Click" MouseEnter="ContBtn_MouseEnter" MouseLeave="ContBtn_MouseLeave"
                                 MouseRightButtonUp="ConBtn_MouseRightButtonUp" />
 
-                        <Label x:Name="highlightControlDisplayLb" Content="" Canvas.Left="150" Canvas.Top="208" MinWidth="150"
+                        <Label x:Name="highlightControlDisplayLb" Content="" Canvas.Left="150" Canvas.Top="220" MinWidth="150"
                                HorizontalContentAlignment="Center">
                             <Label.Foreground>
                                 <SolidColorBrush Color="{DynamicResource {x:Static SystemColors.ControlColorKey}}"/>

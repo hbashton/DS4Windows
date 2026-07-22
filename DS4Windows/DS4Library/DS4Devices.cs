@@ -280,7 +280,8 @@ namespace DS4Windows
         // The pending guard rejects the arriving virtual HID immediately; the path
         // registry then keeps rejecting it for the rest of that output's lifetime.
         public static void RegisterOwnVirtualSonyAsync(
-            HashSet<string> beforePaths)
+            HashSet<string> beforePaths,
+            Action<IReadOnlyCollection<string>> registeredCallback = null)
         {
             var worker = new System.Threading.Thread(() =>
             {
@@ -311,6 +312,7 @@ namespace DS4Windows
                         return;
                     }
 
+                    List<string> registeredPaths = new List<string>();
                     lock (ownVirtualLock)
                     {
                         foreach (string path in after)
@@ -318,11 +320,26 @@ namespace DS4Windows
                             if (beforePaths == null || !beforePaths.Contains(path))
                             {
                                 ownVirtualSonyPaths.Add(path);
+                                registeredPaths.Add(path);
                             }
                         }
 
                         ownVirtualSonyPaths.RemoveWhere(path =>
                             !after.Contains(path));
+                    }
+
+                    if (registeredPaths.Count > 0 && registeredCallback != null)
+                    {
+                        try
+                        {
+                            registeredCallback(registeredPaths);
+                        }
+                        catch (Exception ex)
+                        {
+                            AppLogger.LogToGui(
+                                $"VIIPER virtual Sony visibility cleanup failed: {ex.Message}",
+                                true);
+                        }
                     }
                 }
                 finally

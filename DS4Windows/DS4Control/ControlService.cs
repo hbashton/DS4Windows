@@ -233,7 +233,8 @@ namespace DS4Windows
                 };
             }
 
-            outputslotMan = new OutputSlotManager();
+            outputslotMan = new OutputSlotManager(
+                EnsureHidHideDoesNotCloakVirtualSonyOutputs);
             //outputslotMan.SlotAssigned += OutputslotMan_SlotAssigned;
             deviceOptions = Global.DeviceOptions;
 
@@ -1179,6 +1180,76 @@ namespace DS4Windows
             else if (ViiperOutDevice.IsViiperType(contType))
             {
                 LogDebug($"VIIPER {contType} output is active but the physical {device.DisplayName} could not be hidden with HidHide. Games may detect both the physical controller and the virtual controller.", true);
+            }
+        }
+
+        /// <summary>
+        /// A VIIPER Sony output is a complete USB/IP HID, so an instance path
+        /// accidentally retained in HidHide's persistent blacklist makes the
+        /// virtual controller healthy and writable inside DS4Windows while it
+        /// is invisible to games. Remove only the exact before/after paths that
+        /// this process just created; physical Sony controllers stay cloaked.
+        /// </summary>
+        private void EnsureHidHideDoesNotCloakVirtualSonyOutputs(
+            IReadOnlyCollection<string> devicePaths)
+        {
+            if (!Global.hidHideInstalled || devicePaths == null ||
+                devicePaths.Count == 0)
+            {
+                return;
+            }
+
+            HashSet<string> instanceIds = new HashSet<string>(
+                devicePaths.Select(Global.GetInstanceIdFromDevicePath)
+                    .Where(instanceId => !string.IsNullOrWhiteSpace(instanceId)),
+                StringComparer.OrdinalIgnoreCase);
+            if (instanceIds.Count == 0)
+            {
+                return;
+            }
+
+            try
+            {
+                using (HidHideAPIDevice hidHideDevice = new HidHideAPIDevice())
+                {
+                    if (!hidHideDevice.IsOpen())
+                    {
+                        StartupDiag(
+                            "Could not open HidHide while exempting a VIIPER virtual Sony output");
+                        return;
+                    }
+
+                    List<string> blacklist = hidHideDevice.GetBlacklist()
+                        .Where(item => !string.IsNullOrWhiteSpace(item))
+                        .ToList();
+                    int removed = blacklist.RemoveAll(item =>
+                        instanceIds.Contains(item));
+                    if (removed == 0)
+                    {
+                        return;
+                    }
+
+                    if (!hidHideDevice.SetBlacklist(blacklist))
+                    {
+                        StartupDiag(
+                            $"HidHide failed to exempt {removed} VIIPER virtual Sony output entr{(removed == 1 ? "y" : "ies")}");
+                        return;
+                    }
+
+                    lock (hidHideSessionLock)
+                    {
+                        hidHidePersistentManagedInstanceIds.ExceptWith(instanceIds);
+                    }
+
+                    StartupDiag(
+                        $"HidHide exempted {removed} VIIPER virtual Sony output entr{(removed == 1 ? "y" : "ies")}: {string.Join(", ", instanceIds)}");
+                    UpdateHidHideAttributes();
+                }
+            }
+            catch (Exception ex)
+            {
+                StartupDiag(
+                    $"HidHide VIIPER virtual-output exemption failed {ex.GetType().Name}: {ex.Message}");
             }
         }
 
@@ -2935,9 +3006,21 @@ namespace DS4Windows
 
         private OutputDevice GetReportOutputDevice(int index)
         {
-            return Volatile.Read(ref gameBarCompatibilityRoutingActive[index]) == 1 ?
-                Volatile.Read(ref gameBarCompatibilityOutputDevices[index]) :
-                outputDevices[index];
+            // The companion pointer is published before routing becomes active
+            // and routing is disabled before the pointer is withdrawn. This
+            // keeps the report path valid throughout VIIPER's comparatively
+            // slow USB/IP plug and unplug operations.
+            if (Volatile.Read(ref gameBarCompatibilityRoutingActive[index]) == 1)
+            {
+                OutputDevice compatibilityOutput = Volatile.Read(
+                    ref gameBarCompatibilityOutputDevices[index]);
+                if (compatibilityOutput != null)
+                {
+                    return compatibilityOutput;
+                }
+            }
+
+            return outputDevices[index];
         }
 
         public bool TryDeferAutoProfileForGameBar(int ind, string profileName)
@@ -3134,11 +3217,9 @@ namespace DS4Windows
                 return;
             }
 
-            Interlocked.Exchange(ref gameBarCompatibilityRoutingActive[index], 1);
             OutputDevice compatibilityOutput = null;
             try
             {
-                nativeOutput.ResetState();
                 compatibilityOutput = EstablishOutDevice(index, OutContType.ViiperX360);
                 if (compatibilityOutput == null)
                 {
@@ -3157,6 +3238,20 @@ namespace DS4Windows
 
                 Interlocked.Exchange(
                     ref gameBarCompatibilityOutputDevices[index], compatibilityOutput);
+                // Commit routing only after the companion is fully connected
+                // and published. The native output continues receiving reports
+                // during the whole USB/IP creation interval.
+                Interlocked.Exchange(ref gameBarCompatibilityRoutingActive[index], 1);
+                try
+                {
+                    nativeOutput.ResetState();
+                }
+                catch (Exception resetEx)
+                {
+                    // The companion is already live. A native neutral-report
+                    // failure must not roll back or tear down the valid route.
+                    StartupDiag($"GameBar compatibility native reset failed controller={index + 1} {resetEx.GetType().Name}: {resetEx.Message}");
+                }
                 gameBarCompatibilityNextRetryUtc[index] = DateTime.MinValue;
                 StartupDiag($"GameBar compatibility activated controller={index + 1} native={Global.OutContType[index]} companion=X360");
             }
@@ -3171,13 +3266,6 @@ namespace DS4Windows
 
                 Interlocked.Exchange(
                     ref gameBarCompatibilityOutputDevices[index], null);
-                try
-                {
-                    nativeOutput.ResetState();
-                }
-                catch
-                {
-                }
                 Interlocked.Exchange(ref gameBarCompatibilityRoutingActive[index], 0);
                 gameBarCompatibilityNextRetryUtc[index] =
                     DateTime.UtcNow + TimeSpan.FromSeconds(2);
@@ -3196,10 +3284,12 @@ namespace DS4Windows
         private void DeactivateGameBarCompatibilityOutputCore(int index)
         {
             gameBarCompatibilityNextRetryUtc[index] = DateTime.MinValue;
+            // Return the report path to the native output before withdrawing or
+            // disconnecting the companion. Reports never observe a null route.
+            Interlocked.Exchange(ref gameBarCompatibilityRoutingActive[index], 0);
             OutputDevice compatibilityOutput = Interlocked.Exchange(
                 ref gameBarCompatibilityOutputDevices[index], null);
-            if (compatibilityOutput == null &&
-                Volatile.Read(ref gameBarCompatibilityRoutingActive[index]) == 0)
+            if (compatibilityOutput == null)
             {
                 return;
             }
@@ -3220,13 +3310,6 @@ namespace DS4Windows
             }
             finally
             {
-                try
-                {
-                    outputDevices[index]?.ResetState();
-                }
-                catch
-                {
-                }
                 Interlocked.Exchange(ref gameBarCompatibilityRoutingActive[index], 0);
             }
 
@@ -3268,7 +3351,7 @@ namespace DS4Windows
                 }
 
                 DateTime now = DateTime.UtcNow;
-                if (now - gameBarLastVisibilityCheckUtc < TimeSpan.FromMilliseconds(350))
+                if (now - gameBarLastVisibilityCheckUtc < TimeSpan.FromMilliseconds(100))
                 {
                     return;
                 }
@@ -3294,14 +3377,16 @@ namespace DS4Windows
                     gameBarInvisibleSinceUtc = now;
                 }
 
+                // The XInput companion is an input route, not a profile. On
+                // the first confirmed hidden state, publish the native route
+                // immediately and remove the temporary device. Keep the older
+                // grace period below only for legacy profile restoration.
+                UpdateGameBarCompatibilityOutputs(false);
+
                 bool visibilityGraceElapsed = gameBarLastVisibleUtc == DateTime.MinValue ||
                     now - gameBarLastVisibleUtc > TimeSpan.FromMilliseconds(1500);
                 bool invisibleStable = gameBarInvisibleSinceUtc != DateTime.MinValue &&
                     now - gameBarInvisibleSinceUtc > TimeSpan.FromMilliseconds(1500);
-                if (visibilityGraceElapsed && invisibleStable)
-                {
-                    UpdateGameBarCompatibilityOutputs(false);
-                }
 
                 for (int i = 0; i < MAX_DS4_CONTROLLER_COUNT; i++)
                 {
@@ -3667,7 +3752,7 @@ namespace DS4Windows
             }
 
             gameBarProfileTimer = new System.Threading.Timer(_ => UpdateGameBarProfileState(),
-                null, TimeSpan.FromMilliseconds(350), TimeSpan.FromMilliseconds(350));
+                null, TimeSpan.FromMilliseconds(100), TimeSpan.FromMilliseconds(100));
         }
 
         private void StopGameBarProfileTimer()

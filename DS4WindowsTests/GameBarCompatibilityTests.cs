@@ -38,6 +38,22 @@ namespace DS4WindowsTests
                 enabled: true, OutContType.ViiperDualSense, dInputOnly: true));
         }
 
+        [DataTestMethod]
+        [DataRow(true, false, false, false, true)]
+        [DataRow(true, false, true, false, true)]
+        [DataRow(true, true, false, false, true)]
+        [DataRow(true, true, true, false, false)]
+        [DataRow(false, true, true, true, true)]
+        [DataRow(false, true, true, false, false)]
+        public void VisibilityLatchChangesOnlyForCompletedSupportedResults(
+            bool confirmedVisible, bool probeCompleted, bool supported,
+            bool probeVisible, bool expected)
+        {
+            Assert.AreEqual(expected,
+                GameBarIntegration.ResolveGameBarApiVisibility(
+                    confirmedVisible, probeCompleted, supported, probeVisible));
+        }
+
         [TestMethod]
         public void ProfileSettingPersistsThroughDtoAndXml()
         {

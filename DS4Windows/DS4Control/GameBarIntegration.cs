@@ -49,8 +49,7 @@ namespace DS4Windows
         private const int MaxAutomationVisitCount = 500;
         private const int MaxAutomationDepth = 5;
         private const int MaxDiagnosticTextLength = 160;
-        private const int LiveGameBarApiPollMs = 1000;
-        private const int LiveGameBarApiCacheMs = 1500;
+        private const int LiveGameBarApiPollMs = 150;
         private const int LiveGameBarApiProbeTimeoutMs = 1500;
         private const int LiveGameBarApiHangMs = 2500;
         private const int LiveAutomationPollMs = 1000;
@@ -377,8 +376,13 @@ namespace DS4Windows
             DateTime now = DateTime.UtcNow;
             lock (gameBarApiPollLock)
             {
-                bool cachedResultIsFresh = gameBarApiPollCachedVisible &&
-                    now - gameBarApiPollLastCompletedUtc < TimeSpan.FromMilliseconds(LiveGameBarApiCacheMs);
+                // This is a confirmed-state latch, not a time cache. Probe
+                // duration varies with CPU and system load, so an in-flight
+                // sample must never make a previously visible overlay appear
+                // hidden. Only a completed, supported API result may change it.
+                bool confirmedVisible = ResolveGameBarApiVisibility(
+                    gameBarApiPollCachedVisible, probeCompleted: false,
+                    supported: false, visible: false);
 
                 bool pollIsStale = gameBarApiPollRunning &&
                     now - gameBarApiPollLastStartedUtc > TimeSpan.FromMilliseconds(LiveGameBarApiHangMs);
@@ -422,8 +426,15 @@ namespace DS4Windows
 
                                 if (pollGeneration == gameBarApiPollGeneration || visible)
                                 {
-                                    gameBarApiPollCachedVisible = visible;
-                                    gameBarApiPollLastCompletedUtc = DateTime.UtcNow;
+                                    gameBarApiPollCachedVisible =
+                                        ResolveGameBarApiVisibility(
+                                            gameBarApiPollCachedVisible,
+                                            probeCompleted: true,
+                                            supported, visible);
+                                    if (supported)
+                                    {
+                                        gameBarApiPollLastCompletedUtc = DateTime.UtcNow;
+                                    }
                                 }
 
                                 if (pollGeneration == gameBarApiPollGeneration)
@@ -441,19 +452,25 @@ namespace DS4Windows
                 }
 
                 summary = includeDiagnostics ?
-                    BuildCachedGameBarApiSummary(now, cachedResultIsFresh, pollIsStale) :
+                    BuildCachedGameBarApiSummary(now, confirmedVisible, pollIsStale) :
                     string.Empty;
-                return cachedResultIsFresh;
+                return confirmedVisible;
             }
         }
 
-        private static string BuildCachedGameBarApiSummary(DateTime now, bool cachedResultIsFresh, bool pollIsStale)
+        internal static bool ResolveGameBarApiVisibility(
+            bool confirmedVisible, bool probeCompleted,
+            bool supported, bool visible)
+        {
+            return probeCompleted && supported ? visible : confirmedVisible;
+        }
+
+        private static string BuildCachedGameBarApiSummary(DateTime now, bool confirmedVisible, bool pollIsStale)
         {
             try
             {
                 StringBuilder builder = new StringBuilder(256);
-                builder.Append("cachedFresh=").Append(cachedResultIsFresh)
-                    .Append(" cachedVisible=").Append(gameBarApiPollCachedVisible)
+                builder.Append("confirmedVisible=").Append(confirmedVisible)
                     .Append(" running=").Append(gameBarApiPollRunning)
                     .Append(" stale=").Append(pollIsStale)
                     .Append(" startedAge=").Append(FormatDiagnosticAge(now, gameBarApiPollLastStartedUtc))

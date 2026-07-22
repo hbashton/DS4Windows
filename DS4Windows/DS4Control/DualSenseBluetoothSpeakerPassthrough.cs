@@ -431,11 +431,10 @@ namespace DS4Windows
         // prebuffer duplicated that protection and made game audio feel late.
         internal const int InitialBufferMs = 20;
         internal const int TargetBufferMs = 20;
-        // Keep two reports beyond the helper's eight-report prime. Together
-        // with the causal source target this protects roughly 123 ms, above the
-        // 86.7 ms callback stall measured in a live trace, without the former
-        // ~235 ms steady-state presentation delay.
-        internal const int PacerReservoirTargetFrames = 10;
+        // Two double-frame reports prime the helper; retain two additional
+        // reports for the measured Windows callback stall without building a
+        // media-style queue.
+        internal const int PacerReservoirTargetFrames = 8;
         internal const int StartupWarmupReportCount = 6;
         private const int CaptureRingFrames = (SampleRate * CaptureBufferMs) / 1000;
         private const int CapturePumpBufferFrames = 2048;

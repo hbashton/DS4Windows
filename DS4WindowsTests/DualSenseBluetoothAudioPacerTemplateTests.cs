@@ -284,7 +284,7 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
-        public void DoubleFrameSpeakerUsesTwoReportPrimeAndTwoFrameCadence()
+        public void DoubleFrameSpeakerUsesFourReportPrimeAndTwoFrameCadence()
         {
             byte[] speaker = CreateDoubleFrameReport(0x31);
 
@@ -295,15 +295,11 @@ namespace DS4Windows.Tests
                     speaker, speaker.Length));
             Assert.IsFalse(
                 DualSenseBluetoothAudioPacer.CanPresentFromPrimeGate(
-                    primeRequired: true, speakerReportCount:
-                        DualSenseBluetoothAudioPacer
-                            .DoubleFramePrimeReportCount - 1,
+                    primeRequired: true, speakerReportCount: 3,
                     nextReport: speaker));
             Assert.IsTrue(
                 DualSenseBluetoothAudioPacer.CanPresentFromPrimeGate(
-                    primeRequired: true, speakerReportCount:
-                        DualSenseBluetoothAudioPacer
-                            .DoubleFramePrimeReportCount,
+                    primeRequired: true, speakerReportCount: 4,
                     nextReport: speaker));
 
             const long qpcFrequency = 10_000_000;
@@ -356,33 +352,6 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
-        public void DedicatedHapticsReportBypassesSpeakerPrime()
-        {
-            byte[] haptics = new byte[
-                DualSenseBluetoothAudioPacer.HapticsReportLength];
-            haptics[0] = 0x32;
-            haptics[2] = 0x91;
-            haptics[3] = 0x07;
-            haptics[4] = 0xFE;
-            haptics[9] = 0xFF;
-            haptics[11] = 0x92;
-            haptics[12] = 64;
-
-            Assert.IsFalse(
-                DualSenseBluetoothAudioPacer.IsSpeakerAudioReport(haptics));
-            Assert.AreEqual(0,
-                DualSenseBluetoothAudioPacer.GetSpeakerAudioFrameCount(
-                    haptics, haptics.Length));
-            Assert.IsTrue(
-                DualSenseBluetoothAudioPacer.CanPresentFromPrimeGate(
-                    primeRequired: true, speakerReportCount: 0,
-                    nextReport: haptics));
-            Assert.IsFalse(
-                DualSenseBluetoothAudioPacer.RequiresPriorWriteCompletion(
-                    haptics, haptics.Length));
-        }
-
-        [TestMethod]
         public void LowLatencyProducerReservoirCoversMeasuredWindowsCallbackStall()
         {
             double presentationReserveMilliseconds =
@@ -410,8 +379,7 @@ namespace DS4Windows.Tests
             Assert.IsTrue(
                 DualSenseBluetoothSpeakerPassthrough
                     .PacerReservoirTargetFrames >
-                DualSenseBluetoothAudioPacer
-                    .DoubleFramePrimeReportCount * 2,
+                DualSenseBluetoothAudioPacer.PrimeReportCount,
                 "The steady-state reserve must survive a stall without " +
                 "falling through the helper's empty-reservoir re-prime gate.");
         }

@@ -369,9 +369,6 @@ namespace DS4Windows.InputDevices
         private const byte BluetoothDoubleFrameReportId = 0x39;
         private const int BluetoothDoubleFrameHapticsDataOffset = 12;
         private const int BluetoothDoubleFrameSpeakerDataOffset = 142;
-        private const int BluetoothHapticsOutputReportLength = 142;
-        private const byte BluetoothHapticsReportId = 0x32;
-        private const int BluetoothHapticsDataOffset = 13;
         private const int BluetoothStateOutputReportLength = 78;
         private const int BluetoothStateOutputDataOffset = 3;
         private const int BluetoothCombinedStateLength = 63;
@@ -439,8 +436,6 @@ namespace DS4Windows.InputDevices
             new byte[BluetoothCombinedSpeakerFrameLength];
         private readonly byte[] bluetoothDoubleFirstHapticsFrame =
             new byte[BluetoothCombinedHapticsDataLength];
-        private readonly byte[] bluetoothHapticsWorkingReport =
-            new byte[BluetoothHapticsOutputReportLength];
         private readonly byte[] bluetoothStateWorkingReport =
             new byte[BluetoothStateOutputReportLength];
         private bool bluetoothDoubleFirstFramePending;
@@ -1515,36 +1510,24 @@ namespace DS4Windows.InputDevices
         {
             lock (bluetoothCombinedTransportWriteLock)
             {
-                bool speakerClockActive = enableSpeakerOutput &&
-                    IsBluetoothSpeakerClockActive();
-                // State (including regular light/heavy rumble and triggers)
-                // always takes the priority control lane. It must never wait
-                // in the controller's speaker/haptics audio reservoir.
-                if (!TryWriteCachedBluetoothStateReport(
-                    idleReportDescription))
-                {
-                    deferredToSpeakerClock = speakerClockActive;
-                    return false;
-                }
-
-                if (!includeNativeHaptics ||
-                    !HasPendingBluetoothCombinedHaptics())
-                {
-                    deferredToSpeakerClock = false;
-                    LastBluetoothHapticsWriteStatus = activeStatus;
-                    return true;
-                }
-
-                if (speakerClockActive)
+                // The active/idle decision and its matching publication are a
+                // single boundary with Clear. Clear cannot invalidate the
+                // clock between this check and an UpdateTemplate, leaving an
+                // idle helper with state that is never physically presented.
+                if (enableSpeakerOutput && IsBluetoothSpeakerClockActive())
                 {
                     deferredToSpeakerClock = true;
-                    LastBluetoothHapticsWriteStatus = activeStatus;
-                    return true;
+                    bool refreshed = TryWriteCachedBluetoothStateReport(
+                        idleReportDescription);
+                    LastBluetoothHapticsWriteStatus = refreshed ?
+                        activeStatus :
+                        $"Could not publish {idleReportDescription} to the active Bluetooth speaker clock.";
+                    return refreshed;
                 }
 
                 deferredToSpeakerClock = false;
-                return TryWriteCachedBluetoothHapticsReport(
-                    idleReportDescription);
+                return TryWriteCachedBluetoothCombinedControlReport(
+                    includeNativeHaptics, idleReportDescription);
             }
         }
 
@@ -3131,8 +3114,18 @@ namespace DS4Windows.InputDevices
                 return true;
             }
 
-            return TryWriteCachedBluetoothHapticsReport(
-                "converted haptics", hapticsGeneration);
+            bool written = TryPublishCachedBluetoothCombinedState(
+                includeNativeHaptics: true,
+                activeStatus:
+                    "Converted Bluetooth haptics to the next combined speaker-clocked report.",
+                idleReportDescription: "converted haptics",
+                out bool deferredToSpeakerClock);
+            if (written && !deferredToSpeakerClock)
+            {
+                MarkBluetoothCombinedHapticsSubmitted(hapticsGeneration);
+            }
+
+            return written;
         }
 
         /// <summary>
@@ -3762,97 +3755,6 @@ namespace DS4Windows.InputDevices
                 }
                 LastBluetoothHapticsWriteStatus =
                     $"Bluetooth {reportDescription} accepted on the serialized state lane.";
-                return true;
-            }
-        }
-
-        /// <summary>
-        /// Sends one native haptics block on Sony's speaker-independent 0x32
-        /// transport. Keeping this packet out of the speaker reservoir makes
-        /// advanced haptics work at idle and preserves their 10.667 ms clock.
-        /// </summary>
-        private bool TryWriteCachedBluetoothHapticsReport(
-            string reportDescription, long requestedGeneration = -1)
-        {
-            lock (bluetoothCombinedTransportWriteLock)
-            {
-                if (!EnsureBluetoothCombinedOutputTransport())
-                {
-                    return false;
-                }
-
-                byte[] hapticsReport = bluetoothHapticsWorkingReport;
-                Array.Clear(hapticsReport, 0, hapticsReport.Length);
-                long hapticsGeneration;
-                lock (bluetoothCombinedSpeakerReportLock)
-                {
-                    if (!bluetoothCombinedSpeakerReportAvailable)
-                    {
-                        return false;
-                    }
-
-                    Array.Copy(latestBluetoothCombinedSpeakerReport,
-                        BluetoothCombinedHapticsDataOffset, hapticsReport,
-                        BluetoothHapticsDataOffset,
-                        BluetoothCombinedHapticsDataLength);
-                    hapticsGeneration = requestedGeneration >= 0 ?
-                        requestedGeneration :
-                        bluetoothCombinedHapticsGeneration;
-                }
-
-                hapticsReport[0] = BluetoothHapticsReportId;
-                hapticsReport[2] = 0x91;
-                hapticsReport[3] = 0x07;
-                hapticsReport[4] = (byte)(0xFE |
-                    (Volatile.Read(
-                        ref bluetoothMicrophoneStreamingRequested) != 0 ?
-                            BluetoothMicrophoneControlEnable : 0));
-                hapticsReport[9] = 0xFF;
-                hapticsReport[11] = 0x92;
-                hapticsReport[12] = BluetoothCombinedHapticsDataLength;
-
-                byte reportSequenceBefore;
-                byte packetSequenceBefore;
-                bool sequenceInitializedBefore;
-                lock (bluetoothCombinedSpeakerReportLock)
-                {
-                    reportSequenceBefore =
-                        bluetoothCombinedSpeakerReportSequence;
-                    packetSequenceBefore =
-                        bluetoothCombinedSpeakerPacketSequence;
-                    sequenceInitializedBefore =
-                        bluetoothCombinedSpeakerSequenceInitialized;
-                }
-                ApplyNextBluetoothCombinedSequence(hapticsReport);
-                ApplyBluetoothCombinedCrc(hapticsReport);
-
-                bool pacerOwnsTransport =
-                    BluetoothAudioPacerOwnsTransport();
-                bool written = pacerOwnsTransport ?
-                    TryCommitBluetoothControlThroughAudioPacer(hapticsReport,
-                        PersistentBluetoothHapticsExpiryQpc,
-                        waitForCompletion: false, out _) :
-                    TryWriteBluetoothCombinedSpeakerReport(hapticsReport,
-                        out _);
-                if (!written)
-                {
-                    lock (bluetoothCombinedSpeakerReportLock)
-                    {
-                        bluetoothCombinedSpeakerReportSequence =
-                            reportSequenceBefore;
-                        bluetoothCombinedSpeakerPacketSequence =
-                            packetSequenceBefore;
-                        bluetoothCombinedSpeakerSequenceInitialized =
-                            sequenceInitializedBefore;
-                    }
-                    LastBluetoothHapticsWriteStatus =
-                        $"Could not submit Bluetooth {reportDescription} on the dedicated haptics lane.";
-                    return false;
-                }
-
-                MarkBluetoothCombinedHapticsSubmitted(hapticsGeneration);
-                LastBluetoothHapticsWriteStatus =
-                    $"Bluetooth {reportDescription} accepted on the dedicated low-latency haptics lane.";
                 return true;
             }
         }

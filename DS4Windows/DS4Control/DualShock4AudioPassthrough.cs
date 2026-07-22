@@ -18,7 +18,28 @@ namespace DS4Windows
         private readonly StartRequest[] pendingStarts =
             new StartRequest[ControllerCount];
         private readonly int[] startGenerations = new int[ControllerCount];
+        private readonly bool[] startFailed = new bool[ControllerCount];
         private readonly object[] slotWorkerLocks = CreateSlotWorkerLocks();
+
+        public ControllerRuntimeLaneState GetStatus(int slot)
+        {
+            if (slot < 0 || slot >= slots.Length)
+            {
+                return ControllerRuntimeLaneState.Unavailable;
+            }
+
+            lock (syncRoot)
+            {
+                if (slots[slot] != null)
+                {
+                    return ControllerRuntimeLaneState.Ready;
+                }
+
+                return startFailed[slot]
+                    ? ControllerRuntimeLaneState.Unavailable
+                    : ControllerRuntimeLaneState.Starting;
+            }
+        }
 
         public void Start(int slot, DS4Device device, byte speakerVolume,
             DualSenseSpeakerCompression compression, byte bassBoost,
@@ -59,6 +80,7 @@ namespace DS4Windows
 
                 previous = slots[slot];
                 slots[slot] = null;
+                startFailed[slot] = false;
                 generation = ++startGenerations[slot];
                 pendingStarts[slot] = new StartRequest(device, speakerVolume,
                     compression, bassBoost, captureEndpointId, endpointKind,
@@ -95,6 +117,7 @@ namespace DS4Windows
                 bool hadPendingStart = pendingStarts[slot] != null;
                 slots[slot] = null;
                 pendingStarts[slot] = null;
+                startFailed[slot] = false;
                 startGenerations[slot]++;
                 if (playback != null || hadPendingStart)
                 {
@@ -117,6 +140,7 @@ namespace DS4Windows
                     previous[slot] = slots[slot];
                     slots[slot] = null;
                     pendingStarts[slot] = null;
+                    startFailed[slot] = false;
                     startGenerations[slot]++;
                 }
             }
@@ -178,6 +202,7 @@ namespace DS4Windows
 
                         slots[slot] = playback;
                         pendingStarts[slot] = null;
+                        startFailed[slot] = false;
                     }
 
                     AppLogger.LogToGui(
@@ -210,6 +235,7 @@ namespace DS4Windows
                 if (generation == startGenerations[slot])
                 {
                     pendingStarts[slot] = null;
+                    startFailed[slot] = true;
                 }
             }
         }

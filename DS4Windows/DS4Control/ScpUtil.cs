@@ -2564,6 +2564,12 @@ namespace DS4Windows
             set => m_Config.dualSenseEnableSpeakerOutput = value;
         }
 
+        public static bool[] DualSenseHeadsetOnlyAudio
+        {
+            get => m_Config.dualSenseHeadsetOnlyAudio;
+            set => m_Config.dualSenseHeadsetOnlyAudio = value;
+        }
+
         public static byte[] DualSenseSpeakerVolume
         {
             get => m_Config.dualSenseSpeakerVolume;
@@ -3842,6 +3848,7 @@ namespace DS4Windows
             0,0,0,0,0,0,0,0,0
         };
         public bool[] dualSenseEnableSpeakerOutput = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
+        public bool[] dualSenseHeadsetOnlyAudio = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
         public byte[] dualSenseSpeakerVolume = new byte[Global.TEST_PROFILE_ITEM_COUNT] { 128, 128, 128, 128, 128, 128, 128, 128, 128 };
         public byte[] dualSenseSpeakerCompression = new byte[Global.TEST_PROFILE_ITEM_COUNT];
         public byte[] dualSenseSpeakerBassBoost = new byte[Global.TEST_PROFILE_ITEM_COUNT];
@@ -4806,9 +4813,7 @@ namespace DS4Windows
                 XmlNode xmlMouseVerticalScale = m_Xdoc.CreateNode(XmlNodeType.Element, "ButtonMouseVerticalScale", null); xmlMouseVerticalScale.InnerText = Convert.ToInt32(buttonMouseInfos[device].buttonVerticalScale * 100).ToString(); rootElement.AppendChild(xmlMouseVerticalScale);
                 //XmlNode xmlShiftMod = m_Xdoc.CreateNode(XmlNodeType.Element, "ShiftModifier", null); xmlShiftMod.InnerText = shiftModifier[device].ToString(); rootElement.AppendChild(xmlShiftMod);
                 XmlNode xmlLaunchProgram = m_Xdoc.CreateNode(XmlNodeType.Element, "LaunchProgram", null); xmlLaunchProgram.InnerText = launchProgram[device].ToString(); rootElement.AppendChild(xmlLaunchProgram);
-                XmlNode xmlGameBarHomeButtonSupport = m_Xdoc.CreateNode(XmlNodeType.Element, "GameBarHomeButtonSupport", null); xmlGameBarHomeButtonSupport.InnerText = gameBarHomeButtonSupport[device].ToString(); rootElement.AppendChild(xmlGameBarHomeButtonSupport);
                 XmlNode xmlGameBarControllerCompatibility = m_Xdoc.CreateNode(XmlNodeType.Element, "GameBarControllerCompatibility", null); xmlGameBarControllerCompatibility.InnerText = gameBarControllerCompatibility[device].ToString(); rootElement.AppendChild(xmlGameBarControllerCompatibility);
-                XmlNode xmlGameBarProfileName = m_Xdoc.CreateNode(XmlNodeType.Element, "GameBarProfileName", null); xmlGameBarProfileName.InnerText = gameBarProfileName[device]; rootElement.AppendChild(xmlGameBarProfileName);
                 XmlNode xmlDualSenseMuteButtonLightEnabled = m_Xdoc.CreateNode(XmlNodeType.Element, "DualSenseMuteButtonLightEnabled", null); xmlDualSenseMuteButtonLightEnabled.InnerText = dualSenseMuteButtonLightEnabled[device].ToString(); rootElement.AppendChild(xmlDualSenseMuteButtonLightEnabled);
                 XmlNode xmlDualSenseMuteButtonMutesMicrophone = m_Xdoc.CreateNode(XmlNodeType.Element, "DualSenseMuteButtonMutesMicrophone", null); xmlDualSenseMuteButtonMutesMicrophone.InnerText = dualSenseMuteButtonMutesMicrophone[device].ToString(); rootElement.AppendChild(xmlDualSenseMuteButtonMutesMicrophone);
                 XmlNode xmlDualSenseMuteOnProfileName = m_Xdoc.CreateNode(XmlNodeType.Element, "DualSenseMuteOnProfileName", null); xmlDualSenseMuteOnProfileName.InnerText = dualSenseMuteOnProfileName[device]; rootElement.AppendChild(xmlDualSenseMuteOnProfileName);
@@ -5034,6 +5039,7 @@ namespace DS4Windows
 
                 XmlElement xmlDSAudioGroupElement = m_Xdoc.CreateElement("AudioSettings"); xmlDualSenseControllerSettingsElement.AppendChild(xmlDSAudioGroupElement);
                 XmlNode xmlDSEnableSpeakerOutputElement = m_Xdoc.CreateNode(XmlNodeType.Element, "EnableSpeakerOutput", null); xmlDSEnableSpeakerOutputElement.InnerText = dualSenseEnableSpeakerOutput[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSEnableSpeakerOutputElement);
+                XmlNode xmlDSHeadsetOnlyAudioElement = m_Xdoc.CreateNode(XmlNodeType.Element, "HeadsetOnlyAudio", null); xmlDSHeadsetOnlyAudioElement.InnerText = dualSenseHeadsetOnlyAudio[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSHeadsetOnlyAudioElement);
                 XmlNode xmlDSSpeakerVolumeElement = m_Xdoc.CreateNode(XmlNodeType.Element, "SpeakerVolume", null); xmlDSSpeakerVolumeElement.InnerText = dualSenseSpeakerVolume[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSSpeakerVolumeElement);
                 XmlNode xmlDSSpeakerCompressionElement = m_Xdoc.CreateNode(XmlNodeType.Element, "SpeakerCompression", null); xmlDSSpeakerCompressionElement.InnerText = dualSenseSpeakerCompression[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSSpeakerCompressionElement);
                 XmlNode xmlDSSpeakerBassBoostElement = m_Xdoc.CreateNode(XmlNodeType.Element, "SpeakerBassBoost", null); xmlDSSpeakerBassBoostElement.InnerText = dualSenseSpeakerBassBoost[device].ToString(); xmlDSAudioGroupElement.AppendChild(xmlDSSpeakerBassBoostElement);
@@ -6658,6 +6664,16 @@ namespace DS4Windows
                 }
                 catch { gameBarProfileName[device] = string.Empty; missingSetting = true; }
 
+                // Migrate the retired profile-switch behavior to the modern
+                // companion route. The active profile is never replaced.
+                if (gameBarHomeButtonSupport[device] ||
+                    !string.IsNullOrWhiteSpace(gameBarProfileName[device]))
+                {
+                    gameBarControllerCompatibility[device] = true;
+                }
+                gameBarHomeButtonSupport[device] = false;
+                gameBarProfileName[device] = string.Empty;
+
                 try
                 {
                     Item = m_Xdoc.SelectSingleNode("/" + rootname + "/DualSenseMuteButtonLightEnabled");
@@ -7450,6 +7466,14 @@ namespace DS4Windows
                             Item = xmlDSAudioGroupElement.SelectSingleNode("EnableSpeakerOutput");
                             bool.TryParse(Item.InnerText, out bool temp);
                             dualSenseEnableSpeakerOutput[device] = temp;
+                        }
+                        catch { missingSetting = true; }
+
+                        try
+                        {
+                            Item = xmlDSAudioGroupElement.SelectSingleNode("HeadsetOnlyAudio");
+                            bool.TryParse(Item?.InnerText, out bool temp);
+                            dualSenseHeadsetOnlyAudio[device] = temp;
                         }
                         catch { missingSetting = true; }
 

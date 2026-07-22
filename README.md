@@ -72,8 +72,7 @@ correctly.
 - Window-title-only Auto Profile rules for applications that do not expose a usable executable path.
 - Duplicate Auto Profile rules with per-device matching for DualSense, DS4, DS3, Switch Pro, and Joy-Con controllers.
 - An apply-to-all-controllers option for Auto Profiles.
-- Xbox Game Bar profile switching with Game Bar priority over normal Auto Profiles while the overlay is visible.
-- Per-profile Game Bar compatibility for VIIPER DualSense outputs. It uses a
+- Per-profile Game Bar compatibility for DualSense outputs. It uses a
   temporary XInput companion only while the overlay is visible and does not
   change the loaded profile.
 - Per-profile DualSense adaptive-trigger configuration and fixed full-pull trigger actions.
@@ -257,7 +256,7 @@ rejects its own VIIPER outputs to prevent recursive virtual controllers.
 5. Keep **Hide DS4 Controller** enabled when a game would otherwise see both the real and virtual devices.
 6. Disable overlapping PlayStation or Xbox remapping in Steam for games managed entirely by DS4Windows.
 
-Xbox Game Bar profile support requires DS4Windows to run elevated. VIIPER and
+Xbox Game Bar companion support requires DS4Windows to run elevated. VIIPER and
 HidHide setup may also require administrator approval.
 
 ## Updating

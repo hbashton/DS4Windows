@@ -45,13 +45,35 @@ namespace DS4Windows
         private readonly SlotPlayback[] slots = new SlotPlayback[ControllerCount];
         private readonly DualSenseBluetoothSpeakerPassthrough[] bluetoothSlots = new DualSenseBluetoothSpeakerPassthrough[ControllerCount];
         private readonly int[] bluetoothStartGeneration = new int[ControllerCount];
+        private readonly bool[] bluetoothStartPending = new bool[ControllerCount];
+        private readonly bool[] startFailed = new bool[ControllerCount];
         private readonly object[] bluetoothStartGates = Enumerable.Range(0,
             ControllerCount).Select(_ => new object()).ToArray();
-        private WasapiLoopbackCapture capture;
+        private IWaveIn capture;
         private WaveFormat captureFormat;
         private string captureEndpointId = string.Empty;
         private ControllerAudioEndpointKind captureEndpointKind;
         private bool disposed;
+
+        public ControllerRuntimeLaneState GetStatus(int slot)
+        {
+            if (slot < 0 || slot >= slots.Length)
+            {
+                return ControllerRuntimeLaneState.Unavailable;
+            }
+
+            lock (syncRoot)
+            {
+                if (slots[slot] != null || bluetoothSlots[slot] != null)
+                {
+                    return ControllerRuntimeLaneState.Ready;
+                }
+
+                return startFailed[slot]
+                    ? ControllerRuntimeLaneState.Unavailable
+                    : ControllerRuntimeLaneState.Starting;
+            }
+        }
 
         public void Start(int slot, DualSenseDevice dualSenseDevice, byte speakerVolume,
             DualSenseSpeakerCompression speakerCompression, byte speakerBassBoost,
@@ -62,6 +84,11 @@ namespace DS4Windows
             if (slot < 0 || slot >= slots.Length)
             {
                 return;
+            }
+
+            lock (syncRoot)
+            {
+                startFailed[slot] = false;
             }
 
             if (dualSenseDevice?.ConnectionType == ConnectionType.BT)
@@ -86,6 +113,7 @@ namespace DS4Windows
 
                     bluetoothPlayback = bluetoothSlots[slot];
                     bluetoothSlots[slot] = null;
+                    bluetoothStartPending[slot] = false;
                     bluetoothStartGeneration[slot]++;
                 }
 
@@ -122,6 +150,7 @@ namespace DS4Windows
                             }
 
                             endpointMissing = true;
+                            startFailed[slot] = true;
                         }
                         else if (slots[slot] != null && string.Equals(
                             slots[slot].EndpointId, endpoint.ID,
@@ -171,6 +200,7 @@ namespace DS4Windows
                     lock (syncRoot)
                     {
                         failedPlayback = slots[slot];
+                        startFailed[slot] = true;
                         slots[slot] = null;
                         if (!slots.Any(item => item != null))
                         {
@@ -210,6 +240,7 @@ namespace DS4Windows
 
                     bluetoothPlayback = bluetoothSlots[slot];
                     bluetoothSlots[slot] = null;
+                    bluetoothStartPending[slot] = false;
                     bluetoothStartGeneration[slot]++;
 
                     if (!slots.Any(item => item != null))
@@ -242,6 +273,7 @@ namespace DS4Windows
                     slots[i] = null;
                     bluetoothPlaybacks[i] = bluetoothSlots[i];
                     bluetoothSlots[i] = null;
+                    bluetoothStartPending[i] = false;
                     bluetoothStartGeneration[i]++;
                 }
 
@@ -303,6 +335,7 @@ namespace DS4Windows
                     previous = bluetoothSlots[slot];
                     bluetoothSlots[slot] = null;
                     generation = ++bluetoothStartGeneration[slot];
+                    bluetoothStartPending[slot] = true;
                 }
 
                 usbPlayback?.Dispose();
@@ -343,6 +376,9 @@ namespace DS4Windows
                 {
                     return;
                 }
+
+                bluetoothStartPending[slot] = false;
+                startFailed[slot] = true;
             }
 
             AppLogger.LogToGui($"DualSense Bluetooth speaker passthrough could not start after waiting for the selected audio endpoint: {lastError?.Message}", true);
@@ -398,6 +434,8 @@ namespace DS4Windows
                         if (!superseded)
                         {
                             bluetoothSlots[slot] = bluetoothPlayback;
+                            bluetoothStartPending[slot] = false;
+                            startFailed[slot] = false;
                         }
                     }
 
@@ -427,6 +465,7 @@ namespace DS4Windows
                 {
                     bluetoothPlayback = bluetoothSlots[slot];
                     bluetoothSlots[slot] = null;
+                    bluetoothStartPending[slot] = false;
                     bluetoothStartGeneration[slot]++;
                 }
 
@@ -447,6 +486,29 @@ namespace DS4Windows
             }
 
             StopCapture();
+
+            if (ProcessLoopbackWaveCapture.TryParseEndpointId(
+                    requestedCaptureEndpointId, out int processId))
+            {
+                capture = new ProcessLoopbackWaveCapture(processId);
+                captureEndpointId = requestedCaptureEndpointId;
+                captureEndpointKind = endpointKind;
+                captureFormat = capture.WaveFormat;
+                capture.DataAvailable += Capture_DataAvailable;
+                capture.RecordingStopped += Capture_RecordingStopped;
+                capture.StartRecording();
+                AppLogger.LogToGui(
+                    $"DualSense audio passthrough capture source: selected app (process {processId})",
+                    false);
+                return;
+            }
+
+            if (ProcessLoopbackWaveCapture.IsProcessEndpointId(
+                    requestedCaptureEndpointId))
+            {
+                throw new InvalidOperationException(
+                    "The selected app is not running, so its audio cannot be streamed to the controller.");
+            }
 
             MMDevice sourceEndpoint = FindCaptureEndpoint(requestedCaptureEndpointId,
                 speakerEndpointId, endpointKind);
@@ -483,7 +545,7 @@ namespace DS4Windows
 
         private void StopCapture()
         {
-            WasapiLoopbackCapture oldCapture = capture;
+            IWaveIn oldCapture = capture;
             capture = null;
             captureFormat = null;
             captureEndpointId = string.Empty;

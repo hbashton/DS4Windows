@@ -209,50 +209,33 @@
     </Style>
 
     <Style x:Key="BridgeTriggerPairIconStyle" TargetType="ContentControl">
-        <Setter Property="Width" Value="32" />
-        <Setter Property="Height" Value="24" />
+        <Setter Property="Width" Value="26" />
+        <Setter Property="Height" Value="20" />
         <Setter Property="Foreground" Value="{DynamicResource MutedForegroundColor}" />
         <Setter Property="HorizontalAlignment" Value="Center" />
         <Setter Property="VerticalAlignment" Value="Center" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ContentControl">
-                    <Grid Width="32" Height="24">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="16" />
-                            <ColumnDefinition Width="16" />
-                        </Grid.ColumnDefinitions>
-                        <Border Grid.Column="0" Width="15" Height="20"
-                                HorizontalAlignment="Right" VerticalAlignment="Top"
-                                CornerRadius="6,3,4,7" BorderThickness="1.2"
-                                BorderBrush="{TemplateBinding Foreground}"
-                                Background="{DynamicResource RaisedBackgroundColor}"
-                                RenderTransformOrigin="0.5,0.5">
-                            <Border.RenderTransform>
-                                <RotateTransform Angle="-8" />
-                            </Border.RenderTransform>
-                            <TextBlock Text="L2" Margin="0,1,0,0"
-                                       FontFamily="Segoe UI" FontSize="7.5"
-                                       FontWeight="Bold" TextAlignment="Center"
-                                       Foreground="{TemplateBinding Foreground}"
-                                       VerticalAlignment="Center" />
-                        </Border>
-                        <Border Grid.Column="1" Width="15" Height="20"
-                                HorizontalAlignment="Left" VerticalAlignment="Top"
-                                CornerRadius="3,6,7,4" BorderThickness="1.2"
-                                BorderBrush="{TemplateBinding Foreground}"
-                                Background="{DynamicResource RaisedBackgroundColor}"
-                                RenderTransformOrigin="0.5,0.5">
-                            <Border.RenderTransform>
-                                <RotateTransform Angle="8" />
-                            </Border.RenderTransform>
-                            <TextBlock Text="R2" Margin="0,1,0,0"
-                                       FontFamily="Segoe UI" FontSize="7.5"
-                                       FontWeight="Bold" TextAlignment="Center"
-                                       Foreground="{TemplateBinding Foreground}"
-                                       VerticalAlignment="Center" />
-                        </Border>
-                    </Grid>
+                    <Viewbox Width="26" Height="20" Stretch="Uniform">
+                        <Canvas Width="26" Height="20">
+                            <Path Data="M1.4,6.2 C1.8,2.5 4.2,1 9.8,1 L12,3.8 10.8,15.1 C10.5,17.6 8.4,19 5.8,18.2 L3.1,17.3 C1.7,16.8 1,15.3 1,13.7 Z"
+                                  Stroke="{TemplateBinding Foreground}" StrokeThickness="1.25"
+                                  StrokeLineJoin="Round" Fill="{DynamicResource RaisedBackgroundColor}" />
+                            <Path Data="M24.6,6.2 C24.2,2.5 21.8,1 16.2,1 L14,3.8 15.2,15.1 C15.5,17.6 17.6,19 20.2,18.2 L22.9,17.3 C24.3,16.8 25,15.3 25,13.7 Z"
+                                  Stroke="{TemplateBinding Foreground}" StrokeThickness="1.25"
+                                  StrokeLineJoin="Round" Fill="{DynamicResource RaisedBackgroundColor}" />
+                            <Path Data="M2.2,5.5 C4.6,4.2 7.7,4.1 10.7,5.1 M15.3,5.1 C18.3,4.1 21.4,4.2 23.8,5.5"
+                                  Stroke="{TemplateBinding Foreground}" StrokeThickness="0.85"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" Opacity="0.8" />
+                            <TextBlock Canvas.Left="3.2" Canvas.Top="7.1" Text="L2"
+                                       FontFamily="Segoe UI" FontSize="6.3" FontWeight="Bold"
+                                       Foreground="{TemplateBinding Foreground}" />
+                            <TextBlock Canvas.Left="16.2" Canvas.Top="7.1" Text="R2"
+                                       FontFamily="Segoe UI" FontSize="6.3" FontWeight="Bold"
+                                       Foreground="{TemplateBinding Foreground}" />
+                        </Canvas>
+                    </Viewbox>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>

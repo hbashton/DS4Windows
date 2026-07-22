@@ -69,12 +69,6 @@ namespace DS4WinWPF
 
             if (GetTopWindowName(out topProcessName, out topWindowTitle))
             {
-                if (Program.rootHub.IsAnyGameBarProfilePriorityActive() &&
-                    IsGameBarForegroundWindow(topProcessName, topWindowTitle))
-                {
-                    return;
-                }
-
                 // Find a profile match based on autoprofile program path and wnd title list.
                 // The same program may set different profiles for each of the controllers, so we need an array of newProfileName[controllerIdx] values.
                 for (int i = 0, pathsLen = profileHolder.AutoProfileColl.Count; i < pathsLen; i++)
@@ -129,11 +123,6 @@ namespace DS4WinWPF
                         string tempname = controllerProfileEntity.GetProfileNameForController(j);
                         if (tempname != string.Empty && tempname != "(none)")
                         {
-                            if (Program.rootHub.TryDeferAutoProfileForGameBar(j, tempname))
-                            {
-                                continue;
-                            }
-
                             if ((Global.useTempProfile[j] && tempname != Global.tempprofilename[j]) ||
                                 (!Global.useTempProfile[j] && tempname != Global.ProfilePath[j]) ||
                                 forceLoadProfile)
@@ -172,7 +161,7 @@ namespace DS4WinWPF
                         }
                     }
 
-                    if (turnOffDS4WinApp && !Program.rootHub.IsAnyGameBarProfilePriorityActive())
+                    if (turnOffDS4WinApp)
                     {
                         turnOffTemp = true;
                         if (App.rootHub.running)
@@ -207,11 +196,6 @@ namespace DS4WinWPF
                         {
                             if (DS4Windows.Global.AutoProfileRevertDefaultProfile)
                             {
-                                if (Program.rootHub.TryDeferAutoProfileDefaultForGameBar(j))
-                                {
-                                    continue;
-                                }
-
                                 if (autoProfileDebugLogLevel > 0)
                                     DS4Windows.AppLogger.LogToGui($"DEBUG: Auto-Profile. Unknown process. Reverting to default profile. Controller {j + 1}={Global.ProfilePath[j]} (default)", false, true);
 
@@ -265,14 +249,6 @@ namespace DS4WinWPF
             }
 
             return fallbackEntity;
-        }
-
-        private static bool IsGameBarForegroundWindow(string topProcessName, string topWndTitleName)
-        {
-            return topProcessName.IndexOf("gamebar", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                topProcessName.IndexOf("xboxgamingoverlay", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                topWndTitleName.IndexOf("game bar", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                topWndTitleName.IndexOf("xbox game bar", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private bool GetTopWindowName(out string topProcessName, out string topWndTitleName)

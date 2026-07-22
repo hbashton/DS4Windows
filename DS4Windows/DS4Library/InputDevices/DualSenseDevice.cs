@@ -309,6 +309,18 @@ namespace DS4Windows.InputDevices
         private byte speakerVolume = 128;
         public byte SpeakerVolume { get => speakerVolume; set { speakerVolume = value; outputDirty = true; } }
 
+        private bool headsetOnlyAudio;
+        public bool HeadsetOnlyAudio
+        {
+            get => headsetOnlyAudio;
+            set
+            {
+                if (headsetOnlyAudio == value) return;
+                headsetOnlyAudio = value;
+                outputDirty = true;
+            }
+        }
+
         private byte microphoneVolume = 128;
         public byte MicrophoneVolume { get => microphoneVolume; set { microphoneVolume = value; outputDirty = true; } }
 
@@ -353,6 +365,7 @@ namespace DS4Windows.InputDevices
         private const int BluetoothCombinedStateOffset = 13;
         private const int BluetoothCombinedStateFlag0Offset = BluetoothCombinedStateOffset;
         private const int BluetoothCombinedStateFlag1Offset = BluetoothCombinedStateOffset + 1;
+        private const int BluetoothCombinedStateHeadphoneVolumeOffset = BluetoothCombinedStateOffset + 4;
         private const int BluetoothCombinedStateSpeakerVolumeOffset = BluetoothCombinedStateOffset + 5;
         private const int BluetoothCombinedStateMicrophoneVolumeOffset = BluetoothCombinedStateOffset + 6;
         private const int BluetoothCombinedStateAudioControlOffset = BluetoothCombinedStateOffset + 7;
@@ -1064,8 +1077,8 @@ namespace DS4Windows.InputDevices
                         BluetoothCombinedSpeakerOffset,
                         BluetoothCombinedOutputReportLength - sizeof(uint) -
                             BluetoothCombinedSpeakerOffset);
-                    ApplyBluetoothSpeakerVolumeAndRouting(initialTemplate,
-                        speakerVolume);
+                    ApplyBluetoothSpeakerVolumeAndRoutingCore(initialTemplate,
+                        speakerVolume, headsetOnlyAudio, headphoneVolume);
                     ApplyBluetoothMicrophoneStreamingRequest(initialTemplate);
                     if (!DualSenseBluetoothAudioPacer.TryStart(
                         hDevice?.SafeReadHandle, initialTemplate,
@@ -1399,8 +1412,8 @@ namespace DS4Windows.InputDevices
                         PersistentBluetoothHapticsExpiryQpc;
                 }
 
-                ApplyBluetoothSpeakerVolumeAndRouting(template,
-                    speakerVolume);
+                ApplyBluetoothSpeakerVolumeAndRoutingCore(template,
+                    speakerVolume, headsetOnlyAudio, headphoneVolume);
                 ApplyBluetoothMicrophoneStreamingRequest(template);
                 bool updated = TryUpdateBluetoothAudioPacerTemplate(template,
                     hapticsExpiryQpc, out bool pacerOwnsTransport);
@@ -2598,13 +2611,15 @@ namespace DS4Windows.InputDevices
                 // Headphone volume
                 outputReport[5] = headphoneVolume; // Left and Right
                 // Internal speaker volume
-                outputReport[6] = MapDualSenseSpeakerVolume(speakerVolume);
+                outputReport[6] = headsetOnlyAudio ? (byte)0 :
+                    MapDualSenseSpeakerVolume(speakerVolume);
                 // Internal microphone volume
                 outputReport[7] = MapDualSenseMicrophoneVolume(
                     microphoneVolume);
                 // 0x01 Enable internal microphone, 0x10 Disable attached headphones (must set 0x20 as well)
                 // 0x20 Enable internal speaker
-                outputReport[8] = enableSpeakerOutput ? (byte)0x20 : (byte)0x00;
+                outputReport[8] = enableSpeakerOutput && !headsetOnlyAudio ?
+                    (byte)0x20 : (byte)0x00;
 
                 // Mute button LED. 0x01 = Solid. 0x02 = Pulsating
                 outputReport[9] = muteLedOverride ? (muteLedOn ? (byte)0x01 : (byte)0x00) :
@@ -2738,13 +2753,15 @@ namespace DS4Windows.InputDevices
                 // Headphone volume
                 outputReport[6] = headphoneVolume; // Left and Right
                 // Internal speaker volume
-                outputReport[7] = MapDualSenseSpeakerVolume(speakerVolume);
+                outputReport[7] = headsetOnlyAudio ? (byte)0 :
+                    MapDualSenseSpeakerVolume(speakerVolume);
                 // Internal microphone volume
                 outputReport[8] = MapDualSenseMicrophoneVolume(
                     microphoneVolume);
                 // 0x01 Enable internal microphone, 0x10 Disable attached headphones (must set 0x20 as well)
                 // 0x20 Enable internal speaker
-                outputReport[9] = enableSpeakerOutput ? (byte)0x20 : (byte)0x00;
+                outputReport[9] = enableSpeakerOutput && !headsetOnlyAudio ?
+                    (byte)0x20 : (byte)0x00;
 
                 // Mute button LED. 0x01 = Solid. 0x02 = Pulsating
                 outputReport[10] = muteLedOverride ? (muteLedOn ? (byte)0x01 : (byte)0x00) :
@@ -3424,8 +3441,8 @@ namespace DS4Windows.InputDevices
                     BluetoothCombinedSpeakerOffset);
                 if (enableSpeakerOutput)
                 {
-                    ApplyBluetoothSpeakerVolumeAndRouting(combined,
-                        speakerVolume);
+                    ApplyBluetoothSpeakerVolumeAndRoutingCore(combined,
+                        speakerVolume, headsetOnlyAudio, headphoneVolume);
                 }
 
                 ApplyBluetoothMicrophoneStreamingRequest(combined);
@@ -3583,7 +3600,8 @@ namespace DS4Windows.InputDevices
             combined[BluetoothCombinedSpeakerOffset + 1] =
                 BluetoothCombinedSpeakerFrameLength;
             SanitizeBluetoothSpeakerAudioSnapshot(combined);
-            ApplyBluetoothSpeakerVolumeAndRouting(combined, speakerVolume);
+            ApplyBluetoothSpeakerVolumeAndRoutingCore(combined, speakerVolume,
+                headsetOnlyAudio, headphoneVolume);
             ApplyBluetoothMicrophoneStreamingRequest(combined);
             byte reportSequenceBefore;
             byte packetSequenceBefore;
@@ -3835,8 +3853,18 @@ namespace DS4Windows.InputDevices
                 byte.MaxValue);
         }
 
-        private static void ApplyBluetoothSpeakerVolumeAndRouting(byte[] combined,
-            byte profileVolume)
+        // Retain the two-argument protocol helper for callers and regression
+        // tests that only need the standard speaker route.
+        private static void ApplyBluetoothSpeakerVolumeAndRouting(
+            byte[] combined, byte profileVolume)
+        {
+            ApplyBluetoothSpeakerVolumeAndRoutingCore(combined, profileVolume,
+                false, 128);
+        }
+
+        private static void ApplyBluetoothSpeakerVolumeAndRoutingCore(
+            byte[] combined, byte profileVolume, bool headsetOnlyAudio,
+            byte headphoneVolume)
         {
             // Speaker loudness is gated by both validity flags. The effective
             // firmware range used by the PS5 is 0x3D-0x64; values above it do
@@ -3846,8 +3874,11 @@ namespace DS4Windows.InputDevices
                 DualSenseOutputFlag0AudioControlEnable;
             combined[BluetoothCombinedStateFlag1Offset] |=
                 DualSenseOutputFlag1AudioControl2Enable;
+            combined[BluetoothCombinedStateHeadphoneVolumeOffset] =
+                headphoneVolume;
             combined[BluetoothCombinedStateSpeakerVolumeOffset] =
-                MapDualSenseSpeakerVolume(profileVolume);
+                headsetOnlyAudio ? (byte)0 :
+                    MapDualSenseSpeakerVolume(profileVolume);
             combined[BluetoothCombinedStateAudioControlOffset] =
                 DualSenseAudioControlOutputSpeaker;
             combined[BluetoothCombinedStateAudioControl2Offset] =

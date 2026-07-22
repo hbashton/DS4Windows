@@ -70,6 +70,7 @@ namespace DS4Windows
         public const int DefaultGainPercent = 100;
 
         public bool Enabled { get; set; }
+        public bool StreamAppAudioToController { get; set; }
         public AudioHapticsSourceKind Source { get; set; } = AudioHapticsSourceKind.SystemAudio;
         public AudioHapticsMode Mode { get; set; } = AudioHapticsMode.Mix;
         public int GainPercent { get; set; } = DefaultGainPercent;
@@ -103,12 +104,17 @@ namespace DS4Windows
             SessionIdentifier = (SessionIdentifier ?? string.Empty).Trim();
             SessionInstanceIdentifier = (SessionInstanceIdentifier ?? string.Empty).Trim();
             ProcessId = Math.Max(0, ProcessId);
+            if (Source != AudioHapticsSourceKind.AppSession)
+            {
+                StreamAppAudioToController = false;
+            }
             return this;
         }
 
         public AudioHapticsProfileSettings Clone() => new AudioHapticsProfileSettings
         {
             Enabled = Enabled,
+            StreamAppAudioToController = StreamAppAudioToController,
             Source = Source,
             Mode = Mode,
             GainPercent = GainPercent,
@@ -125,7 +131,8 @@ namespace DS4Windows
         }.Normalize();
 
         public bool IsDefaultConfiguration() =>
-            !Enabled && Source == AudioHapticsSourceKind.SystemAudio &&
+            !Enabled && !StreamAppAudioToController &&
+            Source == AudioHapticsSourceKind.SystemAudio &&
             Mode == AudioHapticsMode.Mix && GainPercent == DefaultGainPercent &&
             BassFocus == AudioHapticsBassFocus.Balanced &&
             Response == AudioHapticsResponse.Balanced &&

@@ -19,3 +19,7 @@ https://github.com/xiph/rnnoise
 
 RNNoise.NET wrapper and Windows native package:
 https://github.com/Yellow-Dog-Man/RNNoise.Net
+Switch 2 Pro Controller remapping artwork is an adapted project asset based on
+"Nintendo Switch 2 Pro Controller.jpg" by Kyu3a, licensed under CC BY-SA 4.0:
+https://commons.wikimedia.org/wiki/File:Nintendo_Switch_2_Pro_Controller.jpg
+https://creativecommons.org/licenses/by-sa/4.0/

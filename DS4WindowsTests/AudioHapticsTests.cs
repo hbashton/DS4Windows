@@ -119,6 +119,24 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void AppSpeakerOverridePersistsOnlyForAppSources()
+        {
+            var settings = new AudioHapticsProfileSettings
+            {
+                Enabled = true,
+                Source = AudioHapticsSourceKind.AppSession,
+                ProcessId = 1234,
+                StreamAppAudioToController = true,
+            }.Normalize();
+            Assert.IsTrue(settings.StreamAppAudioToController);
+            Assert.IsTrue(settings.Clone().StreamAppAudioToController);
+
+            settings.Source = AudioHapticsSourceKind.SystemAudio;
+            settings.Normalize();
+            Assert.IsFalse(settings.StreamAppAudioToController);
+        }
+
+        [TestMethod]
         public void Ds5BridgeAudioHapticsConfigurationMatrixClonesWithoutLoss()
         {
             foreach (AudioHapticsSourceKind source in

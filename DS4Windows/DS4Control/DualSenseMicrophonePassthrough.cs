@@ -15,6 +15,33 @@ namespace DS4Windows
         private string outputEndpointId = string.Empty;
         private byte volume;
 
+        public bool IsRunning
+        {
+            get
+            {
+                lock (syncRoot)
+                {
+                    return capture != null && output != null && provider != null;
+                }
+            }
+        }
+
+        public bool IsRunningFor(string requestedCaptureEndpointId,
+            string requestedOutputEndpointId)
+        {
+            requestedCaptureEndpointId ??= string.Empty;
+            requestedOutputEndpointId ??= string.Empty;
+            lock (syncRoot)
+            {
+                return capture != null && output != null && provider != null &&
+                    string.Equals(captureEndpointId,
+                        requestedCaptureEndpointId,
+                        StringComparison.Ordinal) &&
+                    string.Equals(outputEndpointId, requestedOutputEndpointId,
+                        StringComparison.Ordinal);
+            }
+        }
+
         public void Start(byte microphoneVolume, string requestedCaptureEndpointId, string requestedOutputEndpointId)
         {
             requestedCaptureEndpointId ??= string.Empty;

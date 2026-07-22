@@ -83,6 +83,16 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             };
 
         private CompositeDeviceModel selectedController;
+        private OverviewRuntimeSnapshot lastRuntimeSnapshot;
+        private bool hasRuntimeSnapshot;
+        private ControllerStartupStatus selectedControllerStartupStatus =
+            ControllerRuntimeStatusPolicy.Evaluate(
+                new ControllerRuntimeSignals(false, false, false, false,
+                    false, false, ControllerRuntimeLaneState.NotRequired,
+                    ControllerRuntimeLaneState.NotRequired,
+                    ControllerRuntimeLaneState.NotRequired,
+                    ControllerRuntimeLaneState.NotRequired,
+                    "virtual controller"));
 
         public CompositeDeviceModel SelectedController
         {
@@ -94,6 +104,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 HookSelectedController(selectedController, false);
                 selectedController = value;
                 HookSelectedController(selectedController, true);
+                hasRuntimeSnapshot = false;
                 RefreshSelectedControllerProperties();
             }
         }
@@ -103,6 +114,11 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public event EventHandler CurrentProfileNameChanged;
         public event EventHandler SelectedControllerConnectionChanged;
         public event EventHandler SelectedControllerLatencyChanged;
+        public event EventHandler SelectedControllerBatteryChanged;
+        public event EventHandler SelectedControllerStartupTitleChanged;
+        public event EventHandler SelectedControllerStartupDetailChanged;
+        public event EventHandler SelectedControllerIsReadyChanged;
+        public event EventHandler SelectedControllerNeedsAttentionChanged;
         public event EventHandler SelectedControllerSupportsAudioChanged;
         public event EventHandler SelectedControllerSupportsMicrophoneChanged;
         public event EventHandler MicrophoneAvailabilityTextChanged;
@@ -114,6 +130,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public event EventHandler SelectedOutputControllerNameChanged;
         public event EventHandler HapticStrengthPercentChanged;
         public event EventHandler SpeakerOutputEnabledChanged;
+        public event EventHandler HeadsetOnlyAudioChanged;
         public event EventHandler MicrophoneInputEnabledChanged;
         public event EventHandler SpeakerVolumePercentChanged;
         public event EventHandler MicrophoneVolumePercentChanged;
@@ -129,6 +146,24 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public string SelectedControllerConnection => selectedController?.ConnectionText ?? "Not connected";
 
         public string SelectedControllerLatency => selectedController?.LatencyText ?? "--";
+
+        public string SelectedControllerBattery =>
+            selectedController?.BatteryState ?? "--";
+
+        public string SelectedControllerStartupTitle =>
+            selectedControllerStartupStatus.Title;
+
+        public string SelectedControllerStartupDetail =>
+            selectedControllerStartupStatus.Detail;
+
+        public ControllerStartupStage SelectedControllerStartupStage =>
+            selectedControllerStartupStatus.Stage;
+
+        public bool SelectedControllerIsReady =>
+            selectedControllerStartupStatus.IsReady;
+
+        public bool SelectedControllerNeedsAttention =>
+            selectedControllerStartupStatus.NeedsAttention;
 
         public bool SelectedControllerSupportsAudio =>
             selectedController?.SupportsControllerAudio == true;
@@ -282,6 +317,26 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             }
         }
 
+        public bool HeadsetOnlyAudio
+        {
+            get => HasValidSelectedDevice &&
+                Global.DualSenseHeadsetOnlyAudio[selectedController.DevIndex];
+            set
+            {
+                if (!HasValidSelectedDevice ||
+                    Global.DualSenseHeadsetOnlyAudio[
+                        selectedController.DevIndex] == value)
+                {
+                    return;
+                }
+
+                int deviceIndex = selectedController.DevIndex;
+                Global.DualSenseHeadsetOnlyAudio[deviceIndex] = value;
+                HeadsetOnlyAudioChanged?.Invoke(this, EventArgs.Empty);
+                RaiseQuickProfileSettingChanged(deviceIndex);
+            }
+        }
+
         public bool MicrophoneInputEnabled
         {
             get => HasValidSelectedDevice && Global.DualSenseEnableMicrophonePassthrough[selectedController.DevIndex];
@@ -338,11 +393,14 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public void RefreshSelectedControllerProperties()
         {
+            CaptureRuntimeSnapshot(App.rootHub);
             SelectedControllerChanged?.Invoke(this, EventArgs.Empty);
             HasSelectedControllerChanged?.Invoke(this, EventArgs.Empty);
             CurrentProfileNameChanged?.Invoke(this, EventArgs.Empty);
             SelectedControllerConnectionChanged?.Invoke(this, EventArgs.Empty);
             SelectedControllerLatencyChanged?.Invoke(this, EventArgs.Empty);
+            SelectedControllerBatteryChanged?.Invoke(this, EventArgs.Empty);
+            RaiseControllerStartupStatusChanged();
             SelectedControllerSupportsAudioChanged?.Invoke(this, EventArgs.Empty);
             RaiseMicrophoneCapabilityChanged();
             SelectedControllerIsWirelessChanged?.Invoke(this, EventArgs.Empty);
@@ -350,16 +408,100 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             SelectedOutputControllerNameChanged?.Invoke(this, EventArgs.Empty);
             HapticStrengthPercentChanged?.Invoke(this, EventArgs.Empty);
             SpeakerOutputEnabledChanged?.Invoke(this, EventArgs.Empty);
+            HeadsetOnlyAudioChanged?.Invoke(this, EventArgs.Empty);
             MicrophoneInputEnabledChanged?.Invoke(this, EventArgs.Empty);
             SpeakerVolumePercentChanged?.Invoke(this, EventArgs.Empty);
             MicrophoneVolumePercentChanged?.Invoke(this, EventArgs.Empty);
         }
 
-        public void RefreshSelectedControllerStatus()
+        public void RefreshRuntimeState(ControlService controlService)
         {
-            SelectedControllerChanged?.Invoke(this, EventArgs.Empty);
-            SelectedControllerLatencyChanged?.Invoke(this, EventArgs.Empty);
-            RaiseMicrophoneCapabilityChanged();
+            foreach (CompositeDeviceModel controller in controllerCol)
+            {
+                controller.SynchronizeRuntimeProfile();
+            }
+
+            OverviewRuntimeSnapshot snapshot =
+                CreateRuntimeSnapshot(controlService);
+            if (!hasRuntimeSnapshot)
+            {
+                lastRuntimeSnapshot = snapshot;
+                hasRuntimeSnapshot = true;
+                RefreshSelectedControllerProperties();
+                return;
+            }
+
+            OverviewRuntimeSnapshot previous = lastRuntimeSnapshot;
+            lastRuntimeSnapshot = snapshot;
+
+            if (previous.ProfileName != snapshot.ProfileName)
+            {
+                CurrentProfileNameChanged?.Invoke(this, EventArgs.Empty);
+            }
+            if (previous.Connection != snapshot.Connection)
+            {
+                SelectedControllerConnectionChanged?.Invoke(this,
+                    EventArgs.Empty);
+            }
+            if (previous.Latency != snapshot.Latency)
+            {
+                SelectedControllerLatencyChanged?.Invoke(this,
+                    EventArgs.Empty);
+            }
+            if (previous.Battery != snapshot.Battery)
+            {
+                SelectedControllerBatteryChanged?.Invoke(this,
+                    EventArgs.Empty);
+            }
+            if (previous.OutputController != snapshot.OutputController)
+            {
+                SelectedOutputControllerChanged?.Invoke(this, EventArgs.Empty);
+                SelectedOutputControllerNameChanged?.Invoke(this,
+                    EventArgs.Empty);
+                RaiseMicrophoneCapabilityChanged();
+            }
+            if (previous.HapticStrength != snapshot.HapticStrength)
+            {
+                HapticStrengthPercentChanged?.Invoke(this, EventArgs.Empty);
+            }
+            if (previous.SpeakerEnabled != snapshot.SpeakerEnabled)
+            {
+                SpeakerOutputEnabledChanged?.Invoke(this, EventArgs.Empty);
+            }
+            if (previous.HeadsetOnlyAudio != snapshot.HeadsetOnlyAudio)
+            {
+                HeadsetOnlyAudioChanged?.Invoke(this, EventArgs.Empty);
+            }
+            if (previous.MicrophoneEnabled != snapshot.MicrophoneEnabled)
+            {
+                MicrophoneInputEnabledChanged?.Invoke(this, EventArgs.Empty);
+                RaiseMicrophoneCapabilityChanged();
+            }
+            if (previous.SpeakerVolume != snapshot.SpeakerVolume)
+            {
+                SpeakerVolumePercentChanged?.Invoke(this, EventArgs.Empty);
+            }
+            if (previous.MicrophoneVolume != snapshot.MicrophoneVolume)
+            {
+                MicrophoneVolumePercentChanged?.Invoke(this, EventArgs.Empty);
+            }
+            if (previous.StartupStatus != snapshot.StartupStatus)
+            {
+                selectedControllerStartupStatus = snapshot.StartupStatus;
+                RaiseControllerStartupStatusChanged();
+            }
+        }
+
+        private void RaiseControllerStartupStatusChanged()
+        {
+            SelectedControllerStartupTitleChanged?.Invoke(this,
+                EventArgs.Empty);
+            SelectedControllerStartupDetailChanged?.Invoke(this,
+                EventArgs.Empty);
+            SelectedControllerIsReadyChanged?.Invoke(this,
+                EventArgs.Empty);
+            SelectedControllerNeedsAttentionChanged?.Invoke(this,
+                EventArgs.Empty);
         }
 
         private void RaiseMicrophoneCapabilityChanged()
@@ -403,7 +545,78 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         private void SelectedController_StatusChanged(object sender, EventArgs e)
         {
-            SelectedControllerChanged?.Invoke(this, EventArgs.Empty);
+            RefreshRuntimeState(App.rootHub);
+        }
+
+        private void CaptureRuntimeSnapshot(ControlService controlService)
+        {
+            OverviewRuntimeSnapshot snapshot =
+                CreateRuntimeSnapshot(controlService);
+            lastRuntimeSnapshot = snapshot;
+            hasRuntimeSnapshot = true;
+            selectedControllerStartupStatus = snapshot.StartupStatus;
+        }
+
+        private OverviewRuntimeSnapshot CreateRuntimeSnapshot(
+            ControlService controlService)
+        {
+            ControllerStartupStatus startupStatus =
+                ControllerRuntimeStatusPolicy.Evaluate(
+                    HasValidSelectedDevice && controlService != null
+                        ? controlService.GetControllerRuntimeSignals(
+                            selectedController.DevIndex)
+                        : new ControllerRuntimeSignals(false, false, false,
+                            false, false, false,
+                            ControllerRuntimeLaneState.NotRequired,
+                            ControllerRuntimeLaneState.NotRequired,
+                            ControllerRuntimeLaneState.NotRequired,
+                            ControllerRuntimeLaneState.NotRequired,
+                            "virtual controller"));
+
+            return new OverviewRuntimeSnapshot(CurrentProfileName,
+                SelectedControllerConnection, SelectedControllerLatency,
+                SelectedControllerBattery, SelectedOutputController,
+                HapticStrengthPercent, SpeakerOutputEnabled,
+                HeadsetOnlyAudio, MicrophoneInputEnabled, SpeakerVolumePercent,
+                MicrophoneVolumePercent, startupStatus);
+        }
+
+        private readonly struct OverviewRuntimeSnapshot
+        {
+            public OverviewRuntimeSnapshot(string profileName,
+                string connection, string latency, string battery,
+                OutContType outputController, int hapticStrength,
+                bool speakerEnabled, bool headsetOnlyAudio,
+                bool microphoneEnabled,
+                int speakerVolume, int microphoneVolume,
+                ControllerStartupStatus startupStatus)
+            {
+                ProfileName = profileName;
+                Connection = connection;
+                Latency = latency;
+                Battery = battery;
+                OutputController = outputController;
+                HapticStrength = hapticStrength;
+                SpeakerEnabled = speakerEnabled;
+                HeadsetOnlyAudio = headsetOnlyAudio;
+                MicrophoneEnabled = microphoneEnabled;
+                SpeakerVolume = speakerVolume;
+                MicrophoneVolume = microphoneVolume;
+                StartupStatus = startupStatus;
+            }
+
+            public string ProfileName { get; }
+            public string Connection { get; }
+            public string Latency { get; }
+            public string Battery { get; }
+            public OutContType OutputController { get; }
+            public int HapticStrength { get; }
+            public bool SpeakerEnabled { get; }
+            public bool HeadsetOnlyAudio { get; }
+            public bool MicrophoneEnabled { get; }
+            public int SpeakerVolume { get; }
+            public int MicrophoneVolume { get; }
+            public ControllerStartupStatus StartupStatus { get; }
         }
 
         private void RaiseQuickProfileSettingChanged(int deviceIndex)

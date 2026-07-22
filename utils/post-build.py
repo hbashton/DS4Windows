@@ -33,6 +33,18 @@ lang_script = project_dir.parent / "utils" / "inject_deps_path.py"
 deps_json_path = target_dir / "DS4Windows.deps.json"
 subprocess.run([sys.executable, str(lang_script), str(deps_json_path)], check=True)
 
+# Record every file owned by this package. DS4Updater uses this manifest on the
+# next update to remove package files that no longer ship, without touching
+# profiles, settings, plugins, or other user-created content.
+manifest_name = ".ds4windows-managed-files.txt"
+manifest_path = target_dir / manifest_name
+managed_files = sorted(
+    file.relative_to(target_dir).as_posix()
+    for file in target_dir.rglob("*")
+    if file.is_file() and file.name != manifest_name
+)
+manifest_path.write_text("\n".join(managed_files) + "\n", encoding="utf-8")
+
 
 # write the version to newest.txt
 newest_txt = project_dir / "newest.txt"

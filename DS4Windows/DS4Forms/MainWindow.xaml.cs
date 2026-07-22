@@ -116,10 +116,10 @@ namespace DS4WinWPF.DS4Forms
 
             overviewStatusRefreshTimer = new DispatcherTimer
             {
-                Interval = TimeSpan.FromSeconds(1),
+                Interval = TimeSpan.FromMilliseconds(250),
             };
             overviewStatusRefreshTimer.Tick += (sender, e) =>
-                mainWinVM.RefreshSelectedControllerStatus();
+                mainWinVM.RefreshRuntimeState(App.rootHub);
             overviewStatusRefreshTimer.Start();
 
             App root = Application.Current as App;
@@ -453,6 +453,8 @@ namespace DS4WinWPF.DS4Forms
             App.rootHub.ServiceStarted += ControlServiceStarted;
             App.rootHub.RunningChanged += ControlServiceChanged;
             App.rootHub.PreServiceStop += PrepareForServiceStop;
+            App.rootHub.OutputslotMan.SlotAssigned += OutputSlot_RuntimeChanged;
+            App.rootHub.OutputslotMan.SlotUnassigned += OutputSlot_RuntimeChanged;
             //root.rootHubtest.RunningChanged += ControlServiceChanged;
             conLvViewModel.ControllerCol.CollectionChanged += ControllerCol_CollectionChanged;
             AppLogger.TrayIconLog += ShowNotification;
@@ -968,8 +970,21 @@ Suspend support not enabled.", true);
         {
             Dispatcher.BeginInvoke((Action)(() =>
             {
+                mainWinVM.RefreshRuntimeState(App.rootHub);
                 trayIconVM.PopulateContextMenu();
             }));
+        }
+
+        private void OutputSlot_RuntimeChanged(OutputSlotManager sender,
+            int slotNum, OutSlotDevice outSlotDevice)
+        {
+            if (!Dispatcher.HasShutdownStarted &&
+                !Dispatcher.HasShutdownFinished)
+            {
+                Dispatcher.BeginInvoke(DispatcherPriority.DataBind,
+                    new Action(() =>
+                        mainWinVM.RefreshRuntimeState(App.rootHub)));
+            }
         }
 
         private void ControlServiceChanged(object sender, EventArgs e)
@@ -1105,6 +1120,7 @@ Suspend support not enabled.", true);
             ProfileFeatureSettingsChangedEventArgs e)
         {
             overviewDirtyControllerIndices.Add(e.DeviceIndex);
+            mainWinVM.RefreshRuntimeState(App.rootHub);
             overviewProfileSaveTimer.Stop();
             overviewProfileSaveTimer.Start();
         }
@@ -1373,9 +1389,11 @@ Suspend support not enabled.", true);
             {
                 FlushOverviewQuickSettings(idx, false);
                 CompositeDeviceModel item = conLvViewModel.ControllerDict[idx];
-                if (item.SelectedIndex > -1)
+                if (!item.IsSynchronizingRuntimeProfile &&
+                    item.SelectedIndex > -1)
                 {
                     item.ChangeSelectedProfile();
+                    mainWinVM.RefreshRuntimeState(App.rootHub);
                     trayIconVM.PopulateContextMenu();
                 }
             }

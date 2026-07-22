@@ -765,6 +765,10 @@ namespace DS4WinWPF.DS4Control.DTOXml
             set => _gameBarHomeButtonSupport = XmlDataUtilities.StrToBool(value);
         }
 
+        // Read-only migration shim. New profiles use the companion option
+        // below and never write the removed profile-switch control.
+        public bool ShouldSerializeGameBarHomeButtonSupportString() => false;
+
         private bool _gameBarControllerCompatibility;
         [XmlElement("GameBarControllerCompatibility")]
         public string GameBarControllerCompatibilityString
@@ -778,6 +782,8 @@ namespace DS4WinWPF.DS4Control.DTOXml
         {
             get; set;
         } = string.Empty;
+
+        public bool ShouldSerializeGameBarProfileName() => false;
 
         private bool _dualSenseMuteButtonLightEnabled;
         [XmlElement("DualSenseMuteButtonLightEnabled")]
@@ -1707,9 +1713,9 @@ namespace DS4WinWPF.DS4Control.DTOXml
             _mouseAcceleration = source.buttonMouseInfos[deviceIndex].mouseAccel;
             //ShiftModifier = source.
             LaunchProgram = source.launchProgram[deviceIndex];
-            _gameBarHomeButtonSupport = source.gameBarHomeButtonSupport[deviceIndex];
+            _gameBarHomeButtonSupport = false;
             _gameBarControllerCompatibility = source.gameBarControllerCompatibility[deviceIndex];
-            GameBarProfileName = source.gameBarProfileName[deviceIndex];
+            GameBarProfileName = string.Empty;
             _dualSenseMuteButtonLightEnabled = source.dualSenseMuteButtonLightEnabled[deviceIndex];
             _dualSenseMuteButtonMutesMicrophone = source.dualSenseMuteButtonMutesMicrophone[deviceIndex];
             DualSenseMuteOnProfileName = source.dualSenseMuteOnProfileName[deviceIndex];
@@ -1842,6 +1848,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
                 AudioSettingsGroup = new DualSenseControllerSettings.AudioSettings()
                 {
                     EnableSpeakerOutput = source.dualSenseEnableSpeakerOutput[deviceIndex],
+                    HeadsetOnlyAudio = source.dualSenseHeadsetOnlyAudio[deviceIndex],
                     SpeakerVolume = source.dualSenseSpeakerVolume[deviceIndex],
                     SpeakerCompression = Math.Min(source.dualSenseSpeakerCompression[deviceIndex],
                         (byte)DualSenseSpeakerCompression.Strong),
@@ -2323,9 +2330,13 @@ namespace DS4WinWPF.DS4Control.DTOXml
             destination.buttonMouseInfos[deviceIndex].mouseAccel = _mouseAcceleration;
             //destination. = ShiftModifier 
             destination.launchProgram[deviceIndex] = LaunchProgram;
-            destination.gameBarHomeButtonSupport[deviceIndex] = _gameBarHomeButtonSupport;
-            destination.gameBarControllerCompatibility[deviceIndex] = _gameBarControllerCompatibility;
-            destination.gameBarProfileName[deviceIndex] = GameBarProfileName ?? string.Empty;
+            bool legacyGameBarSwitcherConfigured =
+                _gameBarHomeButtonSupport ||
+                !string.IsNullOrWhiteSpace(GameBarProfileName);
+            destination.gameBarHomeButtonSupport[deviceIndex] = false;
+            destination.gameBarControllerCompatibility[deviceIndex] =
+                _gameBarControllerCompatibility || legacyGameBarSwitcherConfigured;
+            destination.gameBarProfileName[deviceIndex] = string.Empty;
             destination.dualSenseMuteButtonLightEnabled[deviceIndex] = _dualSenseMuteButtonLightEnabled;
             destination.dualSenseMuteButtonMutesMicrophone[deviceIndex] = _dualSenseMuteButtonMutesMicrophone;
             destination.dualSenseMuteOnProfileName[deviceIndex] = DualSenseMuteOnProfileName ?? string.Empty;
@@ -2483,6 +2494,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
                 if (DualSenseControllerSettings.AudioSettingsGroup != null)
                 {
                     destination.dualSenseEnableSpeakerOutput[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.EnableSpeakerOutput;
+                    destination.dualSenseHeadsetOnlyAudio[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.HeadsetOnlyAudio;
                     destination.dualSenseSpeakerVolume[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.SpeakerVolume;
                     destination.dualSenseSpeakerCompression[deviceIndex] = Math.Min(
                         DualSenseControllerSettings.AudioSettingsGroup.SpeakerCompression,
@@ -3284,6 +3296,12 @@ namespace DS4WinWPF.DS4Control.DTOXml
         {
             [XmlElement("EnableSpeakerOutput")]
             public bool EnableSpeakerOutput
+            {
+                get; set;
+            }
+
+            [XmlElement("HeadsetOnlyAudio")]
+            public bool HeadsetOnlyAudio
             {
                 get; set;
             }

@@ -47,6 +47,8 @@ namespace DS4WinWPF.DS4Forms
             new Dictionary<DS4Windows.X360Controls, Button>();
         private Dictionary<DS4Windows.X360Controls, Button> mouseBtnMap =
             new Dictionary<DS4Windows.X360Controls, Button>();
+        private readonly Dictionary<Button, Geometry> outputButtonHitGeometries =
+            new Dictionary<Button, Geometry>();
         private BindingWindowViewModel bindingVM;
         private Button highlightBtn;
         private ExposeMode expose;
@@ -124,14 +126,15 @@ namespace DS4WinWPF.DS4Forms
             double left = Canvas.GetLeft(button);
             double top = Canvas.GetTop(button);
 
-            Rect highlightBounds = new Rect(left, top,
-                Math.Max(1, button.Width), Math.Max(1, button.Height));
             outputControllerHighlight.Data = CreateOutputHighlightGeometry(
-                button, highlightBounds);
+                button, left, top);
             outputControllerHighlight.Visibility = Visibility.Visible;
 
             Canvas.SetLeft(highlightLb, left + (button.Width / 2.0) - (highlightLb.ActualWidth / 2.0));
-            Canvas.SetTop(highlightLb, top - 30);
+            double labelTop = top >= 30
+                ? top - 30
+                : top + button.Height + 4;
+            Canvas.SetTop(highlightLb, labelTop);
 
             highlightLb.Visibility = Visibility.Visible;
         }
@@ -772,37 +775,158 @@ namespace DS4WinWPF.DS4Forms
         }
 
         private Geometry CreateOutputHighlightGeometry(Button button,
-            Rect bounds)
+            double left, double top)
         {
-            bool circular = button == aBtn || button == bBtn ||
-                button == xBtn || button == yBtn || button == guideBtn ||
-                button == lsbBtn || button == rsbBtn;
-            if (circular)
+            if (!outputButtonHitGeometries.TryGetValue(button,
+                out Geometry localGeometry))
             {
-                return new EllipseGeometry(bounds);
+                localGeometry = CreateOutputButtonHitGeometry(button,
+                    button.Width, button.Height);
             }
 
-            double radius = button == ltBtn || button == rtBtn ||
-                button == lbBtn || button == rbBtn
-                    ? Math.Min(bounds.Height / 2.0, 8.0)
-                    : configuredOutputType == OutContType.ViiperX360
-                        ? 3.0
-                        : 5.0;
-            return new RectangleGeometry(bounds, radius, radius);
+            Geometry highlightGeometry = localGeometry.Clone();
+            highlightGeometry.Transform = new TranslateTransform(left, top);
+            return highlightGeometry;
         }
 
-        private static void SetOutputButtonBounds(Button button, double left,
+        private void SetOutputButtonBounds(Button button, double left,
             double top, double width, double height)
         {
             Canvas.SetLeft(button, left);
             Canvas.SetTop(button, top);
             button.Width = width;
             button.Height = height;
+
+            Geometry hitGeometry = CreateOutputButtonHitGeometry(button,
+                width, height);
+            outputButtonHitGeometries[button] = hitGeometry;
+            button.Clip = hitGeometry;
+        }
+
+        private Geometry CreateOutputButtonHitGeometry(Button button,
+            double width, double height)
+        {
+            Rect bounds = new Rect(0, 0, Math.Max(1, width),
+                Math.Max(1, height));
+
+            if (button == aBtn || button == bBtn || button == xBtn ||
+                button == yBtn || button == lsbBtn || button == rsbBtn ||
+                button == guideBtn ||
+                (configuredOutputType == OutContType.ViiperSwitch2Pro &&
+                    (button == backBtn || button == startBtn)))
+            {
+                double inset = Math.Min(1.0,
+                    Math.Min(bounds.Width, bounds.Height) / 8.0);
+                return new EllipseGeometry(new Rect(inset, inset,
+                    Math.Max(1, bounds.Width - (inset * 2.0)),
+                    Math.Max(1, bounds.Height - (inset * 2.0))));
+            }
+
+            if (button == dpadUBtn)
+            {
+                return CreatePolygonGeometry(width, height,
+                    new Point(0.22, 1.00), new Point(0.08, 0.78),
+                    new Point(0.10, 0.22), new Point(0.28, 0.04),
+                    new Point(0.72, 0.04), new Point(0.90, 0.22),
+                    new Point(0.92, 0.78), new Point(0.78, 1.00));
+            }
+
+            if (button == dpadRBtn)
+            {
+                return CreatePolygonGeometry(width, height,
+                    new Point(0.00, 0.22), new Point(0.22, 0.08),
+                    new Point(0.78, 0.10), new Point(0.96, 0.28),
+                    new Point(0.96, 0.72), new Point(0.78, 0.90),
+                    new Point(0.22, 0.92), new Point(0.00, 0.78));
+            }
+
+            if (button == dpadDBtn)
+            {
+                return CreatePolygonGeometry(width, height,
+                    new Point(0.22, 0.00), new Point(0.08, 0.22),
+                    new Point(0.10, 0.78), new Point(0.28, 0.96),
+                    new Point(0.72, 0.96), new Point(0.90, 0.78),
+                    new Point(0.92, 0.22), new Point(0.78, 0.00));
+            }
+
+            if (button == dpadLBtn)
+            {
+                return CreatePolygonGeometry(width, height,
+                    new Point(1.00, 0.22), new Point(0.78, 0.08),
+                    new Point(0.22, 0.10), new Point(0.04, 0.28),
+                    new Point(0.04, 0.72), new Point(0.22, 0.90),
+                    new Point(0.78, 0.92), new Point(1.00, 0.78));
+            }
+
+            if (button == ltBtn || button == lbBtn)
+            {
+                return CreatePolygonGeometry(width, height,
+                    new Point(0.04, 0.95), new Point(0.00, 0.56),
+                    new Point(0.10, 0.16), new Point(0.25, 0.02),
+                    new Point(0.82, 0.00), new Point(0.96, 0.16),
+                    new Point(1.00, 0.72), new Point(0.88, 0.94),
+                    new Point(0.22, 1.00));
+            }
+
+            if (button == rtBtn || button == rbBtn)
+            {
+                return CreatePolygonGeometry(width, height,
+                    new Point(0.96, 0.95), new Point(1.00, 0.56),
+                    new Point(0.90, 0.16), new Point(0.75, 0.02),
+                    new Point(0.18, 0.00), new Point(0.04, 0.16),
+                    new Point(0.00, 0.72), new Point(0.12, 0.94),
+                    new Point(0.78, 1.00));
+            }
+
+            if (button == lsuBtn || button == lsdBtn ||
+                button == rsuBtn || button == rsdBtn)
+            {
+                double radius = Math.Min(height / 2.0, width / 2.0);
+                return new RectangleGeometry(bounds, radius, radius);
+            }
+
+            if (button == lslBtn || button == lsrBtn ||
+                button == rslBtn || button == rsrBtn)
+            {
+                double radius = Math.Min(width / 2.0, height / 2.0);
+                return new RectangleGeometry(bounds, radius, radius);
+            }
+
+            double cornerRadius = button == touchpadClickBtn
+                ? Math.Min(8.0, height / 5.0)
+                : Math.Min(5.0, height / 2.0);
+            return new RectangleGeometry(bounds, cornerRadius, cornerRadius);
+        }
+
+        private static Geometry CreatePolygonGeometry(double width,
+            double height, params Point[] normalizedPoints)
+        {
+            var geometry = new StreamGeometry();
+            using (StreamGeometryContext context = geometry.Open())
+            {
+                Point first = new Point(normalizedPoints[0].X * width,
+                    normalizedPoints[0].Y * height);
+                context.BeginFigure(first, true, true);
+                for (int i = 1; i < normalizedPoints.Length; i++)
+                {
+                    context.LineTo(new Point(
+                        normalizedPoints[i].X * width,
+                        normalizedPoints[i].Y * height), true, false);
+                }
+            }
+
+            geometry.Freeze();
+            return geometry;
         }
 
         private void ConfigureOutputControllerCanvas(OutContType outputType)
         {
             touchpadClickBtn.Visibility = Visibility.Collapsed;
+            foreach (Button button in outputButtonHitGeometries.Keys)
+            {
+                button.Clip = null;
+            }
+            outputButtonHitGeometries.Clear();
             outputType = outputType.Normalize();
             configuredOutputType = outputType;
             switch (outputType)
@@ -829,14 +953,14 @@ namespace DS4WinWPF.DS4Forms
         {
             conImageBrush.ImageSource = LoadControllerImage("360 map.png");
 
-            SetOutputButtonBounds(aBtn, 433, 109, 34, 30);
-            SetOutputButtonBounds(bBtn, 472, 79, 34, 30);
-            SetOutputButtonBounds(xBtn, 400, 82, 32, 30);
-            SetOutputButtonBounds(yBtn, 437, 50, 34, 30);
-            SetOutputButtonBounds(lbBtn, 14, 55, 82, 25);
-            SetOutputButtonBounds(rbBtn, 542, 55, 80, 25);
-            SetOutputButtonBounds(ltBtn, 54, 18, 31, 39);
-            SetOutputButtonBounds(rtBtn, 555, 18, 29, 39);
+            SetOutputButtonBounds(aBtn, 433, 108, 34, 31);
+            SetOutputButtonBounds(bBtn, 472, 79, 34, 31);
+            SetOutputButtonBounds(xBtn, 400, 80, 32, 31);
+            SetOutputButtonBounds(yBtn, 437, 50, 34, 31);
+            SetOutputButtonBounds(lbBtn, 14, 56, 82, 21);
+            SetOutputButtonBounds(rbBtn, 535, 56, 79, 21);
+            SetOutputButtonBounds(ltBtn, 52, 19, 33, 37);
+            SetOutputButtonBounds(rtBtn, 548, 19, 29, 37);
             SetOutputButtonBounds(backBtn, 260, 88, 25, 18);
             SetOutputButtonBounds(startBtn, 356, 88, 25, 18);
             SetOutputButtonBounds(guideBtn, 303, 78, 32, 34);
@@ -864,10 +988,10 @@ namespace DS4WinWPF.DS4Forms
             SetOutputButtonBounds(bBtn, 446, 114, 25, 25);
             SetOutputButtonBounds(xBtn, 390, 114, 25, 25);
             SetOutputButtonBounds(yBtn, 419, 90, 25, 25);
-            SetOutputButtonBounds(lbBtn, 178, 40, 53, 24);
-            SetOutputButtonBounds(rbBtn, 399, 40, 53, 24);
-            SetOutputButtonBounds(ltBtn, 184, 18, 45, 25);
-            SetOutputButtonBounds(rtBtn, 401, 18, 45, 25);
+            SetOutputButtonBounds(lbBtn, 174, 43, 53, 22);
+            SetOutputButtonBounds(rbBtn, 403, 43, 53, 22);
+            SetOutputButtonBounds(ltBtn, 184, 19, 43, 24);
+            SetOutputButtonBounds(rtBtn, 403, 19, 43, 24);
             SetOutputButtonBounds(backBtn, 231, 79, 17, 25);
             SetOutputButtonBounds(startBtn, 382, 79, 17, 25);
             SetOutputButtonBounds(guideBtn, 305, 158, 20, 18);
@@ -926,32 +1050,32 @@ namespace DS4WinWPF.DS4Forms
         {
             conImageBrush.ImageSource = LoadControllerImage("DualSense Edge Controller.png");
 
-            SetOutputButtonBounds(aBtn, 419, 86, 28, 28);
-            SetOutputButtonBounds(bBtn, 447, 57, 28, 28);
-            SetOutputButtonBounds(xBtn, 390, 57, 28, 28);
-            SetOutputButtonBounds(yBtn, 419, 28, 28, 28);
-            SetOutputButtonBounds(lbBtn, 157, 0, 78, 26);
-            SetOutputButtonBounds(rbBtn, 395, 0, 78, 26);
-            SetOutputButtonBounds(ltBtn, 166, 0, 61, 15);
-            SetOutputButtonBounds(rtBtn, 403, 0, 61, 15);
-            SetOutputButtonBounds(backBtn, 224, 20, 19, 25);
-            SetOutputButtonBounds(startBtn, 387, 20, 19, 25);
-            SetOutputButtonBounds(guideBtn, 305, 138, 20, 20);
-            SetOutputButtonBounds(lsbBtn, 229, 100, 45, 45);
-            SetOutputButtonBounds(lsuBtn, 241, 92, 21, 17);
-            SetOutputButtonBounds(lsrBtn, 267, 111, 17, 21);
-            SetOutputButtonBounds(lsdBtn, 241, 139, 21, 17);
-            SetOutputButtonBounds(lslBtn, 219, 111, 17, 21);
-            SetOutputButtonBounds(rsbBtn, 356, 100, 45, 45);
-            SetOutputButtonBounds(rsuBtn, 368, 92, 21, 17);
-            SetOutputButtonBounds(rsrBtn, 394, 111, 17, 21);
-            SetOutputButtonBounds(rsdBtn, 368, 139, 21, 17);
-            SetOutputButtonBounds(rslBtn, 346, 111, 17, 21);
-            SetOutputButtonBounds(dpadUBtn, 183, 28, 23, 27);
-            SetOutputButtonBounds(dpadRBtn, 205, 57, 27, 23);
-            SetOutputButtonBounds(dpadDBtn, 183, 85, 23, 27);
-            SetOutputButtonBounds(dpadLBtn, 156, 57, 27, 23);
-            SetOutputButtonBounds(touchpadClickBtn, 234, 7, 162, 92);
+            SetOutputButtonBounds(aBtn, 407, 103, 25, 25);
+            SetOutputButtonBounds(bBtn, 433, 77, 25, 25);
+            SetOutputButtonBounds(xBtn, 381, 77, 25, 25);
+            SetOutputButtonBounds(yBtn, 407, 55, 25, 25);
+            SetOutputButtonBounds(lbBtn, 184, 23, 49, 24);
+            SetOutputButtonBounds(rbBtn, 397, 23, 49, 24);
+            SetOutputButtonBounds(ltBtn, 185, 5, 47, 19);
+            SetOutputButtonBounds(rtBtn, 399, 5, 44, 19);
+            SetOutputButtonBounds(backBtn, 229, 46, 18, 20);
+            SetOutputButtonBounds(startBtn, 385, 46, 18, 20);
+            SetOutputButtonBounds(guideBtn, 303, 128, 24, 23);
+            SetOutputButtonBounds(lsbBtn, 237, 115, 47, 47);
+            SetOutputButtonBounds(lsuBtn, 250, 109, 21, 16);
+            SetOutputButtonBounds(lsrBtn, 276, 128, 16, 20);
+            SetOutputButtonBounds(lsdBtn, 250, 154, 21, 16);
+            SetOutputButtonBounds(lslBtn, 229, 128, 16, 20);
+            SetOutputButtonBounds(rsbBtn, 347, 115, 47, 47);
+            SetOutputButtonBounds(rsuBtn, 360, 109, 21, 16);
+            SetOutputButtonBounds(rsrBtn, 386, 128, 16, 20);
+            SetOutputButtonBounds(rsdBtn, 360, 154, 21, 16);
+            SetOutputButtonBounds(rslBtn, 339, 128, 16, 20);
+            SetOutputButtonBounds(dpadUBtn, 199, 63, 24, 25);
+            SetOutputButtonBounds(dpadRBtn, 219, 78, 26, 24);
+            SetOutputButtonBounds(dpadDBtn, 199, 99, 24, 25);
+            SetOutputButtonBounds(dpadLBtn, 186, 78, 26, 24);
+            SetOutputButtonBounds(touchpadClickBtn, 246, 38, 138, 66);
             touchpadClickBtn.Visibility = Visibility.Visible;
         }
 
@@ -965,10 +1089,10 @@ namespace DS4WinWPF.DS4Forms
             SetOutputButtonBounds(bBtn, 407, 67, 23, 24);
             SetOutputButtonBounds(xBtn, 362, 67, 23, 24);
             SetOutputButtonBounds(yBtn, 385, 47, 23, 24);
-            SetOutputButtonBounds(lbBtn, 199, 21, 54, 14);
-            SetOutputButtonBounds(rbBtn, 377, 21, 56, 14);
-            SetOutputButtonBounds(ltBtn, 202, 7, 49, 15);
-            SetOutputButtonBounds(rtBtn, 383, 7, 50, 15);
+            SetOutputButtonBounds(lbBtn, 199, 23, 54, 18);
+            SetOutputButtonBounds(rbBtn, 377, 23, 56, 18);
+            SetOutputButtonBounds(ltBtn, 202, 8, 49, 15);
+            SetOutputButtonBounds(rtBtn, 383, 8, 50, 15);
             SetOutputButtonBounds(backBtn, 269, 49, 16, 16);
             SetOutputButtonBounds(startBtn, 342, 49, 17, 16);
             SetOutputButtonBounds(guideBtn, 325, 69, 18, 18);

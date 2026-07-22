@@ -105,10 +105,6 @@ namespace DS4Windows.InputDevices
         public long CompletedWrites => Interlocked.Read(ref completedWrites);
         public long SlowCompletionCount => Interlocked.Read(ref slowCompletionCount);
         public long LateSubmissionCount => Interlocked.Read(ref lateSubmissionCount);
-        internal long MaximumCompletionTicks =>
-            Interlocked.Read(ref maximumCompletionTicks);
-        internal long MaximumSubmissionGapTicks =>
-            Interlocked.Read(ref maximumSubmissionGapTicks);
         public double MaximumCompletionMilliseconds =>
             Interlocked.Read(ref maximumCompletionTicks) * 1000.0 / Stopwatch.Frequency;
         public double MaximumSubmissionGapMilliseconds =>
@@ -249,21 +245,9 @@ namespace DS4Windows.InputDevices
         /// </summary>
         public bool TryWrite(byte[] report, out bool transportFault)
         {
-            return TryWrite(report, report?.Length ?? 0, out transportFault);
-        }
-
-        /// <summary>
-        /// Writes the valid prefix of a reusable maximum-sized report buffer.
-        /// This lets one HID owner serialize normal state, single-frame audio,
-        /// and double-frame audio without allocating in the real-time path.
-        /// </summary>
-        public bool TryWrite(byte[] report, int reportLength,
-            out bool transportFault)
-        {
             transportFault = false;
-            if (report == null || reportLength <= 0 ||
-                reportLength > report.Length ||
-                reportLength > slots[0].Buffer.Length)
+            if (report == null || report.Length == 0 ||
+                report.Length > slots[0].Buffer.Length)
             {
                 transportFault = true;
                 return false;
@@ -312,13 +296,13 @@ namespace DS4Windows.InputDevices
                     slot.SubmittedTimestamp = 0;
                 }
 
-                Buffer.BlockCopy(report, 0, slot.Buffer, 0, reportLength);
+                Buffer.BlockCopy(report, 0, slot.Buffer, 0, report.Length);
                 ResetEvent(slot.EventHandle);
                 var overlapped = new NativeOverlappedData { EventHandle = slot.EventHandle };
                 Marshal.StructureToPtr(overlapped, slot.Overlapped, false);
 
                 bool completed = WriteFile(deviceHandle, slot.BufferHandle.AddrOfPinnedObject(),
-                    (uint)reportLength, IntPtr.Zero, slot.Overlapped);
+                    (uint)report.Length, IntPtr.Zero, slot.Overlapped);
                 if (!completed)
                 {
                     int error = Marshal.GetLastWin32Error();
@@ -347,49 +331,6 @@ namespace DS4Windows.InputDevices
         }
 
         /// <summary>
-        /// Waits for every older HID write to complete before submitting this
-        /// report, but does not wait for this report after submission. The
-        /// DualSense 0x39 report is larger than one Bluetooth ACL packet; this
-        /// ordering barrier mirrors an L2CAP CAN_SEND_NOW producer and prevents
-        /// adjacent reports from competing for the adapter's ACL credits.
-        /// </summary>
-        public bool TryWriteAfterPriorCompletion(byte[] report,
-            int reportLength, uint timeoutMilliseconds,
-            out bool transportFault)
-        {
-            transportFault = false;
-            if (report == null || reportLength <= 0 ||
-                reportLength > report.Length ||
-                reportLength > slots[0].Buffer.Length)
-            {
-                transportFault = true;
-                return false;
-            }
-
-            lock (syncRoot)
-            {
-                if (disposed)
-                {
-                    transportFault = true;
-                    return false;
-                }
-
-                long waitStarted = Stopwatch.GetTimestamp();
-                ObserveCompletedWrites();
-                if (!TryDrainPendingWrites(waitStarted,
-                    timeoutMilliseconds, out transportFault))
-                {
-                    return false;
-                }
-
-                // Monitor locks are recursive. Keep syncRoot held across the
-                // drain and submission so another control write cannot enter
-                // between the ordering barrier and this presentation report.
-                return TryWrite(report, reportLength, out transportFault);
-            }
-        }
-
-        /// <summary>
         /// Writes a one-shot control report and waits for its exact OVERLAPPED
         /// completion. This writer owns the exact OVERLAPPED pointer even when
         /// the HID handle is shared, so its wait/cancel cannot consume the input
@@ -398,17 +339,9 @@ namespace DS4Windows.InputDevices
         public bool TryWriteAndWait(byte[] report, uint timeoutMilliseconds,
             out bool transportFault)
         {
-            return TryWriteAndWait(report, report?.Length ?? 0,
-                timeoutMilliseconds, out transportFault);
-        }
-
-        public bool TryWriteAndWait(byte[] report, int reportLength,
-            uint timeoutMilliseconds, out bool transportFault)
-        {
             transportFault = false;
-            if (report == null || reportLength <= 0 ||
-                reportLength > report.Length ||
-                reportLength > slots[0].Buffer.Length)
+            if (report == null || report.Length == 0 ||
+                report.Length > slots[0].Buffer.Length)
             {
                 transportFault = true;
                 return false;
@@ -503,7 +436,7 @@ namespace DS4Windows.InputDevices
                     }
                 }
 
-                Buffer.BlockCopy(report, 0, slot.Buffer, 0, reportLength);
+                Buffer.BlockCopy(report, 0, slot.Buffer, 0, report.Length);
                 ResetEvent(slot.EventHandle);
                 Marshal.StructureToPtr(new NativeOverlappedData
                 {
@@ -512,7 +445,7 @@ namespace DS4Windows.InputDevices
 
                 long submitted = Stopwatch.GetTimestamp();
                 bool completed = WriteFile(deviceHandle,
-                    slot.BufferHandle.AddrOfPinnedObject(), (uint)reportLength,
+                    slot.BufferHandle.AddrOfPinnedObject(), (uint)report.Length,
                     IntPtr.Zero, slot.Overlapped);
                 if (!completed)
                 {

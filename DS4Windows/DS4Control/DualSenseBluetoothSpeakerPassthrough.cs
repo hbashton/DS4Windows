@@ -1337,16 +1337,11 @@ namespace DS4Windows
         private void UpdateCaptureClockRatioLocked()
         {
             int targetFrames = (SampleRate * TargetBufferMs) / 1000;
-            bool phaseLockedDirectDualSense =
-                directSpeakerSource != null &&
-                directSpeakerSampleRate == SampleRate &&
-                sourceEndpointKind == ControllerAudioEndpointKind.DualSense;
             if (!captureClockInitialized)
             {
                 captureSmoothedBufferedFrames = captureRingBufferedFrames;
                 captureTargetClockRatio = CalculateCaptureClockRatio(
-                    captureRingBufferedFrames, targetFrames,
-                    phaseLockedDirectDualSense);
+                    captureRingBufferedFrames, targetFrames);
                 captureCurrentClockRatio = captureTargetClockRatio;
                 captureClockInitialized = true;
                 return;
@@ -1362,8 +1357,7 @@ namespace DS4Windows
             // physical 10.667 ms report clock never skips, catches up, or
             // receives a fabricated zero packet.
             captureTargetClockRatio = CalculateCaptureClockRatio(
-                captureRingBufferedFrames, targetFrames,
-                phaseLockedDirectDualSense);
+                captureRingBufferedFrames, targetFrames);
             captureCurrentClockRatio = captureTargetClockRatio;
             if (Math.Abs(captureCurrentClockRatio - 1.0) > 0.000001)
             {
@@ -1372,22 +1366,8 @@ namespace DS4Windows
         }
 
         internal static double CalculateCaptureClockRatio(
-            int bufferedFrames, int targetFrames,
-            bool phaseLockedDirectDualSense = false)
+            int bufferedFrames, int targetFrames)
         {
-            // A VIIPER DualSense endpoint already publishes one 512-frame,
-            // 48 kHz block for every 10.667 ms controller service interval.
-            // Its ring naturally oscillates by one callback block. Treating
-            // that callback phase as clock drift pins the resampler at
-            // 508/512 or 516/512, audibly shifting pitch and producing a
-            // periodic warble. Keep this one source/target pair at unity;
-            // loopback and virtual-DS4 sources retain their independent drift
-            // correction.
-            if (phaseLockedDirectDualSense)
-            {
-                return 1.0;
-            }
-
             if (bufferedFrames >
                 targetFrames + CaptureClockLagDeadbandFrames)
             {
@@ -2178,15 +2158,6 @@ namespace DS4Windows
                          $"pacerLate={device.BluetoothAudioPacerLatePresentations} " +
                          $"pacerGapMaxMs={device.BluetoothAudioPacerMaximumPresentationGapMilliseconds:F2} " +
                          $"pacerRejected={device.BluetoothAudioPacerRejectedReports} " +
-                         $"helperWriterCompletions={device.BluetoothAudioPacerWriterCompletedReports} " +
-                         $"helperWriterSlowCompletions={device.BluetoothAudioPacerWriterSlowCompletionCount} " +
-                         $"helperWriterMaximumCompletionMs={device.BluetoothAudioPacerWriterMaximumCompletionMilliseconds:F1} " +
-                         $"helperWriterLateSubmissions={device.BluetoothAudioPacerWriterLateSubmissionCount} " +
-                         $"helperWriterMaximumSubmissionGapMs={device.BluetoothAudioPacerWriterMaximumSubmissionGapMilliseconds:F1} " +
-                         $"invalidLayouts={device.BluetoothAudioPacerInvalidLayoutCount} " +
-                         $"invalidCrcs={device.BluetoothAudioPacerInvalidCrcCount} " +
-                         $"reportSequenceDiscontinuities={device.BluetoothAudioPacerReportSequenceDiscontinuityCount} " +
-                         $"packetSequenceDiscontinuities={device.BluetoothAudioPacerPacketSequenceDiscontinuityCount} " +
                          $"pacerError='{device.BluetoothAudioPacerLastError}' " +
                         $"speakerWrites={device.BluetoothCombinedSpeakerReportsWritten} " +
                         $"speakerWriteFailures={device.BluetoothCombinedSpeakerWriteFailures} " +

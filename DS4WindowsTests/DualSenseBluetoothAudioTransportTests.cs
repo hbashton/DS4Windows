@@ -48,14 +48,6 @@ namespace DS4WindowsTests
             typeof(DualSenseDevice).GetField(
                 "bluetoothCombinedSpeakerPacketSequence",
                 BindingFlags.Instance | BindingFlags.NonPublic);
-        private static readonly FieldInfo DoubleFrameWorkingReportField =
-            typeof(DualSenseDevice).GetField(
-                "bluetoothDoubleFrameWorkingReport",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-        private static readonly FieldInfo DoubleFirstFramePendingField =
-            typeof(DualSenseDevice).GetField(
-                "bluetoothDoubleFirstFramePending",
-                BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly MethodInfo BuildCombinedControlReportMethod =
             typeof(DualSenseDevice).GetMethod(
                 "BuildBluetoothCombinedControlReport",
@@ -227,7 +219,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void LocallyBufferedFirstHalfDoesNotClaimActiveClock()
+        public void FailedFirstSpeakerSubmissionDoesNotClaimActiveClock()
         {
             DualSenseDevice device = CreateBluetoothDevice();
             device.EnableSpeakerOutput = true;
@@ -235,15 +227,13 @@ namespace DS4WindowsTests
             bool accepted = device.SetBluetoothSpeakerAudioFrame(
                 new byte[200], 200);
 
-            Assert.IsTrue(accepted,
-                "The first half of a double-frame report was not buffered.");
+            Assert.IsFalse(accepted,
+                "The hardware-less speaker submission unexpectedly succeeded.");
             Assert.AreEqual(0L, GetFieldValue<long>(
                 SpeakerClockActiveClaimField, device),
-                "A locally buffered half-frame left a false active speaker clock.");
+                "A failed first frame left a false active speaker clock.");
             Assert.AreEqual(0L, GetFieldValue<long>(
                 SpeakerClockLeaseExpiryField, device));
-            Assert.IsTrue(GetFieldValue<bool>(
-                DoubleFirstFramePendingField, device));
         }
 
         [TestMethod]
@@ -253,13 +243,6 @@ namespace DS4WindowsTests
             device.EnableSpeakerOutput = true;
             SetFieldValue(SpeakerReportSequenceField, device, (byte)9);
             SetFieldValue(SpeakerPacketSequenceField, device, (byte)41);
-
-            Assert.IsTrue(device.SetBluetoothSpeakerAudioFrame(
-                new byte[200], 200));
-            Assert.AreEqual((byte)9, GetFieldValue<byte>(
-                SpeakerReportSequenceField, device));
-            Assert.AreEqual((byte)41, GetFieldValue<byte>(
-                SpeakerPacketSequenceField, device));
 
             Assert.IsFalse(device.SetBluetoothSpeakerAudioFrame(
                 new byte[200], 200));
@@ -280,14 +263,11 @@ namespace DS4WindowsTests
             long existingExpiry = GetFieldValue<long>(
                 SpeakerClockLeaseExpiryField, device);
 
-            bool buffered = device.SetBluetoothSpeakerAudioFrame(
-                new byte[200], 200);
             bool accepted = device.SetBluetoothSpeakerAudioFrame(
                 new byte[200], 200);
 
-            Assert.IsTrue(buffered);
             Assert.IsFalse(accepted,
-                "The hardware-less paired speaker submission unexpectedly succeeded.");
+                "The hardware-less speaker submission unexpectedly succeeded.");
             Assert.AreEqual(existingClaim, GetFieldValue<long>(
                 SpeakerClockActiveClaimField, device),
                 "A failed later frame cleared the lease earned by queued audio.");
@@ -306,59 +286,9 @@ namespace DS4WindowsTests
             report[11] = 0x93;
             report[12] = 200;
 
-            Assert.IsTrue(device.WriteBluetoothSpeakerAudioOutputReport(
-                report, 0, report.Length),
-                "The compatibility API rejected the locally buffered first half.");
             Assert.IsFalse(device.WriteBluetoothSpeakerAudioOutputReport(
                 report, 0, report.Length),
-                "The compatibility API hid the paired physical submission failure.");
-        }
-
-        [TestMethod]
-        public void DoubleFrameReportPairsConsecutiveSpeakerFramesExactly()
-        {
-            DualSenseDevice device = CreateBluetoothDevice();
-            device.EnableSpeakerOutput = true;
-            byte[] first = Enumerable.Range(0, 200)
-                .Select(index => (byte)index).ToArray();
-            byte[] second = Enumerable.Range(0, 200)
-                .Select(index => (byte)(255 - index)).ToArray();
-
-            Assert.IsTrue(device.SetBluetoothSpeakerAudioFrame(first,
-                first.Length));
-            Assert.IsFalse(device.SetBluetoothSpeakerAudioFrame(second,
-                second.Length),
-                "The hardware-less paired report unexpectedly reached a HID transport.");
-
-            byte[] report = GetFieldValue<byte[]>(
-                DoubleFrameWorkingReportField, device);
-            Assert.AreEqual(547, report.Length);
-            Assert.AreEqual((byte)0x39, report[0]);
-            Assert.AreEqual((byte)0x91, report[2]);
-            Assert.AreEqual((byte)0x06, report[3]);
-            Assert.AreEqual((byte)0x7E, report[4]);
-            for (int index = 5; index <= 8; index++)
-            {
-                Assert.AreEqual((byte)128, report[index]);
-            }
-            Assert.AreEqual((byte)0xD2, report[10]);
-            Assert.AreEqual((byte)64, report[11]);
-            Assert.AreEqual((byte)0xD3, report[140]);
-            Assert.AreEqual((byte)200, report[141]);
-            CollectionAssert.AreEqual(first,
-                report.AsSpan(142, 200).ToArray());
-            CollectionAssert.AreEqual(second,
-                report.AsSpan(342, 200).ToArray());
-
-            uint expectedCrc =
-                DualSenseBluetoothAudioReportPatcher.ComputeSonyCrc(report,
-                    543);
-            Assert.AreEqual(expectedCrc,
-                BinaryPrimitives.ReadUInt32LittleEndian(
-                    report.AsSpan(543, sizeof(uint))));
-            Assert.IsTrue(GetFieldValue<bool>(
-                DoubleFirstFramePendingField, device),
-                "A rejected paired write must retain its exact first half for retry.");
+                "The compatibility API hid the physical speaker submission failure.");
         }
 
         [TestMethod]

@@ -1162,11 +1162,9 @@ namespace DS4Windows
                     }
                     else
                     {
-                        // Audio report 0x11 carries the rumble/lightbar
-                        // validity bits and therefore applies its zeroed effect
-                        // bytes. Reassert the current profile effects on the
-                        // next output tick instead of waiting for a user-visible
-                        // state change that may never occur.
+                        // Audio control report 0x11 carries effect-validity
+                        // bits with zeroed effect bytes. Reassert the active
+                        // profile lightbar and rumble on the next output tick.
                         Interlocked.Exchange(
                             ref bluetoothEffectRefreshPending, 1);
                     }

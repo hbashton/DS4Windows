@@ -26,13 +26,6 @@ namespace DS4Windows
         private float carryLeft;
         private float carryRight;
 
-        internal void Reset()
-        {
-            phase = 0.0;
-            carryLeft = 0.0f;
-            carryRight = 0.0f;
-        }
-
         internal int Convert(float[] source, int frameCount,
             byte[] destination)
         {
@@ -142,7 +135,10 @@ namespace DS4Windows
         private const int DirectSourceIdleThresholdMilliseconds = 200;
         private const int MaxFramesAvailableWaitMilliseconds = 20;
         private const int PadForgeAsyncBackpressureWaitMilliseconds = 1;
-        private static readonly bool EnableDiagnosticCapture = false;
+        private static readonly bool EnableDiagnosticCapture =
+            string.Equals(Environment.GetEnvironmentVariable(
+                "DS4WINDOWS_DS4_AUDIO_DIAGNOSTIC_CAPTURE"), "1",
+                StringComparison.Ordinal);
         // Keep one bounded, in-memory diagnostic sample from the direct VIIPER
         // lane. Disk I/O never runs on either real-time path: after both sides
         // cover the same minute, a ThreadPool worker writes the raw 32 kHz
@@ -254,7 +250,7 @@ namespace DS4Windows
         private int diagnosticCaptureWritten;
         private DateTime diagnosticCaptureStartedUtc;
 
-        private IWaveIn capture;
+        private WasapiCapture capture;
         private BufferedWaveProvider captureBuffer;
         private ISampleProvider sampleProvider;
         private Thread worker;
@@ -277,7 +273,6 @@ namespace DS4Windows
         private long directWriteSaturations;
         private long directHardWriteFailures;
         private long lastDirectPacketTimestamp;
-        private long lastDirectAudibleTimestamp;
         private long maximumDirectPacketGapTicks;
         private long lastDirectReportTimestamp;
         private long maximumDirectReportGapTicks;
@@ -414,11 +409,15 @@ namespace DS4Windows
                     DirectSpeakerPcmReceived;
                 try
                 {
-                    // Open the dedicated HID audio lane only when a complete
-                    // audible source cushion exists. A handle that sits idle
-                    // for minutes can inherit the controller's low-duty
-                    // Bluetooth state and complete fewer than the required
-                    // 250 reports/sec on its first segment.
+                    // Open the dedicated lane now, but do not arm the physical
+                    // speaker until the virtual endpoint has delivered a
+                    // complete source cushion. This keeps startup contiguous
+                    // and avoids an idle physical audio session.
+                    if (!EnsureSpeakerWritePool())
+                    {
+                        throw new IOException(
+                            "Could not open the DualShock 4 Bluetooth audio transport.");
+                    }
                     worker = new Thread(DirectStreamLoop)
                     {
                         IsBackground = true,
@@ -483,22 +482,9 @@ namespace DS4Windows
             }
         }
 
-        private static IWaveIn CreateCapture(string endpointId,
+        private static WasapiCapture CreateCapture(string endpointId,
             ControllerAudioEndpointKind endpointKind, out string sourceName)
         {
-            if (ProcessLoopbackWaveCapture.TryParseEndpointId(endpointId,
-                    out int processId))
-            {
-                sourceName = $"selected app (process {processId})";
-                return new ProcessLoopbackWaveCapture(processId);
-            }
-
-            if (ProcessLoopbackWaveCapture.IsProcessEndpointId(endpointId))
-            {
-                throw new InvalidOperationException(
-                    "The selected app is not running, so its audio cannot be streamed to the controller.");
-            }
-
             bool useSystemDefault = string.Equals(endpointId,
                 DualSenseAudioPassthrough.DefaultSystemAudioEndpointId,
                 StringComparison.Ordinal) ||
@@ -600,35 +586,6 @@ namespace DS4Windows
                 ref lastDirectPacketTimestamp, now);
             int completeLength = length - length %
                 (Channels * sizeof(short));
-            int packetPeak = 0;
-            for (int offset = 0; offset < completeLength;
-                offset += sizeof(short))
-            {
-                short sample = (short)(pcm[offset] |
-                    pcm[offset + 1] << 8);
-                int magnitude = sample == short.MinValue ?
-                    short.MaxValue : Math.Abs(sample);
-                packetPeak = Math.Max(packetPeak, magnitude);
-            }
-            bool packetAudible = packetPeak > 16;
-            if (packetAudible)
-            {
-                Interlocked.Exchange(ref lastDirectAudibleTimestamp, now);
-            }
-            else
-            {
-                long lastAudible = Interlocked.Read(
-                    ref lastDirectAudibleTimestamp);
-                if (lastAudible == 0 || now - lastAudible >
-                    Stopwatch.Frequency * IdleStreamTimeoutMs / 1000)
-                {
-                    // Windows can keep a virtual USB audio interface in its
-                    // streaming alternate setting and submit zero PCM forever
-                    // after the client closes. Do not turn that host silence
-                    // into a permanent 250 Hz Bluetooth audio stream.
-                    return;
-                }
-            }
             if (Global.VerboseStartupLogging)
             {
                 if (previous != 0)
@@ -638,12 +595,19 @@ namespace DS4Windows
                 }
                 Interlocked.Increment(ref directPacketsReceived);
                 Interlocked.Add(ref directPcmBytesReceived, length);
+                int peak = 0;
                 ulong fingerprint = 1469598103934665603UL;
                 for (int offset = 0; offset < completeLength;
                     offset += sizeof(short))
                 {
                     short sample = (short)(pcm[offset] |
                         pcm[offset + 1] << 8);
+                    int magnitude = sample == short.MinValue ?
+                        short.MaxValue : Math.Abs(sample);
+                    if (magnitude > peak)
+                    {
+                        peak = magnitude;
+                    }
                     fingerprint ^= pcm[offset];
                     fingerprint *= 1099511628211UL;
                     fingerprint ^= pcm[offset + 1];
@@ -681,8 +645,8 @@ namespace DS4Windows
                         }
                     }
                 }
-                RecordMaximum(ref directPeakSample, packetPeak);
-                if (!packetAudible)
+                RecordMaximum(ref directPeakSample, peak);
+                if (peak <= 16)
                 {
                     Interlocked.Increment(ref directSilentPackets);
                     long run = Interlocked.Increment(
@@ -816,7 +780,8 @@ namespace DS4Windows
                         pcm[offset + 3] << 8);
                     bool dropCurrentSample = false;
                     if ((directDriftMode == DualShock4AudioDriftMode.Slip ||
-                            historicalSlipServo) &&
+                            (historicalSlipServo && directDriftMode !=
+                                DualShock4AudioDriftMode.Off)) &&
                         directDriftCorrectionEnabled)
                     {
                         directTargetDriftRatio = historicalSlipServo ?
@@ -1153,15 +1118,11 @@ namespace DS4Windows
                     {
                         availableFrames = encodedFrames.Count;
                     }
-                    long lastAudible = Interlocked.Read(
-                        ref lastDirectAudibleTimestamp);
-                    long sourceIdleMilliseconds = lastAudible == 0 ? 0 :
-                        Math.Max(0, (Stopwatch.GetTimestamp() - lastAudible) *
+                    long lastPacket = Interlocked.Read(
+                        ref lastDirectPacketTimestamp);
+                    long sourceIdleMilliseconds = lastPacket == 0 ? 0 :
+                        Math.Max(0, (Stopwatch.GetTimestamp() - lastPacket) *
                             1000 / Stopwatch.Frequency);
-                    if (sourceIdleMilliseconds < IdleStreamTimeoutMs)
-                    {
-                        sourceIdleMilliseconds = 0;
-                    }
                     if (!sourceReprimePending &&
                         DualShock4AudioTransportSettings.
                             ShouldBeginProductionReplayReprime(availableFrames,
@@ -1169,18 +1130,12 @@ namespace DS4Windows
                     {
                         sourceReprimePending = true;
                         SetProductionReplaySourceServo(enabled: false);
-                        DiscardQueuedDirectAudio();
-                        availableFrames = 0;
                     }
 
                     if (sourceReprimePending &&
                         DualShock4AudioTransportSettings.
                             ShouldStartProductionReplay(availableFrames))
                     {
-                        if (!PrepareSpeakerTransportForNewSegment())
-                        {
-                            return;
-                        }
                         if (!SubmitProductionReplayPrime())
                         {
                             return;
@@ -1192,18 +1147,6 @@ namespace DS4Windows
                     }
                     else
                     {
-                        if (sourceReprimePending &&
-                            !IsDualShock4MicrophoneActive())
-                        {
-                            // The virtual USB endpoint may continue producing
-                            // zero packets after its client closes. Leave the
-                            // physical audio link quiescent until a complete
-                            // new audible cushion exists.
-                            nextTick = Stopwatch.GetTimestamp() + cadenceTicks;
-                            captureAvailable.WaitOne(2);
-                            TraceDirectStreamStatus();
-                            continue;
-                        }
                         ProductionReplaySubmissionResult result =
                             SubmitProductionReplayFrame(
                                 allowSilence: true,
@@ -1234,50 +1177,6 @@ namespace DS4Windows
                     CloseNativeHandle(highResolutionTimer);
                 }
                 timeEndPeriod(1);
-            }
-        }
-
-        private bool IsDualShock4MicrophoneActive()
-        {
-            bool active = false;
-            device.ReadDualShock4BluetoothAudioModeSynchronized(
-                microphoneEnabled => active = microphoneEnabled);
-            return active;
-        }
-
-        private bool PrepareSpeakerTransportForNewSegment()
-        {
-            if (IsDualShock4MicrophoneActive())
-            {
-                return EnsureSpeakerTransportEnabled();
-            }
-
-            DisableSpeakerTransport();
-            device.UnregisterDualShock4BluetoothAudioControlLane(this);
-            speakerWritePool?.Dispose();
-            speakerWritePool = null;
-            speakerWriteHandle?.Dispose();
-            speakerWriteHandle = null;
-            return EnsureSpeakerTransportEnabled();
-        }
-
-        private void DiscardQueuedDirectAudio()
-        {
-            lock (syncRoot)
-            {
-                while (encodedFrames.Count > 0)
-                {
-                    freeEncodedFrames.Enqueue(encodedFrames.Dequeue());
-                }
-                pendingPcmCount = 0;
-                directPcmPacketOffset = 0;
-                directHasPreviousSample = false;
-                directPreviousLeft = 0;
-                directPreviousRight = 0;
-                directDriftCorrectionAccumulator = 0.0;
-                directResampler.Reset();
-                directFractionalResampler.Reset();
-                frameNumber = 0;
             }
         }
 
@@ -3713,7 +3612,7 @@ namespace DS4Windows
                 speakerWriteHandle = null;
             }
 
-            IWaveIn oldCapture;
+            WasapiCapture oldCapture;
             lock (syncRoot)
             {
                 oldCapture = capture;
@@ -3857,21 +3756,97 @@ namespace DS4Windows
                     return false;
                 }
 
-                // Queue the mode change in the same OVERLAPPED slot ring as
-                // speaker data. WriteFile submissions on this handle retain
-                // ordering, so older audio precedes the control report and new
-                // mode data follows it. The former implementation drained all
-                // outstanding writes while holding gate; a slow HID completion
-                // consequently stopped the 4 ms producer for up to a second.
-                bool submitted = TrySend(report, out bool hardFailure);
-                if (!submitted)
+                lock (gate)
                 {
-                    error = hardFailure ?
-                        "audio control submission failed" :
-                        "audio control queue saturated";
-                }
+                    if (disposed)
+                    {
+                        error = "audio transport disposed";
+                        return false;
+                    }
+                    if (!DrainOutstandingNoLock(1000, out error))
+                    {
+                        return false;
+                    }
 
-                return submitted;
+                    byte[] nativeReport = new byte[Math.Max(report.Length,
+                        NativeBackingBufferLength)];
+                    Buffer.BlockCopy(report, 0, nativeReport, 0,
+                        report.Length);
+                    GCHandle pin = GCHandle.Alloc(nativeReport,
+                        GCHandleType.Pinned);
+                    IntPtr completionEvent = CreateEventW(IntPtr.Zero, true,
+                        false, null);
+                    IntPtr controlOverlapped = Marshal.AllocHGlobal(
+                        OverlappedSize);
+                    bool leak = false;
+                    try
+                    {
+                        if (completionEvent == IntPtr.Zero)
+                        {
+                            error = $"CreateEvent failed: Win32 " +
+                                Marshal.GetLastWin32Error();
+                            return false;
+                        }
+
+                        ZeroOverlapped(controlOverlapped, completionEvent);
+                        bool submitted = WriteFile(handle,
+                            pin.AddrOfPinnedObject(), (uint)report.Length,
+                            IntPtr.Zero, controlOverlapped);
+                        int submitError = submitted ? 0 :
+                            Marshal.GetLastWin32Error();
+                        if (submitted)
+                        {
+                            // This is the common HIDCLASS fast path. PadForge's
+                            // WriteOneShot returns immediately here as well; a
+                            // synchronous overlapped WriteFile need not report
+                            // the transfer count through a second result query.
+                            return true;
+                        }
+                        if (submitError != ErrorIoPending)
+                        {
+                            error = $"WriteFile failed: Win32 {submitError}";
+                            return false;
+                        }
+
+                        uint wait = WaitForSingleObject(completionEvent, 1000);
+                        // PadForge's WriteOneShot treats a signaled OVERLAPPED
+                        // event as completion. HIDCLASS commonly reports zero
+                        // via GetOverlappedResult even though the output report
+                        // was accepted, so requiring a byte count creates false
+                        // failures and retry storms.
+                        if (wait == WaitObject0)
+                        {
+                            return true;
+                        }
+
+                        CancelIoEx(handle, controlOverlapped);
+                        leak = WaitForSingleObject(completionEvent, 250) !=
+                            WaitObject0;
+                        error = wait == WaitTimeout ?
+                            "control report timed out" :
+                            $"control wait failed: Win32 " +
+                            $"{Marshal.GetLastWin32Error()}";
+                        return false;
+                    }
+                    finally
+                    {
+                        if (!leak)
+                        {
+                            if (controlOverlapped != IntPtr.Zero)
+                            {
+                                Marshal.FreeHGlobal(controlOverlapped);
+                            }
+                            if (completionEvent != IntPtr.Zero)
+                            {
+                                CloseHandle(completionEvent);
+                            }
+                            if (pin.IsAllocated)
+                            {
+                                pin.Free();
+                            }
+                        }
+                    }
+                }
             }
 
             public bool TryDrainOutstanding(int timeoutMilliseconds,

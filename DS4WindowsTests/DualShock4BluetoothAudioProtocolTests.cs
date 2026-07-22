@@ -10,6 +10,19 @@ namespace DS4WindowsTests
     public class DualShock4BluetoothAudioProtocolTests
     {
         [TestMethod]
+        public void BluetoothPowerPolicyOnlyAppliesWhenSuspendIsEnabled()
+        {
+            Assert.IsFalse(DualShock4BluetoothPowerPolicy.
+                ShouldApply(0, 0));
+            Assert.IsTrue(DualShock4BluetoothPowerPolicy.
+                ShouldApply(1, 0));
+            Assert.IsTrue(DualShock4BluetoothPowerPolicy.
+                ShouldApply(0, 1));
+            Assert.IsTrue(DualShock4BluetoothPowerPolicy.
+                ShouldApply(1, 1));
+        }
+
+        [TestMethod]
         public void SpeakerStreamCoalescesPhysicalEffectReportsAtThirtyHertz()
         {
             Assert.IsTrue(DS4Device.ShouldDeferBluetoothEffectDuringSpeaker(

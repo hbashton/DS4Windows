@@ -52,6 +52,10 @@ namespace DS4WindowsTests
             typeof(DualSenseDevice).GetField(
                 "bluetoothDoubleFrameWorkingReport",
                 BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo HapticsWorkingReportField =
+            typeof(DualSenseDevice).GetField(
+                "bluetoothHapticsWorkingReport",
+                BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo DoubleFirstFramePendingField =
             typeof(DualSenseDevice).GetField(
                 "bluetoothDoubleFirstFramePending",
@@ -339,7 +343,9 @@ namespace DS4WindowsTests
             Assert.AreEqual((byte)0x7E, report[4]);
             for (int index = 5; index <= 8; index++)
             {
-                Assert.AreEqual((byte)128, report[index]);
+                Assert.AreEqual(
+                    DualSenseBluetoothAudioPacer.DoubleFrameBufferLength,
+                    report[index]);
             }
             Assert.AreEqual((byte)0xD2, report[10]);
             Assert.AreEqual((byte)64, report[11]);
@@ -359,6 +365,38 @@ namespace DS4WindowsTests
             Assert.IsTrue(GetFieldValue<bool>(
                 DoubleFirstFramePendingField, device),
                 "A rejected paired write must retain its exact first half for retry.");
+        }
+
+        [TestMethod]
+        public void IdleAdvancedHapticsUsesDedicatedSonyReport()
+        {
+            DualSenseDevice device = CreateBluetoothDevice();
+            byte[] samples = Enumerable.Range(0, 64)
+                .Select(index => (byte)(index * 3 + 1)).ToArray();
+
+            Assert.IsFalse(device.WriteBluetoothHapticsSamples(samples, 0,
+                samples.Length),
+                "The hardware-less dedicated report unexpectedly reached HID.");
+
+            byte[] report = GetFieldValue<byte[]>(HapticsWorkingReportField,
+                device);
+            Assert.AreEqual(142, report.Length);
+            Assert.AreEqual((byte)0x32, report[0]);
+            Assert.AreEqual((byte)0x91, report[2]);
+            Assert.AreEqual((byte)0x07, report[3]);
+            Assert.AreEqual((byte)0xFE, report[4]);
+            Assert.AreEqual((byte)0xFF, report[9]);
+            Assert.AreEqual((byte)0x92, report[11]);
+            Assert.AreEqual((byte)64, report[12]);
+            CollectionAssert.AreEqual(samples,
+                report.AsSpan(13, 64).ToArray());
+
+            uint expectedCrc =
+                DualSenseBluetoothAudioReportPatcher.ComputeSonyCrc(report,
+                    report.Length - sizeof(uint));
+            Assert.AreEqual(expectedCrc,
+                BinaryPrimitives.ReadUInt32LittleEndian(report.AsSpan(
+                    report.Length - sizeof(uint), sizeof(uint))));
         }
 
         [TestMethod]

@@ -22,15 +22,16 @@ namespace DS4Windows.InputDevices
     {
         internal const int ReportLength = 398;
         internal const int DoubleFrameReportLength = 547;
+        internal const int HapticsReportLength = 142;
         internal const int StateReportLength = 78;
         internal const int MaximumReportLength = DoubleFrameReportLength;
-        // A 0x39 transaction spans multiple Bluetooth ACL fragments. Use the
-        // largest jitter target accepted by the DualSense so a brief radio
-        // retransmission cannot underrun speaker or haptics presentation.
-        // Live acoustic measurements show this controller-side value does not
-        // increase host-to-controller onset latency.
-        internal const byte DoubleFrameBufferLength = 128;
+        // This byte controls the DualSense's own presentation reservoir. 128
+        // was smooth but accumulated roughly 2.5 seconds of speaker and
+        // feedback latency on real hardware. Use the smallest value accepted
+        // by the reference protocol; host-side pacing absorbs radio jitter.
+        internal const byte DoubleFrameBufferLength = 16;
         internal const int PrimeReportCount = 8;
+        internal const int DoubleFramePrimeReportCount = 2;
         internal const int HostReservoirCapacity = 64;
 
         private const string HelperArgument = "--dualsense-bt-audio-pacer-helper";
@@ -551,6 +552,7 @@ namespace DS4Windows.InputDevices
             return report.Length == ReportLength && report[0] == 0x36 ||
                 report.Length == DoubleFrameReportLength &&
                     report[0] == 0x39 ||
+                report.Length == HapticsReportLength && report[0] == 0x32 ||
                 report.Length == StateReportLength && report[0] == 0x31;
         }
 
@@ -565,7 +567,7 @@ namespace DS4Windows.InputDevices
             int speakerReportCount, byte[] nextReport, int reportLength)
         {
             int requiredReports = reportLength == DoubleFrameReportLength ?
-                    Math.Max(1, PrimeReportCount / 2) : PrimeReportCount;
+                    DoubleFramePrimeReportCount : PrimeReportCount;
             return !primeRequired ||
                 (nextReport != null &&
                     !IsSpeakerAudioReport(nextReport, reportLength)) ||
@@ -1848,6 +1850,8 @@ namespace DS4Windows.InputDevices
                 return length == ReportLength && source[offset] == 0x36 ||
                     length == DoubleFrameReportLength &&
                         source[offset] == 0x39 ||
+                    length == HapticsReportLength &&
+                        source[offset] == 0x32 ||
                     length == StateReportLength && source[offset] == 0x31;
             }
 
@@ -2182,6 +2186,8 @@ namespace DS4Windows.InputDevices
                 return reportLength == DoubleFrameReportLength &&
                     report[0] == 0x39 ? 9 :
                     reportLength == ReportLength && report[0] == 0x36 ? 10 :
+                    reportLength == HapticsReportLength &&
+                        report[0] == 0x32 ? 10 :
                     -1;
             }
 
@@ -2235,6 +2241,17 @@ namespace DS4Windows.InputDevices
                             report[10] == 0xD2 && report[11] == 64 &&
                             report[140] == 0xD3 && report[141] == 200;
                     }
+                    else if (reportLength == HapticsReportLength &&
+                        report[0] == 0x32)
+                    {
+                        validLayout = report[2] == 0x91 &&
+                            report[3] == 0x07 &&
+                            (report[4] == 0xFE || report[4] == 0xFF) &&
+                            report[5] == 0 && report[6] == 0 &&
+                            report[7] == 0 && report[8] == 0 &&
+                            report[9] == 0xFF && report[11] == 0x92 &&
+                            report[12] == 64;
+                    }
                     else if (reportLength == StateReportLength &&
                         report[0] == 0x31)
                     {
@@ -2276,7 +2293,7 @@ namespace DS4Windows.InputDevices
                     sequenceValidationInitialized = true;
 
                     int packetSequenceOffset = report[0] == 0x39 ? 9 :
-                        report[0] == 0x36 ? 10 : -1;
+                        report[0] == 0x36 || report[0] == 0x32 ? 10 : -1;
                     if (packetSequenceOffset >= 0)
                     {
                         byte packetSequence = report[packetSequenceOffset];

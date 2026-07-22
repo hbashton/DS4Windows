@@ -162,6 +162,13 @@ namespace DS4Windows
             const int attempts = 20;
             Exception lastError = null;
 
+            // Apply this before opening the audio HID lane. Reboots and power
+            // plan changes can silently restore selective suspend, producing
+            // periodic 40-110 ms radio stalls even though every 4 ms speaker
+            // report was submitted on time.
+            DualShock4BluetoothPowerPolicy.
+                EnsureDisabledForActivePowerScheme();
+
             for (int attempt = 0; attempt < attempts; attempt++)
             {
                 lock (syncRoot)

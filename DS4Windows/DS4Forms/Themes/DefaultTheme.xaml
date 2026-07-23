@@ -207,5 +207,15 @@
 
     <!-- based on https://github.com/whistyun/MdXaml/blob/787605545ace5b7cd7d02ff19e80b1c7a019b0d3/MdXaml/Markdown.Style.xaml#L338
     need to use it here because I had to modify it to accomodate for dark theme too -->
+    <!--
+        BridgeShellStyles is loaded after either application theme and builds
+        its component styles on these stable keys. DarkTheme supplies fully
+        templated versions; the light/default theme intentionally inherits the
+        native Windows control chrome through empty keyed base styles.
+    -->
+    <Style x:Key="ButtonStyle" TargetType="{x:Type Button}" />
+    <Style x:Key="CheckBoxStyle" TargetType="{x:Type CheckBox}" />
+    <Style x:Key="ComboBoxStyle" TargetType="{x:Type ComboBox}" />
+    <Style x:Key="ComboBoxItemStyle" TargetType="{x:Type ComboBoxItem}" />
     <Style x:Key="WindowStyle" TargetType="{x:Type Window}" />
 </ResourceDictionary>

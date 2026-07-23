@@ -904,11 +904,7 @@ namespace DS4Windows
             if (directTransportMode ==
                 DualShock4AudioTransportMode.PadForgeReference)
             {
-                // Match the clean standalone sender: one ordered control
-                // report followed immediately by live, counter-zero SBC.
-                // Synthetic pre-roll changes decoder/counter state and is not
-                // part of the reference implementation.
-                ReferenceDirectStreamLoop();
+                PadForgeReferenceDirectStreamLoop();
                 return;
             }
             if (directTransportMode ==
@@ -1242,11 +1238,12 @@ namespace DS4Windows
             timeBeginPeriod(1);
             IntPtr highResolutionTimer = CreateHighResolutionTimer();
             IntPtr mmcssHandle = RegisterMultimediaScheduler();
-            long tickTicks = (long)Math.Round(Stopwatch.Frequency *
-                DualShock4AudioTransportSettings.
-                    PadForgeReferenceTickMilliseconds / 1000.0);
-            Interlocked.Exchange(ref directCurrentCadenceTicks, tickTicks);
-            Interlocked.Exchange(ref directTargetCadenceTicks, tickTicks);
+            long cadenceTicks = (long)Math.Round(Stopwatch.Frequency *
+                DirectReportCadenceMilliseconds / 1000.0);
+            int startupCushionFrames = DualShock4BluetoothAudioProtocol.
+                SpeakerLargeFramesPerReport * 2;
+            Interlocked.Exchange(ref directCurrentCadenceTicks, cadenceTicks);
+            Interlocked.Exchange(ref directTargetCadenceTicks, cadenceTicks);
             try
             {
                 while (!stopping)
@@ -1256,8 +1253,7 @@ namespace DS4Windows
                     {
                         bufferedFrames = encodedFrames.Count;
                     }
-                    if (bufferedFrames >= DualShock4BluetoothAudioProtocol.
-                            SpeakerLargeFramesPerReport)
+                    if (bufferedFrames >= startupCushionFrames)
                     {
                         break;
                     }
@@ -1276,21 +1272,21 @@ namespace DS4Windows
                     return;
                 }
 
-                int frameThirds = 0;
                 long nextTick = Stopwatch.GetTimestamp();
                 while (!stopping)
                 {
-                    WaitForNextTick(ref nextTick, tickTicks,
+                    WaitForNextTick(ref nextTick, cadenceTicks,
                         highResolutionTimer,
-                        DualShock4AudioTransportSettings.
-                            PadForgeAsyncSlotCount);
-                    if (!DualShock4AudioTransportSettings.
-                        AdvancePadForgeReferencePresentation(ref frameThirds))
-                    {
-                        TraceDirectStreamStatus();
-                        continue;
-                    }
+                        maximumRecoverablePeriods: 1,
+                        catchUpRebaseLatenessTicks: cadenceTicks / 2);
 
+                    // The captured product path supplied ten SBC frames every
+                    // 40 ms as two 0x17 reports followed immediately by 0x14.
+                    // Acoustic decoder relocks clustered on that burst phase.
+                    // Keep the same exact 250-frame/s media rate, but present
+                    // one complete 0x17 every 16 ms from a small host cushion.
+                    // This changes neither encoded content nor controller mode
+                    // and never injects synthetic controller-side pre-roll.
                     directDriftCorrectionEnabled = false;
                     bool submitted = SubmitEncodedFramesAndWait(
                         DualShock4BluetoothAudioProtocol.
@@ -1307,6 +1303,12 @@ namespace DS4Windows
                                 SpeakerLargeFramesPerReport)
                         {
                             Interlocked.Increment(ref directCadenceUnderruns);
+                            int signaled = WaitHandle.WaitAny(waitHandles,
+                                MaxFramesAvailableWaitMilliseconds);
+                            if (signaled == 1 || stopping)
+                            {
+                                return;
+                            }
                             continue;
                         }
                         return;

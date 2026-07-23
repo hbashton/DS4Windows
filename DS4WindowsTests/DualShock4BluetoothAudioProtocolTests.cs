@@ -294,7 +294,7 @@ namespace DS4WindowsTests
             Assert.AreEqual(270, report.Length);
             CollectionAssert.AreEqual(new byte[]
             {
-                0x14, 0xC0, 0xA0, 0x34, 0x12, 0x02,
+                0x14, 0x40, 0xA0, 0x34, 0x12, 0x02,
             }, report.Take(6).ToArray());
             CollectionAssert.AreEqual(first,
                 report.Skip(6).Take(first.Length).ToArray());
@@ -323,7 +323,7 @@ namespace DS4WindowsTests
             Assert.AreEqual(142, report.Length);
             CollectionAssert.AreEqual(new byte[]
             {
-                0x12, 0xC0, 0xA0, 0xEF, 0xBE, 0x02,
+                0x12, 0x40, 0xA0, 0xEF, 0xBE, 0x02,
             }, report.Take(6).ToArray());
             CollectionAssert.AreEqual(frame,
                 report.Skip(6).Take(frame.Length).ToArray());
@@ -349,7 +349,7 @@ namespace DS4WindowsTests
             Assert.AreEqual(462, report.Length);
             CollectionAssert.AreEqual(new byte[]
             {
-                0x17, 0xC0, 0xA0, 0xFE, 0xFF, 0x02,
+                0x17, 0x40, 0xA0, 0xFE, 0xFF, 0x02,
             }, report.Take(6).ToArray());
             for (int index = 0; index < frames.Length; index++)
             {
@@ -377,7 +377,7 @@ namespace DS4WindowsTests
                 DualShock4BluetoothAudioProtocol.BuildSpeakerReport(
                     0x1234, frames, bluetoothPollRate: 5);
 
-            Assert.AreEqual(0xC5, report[1]);
+            Assert.AreEqual(0x45, report[1]);
             Assert.AreEqual(
                 DualShock4BluetoothAudioProtocol.ComputeBluetoothCrc(
                     0xA2, report, report.Length - sizeof(uint)),

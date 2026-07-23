@@ -8,6 +8,7 @@ namespace DS4Windows
         SourceDriven,
         PadForgeAsync,
         PadForgeSpeakerOnly,
+        InputSynchronized,
         ProductionReplay,
         ProductionA0,
         ProductionDuplexA1,
@@ -154,6 +155,13 @@ namespace DS4Windows
             {
                 return DualShock4AudioTransportMode.PadForgeSpeakerOnly;
             }
+            if (string.Equals(value?.Trim(), "input-synchronized",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value?.Trim(), "input-clocked",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return DualShock4AudioTransportMode.InputSynchronized;
+            }
             if (string.Equals(value?.Trim(), "production-replay",
                     StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(value?.Trim(), "historical-replay",
@@ -208,6 +216,8 @@ namespace DS4Windows
                     "padforge-async",
                 DualShock4AudioTransportMode.PadForgeSpeakerOnly =>
                     "padforge-speaker-only",
+                DualShock4AudioTransportMode.InputSynchronized =>
+                    "input-synchronized",
                 DualShock4AudioTransportMode.ProductionReplay =>
                     "production-replay",
                 DualShock4AudioTransportMode.ProductionA0 =>

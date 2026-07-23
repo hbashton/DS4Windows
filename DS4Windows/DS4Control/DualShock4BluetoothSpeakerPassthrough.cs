@@ -1269,7 +1269,6 @@ namespace DS4Windows
                     }
 
                     directDriftCorrectionEnabled = false;
-                    int bufferedFrames;
                     lock (syncRoot)
                     {
                         bufferedFrames = encodedFrames.Count;

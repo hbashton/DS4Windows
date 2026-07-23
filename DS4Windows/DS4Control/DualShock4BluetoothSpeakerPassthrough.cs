@@ -1269,21 +1269,26 @@ namespace DS4Windows
                     }
 
                     directDriftCorrectionEnabled = false;
-                    lock (syncRoot)
+                    PadForgeAsyncSubmissionResult result =
+                        SubmitEncodedFramesPadForgeAsync(
+                            DualShock4BluetoothAudioProtocol.
+                                SpeakerLargeFramesPerReport);
+                    if (result == PadForgeAsyncSubmissionResult.Failed)
                     {
-                        bufferedFrames = encodedFrames.Count;
+                        return;
                     }
-                    if (bufferedFrames < DualShock4BluetoothAudioProtocol.
-                            SpeakerLargeFramesPerReport)
+                    if (result == PadForgeAsyncSubmissionResult.NoFrames)
                     {
                         Interlocked.Increment(ref directCadenceUnderruns);
                         continue;
                     }
-                    if (!SubmitEncodedFramesAndWait(
-                        DualShock4BluetoothAudioProtocol.
-                            SpeakerLargeFramesPerReport))
+                    if (result == PadForgeAsyncSubmissionResult.Saturated)
                     {
-                        return;
+                        if (stoppingSignal.WaitOne(
+                            PadForgeAsyncBackpressureWaitMilliseconds))
+                        {
+                            return;
+                        }
                     }
 
                     TraceDirectStreamStatus();
@@ -2638,11 +2643,6 @@ namespace DS4Windows
                         report, reportFrameNumber, speakerFrameBatch, count,
                         microphoneEnabled: microphoneEnabled,
                         bluetoothPollRate: GetBluetoothPollRate());
-                    if (directTransportMode ==
-                        DualShock4AudioTransportMode.PadForgeReference)
-                    {
-                        ApplyPadForgeReferenceAudioMode(report);
-                    }
                     submitted = speakerWritePool.SendAndWait(report,
                         out hardFailure);
                 });

@@ -764,6 +764,24 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void PadForgeReferencePreservesMeasuredTwoOneTickCadence()
+        {
+            int frameThirds = 0;
+            bool[] presentations = Enumerable.Range(0, 6)
+                .Select(_ => DualShock4AudioTransportSettings.
+                    AdvancePadForgeReferencePresentation(ref frameThirds))
+                .ToArray();
+
+            CollectionAssert.AreEqual(
+                new[] { false, true, true, false, true, true },
+                presentations);
+            Assert.AreEqual(0, frameThirds);
+            Assert.AreEqual(10.666666666666666,
+                DualShock4AudioTransportSettings.
+                    PadForgeReferenceTickMilliseconds, 0.0000001);
+        }
+
+        [TestMethod]
         public void PadForgeReferenceNormalizesControlDataAndInputInterval()
         {
             byte[][] frames = Enumerable.Range(0, 4)

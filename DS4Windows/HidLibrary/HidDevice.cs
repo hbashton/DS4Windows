@@ -301,6 +301,18 @@ namespace DS4Windows
 
         public unsafe bool WriteOutputReportViaInterrupt(byte[] outputBuffer, int timeout)
         {
+            return WriteOutputReportViaInterrupt(outputBuffer,
+                outputBuffer?.Length ?? 0, timeout);
+        }
+
+        public unsafe bool WriteOutputReportViaInterrupt(byte[] outputBuffer,
+            int reportLength, int timeout)
+        {
+            if (outputBuffer == null || reportLength <= 0 ||
+                reportLength > outputBuffer.Length)
+            {
+                return false;
+            }
             SafeReadHandle ??= OpenHandle(_devicePath, true, false);
             using AutoResetEvent wait = new(false);
             var ov = new NativeOverlapped { EventHandle = wait.SafeWaitHandle.DangerousGetHandle() };
@@ -309,7 +321,7 @@ namespace DS4Windows
             {
                 if (NativeMethods.WriteFilePinned(
                     SafeReadHandle.DangerousGetHandle(), buffer,
-                    (uint)outputBuffer.Length, null, &ov))
+                    (uint)reportLength, null, &ov))
                 {
                     return true;
                 }

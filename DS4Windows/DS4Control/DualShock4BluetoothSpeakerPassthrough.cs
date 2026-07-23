@@ -6,8 +6,10 @@ using Microsoft.Win32.SafeHandles;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 
 namespace DS4Windows
@@ -146,13 +148,14 @@ namespace DS4Windows
         // stereo PCM and concatenated 109-byte SBC frames beside the normal
         // DS4Windows log. This lets an audible cut be located before or after
         // the encoder without changing presentation timing.
-        private const int DiagnosticCaptureSeconds = 60;
+        private const int DiagnosticCaptureSeconds = 30;
         private const int DiagnosticPcmBytes = SpeakerSampleRate * Channels *
             sizeof(short) * DiagnosticCaptureSeconds;
         private const int DiagnosticSbcFrames = SpeakerSampleRate /
             SamplesPerSbcFrame * DiagnosticCaptureSeconds;
         private const int DiagnosticSbcBytes = DiagnosticSbcFrames *
             DualShock4BluetoothAudioProtocol.SpeakerSbcFrameLength;
+        private const int DiagnosticTimelineCapacity = 16384;
         private const double ReportCadenceMilliseconds =
             DualShock4BluetoothAudioProtocol.
                 SpeakerRealtimeReportDurationMilliseconds;
@@ -241,15 +244,30 @@ namespace DS4Windows
             DualShock4BluetoothAudioProtocol.SpeakerSmallReportLength];
         private readonly byte[] speakerLargeReport = new byte[
             DualShock4BluetoothAudioProtocol.SpeakerLargeReportLength];
+        private readonly byte[] speakerSharedHandleAudioReport = new byte[640];
+        private readonly byte[] speakerSharedHandleControlReport = new byte[640];
+        private readonly object speakerSharedHandleWriteGate = new object();
         private readonly AutoResetEvent captureAvailable = new AutoResetEvent(false);
         private readonly ManualResetEvent stoppingSignal = new ManualResetEvent(false);
 
         private byte[] diagnosticPcm;
         private byte[] diagnosticSbc;
+        private byte[] diagnosticSubmittedSbc;
+        private readonly long[] diagnosticTimelineStart =
+            EnableDiagnosticCapture ? new long[DiagnosticTimelineCapacity] : null;
+        private readonly long[] diagnosticTimelineEnd =
+            EnableDiagnosticCapture ? new long[DiagnosticTimelineCapacity] : null;
+        private readonly int[] diagnosticTimelineKind =
+            EnableDiagnosticCapture ? new int[DiagnosticTimelineCapacity] : null;
+        private readonly int[] diagnosticTimelineValue =
+            EnableDiagnosticCapture ? new int[DiagnosticTimelineCapacity] : null;
         private int diagnosticPcmCount;
         private int diagnosticSbcCount;
+        private int diagnosticSubmittedSbcCount;
+        private int diagnosticTimelineCount;
         private int diagnosticCaptureWritten;
         private DateTime diagnosticCaptureStartedUtc;
+        private long diagnosticCaptureStartedTimestamp;
 
         private WasapiCapture capture;
         private BufferedWaveProvider captureBuffer;
@@ -267,6 +285,7 @@ namespace DS4Windows
         private int writeFailureLogged;
         private int reportsSubmitted;
         private bool speakerTransportEnabled;
+        private bool speakerSharedHandleControlLaneRegistered;
         private bool padForgeReferenceInputIntervalOverrideEnabled;
         private long directPacketsReceived;
         private long directPcmBytesReceived;
@@ -419,12 +438,11 @@ namespace DS4Windows
                     DirectSpeakerPcmReceived;
                 try
                 {
-                    // Match the proven production transport: establish the
-                    // dedicated HID write lane during startup, but do not arm
-                    // the physical speaker until a complete source cushion is
-                    // available. Keeping one handle for the full stream also
-                    // preserves write ordering across every audio segment.
-                    if (!EnsureSpeakerWritePool())
+                    bool transportReady = directTransportMode ==
+                        DualShock4AudioTransportMode.PadForgeReference ?
+                        EnsurePadForgeReferenceSharedHandle() :
+                        EnsureSpeakerWritePool();
+                    if (!transportReady)
                     {
                         throw new IOException(
                             "Could not open the DualShock 4 Bluetooth audio transport.");
@@ -594,6 +612,7 @@ namespace DS4Windows
             }
 
             long now = Stopwatch.GetTimestamp();
+            CaptureDiagnosticTimeline(1, now, now, length);
             long previous = Interlocked.Exchange(
                 ref lastDirectPacketTimestamp, now);
             int completeLength = length - length %
@@ -885,7 +904,11 @@ namespace DS4Windows
             if (directTransportMode ==
                 DualShock4AudioTransportMode.PadForgeReference)
             {
-                PadForgeReferenceDirectStreamLoop();
+                // Match the clean standalone sender: one ordered control
+                // report followed immediately by live, counter-zero SBC.
+                // Synthetic pre-roll changes decoder/counter state and is not
+                // part of the reference implementation.
+                ReferenceDirectStreamLoop();
                 return;
             }
             if (directTransportMode ==
@@ -1269,26 +1292,24 @@ namespace DS4Windows
                     }
 
                     directDriftCorrectionEnabled = false;
-                    PadForgeAsyncSubmissionResult result =
-                        SubmitEncodedFramesPadForgeAsync(
-                            DualShock4BluetoothAudioProtocol.
-                                SpeakerLargeFramesPerReport);
-                    if (result == PadForgeAsyncSubmissionResult.Failed)
+                    bool submitted = SubmitEncodedFramesAndWait(
+                        DualShock4BluetoothAudioProtocol.
+                            SpeakerLargeFramesPerReport);
+                    if (!submitted)
                     {
-                        return;
-                    }
-                    if (result == PadForgeAsyncSubmissionResult.NoFrames)
-                    {
-                        Interlocked.Increment(ref directCadenceUnderruns);
-                        continue;
-                    }
-                    if (result == PadForgeAsyncSubmissionResult.Saturated)
-                    {
-                        if (stoppingSignal.WaitOne(
-                            PadForgeAsyncBackpressureWaitMilliseconds))
+                        int bufferedFrames;
+                        lock (syncRoot)
                         {
-                            return;
+                            bufferedFrames = encodedFrames.Count;
                         }
+                        if (bufferedFrames <
+                            DualShock4BluetoothAudioProtocol.
+                                SpeakerLargeFramesPerReport)
+                        {
+                            Interlocked.Increment(ref directCadenceUnderruns);
+                            continue;
+                        }
+                        return;
                     }
 
                     TraceDirectStreamStatus();
@@ -2609,13 +2630,18 @@ namespace DS4Windows
                 return false;
             }
 
-            if (!EnsureSpeakerWritePool())
+            bool useSharedHandle = directTransportMode ==
+                DualShock4AudioTransportMode.PadForgeReference;
+            bool transportReady = useSharedHandle ?
+                EnsurePadForgeReferenceSharedHandle() :
+                EnsureSpeakerWritePool();
+            if (!transportReady)
             {
                 return false;
             }
 
             byte[] report;
-            ushort reportFrameNumber;
+            ushort reportFrameNumber = 0;
             lock (syncRoot)
             {
                 if (encodedFrames.Count < count)
@@ -2630,8 +2656,11 @@ namespace DS4Windows
                 report = count == DualShock4BluetoothAudioProtocol.
                     SpeakerLargeFramesPerReport ? speakerLargeReport :
                     speakerSmallReport;
-                reportFrameNumber = frameNumber;
-                frameNumber += (ushort)count;
+                if (!useSharedHandle)
+                {
+                    reportFrameNumber = frameNumber;
+                    frameNumber += (ushort)count;
+                }
             }
 
             bool submitted = false;
@@ -2639,12 +2668,51 @@ namespace DS4Windows
             device.ReadDualShock4BluetoothAudioModeSynchronized(
                 microphoneEnabled =>
                 {
-                    DualShock4BluetoothAudioProtocol.WriteSpeakerReport(
-                        report, reportFrameNumber, speakerFrameBatch, count,
-                        microphoneEnabled: microphoneEnabled,
-                        bluetoothPollRate: GetBluetoothPollRate());
-                    submitted = speakerWritePool.SendAndWait(report,
-                        out hardFailure);
+                    if (useSharedHandle)
+                    {
+                        lock (speakerSharedHandleWriteGate)
+                        {
+                            reportFrameNumber = frameNumber;
+                            DualShock4BluetoothAudioProtocol.
+                                WriteSpeakerReport(report,
+                                    reportFrameNumber, speakerFrameBatch,
+                                    count,
+                                    microphoneEnabled: microphoneEnabled,
+                                    bluetoothPollRate:
+                                        GetBluetoothPollRate());
+                            ApplyPadForgeReferenceAudioMode(report);
+                            CaptureDiagnosticSubmittedSbc(report, count);
+                            Array.Clear(speakerSharedHandleAudioReport, 0,
+                                speakerSharedHandleAudioReport.Length);
+                            Buffer.BlockCopy(report, 0,
+                                speakerSharedHandleAudioReport, 0,
+                                report.Length);
+                            long writeStarted = Stopwatch.GetTimestamp();
+                            submitted = device.HidDevice.
+                                WriteOutputReportViaInterrupt(
+                                    speakerSharedHandleAudioReport,
+                                    report.Length,
+                                    DS4Device.READ_STREAM_TIMEOUT);
+                            CaptureDiagnosticTimeline(2, writeStarted,
+                                Stopwatch.GetTimestamp(), report[0]);
+                            if (submitted)
+                            {
+                                frameNumber = unchecked((ushort)(
+                                    frameNumber + count));
+                            }
+                        }
+                        hardFailure = !submitted;
+                    }
+                    else
+                    {
+                        DualShock4BluetoothAudioProtocol.WriteSpeakerReport(
+                            report, reportFrameNumber, speakerFrameBatch,
+                            count, microphoneEnabled: microphoneEnabled,
+                            bluetoothPollRate: GetBluetoothPollRate());
+                        CaptureDiagnosticSubmittedSbc(report, count);
+                        submitted = speakerWritePool.SendAndWait(report,
+                            out hardFailure);
+                    }
                 });
 
             lock (syncRoot)
@@ -3350,17 +3418,22 @@ namespace DS4Windows
 
             int crcOffset = report.Length - sizeof(uint);
             report[1] = (byte)(report[1] & 0xC0);
-            report[2] = 0xA2;
+            // DS4AudioStreamer can use A2 because it owns the physical pad by
+            // itself. DS4Windows must preserve the mode selected by the shared
+            // protocol builder: A0 keeps ordinary HID input alive for
+            // speaker-only playback and A1 keeps HID + microphone input alive
+            // during duplex playback. Replacing either with A2 on every audio
+            // report changes the controller's inbound lane underneath the
+            // live input reader.
+            // The independently clean sender arms report 0x11 with validity
+            // 0xF3. BuildAudioControlReport already produces that exact mask
+            // while carrying the current rumble, lightbar, headphone, mic,
+            // and speaker state. Do not erase those fields or downgrade the
+            // mask to 0xB0: that changes the controller mode and was also the
+            // measured cause of lightbar loss during DS4 audio playback.
             if (report[0] == 0x11)
             {
-                byte headphoneLeft = report[21];
-                byte headphoneRight = report[22];
-                byte speaker = report[24];
-                Array.Clear(report, 3, crcOffset - 3);
-                report[3] = 0xB0;
-                report[21] = headphoneLeft;
-                report[22] = headphoneRight;
-                report[24] = speaker;
+                report[3] = 0xF3;
             }
 
             uint crc = DualShock4BluetoothAudioProtocol.ComputeBluetoothCrc(
@@ -3658,6 +3731,38 @@ namespace DS4Windows
             TryWriteDiagnosticCapture();
         }
 
+        private void CaptureDiagnosticSubmittedSbc(byte[] report,
+            int frameCount)
+        {
+            if (!EnableDiagnosticCapture || report == null ||
+                frameCount <= 0)
+            {
+                return;
+            }
+
+            EnsureDiagnosticCapture();
+            byte[] destination = diagnosticSubmittedSbc;
+            if (destination == null)
+            {
+                return;
+            }
+
+            int sourceOffset = 6;
+            int sourceCount = frameCount *
+                DualShock4BluetoothAudioProtocol.SpeakerSbcFrameLength;
+            int offset = Volatile.Read(ref diagnosticSubmittedSbcCount);
+            int count = Math.Min(sourceCount, destination.Length - offset);
+            if (count <= 0)
+            {
+                TryWriteDiagnosticCapture();
+                return;
+            }
+
+            Buffer.BlockCopy(report, sourceOffset, destination, offset, count);
+            Volatile.Write(ref diagnosticSubmittedSbcCount, offset + count);
+            TryWriteDiagnosticCapture();
+        }
+
         private void EnsureDiagnosticCapture()
         {
             if (diagnosticPcm != null ||
@@ -3675,24 +3780,54 @@ namespace DS4Windows
                 }
 
                 diagnosticCaptureStartedUtc = DateTime.UtcNow;
+                diagnosticCaptureStartedTimestamp = Stopwatch.GetTimestamp();
                 diagnosticPcm = new byte[DiagnosticPcmBytes];
                 diagnosticSbc = new byte[DiagnosticSbcBytes];
+                diagnosticSubmittedSbc = new byte[DiagnosticSbcBytes];
             }
+        }
+
+        private void CaptureDiagnosticTimeline(int kind, long start,
+            long end, int value)
+        {
+            if (!EnableDiagnosticCapture)
+            {
+                return;
+            }
+
+            EnsureDiagnosticCapture();
+            int index = Interlocked.Increment(ref diagnosticTimelineCount) - 1;
+            if ((uint)index >= DiagnosticTimelineCapacity)
+            {
+                return;
+            }
+
+            diagnosticTimelineKind[index] = kind;
+            diagnosticTimelineValue[index] = value;
+            diagnosticTimelineStart[index] = start;
+            diagnosticTimelineEnd[index] = end;
         }
 
         private void TryWriteDiagnosticCapture()
         {
             byte[] pcm = diagnosticPcm;
             byte[] sbc = diagnosticSbc;
-            if (pcm == null || sbc == null ||
+            byte[] submittedSbc = diagnosticSubmittedSbc;
+            if (pcm == null || sbc == null || submittedSbc == null ||
                 Volatile.Read(ref diagnosticPcmCount) < pcm.Length ||
                 Volatile.Read(ref diagnosticSbcCount) < sbc.Length ||
+                Volatile.Read(ref diagnosticSubmittedSbcCount) <
+                    submittedSbc.Length ||
                 Interlocked.CompareExchange(ref diagnosticCaptureWritten, 1, 0) != 0)
             {
                 return;
             }
 
             DateTime startedUtc = diagnosticCaptureStartedUtc;
+            long startedTimestamp = diagnosticCaptureStartedTimestamp;
+            int timelineCount = Math.Min(
+                Volatile.Read(ref diagnosticTimelineCount),
+                DiagnosticTimelineCapacity);
             ThreadPool.QueueUserWorkItem(_ =>
             {
                 try
@@ -3706,12 +3841,42 @@ namespace DS4Windows
                         $"ds4-bt-audio-{startedUtc:yyyyMMdd-HHmmss}");
                     File.WriteAllBytes(stem + ".pcm", pcm);
                     File.WriteAllBytes(stem + ".sbc", sbc);
+                    File.WriteAllBytes(stem + ".submitted.sbc", submittedSbc);
+                    var timeline = new StringBuilder(
+                        timelineCount * 48);
+                    timeline.AppendLine("kind,startMs,endMs,durationMs,value");
+                    for (int index = 0; index < timelineCount; index++)
+                    {
+                        double startMilliseconds =
+                            (diagnosticTimelineStart[index] -
+                                startedTimestamp) * 1000.0 /
+                            Stopwatch.Frequency;
+                        double endMilliseconds =
+                            (diagnosticTimelineEnd[index] -
+                                startedTimestamp) * 1000.0 /
+                            Stopwatch.Frequency;
+                        timeline.Append(diagnosticTimelineKind[index])
+                            .Append(',').Append(startMilliseconds.ToString(
+                                "F4", CultureInfo.InvariantCulture))
+                            .Append(',').Append(endMilliseconds.ToString(
+                                "F4", CultureInfo.InvariantCulture))
+                            .Append(',').Append((endMilliseconds -
+                                startMilliseconds).ToString("F4",
+                                    CultureInfo.InvariantCulture))
+                            .Append(',').Append(
+                                diagnosticTimelineValue[index])
+                            .AppendLine();
+                    }
+                    File.WriteAllText(stem + ".timeline.csv",
+                        timeline.ToString());
                     File.WriteAllText(stem + ".txt",
                         "PCM: signed 16-bit little-endian, stereo, 32000 Hz\r\n" +
                         $"PCM bytes: {pcm.Length}\r\n" +
                         "SBC: concatenated 109-byte frames, 32000 Hz, joint stereo, " +
                         "16 blocks, 8 subbands, SNR allocation, bitpool 48\r\n" +
-                        $"SBC frames: {sbc.Length / DualShock4BluetoothAudioProtocol.SpeakerSbcFrameLength}\r\n");
+                        $"SBC frames: {sbc.Length / DualShock4BluetoothAudioProtocol.SpeakerSbcFrameLength}\r\n" +
+                        $"Capture UTC: {startedUtc:O}\r\n" +
+                        $"Timeline events: {timelineCount}\r\n");
                     AppLogger.LogToGui(
                         $"DS4 Bluetooth audio diagnostic capture saved: {stem}.*",
                         false);
@@ -3758,6 +3923,51 @@ namespace DS4Windows
         private byte GetBluetoothPollRate()
         {
             return (byte)Math.Clamp(device.getBTPollRate(), 0, 16);
+        }
+
+        private bool EnsurePadForgeReferenceSharedHandle()
+        {
+            if (speakerSharedHandleControlLaneRegistered)
+            {
+                return device.HidDevice?.IsOpen == true;
+            }
+
+            if (device.HidDevice?.IsOpen != true ||
+                !device.RegisterDualShock4BluetoothAudioControlLane(this,
+                    WriteBluetoothAudioControlBarrier))
+            {
+                return false;
+            }
+
+            speakerSharedHandleControlLaneRegistered = true;
+            return true;
+        }
+
+        private bool TrySendBluetoothAudioControlSharedHandle(byte[] report,
+            out string error)
+        {
+            if (report == null || report.Length == 0 ||
+                report.Length > speakerSharedHandleControlReport.Length ||
+                device.HidDevice?.IsOpen != true)
+            {
+                error = "shared physical HID handle unavailable";
+                return false;
+            }
+
+            lock (speakerSharedHandleWriteGate)
+            {
+                Array.Clear(speakerSharedHandleControlReport, 0,
+                    speakerSharedHandleControlReport.Length);
+                Buffer.BlockCopy(report, 0, speakerSharedHandleControlReport,
+                    0, report.Length);
+                bool submitted = device.HidDevice.
+                    WriteOutputReportViaInterrupt(
+                        speakerSharedHandleControlReport, report.Length,
+                        DS4Device.READ_STREAM_TIMEOUT);
+                error = submitted ? "none" :
+                    "shared physical HID write failed";
+                return submitted;
+            }
         }
 
         private bool EnsureSpeakerWritePool()
@@ -3823,6 +4033,13 @@ namespace DS4Windows
         private bool TrySendBluetoothAudioControl(byte[] report,
             out string error)
         {
+            if (directTransportMode ==
+                DualShock4AudioTransportMode.PadForgeReference)
+            {
+                return TrySendBluetoothAudioControlSharedHandle(report,
+                    out error);
+            }
+
             NativeOverlappedWritePool pool = speakerWritePool;
             if (pool == null)
             {
@@ -3895,7 +4112,11 @@ namespace DS4Windows
             }
 
             string controlError = "not submitted";
-            if (!EnsureSpeakerWritePool() ||
+            bool transportReady = directTransportMode ==
+                DualShock4AudioTransportMode.PadForgeReference ?
+                EnsurePadForgeReferenceSharedHandle() :
+                EnsureSpeakerWritePool();
+            if (!transportReady ||
                 !device.SetDualShock4BluetoothSpeakerStreaming(true,
                     speakerVolume, report =>
                         TrySendBluetoothAudioControl(report,
@@ -3924,7 +4145,9 @@ namespace DS4Windows
             }
 
             speakerTransportEnabled = false;
-            if (device.HidDevice?.IsOpen == true && speakerWritePool != null)
+            if (device.HidDevice?.IsOpen == true &&
+                (speakerWritePool != null ||
+                    speakerSharedHandleControlLaneRegistered))
             {
                 device.SetDualShock4BluetoothSpeakerStreaming(false,
                     speakerVolume, report =>
@@ -4117,6 +4340,7 @@ namespace DS4Windows
             DisableSpeakerTransport();
             ReleasePadForgeReferenceInputIntervalOverride();
             device.UnregisterDualShock4BluetoothAudioControlLane(this);
+            speakerSharedHandleControlLaneRegistered = false;
             speakerWritePool?.Dispose();
             speakerWritePool = null;
             if (speakerWriteHandle != null)

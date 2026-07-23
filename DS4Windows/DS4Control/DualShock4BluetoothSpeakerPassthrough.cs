@@ -245,7 +245,6 @@ namespace DS4Windows
         private readonly byte[] speakerLargeReport = new byte[
             DualShock4BluetoothAudioProtocol.SpeakerLargeReportLength];
         private readonly byte[] speakerSharedHandleAudioReport = new byte[640];
-        private readonly byte[] speakerSharedHandleControlReport = new byte[640];
         private readonly object speakerSharedHandleWriteGate = new object();
         private readonly AutoResetEvent captureAvailable = new AutoResetEvent(false);
         private readonly ManualResetEvent stoppingSignal = new ManualResetEvent(false);
@@ -904,7 +903,12 @@ namespace DS4Windows
             if (directTransportMode ==
                 DualShock4AudioTransportMode.PadForgeReference)
             {
-                PadForgeReferenceDirectStreamLoop();
+                // PadForge's working DS4 transport is source-driven and keeps
+                // up to eight ordered OVERLAPPED writes in flight. Use that
+                // exact 0x17/0x14 policy on the controller's already-open
+                // primary HID handle so input and audio remain one physical
+                // session without giving up the kernel-side jitter buffer.
+                SourceDrivenDirectStreamLoop();
                 return;
             }
             if (directTransportMode ==
@@ -3929,47 +3933,63 @@ namespace DS4Windows
 
         private bool EnsurePadForgeReferenceSharedHandle()
         {
-            if (speakerSharedHandleControlLaneRegistered)
+            lock (speakerSharedHandleWriteGate)
             {
-                return device.HidDevice?.IsOpen == true;
-            }
+                if (device.HidDevice?.IsOpen != true ||
+                    device.HidDevice.SafeReadHandle == null ||
+                    device.HidDevice.SafeReadHandle.IsClosed ||
+                    device.HidDevice.SafeReadHandle.IsInvalid)
+                {
+                    return false;
+                }
 
-            if (device.HidDevice?.IsOpen != true ||
-                !device.RegisterDualShock4BluetoothAudioControlLane(this,
-                    WriteBluetoothAudioControlBarrier))
-            {
-                return false;
-            }
+                if (speakerWritePool == null)
+                {
+                    speakerWritePool = new NativeOverlappedWritePool(
+                        device.HidDevice.SafeReadHandle.DangerousGetHandle(),
+                        DualShock4BluetoothAudioProtocol.
+                            SpeakerLargeReportLength);
+                }
 
-            speakerSharedHandleControlLaneRegistered = true;
-            return true;
+                if (!speakerSharedHandleControlLaneRegistered)
+                {
+                    if (!device.RegisterDualShock4BluetoothAudioControlLane(
+                            this, WriteBluetoothAudioControlBarrier))
+                    {
+                        speakerWritePool.Dispose();
+                        speakerWritePool = null;
+                        return false;
+                    }
+                    speakerSharedHandleControlLaneRegistered = true;
+                }
+
+                return true;
+            }
         }
 
         private bool TrySendBluetoothAudioControlSharedHandle(byte[] report,
             out string error)
         {
             if (report == null || report.Length == 0 ||
-                report.Length > speakerSharedHandleControlReport.Length ||
+                report.Length >
+                    DualShock4BluetoothAudioProtocol.SpeakerLargeReportLength ||
                 device.HidDevice?.IsOpen != true)
             {
                 error = "shared physical HID handle unavailable";
                 return false;
             }
 
-            lock (speakerSharedHandleWriteGate)
+            if (!EnsurePadForgeReferenceSharedHandle())
             {
-                Array.Clear(speakerSharedHandleControlReport, 0,
-                    speakerSharedHandleControlReport.Length);
-                Buffer.BlockCopy(report, 0, speakerSharedHandleControlReport,
-                    0, report.Length);
-                bool submitted = device.HidDevice.
-                    WriteOutputReportViaInterrupt(
-                        speakerSharedHandleControlReport, report.Length,
-                        DS4Device.READ_STREAM_TIMEOUT);
-                error = submitted ? "none" :
-                    "shared physical HID write failed";
-                return submitted;
+                error = "shared physical HID write pool unavailable";
+                return false;
             }
+
+            // TrySendControl drains all older audio slots under the pool gate,
+            // submits this mode/effect report, and only then lets newer SBC
+            // reports proceed. This is the same ordering barrier used by the
+            // dedicated PadForge lane, but no second HID file session exists.
+            return speakerWritePool.TrySendControl(report, out error);
         }
 
         private bool EnsureSpeakerWritePool()
@@ -5176,8 +5196,6 @@ namespace DS4Windows
                     }
                     disposed = true;
                 }
-
-                CancelIoEx(handle, IntPtr.Zero);
 
                 lock (gate)
                 {

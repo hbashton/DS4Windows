@@ -6,6 +6,7 @@ namespace DS4Windows
     {
         Reference,
         SourceDriven,
+        PadForgeReference,
         PadForgeAsync,
         PadForgeSpeakerOnly,
         InputSynchronized,
@@ -132,6 +133,13 @@ namespace DS4Windows
             {
                 return DualShock4AudioTransportMode.SourceDriven;
             }
+            if (string.Equals(value?.Trim(), "padforge-reference",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value?.Trim(), "padforge-exact",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return DualShock4AudioTransportMode.PadForgeReference;
+            }
             if (string.Equals(value?.Trim(), "scheduled",
                     StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(value?.Trim(), "clocked",
@@ -212,6 +220,8 @@ namespace DS4Windows
             {
                 DualShock4AudioTransportMode.SourceDriven =>
                     "source-driven",
+                DualShock4AudioTransportMode.PadForgeReference =>
+                    "padforge-reference",
                 DualShock4AudioTransportMode.PadForgeAsync =>
                     "padforge-async",
                 DualShock4AudioTransportMode.PadForgeSpeakerOnly =>

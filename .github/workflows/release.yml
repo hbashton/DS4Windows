@@ -30,15 +30,38 @@ jobs:
       run: | 
         TAG=${{ github.event.release.tag_name }}
         VERSION=${TAG#v}
-        echo Version: $VERSION
+        PROJECT_ASSEMBLY_VERSION=$(python -c "import xml.etree.ElementTree as ET; print(ET.parse('DS4Windows/DS4WinWPF.csproj').find('.//AssemblyVersion').text)")
+        PROJECT_VERSION=$(python -c "import xml.etree.ElementTree as ET; print(ET.parse('DS4Windows/DS4WinWPF.csproj').find('.//Version').text)")
+        if [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,3}(-.*)?$ ]]; then
+          BINARY_VERSION=${VERSION%%-*}
+          PACKAGE_VERSION=$VERSION
+        else
+          BINARY_VERSION=$PROJECT_ASSEMBLY_VERSION
+          PACKAGE_VERSION=$PROJECT_VERSION
+        fi
+        echo "Release: $VERSION; binary: $BINARY_VERSION; package: $PACKAGE_VERSION"
         echo "VERSION=$VERSION" >> $GITHUB_ENV
-        echo "SHORT_VERSION=${VERSION%-*}" >> $GITHUB_ENV
+        echo "BINARY_VERSION=$BINARY_VERSION" >> $GITHUB_ENV
+        echo "PACKAGE_VERSION=$PACKAGE_VERSION" >> $GITHUB_ENV
       shell: bash
     - name: Build X64
-      run: dotnet publish .\DS4Windows\DS4WinWPF.csproj -c Release  /p:platform=x64 /p:AssemblyVersion=${{ env.SHORT_VERSION }} /p:FileVersion=${{ env.SHORT_VERSION }} /p:Version=${{ env.VERSION }} /p:InformationalVersion=${{ env.VERSION }} -o .\bin\x64\Release\output
+      run: dotnet publish .\DS4Windows\DS4WinWPF.csproj -c Release /p:platform=x64 /p:AssemblyVersion=${{ env.BINARY_VERSION }} /p:FileVersion=${{ env.BINARY_VERSION }} /p:Version=${{ env.PACKAGE_VERSION }} /p:InformationalVersion=${{ env.VERSION }} -o .\bin\x64\Release\output
     - name: Post-Build script X64
       run: python .\utils\post-build.py .\bin\x64\Release\output . ${{env.VERSION}}
+    - name: Name release asset
+      shell: pwsh
+      run: |
+        $source = ".\bin\x64\Release\DS4Windows_${{ env.VERSION }}_x64.zip"
+        $asset = if ("${{ env.VERSION }}" -like "VIIPER*") {
+          ".\bin\x64\Release\DS4Windows_VIIPER_x64.zip"
+        } else {
+          $source
+        }
+        if ($asset -ne $source) {
+          Move-Item -LiteralPath $source -Destination $asset -Force
+        }
+        "RELEASE_ASSET=$asset" >> $env:GITHUB_ENV
     - name: Publish release Build X64
-      run: gh release upload ${{github.event.release.tag_name}} .\bin\x64\Release\DS4Windows_${{env.VERSION}}_x64.zip
+      run: gh release upload ${{github.event.release.tag_name}} ${{ env.RELEASE_ASSET }} --clobber
       env:
         GITHUB_TOKEN: ${{ github.TOKEN }}

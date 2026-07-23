@@ -875,7 +875,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             }
         }
 
-        public bool LauchDS4Updater()
+        public bool LauchDS4Updater(string releaseTag = null)
         {
             bool launch = false;
             using (Process p = new Process())
@@ -889,11 +889,20 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     argList.Add("-user");
                 }
 
+                if (!string.IsNullOrWhiteSpace(releaseTag))
+                {
+                    argList.Add("--releaseTag");
+                    argList.Add(releaseTag);
+                }
+
                 // Specify current exe to have DS4Updater launch
                 argList.Add("--launchExe");
                 argList.Add(Global.exeFileName);
 
-                p.StartInfo.Arguments = string.Join(" ", argList);
+                foreach (string argument in argList)
+                {
+                    p.StartInfo.ArgumentList.Add(argument);
+                }
                 if (Global.AdminNeeded())
                     p.StartInfo.Verb = "runas";
 

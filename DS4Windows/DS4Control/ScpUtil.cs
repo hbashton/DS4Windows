@@ -3453,22 +3453,76 @@ namespace DS4Windows
 
         private static bool? _newerVersionAvailable = null;
         private static Version _latestVersion;
+        private static string _latestReleaseTag = string.Empty;
 
         public static bool TryParseReleaseVersion(string tagName, out Version version)
         {
-            version = Version.Parse("0.0.0");
-            if (string.IsNullOrWhiteSpace(tagName)) return false;
-
-            Match versionMatch = Regex.Match(tagName, @"\d+(?:\.\d+){1,3}");
-            return versionMatch.Success && Version.TryParse(versionMatch.Value, out version);
+            return ReleaseChannelPolicy.TryParseReleaseVersion(tagName, out version);
         }
 
         private static bool IsStableRelease(GithubRelease release)
         {
-            if (release is null || release.PreRelease) return false;
+            return release is not null && !ReleaseChannelPolicy.IsPrerelease(release);
+        }
 
-            string tagName = release.TagName ?? string.Empty;
-            return !Regex.IsMatch(tagName, @"(?i)(alpha|beta|preview|pre-release|prerelease|rc)");
+        public static bool CheckNewerReleaseExists(
+            out string releaseTag,
+            bool allowCached = true)
+        {
+            releaseTag = string.Empty;
+
+            if (allowCached && _newerVersionAvailable is not null)
+            {
+                releaseTag = _latestReleaseTag;
+                return (bool)_newerVersionAvailable;
+            }
+
+            var request = App.requestClient.GetAsync(GITHUB_RELEASES_API_URI);
+            request.Wait();
+            if (!request.Result.IsSuccessStatusCode)
+            {
+                return false;
+            }
+
+            var task = request.Result.Content.ReadFromJsonAsync<GithubRelease[]>();
+            task.Wait();
+
+            bool currentBuildIsPrerelease = ReleaseChannelPolicy.IsPrereleaseBuild(
+                Global.exeDisplayVersion);
+            GithubRelease selectedRelease = ReleaseChannelPolicy.SelectPreferredRelease(
+                task.Result, currentBuildIsPrerelease);
+
+            string installedReleaseTag = string.Empty;
+            string markerPath = Path.Combine(
+                Global.exedirpath,
+                ReleaseChannelPolicy.InstalledReleaseFileName);
+            try
+            {
+                if (File.Exists(markerPath))
+                {
+                    installedReleaseTag = File.ReadAllText(markerPath).Trim();
+                }
+            }
+            catch (IOException)
+            {
+                // A missing marker only means this build predates channel-aware updates.
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+
+            bool updateAvailable = ReleaseChannelPolicy.ShouldUpdate(
+                selectedRelease,
+                Global.exeversion,
+                currentBuildIsPrerelease,
+                installedReleaseTag);
+
+            _latestReleaseTag = selectedRelease?.TagName ?? string.Empty;
+            _latestVersion = TryParseReleaseVersion(_latestReleaseTag, out Version version) ?
+                version : new Version(0, 0, 0);
+            _newerVersionAvailable = updateAvailable;
+            releaseTag = _latestReleaseTag;
+            return updateAvailable;
         }
 
         // Much more compact and elegant way of checking if there is a new update available than the
@@ -3478,47 +3532,9 @@ namespace DS4Windows
         // it to have
         public static bool CheckNewerVersionExists(out Version version, bool allowCached = true)
         {
-            version = Version.Parse("0.0.0");
-
-            if (!Version.TryParse(Global.exeversion, out var currentVersion)) return false;
-
-            // attempt to limit HTTP requests for reasons of 1. performance 2. GH API rate limit
-            if (allowCached && _newerVersionAvailable is not null)
-            {
-                version = _latestVersion;
-                return (bool)_newerVersionAvailable;
-            }
-
-            var request = App.requestClient.GetAsync(GITHUB_RELEASES_API_URI);
-            request.Wait();
-            if (request.Result.IsSuccessStatusCode)
-            {
-                var task = request.Result.Content.ReadFromJsonAsync<GithubRelease[]>();
-                task.Wait();
-
-                foreach (var release in task.Result ?? Array.Empty<GithubRelease>())
-                {
-                    if (!IsStableRelease(release)) continue;
-                    if (!TryParseReleaseVersion(release.TagName, out var parsedVersion)) continue;
-                    if (parsedVersion > version) version = parsedVersion;
-                }
-
-                if (version <= Version.Parse("0.0.0")) return false;
-
-                // if there is a newer version available
-                if (currentVersion < version)
-                {
-                    _latestVersion = version;
-                    _newerVersionAvailable = true;
-                    return true;
-                }
-
-                // if current version is the latest
-                _newerVersionAvailable = false;
-                return false;
-            }
-
-            return false;
+            bool result = CheckNewerReleaseExists(out _, allowCached);
+            version = _latestVersion ?? new Version(0, 0, 0);
+            return result;
         }
 
         public static async Task<Dictionary<Version, string>> GetChangelog(bool allVersions = false)
@@ -3549,6 +3565,27 @@ namespace DS4Windows
 
         public static async Task<string> GetChangelogMarkdown(bool allVersions = false)
         {
+            if (!allVersions &&
+                ReleaseChannelPolicy.IsPrereleaseBuild(Global.exeDisplayVersion) &&
+                !string.IsNullOrWhiteSpace(_latestReleaseTag))
+            {
+                var request = await App.requestClient.GetAsync(GITHUB_RELEASES_API_URI);
+                if (request.IsSuccessStatusCode)
+                {
+                    GithubRelease[] releases = await request.Content
+                        .ReadFromJsonAsync<GithubRelease[]>();
+                    GithubRelease selectedRelease = releases?.FirstOrDefault(release =>
+                        string.Equals(release.TagName, _latestReleaseTag,
+                            StringComparison.OrdinalIgnoreCase));
+                    string selectedChangelog = ParseChangelogString(selectedRelease?.Body);
+                    if (!string.IsNullOrWhiteSpace(selectedChangelog))
+                    {
+                        return $"## {_latestReleaseTag}{Environment.NewLine}{Environment.NewLine}" +
+                            selectedChangelog;
+                    }
+                }
+            }
+
             var versions = await GetChangelog(allVersions);
 
             StringBuilder sb = new();

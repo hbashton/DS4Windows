@@ -881,6 +881,12 @@ namespace DS4Windows
                 PadForgeAsyncDirectStreamLoop();
                 return;
             }
+            if (directTransportMode ==
+                DualShock4AudioTransportMode.InputSynchronized)
+            {
+                InputSynchronizedDirectStreamLoop();
+                return;
+            }
             if (DualShock4AudioTransportSettings.
                 UsesProductionReplayPolicy(directTransportMode))
             {
@@ -1185,6 +1191,85 @@ namespace DS4Windows
                     CloseNativeHandle(highResolutionTimer);
                 }
                 timeEndPeriod(1);
+            }
+        }
+
+        /// <summary>
+        /// Presents one complete 16 ms report after each newly received,
+        /// CRC-valid physical DS4 input report. This phase-locks host writes to
+        /// the controller's actual Bluetooth connection-event clock instead of
+        /// allowing an independent 16 ms timer to drift across that window.
+        /// </summary>
+        private void InputSynchronizedDirectStreamLoop()
+        {
+            var waitHandles = new WaitHandle[]
+            {
+                captureAvailable,
+                stoppingSignal,
+            };
+            IntPtr mmcssHandle = RegisterMultimediaScheduler();
+            long lastPresentedInputTick = 0;
+            try
+            {
+                while (!stopping)
+                {
+                    int bufferedFrames;
+                    lock (syncRoot)
+                    {
+                        bufferedFrames = encodedFrames.Count;
+                    }
+
+                    long inputTick = device.LastBluetoothInputReportTick;
+                    if (bufferedFrames < DualShock4BluetoothAudioProtocol.
+                            SpeakerLargeFramesPerReport ||
+                        inputTick == 0 || inputTick == lastPresentedInputTick)
+                    {
+                        TraceDirectStreamStatus();
+                        int signaled = WaitHandle.WaitAny(waitHandles, 2);
+                        if (signaled == 1 || stopping)
+                        {
+                            return;
+                        }
+                        continue;
+                    }
+
+                    if (!speakerTransportEnabled &&
+                        !EnsureSpeakerTransportEnabled())
+                    {
+                        return;
+                    }
+
+                    directDriftCorrectionEnabled = false;
+                    PadForgeAsyncSubmissionResult result =
+                        SubmitEncodedFramesPadForgeAsync(
+                            DualShock4BluetoothAudioProtocol.
+                                SpeakerLargeFramesPerReport);
+                    if (result == PadForgeAsyncSubmissionResult.Failed)
+                    {
+                        return;
+                    }
+                    if (result == PadForgeAsyncSubmissionResult.Saturated)
+                    {
+                        if (stoppingSignal.WaitOne(
+                            PadForgeAsyncBackpressureWaitMilliseconds))
+                        {
+                            return;
+                        }
+                        continue;
+                    }
+                    if (result == PadForgeAsyncSubmissionResult.Submitted)
+                    {
+                        lastPresentedInputTick = inputTick;
+                    }
+                    TraceDirectStreamStatus();
+                }
+            }
+            finally
+            {
+                if (mmcssHandle != IntPtr.Zero)
+                {
+                    AvRevertMmThreadCharacteristics(mmcssHandle);
+                }
             }
         }
 
@@ -2165,6 +2250,8 @@ namespace DS4Windows
                     DualShock4AudioTransportMode.PadForgeAsync ||
                     directTransportMode ==
                         DualShock4AudioTransportMode.PadForgeSpeakerOnly ||
+                    directTransportMode ==
+                        DualShock4AudioTransportMode.InputSynchronized ||
                     directTransportMode ==
                         DualShock4AudioTransportMode.SourceDriven ?
                 DualShock4AudioTransportSettings.

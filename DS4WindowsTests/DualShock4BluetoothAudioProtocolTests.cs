@@ -365,6 +365,26 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void SpeakerReportPreservesBluetoothInputIntervalAndCrc()
+        {
+            byte[][] frames = Enumerable.Range(1, 4)
+                .Select(value => Enumerable.Repeat((byte)value,
+                    DualShock4BluetoothAudioProtocol.SpeakerSbcFrameLength)
+                    .ToArray())
+                .ToArray();
+
+            byte[] report =
+                DualShock4BluetoothAudioProtocol.BuildSpeakerReport(
+                    0x1234, frames, bluetoothPollRate: 5);
+
+            Assert.AreEqual(0x45, report[1]);
+            Assert.AreEqual(
+                DualShock4BluetoothAudioProtocol.ComputeBluetoothCrc(
+                    0xA2, report, report.Length - sizeof(uint)),
+                ReadUInt32(report, report.Length - sizeof(uint)));
+        }
+
+        [TestMethod]
         public void FourFrameSpeakerReportRepresentsExactlySixteenMilliseconds()
         {
             Assert.AreEqual(32000,

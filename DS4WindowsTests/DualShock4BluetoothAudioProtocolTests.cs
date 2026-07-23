@@ -421,6 +421,13 @@ namespace DS4WindowsTests
                 DualShock4AudioTransportSettings.Parse(null));
             Assert.AreEqual(DualShock4AudioTransportMode.Reference,
                 DualShock4AudioTransportSettings.Parse("reference"));
+            Assert.AreEqual(DualShock4AudioTransportMode.SourceDriven,
+                DualShock4AudioTransportSettings.Parse("source-driven"));
+            Assert.AreEqual(DualShock4AudioTransportMode.SourceDriven,
+                DualShock4AudioTransportSettings.Parse("clean-era"));
+            Assert.AreEqual("source-driven",
+                DualShock4AudioTransportSettings.Format(
+                    DualShock4AudioTransportMode.SourceDriven));
             Assert.AreEqual(DualShock4AudioTransportMode.ProductionDuplexA1,
                 DualShock4AudioTransportSettings.Parse("unknown"));
             Assert.AreEqual(DualShock4AudioTransportMode.Scheduled,

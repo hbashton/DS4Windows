@@ -874,7 +874,9 @@ namespace DS4Windows
                 return;
             }
             if (directTransportMode ==
-                DualShock4AudioTransportMode.PadForgeAsync)
+                    DualShock4AudioTransportMode.PadForgeAsync ||
+                directTransportMode ==
+                    DualShock4AudioTransportMode.PadForgeSpeakerOnly)
             {
                 PadForgeAsyncDirectStreamLoop();
                 return;
@@ -2162,6 +2164,8 @@ namespace DS4Windows
             int queueLimit = directTransportMode ==
                     DualShock4AudioTransportMode.PadForgeAsync ||
                     directTransportMode ==
+                        DualShock4AudioTransportMode.PadForgeSpeakerOnly ||
+                    directTransportMode ==
                         DualShock4AudioTransportMode.SourceDriven ?
                 DualShock4AudioTransportSettings.
                     PadForgeAsyncEncodedFrameQueueLimit :
@@ -2532,6 +2536,13 @@ namespace DS4Windows
                                             microphoneEnabled,
                                         bluetoothPollRate:
                                             GetBluetoothPollRate());
+                                if (directTransportMode ==
+                                    DualShock4AudioTransportMode.
+                                        PadForgeSpeakerOnly)
+                                {
+                                    ApplySpeakerOnlyAudioMode(report,
+                                        "padforge-speaker-only", 0xA2);
+                                }
                                 frameNumber += (ushort)count;
                                 prepared = true;
                                 return true;
@@ -3552,6 +3563,13 @@ namespace DS4Windows
 
         private bool WriteBluetoothAudioControlBarrier(byte[] report)
         {
+            if (directTransportMode ==
+                    DualShock4AudioTransportMode.PadForgeSpeakerOnly &&
+                report != null && report.Length >= 7 && report[2] != 0)
+            {
+                ApplySpeakerOnlyAudioMode(report,
+                    "padforge-speaker-only control", 0xA2);
+            }
             return TrySendBluetoothAudioControl(report, out _);
         }
 

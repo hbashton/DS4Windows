@@ -441,6 +441,16 @@ namespace DS4WindowsTests
             Assert.AreEqual("padforge-async",
                 DualShock4AudioTransportSettings.Format(
                     DualShock4AudioTransportMode.PadForgeAsync));
+            Assert.AreEqual(
+                DualShock4AudioTransportMode.PadForgeSpeakerOnly,
+                DualShock4AudioTransportSettings.Parse(
+                    " padforge-speaker-only "));
+            Assert.AreEqual(
+                DualShock4AudioTransportMode.PadForgeSpeakerOnly,
+                DualShock4AudioTransportSettings.Parse("PADFORGE-A2"));
+            Assert.AreEqual("padforge-speaker-only",
+                DualShock4AudioTransportSettings.Format(
+                    DualShock4AudioTransportMode.PadForgeSpeakerOnly));
             Assert.AreEqual(DualShock4AudioTransportMode.ProductionReplay,
                 DualShock4AudioTransportSettings.Parse(
                     " production-replay "));

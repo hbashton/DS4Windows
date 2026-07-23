@@ -3164,9 +3164,21 @@ namespace DS4Windows
                 $"hidLastError={writeStatus.LastError}, " +
                 $"hidLastTransfer={writeStatus.LastTransferred}/" +
                 $"{writeStatus.LastExpected}, " +
-                $"hidPendingAgeMs={writeStatus.OldestPendingMilliseconds:F2}, " +
-                $"hidCompletionMs={writeStatus.MaximumCompletionMilliseconds:F2}, " +
-                $"effectWrites={device.BluetoothEffectReportsDuringAudio}, " +
+                 $"hidPendingAgeMs={writeStatus.OldestPendingMilliseconds:F2}, " +
+                 $"hidCompletionMs={writeStatus.MaximumCompletionMilliseconds:F2}, " +
+                 $"hidIntervalCompletionMs=" +
+                 $"{writeStatus.MaximumIntervalCompletionMilliseconds:F2}, " +
+                 $"hidCompletionBuckets=" +
+                 $"{writeStatus.CompletionsUnder16Milliseconds}/" +
+                 $"{writeStatus.Completions16To24Milliseconds}/" +
+                 $"{writeStatus.Completions24To32Milliseconds}/" +
+                 $"{writeStatus.CompletionsAtLeast32Milliseconds}, " +
+                 $"hidSubmitPending=" +
+                 $"{writeStatus.SubmissionsWithNoPendingWrites}/" +
+                 $"{writeStatus.SubmissionsWithOnePendingWrite}/" +
+                 $"{writeStatus.SubmissionsWithAtLeastTwoPendingWrites}, " +
+                 $"hidPendingHighWater={writeStatus.MaximumPendingWrites}, " +
+                 $"effectWrites={device.BluetoothEffectReportsDuringAudio}, " +
                 $"effectDeferred={device.BluetoothEffectReportsDeferredDuringAudio}, " +
                 $"effectAgeMs={effectAgeMilliseconds}, " +
                 $"lastValidInputAgeMs={lastValidInputAgeMilliseconds}, " +
@@ -3805,6 +3817,15 @@ namespace DS4Windows
             private long completionFailures;
             private long shortTransfers;
             private long maximumCompletionTicks;
+            private long maximumIntervalCompletionTicks;
+            private long completionsUnder16Milliseconds;
+            private long completions16To24Milliseconds;
+            private long completions24To32Milliseconds;
+            private long completionsAtLeast32Milliseconds;
+            private long submissionsWithNoPendingWrites;
+            private long submissionsWithOnePendingWrite;
+            private long submissionsWithAtLeastTwoPendingWrites;
+            private int maximumPendingWrites;
             private int lastCompletionError;
             private int lastTransferred;
             private int lastExpected;
@@ -3815,7 +3836,16 @@ namespace DS4Windows
                     long shortTransfers, int lastError,
                     int lastTransferred, int lastExpected,
                     double oldestPendingMilliseconds,
-                    double maximumCompletionMilliseconds)
+                    double maximumCompletionMilliseconds,
+                    double maximumIntervalCompletionMilliseconds,
+                    long completionsUnder16Milliseconds,
+                    long completions16To24Milliseconds,
+                    long completions24To32Milliseconds,
+                    long completionsAtLeast32Milliseconds,
+                    long submissionsWithNoPendingWrites,
+                    long submissionsWithOnePendingWrite,
+                    long submissionsWithAtLeastTwoPendingWrites,
+                    int maximumPendingWrites)
                 {
                     Pending = pending;
                     Completed = completed;
@@ -3827,6 +3857,23 @@ namespace DS4Windows
                     OldestPendingMilliseconds = oldestPendingMilliseconds;
                     MaximumCompletionMilliseconds =
                         maximumCompletionMilliseconds;
+                    MaximumIntervalCompletionMilliseconds =
+                        maximumIntervalCompletionMilliseconds;
+                    CompletionsUnder16Milliseconds =
+                        completionsUnder16Milliseconds;
+                    Completions16To24Milliseconds =
+                        completions16To24Milliseconds;
+                    Completions24To32Milliseconds =
+                        completions24To32Milliseconds;
+                    CompletionsAtLeast32Milliseconds =
+                        completionsAtLeast32Milliseconds;
+                    SubmissionsWithNoPendingWrites =
+                        submissionsWithNoPendingWrites;
+                    SubmissionsWithOnePendingWrite =
+                        submissionsWithOnePendingWrite;
+                    SubmissionsWithAtLeastTwoPendingWrites =
+                        submissionsWithAtLeastTwoPendingWrites;
+                    MaximumPendingWrites = maximumPendingWrites;
                 }
 
                 public int Pending { get; }
@@ -3838,6 +3885,15 @@ namespace DS4Windows
                 public int LastExpected { get; }
                 public double OldestPendingMilliseconds { get; }
                 public double MaximumCompletionMilliseconds { get; }
+                public double MaximumIntervalCompletionMilliseconds { get; }
+                public long CompletionsUnder16Milliseconds { get; }
+                public long Completions16To24Milliseconds { get; }
+                public long Completions24To32Milliseconds { get; }
+                public long CompletionsAtLeast32Milliseconds { get; }
+                public long SubmissionsWithNoPendingWrites { get; }
+                public long SubmissionsWithOnePendingWrite { get; }
+                public long SubmissionsWithAtLeastTwoPendingWrites { get; }
+                public int MaximumPendingWrites { get; }
             }
 
             public NativeOverlappedWritePool(IntPtr handle, int reportSize)
@@ -4149,6 +4205,21 @@ namespace DS4Windows
                         return false;
                     }
 
+                    if (pending == 0)
+                    {
+                        submissionsWithNoPendingWrites++;
+                    }
+                    else if (pending == 1)
+                    {
+                        submissionsWithOnePendingWrite++;
+                    }
+                    else
+                    {
+                        submissionsWithAtLeastTwoPendingWrites++;
+                    }
+                    maximumPendingWrites = Math.Max(maximumPendingWrites,
+                        pending);
+
                     if (!prepare())
                     {
                         return false;
@@ -4358,7 +4429,15 @@ namespace DS4Windows
                             lastCompletionError, lastTransferred,
                             lastExpected, 0.0,
                             maximumCompletionTicks * 1000.0 /
-                            Stopwatch.Frequency);
+                            Stopwatch.Frequency, 0.0,
+                            completionsUnder16Milliseconds,
+                            completions16To24Milliseconds,
+                            completions24To32Milliseconds,
+                            completionsAtLeast32Milliseconds,
+                            submissionsWithNoPendingWrites,
+                            submissionsWithOnePendingWrite,
+                            submissionsWithAtLeastTwoPendingWrites,
+                            maximumPendingWrites);
                     }
 
                     ReapCompletedNoLock();
@@ -4380,12 +4459,27 @@ namespace DS4Windows
                         }
                     }
 
+                    long intervalMaximumTicks =
+                        maximumIntervalCompletionTicks;
+                    maximumIntervalCompletionTicks = 0;
+                    int intervalMaximumPending = maximumPendingWrites;
+                    maximumPendingWrites = pending;
                     return new Status(pending, completedWrites,
                         completionFailures, shortTransfers,
                         lastCompletionError, lastTransferred, lastExpected,
                         oldestPendingTicks * 1000.0 / Stopwatch.Frequency,
                         maximumCompletionTicks * 1000.0 /
-                        Stopwatch.Frequency);
+                        Stopwatch.Frequency,
+                        intervalMaximumTicks * 1000.0 /
+                        Stopwatch.Frequency,
+                        completionsUnder16Milliseconds,
+                        completions16To24Milliseconds,
+                        completions24To32Milliseconds,
+                        completionsAtLeast32Milliseconds,
+                        submissionsWithNoPendingWrites,
+                        submissionsWithOnePendingWrite,
+                        submissionsWithAtLeastTwoPendingWrites,
+                        intervalMaximumPending);
                 }
             }
 
@@ -4406,6 +4500,28 @@ namespace DS4Windows
                     if (completionTicks > maximumCompletionTicks)
                     {
                         maximumCompletionTicks = completionTicks;
+                    }
+                    if (completionTicks > maximumIntervalCompletionTicks)
+                    {
+                        maximumIntervalCompletionTicks = completionTicks;
+                    }
+                    double completionMilliseconds = completionTicks * 1000.0 /
+                        Stopwatch.Frequency;
+                    if (completionMilliseconds < 16.0)
+                    {
+                        completionsUnder16Milliseconds++;
+                    }
+                    else if (completionMilliseconds < 24.0)
+                    {
+                        completions16To24Milliseconds++;
+                    }
+                    else if (completionMilliseconds < 32.0)
+                    {
+                        completions24To32Milliseconds++;
+                    }
+                    else
+                    {
+                        completionsAtLeast32Milliseconds++;
                     }
 
                     outstanding[slot] = false;

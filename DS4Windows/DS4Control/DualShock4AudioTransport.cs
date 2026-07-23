@@ -25,6 +25,7 @@ namespace DS4Windows
         internal const string EnvironmentVariableName =
             "DS4WINDOWS_DS4_AUDIO_TRANSPORT_MODE";
         internal const int PadForgeAsyncSlotCount = 8;
+        internal const int PadForgeAsyncEncodedFrameQueueLimit = 12;
         internal const int ProductionReplaySlotCount = 32;
         internal const int ProductionReplayRetainedSourceFrames = 16;
         internal const int ProductionReplayQueueServoTargetFrames =
@@ -231,9 +232,29 @@ namespace DS4Windows
         }
 
         internal static int SelectPadForgeAsyncReportFrameCount(
-            int bufferedFrames)
+            int bufferedFrames, bool flushTail = false)
         {
-            return SelectReferenceReportFrameCount(bufferedFrames);
+            if (bufferedFrames < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(bufferedFrames));
+            }
+
+            // A real PadForge trace on this adapter contains a steady stream of
+            // one 0x17 report per four SBC frames. 0x14 is the two-frame tail,
+            // not a second report to burst immediately after every 0x17. The
+            // latter pattern was unique to our 10 ms VIIPER source callbacks
+            // and consumed two ACL credits at once every 40 ms.
+            if (bufferedFrames >= DualShock4BluetoothAudioProtocol.
+                    SpeakerLargeFramesPerReport)
+            {
+                return DualShock4BluetoothAudioProtocol.
+                    SpeakerLargeFramesPerReport;
+            }
+
+            return flushTail && bufferedFrames >=
+                DualShock4BluetoothAudioProtocol.SpeakerSmallFramesPerReport ?
+                DualShock4BluetoothAudioProtocol.SpeakerSmallFramesPerReport :
+                0;
         }
 
         internal static bool CanSubmitPadForgeAsync(int pendingWrites)

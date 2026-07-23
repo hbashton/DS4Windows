@@ -502,46 +502,30 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void PadForgeAsyncTransportUsesTheExactAvailabilityDrainPolicy()
+        public void PadForgeAsyncTransportDoesNotBurstItsTwoFrameRemainder()
         {
             Assert.IsFalse(DualShock4AudioTransportSettings.
                 ShouldWakePadForgeAsyncSender(3));
             Assert.IsTrue(DualShock4AudioTransportSettings.
                 ShouldWakePadForgeAsyncSender(4));
 
-            var cases = new[]
-            {
-                (Buffered: 4, Reports: new[] { 4 }, Remaining: 0),
-                (Buffered: 5, Reports: new[] { 4 }, Remaining: 1),
-                (Buffered: 6, Reports: new[] { 4, 2 }, Remaining: 0),
-                (Buffered: 7, Reports: new[] { 4, 2 }, Remaining: 1),
-                (Buffered: 8, Reports: new[] { 4, 4 }, Remaining: 0),
-                (Buffered: 9, Reports: new[] { 4, 4 }, Remaining: 1),
-            };
-            foreach (var item in cases)
-            {
-                int buffered = item.Buffered;
-                var reports = new List<int>();
-                while (true)
-                {
-                    int count = DualShock4AudioTransportSettings.
-                        SelectPadForgeAsyncReportFrameCount(buffered);
-                    if (count == 0)
-                    {
-                        break;
-                    }
-                    reports.Add(count);
-                    buffered -= count;
-                }
-
-                CollectionAssert.AreEqual(item.Reports, reports,
-                    $"Unexpected drain for {item.Buffered} frames.");
-                Assert.AreEqual(item.Remaining, buffered);
-                Assert.IsFalse(reports.Contains(
-                    DualShock4BluetoothAudioProtocol.
-                        SpeakerRealtimeFramesPerReport),
-                    "Availability transport must never select report 0x12.");
-            }
+            Assert.AreEqual(4, DualShock4AudioTransportSettings.
+                SelectPadForgeAsyncReportFrameCount(4));
+            Assert.AreEqual(4, DualShock4AudioTransportSettings.
+                SelectPadForgeAsyncReportFrameCount(6));
+            Assert.AreEqual(0, DualShock4AudioTransportSettings.
+                SelectPadForgeAsyncReportFrameCount(2),
+                "A continuous source must retain its two-frame remainder.");
+            Assert.AreEqual(2, DualShock4AudioTransportSettings.
+                SelectPadForgeAsyncReportFrameCount(2, flushTail: true),
+                "A real source tail must use report 0x14.");
+            Assert.AreEqual(0, DualShock4AudioTransportSettings.
+                SelectPadForgeAsyncReportFrameCount(1, flushTail: true));
+            Assert.AreEqual(12, DualShock4AudioTransportSettings.
+                PadForgeAsyncEncodedFrameQueueLimit);
+            Assert.ThrowsException<ArgumentOutOfRangeException>(() =>
+                DualShock4AudioTransportSettings.
+                    SelectPadForgeAsyncReportFrameCount(-1));
         }
 
         [TestMethod]

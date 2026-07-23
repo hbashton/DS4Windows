@@ -270,6 +270,7 @@ namespace DS4Windows
         private long directPcmBytesReceived;
         private long directPacketsDropped;
         private long directFramesEncoded;
+        private long directFramesDroppedForLatency;
         private long directWriteSaturations;
         private long directHardWriteFailures;
         private long lastDirectPacketTimestamp;
@@ -973,6 +974,7 @@ namespace DS4Windows
             IntPtr mmcssHandle = RegisterMultimediaScheduler();
             try
             {
+                bool flushTail = false;
                 while (!stopping)
                 {
                     int bufferedFrames;
@@ -981,8 +983,10 @@ namespace DS4Windows
                         bufferedFrames = encodedFrames.Count;
                     }
 
-                    if (!DualShock4AudioTransportSettings.
-                            ShouldWakePadForgeAsyncSender(bufferedFrames))
+                    int reportFrames = DualShock4AudioTransportSettings.
+                        SelectPadForgeAsyncReportFrameCount(bufferedFrames,
+                            flushTail);
+                    if (reportFrames == 0)
                     {
                         TraceDirectStreamStatus();
                         int signaled = WaitHandle.WaitAny(waitHandles,
@@ -991,6 +995,7 @@ namespace DS4Windows
                         {
                             return;
                         }
+                        flushTail = signaled == WaitHandle.WaitTimeout;
                         continue;
                     }
 
@@ -1000,47 +1005,38 @@ namespace DS4Windows
                         return;
                     }
 
-                    // Like the reference lane, PadForge's sender is driven by
-                    // source availability rather than a second clock.
+                    // The sender remains source-availability driven. Submit
+                    // large reports first, but do not turn the two-frame
+                    // remainder produced by VIIPER's 10 ms callback into an
+                    // immediate second ACL write. A 0x14 is emitted only after
+                    // the source has left a real tail for the bounded wait.
                     directDriftCorrectionEnabled = false;
-                    while (!stopping)
+                    PadForgeAsyncSubmissionResult result =
+                        SubmitEncodedFramesPadForgeAsync(reportFrames);
+                    if (result == PadForgeAsyncSubmissionResult.Failed)
                     {
-                        lock (syncRoot)
-                        {
-                            bufferedFrames = encodedFrames.Count;
-                        }
-                        int reportFrames = DualShock4AudioTransportSettings.
-                            SelectPadForgeAsyncReportFrameCount(bufferedFrames);
-                        if (reportFrames == 0)
-                        {
-                            break;
-                        }
-
-                        PadForgeAsyncSubmissionResult result =
-                            SubmitEncodedFramesPadForgeAsync(reportFrames);
-                        if (result == PadForgeAsyncSubmissionResult.Failed)
+                        return;
+                    }
+                    if (result == PadForgeAsyncSubmissionResult.NoFrames)
+                    {
+                        flushTail = false;
+                        continue;
+                    }
+                    if (result == PadForgeAsyncSubmissionResult.Saturated)
+                    {
+                        // This is backpressure, not presentation cadence. The
+                        // ordered eight-slot ring leaves every SBC frame queued
+                        // until its oldest in-flight write releases a credit.
+                        if (stoppingSignal.WaitOne(
+                            PadForgeAsyncBackpressureWaitMilliseconds))
                         {
                             return;
                         }
-                        if (result == PadForgeAsyncSubmissionResult.NoFrames)
-                        {
-                            break;
-                        }
-                        if (result == PadForgeAsyncSubmissionResult.Saturated)
-                        {
-                            // This is backpressure, not presentation cadence.
-                            // Leave every queued SBC frame in place and retry
-                            // after an outstanding HID write can complete.
-                            if (stoppingSignal.WaitOne(
-                                PadForgeAsyncBackpressureWaitMilliseconds))
-                            {
-                                return;
-                            }
-                            continue;
-                        }
-
-                        TraceDirectStreamStatus();
+                        continue;
                     }
+
+                    flushTail = false;
+                    TraceDirectStreamStatus();
                 }
             }
             finally
@@ -2010,6 +2006,11 @@ namespace DS4Windows
         private void EncodePendingPcmFrames()
         {
             int consumed = 0;
+            int queueLimit = directTransportMode ==
+                    DualShock4AudioTransportMode.PadForgeAsync ?
+                DualShock4AudioTransportSettings.
+                    PadForgeAsyncEncodedFrameQueueLimit :
+                EncodedFrameQueueLimit;
             while (pendingPcmCount - consumed >= PcmValuesPerSbcFrame)
             {
                 for (int sample = 0; sample < SamplesPerSbcFrame; sample++)
@@ -2019,7 +2020,15 @@ namespace DS4Windows
                 }
 
                 byte[] frame;
-                if (freeEncodedFrames.Count > 0)
+                if (encodedFrames.Count >= queueLimit)
+                {
+                    // Match the reference's 12-frame (48 ms) latency bound.
+                    // Reuse the oldest queued frame rather than allowing a
+                    // Bluetooth credit stall to accumulate audible latency.
+                    frame = encodedFrames.Dequeue();
+                    Interlocked.Increment(ref directFramesDroppedForLatency);
+                }
+                else if (freeEncodedFrames.Count > 0)
                 {
                     frame = freeEncodedFrames.Dequeue();
                 }
@@ -3090,6 +3099,7 @@ namespace DS4Windows
                 $"repeatedPackets={Interlocked.Read(ref directRepeatedPackets)}, " +
                 $"pcmPeak={Interlocked.Exchange(ref directPeakSample, 0)}, " +
                 $"encodedFrames={Interlocked.Read(ref directFramesEncoded)}, " +
+                $"encodedDrops={Interlocked.Read(ref directFramesDroppedForLatency)}, " +
                 $"reports={Volatile.Read(ref reportsSubmitted)}, " +
                 $"syntheticReports={Interlocked.Read(ref syntheticSilenceReports)}, " +
                 $"writeSaturation={Interlocked.Read(ref directWriteSaturations)}, " +
@@ -4018,11 +4028,18 @@ namespace DS4Windows
                         return false;
                     }
 
+                    bool padForgeOrderedRing = maximumOutstanding ==
+                        DualShock4AudioTransportSettings.
+                            PadForgeAsyncSlotCount;
+                    int slotLimit = padForgeOrderedRing ?
+                        DualShock4AudioTransportSettings.
+                            PadForgeAsyncSlotCount : SlotCount;
                     int pending = 0;
                     int slot = -1;
-                    for (int offset = 0; offset < SlotCount; offset++)
+                    for (int offset = 0; offset < slotLimit; offset++)
                     {
-                        int candidate = (next + offset) % SlotCount;
+                        int candidate = padForgeOrderedRing ? offset :
+                            (next + offset) % SlotCount;
                         if (outstanding[candidate])
                         {
                             pending++;
@@ -4031,6 +4048,14 @@ namespace DS4Windows
                         {
                             slot = candidate;
                         }
+                    }
+                    if (padForgeOrderedRing)
+                    {
+                        // PadForge's pool probes exactly the oldest ring slot.
+                        // Do not skip over that still-pending write and spend a
+                        // newer Bluetooth ACL credit out of presentation order.
+                        int oldest = next % slotLimit;
+                        slot = outstanding[oldest] ? -1 : oldest;
                     }
                     bool boundedCapacity;
                     if (maximumOutstanding ==
@@ -4098,7 +4123,7 @@ namespace DS4Windows
                     outstanding[slot] = true;
                     expectedLengths[slot] = length;
                     submittedTimestamps[slot] = Stopwatch.GetTimestamp();
-                    next = (slot + 1) % SlotCount;
+                    next = (slot + 1) % slotLimit;
                     return true;
                 }
             }

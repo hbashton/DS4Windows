@@ -224,12 +224,18 @@ namespace DS4Windows
 
         /// <summary>
         /// Builds the one-shot report 0x11 which arms or disarms the DS4 audio
-        /// plane. The normal effects dispatcher continues to own ongoing
-        /// rumble, lightbar, and flash state after this initialization packet.
+        /// plane. This initialization report also carries the current rumble,
+        /// lightbar, and flash state. Keeping the initial effects in this same
+        /// ordered packet avoids a second competing Bluetooth HID write
+        /// immediately after the audio lane is armed.
         /// </summary>
         public static byte[] BuildAudioControlReport(bool speakerEnabled,
             bool microphoneEnabled, byte speakerVolume,
-            byte headphoneVolume, byte microphoneVolume)
+            byte headphoneVolume, byte microphoneVolume,
+            byte rightFastRumble = 0, byte leftSlowRumble = 0,
+            byte lightbarRed = 0, byte lightbarGreen = 0,
+            byte lightbarBlue = 0, byte flashOn = 0, byte flashOff = 0,
+            byte bluetoothPollRate = 0)
         {
             const int reportLength = 78;
             byte[] report = new byte[reportLength];
@@ -239,7 +245,11 @@ namespace DS4Windows
             // putting 0x15 on this short packet makes the firmware stop
             // reporting input. Keep this invariant inside the packet builder.
             report[0] = 0x11;
-            report[1] = 0xC0;
+            // The lower six bits also own the controller's Bluetooth input
+            // interval. Resetting them to zero while arming audio increases
+            // inbound radio traffic and can starve speaker ACL completions.
+            // Preserve the active profile value in the same atomic report.
+            report[1] = (byte)(0xC0 | Math.Min(bluetoothPollRate, (byte)16));
             // A0 keeps ordinary controller input alive for speaker-only
             // streaming. A1 selects microphone input even when speaker output
             // is also active; full-duplex speaker payloads retain A1 as well.
@@ -252,6 +262,13 @@ namespace DS4Windows
             byte validity = audioEnabled ? (byte)0xF3 : (byte)0xF0;
 
             report[3] = validity;
+            report[6] = rightFastRumble;
+            report[7] = leftSlowRumble;
+            report[8] = lightbarRed;
+            report[9] = lightbarGreen;
+            report[10] = lightbarBlue;
+            report[11] = flashOn;
+            report[12] = flashOff;
             report[21] = speakerEnabled ? headphoneVolume : (byte)0;
             report[22] = speakerEnabled ? headphoneVolume : (byte)0;
             report[23] = microphoneEnabled ? microphoneVolume : (byte)0;

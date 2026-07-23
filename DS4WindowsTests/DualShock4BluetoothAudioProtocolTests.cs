@@ -914,7 +914,7 @@ namespace DS4WindowsTests
                 DualShock4BluetoothSpeakerPassthrough.
                     ApplyFifoBufferedAudioMode(prime);
                 Assert.AreEqual(0x17, prime[0]);
-                Assert.AreEqual(0xA2, prime[2]);
+                Assert.AreEqual(0xA0, prime[2]);
                 Assert.AreEqual((byte)counter, prime[3]);
                 Assert.AreEqual((byte)(counter >> 8), prime[4]);
                 Assert.AreEqual(
@@ -933,12 +933,21 @@ namespace DS4WindowsTests
             DualShock4BluetoothSpeakerPassthrough.
                 ApplyFifoBufferedAudioMode(steady);
             Assert.AreEqual(0x12, steady[0]);
-            Assert.AreEqual(0xA2, steady[2]);
+            Assert.AreEqual(0xA0, steady[2]);
             Assert.AreEqual(0, steady[3]);
             Assert.AreEqual(0, steady[4]);
             counter = DualShock4AudioTransportSettings.
                 AdvanceFifoBufferedSteadyFrameNumber(counter);
             Assert.AreEqual((ushort)1, counter);
+
+            DualShock4BluetoothSpeakerPassthrough.
+                ApplyFifoBufferedAudioMode(steady,
+                    microphoneEnabled: true);
+            Assert.AreEqual(0xA1, steady[2]);
+            Assert.AreEqual(
+                DualShock4BluetoothAudioProtocol.ComputeBluetoothCrc(
+                    0xA2, steady, steady.Length - sizeof(uint)),
+                ReadUInt32(steady, steady.Length - sizeof(uint)));
         }
 
         [TestMethod]
@@ -1070,6 +1079,58 @@ namespace DS4WindowsTests
             Assert.AreEqual(64, liveSource *
                 DualShock4BluetoothAudioProtocol.
                     SpeakerRealtimeReportDurationMilliseconds);
+        }
+
+        [TestMethod]
+        public void ScheduledSpeakerUsesOnlyPacedLargeReports()
+        {
+            Assert.AreEqual(8,
+                DualShock4AudioTransportSettings.ScheduledPrimeReports);
+            Assert.AreEqual(
+                DualShock4BluetoothAudioProtocol.SpeakerLargeFramesPerReport,
+                DualShock4AudioTransportSettings.
+                    ScheduledPrimeFramesPerReport);
+            Assert.AreEqual(4,
+                DualShock4AudioTransportSettings.
+                    ScheduledPrimeCadenceMilliseconds);
+            Assert.AreEqual(16,
+                DualShock4AudioTransportSettings.
+                    ScheduledSteadyCadenceMilliseconds);
+            Assert.AreEqual(48,
+                DualShock4AudioTransportSettings.
+                    ScheduledStartupBufferedFrames);
+
+            // At the first steady deadline, the eight paced prime reports
+            // still cover 84 ms: 128 ms of content minus 28 ms between prime
+            // submissions and one 16 ms steady interval.
+            int remainingPrimeCoverageMilliseconds =
+                DualShock4AudioTransportSettings.ScheduledPrimeReports *
+                    DualShock4AudioTransportSettings.
+                        ScheduledSteadyCadenceMilliseconds -
+                (DualShock4AudioTransportSettings.ScheduledPrimeReports - 1) *
+                    DualShock4AudioTransportSettings.
+                        ScheduledPrimeCadenceMilliseconds -
+                DualShock4AudioTransportSettings.
+                    ScheduledSteadyCadenceMilliseconds;
+            Assert.AreEqual(84, remainingPrimeCoverageMilliseconds);
+        }
+
+        [TestMethod]
+        public void ScheduledSpeakerWaitsForPrimeAndRetainedSourceFrames()
+        {
+            int startup = DualShock4AudioTransportSettings.
+                ScheduledStartupBufferedFrames;
+
+            Assert.IsFalse(DualShock4AudioTransportSettings.
+                ShouldStartScheduled(startup - 1));
+            Assert.IsTrue(DualShock4AudioTransportSettings.
+                ShouldStartScheduled(startup));
+            Assert.AreEqual(40_000,
+                DualShock4AudioTransportSettings.
+                    GetScheduledPrimeCadenceTicks(10_000_000));
+            Assert.AreEqual(160_000,
+                DualShock4AudioTransportSettings.
+                    GetScheduledSteadyCadenceTicks(10_000_000));
         }
 
         [TestMethod]
@@ -1223,6 +1284,22 @@ namespace DS4WindowsTests
             Assert.AreEqual(0x4F, report[22]);
             Assert.AreEqual(0x00, report[23]);
             Assert.AreEqual(0x4F, report[24]);
+            Assert.AreEqual(
+                DualShock4BluetoothAudioProtocol.ComputeBluetoothCrc(
+                    0xA2, report, report.Length - sizeof(uint)),
+                ReadUInt32(report, report.Length - sizeof(uint)));
+        }
+
+        [TestMethod]
+        public void SpeakerControlReportPreservesBluetoothPollRate()
+        {
+            byte[] report =
+                DualShock4BluetoothAudioProtocol.BuildAudioControlReport(
+                    speakerEnabled: true, microphoneEnabled: false,
+                    speakerVolume: 0x4F, headphoneVolume: 0x4F,
+                    microphoneVolume: 0x4F, bluetoothPollRate: 4);
+
+            Assert.AreEqual(0xC4, report[1]);
             Assert.AreEqual(
                 DualShock4BluetoothAudioProtocol.ComputeBluetoothCrc(
                     0xA2, report, report.Length - sizeof(uint)),

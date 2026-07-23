@@ -26,7 +26,6 @@ namespace DS4Windows
             "DS4WINDOWS_DS4_AUDIO_TRANSPORT_MODE";
         internal const int PadForgeAsyncSlotCount = 8;
         internal const int ProductionReplaySlotCount = 32;
-        internal const int ProductionReplayPrimeReports = 20;
         internal const int ProductionReplayRetainedSourceFrames = 16;
         internal const int ProductionReplayQueueServoTargetFrames =
             ProductionReplayRetainedSourceFrames;
@@ -34,6 +33,8 @@ namespace DS4Windows
             DualShock4BluetoothAudioProtocol.SpeakerRealtimeFramesPerReport;
         internal const int ProductionReplayPrimeFrames =
             ProductionReplayPrimeReports * ProductionReplayFramesPerReport;
+        internal const int ProductionReplayPrimeReports =
+            20;
         internal const int ProductionReplayStartupBufferedFrames =
             ProductionReplayPrimeFrames +
                 ProductionReplayRetainedSourceFrames;
@@ -44,6 +45,26 @@ namespace DS4Windows
         internal const byte ProductionA0SpeakerAudioMode = 0xA0;
         internal const byte ProductionDuplexSpeakerAudioMode = 0xA0;
         internal const byte ProductionDuplexMicrophoneAudioMode = 0xA1;
+        // The clocked transport presents only four-frame 0x17 reports. Eight
+        // reports contain 128 ms of audio; presenting the startup reports four
+        // milliseconds apart builds about 100 ms of controller-side coverage
+        // without the zero-interval 0x17/0x14 bursts measured in the reference
+        // transports. Steady state then consumes exactly one 16 ms report per
+        // 16 ms period. A late submission always starts a new period.
+        internal const int ScheduledPrimeReports = 8;
+        internal const int ScheduledPrimeFramesPerReport =
+            DualShock4BluetoothAudioProtocol.SpeakerLargeFramesPerReport;
+        internal const int ScheduledPrimeFrames = ScheduledPrimeReports *
+            ScheduledPrimeFramesPerReport;
+        internal const int ScheduledRetainedSourceFrames =
+            DualShock4BluetoothAudioProtocol.
+                SpeakerRealtimeSourceCushionFrames;
+        internal const int ScheduledStartupBufferedFrames =
+            ScheduledPrimeFrames + ScheduledRetainedSourceFrames;
+        internal const int ScheduledPrimeCadenceMilliseconds = 4;
+        internal const int ScheduledSteadyCadenceMilliseconds =
+            DualShock4BluetoothAudioProtocol.
+                SpeakerLargeReportDurationMilliseconds;
         // A deliberately shallow controller-FIFO probe: four 0x17 reports
         // carry sixteen unique SBC frames (64 ms), then steady state returns
         // to the proven one-frame 0x12 production cadence. The independent
@@ -59,14 +80,19 @@ namespace DS4Windows
         internal const int FifoBufferedStartupBufferedFrames =
             FifoBufferedPrimeFrames + FifoBufferedRetainedSourceFrames;
         internal const int FifoBufferedSteadyFramesPerReport =
-            ProductionReplayFramesPerReport;
+            DualShock4BluetoothAudioProtocol.SpeakerRealtimeFramesPerReport;
         internal const int FifoBufferedCadenceMilliseconds =
-            ProductionReplayCadenceMilliseconds;
+            DualShock4BluetoothAudioProtocol.
+                SpeakerRealtimeReportDurationMilliseconds;
         internal const int FifoBufferedIdleReprimeMilliseconds =
             ProductionReplayIdleReprimeMilliseconds;
         internal const int FifoBufferedQueueServoTargetFrames =
             ProductionReplayQueueServoTargetFrames;
-        internal const byte FifoBufferedSpeakerAudioMode = 0xA2;
+        // Keep ordinary HID/gyro input active while the controller-side audio
+        // cushion is primed. A1 adds microphone audio without changing the
+        // speaker packet cadence.
+        internal const byte FifoBufferedSpeakerAudioMode = 0xA0;
+        internal const byte FifoBufferedMicrophoneAudioMode = 0xA1;
         // Retained as the original physical-credit comparison lane. It caps
         // fourteen four-frame reports at the ACL-credit ceiling observed in
         // ETW; that credit window is transport capacity, not proof that the
@@ -309,6 +335,13 @@ namespace DS4Windows
                 ProductionDuplexSpeakerAudioMode;
         }
 
+        internal static byte GetFifoBufferedAudioMode(
+            bool microphoneEnabled)
+        {
+            return microphoneEnabled ? FifoBufferedMicrophoneAudioMode :
+                FifoBufferedSpeakerAudioMode;
+        }
+
         internal static bool UsesProductionReplayPolicy(
             DualShock4AudioTransportMode mode)
         {
@@ -482,6 +515,38 @@ namespace DS4Windows
         {
             return unchecked((ushort)(frameNumber +
                 CreditBufferedFramesPerReport));
+        }
+
+        internal static bool ShouldStartScheduled(int bufferedFrames)
+        {
+            if (bufferedFrames < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(bufferedFrames));
+            }
+
+            return bufferedFrames >= ScheduledStartupBufferedFrames;
+        }
+
+        internal static long GetScheduledPrimeCadenceTicks(long frequency)
+        {
+            if (frequency <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(frequency));
+            }
+
+            return checked((long)Math.Round(frequency *
+                (ScheduledPrimeCadenceMilliseconds / 1000.0)));
+        }
+
+        internal static long GetScheduledSteadyCadenceTicks(long frequency)
+        {
+            if (frequency <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(frequency));
+            }
+
+            return checked((long)Math.Round(frequency *
+                (ScheduledSteadyCadenceMilliseconds / 1000.0)));
         }
     }
 }

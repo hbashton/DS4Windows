@@ -409,10 +409,11 @@ namespace DS4Windows
                     DirectSpeakerPcmReceived;
                 try
                 {
-                    // Open the dedicated lane now, but do not arm the physical
-                    // speaker until the virtual endpoint has delivered a
-                    // complete source cushion. This keeps startup contiguous
-                    // and avoids an idle physical audio session.
+                    // Match the proven production transport: establish the
+                    // dedicated HID write lane during startup, but do not arm
+                    // the physical speaker until a complete source cushion is
+                    // available. Keeping one handle for the full stream also
+                    // preserves write ordering across every audio segment.
                     if (!EnsureSpeakerWritePool())
                     {
                         throw new IOException(
@@ -1229,12 +1230,27 @@ namespace DS4Windows
             if (!stopping && Interlocked.CompareExchange(
                 ref productionReplayPrimeLogged, 1, 0) == 0)
             {
+                byte reportId = DualShock4AudioTransportSettings.
+                    ProductionReplayFramesPerReport switch
+                {
+                    DualShock4BluetoothAudioProtocol.
+                        SpeakerRealtimeFramesPerReport => 0x12,
+                    DualShock4BluetoothAudioProtocol.
+                        SpeakerSmallFramesPerReport => 0x14,
+                    _ => 0x17,
+                };
+                byte[] report = reportId switch
+                {
+                    0x12 => speakerRealtimeReport,
+                    0x14 => speakerSmallReport,
+                    _ => speakerLargeReport,
+                };
                 AppLogger.LogToGui(
                     $"DualShock 4 Bluetooth production replay primed " +
                     $"{DualShock4AudioTransportSettings.ProductionReplayPrimeReports} " +
-                    $"unique 0x12 source reports back-to-back, retained " +
+                    $"unique 0x{reportId:X2} source reports back-to-back, retained " +
                     $"{DualShock4AudioTransportSettings.ProductionReplayRetainedSourceFrames} " +
-                    $"source frames, mode=0x{speakerRealtimeReport[2]:X2}, " +
+                    $"source frames, mode=0x{report[2]:X2}, " +
                     $"slots={DualShock4AudioTransportSettings.ProductionReplaySlotCount}, " +
                     $"sourceServo=historical-slip@" +
                     $"{DualShock4AudioTransportSettings.ProductionReplayQueueServoTargetFrames}.",
@@ -1262,7 +1278,8 @@ namespace DS4Windows
             try
             {
                 // Build exactly sixteen prime frames plus the independent
-                // sixteen-frame source cushion before the A2 control barrier.
+                // sixteen-frame source cushion before the A0/A1 control
+                // barrier. Normal HID input remains active during the prime.
                 while (!stopping)
                 {
                     int bufferedFrames;
@@ -1646,8 +1663,8 @@ namespace DS4Windows
                         bufferedFrames = encodedFrames.Count;
                     }
 
-                    if (bufferedFrames >= DualShock4BluetoothAudioProtocol.
-                            SpeakerMinimumBufferedFrames)
+                    if (DualShock4AudioTransportSettings.
+                        ShouldStartScheduled(bufferedFrames))
                     {
                         break;
                     }
@@ -1666,24 +1683,45 @@ namespace DS4Windows
                     return;
                 }
 
-                // Queue the same 80 ms hardware cushion which survived every
-                // scheduler and Bluetooth completion stall in the physical-pad
-                // trace. Five 0x17 reports carry the twenty prime frames while
-                // leaving sixteen encoded source frames in reserve.
+                // Build the controller cushion with paced 0x17 reports. The
+                // independent PadForge/DS4AudioStreamer trace showed that
+                // zero-interval 0x17+0x14 pairs produce 48-89 ms completion
+                // holes on this Windows Bluetooth stack. Four-millisecond
+                // spacing is fast enough to accumulate coverage but never
+                // submits two reports in one scheduler turn.
+                long primeCadenceTicks = DualShock4AudioTransportSettings.
+                    GetScheduledPrimeCadenceTicks(Stopwatch.Frequency);
+                long nextPrimeTick = Stopwatch.GetTimestamp();
                 for (int index = 0; index <
-                        DualShock4BluetoothAudioProtocol.
-                            SpeakerDirectPrimeReports && !stopping; index++)
+                        DualShock4AudioTransportSettings.
+                            ScheduledPrimeReports && !stopping; index++)
                 {
+                    if (index != 0)
+                    {
+                        WaitUntil(highResolutionTimer, nextPrimeTick);
+                    }
                     SubmitEncodedFrames(DualShock4BluetoothAudioProtocol.
                         SpeakerDirectFramesPerReport);
+                    // Rebase from the actual submission time. A delayed HID
+                    // write must never compress the next prime interval.
+                    nextPrimeTick = Stopwatch.GetTimestamp() +
+                        primeCadenceTicks;
                 }
                 Interlocked.Increment(ref directCadencePrimes);
+                AppLogger.LogToGui(
+                    $"DualShock 4 Bluetooth scheduled speaker primed " +
+                    $"{DualShock4AudioTransportSettings.ScheduledPrimeReports} " +
+                    $"paced 0x17 reports at " +
+                    $"{DualShock4AudioTransportSettings.ScheduledPrimeCadenceMilliseconds} ms " +
+                    $"and retained " +
+                    $"{DualShock4AudioTransportSettings.ScheduledRetainedSourceFrames} " +
+                    "source frames; steady cadence=16 ms, catch-up=disabled.",
+                    false);
                 directDriftCorrectionEnabled = directDriftMode !=
                     DualShock4AudioDriftMode.Off;
 
-                long nominalCadenceTicks = (long)Math.Round(
-                    Stopwatch.Frequency *
-                    DirectReportCadenceMilliseconds / 1000.0);
+                long nominalCadenceTicks = DualShock4AudioTransportSettings.
+                    GetScheduledSteadyCadenceTicks(Stopwatch.Frequency);
                 long cadenceTicks = nominalCadenceTicks;
                 Interlocked.Exchange(ref directCurrentCadenceTicks,
                     cadenceTicks);
@@ -1711,8 +1749,8 @@ namespace DS4Windows
                         targetCadenceTicks);
                     WaitForNextTick(ref nextTick, cadenceTicks,
                         highResolutionTimer,
-                        DualShock4BluetoothAudioProtocol.
-                            SpeakerDirectPrimeReports,
+                        DualShock4AudioTransportSettings.
+                            ScheduledPrimeReports,
                         rebaseLatenessTicks);
 
                     int availableFrames;
@@ -1732,24 +1770,13 @@ namespace DS4Windows
                     }
 
                     if (sourceReprimePending && availableFrames >=
-                        DualShock4BluetoothAudioProtocol.
-                            SpeakerMinimumBufferedFrames)
+                        DualShock4AudioTransportSettings.
+                            ScheduledRetainedSourceFrames)
                     {
-                        // The virtual endpoint has resumed after an idle
-                        // period. Rebuild the exact startup cushion before
-                        // presenting live audio again. Until all 36 frames are
-                        // ready, complete four-frame SBC silence reports below
-                        // keep the controller decoder clock continuous.
-                        for (int index = 0; index <
-                                DualShock4BluetoothAudioProtocol.
-                                    SpeakerDirectPrimeReports && !stopping;
-                            index++)
-                        {
-                            SubmitEncodedFrames(
-                                DualShock4BluetoothAudioProtocol.
-                                    SpeakerDirectFramesPerReport);
-                        }
-                        Interlocked.Increment(ref directCadencePrimes);
+                        // Silence reports have kept the controller clock and
+                        // FIFO alive while the source was idle. Resume with one
+                        // live report on this same 16 ms tick; a second startup
+                        // burst would destroy the no-catch-up invariant.
                         sourceReprimePending = false;
                         directDriftCorrectionEnabled = directDriftMode !=
                             DualShock4AudioDriftMode.Off;
@@ -2412,7 +2439,7 @@ namespace DS4Windows
 
         private ProductionReplaySubmissionResult
             SubmitProductionReplayFrame(bool allowSilence,
-                bool forceSilence, bool speakerOnlyA2 = false,
+                bool forceSilence,
                 string transportLabel = "production replay")
         {
             if (!EnsureSpeakerWritePool())
@@ -2422,7 +2449,14 @@ namespace DS4Windows
 
             const int count = DualShock4AudioTransportSettings.
                 ProductionReplayFramesPerReport;
-            byte[] report = speakerRealtimeReport;
+            byte[] report = count switch
+            {
+                DualShock4BluetoothAudioProtocol.
+                    SpeakerRealtimeFramesPerReport => speakerRealtimeReport,
+                DualShock4BluetoothAudioProtocol.
+                    SpeakerLargeFramesPerReport => speakerLargeReport,
+                _ => speakerSmallReport,
+            };
             bool prepared = false;
             bool saturated = false;
             bool hardFailure = false;
@@ -2433,11 +2467,13 @@ namespace DS4Windows
                 DualShock4AudioTransportMode.ProductionA0;
             bool productionDuplexA1 = directTransportMode ==
                 DualShock4AudioTransportMode.ProductionDuplexA1;
+            bool fifoBufferedDuplex = directTransportMode ==
+                DualShock4AudioTransportMode.FifoBuffered;
             device.ReadDualShock4BluetoothAudioModeSynchronized(
                 microphoneEnabled =>
                 {
                     bool effectiveMicrophoneEnabled = !productionA0 &&
-                        !speakerOnlyA2 && microphoneEnabled;
+                        microphoneEnabled;
                     submitted = speakerWritePool.TrySendPrepared(report,
                         DualShock4AudioTransportSettings.
                             ProductionReplaySlotCount,
@@ -2454,11 +2490,20 @@ namespace DS4Windows
                                     return false;
                                 }
 
-                                speakerFrameBatch[0] = realFrameCount == 1 ?
-                                    encodedFrames.Dequeue() :
-                                    GetEncodedSilenceFrame();
+                                for (int index = 0;
+                                    index < realFrameCount; index++)
+                                {
+                                    speakerFrameBatch[index] =
+                                        encodedFrames.Dequeue();
+                                }
+                                for (int index = realFrameCount;
+                                    index < count; index++)
+                                {
+                                    speakerFrameBatch[index] =
+                                        GetEncodedSilenceFrame();
+                                }
                                 containsSyntheticSilence =
-                                    realFrameCount == 0;
+                                    realFrameCount < count;
                                  DualShock4BluetoothAudioProtocol.
                                      WriteSpeakerReport(report, frameNumber,
                                          speakerFrameBatch, count,
@@ -2473,16 +2518,18 @@ namespace DS4Windows
                                     ApplyProductionDuplexAudioMode(report,
                                         effectiveMicrophoneEnabled);
                                 }
+                                else if (fifoBufferedDuplex)
+                                {
+                                    ApplyFifoBufferedAudioMode(report,
+                                        effectiveMicrophoneEnabled);
+                                }
                                 else
                                 {
                                     ApplyProductionReplayAudioMode(report,
                                         effectiveMicrophoneEnabled);
                                 }
-                                frameNumber = speakerOnlyA2 ?
-                                    DualShock4AudioTransportSettings.
-                                        AdvanceFifoBufferedSteadyFrameNumber(
-                                            frameNumber) :
-                                    unchecked((ushort)(frameNumber + count));
+                                frameNumber = unchecked((ushort)(frameNumber +
+                                    count));
                                 prepared = true;
                                 return true;
                             }
@@ -2493,11 +2540,15 @@ namespace DS4Windows
             {
                 lock (syncRoot)
                 {
-                    if (realFrameCount == 1)
+                    for (int index = 0; index < count; index++)
                     {
-                        freeEncodedFrames.Enqueue(speakerFrameBatch[0]);
+                        if (index < realFrameCount)
+                        {
+                            freeEncodedFrames.Enqueue(
+                                speakerFrameBatch[index]);
+                        }
+                        speakerFrameBatch[index] = null;
                     }
-                    speakerFrameBatch[0] = null;
                 }
             }
 
@@ -2558,7 +2609,6 @@ namespace DS4Windows
         {
             ProductionReplaySubmissionResult result =
                 SubmitProductionReplayFrame(allowSilence, forceSilence,
-                    speakerOnlyA2: true,
                     transportLabel: "fifo-buffered steady transport");
             return result switch
             {
@@ -2588,7 +2638,7 @@ namespace DS4Windows
             bool hardFailure = false;
             bool submitted = false;
             device.ReadDualShock4BluetoothAudioModeSynchronized(
-                _ =>
+                microphoneEnabled =>
                 {
                     submitted = speakerWritePool.TrySendPrepared(report,
                         DualShock4AudioTransportSettings.
@@ -2613,8 +2663,10 @@ namespace DS4Windows
                                 DualShock4BluetoothAudioProtocol.
                                     WriteSpeakerReport(report, frameNumber,
                                         speakerFrameBatch, count,
-                                        microphoneEnabled: false);
-                                ApplyFifoBufferedAudioMode(report);
+                                        microphoneEnabled:
+                                            microphoneEnabled);
+                                ApplyFifoBufferedAudioMode(report,
+                                    microphoneEnabled);
                                 frameNumber = DualShock4AudioTransportSettings.
                                     AdvanceFifoBufferedPrimeFrameNumber(
                                         frameNumber);
@@ -2850,11 +2902,12 @@ namespace DS4Windows
                     CreditBufferedSpeakerAudioMode);
         }
 
-        internal static void ApplyFifoBufferedAudioMode(byte[] report)
+        internal static void ApplyFifoBufferedAudioMode(byte[] report,
+            bool microphoneEnabled = false)
         {
             ApplySpeakerOnlyAudioMode(report, "fifo-buffered",
                 DualShock4AudioTransportSettings.
-                    FifoBufferedSpeakerAudioMode);
+                    GetFifoBufferedAudioMode(microphoneEnabled));
         }
 
         internal static void ApplyProductionA0AudioMode(byte[] report)
@@ -3360,9 +3413,11 @@ namespace DS4Windows
                     DualShock4AudioTransportMode.FifoBuffered &&
                 report != null && report.Length > 2 && report[2] != 0)
             {
-                // This FIFO-depth experiment is speaker-only. Keep the enable
-                // barrier, four-report prime, and every steady 0x12 report A2.
-                ApplyFifoBufferedAudioMode(report);
+                // Normalize the ordered control barrier to the same A0/A1
+                // mode used by the prime and every steady speaker report.
+                ApplyFifoBufferedAudioMode(report,
+                    report[2] == DualShock4AudioTransportSettings.
+                        FifoBufferedMicrophoneAudioMode);
             }
             else if (directTransportMode ==
                     DualShock4AudioTransportMode.CreditBuffered &&

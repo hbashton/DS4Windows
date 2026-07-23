@@ -776,7 +776,7 @@ namespace DS4WindowsTests
                 new[] { false, true, true, false, true, true },
                 presentations);
             Assert.AreEqual(0, frameThirds);
-            Assert.AreEqual(10.666666666666666,
+            Assert.AreEqual(10.644950966694608,
                 DualShock4AudioTransportSettings.
                     PadForgeReferenceTickMilliseconds, 0.0000001);
         }

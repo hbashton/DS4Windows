@@ -868,6 +868,12 @@ namespace DS4Windows
                 return;
             }
             if (directTransportMode ==
+                DualShock4AudioTransportMode.SourceDriven)
+            {
+                SourceDrivenDirectStreamLoop();
+                return;
+            }
+            if (directTransportMode ==
                 DualShock4AudioTransportMode.PadForgeAsync)
             {
                 PadForgeAsyncDirectStreamLoop();
@@ -952,6 +958,100 @@ namespace DS4Windows
                         {
                             return;
                         }
+                        TraceDirectStreamStatus();
+                    }
+                }
+            }
+            finally
+            {
+                if (mmcssHandle != IntPtr.Zero)
+                {
+                    AvRevertMmThreadCharacteristics(mmcssHandle);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Replays the direct-speaker submission policy from the last known
+        /// clean DualShock 4 build (af57bca). Source availability is the only
+        /// presentation clock: once four SBC frames are buffered, drain the
+        /// batch as a 0x17 report and any two-frame remainder as 0x14. Unlike
+        /// the synchronous reference probe, this retains the historical
+        /// eight-slot overlapped writer and therefore adds no completion wait
+        /// to the speaker path.
+        /// </summary>
+        private void SourceDrivenDirectStreamLoop()
+        {
+            var waitHandles = new WaitHandle[]
+            {
+                captureAvailable,
+                stoppingSignal,
+            };
+            IntPtr mmcssHandle = RegisterMultimediaScheduler();
+            try
+            {
+                while (!stopping)
+                {
+                    int bufferedFrames;
+                    lock (syncRoot)
+                    {
+                        bufferedFrames = encodedFrames.Count;
+                    }
+
+                    if (!DualShock4AudioTransportSettings.
+                            ShouldWakeReferenceSender(bufferedFrames))
+                    {
+                        TraceDirectStreamStatus();
+                        int signaled = WaitHandle.WaitAny(waitHandles,
+                            MaxFramesAvailableWaitMilliseconds);
+                        if (signaled == 1 || stopping)
+                        {
+                            return;
+                        }
+                        continue;
+                    }
+
+                    if (!speakerTransportEnabled &&
+                        !EnsureSpeakerTransportEnabled())
+                    {
+                        return;
+                    }
+
+                    directDriftCorrectionEnabled = false;
+                    while (!stopping)
+                    {
+                        lock (syncRoot)
+                        {
+                            bufferedFrames = encodedFrames.Count;
+                        }
+
+                        int reportFrames = DualShock4AudioTransportSettings.
+                            SelectReferenceReportFrameCount(bufferedFrames);
+                        if (reportFrames == 0)
+                        {
+                            break;
+                        }
+
+                        PadForgeAsyncSubmissionResult result =
+                            SubmitEncodedFramesPadForgeAsync(reportFrames);
+                        if (result == PadForgeAsyncSubmissionResult.Failed)
+                        {
+                            return;
+                        }
+                        if (result == PadForgeAsyncSubmissionResult.NoFrames)
+                        {
+                            break;
+                        }
+                        if (result == PadForgeAsyncSubmissionResult.Saturated)
+                        {
+                            if (stoppingSignal.WaitOne(
+                                PadForgeAsyncBackpressureWaitMilliseconds))
+                            {
+                                return;
+                            }
+                            continue;
+                        }
+
                         TraceDirectStreamStatus();
                     }
                 }
@@ -2060,7 +2160,9 @@ namespace DS4Windows
         {
             int consumed = 0;
             int queueLimit = directTransportMode ==
-                    DualShock4AudioTransportMode.PadForgeAsync ?
+                    DualShock4AudioTransportMode.PadForgeAsync ||
+                    directTransportMode ==
+                        DualShock4AudioTransportMode.SourceDriven ?
                 DualShock4AudioTransportSettings.
                     PadForgeAsyncEncodedFrameQueueLimit :
                 EncodedFrameQueueLimit;

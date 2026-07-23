@@ -5,6 +5,7 @@ namespace DS4Windows
     internal enum DualShock4AudioTransportMode
     {
         Reference,
+        SourceDriven,
         PadForgeAsync,
         ProductionReplay,
         ProductionA0,
@@ -122,6 +123,13 @@ namespace DS4Windows
             {
                 return DualShock4AudioTransportMode.Reference;
             }
+            if (string.Equals(value?.Trim(), "source-driven",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value?.Trim(), "clean-era",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return DualShock4AudioTransportMode.SourceDriven;
+            }
             if (string.Equals(value?.Trim(), "scheduled",
                     StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(value?.Trim(), "clocked",
@@ -186,6 +194,8 @@ namespace DS4Windows
         {
             return mode switch
             {
+                DualShock4AudioTransportMode.SourceDriven =>
+                    "source-driven",
                 DualShock4AudioTransportMode.PadForgeAsync =>
                     "padforge-async",
                 DualShock4AudioTransportMode.ProductionReplay =>

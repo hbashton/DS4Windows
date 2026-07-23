@@ -134,6 +134,7 @@ namespace DS4Windows
         private const int IdleStreamTimeoutMs = 2000;
         private const int DirectSourceIdleThresholdMilliseconds = 200;
         private const int MaxFramesAvailableWaitMilliseconds = 20;
+        private const int PadForgeAsyncTailFlushIdleMilliseconds = 60;
         private const int PadForgeAsyncBackpressureWaitMilliseconds = 1;
         private static readonly bool EnableDiagnosticCapture =
             string.Equals(Environment.GetEnvironmentVariable(
@@ -974,7 +975,6 @@ namespace DS4Windows
             IntPtr mmcssHandle = RegisterMultimediaScheduler();
             try
             {
-                bool flushTail = false;
                 while (!stopping)
                 {
                     int bufferedFrames;
@@ -985,7 +985,7 @@ namespace DS4Windows
 
                     int reportFrames = DualShock4AudioTransportSettings.
                         SelectPadForgeAsyncReportFrameCount(bufferedFrames,
-                            flushTail);
+                            IsPadForgeAsyncTailFlushReady());
                     if (reportFrames == 0)
                     {
                         TraceDirectStreamStatus();
@@ -995,7 +995,6 @@ namespace DS4Windows
                         {
                             return;
                         }
-                        flushTail = signaled == WaitHandle.WaitTimeout;
                         continue;
                     }
 
@@ -1019,7 +1018,6 @@ namespace DS4Windows
                     }
                     if (result == PadForgeAsyncSubmissionResult.NoFrames)
                     {
-                        flushTail = false;
                         continue;
                     }
                     if (result == PadForgeAsyncSubmissionResult.Saturated)
@@ -1035,7 +1033,6 @@ namespace DS4Windows
                         continue;
                     }
 
-                    flushTail = false;
                     TraceDirectStreamStatus();
                 }
             }
@@ -1046,6 +1043,21 @@ namespace DS4Windows
                     AvRevertMmThreadCharacteristics(mmcssHandle);
                 }
             }
+        }
+
+        private bool IsPadForgeAsyncTailFlushReady()
+        {
+            long lastPacket = Interlocked.Read(ref lastDirectPacketTimestamp);
+            if (lastPacket == 0)
+            {
+                return false;
+            }
+
+            long elapsedTicks = Stopwatch.GetTimestamp() - lastPacket;
+            long elapsedMilliseconds = elapsedTicks * 1000 /
+                Stopwatch.Frequency;
+            return elapsedMilliseconds >=
+                PadForgeAsyncTailFlushIdleMilliseconds;
         }
 
         private void ProductionReplayDirectStreamLoop()

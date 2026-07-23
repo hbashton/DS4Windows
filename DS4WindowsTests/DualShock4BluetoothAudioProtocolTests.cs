@@ -428,6 +428,14 @@ namespace DS4WindowsTests
             Assert.AreEqual("source-driven",
                 DualShock4AudioTransportSettings.Format(
                     DualShock4AudioTransportMode.SourceDriven));
+            Assert.AreEqual(DualShock4AudioTransportMode.PadForgeReference,
+                DualShock4AudioTransportSettings.Parse(
+                    " padforge-reference "));
+            Assert.AreEqual(DualShock4AudioTransportMode.PadForgeReference,
+                DualShock4AudioTransportSettings.Parse("PADFORGE-EXACT"));
+            Assert.AreEqual("padforge-reference",
+                DualShock4AudioTransportSettings.Format(
+                    DualShock4AudioTransportMode.PadForgeReference));
             Assert.AreEqual(DualShock4AudioTransportMode.ProductionDuplexA1,
                 DualShock4AudioTransportSettings.Parse("unknown"));
             Assert.AreEqual(DualShock4AudioTransportMode.Scheduled,
@@ -753,6 +761,60 @@ namespace DS4WindowsTests
                 DualShock4BluetoothAudioProtocol.ComputeBluetoothCrc(
                     0xA2, control, control.Length - sizeof(uint)),
                 ReadUInt32(control, control.Length - sizeof(uint)));
+        }
+
+        [TestMethod]
+        public void PadForgeReferenceNormalizesControlDataAndInputInterval()
+        {
+            byte[][] frames = Enumerable.Range(0, 4)
+                .Select(_ => new byte[
+                    DualShock4BluetoothAudioProtocol.SpeakerSbcFrameLength])
+                .ToArray();
+            byte[] data = DualShock4BluetoothAudioProtocol.
+                BuildSpeakerReport(0x1234, frames, bluetoothPollRate: 5);
+
+            DualShock4BluetoothSpeakerPassthrough.
+                ApplyPadForgeReferenceAudioMode(data);
+
+            Assert.AreEqual(0x17, data[0]);
+            Assert.AreEqual(0x40, data[1]);
+            Assert.AreEqual(0xA2, data[2]);
+            Assert.AreEqual(
+                DualShock4BluetoothAudioProtocol.ComputeBluetoothCrc(
+                    0xA2, data, data.Length - sizeof(uint)),
+                ReadUInt32(data, data.Length - sizeof(uint)));
+
+            byte[] control = DualShock4BluetoothAudioProtocol.
+                BuildAudioControlReport(speakerEnabled: true,
+                    microphoneEnabled: false, speakerVolume: 0x31,
+                    headphoneVolume: 0x27, microphoneVolume: 0x40,
+                    rightFastRumble: 0x55, leftSlowRumble: 0x66,
+                    lightbarRed: 1, lightbarGreen: 2, lightbarBlue: 3,
+                    bluetoothPollRate: 5);
+
+            DualShock4BluetoothSpeakerPassthrough.
+                ApplyPadForgeReferenceAudioMode(control);
+
+            Assert.AreEqual(0x11, control[0]);
+            Assert.AreEqual(0xC0, control[1]);
+            Assert.AreEqual(0xA2, control[2]);
+            Assert.AreEqual(0xB0, control[3]);
+            Assert.AreEqual(0, control[6]);
+            Assert.AreEqual(0, control[7]);
+            Assert.AreEqual(0, control[8]);
+            Assert.AreEqual(0x27, control[21]);
+            Assert.AreEqual(0x27, control[22]);
+            Assert.AreEqual(0, control[23]);
+            Assert.AreEqual(0x31, control[24]);
+            Assert.AreEqual(
+                DualShock4BluetoothAudioProtocol.ComputeBluetoothCrc(
+                    0xA2, control, control.Length - sizeof(uint)),
+                ReadUInt32(control, control.Length - sizeof(uint)));
+
+            Assert.AreEqual(5, DS4Device.GetBluetoothOutputPollRate(5,
+                useDefaultAudioInterval: false));
+            Assert.AreEqual(0, DS4Device.GetBluetoothOutputPollRate(5,
+                useDefaultAudioInterval: true));
         }
 
         [TestMethod]

@@ -237,6 +237,7 @@ namespace DS4Windows
         private long bluetoothEffectReportsDeferredDuringAudio;
         private long lastBluetoothEffectReportDuringAudioTick;
         private long lastBluetoothInputReportTick;
+        private int bluetoothAudioDefaultInputIntervalOverride;
         protected int inputReportErrorCount = 0; // Num of consequtive input report errors (fex if BT device fails 5 times in crc32 and 0x11 data type check then switch over to handle incoming BT packets as those were usb PC-friendly packets. Some fake DS4 gamepads needs this)
         protected readonly DS4Touchpad touchpad = null;
         protected readonly DS4SixAxis sixAxis = null;
@@ -413,6 +414,21 @@ namespace DS4Windows
                 reportPending && elapsedMilliseconds >= 0 &&
                 elapsedMilliseconds <
                     BLUETOOTH_EFFECT_INTERVAL_DURING_SPEAKER_MS;
+        }
+
+        internal void SetBluetoothAudioDefaultInputIntervalOverride(
+            bool enabled)
+        {
+            Interlocked.Exchange(
+                ref bluetoothAudioDefaultInputIntervalOverride,
+                enabled ? 1 : 0);
+        }
+
+        internal static byte GetBluetoothOutputPollRate(int profilePollRate,
+            bool useDefaultAudioInterval)
+        {
+            return useDefaultAudioInterval ? (byte)0 :
+                (byte)Math.Clamp(profilePollRate, 0, 16);
         }
         public bool IsHidExclusive => HidDevice.IsExclusive;
         public bool isHidExclusive()
@@ -1911,7 +1927,10 @@ namespace DS4Windows
                 outReportBuffer[0] = knownGoodBTOutputReportType;
                 //outReportBuffer[0] = 0x15;
                 //outReportBuffer[1] = (byte)(0x80 | btPollRate); // input report rate
-                outReportBuffer[1] = (byte)(0xC0 | btPollRate);
+                byte effectivePollRate = GetBluetoothOutputPollRate(
+                    btPollRate, Volatile.Read(ref
+                        bluetoothAudioDefaultInputIntervalOverride) != 0);
+                outReportBuffer[1] = (byte)(0xC0 | effectivePollRate);
                 // The upper transport bits are mandatory on ordinary DS4 BT
                 // effects. Preserve mode 1 while microphone streaming is
                 // armed; sending a later A0 effect would otherwise switch the

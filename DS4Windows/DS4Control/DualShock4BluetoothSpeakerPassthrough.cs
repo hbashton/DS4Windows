@@ -267,6 +267,7 @@ namespace DS4Windows
         private int writeFailureLogged;
         private int reportsSubmitted;
         private bool speakerTransportEnabled;
+        private bool padForgeReferenceInputIntervalOverrideEnabled;
         private long directPacketsReceived;
         private long directPcmBytesReceived;
         private long directPacketsDropped;
@@ -407,6 +408,13 @@ namespace DS4Windows
                         "VIIPER direct DualShock 4 speaker stream is not active.");
                 }
 
+                if (directTransportMode ==
+                    DualShock4AudioTransportMode.PadForgeReference)
+                {
+                    device.SetBluetoothAudioDefaultInputIntervalOverride(true);
+                    padForgeReferenceInputIntervalOverrideEnabled = true;
+                }
+
                 directSpeakerSource.VirtualSpeakerPcmReceived +=
                     DirectSpeakerPcmReceived;
                 try
@@ -438,6 +446,7 @@ namespace DS4Windows
                     directSpeakerSource.VirtualSpeakerPcmReceived -=
                         DirectSpeakerPcmReceived;
                     DisableSpeakerTransport();
+                    ReleasePadForgeReferenceInputIntervalOverride();
                     throw;
                 }
             }
@@ -868,7 +877,9 @@ namespace DS4Windows
                 return;
             }
             if (directTransportMode ==
-                DualShock4AudioTransportMode.SourceDriven)
+                    DualShock4AudioTransportMode.SourceDriven ||
+                directTransportMode ==
+                    DualShock4AudioTransportMode.PadForgeReference)
             {
                 SourceDrivenDirectStreamLoop();
                 return;
@@ -2251,6 +2262,8 @@ namespace DS4Windows
                     directTransportMode ==
                         DualShock4AudioTransportMode.PadForgeSpeakerOnly ||
                     directTransportMode ==
+                        DualShock4AudioTransportMode.PadForgeReference ||
+                    directTransportMode ==
                         DualShock4AudioTransportMode.InputSynchronized ||
                     directTransportMode ==
                         DualShock4AudioTransportMode.SourceDriven ?
@@ -2629,6 +2642,12 @@ namespace DS4Windows
                                 {
                                     ApplySpeakerOnlyAudioMode(report,
                                         "padforge-speaker-only", 0xA2);
+                                }
+                                else if (directTransportMode ==
+                                    DualShock4AudioTransportMode.
+                                        PadForgeReference)
+                                {
+                                    ApplyPadForgeReferenceAudioMode(report);
                                 }
                                 frameNumber += (ushort)count;
                                 prepared = true;
@@ -3217,6 +3236,38 @@ namespace DS4Windows
             report[crcOffset + 3] = (byte)(crc >> 24);
         }
 
+        internal static void ApplyPadForgeReferenceAudioMode(byte[] report)
+        {
+            if (report == null || report.Length < 7)
+            {
+                throw new ArgumentException(
+                    "A PadForge reference report must include a Bluetooth CRC.",
+                    nameof(report));
+            }
+
+            int crcOffset = report.Length - sizeof(uint);
+            report[1] = (byte)(report[1] & 0xC0);
+            report[2] = 0xA2;
+            if (report[0] == 0x11)
+            {
+                byte headphoneLeft = report[21];
+                byte headphoneRight = report[22];
+                byte speaker = report[24];
+                Array.Clear(report, 3, crcOffset - 3);
+                report[3] = 0xB0;
+                report[21] = headphoneLeft;
+                report[22] = headphoneRight;
+                report[24] = speaker;
+            }
+
+            uint crc = DualShock4BluetoothAudioProtocol.ComputeBluetoothCrc(
+                0xA2, report, crcOffset);
+            report[crcOffset] = (byte)crc;
+            report[crcOffset + 1] = (byte)(crc >> 8);
+            report[crcOffset + 2] = (byte)(crc >> 16);
+            report[crcOffset + 3] = (byte)(crc >> 24);
+        }
+
         private void RecordReportSize(int count)
         {
             if (count == DualShock4BluetoothAudioProtocol.
@@ -3651,6 +3702,12 @@ namespace DS4Windows
         private bool WriteBluetoothAudioControlBarrier(byte[] report)
         {
             if (directTransportMode ==
+                    DualShock4AudioTransportMode.PadForgeReference &&
+                report != null && report.Length >= 7 && report[2] != 0)
+            {
+                ApplyPadForgeReferenceAudioMode(report);
+            }
+            else if (directTransportMode ==
                     DualShock4AudioTransportMode.PadForgeSpeakerOnly &&
                 report != null && report.Length >= 7 && report[2] != 0)
             {
@@ -3955,6 +4012,7 @@ namespace DS4Windows
             }
             worker = null;
             DisableSpeakerTransport();
+            ReleasePadForgeReferenceInputIntervalOverride();
             device.UnregisterDualShock4BluetoothAudioControlLane(this);
             speakerWritePool?.Dispose();
             speakerWritePool = null;
@@ -3990,6 +4048,17 @@ namespace DS4Windows
                 oldCapture.Dispose();
             }
 
+        }
+
+        private void ReleasePadForgeReferenceInputIntervalOverride()
+        {
+            if (!padForgeReferenceInputIntervalOverrideEnabled)
+            {
+                return;
+            }
+
+            padForgeReferenceInputIntervalOverrideEnabled = false;
+            device.SetBluetoothAudioDefaultInputIntervalOverride(false);
         }
 
         private readonly struct DirectPcmPacket

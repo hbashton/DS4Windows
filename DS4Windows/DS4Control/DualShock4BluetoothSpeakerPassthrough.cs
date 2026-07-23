@@ -1220,14 +1220,7 @@ namespace DS4Windows
                 captureAvailable,
                 stoppingSignal,
             };
-            timeBeginPeriod(1);
-            IntPtr highResolutionTimer = CreateHighResolutionTimer();
             IntPtr mmcssHandle = RegisterMultimediaScheduler();
-            long tickTicks = (long)Math.Round(Stopwatch.Frequency *
-                DualShock4AudioTransportSettings.
-                    PadForgeReferenceTickMilliseconds / 1000.0);
-            Interlocked.Exchange(ref directCurrentCadenceTicks, tickTicks);
-            Interlocked.Exchange(ref directTargetCadenceTicks, tickTicks);
             try
             {
                 while (!stopping)
@@ -1237,65 +1230,53 @@ namespace DS4Windows
                     {
                         bufferedFrames = encodedFrames.Count;
                     }
-                    if (bufferedFrames >= DualShock4BluetoothAudioProtocol.
-                            SpeakerLargeFramesPerReport)
-                    {
-                        break;
-                    }
-
-                    TraceDirectStreamStatus();
-                    int signaled = WaitHandle.WaitAny(waitHandles,
-                        MaxFramesAvailableWaitMilliseconds);
-                    if (signaled == 1 || stopping)
-                    {
-                        return;
-                    }
-                }
-
-                if (stopping || !EnsureSpeakerTransportEnabled())
-                {
-                    return;
-                }
-
-                int frameThirds = 0;
-                long nextTick = Stopwatch.GetTimestamp();
-                while (!stopping)
-                {
-                    WaitForNextTick(ref nextTick, tickTicks,
-                        highResolutionTimer,
-                        DualShock4AudioTransportSettings.
-                            PadForgeAsyncSlotCount);
                     if (!DualShock4AudioTransportSettings.
-                        AdvancePadForgeReferencePresentation(ref frameThirds))
+                            ShouldWakeReferenceSender(bufferedFrames))
                     {
                         TraceDirectStreamStatus();
-                        continue;
-                    }
-
-                    directDriftCorrectionEnabled = false;
-                    PadForgeAsyncSubmissionResult result =
-                        SubmitEncodedFramesPadForgeSharedHandle(
-                            DualShock4BluetoothAudioProtocol.
-                                SpeakerLargeFramesPerReport);
-                    if (result == PadForgeAsyncSubmissionResult.Failed)
-                    {
-                        return;
-                    }
-                    if (result == PadForgeAsyncSubmissionResult.NoFrames)
-                    {
-                        Interlocked.Increment(ref directCadenceUnderruns);
-                        continue;
-                    }
-                    if (result == PadForgeAsyncSubmissionResult.Saturated)
-                    {
-                        if (stoppingSignal.WaitOne(
-                            PadForgeAsyncBackpressureWaitMilliseconds))
+                        int signaled = WaitHandle.WaitAny(waitHandles,
+                            MaxFramesAvailableWaitMilliseconds);
+                        if (signaled == 1 || stopping)
                         {
                             return;
                         }
+                        continue;
                     }
 
-                    TraceDirectStreamStatus();
+                    if (!speakerTransportEnabled &&
+                        !EnsureSpeakerTransportEnabled())
+                    {
+                        return;
+                    }
+
+                    directDriftCorrectionEnabled = false;
+                    while (!stopping)
+                    {
+                        lock (syncRoot)
+                        {
+                            bufferedFrames = encodedFrames.Count;
+                        }
+                        int reportFrames = DualShock4AudioTransportSettings.
+                            SelectReferenceReportFrameCount(bufferedFrames);
+                        if (reportFrames == 0)
+                        {
+                            break;
+                        }
+
+                        PadForgeAsyncSubmissionResult result =
+                            SubmitEncodedFramesPadForgeSharedHandle(
+                                reportFrames);
+                        if (result == PadForgeAsyncSubmissionResult.Failed)
+                        {
+                            return;
+                        }
+                        if (result == PadForgeAsyncSubmissionResult.NoFrames)
+                        {
+                            break;
+                        }
+
+                        TraceDirectStreamStatus();
+                    }
                 }
             }
             finally
@@ -1304,11 +1285,6 @@ namespace DS4Windows
                 {
                     AvRevertMmThreadCharacteristics(mmcssHandle);
                 }
-                if (highResolutionTimer != IntPtr.Zero)
-                {
-                    CloseNativeHandle(highResolutionTimer);
-                }
-                timeEndPeriod(1);
             }
         }
 

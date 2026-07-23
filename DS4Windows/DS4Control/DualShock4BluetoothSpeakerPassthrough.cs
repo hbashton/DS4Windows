@@ -241,6 +241,9 @@ namespace DS4Windows
             DualShock4BluetoothAudioProtocol.SpeakerSmallReportLength];
         private readonly byte[] speakerLargeReport = new byte[
             DualShock4BluetoothAudioProtocol.SpeakerLargeReportLength];
+        private readonly byte[] speakerSharedHandleAudioReport = new byte[640];
+        private readonly byte[] speakerSharedHandleControlReport = new byte[640];
+        private readonly object speakerSharedHandleWriteGate = new object();
         private readonly AutoResetEvent captureAvailable = new AutoResetEvent(false);
         private readonly ManualResetEvent stoppingSignal = new ManualResetEvent(false);
 
@@ -267,6 +270,7 @@ namespace DS4Windows
         private int writeFailureLogged;
         private int reportsSubmitted;
         private bool speakerTransportEnabled;
+        private bool speakerSharedHandleControlLaneRegistered;
         private bool padForgeReferenceInputIntervalOverrideEnabled;
         private long directPacketsReceived;
         private long directPcmBytesReceived;
@@ -1270,7 +1274,7 @@ namespace DS4Windows
 
                     directDriftCorrectionEnabled = false;
                     PadForgeAsyncSubmissionResult result =
-                        SubmitEncodedFramesPadForgeAsync(
+                        SubmitEncodedFramesPadForgeSharedHandle(
                             DualShock4BluetoothAudioProtocol.
                                 SpeakerLargeFramesPerReport);
                     if (result == PadForgeAsyncSubmissionResult.Failed)
@@ -2689,6 +2693,103 @@ namespace DS4Windows
             return true;
         }
 
+        /// <summary>
+        /// DS4AudioStreamer-compatible speaker write: serialize each complete
+        /// 0x17/0x14 report on the physical DS4's primary shared HID handle.
+        /// The 640-byte backing array is intentional; genuine CUH-ZCT2
+        /// HIDCLASS completes a 462-byte write as 547 bytes.
+        /// </summary>
+        private PadForgeAsyncSubmissionResult
+            SubmitEncodedFramesPadForgeSharedHandle(int count)
+        {
+            if (count != DualShock4BluetoothAudioProtocol.
+                    SpeakerSmallFramesPerReport &&
+                count != DualShock4BluetoothAudioProtocol.
+                    SpeakerLargeFramesPerReport)
+            {
+                return PadForgeAsyncSubmissionResult.Failed;
+            }
+
+            if (!EnsurePadForgeReferenceSharedHandle())
+            {
+                return PadForgeAsyncSubmissionResult.Failed;
+            }
+
+            byte[] report = count == DualShock4BluetoothAudioProtocol.
+                SpeakerLargeFramesPerReport ? speakerLargeReport :
+                speakerSmallReport;
+            ushort reportFrameNumber;
+            lock (syncRoot)
+            {
+                if (encodedFrames.Count < count)
+                {
+                    return PadForgeAsyncSubmissionResult.NoFrames;
+                }
+
+                for (int index = 0; index < count; index++)
+                {
+                    speakerFrameBatch[index] = encodedFrames.Dequeue();
+                }
+                reportFrameNumber = frameNumber;
+                frameNumber += (ushort)count;
+            }
+
+            bool submitted = false;
+            device.ReadDualShock4BluetoothAudioModeSynchronized(
+                microphoneEnabled =>
+                {
+                    DualShock4BluetoothAudioProtocol.WriteSpeakerReport(
+                        report, reportFrameNumber, speakerFrameBatch, count,
+                        microphoneEnabled: microphoneEnabled,
+                        bluetoothPollRate: GetBluetoothPollRate());
+                    ApplyPadForgeReferenceAudioMode(report);
+                    lock (speakerSharedHandleWriteGate)
+                    {
+                        Array.Clear(speakerSharedHandleAudioReport, 0,
+                            speakerSharedHandleAudioReport.Length);
+                        Buffer.BlockCopy(report, 0,
+                            speakerSharedHandleAudioReport, 0, report.Length);
+                        submitted = device.HidDevice.
+                            WriteOutputReportViaInterrupt(
+                                speakerSharedHandleAudioReport,
+                                report.Length, 1000);
+                    }
+                });
+
+            lock (syncRoot)
+            {
+                for (int index = 0; index < count; index++)
+                {
+                    freeEncodedFrames.Enqueue(speakerFrameBatch[index]);
+                    speakerFrameBatch[index] = null;
+                }
+            }
+
+            if (!submitted)
+            {
+                Interlocked.Increment(ref directHardWriteFailures);
+                if (Interlocked.Exchange(ref writeFailureLogged, 1) == 0)
+                {
+                    AppLogger.LogToGui(
+                        "DualShock 4 Bluetooth shared-handle speaker write failed.",
+                        true);
+                }
+                return PadForgeAsyncSubmissionResult.Failed;
+            }
+
+            RecordReportSize(count);
+            RecordDirectReportTimestamp();
+            if (Interlocked.Increment(ref reportsSubmitted) == 1)
+            {
+                AppLogger.LogToGui(
+                    $"DualShock 4 Bluetooth speaker submitted its first " +
+                    $"shared-handle SBC report (id=0x{report[0]:X2}, " +
+                    $"mode=0x{report[2]:X2}, frames={count}, " +
+                    $"bytes={report.Length}).", false);
+            }
+            return PadForgeAsyncSubmissionResult.Submitted;
+        }
+
         private PadForgeAsyncSubmissionResult
             SubmitEncodedFramesPadForgeAsync(int count)
         {
@@ -3760,6 +3861,51 @@ namespace DS4Windows
             return (byte)Math.Clamp(device.getBTPollRate(), 0, 16);
         }
 
+        private bool EnsurePadForgeReferenceSharedHandle()
+        {
+            if (speakerSharedHandleControlLaneRegistered)
+            {
+                return device.HidDevice?.IsOpen == true;
+            }
+
+            if (device.HidDevice?.IsOpen != true ||
+                !device.RegisterDualShock4BluetoothAudioControlLane(this,
+                    WriteBluetoothAudioControlBarrier))
+            {
+                return false;
+            }
+
+            speakerSharedHandleControlLaneRegistered = true;
+            return true;
+        }
+
+        private bool TrySendBluetoothAudioControlSharedHandle(byte[] report,
+            out string error)
+        {
+            if (report == null || report.Length == 0 ||
+                report.Length > speakerSharedHandleControlReport.Length ||
+                device.HidDevice?.IsOpen != true)
+            {
+                error = "shared physical HID handle unavailable";
+                return false;
+            }
+
+            ApplyPadForgeReferenceAudioMode(report);
+            lock (speakerSharedHandleWriteGate)
+            {
+                Array.Clear(speakerSharedHandleControlReport, 0,
+                    speakerSharedHandleControlReport.Length);
+                Buffer.BlockCopy(report, 0,
+                    speakerSharedHandleControlReport, 0, report.Length);
+                bool submitted = device.HidDevice.
+                    WriteOutputReportViaInterrupt(
+                        speakerSharedHandleControlReport, report.Length, 1000);
+                error = submitted ? "none" :
+                    "shared physical HID write failed";
+                return submitted;
+            }
+        }
+
         private bool EnsureSpeakerWritePool()
         {
             if (speakerWritePool != null)
@@ -3823,6 +3969,13 @@ namespace DS4Windows
         private bool TrySendBluetoothAudioControl(byte[] report,
             out string error)
         {
+            if (directTransportMode ==
+                DualShock4AudioTransportMode.PadForgeReference)
+            {
+                return TrySendBluetoothAudioControlSharedHandle(report,
+                    out error);
+            }
+
             NativeOverlappedWritePool pool = speakerWritePool;
             if (pool == null)
             {
@@ -3895,7 +4048,11 @@ namespace DS4Windows
             }
 
             string controlError = "not submitted";
-            if (!EnsureSpeakerWritePool() ||
+            bool transportReady = directTransportMode ==
+                    DualShock4AudioTransportMode.PadForgeReference ?
+                EnsurePadForgeReferenceSharedHandle() :
+                EnsureSpeakerWritePool();
+            if (!transportReady ||
                 !device.SetDualShock4BluetoothSpeakerStreaming(true,
                     speakerVolume, report =>
                         TrySendBluetoothAudioControl(report,
@@ -3924,7 +4081,10 @@ namespace DS4Windows
             }
 
             speakerTransportEnabled = false;
-            if (device.HidDevice?.IsOpen == true && speakerWritePool != null)
+            if (device.HidDevice?.IsOpen == true &&
+                (speakerWritePool != null ||
+                 directTransportMode ==
+                    DualShock4AudioTransportMode.PadForgeReference))
             {
                 device.SetDualShock4BluetoothSpeakerStreaming(false,
                     speakerVolume, report =>

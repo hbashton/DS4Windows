@@ -125,7 +125,7 @@ namespace DS4Windows
         /// </summary>
         public static byte[] BuildSpeakerReport(ushort frameNumber,
             byte[][] frames, byte audioTarget = 0x02,
-            bool microphoneEnabled = false)
+            bool microphoneEnabled = false, byte bluetoothPollRate = 0)
         {
             if (frames == null ||
                 (frames.Length != SpeakerRealtimeFramesPerReport &&
@@ -140,7 +140,7 @@ namespace DS4Windows
             int reportLength = GetSpeakerReportLength(frames.Length);
             byte[] report = new byte[reportLength];
             WriteSpeakerReport(report, frameNumber, frames, frames.Length,
-                audioTarget, microphoneEnabled);
+                audioTarget, microphoneEnabled, bluetoothPollRate);
             return report;
         }
 
@@ -151,7 +151,8 @@ namespace DS4Windows
         /// </summary>
         public static void WriteSpeakerReport(byte[] report,
             ushort frameNumber, byte[][] frames, int frameCount,
-            byte audioTarget = 0x02, bool microphoneEnabled = false)
+            byte audioTarget = 0x02, bool microphoneEnabled = false,
+            byte bluetoothPollRate = 0)
         {
             if (frames == null ||
                 (frameCount != SpeakerRealtimeFramesPerReport &&
@@ -190,7 +191,14 @@ namespace DS4Windows
                 SpeakerSmallFramesPerReport => (byte)0x14,
                 _ => (byte)0x17,
             };
-            report[1] = 0x40;
+            // These low bits are the DS4 Bluetooth input interval, not spare
+            // audio-report bits. Ordinary effects preserve the profile value
+            // with 0xC0 | rate; audio data reports use the Sony 0x40 prefix but
+            // must preserve the same rate. Writing bare 0x40 on every 0x17
+            // silently reset the controller to rate zero throughout playback,
+            // defeating the profile setting and increasing shared-link traffic.
+            report[1] = (byte)(0x40 |
+                Math.Min(bluetoothPollRate, (byte)16));
             // Byte 2 selects the controller's inbound report mode even on a
             // report which carries outbound speaker SBC. Hardware sweeps on a
             // genuine CUH-ZCT2 show that A2 stops ordinary controller input

@@ -210,8 +210,6 @@ namespace DS4Windows
             new StereoPcm48To32LinearResampler();
         private readonly DualShock4SbcEncoder encoder =
             new DualShock4SbcEncoder();
-        private readonly DualShock4NativeSbcEncoder nativeEncoder;
-        private readonly bool useNativeEncoder;
         private readonly float[] sourceSamples = new float[
             Math.Max(SourceFramesPerTick, DirectPcmMaximumSourceFrames) *
                 Channels];
@@ -354,28 +352,11 @@ namespace DS4Windows
             directTransportMode = DualShock4AudioTransportSettings.Parse(
                 Environment.GetEnvironmentVariable(
                     DualShock4AudioTransportSettings.EnvironmentVariableName));
-            useNativeEncoder = string.Equals(
-                Environment.GetEnvironmentVariable(
-                    "DS4WINDOWS_DS4_AUDIO_ENCODER"), "native",
-                StringComparison.OrdinalIgnoreCase);
-            if (useNativeEncoder)
-            {
-                nativeEncoder = new DualShock4NativeSbcEncoder();
-            }
             processor = new DualSenseSpeakerProcessor(this.compression,
                 this.bassBoost, CaptureSampleRate);
-            if (useNativeEncoder)
-            {
-                using var silenceEncoder = new DualShock4NativeSbcEncoder();
-                silenceEncoder.Encode(new short[SamplesPerSbcFrame],
-                    new short[SamplesPerSbcFrame], speakerSilenceFrame);
-            }
-            else
-            {
-                var silenceEncoder = new DualShock4SbcEncoder();
-                silenceEncoder.Encode(new short[SamplesPerSbcFrame],
-                    new short[SamplesPerSbcFrame], speakerSilenceFrame);
-            }
+            var silenceEncoder = new DualShock4SbcEncoder();
+            silenceEncoder.Encode(new short[SamplesPerSbcFrame],
+                new short[SamplesPerSbcFrame], speakerSilenceFrame);
             for (int index = 0; index < EncodedFrameQueueLimit; index++)
             {
                 freeEncodedFrames.Enqueue(new byte[
@@ -2424,9 +2405,7 @@ namespace DS4Windows
                     break;
                 }
 
-                bool encoded = useNativeEncoder ?
-                    nativeEncoder.Encode(pcmLeft, pcmRight, frame) :
-                    encoder.Encode(pcmLeft, pcmRight, frame);
+                bool encoded = encoder.Encode(pcmLeft, pcmRight, frame);
                 consumed += PcmValuesPerSbcFrame;
                 if (!encoded)
                 {
@@ -4171,8 +4150,6 @@ namespace DS4Windows
                 }
                 oldCapture.Dispose();
             }
-
-            nativeEncoder?.Dispose();
 
         }
 

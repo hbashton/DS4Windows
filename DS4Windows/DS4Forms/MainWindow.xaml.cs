@@ -261,9 +261,9 @@ namespace DS4WinWPF.DS4Forms
                 {
                     try
                     {
-                        if (Changelog.CheckNewerVersionExists(out var version, false))
+                        if (Changelog.CheckNewerReleaseExists(out string releaseTag, false))
                         {
-                            DisplayUpdaterWindow(version.ToString());
+                            DisplayUpdaterWindow(releaseTag);
                         }
                     }
                     catch
@@ -304,7 +304,7 @@ namespace DS4WinWPF.DS4Forms
 
                 if (launch)
                 {
-                    launch = mainWinVM.LauchDS4Updater();
+                    launch = mainWinVM.LauchDS4Updater(version);
                 }
 
                 if (launch)
@@ -364,7 +364,7 @@ namespace DS4WinWPF.DS4Forms
 
                     if (launch)
                     {
-                        launch = mainWinVM.LauchDS4Updater();
+                        launch = mainWinVM.LauchDS4Updater(newversion);
                     }
 
                     if (launch)
@@ -2108,8 +2108,8 @@ Suspend support not enabled.", true);
             {
                 try
                 {
-                    if (Changelog.CheckNewerVersionExists(out var version, false))
-                        DisplayUpdaterWindow(version.ToString());
+                    if (Changelog.CheckNewerReleaseExists(out string releaseTag, false))
+                        DisplayUpdaterWindow(releaseTag);
                     else
                         Dispatcher.Invoke(() => MessageBox.Show(Properties.Resources.UpToDate, "DS4Windows Updater"));
                 }

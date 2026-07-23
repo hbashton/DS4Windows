@@ -972,11 +972,52 @@ namespace DS4Windows
                 captureAvailable,
                 stoppingSignal,
             };
+            timeBeginPeriod(1);
+            IntPtr highResolutionTimer = CreateHighResolutionTimer();
             IntPtr mmcssHandle = RegisterMultimediaScheduler();
+            long cadenceTicks = (long)Math.Round(Stopwatch.Frequency *
+                DirectReportCadenceMilliseconds / 1000.0);
+            Interlocked.Exchange(ref directCurrentCadenceTicks,
+                cadenceTicks);
+            Interlocked.Exchange(ref directTargetCadenceTicks,
+                cadenceTicks);
             try
             {
                 while (!stopping)
                 {
+                    int bufferedFrames;
+                    lock (syncRoot)
+                    {
+                        bufferedFrames = encodedFrames.Count;
+                    }
+                    if (bufferedFrames >= DualShock4BluetoothAudioProtocol.
+                            SpeakerLargeFramesPerReport)
+                    {
+                        break;
+                    }
+
+                    TraceDirectStreamStatus();
+                    int signaled = WaitHandle.WaitAny(waitHandles,
+                        MaxFramesAvailableWaitMilliseconds);
+                    if (signaled == 1 || stopping)
+                    {
+                        return;
+                    }
+                }
+
+                if (stopping || !EnsureSpeakerTransportEnabled())
+                {
+                    return;
+                }
+
+                long nextTick = Stopwatch.GetTimestamp();
+                while (!stopping)
+                {
+                    WaitForNextTick(ref nextTick, cadenceTicks,
+                        highResolutionTimer,
+                        DualShock4AudioTransportSettings.
+                            PadForgeAsyncSlotCount);
+
                     int bufferedFrames;
                     lock (syncRoot)
                     {
@@ -995,20 +1036,15 @@ namespace DS4Windows
                         {
                             return;
                         }
+                        Interlocked.Increment(ref directCadenceUnderruns);
                         continue;
                     }
 
-                    if (!speakerTransportEnabled &&
-                        !EnsureSpeakerTransportEnabled())
-                    {
-                        return;
-                    }
-
-                    // The sender remains source-availability driven. Submit
-                    // large reports first, but do not turn the two-frame
-                    // remainder produced by VIIPER's 10 ms callback into an
-                    // immediate second ACL write. A 0x14 is emitted only after
-                    // the source has left a real tail for the bounded wait.
+                    // The sender uses PadForge's report shape, but presents it
+                    // on the controller's 16 ms clock. Source callbacks are
+                    // not a transport clock: they can arrive at 10/20 ms
+                    // boundaries and produced the measured 7-22 ms write
+                    // jitter that correlated with acoustic dropouts.
                     directDriftCorrectionEnabled = false;
                     PadForgeAsyncSubmissionResult result =
                         SubmitEncodedFramesPadForgeAsync(reportFrames);
@@ -1042,6 +1078,11 @@ namespace DS4Windows
                 {
                     AvRevertMmThreadCharacteristics(mmcssHandle);
                 }
+                if (highResolutionTimer != IntPtr.Zero)
+                {
+                    CloseNativeHandle(highResolutionTimer);
+                }
+                timeEndPeriod(1);
             }
         }
 

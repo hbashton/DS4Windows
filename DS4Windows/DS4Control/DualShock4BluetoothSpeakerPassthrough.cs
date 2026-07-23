@@ -877,9 +877,7 @@ namespace DS4Windows
                 return;
             }
             if (directTransportMode ==
-                    DualShock4AudioTransportMode.SourceDriven ||
-                directTransportMode ==
-                    DualShock4AudioTransportMode.PadForgeReference)
+                DualShock4AudioTransportMode.SourceDriven)
             {
                 SourceDrivenDirectStreamLoop();
                 return;
@@ -887,7 +885,9 @@ namespace DS4Windows
             if (directTransportMode ==
                     DualShock4AudioTransportMode.PadForgeAsync ||
                 directTransportMode ==
-                    DualShock4AudioTransportMode.PadForgeSpeakerOnly)
+                    DualShock4AudioTransportMode.PadForgeSpeakerOnly ||
+                directTransportMode ==
+                    DualShock4AudioTransportMode.PadForgeReference)
             {
                 PadForgeAsyncDirectStreamLoop();
                 return;

@@ -191,13 +191,13 @@ namespace DS4Windows
                 SpeakerSmallFramesPerReport => (byte)0x14,
                 _ => (byte)0x17,
             };
-            // These low bits are the DS4 Bluetooth input interval, not spare
-            // audio-report bits. Ordinary effects preserve the profile value
-            // with 0xC0 | rate; audio data reports use the Sony 0x40 prefix but
-            // must preserve the same rate. Writing bare 0x40 on every 0x17
-            // silently reset the controller to rate zero throughout playback,
-            // defeating the profile setting and increasing shared-link traffic.
-            report[1] = (byte)(0x40 |
+            // Keep both the CRC and HID lanes enabled while speaker data is in
+            // flight, and preserve the profile's Bluetooth input interval in
+            // the low bits. The speaker-only references deliberately use 0x40
+            // here; that clears EnableHID and cannot be copied into DS4Windows'
+            // combined controller/audio path. Bare 0x40 also made the interval
+            // bits ineffective on every 0x17 report.
+            report[1] = (byte)(0xC0 |
                 Math.Min(bluetoothPollRate, (byte)16));
             // Byte 2 selects the controller's inbound report mode even on a
             // report which carries outbound speaker SBC. Hardware sweeps on a

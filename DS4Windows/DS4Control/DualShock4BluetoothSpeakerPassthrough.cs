@@ -883,11 +883,15 @@ namespace DS4Windows
                 return;
             }
             if (directTransportMode ==
+                DualShock4AudioTransportMode.PadForgeReference)
+            {
+                PadForgeReferenceDirectStreamLoop();
+                return;
+            }
+            if (directTransportMode ==
                     DualShock4AudioTransportMode.PadForgeAsync ||
                 directTransportMode ==
-                    DualShock4AudioTransportMode.PadForgeSpeakerOnly ||
-                directTransportMode ==
-                    DualShock4AudioTransportMode.PadForgeReference)
+                    DualShock4AudioTransportMode.PadForgeSpeakerOnly)
             {
                 PadForgeAsyncDirectStreamLoop();
                 return;
@@ -1186,6 +1190,105 @@ namespace DS4Windows
                             return;
                         }
                         continue;
+                    }
+
+                    TraceDirectStreamStatus();
+                }
+            }
+            finally
+            {
+                if (mmcssHandle != IntPtr.Zero)
+                {
+                    AvRevertMmThreadCharacteristics(mmcssHandle);
+                }
+                if (highResolutionTimer != IntPtr.Zero)
+                {
+                    CloseNativeHandle(highResolutionTimer);
+                }
+                timeEndPeriod(1);
+            }
+        }
+
+        private void PadForgeReferenceDirectStreamLoop()
+        {
+            var waitHandles = new WaitHandle[]
+            {
+                captureAvailable,
+                stoppingSignal,
+            };
+            timeBeginPeriod(1);
+            IntPtr highResolutionTimer = CreateHighResolutionTimer();
+            IntPtr mmcssHandle = RegisterMultimediaScheduler();
+            long tickTicks = (long)Math.Round(Stopwatch.Frequency *
+                DualShock4AudioTransportSettings.
+                    PadForgeReferenceTickMilliseconds / 1000.0);
+            Interlocked.Exchange(ref directCurrentCadenceTicks, tickTicks);
+            Interlocked.Exchange(ref directTargetCadenceTicks, tickTicks);
+            try
+            {
+                while (!stopping)
+                {
+                    int bufferedFrames;
+                    lock (syncRoot)
+                    {
+                        bufferedFrames = encodedFrames.Count;
+                    }
+                    if (bufferedFrames >= DualShock4BluetoothAudioProtocol.
+                            SpeakerLargeFramesPerReport)
+                    {
+                        break;
+                    }
+
+                    TraceDirectStreamStatus();
+                    int signaled = WaitHandle.WaitAny(waitHandles,
+                        MaxFramesAvailableWaitMilliseconds);
+                    if (signaled == 1 || stopping)
+                    {
+                        return;
+                    }
+                }
+
+                if (stopping || !EnsureSpeakerTransportEnabled())
+                {
+                    return;
+                }
+
+                int frameThirds = 0;
+                long nextTick = Stopwatch.GetTimestamp();
+                while (!stopping)
+                {
+                    WaitForNextTick(ref nextTick, tickTicks,
+                        highResolutionTimer,
+                        DualShock4AudioTransportSettings.
+                            PadForgeAsyncSlotCount);
+                    if (!DualShock4AudioTransportSettings.
+                        AdvancePadForgeReferencePresentation(ref frameThirds))
+                    {
+                        TraceDirectStreamStatus();
+                        continue;
+                    }
+
+                    directDriftCorrectionEnabled = false;
+                    PadForgeAsyncSubmissionResult result =
+                        SubmitEncodedFramesPadForgeAsync(
+                            DualShock4BluetoothAudioProtocol.
+                                SpeakerLargeFramesPerReport);
+                    if (result == PadForgeAsyncSubmissionResult.Failed)
+                    {
+                        return;
+                    }
+                    if (result == PadForgeAsyncSubmissionResult.NoFrames)
+                    {
+                        Interlocked.Increment(ref directCadenceUnderruns);
+                        continue;
+                    }
+                    if (result == PadForgeAsyncSubmissionResult.Saturated)
+                    {
+                        if (stoppingSignal.WaitOne(
+                            PadForgeAsyncBackpressureWaitMilliseconds))
+                        {
+                            return;
+                        }
                     }
 
                     TraceDirectStreamStatus();

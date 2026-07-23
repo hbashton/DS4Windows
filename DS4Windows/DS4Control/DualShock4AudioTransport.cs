@@ -30,6 +30,16 @@ namespace DS4Windows
             "DS4WINDOWS_DS4_AUDIO_TRANSPORT_MODE";
         internal const int PadForgeAsyncSlotCount = 8;
         internal const int PadForgeAsyncEncodedFrameQueueLimit = 12;
+        // PadForge's clean hardware trace is driven by its shared 512-frame
+        // 48 kHz tick (10 2/3 ms). A DS4 tick produces 8/3 SBC frames, so a
+        // four-frame 0x17 is presented on a 2,1,2,1... tick pattern. This is
+        // deliberately not flattened to a uniform 16 ms clock: the measured
+        // wire intervals alternate at approximately 21.33 and 10.67 ms.
+        internal const double PadForgeReferenceTickMilliseconds =
+            1000.0 * 512.0 / 48000.0;
+        internal const int PadForgeReferenceProducedFrameThirdsPerTick = 8;
+        internal const int PadForgeReferenceReportFrameThirds =
+            DualShock4BluetoothAudioProtocol.SpeakerLargeFramesPerReport * 3;
         internal const int ProductionReplaySlotCount = 32;
         internal const int ProductionReplayRetainedSourceFrames = 16;
         internal const int ProductionReplayQueueServoTargetFrames =
@@ -305,6 +315,27 @@ namespace DS4Windows
             }
 
             return pendingWrites < PadForgeAsyncSlotCount;
+        }
+
+        internal static bool AdvancePadForgeReferencePresentation(
+            ref int bufferedFrameThirds)
+        {
+            if (bufferedFrameThirds < 0 ||
+                bufferedFrameThirds >= PadForgeReferenceReportFrameThirds)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(bufferedFrameThirds));
+            }
+
+            bufferedFrameThirds +=
+                PadForgeReferenceProducedFrameThirdsPerTick;
+            if (bufferedFrameThirds < PadForgeReferenceReportFrameThirds)
+            {
+                return false;
+            }
+
+            bufferedFrameThirds -= PadForgeReferenceReportFrameThirds;
+            return true;
         }
 
         internal static bool ShouldStartProductionReplay(int bufferedFrames)

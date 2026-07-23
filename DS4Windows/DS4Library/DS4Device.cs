@@ -1226,6 +1226,30 @@ namespace DS4Windows
                 bluetoothPollRate: (byte)Math.Clamp(btPollRate, 0, 16));
         }
 
+        private bool WriteDualShock4BluetoothEffectThroughAudioLane(
+            DualShock4BluetoothAudioState.Snapshot state)
+        {
+            Func<byte[], bool> audioLaneWriter;
+            lock (bluetoothAudioControlLaneLock)
+            {
+                audioLaneWriter = bluetoothAudioControlLaneWriter;
+            }
+
+            if (audioLaneWriter == null)
+            {
+                return false;
+            }
+
+            // A conventional DS4 Bluetooth effect report has no audio mode in
+            // byte 2. Sending it after the A0/A1 arm report silently replaces
+            // the controller's audio-plane state and makes valid SBC reports
+            // disappear at the hardware decoder. Rebuild the same rumble,
+            // lightbar, flash, and volume state as an A0/A1 F3 control report
+            // and serialize it through the speaker lane instead.
+            return audioLaneWriter(
+                CreateDualShock4BluetoothAudioControlReport(state));
+        }
+
         public bool WriteBluetoothAudioOutputReport(byte[] report)
         {
             if (!IsGenuineBluetoothDualShock4() || report == null ||
@@ -1367,8 +1391,16 @@ namespace DS4Windows
                 ResetBluetoothControllerClock();
                 Debouncer = SetupDebouncer();
                 firstActive = DateTime.UtcNow;
+                // Keep the HIDCLASS input queue shallow on DS4. The proven
+                // zero-drop historical DS4Windows path used three buffers (the
+                // standalone reference uses two). Raising
+                // this to 64 lets inbound HID reports accumulate deeply on
+                // the same Bluetooth link and periodically consumes the ACL
+                // credits needed by 0x17 speaker reports. This does not alter
+                // the controller's polling rate; it only bounds host-side
+                // buffering while the input loop continuously drains it.
                 NativeMethods.HidD_SetNumInputBuffers(
-                    hDevice.SafeReadHandle.DangerousGetHandle(), 64);
+                    hDevice.SafeReadHandle.DangerousGetHandle(), 3);
                 Queue<long> latencyQueue = new Queue<long>(21); // Set capacity at max + 1 to avoid any resizing
                 int tempLatencyCount = 0;
                 long oldtime = 0;
@@ -2105,7 +2137,11 @@ namespace DS4Windows
 
                     try
                     {
-                        bool outputWritten = writeOutput();
+                        bool outputWritten = usingBT &&
+                            bluetoothAudio.SpeakerEnabled ?
+                            WriteDualShock4BluetoothEffectThroughAudioLane(
+                                bluetoothAudio) :
+                            writeOutput();
                         if (outputWritten && usingBT &&
                             (bluetoothAudio.SpeakerEnabled ||
                                 bluetoothAudio.MicrophoneEnabled))

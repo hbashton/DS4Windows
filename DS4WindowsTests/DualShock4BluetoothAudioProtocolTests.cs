@@ -782,7 +782,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void PadForgeReferenceNormalizesControlDataAndInputInterval()
+        public void PadForgeReferencePreservesIntegratedInputModeAndNormalizesInterval()
         {
             byte[][] frames = Enumerable.Range(0, 4)
                 .Select(_ => new byte[
@@ -796,7 +796,7 @@ namespace DS4WindowsTests
 
             Assert.AreEqual(0x17, data[0]);
             Assert.AreEqual(0x40, data[1]);
-            Assert.AreEqual(0xA2, data[2]);
+            Assert.AreEqual(0xA0, data[2]);
             Assert.AreEqual(
                 DualShock4BluetoothAudioProtocol.ComputeBluetoothCrc(
                     0xA2, data, data.Length - sizeof(uint)),
@@ -815,11 +815,13 @@ namespace DS4WindowsTests
 
             Assert.AreEqual(0x11, control[0]);
             Assert.AreEqual(0xC0, control[1]);
-            Assert.AreEqual(0xA2, control[2]);
-            Assert.AreEqual(0xB0, control[3]);
-            Assert.AreEqual(0, control[6]);
-            Assert.AreEqual(0, control[7]);
-            Assert.AreEqual(0, control[8]);
+            Assert.AreEqual(0xA0, control[2]);
+            Assert.AreEqual(0xF3, control[3]);
+            Assert.AreEqual(0x55, control[6]);
+            Assert.AreEqual(0x66, control[7]);
+            Assert.AreEqual(1, control[8]);
+            Assert.AreEqual(2, control[9]);
+            Assert.AreEqual(3, control[10]);
             Assert.AreEqual(0x27, control[21]);
             Assert.AreEqual(0x27, control[22]);
             Assert.AreEqual(0, control[23]);
@@ -833,6 +835,14 @@ namespace DS4WindowsTests
                 useDefaultAudioInterval: false));
             Assert.AreEqual(0, DS4Device.GetBluetoothOutputPollRate(5,
                 useDefaultAudioInterval: true));
+
+            byte[] duplex = DualShock4BluetoothAudioProtocol.
+                BuildSpeakerReport(0x1234, frames,
+                    microphoneEnabled: true, bluetoothPollRate: 5);
+            DualShock4BluetoothSpeakerPassthrough.
+                ApplyPadForgeReferenceAudioMode(duplex);
+            Assert.AreEqual(0x40, duplex[1]);
+            Assert.AreEqual(0xA1, duplex[2]);
         }
 
         [TestMethod]

@@ -35,8 +35,14 @@ namespace DS4Windows
         // four-frame 0x17 is presented on a 2,1,2,1... tick pattern. This is
         // deliberately not flattened to a uniform 16 ms clock: the measured
         // wire intervals alternate at approximately 21.33 and 10.67 ms.
+        // The same clean ETW run delivered 250.51 SBC frames/s through the
+        // ring-lag servo, 0.204% above the nominal 250.00. Preserve that
+        // measured feed instead of letting the pad's shallow FIFO drain to
+        // zero on every clock-skew cycle.
+        internal const double PadForgeReferencePresentationRate = 1.00204;
         internal const double PadForgeReferenceTickMilliseconds =
-            1000.0 * 512.0 / 48000.0;
+            1000.0 * 512.0 / 48000.0 /
+            PadForgeReferencePresentationRate;
         internal const int PadForgeReferenceProducedFrameThirdsPerTick = 8;
         internal const int PadForgeReferenceReportFrameThirds =
             DualShock4BluetoothAudioProtocol.SpeakerLargeFramesPerReport * 3;

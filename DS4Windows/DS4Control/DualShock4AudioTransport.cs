@@ -13,6 +13,7 @@ namespace DS4Windows
         ProductionReplay,
         ProductionA0,
         ProductionDuplexA1,
+        Realtime0x12,
         FifoBuffered,
         CreditBuffered,
         Scheduled,
@@ -54,6 +55,7 @@ namespace DS4Windows
             ProductionReplayPrimeFrames +
                 ProductionReplayRetainedSourceFrames;
         internal const int ProductionReplayCadenceMilliseconds = 4;
+        internal const byte RealtimeReportId = 0x12;
         internal const int ProductionReplayIdleReprimeMilliseconds = 200;
         internal const byte ProductionReplaySpeakerAudioMode = 0xA2;
         internal const byte ProductionReplayMicrophoneAudioMode = 0xA1;
@@ -201,6 +203,15 @@ namespace DS4Windows
             {
                 return DualShock4AudioTransportMode.ProductionDuplexA1;
             }
+            if (string.Equals(value?.Trim(), "realtime-0x12",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value?.Trim(), "0x12",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value?.Trim(), "production",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return DualShock4AudioTransportMode.Realtime0x12;
+            }
             if (string.Equals(value?.Trim(), "credit-buffered",
                     StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(value?.Trim(), "credit-window",
@@ -216,12 +227,12 @@ namespace DS4Windows
                 return DualShock4AudioTransportMode.FifoBuffered;
             }
 
-            // The validated production lane remains in A0 for speaker-only
-            // playback and transitions to A1 only while a virtual capture
-            // client is active. Unknown values fail closed to this duplex-
-            // capable lane; the explicit production-a0 value remains as a
-            // microphone-disabled diagnostic rollback.
-            return DualShock4AudioTransportMode.ProductionDuplexA1;
+            // The validated production contract is one SBC frame per 0x12 at
+            // the current four-millisecond presentation cadence. It remains
+            // in A0 for speaker-only playback and transitions to A1 only while
+            // a virtual capture client is active. Historical names stay
+            // parseable solely for controlled trace comparisons.
+            return DualShock4AudioTransportMode.Realtime0x12;
         }
 
         internal static string Format(DualShock4AudioTransportMode mode)
@@ -244,6 +255,8 @@ namespace DS4Windows
                     "production-a0",
                 DualShock4AudioTransportMode.ProductionDuplexA1 =>
                     "production-duplex-a1",
+                DualShock4AudioTransportMode.Realtime0x12 =>
+                    "realtime-0x12",
                 DualShock4AudioTransportMode.FifoBuffered =>
                     "fifo-buffered",
                 DualShock4AudioTransportMode.CreditBuffered =>
@@ -439,6 +452,14 @@ namespace DS4Windows
         {
             return mode == DualShock4AudioTransportMode.ProductionReplay ||
                 mode == DualShock4AudioTransportMode.ProductionA0 ||
+                mode == DualShock4AudioTransportMode.ProductionDuplexA1 ||
+                mode == DualShock4AudioTransportMode.Realtime0x12;
+        }
+
+        internal static bool UsesRealtimeDuplexAudioMode(
+            DualShock4AudioTransportMode mode)
+        {
+            return mode == DualShock4AudioTransportMode.Realtime0x12 ||
                 mode == DualShock4AudioTransportMode.ProductionDuplexA1;
         }
 

@@ -415,9 +415,9 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void ProductionDuplexA1IsDefaultAndOtherTransportsAreExplicit()
+        public void Realtime0x12IsDefaultAndOtherTransportsAreExplicit()
         {
-            Assert.AreEqual(DualShock4AudioTransportMode.ProductionDuplexA1,
+            Assert.AreEqual(DualShock4AudioTransportMode.Realtime0x12,
                 DualShock4AudioTransportSettings.Parse(null));
             Assert.AreEqual(DualShock4AudioTransportMode.Reference,
                 DualShock4AudioTransportSettings.Parse("reference"));
@@ -436,8 +436,15 @@ namespace DS4WindowsTests
             Assert.AreEqual("padforge-reference",
                 DualShock4AudioTransportSettings.Format(
                     DualShock4AudioTransportMode.PadForgeReference));
-            Assert.AreEqual(DualShock4AudioTransportMode.ProductionDuplexA1,
+            Assert.AreEqual(DualShock4AudioTransportMode.Realtime0x12,
                 DualShock4AudioTransportSettings.Parse("unknown"));
+            Assert.AreEqual(DualShock4AudioTransportMode.Realtime0x12,
+                DualShock4AudioTransportSettings.Parse("0x12"));
+            Assert.AreEqual(DualShock4AudioTransportMode.Realtime0x12,
+                DualShock4AudioTransportSettings.Parse("production"));
+            Assert.AreEqual("realtime-0x12",
+                DualShock4AudioTransportSettings.Format(
+                    DualShock4AudioTransportMode.Realtime0x12));
             Assert.AreEqual(DualShock4AudioTransportMode.Scheduled,
                 DualShock4AudioTransportSettings.Parse(" scheduled "));
             Assert.AreEqual(DualShock4AudioTransportMode.Scheduled,
@@ -697,6 +704,12 @@ namespace DS4WindowsTests
             Assert.IsTrue(DualShock4AudioTransportSettings.
                 UsesProductionReplayPolicy(
                     DualShock4AudioTransportMode.ProductionDuplexA1));
+            Assert.IsTrue(DualShock4AudioTransportSettings.
+                UsesProductionReplayPolicy(
+                    DualShock4AudioTransportMode.Realtime0x12));
+            Assert.IsTrue(DualShock4AudioTransportSettings.
+                UsesRealtimeDuplexAudioMode(
+                    DualShock4AudioTransportMode.Realtime0x12));
             Assert.IsFalse(DualShock4AudioTransportSettings.
                 UsesProductionReplayPolicy(
                     DualShock4AudioTransportMode.FifoBuffered));
@@ -709,6 +722,10 @@ namespace DS4WindowsTests
                 ProductionReplayStartupBufferedFrames);
             Assert.AreEqual(32, DualShock4AudioTransportSettings.
                 ProductionReplaySlotCount);
+            Assert.AreEqual(0x12,
+                DualShock4AudioTransportSettings.RealtimeReportId);
+            Assert.AreEqual(1, DualShock4AudioTransportSettings.
+                ProductionReplayFramesPerReport);
             Assert.AreEqual(40000,
                 DualShock4AudioTransportSettings.
                     GetProductionReplayCadenceTicks(10_000_000));

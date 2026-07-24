@@ -2927,8 +2927,8 @@ namespace DS4Windows
             int realFrameCount = 0;
             bool productionA0 = directTransportMode ==
                 DualShock4AudioTransportMode.ProductionA0;
-            bool productionDuplexA1 = directTransportMode ==
-                DualShock4AudioTransportMode.ProductionDuplexA1;
+            bool productionDuplexA1 = DualShock4AudioTransportSettings.
+                UsesRealtimeDuplexAudioMode(directTransportMode);
             bool fifoBufferedDuplex = directTransportMode ==
                 DualShock4AudioTransportMode.FifoBuffered;
             device.ReadDualShock4BluetoothAudioModeSynchronized(
@@ -4085,8 +4085,8 @@ namespace DS4Windows
 
                 ApplyProductionA0AudioMode(report);
             }
-            else if (directTransportMode ==
-                    DualShock4AudioTransportMode.ProductionDuplexA1 &&
+            else if (DualShock4AudioTransportSettings.
+                    UsesRealtimeDuplexAudioMode(directTransportMode) &&
                 report != null && report.Length > 2 && report[2] != 0)
             {
                 // Preserve the caller's requested microphone state, but

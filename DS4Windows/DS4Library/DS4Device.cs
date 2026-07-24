@@ -1391,16 +1391,13 @@ namespace DS4Windows
                 ResetBluetoothControllerClock();
                 Debouncer = SetupDebouncer();
                 firstActive = DateTime.UtcNow;
-                // Keep the HIDCLASS input queue shallow on DS4. The proven
-                // zero-drop historical DS4Windows path used three buffers (the
-                // standalone reference uses two). Raising
-                // this to 64 lets inbound HID reports accumulate deeply on
-                // the same Bluetooth link and periodically consumes the ACL
-                // credits needed by 0x17 speaker reports. This does not alter
-                // the controller's polling rate; it only bounds host-side
-                // buffering while the input loop continuously drains it.
+                // Preserve the HIDCLASS queue depth used by the verified clean
+                // one-frame 0x12 DS4Windows capture. This does not change the
+                // controller's one-millisecond input interval; it prevents a
+                // short host scheduling stall from exhausting the read queue
+                // while the independent audio handle continues submitting.
                 NativeMethods.HidD_SetNumInputBuffers(
-                    hDevice.SafeReadHandle.DangerousGetHandle(), 3);
+                    hDevice.SafeReadHandle.DangerousGetHandle(), 64);
                 Queue<long> latencyQueue = new Queue<long>(21); // Set capacity at max + 1 to avoid any resizing
                 int tempLatencyCount = 0;
                 long oldtime = 0;

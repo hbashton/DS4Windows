@@ -128,6 +128,20 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void DualShock4EncoderSupportsDocumentedSixteenKilohertzMode()
+        {
+            var encoder = new DualShock4SbcEncoder(16000);
+            var left = new short[DualShock4SbcEncoder.SamplesPerChannel];
+            var right = new short[DualShock4SbcEncoder.SamplesPerChannel];
+            var encoded = new byte[DualShock4SbcEncoder.FrameLength];
+
+            Assert.IsTrue(encoder.Encode(left, right, encoded));
+            Assert.AreEqual((byte)0x9C, encoded[0]);
+            Assert.AreEqual((byte)0x3F, encoded[1]);
+            Assert.AreEqual((byte)48, encoded[2]);
+        }
+
+        [TestMethod]
         public void SpeakerEncoderRoundTripPreservesChannelAmplitude()
         {
             const int frameSamples = 128;
@@ -611,27 +625,27 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void ProductionReplayReconstructsHistoricalPrimeAndReserve()
+        public void ProductionReplayUsesLowBandwidthRealtimePrimeAndReserve()
         {
             Assert.AreEqual(1, DualShock4AudioTransportSettings.
                 ProductionReplayFramesPerReport);
-            Assert.AreEqual(20, DualShock4AudioTransportSettings.
+            Assert.AreEqual(1, DualShock4AudioTransportSettings.
                 ProductionReplayPrimeReports);
-            Assert.AreEqual(20, DualShock4AudioTransportSettings.
+            Assert.AreEqual(1, DualShock4AudioTransportSettings.
                 ProductionReplayPrimeFrames);
-            Assert.AreEqual(16, DualShock4AudioTransportSettings.
+            Assert.AreEqual(8, DualShock4AudioTransportSettings.
                 ProductionReplayRetainedSourceFrames);
-            Assert.AreEqual(36, DualShock4AudioTransportSettings.
+            Assert.AreEqual(9, DualShock4AudioTransportSettings.
                 ProductionReplayStartupBufferedFrames);
-            Assert.AreEqual(4, DualShock4AudioTransportSettings.
+            Assert.AreEqual(8, DualShock4AudioTransportSettings.
                 ProductionReplayCadenceMilliseconds);
             Assert.AreEqual(32, DualShock4AudioTransportSettings.
                 ProductionReplaySlotCount);
 
             Assert.IsFalse(DualShock4AudioTransportSettings.
-                ShouldStartProductionReplay(35));
+                ShouldStartProductionReplay(8));
             Assert.IsTrue(DualShock4AudioTransportSettings.
-                ShouldStartProductionReplay(36));
+                ShouldStartProductionReplay(9));
             int buffered =
                 DualShock4AudioTransportSettings.
                     ProductionReplayStartupBufferedFrames;
@@ -657,9 +671,9 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void ProductionReplayUsesFixedFourMillisecondClockAndIdleReprime()
+        public void ProductionReplayUsesFixedEightMillisecondClockAndIdleReprime()
         {
-            Assert.AreEqual(40000,
+            Assert.AreEqual(80000,
                 DualShock4AudioTransportSettings.
                     GetProductionReplayCadenceTicks(10_000_000));
             Assert.IsTrue(DualShock4AudioTransportSettings.
@@ -676,13 +690,13 @@ namespace DS4WindowsTests
                 SelectProductionReplayReportFrameCount(0));
             Assert.AreEqual(1, DualShock4AudioTransportSettings.
                 SelectProductionReplayReportFrameCount(4));
-            Assert.AreEqual(16, DualShock4AudioTransportSettings.
+            Assert.AreEqual(8, DualShock4AudioTransportSettings.
                 ProductionReplayQueueServoTargetFrames);
             Assert.AreEqual(1.0, DualShock4AudioTransportSettings.
                 GetProductionReplayQueueServoRatio(0, enabled: false),
                 1.0e-12);
             Assert.AreEqual(1.0, DualShock4AudioTransportSettings.
-                GetProductionReplayQueueServoRatio(16, enabled: true),
+                GetProductionReplayQueueServoRatio(8, enabled: true),
                 1.0e-12);
             Assert.AreEqual(1.002, DualShock4AudioTransportSettings.
                 GetProductionReplayQueueServoRatio(0, enabled: true),
@@ -714,11 +728,11 @@ namespace DS4WindowsTests
                 UsesProductionReplayPolicy(
                     DualShock4AudioTransportMode.FifoBuffered));
 
-            Assert.AreEqual(20, DualShock4AudioTransportSettings.
+            Assert.AreEqual(1, DualShock4AudioTransportSettings.
                 ProductionReplayPrimeReports);
-            Assert.AreEqual(16, DualShock4AudioTransportSettings.
+            Assert.AreEqual(8, DualShock4AudioTransportSettings.
                 ProductionReplayRetainedSourceFrames);
-            Assert.AreEqual(36, DualShock4AudioTransportSettings.
+            Assert.AreEqual(9, DualShock4AudioTransportSettings.
                 ProductionReplayStartupBufferedFrames);
             Assert.AreEqual(32, DualShock4AudioTransportSettings.
                 ProductionReplaySlotCount);
@@ -726,15 +740,15 @@ namespace DS4WindowsTests
                 DualShock4AudioTransportSettings.RealtimeReportId);
             Assert.AreEqual(1, DualShock4AudioTransportSettings.
                 ProductionReplayFramesPerReport);
-            Assert.AreEqual(40000,
+            Assert.AreEqual(80000,
                 DualShock4AudioTransportSettings.
                     GetProductionReplayCadenceTicks(10_000_000));
             Assert.IsFalse(DualShock4AudioTransportSettings.
-                ShouldStartProductionReplay(35));
+                ShouldStartProductionReplay(8));
             Assert.IsTrue(DualShock4AudioTransportSettings.
-                ShouldStartProductionReplay(36));
+                ShouldStartProductionReplay(9));
             Assert.AreEqual(1.0, DualShock4AudioTransportSettings.
-                GetProductionReplayQueueServoRatio(16, enabled: true),
+                GetProductionReplayQueueServoRatio(8, enabled: true),
                 1.0e-12);
         }
 
@@ -2009,6 +2023,43 @@ namespace DS4WindowsTests
 
             CollectionAssert.AreEqual(contiguous, chunked.ToArray(),
                 "Changing USB transfer boundaries must not reset the 48-to-32 kHz phase.");
+        }
+
+        [TestMethod]
+        public void DualShock4DirectDownsamplerPreservesOddPacketBoundary()
+        {
+            short[] samples =
+            {
+                100, -100, 300, -300, 500, -500,
+                700, -700, 900, -900, 1100, -1100,
+            };
+            var source = new byte[samples.Length * sizeof(short)];
+            Buffer.BlockCopy(samples, 0, source, 0, source.Length);
+
+            var contiguousConverter = new StereoPcm16DownsamplerByTwo();
+            var contiguous = new byte[source.Length];
+            int contiguousBytes = contiguousConverter.Convert(source,
+                source.Length, contiguous);
+
+            var chunkedConverter = new StereoPcm16DownsamplerByTwo();
+            var first = new byte[3 * 2 * sizeof(short)];
+            var second = new byte[3 * 2 * sizeof(short)];
+            Buffer.BlockCopy(source, 0, first, 0, first.Length);
+            Buffer.BlockCopy(source, first.Length, second, 0, second.Length);
+            var chunked = new byte[source.Length];
+            int firstBytes = chunkedConverter.Convert(first, first.Length,
+                chunked);
+            var secondOutput = new byte[source.Length];
+            int secondBytes = chunkedConverter.Convert(second, second.Length,
+                secondOutput);
+            Buffer.BlockCopy(secondOutput, 0, chunked, firstBytes,
+                secondBytes);
+
+            Assert.AreEqual(3 * 2 * sizeof(short), contiguousBytes);
+            Assert.AreEqual(contiguousBytes, firstBytes + secondBytes);
+            CollectionAssert.AreEqual(
+                contiguous.Take(contiguousBytes).ToArray(),
+                chunked.Take(firstBytes + secondBytes).ToArray());
         }
 
         [TestMethod]

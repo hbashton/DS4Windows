@@ -15,18 +15,28 @@ using System.Threading;
 namespace DS4Windows
 {
     /// <summary>
-    /// Stateful exact-ratio converter for VIIPER's 48 kHz stereo DualSense
-    /// speaker pair. Three source frames become two 32 kHz frames, with the
-    /// fractional output linearly interpolated between adjacent samples.
+    /// Stateful converter for VIIPER's 48 kHz stereo DualSense speaker pair.
+    /// The fractional output is linearly interpolated at the selected DS4 SBC
+    /// sample rate.
     /// Residual frames are retained so arbitrary USB transfer boundaries do
     /// not reset phase or duplicate audio.
     /// </summary>
     internal sealed class StereoPcm48To32LinearResampler
     {
-        private const double Step = 1.5;
+        private readonly double step;
         private double phase;
         private float carryLeft;
         private float carryRight;
+
+        internal StereoPcm48To32LinearResampler(int targetSampleRate = 32000)
+        {
+            if (targetSampleRate <= 0 || targetSampleRate > 48000)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(targetSampleRate));
+            }
+            step = 48000.0 / targetSampleRate;
+        }
 
         internal int Convert(float[] source, int frameCount,
             byte[] destination)
@@ -52,7 +62,7 @@ namespace DS4Windows
                     2 * sizeof(short))
                 {
                     throw new ArgumentException(
-                        "The 32 kHz destination buffer is too small.",
+                        "The target-rate destination buffer is too small.",
                         nameof(destination));
                 }
 
@@ -70,7 +80,7 @@ namespace DS4Windows
                 WriteSample(destination, ref destinationOffset,
                     FloatToPcm16((float)(right0 * (1.0 - fraction) +
                         right1 * fraction)));
-                position += Step;
+                position += step;
             }
 
             phase = Math.Max(0.0, position - frameCount);
@@ -98,25 +108,95 @@ namespace DS4Windows
     }
 
     /// <summary>
+    /// Allocation-free 32-to-16 kHz stereo PCM16 decimator. Adjacent input
+    /// frames are averaged before decimation, and an unmatched frame survives
+    /// callback boundaries so packet sizing cannot reset the audio phase.
+    /// </summary>
+    internal sealed class StereoPcm16DownsamplerByTwo
+    {
+        private bool hasPendingFrame;
+        private short pendingLeft;
+        private short pendingRight;
+
+        internal int Convert(byte[] source, int length, byte[] destination)
+        {
+            if (source == null)
+            {
+                throw new ArgumentNullException(nameof(source));
+            }
+            if (destination == null)
+            {
+                throw new ArgumentNullException(nameof(destination));
+            }
+            if (length < 0 || length > source.Length || length % 4 != 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(length));
+            }
+
+            int destinationOffset = 0;
+            for (int sourceOffset = 0; sourceOffset < length;
+                sourceOffset += 4)
+            {
+                short left = ReadInt16(source, sourceOffset);
+                short right = ReadInt16(source, sourceOffset + 2);
+                if (!hasPendingFrame)
+                {
+                    pendingLeft = left;
+                    pendingRight = right;
+                    hasPendingFrame = true;
+                    continue;
+                }
+
+                if (destinationOffset > destination.Length - 4)
+                {
+                    throw new ArgumentException(
+                        "The 16 kHz destination buffer is too small.",
+                        nameof(destination));
+                }
+                WriteInt16(destination, ref destinationOffset,
+                    Average(pendingLeft, left));
+                WriteInt16(destination, ref destinationOffset,
+                    Average(pendingRight, right));
+                hasPendingFrame = false;
+            }
+            return destinationOffset;
+        }
+
+        private static short ReadInt16(byte[] source, int offset)
+        {
+            return (short)(source[offset] | source[offset + 1] << 8);
+        }
+
+        private static void WriteInt16(byte[] destination, ref int offset,
+            short sample)
+        {
+            destination[offset++] = (byte)sample;
+            destination[offset++] = (byte)(sample >> 8);
+        }
+
+        private static short Average(short first, short second)
+        {
+            return (short)((first + (int)second) / 2);
+        }
+    }
+
+    /// <summary>
     /// Encodes a selected Windows playback endpoint as the SBC-over-HID stream
     /// understood by a physical Bluetooth DualShock 4.
     /// </summary>
     internal sealed class DualShock4BluetoothSpeakerPassthrough : IDisposable
     {
         private const int CaptureSampleRate = 48000;
-        private const int SpeakerSampleRate =
-            DualShock4BluetoothAudioProtocol.SpeakerSampleRate;
+        // The DS4 codec supports both 16 and 32 kHz SBC. Realtime 0x12 uses
+        // 16 kHz so each 142-byte HID report carries 8 ms of playout and the
+        // Bluetooth interrupt-out load is halved without batching reports.
+        private const int SpeakerSampleRate = 16000;
         private const int Channels = 2;
         private const int SamplesPerSbcFrame =
             DualShock4BluetoothAudioProtocol.SpeakerSamplesPerFrame;
         private const int PcmValuesPerSbcFrame = SamplesPerSbcFrame * Channels;
-        // The legacy WASAPI lane pulls one 128-sample SBC frame every 4 ms.
-        // The direct VIIPER lane below presents four of those frames in one
-        // 0x17 report every 16 ms.
         private const int SourceFramesPerTick = CaptureSampleRate *
-            DualShock4BluetoothAudioProtocol.
-                SpeakerRealtimeReportDurationMilliseconds /
-            1000;
+            SamplesPerSbcFrame / SpeakerSampleRate;
         private const int EncodedFrameQueueLimit =
             DualShock4BluetoothAudioProtocol.SpeakerEncodedFrameQueueLimit;
         private const int DirectPcmPacketQueueLimit = 64;
@@ -144,7 +224,7 @@ namespace DS4Windows
                 StringComparison.Ordinal);
         // Keep one bounded, in-memory diagnostic sample from the direct VIIPER
         // lane. Disk I/O never runs on either real-time path: after both sides
-        // cover the same minute, a ThreadPool worker writes the raw 32 kHz
+        // cover the same interval, a ThreadPool worker writes the codec-rate
         // stereo PCM and concatenated 109-byte SBC frames beside the normal
         // DS4Windows log. This lets an audible cut be located before or after
         // the encoder without changing presentation timing.
@@ -210,9 +290,11 @@ namespace DS4Windows
         private readonly DualShock4AudioTransportMode directTransportMode;
         private readonly DualSenseSpeakerProcessor processor;
         private readonly StereoPcm48To32LinearResampler directResampler =
-            new StereoPcm48To32LinearResampler();
+            new StereoPcm48To32LinearResampler(SpeakerSampleRate);
+        private readonly StereoPcm16DownsamplerByTwo directDownsampler =
+            new StereoPcm16DownsamplerByTwo();
         private readonly DualShock4SbcEncoder encoder =
-            new DualShock4SbcEncoder();
+            new DualShock4SbcEncoder(SpeakerSampleRate);
         private readonly float[] sourceSamples = new float[
             Math.Max(SourceFramesPerTick, DirectPcmMaximumSourceFrames) *
                 Channels];
@@ -372,7 +454,8 @@ namespace DS4Windows
                     DualShock4AudioTransportSettings.EnvironmentVariableName));
             processor = new DualSenseSpeakerProcessor(this.compression,
                 this.bassBoost, CaptureSampleRate);
-            var silenceEncoder = new DualShock4SbcEncoder();
+            var silenceEncoder = new DualShock4SbcEncoder(
+                SpeakerSampleRate);
             silenceEncoder.Encode(new short[SamplesPerSbcFrame],
                 new short[SamplesPerSbcFrame], speakerSilenceFrame);
             for (int index = 0; index < EncodedFrameQueueLimit; index++)
@@ -705,6 +788,15 @@ namespace DS4Windows
                     CaptureDiagnosticPcm(directTickPcm, completeLength);
                     ProcessDirectPcmPacket(directTickPcm, completeLength);
                 }
+                else if (directSpeakerSampleRate ==
+                    DualShock4BluetoothAudioProtocol.SpeakerSampleRate &&
+                    SpeakerSampleRate * 2 == directSpeakerSampleRate)
+                {
+                    completeLength = DownsampleDirectSpeakerPacketByTwo(pcm,
+                        completeLength);
+                    CaptureDiagnosticPcm(directTickPcm, completeLength);
+                    ProcessDirectPcmPacket(directTickPcm, completeLength);
+                }
                 else if (directSpeakerSampleRate == SpeakerSampleRate)
                 {
                     CaptureDiagnosticPcm(pcm, completeLength);
@@ -745,6 +837,14 @@ namespace DS4Windows
                 directTickPcm);
         }
 
+        private int DownsampleDirectSpeakerPacketByTwo(byte[] pcm, int length)
+        {
+            int boundedLength = Math.Min(length,
+                DirectPcmMaximumSourceFrames * Channels * sizeof(short));
+            return directDownsampler.Convert(pcm, boundedLength,
+                directTickPcm);
+        }
+
         private void ProcessDirectPcmPacket(byte[] pcm, int length)
         {
             int inputFrames = length / (Channels * sizeof(short));
@@ -760,12 +860,28 @@ namespace DS4Windows
                     UsesProductionReplayPolicy(directTransportMode) ||
                 directTransportMode ==
                     DualShock4AudioTransportMode.FifoBuffered;
-            if (directDriftMode == DualShock4AudioDriftMode.Fractional &&
-                !historicalSlipServo)
+            if (directDriftMode == DualShock4AudioDriftMode.Fractional)
             {
                 directAsrcBaseRatio = device.
                     BluetoothControllerClockRatio;
-                if (directTransportMode !=
+                if (historicalSlipServo)
+                {
+                    // Preserve the production lane's proven queue target, but
+                    // steer it with the continuous ASRC. The former whole-
+                    // sample slip correction produced an acoustic phase event
+                    // for every logged sampleAdjust counter increment.
+                    directTargetDriftRatio = directDriftCorrectionEnabled ?
+                        (directTransportMode ==
+                                DualShock4AudioTransportMode.FifoBuffered ?
+                            DualShock4AudioTransportSettings.
+                                GetFifoBufferedQueueServoRatio(
+                                    encodedFrames.Count, enabled: true) :
+                            DualShock4AudioTransportSettings.
+                                GetProductionReplayQueueServoRatio(
+                                    encodedFrames.Count, enabled: true)) :
+                        1.0;
+                }
+                else if (directTransportMode !=
                     DualShock4AudioTransportMode.Scheduled)
                 {
                     // Keep the stateful, allocation-free ASRC in the source
@@ -1592,9 +1708,8 @@ namespace DS4Windows
                 }
                 if (result == ProductionReplaySubmissionResult.Saturated)
                 {
-                    // A startup prime is intentionally contiguous. Capacity
-                    // backpressure may delay it, but never consumes or replaces
-                    // one of its unique source frames.
+                    // Capacity backpressure never consumes or replaces the
+                    // unique source frame.
                     if (stoppingSignal.WaitOne(
                         PadForgeAsyncBackpressureWaitMilliseconds))
                     {
@@ -1625,7 +1740,7 @@ namespace DS4Windows
                 AppLogger.LogToGui(
                     $"DualShock 4 Bluetooth production replay primed " +
                     $"{DualShock4AudioTransportSettings.ProductionReplayPrimeReports} " +
-                    $"unique 0x{reportId:X2} source reports back-to-back, retained " +
+                    $"unique 0x{reportId:X2} source reports, retained " +
                     $"{DualShock4AudioTransportSettings.ProductionReplayRetainedSourceFrames} " +
                     $"source frames, mode=0x{report[2]:X2}, " +
                     $"slots={DualShock4AudioTransportSettings.ProductionReplaySlotCount}, " +
@@ -2992,6 +3107,7 @@ namespace DS4Windows
                                     ApplyProductionReplayAudioMode(report,
                                         effectiveMicrophoneEnabled);
                                 }
+                                CaptureDiagnosticSubmittedSbc(report, count);
                                 frameNumber = unchecked((ushort)(frameNumber +
                                     count));
                                 prepared = true;

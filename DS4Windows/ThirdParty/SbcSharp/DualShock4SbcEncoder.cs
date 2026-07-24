@@ -9,7 +9,7 @@ namespace SBC;
 
 /// <summary>
 /// Stateful SBC encoder for the fixed format required by a Bluetooth
-/// DualShock 4: 32 kHz stereo, 8 subbands, 16 blocks, joint stereo, SNR bit
+/// DualShock 4: 16/32 kHz stereo, 8 subbands, 16 blocks, joint stereo, SNR bit
 /// allocation, and bitpool 48. The analysis samples remain double precision
 /// through coupling and quantization so the controller receives the same
 /// standards-conformant bitstream decisions as the working reference path.
@@ -24,7 +24,7 @@ internal sealed class DualShock4SbcEncoder
     private const int Blocks = 16;
     private const int Bitpool = 48;
     private const int HistoryLength = 80;
-    private const byte Configuration = 0x7F;
+    private readonly byte configuration;
 
     private readonly double[][] history =
     {
@@ -49,6 +49,16 @@ internal sealed class DualShock4SbcEncoder
     private readonly bool[] joined = new bool[Subbands];
     private readonly SbcBitStream writer = new SbcBitStream(
         Array.Empty<byte>(), 0, isReader: false);
+
+    public DualShock4SbcEncoder(int sampleRate = 32000)
+    {
+        configuration = sampleRate switch
+        {
+            16000 => 0x3F,
+            32000 => 0x7F,
+            _ => throw new ArgumentOutOfRangeException(nameof(sampleRate)),
+        };
+    }
 
     public void Reset()
     {
@@ -288,7 +298,7 @@ internal sealed class DualShock4SbcEncoder
         Array.Clear(output, 0, FrameLength);
         writer.Reset(output, FrameLength, isReader: false);
         writer.PutBits(0x9C, 8);
-        writer.PutBits(Configuration, 8);
+        writer.PutBits(configuration, 8);
         writer.PutBits(Bitpool, 8);
         writer.PutBits(0, 8);
 

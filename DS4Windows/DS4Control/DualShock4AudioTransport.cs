@@ -42,19 +42,21 @@ namespace DS4Windows
         internal const int PadForgeReferenceReportFrameThirds =
             DualShock4BluetoothAudioProtocol.SpeakerLargeFramesPerReport * 3;
         internal const int ProductionReplaySlotCount = 32;
-        internal const int ProductionReplayRetainedSourceFrames = 16;
+        internal const int ProductionReplayRetainedSourceFrames = 8;
         internal const int ProductionReplayQueueServoTargetFrames =
             ProductionReplayRetainedSourceFrames;
         internal const int ProductionReplayFramesPerReport =
             DualShock4BluetoothAudioProtocol.SpeakerRealtimeFramesPerReport;
         internal const int ProductionReplayPrimeFrames =
             ProductionReplayPrimeReports * ProductionReplayFramesPerReport;
+        // Report 0x12 remains a one-frame realtime lane. The 16 kHz SBC mode
+        // gives each frame 8 ms of playout while halving Bluetooth traffic.
         internal const int ProductionReplayPrimeReports =
-            20;
+            1;
         internal const int ProductionReplayStartupBufferedFrames =
             ProductionReplayPrimeFrames +
                 ProductionReplayRetainedSourceFrames;
-        internal const int ProductionReplayCadenceMilliseconds = 4;
+        internal const int ProductionReplayCadenceMilliseconds = 8;
         internal const byte RealtimeReportId = 0x12;
         internal const int ProductionReplayIdleReprimeMilliseconds = 200;
         internal const byte ProductionReplaySpeakerAudioMode = 0xA2;
@@ -93,7 +95,7 @@ namespace DS4Windows
         internal const int FifoBufferedPrimeFrames =
             FifoBufferedPrimeReports * FifoBufferedPrimeFramesPerReport;
         internal const int FifoBufferedRetainedSourceFrames =
-            ProductionReplayRetainedSourceFrames;
+            16;
         internal const int FifoBufferedStartupBufferedFrames =
             FifoBufferedPrimeFrames + FifoBufferedRetainedSourceFrames;
         internal const int FifoBufferedSteadyFramesPerReport =
@@ -104,7 +106,7 @@ namespace DS4Windows
         internal const int FifoBufferedIdleReprimeMilliseconds =
             ProductionReplayIdleReprimeMilliseconds;
         internal const int FifoBufferedQueueServoTargetFrames =
-            ProductionReplayQueueServoTargetFrames;
+            FifoBufferedRetainedSourceFrames;
         // Keep ordinary HID/gyro input active while the controller-side audio
         // cushion is primed. A1 adds microphone audio without changing the
         // speaker packet cadence.

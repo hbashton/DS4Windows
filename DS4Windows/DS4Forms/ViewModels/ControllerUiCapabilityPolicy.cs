@@ -165,7 +165,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 return new ControllerMicrophoneUiState(
                     ControllerMicrophoneUiStatus.RequiresPlayStationOutput,
                     canEnable: false,
-                    "Select a DualShock 4, DualSense, or DualSense Edge emulated device to expose the controller microphone.");
+                    "A VIIPER PlayStation audio interface is required to expose the controller microphone.");
             }
 
             if (requireActiveStream && !activeStreamSupportsMicrophone)

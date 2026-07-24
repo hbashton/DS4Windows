@@ -39,6 +39,7 @@ namespace DS4WinWPF.DS4Forms
             public TextBlock FullPullModeDescription;
             public Grid HipFireDelayRow;
             public IntegerUpDown HipFireDelay;
+            public CheckBox GameRumbleVibration;
         }
 
         private sealed class ProfileChoice
@@ -282,6 +283,7 @@ namespace DS4WinWPF.DS4Forms
             root.Children.Add(MakeMeter("Force", ui, out ui.Force, out ui.ForceValue));
 
             root.Children.Add(BuildFullPullSection(ui));
+            root.Children.Add(BuildGameRumbleVibrationSection(ui));
 
             Grid actions = new Grid { Margin = new Thickness(0, 14, 0, 0) };
             actions.ColumnDefinitions.Add(new ColumnDefinition()); actions.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(8) }); actions.ColumnDefinitions.Add(new ColumnDefinition());
@@ -291,6 +293,61 @@ namespace DS4WinWPF.DS4Forms
             reset.Click += (_, _) => ResetSide(ui); Grid.SetColumn(reset, 2);
             actions.Children.Add(preview); actions.Children.Add(reset); root.Children.Add(actions);
             return root;
+        }
+
+        private Border BuildGameRumbleVibrationSection(SideUi ui)
+        {
+            Grid content = new Grid();
+            content.ColumnDefinitions.Add(new ColumnDefinition());
+            content.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = GridLength.Auto,
+            });
+
+            StackPanel copy = new StackPanel();
+            copy.Children.Add(new TextBlock
+            {
+                Text = "Game rumble vibration",
+                FontSize = 15,
+                FontWeight = FontWeights.SemiBold,
+            });
+            copy.Children.Add(new TextBlock
+            {
+                Text = $"Stream the game's {(ui.IsLeft ? "heavy / left" : "light / right")} HID rumble motor to {(ui.IsLeft ? "L2" : "R2")} as a low-latency vibration effect.",
+                Margin = new Thickness(0, 4, 14, 0),
+                Foreground = FindBrush("MutedForegroundColor", Brushes.Gray),
+                TextWrapping = TextWrapping.Wrap,
+            });
+            content.Children.Add(copy);
+
+            ui.GameRumbleVibration = new CheckBox
+            {
+                Style = FindResource("LabToggle") as Style,
+                VerticalAlignment = VerticalAlignment.Center,
+                ToolTip = $"Independently enable game-rumble vibration for {(ui.IsLeft ? "L2" : "R2")}. This does not link the other trigger.",
+            };
+            ui.GameRumbleVibration.Click += (_, _) =>
+                GameRumbleVibrationChanged(ui);
+            System.Windows.Automation.AutomationProperties.SetName(
+                ui.GameRumbleVibration,
+                $"Stream game rumble to {(ui.IsLeft ? "L2" : "R2")}");
+            System.Windows.Automation.AutomationProperties.SetAutomationId(
+                ui.GameRumbleVibration,
+                ui.IsLeft ? "l2GameRumbleVibration" :
+                    "r2GameRumbleVibration");
+            Grid.SetColumn(ui.GameRumbleVibration, 1);
+            content.Children.Add(ui.GameRumbleVibration);
+
+            return new Border
+            {
+                Background = FindBrush("RaisedBackgroundColor", Brushes.Transparent),
+                BorderBrush = FindBrush("BorderColor", Brushes.Gray),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(12),
+                Margin = new Thickness(0, 16, 0, 0),
+                Child = content,
+            };
         }
 
         private Border BuildFullPullSection(SideUi ui)
@@ -541,6 +598,9 @@ namespace DS4WinWPF.DS4Forms
                 : $"This {(ui.IsLeft ? "L2" : "R2")} choice is saved, but Trigger Lab is globally paused.";
             ui.Start.Value = effect.StartPercent; ui.Wall.Value = effect.WallPercent; ui.Force.Value = effect.ForcePercent;
             ui.StartValue.Text = $"{effect.StartPercent}%"; ui.WallValue.Text = $"{effect.WallPercent}%"; ui.ForceValue.Text = $"{effect.ForcePercent}%";
+            ui.GameRumbleVibration.IsChecked = ui.IsLeft
+                ? CurrentSettings.LeftGameRumbleVibration
+                : CurrentSettings.RightGameRumbleVibration;
             SetModeVisuals(ui, effect.Mode);
             RefreshFullPullUi(ui);
         }
@@ -736,11 +796,32 @@ namespace DS4WinWPF.DS4Forms
             SetSelectedProfileActive(settings, effect.ProfileId, value);
         });
 
+        private void GameRumbleVibrationChanged(SideUi ui) =>
+            Commit(settings =>
+            {
+                bool enabled = ui.GameRumbleVibration.IsChecked == true;
+                if (ui.IsLeft)
+                {
+                    settings.LeftGameRumbleVibration = enabled;
+                }
+                else
+                {
+                    settings.RightGameRumbleVibration = enabled;
+                }
+
+                if (enabled)
+                {
+                    settings.Enabled = true;
+                }
+            });
+
         private void LabEnabledToggle_Click(object sender, RoutedEventArgs e) => Commit(settings =>
         {
             bool enable = labEnabledToggle.IsChecked == true;
             settings.Enabled = enable;
-            if (enable && !settings.LeftActive && !settings.RightActive)
+            if (enable && !settings.LeftActive && !settings.RightActive &&
+                !settings.LeftGameRumbleVibration &&
+                !settings.RightGameRumbleVibration)
             {
                 settings.LeftActive = settings.Left.ForcePercent > 0;
                 SetSelectedProfileActive(settings, settings.Left.ProfileId, settings.LeftActive);
@@ -972,10 +1053,12 @@ namespace DS4WinWPF.DS4Forms
                 : Visibility.Collapsed;
             if (!settings.Enabled)
             {
-                bool anyArmed = settings.LeftActive || settings.RightActive;
+                bool anyArmed = settings.LeftActive || settings.RightActive ||
+                    settings.LeftGameRumbleVibration ||
+                    settings.RightGameRumbleVibration;
                 labStatusText.Text = anyArmed
-                    ? $"Trigger Lab is paused. {ActiveTriggerLabel(settings)} " +
-                        $"{(settings.LeftActive && settings.RightActive ? "are" : "is")} armed and will resume when Enabled is turned on."
+                    ? $"Trigger Lab is paused. {ArmedTriggerLabel(settings)} " +
+                        $"{(AreBothTriggersArmed(settings) ? "are" : "is")} armed and will resume when Enabled is turned on."
                     : "Trigger Lab is paused. Choose an effect and arm L2 or R2, then turn Enabled on.";
                 labBehaviorText.Text =
                     "Armed effects are saved per trigger and do not override the game while paused.";
@@ -984,7 +1067,9 @@ namespace DS4WinWPF.DS4Forms
 
             labStatusText.Text = settings.HasActiveOverride
                 ? $"Made with Trigger Lab - {ActiveTriggerLabel(settings)} overrides incoming game trigger effects."
-                : "Trigger Lab is enabled. Arm L2 or R2 to persist an effect in this profile.";
+                : settings.HasGameRumbleVibration
+                    ? $"Game rumble is streaming to {GameRumbleTriggerLabel(settings)} as trigger vibration."
+                    : "Trigger Lab is enabled. Arm L2 or R2 to persist an effect in this profile.";
             labBehaviorText.Text =
                 "Active lab effects override incoming game adaptive-trigger output.";
         }
@@ -994,6 +1079,33 @@ namespace DS4WinWPF.DS4Forms
             if (settings.LeftActive && settings.RightActive) return "L2 and R2";
             return settings.LeftActive ? "L2" : "R2";
         }
+
+        private static string GameRumbleTriggerLabel(
+            TriggerLabProfileSettings settings)
+        {
+            if (settings.LeftGameRumbleVibration &&
+                settings.RightGameRumbleVibration)
+            {
+                return "L2 and R2";
+            }
+
+            return settings.LeftGameRumbleVibration ? "L2" : "R2";
+        }
+
+        private static string ArmedTriggerLabel(
+            TriggerLabProfileSettings settings)
+        {
+            bool left = settings.LeftActive ||
+                settings.LeftGameRumbleVibration;
+            bool right = settings.RightActive ||
+                settings.RightGameRumbleVibration;
+            return left && right ? "L2 and R2" : left ? "L2" : "R2";
+        }
+
+        private static bool AreBothTriggersArmed(
+            TriggerLabProfileSettings settings) =>
+            (settings.LeftActive || settings.LeftGameRumbleVibration) &&
+            (settings.RightActive || settings.RightGameRumbleVibration);
 
         private Brush FindBrush(string key, Brush fallback) => TryFindResource(key) as Brush ?? fallback;
     }

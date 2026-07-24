@@ -36,7 +36,8 @@ namespace DS4Windows
 
         public void Start(int slot, DS4Device device,
             AudioHapticsProfileSettings settings, OutContType outputType,
-            string requestedPhysicalEndpointId)
+            string requestedPhysicalEndpointId,
+            int controllerAudioUsbipPort = -1)
         {
             if (slot < 0 || slot >= slots.Length)
             {
@@ -66,7 +67,8 @@ namespace DS4Windows
                 slots[slot]?.Dispose();
                 slots[slot] = null;
                 SlotRuntime runtime = new SlotRuntime(slot, dualSense,
-                    settings, outputType.Normalize(), requestedPhysicalEndpointId);
+                    settings, outputType.Normalize(),
+                    requestedPhysicalEndpointId, controllerAudioUsbipPort);
                 try
                 {
                     runtime.Start();
@@ -174,6 +176,7 @@ namespace DS4Windows
             private readonly AudioHapticsProfileSettings settings;
             private readonly OutContType outputType;
             private readonly string requestedPhysicalEndpointId;
+            private readonly int controllerAudioUsbipPort;
             private readonly object frameLock = new object();
             private readonly byte[][] frameQueue = Enumerable.Range(0,
                 QueueCapacity).Select(_ => new byte[FrameBytes]).ToArray();
@@ -223,7 +226,8 @@ namespace DS4Windows
 
             public SlotRuntime(int slot, DualSenseDevice device,
                 AudioHapticsProfileSettings settings, OutContType outputType,
-                string requestedPhysicalEndpointId)
+                string requestedPhysicalEndpointId,
+                int controllerAudioUsbipPort)
             {
                 this.slot = slot;
                 this.device = device;
@@ -231,6 +235,7 @@ namespace DS4Windows
                 this.outputType = outputType;
                 this.requestedPhysicalEndpointId =
                     requestedPhysicalEndpointId ?? string.Empty;
+                this.controllerAudioUsbipPort = controllerAudioUsbipPort;
             }
 
             public string SourceDisplayName => sourceDisplayName;
@@ -335,7 +340,8 @@ namespace DS4Windows
                 {
                     endpoint = DualSenseAudioPassthrough.FindActiveGameAudioEndpoint(
                         enumerator, null,
-                        DualSenseAudioPassthrough.GetEndpointKind(outputType));
+                        DualSenseAudioPassthrough.GetEndpointKind(outputType),
+                        controllerAudioUsbipPort);
                     if (endpoint == null)
                     {
                         enumerator.Dispose();

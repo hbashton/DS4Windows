@@ -181,6 +181,7 @@ namespace DS4Windows
 
         private readonly OutContType outputType;
         private readonly ViiperVirtualDeviceType viiperType;
+        private readonly bool audioOnlySidecar;
         private readonly ViiperClient client;
         private readonly object pendingPacketLock = new object();
         private readonly object microphoneQueueLock = new object();
@@ -247,6 +248,12 @@ namespace DS4Windows
         private byte legacyDualSenseLightFast;
         private byte legacyDualSenseHeavySlow;
         private bool legacyDualSenseRumbleKnown;
+        private byte lastTriggerLabLeftRumble;
+        private byte lastTriggerLabRightRumble;
+        private int lastTriggerLabRumbleSignature;
+        private bool triggerLabRumbleStateKnown;
+        private bool lastTriggerLabLeftRumbleEnabled;
+        private bool lastTriggerLabRightRumbleEnabled;
         private int dualShock4DecodedPcmFifoCount;
         private int dualShock4LastDecodedPcmCount;
         private ushort dualShock4LastMicrophoneSequence;
@@ -259,6 +266,7 @@ namespace DS4Windows
         private bool activeStreamSupportsMicrophone;
         private bool activeStreamSupportsDirectSpeaker;
         private bool activeStreamSupportsAtomicAudioHaptics;
+        private bool activeStreamUsesAudioOnlyDescriptor;
         private byte activeStreamFrameVersion;
         private int microphoneVolume = 128;
         private int microphoneNoiseSuppression = (int)DualSenseMicrophoneNoiseSuppression.Balanced;
@@ -359,10 +367,12 @@ namespace DS4Windows
             public bool HasSequence { get; }
         }
 
-        public ViiperOutDevice(OutContType outputType, ViiperVirtualDeviceType viiperType)
+        public ViiperOutDevice(OutContType outputType,
+            ViiperVirtualDeviceType viiperType, bool audioOnlySidecar = false)
         {
             this.outputType = outputType;
             this.viiperType = viiperType;
+            this.audioOnlySidecar = audioOnlySidecar;
             feedbackDispatchBuffer = new ViiperFeedbackDispatchBuffer(
                 // The buffer implementation requires one preallocated slot.
                 // Non-audio devices never enqueue it; their public policy is
@@ -544,11 +554,27 @@ namespace DS4Windows
         internal bool SupportsActiveVirtualMicrophone =>
             connected && activeStreamSupportsMicrophone;
 
+        internal OutContType OutputType => outputType;
+
+        internal bool IsAudioOnlySidecar => audioOnlySidecar;
+
+        internal bool UsesAudioOnlyUsbDescriptor =>
+            connected && activeStreamUsesAudioOnlyDescriptor;
+
         internal bool IsVirtualMicrophoneInterfaceActive =>
             Volatile.Read(ref virtualMicrophoneInterfaceActive) == 1;
 
         internal ViiperMicrophoneBufferSnapshot VirtualMicrophoneBufferSnapshot =>
             Volatile.Read(ref virtualMicrophoneBufferSnapshot);
+
+        internal void BindPhysicalController(int deviceIndex)
+        {
+            Volatile.Write(ref lastInputDeviceIndex, deviceIndex);
+            if (connected)
+            {
+                ResetState();
+            }
+        }
 
         public override void Connect()
         {
@@ -574,6 +600,7 @@ namespace DS4Windows
             Interlocked.Exchange(ref submittedPacketCount, 0);
             Interlocked.Exchange(ref writtenPacketCount, 0);
             ResetMicrophoneLiveness();
+            ResetTriggerLabRumbleState();
             Interlocked.Exchange(ref lastMicrophoneArmTimestamp, 0);
             Interlocked.Exchange(ref microphoneArmAttempts, 0);
             Interlocked.Exchange(ref microphoneArmFailures, 0);
@@ -668,12 +695,58 @@ namespace DS4Windows
             activeStreamSupportsMicrophone = false;
             activeStreamSupportsDirectSpeaker = false;
             activeStreamSupportsAtomicAudioHaptics = false;
+            activeStreamUsesAudioOnlyDescriptor = false;
             activeStreamFrameVersion = 0;
             Volatile.Write(ref virtualMicrophoneInterfaceActive, 0);
             Volatile.Write(ref virtualMicrophoneInterfaceStateKnown, 0);
 
             if (viiperType == ViiperVirtualDeviceType.DualSense)
             {
+                if (audioOnlySidecar)
+                {
+                    try
+                    {
+                        ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
+                            "dualsenseaudioonlyduplexv4");
+                        activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
+                        activeStreamUsesFramedProtocol = true;
+                        activeStreamSupportsMicrophone = true;
+                        activeStreamSupportsDirectSpeaker = true;
+                        activeStreamSupportsAtomicAudioHaptics = true;
+                        activeStreamUsesAudioOnlyDescriptor = true;
+                        activeStreamFrameVersion = ViiperStreamFrameVersionV4;
+                        return stream;
+                    }
+                    catch (IOException ex)
+                    {
+                        AppLogger.LogToGui(
+                            $"VIIPER DualSense audio-only sidecar V4 unavailable, trying V3: {ex.Message}",
+                            false);
+                    }
+
+                    try
+                    {
+                        ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
+                            "dualsenseaudioonlyduplexv3");
+                        activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
+                        activeStreamUsesFramedProtocol = true;
+                        activeStreamSupportsMicrophone = true;
+                        activeStreamSupportsDirectSpeaker = true;
+                        activeStreamUsesAudioOnlyDescriptor = true;
+                        activeStreamFrameVersion = ViiperStreamFrameVersionV3;
+                        return stream;
+                    }
+                    catch (IOException ex)
+                    {
+                        AppLogger.LogToGui(
+                            $"VIIPER DualSense audio-only sidecar unavailable: {ex.Message}",
+                            true);
+                        throw new IOException(
+                            "The installed VIIPER build does not support the DualSense audio-only interface. Update VIIPER from Settings before using PlayStation audio with an Xbox or Switch output.",
+                            ex);
+                    }
+                }
+
                 try
                 {
                     ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
@@ -828,6 +901,32 @@ namespace DS4Windows
 
             if (viiperType == ViiperVirtualDeviceType.DualShock4)
             {
+                if (audioOnlySidecar)
+                {
+                    try
+                    {
+                        ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
+                            "dualshock4audioonlyduplexv3", 0x05C4);
+                        activeFeedbackLength = ViiperStatePacketBuilder.GetFeedbackLength(
+                            viiperType);
+                        activeStreamUsesFramedProtocol = true;
+                        activeStreamSupportsMicrophone = true;
+                        activeStreamSupportsDirectSpeaker = true;
+                        activeStreamUsesAudioOnlyDescriptor = true;
+                        activeStreamFrameVersion = ViiperStreamFrameVersionV3;
+                        return stream;
+                    }
+                    catch (IOException ex)
+                    {
+                        AppLogger.LogToGui(
+                            $"VIIPER DualShock 4 audio-only sidecar unavailable: {ex.Message}",
+                            true);
+                        throw new IOException(
+                            "The installed VIIPER build does not support the DualShock 4 audio-only interface. Update VIIPER from Settings before using PlayStation audio with an Xbox or Switch output.",
+                            ex);
+                    }
+                }
+
                 try
                 {
                     ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
@@ -920,6 +1019,7 @@ namespace DS4Windows
             // old monitor from reattaching after this synchronous detach.
             DetachBluetoothMicrophoneSource();
             ResetLegacyDualSenseRumbleDeduplication();
+            ResetTriggerLabRumbleState();
             StopMicrophoneInterfaceMonitor();
             lock (pendingPacketLock)
             {
@@ -2872,12 +2972,28 @@ namespace DS4Windows
                 return;
             }
 
+            // A compatibility sidecar exists only to carry PlayStation audio.
+            // If an older VIIPER backend had to expose its neutral HID
+            // interface too, do not let applications overwrite the primary
+            // Xbox/Switch profile's rumble, lightbar, or trigger state. The
+            // V4 atomic 0x36 carrier remains eligible because it is the audio
+            // and haptics payload generated by the sidecar endpoint itself.
+            if (audioOnlySidecar &&
+                !(IsDualSenseType() &&
+                    feedbackLength >= DualSenseCombinedExtendedFeedbackLength &&
+                    feedback[DualSenseCombinedBluetoothReportOffset] == 0x36))
+            {
+                return;
+            }
+
             switch (viiperType)
             {
                 case ViiperVirtualDeviceType.Xbox360:
                     if (feedbackLength >= 2)
                     {
                         Program.rootHub.SetDevRumble(device, feedback[0], feedback[1], deviceIndex);
+                        ApplyGameRumbleTriggerVibration(device, deviceIndex,
+                            feedback[1], feedback[0]);
                     }
                     break;
 
@@ -2885,6 +3001,8 @@ namespace DS4Windows
                     if (feedbackLength >= 7)
                     {
                         Program.rootHub.SetDevRumble(device, feedback[1], feedback[0], deviceIndex);
+                        ApplyGameRumbleTriggerVibration(device, deviceIndex,
+                            feedback[0], feedback[1]);
                         ApplyLightbar(device, feedback[2], feedback[3], feedback[4], feedback[5], feedback[6]);
                     }
                     break;
@@ -2935,6 +3053,8 @@ namespace DS4Windows
                         }
                         ApplyLightbar(device, feedback[2], feedback[3], feedback[4], 0, 0);
                         ApplyDualSenseTriggerFeedback(device, deviceIndex, feedback, feedbackLength);
+                        ApplyGameRumbleTriggerVibration(device, deviceIndex,
+                            lightFast, heavySlow);
                     }
                     break;
 
@@ -2944,6 +3064,8 @@ namespace DS4Windows
                         byte left = MaxByte(feedback, 0, 16);
                         byte right = MaxByte(feedback, 16, 16);
                         Program.rootHub.SetDevRumble(device, left, right, deviceIndex);
+                        ApplyGameRumbleTriggerVibration(device, deviceIndex,
+                            right, left);
                     }
                     break;
             }
@@ -3154,6 +3276,108 @@ namespace DS4Windows
             {
                 Interlocked.Increment(ref microphoneArmFailures);
             }
+        }
+
+        private void ResetTriggerLabRumbleState()
+        {
+            triggerLabRumbleStateKnown = false;
+            lastTriggerLabLeftRumble = 0;
+            lastTriggerLabRightRumble = 0;
+            lastTriggerLabRumbleSignature = 0;
+            lastTriggerLabLeftRumbleEnabled = false;
+            lastTriggerLabRightRumbleEnabled = false;
+        }
+
+        private void ApplyGameRumbleTriggerVibration(DS4Device device,
+            int deviceIndex, byte lightFast, byte heavySlow)
+        {
+            if (device is not DualSenseDevice dualSenseDevice ||
+                !IsCurrentPhysicalSonyDualSense(dualSenseDevice))
+            {
+                return;
+            }
+
+            TriggerLabProfileSettings settings =
+                TriggerLabForDevice(deviceIndex);
+            bool leftEnabled = settings?.Enabled == true &&
+                settings.LeftGameRumbleVibration;
+            bool rightEnabled = settings?.Enabled == true &&
+                settings.RightGameRumbleVibration;
+            int signature = TriggerLabRumbleSignature(settings);
+            if (triggerLabRumbleStateKnown &&
+                lastTriggerLabLeftRumble == heavySlow &&
+                lastTriggerLabRightRumble == lightFast &&
+                lastTriggerLabRumbleSignature == signature &&
+                lastTriggerLabLeftRumbleEnabled == leftEnabled &&
+                lastTriggerLabRightRumbleEnabled == rightEnabled)
+            {
+                return;
+            }
+
+            bool restoreLeft = lastTriggerLabLeftRumbleEnabled &&
+                !leftEnabled;
+            bool restoreRight = lastTriggerLabRightRumbleEnabled &&
+                !rightEnabled;
+            triggerLabRumbleStateKnown = true;
+            lastTriggerLabLeftRumble = heavySlow;
+            lastTriggerLabRightRumble = lightFast;
+            lastTriggerLabRumbleSignature = signature;
+            lastTriggerLabLeftRumbleEnabled = leftEnabled;
+            lastTriggerLabRightRumbleEnabled = rightEnabled;
+
+            if (leftEnabled)
+            {
+                TriggerLabEffectEncoder.ApplyGameRumbleToDevice(
+                    dualSenseDevice, TriggerId.LeftTrigger, settings.Left,
+                    settings.LeftActive, heavySlow);
+            }
+            else if (restoreLeft)
+            {
+                TriggerLabEffectEncoder.ApplyToDevice(dualSenseDevice,
+                    TriggerId.LeftTrigger, settings?.Left,
+                    settings?.Enabled == true && settings.LeftActive);
+            }
+
+            if (rightEnabled)
+            {
+                TriggerLabEffectEncoder.ApplyGameRumbleToDevice(
+                    dualSenseDevice, TriggerId.RightTrigger, settings.Right,
+                    settings.RightActive, lightFast);
+            }
+            else if (restoreRight)
+            {
+                TriggerLabEffectEncoder.ApplyToDevice(dualSenseDevice,
+                    TriggerId.RightTrigger, settings?.Right,
+                    settings?.Enabled == true && settings.RightActive);
+            }
+        }
+
+        private static int TriggerLabRumbleSignature(
+            TriggerLabProfileSettings settings)
+        {
+            if (settings == null)
+            {
+                return 0;
+            }
+
+            HashCode hash = new HashCode();
+            hash.Add(settings.Enabled);
+            hash.Add(settings.LeftActive);
+            hash.Add(settings.RightActive);
+            hash.Add(settings.LeftGameRumbleVibration);
+            hash.Add(settings.RightGameRumbleVibration);
+            AddTriggerLabEffectSignature(ref hash, settings.Left);
+            AddTriggerLabEffectSignature(ref hash, settings.Right);
+            return hash.ToHashCode();
+        }
+
+        private static void AddTriggerLabEffectSignature(ref HashCode hash,
+            TriggerLabEffectSettings effect)
+        {
+            hash.Add(effect?.Mode ?? TriggerLabMode.Feedback);
+            hash.Add(effect?.StartPercent ?? 0);
+            hash.Add(effect?.WallPercent ?? 0);
+            hash.Add(effect?.ForcePercent ?? 0);
         }
 
         private bool ShouldApplyLegacyDualSenseRumble(DS4Device device,
@@ -3649,22 +3873,8 @@ namespace DS4Windows
                 report[10] = 0x00;
             }
 
-            TriggerLabProfileSettings triggerLab = TriggerLabForDevice(deviceIndex);
-            if (triggerLab?.HasActiveOverride == true)
-            {
-                if (triggerLab.RightActive)
-                {
-                    report[1] |= 0x04;
-                    TriggerLabEffectEncoder.WriteNativeBlock(report, 11,
-                        triggerLab.Right, true);
-                }
-                if (triggerLab.LeftActive)
-                {
-                    report[1] |= 0x08;
-                    TriggerLabEffectEncoder.WriteNativeBlock(report, 22,
-                        triggerLab.Left, true);
-                }
-            }
+            ApplyTriggerLabNativeOverrides(report, 1, 11, 22,
+                TriggerLabForDevice(deviceIndex), feedback[1], feedback[0]);
 
             return report;
         }
@@ -3687,7 +3897,7 @@ namespace DS4Windows
                 DualSenseBluetoothHapticsReportLength);
         }
 
-        private static bool TryApplyBluetoothCombinedHapticsOutputReport(
+        private bool TryApplyBluetoothCombinedHapticsOutputReport(
             DS4Device device, int deviceIndex, byte[] feedback, int feedbackLength)
         {
             if (feedbackLength < DualSenseCombinedExtendedFeedbackLength ||
@@ -3704,27 +3914,65 @@ namespace DS4Windows
             int reportOffset = DualSenseCombinedBluetoothReportOffset;
             Program.rootHub?.ApplyAudioHapticsToGameReport(deviceIndex,
                 report, reportOffset + 78, 64);
-            TriggerLabProfileSettings triggerLab = TriggerLabForDevice(deviceIndex);
-            if (triggerLab?.HasActiveOverride == true)
+            if (!audioOnlySidecar)
             {
                 int stateOffset = reportOffset + 13;
-                if (triggerLab.RightActive)
-                {
-                    report[stateOffset] |= 0x04;
-                    TriggerLabEffectEncoder.WriteNativeBlock(report,
-                        stateOffset + 10, triggerLab.Right, true);
-                }
-                if (triggerLab.LeftActive)
-                {
-                    report[stateOffset] |= 0x08;
-                    TriggerLabEffectEncoder.WriteNativeBlock(report,
-                        stateOffset + 21, triggerLab.Left, true);
-                }
+                ApplyTriggerLabNativeOverrides(report, stateOffset,
+                    stateOffset + 10, stateOffset + 21,
+                    TriggerLabForDevice(deviceIndex), feedback[1],
+                    feedback[0]);
             }
 
             return dualSenseDevice.WriteBluetoothCombinedHapticsAudioOutputReport(report,
                 DualSenseCombinedBluetoothReportOffset,
                 DualSenseCombinedBluetoothReportLength);
+        }
+
+        private static void ApplyTriggerLabNativeOverrides(byte[] report,
+            int flagsOffset, int rightTriggerOffset, int leftTriggerOffset,
+            TriggerLabProfileSettings triggerLab, byte lightFast,
+            byte heavySlow)
+        {
+            if (triggerLab?.Enabled != true)
+            {
+                return;
+            }
+
+            bool rightPersistent = triggerLab.RightActive;
+            bool rightRumble = triggerLab.RightGameRumbleVibration;
+            if (rightPersistent || rightRumble)
+            {
+                report[flagsOffset] |= 0x04;
+                if (rightRumble)
+                {
+                    TriggerLabEffectEncoder.WriteGameRumbleNativeBlock(
+                        report, rightTriggerOffset, triggerLab.Right,
+                        rightPersistent, lightFast);
+                }
+                else
+                {
+                    TriggerLabEffectEncoder.WriteNativeBlock(report,
+                        rightTriggerOffset, triggerLab.Right, true);
+                }
+            }
+
+            bool leftPersistent = triggerLab.LeftActive;
+            bool leftRumble = triggerLab.LeftGameRumbleVibration;
+            if (leftPersistent || leftRumble)
+            {
+                report[flagsOffset] |= 0x08;
+                if (leftRumble)
+                {
+                    TriggerLabEffectEncoder.WriteGameRumbleNativeBlock(
+                        report, leftTriggerOffset, triggerLab.Left,
+                        leftPersistent, heavySlow);
+                }
+                else
+                {
+                    TriggerLabEffectEncoder.WriteNativeBlock(report,
+                        leftTriggerOffset, triggerLab.Left, true);
+                }
+            }
         }
 
         private static TriggerLabProfileSettings TriggerLabForDevice(int deviceIndex)

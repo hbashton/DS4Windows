@@ -16,7 +16,9 @@ namespace DS4Windows
             outputType = outputType.Normalize();
             return outputType == OutContType.ViiperDS4 ||
                 outputType == OutContType.ViiperDualSense ||
-                outputType == OutContType.ViiperDualSenseEdge;
+                outputType == OutContType.ViiperDualSenseEdge ||
+                outputType == OutContType.ViiperX360 ||
+                outputType == OutContType.ViiperSwitch2Pro;
         }
 
         internal static bool IsEligibleBluetoothSource(DS4Device source)

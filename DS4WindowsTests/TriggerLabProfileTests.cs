@@ -46,6 +46,8 @@ namespace DS4WindowsTests
                     Linked = false,
                     LeftActive = true,
                     RightActive = true,
+                    LeftGameRumbleVibration = true,
+                    RightGameRumbleVibration = false,
                     HasSplitState = true,
                     SplitLeftActive = true,
                     SplitRightActive = false,
@@ -125,6 +127,8 @@ namespace DS4WindowsTests
             Assert.IsTrue(xml.Contains("<TriggerLab>"));
             Assert.IsTrue(restored.TriggerLabSettings.Enabled);
             Assert.IsFalse(restored.TriggerLabSettings.Linked);
+            Assert.IsTrue(restored.TriggerLabSettings.LeftGameRumbleVibration);
+            Assert.IsFalse(restored.TriggerLabSettings.RightGameRumbleVibration);
             Assert.AreEqual(TriggerLabMode.Feedback,
                 restored.TriggerLabSettings.Left.Mode);
             Assert.AreEqual(TriggerLabMode.Vibration,
@@ -182,6 +186,46 @@ namespace DS4WindowsTests
             Assert.IsFalse(clone.SplitRightActive);
             Assert.AreEqual(TriggerLabMode.Vibration, clone.SplitRight.Mode);
             Assert.AreNotSame(original.SplitRight, clone.SplitRight);
+        }
+
+        [TestMethod]
+        public void GameRumbleVibrationKeepsLabEnabledWithoutPersistentEffect()
+        {
+            TriggerLabProfileSettings settings = new TriggerLabProfileSettings
+            {
+                Enabled = true,
+                LeftActive = false,
+                RightActive = false,
+                LeftGameRumbleVibration = true,
+            };
+
+            settings.Normalize();
+            TriggerLabProfileSettings clone = settings.Clone();
+
+            Assert.IsTrue(settings.Enabled);
+            Assert.IsTrue(settings.HasGameRumbleVibration);
+            Assert.IsFalse(settings.HasActiveOverride);
+            Assert.IsTrue(clone.LeftGameRumbleVibration);
+            Assert.IsFalse(clone.RightGameRumbleVibration);
+        }
+
+        [TestMethod]
+        public void GameRumbleMagnitudeMapsAcrossCompleteTriggerRange()
+        {
+            Assert.AreEqual(0,
+                TriggerLabEffectEncoder.MagnitudeToPercent(0));
+            Assert.AreEqual(1,
+                TriggerLabEffectEncoder.MagnitudeToPercent(1));
+            Assert.AreEqual(50,
+                TriggerLabEffectEncoder.MagnitudeToPercent(128));
+            Assert.AreEqual(100,
+                TriggerLabEffectEncoder.MagnitudeToPercent(byte.MaxValue));
+
+            TriggerLabEffectSettings effect =
+                TriggerLabEffectEncoder.CreateGameRumbleVibration(
+                    TriggerLabPresetCatalog.Presets[0].CreateEffect(), 128);
+            Assert.AreEqual(TriggerLabMode.Vibration, effect.Mode);
+            Assert.AreEqual(50, effect.ForcePercent);
         }
 
         [TestMethod]

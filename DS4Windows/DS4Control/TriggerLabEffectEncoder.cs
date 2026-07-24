@@ -66,6 +66,46 @@ namespace DS4Windows
                 effect.Data3, effect.Frequency);
         }
 
+        public static TriggerLabEffectSettings CreateGameRumbleVibration(
+            TriggerLabEffectSettings template, byte magnitude)
+        {
+            TriggerLabEffectSettings effect =
+                (template ?? new TriggerLabEffectSettings()).Clone();
+            effect.Mode = TriggerLabMode.Vibration;
+            effect.ForcePercent = MagnitudeToPercent(magnitude);
+            return effect;
+        }
+
+        public static void ApplyGameRumbleToDevice(DualSenseDevice device,
+            TriggerId trigger, TriggerLabEffectSettings template,
+            bool persistentEffectActive, byte magnitude)
+        {
+            if (magnitude == 0)
+            {
+                ApplyToDevice(device, trigger, template,
+                    persistentEffectActive);
+                return;
+            }
+
+            ApplyToDevice(device, trigger,
+                CreateGameRumbleVibration(template, magnitude), true);
+        }
+
+        public static void WriteGameRumbleNativeBlock(byte[] destination,
+            int offset, TriggerLabEffectSettings template,
+            bool persistentEffectActive, byte magnitude)
+        {
+            if (magnitude == 0)
+            {
+                WriteNativeBlock(destination, offset, template,
+                    persistentEffectActive);
+                return;
+            }
+
+            WriteNativeBlock(destination, offset,
+                CreateGameRumbleVibration(template, magnitude), true);
+        }
+
         public static void WriteNativeBlock(byte[] destination, int offset,
             TriggerLabEffectSettings settings, bool active)
         {
@@ -118,5 +158,9 @@ namespace DS4Windows
 
         private static int FrequencyFromPercent(int percent) =>
             Math.Max(1, (Math.Clamp(percent, 0, 100) * 28 + 50) / 100);
+
+        internal static int MagnitudeToPercent(byte magnitude) =>
+            magnitude == 0 ? 0 : Math.Max(1,
+                (magnitude * 100 + 127) / byte.MaxValue);
     }
 }

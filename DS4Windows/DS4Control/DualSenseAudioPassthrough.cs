@@ -774,7 +774,8 @@ namespace DS4Windows
 
         internal static MMDevice FindActiveGameAudioEndpoint(MMDeviceEnumerator enumerator,
             string previousEndpointId = null,
-            ControllerAudioEndpointKind preferredKind = ControllerAudioEndpointKind.Any)
+            ControllerAudioEndpointKind preferredKind = ControllerAudioEndpointKind.Any,
+            int preferredUsbipPort = -1)
         {
             IEnumerable<MMDevice> endpoints = enumerator
                 .EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active)
@@ -790,9 +791,34 @@ namespace DS4Windows
             }
 
             return endpoints
-                .OrderByDescending(endpoint => EndpointScore(endpoint, preferredKind,
-                    previousEndpointId))
+                .OrderByDescending(endpoint =>
+                    EndpointMatchesUsbipPort(endpoint, preferredUsbipPort))
+                .ThenByDescending(endpoint => EndpointScore(endpoint,
+                    preferredKind, previousEndpointId))
                 .FirstOrDefault();
+        }
+
+        private static bool EndpointMatchesUsbipPort(MMDevice endpoint,
+            int preferredUsbipPort)
+        {
+            if (preferredUsbipPort < 0 || endpoint == null)
+            {
+                return false;
+            }
+
+            string interfacePath = GetEndpointProperty(endpoint,
+                PropertyKeys.PKEY_Device_InterfaceKey);
+            int pathStart = interfacePath.IndexOf(@"\\?\",
+                StringComparison.Ordinal);
+            if (pathStart > 0)
+            {
+                interfacePath = interfacePath.Substring(pathStart);
+            }
+
+            return !string.IsNullOrEmpty(interfacePath) &&
+                Global.TryResolveUsbIpWin2Device(interfacePath,
+                    out bool usbIpAncestor, out int endpointPort) &&
+                usbIpAncestor && endpointPort == preferredUsbipPort;
         }
 
         internal static ControllerAudioEndpointKind GetEndpointKind(OutContType outputType)

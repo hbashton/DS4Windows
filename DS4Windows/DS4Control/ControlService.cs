@@ -42,6 +42,9 @@ namespace DS4Windows
         private readonly DualShock4AudioPassthrough dualShock4AudioPassthrough = new DualShock4AudioPassthrough();
         private readonly DualSenseMicrophonePassthrough dualSenseMicrophonePassthrough = new DualSenseMicrophonePassthrough();
         private readonly AudioHapticsService audioHapticsService = new AudioHapticsService();
+        private readonly ViiperOutDevice[] playStationFeatureOutputDevices =
+            new ViiperOutDevice[MAX_DS4_CONTROLLER_COUNT];
+        private readonly object playStationFeatureOutputLock = new object();
         private readonly GameBarIntegration gameBarIntegration = new GameBarIntegration();
         private readonly object hidHideSessionLock = new object();
         private readonly HashSet<string> hidHideSessionManagedInstanceIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1994,6 +1997,9 @@ namespace DS4Windows
                 StartupDiag("ControlService.Stop AudioHaptics dispose begin");
                 audioHapticsService.Dispose();
                 StartupDiag("ControlService.Stop AudioHaptics dispose end");
+                StartupDiag("ControlService.Stop PlayStation feature outputs begin");
+                StopAllPlayStationFeatureOutputs();
+                StartupDiag("ControlService.Stop PlayStation feature outputs end");
                 StartupDiag("ControlService.Stop DS4Devices.stopControllers begin");
                 DS4Devices.stopControllers();
                 StartupDiag("ControlService.Stop DS4Devices.stopControllers end");
@@ -2373,9 +2379,147 @@ namespace DS4Windows
             }
         }
 
+        /// <summary>
+        /// Returns the VIIPER device that owns the Windows PlayStation audio
+        /// endpoints for a controller. PlayStation profiles use their primary
+        /// virtual pad; Xbox and Switch profiles use a HID-free audio sidecar.
+        /// </summary>
+        internal ViiperOutDevice GetPlayStationFeatureOutput(int index)
+        {
+            if (index < 0 || index >= MAX_DS4_CONTROLLER_COUNT)
+            {
+                return null;
+            }
+
+            ViiperOutDevice primary = outputDevices[index] as ViiperOutDevice;
+            if (primary != null &&
+                PlayStationFeatureOutputPolicy.IsPlayStationAudioOutput(
+                    primary.OutputType))
+            {
+                return primary;
+            }
+
+            lock (playStationFeatureOutputLock)
+            {
+                return playStationFeatureOutputDevices[index];
+            }
+        }
+
+        internal OutContType GetPlayStationFeatureOutputType(int index)
+        {
+            return GetPlayStationFeatureOutput(index)?.OutputType ??
+                OutContType.None;
+        }
+
+        private ViiperOutDevice EnsurePlayStationFeatureOutput(
+            int index, DS4Device source)
+        {
+            ViiperOutDevice primary = outputDevices[index] as ViiperOutDevice;
+            OutContType primaryType = primary?.OutputType ??
+                Global.OutContType[index].Normalize();
+
+            if (primary?.IsRuntimeConnected == true &&
+                PlayStationFeatureOutputPolicy.IsPlayStationAudioOutput(
+                    primaryType))
+            {
+                DisconnectPlayStationFeatureOutput(index);
+                return primary;
+            }
+
+            OutContType desiredSidecar = primary?.IsRuntimeConnected == true
+                ? PlayStationFeatureOutputPolicy.GetAudioOnlySidecarType(
+                    source, primaryType, getDInputOnly(index))
+                : OutContType.None;
+            if (desiredSidecar == OutContType.None)
+            {
+                DisconnectPlayStationFeatureOutput(index);
+                return null;
+            }
+
+            lock (playStationFeatureOutputLock)
+            {
+                ViiperOutDevice existing =
+                    playStationFeatureOutputDevices[index];
+                if (existing?.IsRuntimeConnected == true &&
+                    existing.OutputType == desiredSidecar)
+                {
+                    existing.BindPhysicalController(index);
+                    return existing;
+                }
+
+                if (existing != null)
+                {
+                    playStationFeatureOutputDevices[index] = null;
+                    existing.Disconnect();
+                }
+
+                ViiperOutDevice sidecar = new ViiperOutDevice(
+                    desiredSidecar,
+                    PlayStationFeatureOutputPolicy.GetViiperType(
+                        desiredSidecar),
+                    audioOnlySidecar: true);
+                try
+                {
+                    StartupDiag(
+                        $"PlayStation audio sidecar connect begin index={index} type={desiredSidecar}");
+                    sidecar.Connect();
+                    sidecar.BindPhysicalController(index);
+                    playStationFeatureOutputDevices[index] = sidecar;
+                    StartupDiag(
+                        $"PlayStation audio sidecar ready index={index} type={desiredSidecar} port={sidecar.DirectSpeakerUsbipPort}");
+                    return sidecar;
+                }
+                catch (Exception ex)
+                {
+                    sidecar.Disconnect();
+                    AppLogger.LogToGui(
+                        $"Could not create the {desiredSidecar.ToDisplayName()} audio interface for controller #{index + 1}: {ex.Message}",
+                        true);
+                    StartupDiag(
+                        $"PlayStation audio sidecar failed index={index} type={desiredSidecar} {ex.GetType().Name}: {ex.Message}");
+                    return null;
+                }
+            }
+        }
+
+        private void DisconnectPlayStationFeatureOutput(int index)
+        {
+            ViiperOutDevice sidecar = null;
+            lock (playStationFeatureOutputLock)
+            {
+                if (index >= 0 && index <
+                    playStationFeatureOutputDevices.Length)
+                {
+                    sidecar = playStationFeatureOutputDevices[index];
+                    playStationFeatureOutputDevices[index] = null;
+                }
+            }
+
+            if (sidecar != null)
+            {
+                StartupDiag(
+                    $"PlayStation audio sidecar disconnect index={index} type={sidecar.OutputType}");
+                sidecar.Disconnect();
+            }
+        }
+
+        private void StopAllPlayStationFeatureOutputs()
+        {
+            for (int index = 0; index <
+                playStationFeatureOutputDevices.Length; index++)
+            {
+                DisconnectPlayStationFeatureOutput(index);
+            }
+        }
+
         public void CheckProfileOptions(int ind, DS4Device device, bool startUp = false)
         {
             EnsureVirtualMouseForStickMouseProfile(ind);
+
+            ViiperOutDevice playStationFeatureOutput =
+                EnsurePlayStationFeatureOutput(ind, device);
+            OutContType playStationFeatureOutputType =
+                playStationFeatureOutput?.OutputType ?? OutContType.None;
 
             device.ModifyFeatureSetFlag(VidPidFeatureSet.NoOutputData, !getEnableOutputDataToDS4(ind));
             if (!getEnableOutputDataToDS4(ind))
@@ -2450,12 +2594,11 @@ namespace DS4Windows
                 dualsense.SpeakerVolume = DualSenseSpeakerVolume[ind];
                 dualsense.HeadphoneVolume = DualSenseHeadphoneVolume[ind];
                 dualsense.HeadsetOnlyAudio = DualSenseHeadsetOnlyAudio[ind];
-                ViiperOutDevice viiperMicrophoneOutput =
-                    outputDevices[ind] as ViiperOutDevice;
                 bool useViiperControllerMicrophone =
                     ControllerMicrophoneRoutePolicy.CanRouteDirectViiperMicrophone(
                         DualSenseEnableMicrophonePassthrough[ind], dualsense,
-                        Global.OutContType[ind], viiperMicrophoneOutput);
+                        playStationFeatureOutputType,
+                        playStationFeatureOutput);
                 // The profile volume is applied once in the shared software
                 // microphone processor. Request the top of the profile range;
                 // DualSenseDevice maps it to the controller's 0x40 ADC ceiling
@@ -2465,15 +2608,13 @@ namespace DS4Windows
 
                 if (speakerEnabled)
                 {
-                    ViiperOutDevice directSpeakerSource =
-                        outputDevices[ind] as ViiperOutDevice;
-
                     dualSenseAudioPassthrough.Start(ind, dualsense, DualSenseSpeakerVolume[ind],
                         (DualSenseSpeakerCompression)Global.DualSenseSpeakerCompression[ind],
                         Global.DualSenseSpeakerBassBoost[ind],
                         speakerCaptureEndpointId,
                         DualSenseAudioSpeakerEndpointId[ind],
-                        Global.OutContType[ind], directSpeakerSource);
+                        playStationFeatureOutputType,
+                        playStationFeatureOutput);
                 }
                 else
                 {
@@ -2501,19 +2642,19 @@ namespace DS4Windows
                 byte physicalSpeakerVolume = DualSenseHeadsetOnlyAudio[ind]
                     ? (byte)0
                     : DualSenseSpeakerVolume[ind];
-                ViiperOutDevice viiperMicrophoneOutput =
-                    outputDevices[ind] as ViiperOutDevice;
                 bool useViiperControllerMicrophone =
                     ControllerMicrophoneRoutePolicy.CanRouteDirectViiperMicrophone(
                         DualSenseEnableMicrophonePassthrough[ind], device,
-                        Global.OutContType[ind], viiperMicrophoneOutput);
+                        playStationFeatureOutputType,
+                        playStationFeatureOutput);
                 // VIIPER opens the physical microphone only while a Windows
                 // client is actively recording. Do not arm it during profile
                 // load and consume Bluetooth bandwidth before that point.
                 bool microphoneEnabled =
                     ControllerMicrophoneRoutePolicy.ShouldArmPhysicalBluetoothMicrophone(
                         DualSenseEnableMicrophonePassthrough[ind], device,
-                        Global.OutContType[ind], viiperMicrophoneOutput);
+                        playStationFeatureOutputType,
+                        playStationFeatureOutput);
                 bool audioConfigured = device.ConfigureBluetoothAudioForProfile(
                     speakerEnabled,
                     microphoneEnabled,
@@ -2524,15 +2665,13 @@ namespace DS4Windows
 
                 if (audioConfigured && speakerEnabled)
                 {
-                    ViiperOutDevice directSpeakerSource =
-                        outputDevices[ind] as ViiperOutDevice;
-
                     dualShock4AudioPassthrough.Start(ind, device,
                         physicalSpeakerVolume,
                         (DualSenseSpeakerCompression)Global.DualSenseSpeakerCompression[ind],
                         Global.DualSenseSpeakerBassBoost[ind],
                         speakerCaptureEndpointId,
-                        Global.OutContType[ind], directSpeakerSource);
+                        playStationFeatureOutputType,
+                        playStationFeatureOutput);
                 }
                 else
                 {
@@ -2544,8 +2683,9 @@ namespace DS4Windows
 
             audioHapticsService.Start(ind, device,
                 Global.store.audioHapticsSettings[ind],
-                Global.OutContType[ind],
-                DualSenseAudioSpeakerEndpointId[ind]);
+                playStationFeatureOutputType,
+                DualSenseAudioSpeakerEndpointId[ind],
+                playStationFeatureOutput?.DirectSpeakerUsbipPort ?? -1);
 
             if (!startUp)
             {
@@ -2927,6 +3067,7 @@ namespace DS4Windows
                     dualShock4AudioPassthrough.Stop(ind);
                     dualSenseMicrophonePassthrough.Stop();
                     audioHapticsService.Stop(ind);
+                    DisconnectPlayStationFeatureOutput(ind);
                     /*Stopwatch sw = new Stopwatch();
                     sw.Start();
                     while (sw.ElapsedMilliseconds < XINPUT_UNPLUG_SETTLE_TIME)
@@ -3009,6 +3150,10 @@ namespace DS4Windows
             bool virtualRequired = !Global.getDInputOnly(index);
             OutContType desiredType = Global.OutContType[index].Normalize();
             ViiperOutDevice viiperOutput = outputDevices[index] as ViiperOutDevice;
+            ViiperOutDevice playStationFeatureOutput =
+                GetPlayStationFeatureOutput(index);
+            OutContType playStationFeatureOutputType =
+                playStationFeatureOutput?.OutputType ?? OutContType.None;
             bool virtualConnected = !virtualRequired ||
                 viiperOutput?.IsRuntimeConnected == true;
             bool virtualTypeMatches = !virtualRequired ||
@@ -3045,12 +3190,14 @@ namespace DS4Windows
             {
                 bool directMicrophone =
                     ControllerMicrophoneRoutePolicy.CanRouteDirectViiperMicrophone(
-                        true, device, desiredType, viiperOutput);
+                        true, device, playStationFeatureOutputType,
+                        playStationFeatureOutput);
                 if (directMicrophone)
                 {
-                    microphone = viiperOutput?.SupportsActiveVirtualMicrophone == true
+                    microphone = playStationFeatureOutput?
+                        .SupportsActiveVirtualMicrophone == true
                         ? ControllerRuntimeLaneState.Ready
-                        : virtualConnected
+                        : playStationFeatureOutput?.IsRuntimeConnected == true
                             ? ControllerRuntimeLaneState.Unavailable
                             : ControllerRuntimeLaneState.Starting;
                 }

@@ -181,10 +181,12 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 }
 
                 int deviceIndex = selectedController.DevIndex;
-                ViiperOutDevice outputDevice = App.rootHub?.outputDevices[deviceIndex]
-                    as ViiperOutDevice;
+                ViiperOutDevice outputDevice = App.rootHub?
+                    .GetPlayStationFeatureOutput(deviceIndex);
+                OutContType outputType = outputDevice?.OutputType ??
+                    OutContType.None;
                 return ControllerUiCapabilities.ForDevice(selectedController.Device)
-                    .GetMicrophoneUiState(Global.OutContType[deviceIndex],
+                    .GetMicrophoneUiState(outputType,
                         outputDevice?.SupportsActiveVirtualMicrophone == true,
                         requireActiveStream: true);
             }

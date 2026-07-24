@@ -194,10 +194,10 @@ namespace DS4WindowsTests
         [DataRow(OutContType.ViiperDS4, true)]
         [DataRow(OutContType.ViiperDualSense, true)]
         [DataRow(OutContType.ViiperDualSenseEdge, true)]
-        [DataRow(OutContType.X360, false)]
-        [DataRow(OutContType.ViiperX360, false)]
-        [DataRow(OutContType.ViiperSwitch2Pro, false)]
-        public void DirectRouteRequiresMicrophoneCapablePlayStationOutput(
+        [DataRow(OutContType.X360, true)]
+        [DataRow(OutContType.ViiperX360, true)]
+        [DataRow(OutContType.ViiperSwitch2Pro, true)]
+        public void DirectRouteSupportsPrimaryOrAudioOnlyFeatureOutput(
             OutContType outputType, bool expected)
         {
             Assert.AreEqual(expected,
@@ -244,6 +244,12 @@ namespace DS4WindowsTests
                     activeStreamSupportsMicrophone: true,
                     virtualMicrophoneInterfaceActive: true));
             Assert.IsFalse(
+                ControllerMicrophoneRoutePolicy.ShouldArmPhysicalBluetoothMicrophone(
+                    profileEnabled: true, eligibleBluetoothSource: true,
+                    outputType: OutContType.ViiperSwitch2Pro,
+                    activeStreamSupportsMicrophone: true,
+                    virtualMicrophoneInterfaceActive: false));
+            Assert.IsTrue(
                 ControllerMicrophoneRoutePolicy.ShouldArmPhysicalBluetoothMicrophone(
                     profileEnabled: true, eligibleBluetoothSource: true,
                     outputType: OutContType.ViiperSwitch2Pro,

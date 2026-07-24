@@ -193,7 +193,10 @@ namespace DS4WindowsTests
             (int)ControllerMicrophoneUiStatus.Ready, true)]
         [DataRow((int)InputDeviceType.DualSense, (int)ConnectionType.BT,
             0x054C, 0x0CE6, (int)OutContType.X360, true,
-            (int)ControllerMicrophoneUiStatus.RequiresPlayStationOutput, false)]
+            (int)ControllerMicrophoneUiStatus.Ready, true)]
+        [DataRow((int)InputDeviceType.DS4, (int)ConnectionType.BT,
+            0x054C, 0x09CC, (int)OutContType.ViiperSwitch2Pro, true,
+            (int)ControllerMicrophoneUiStatus.Ready, true)]
         [DataRow((int)InputDeviceType.DualSense, (int)ConnectionType.BT,
             0x054C, 0x0CE6, (int)OutContType.ViiperDualSense, false,
             (int)ControllerMicrophoneUiStatus.OutputStarting, false)]

@@ -321,6 +321,8 @@ namespace DS4Windows
         public bool Linked { get; set; } = true;
         public bool LeftActive { get; set; }
         public bool RightActive { get; set; }
+        public bool LeftGameRumbleVibration { get; set; }
+        public bool RightGameRumbleVibration { get; set; }
         public TriggerLabEffectSettings Left { get; set; } = new TriggerLabEffectSettings();
         public TriggerLabEffectSettings Right { get; set; } = new TriggerLabEffectSettings();
         public bool HasSplitState { get; set; }
@@ -331,6 +333,8 @@ namespace DS4Windows
         public List<TriggerLabCustomProfile> CustomProfiles { get; set; } = new List<TriggerLabCustomProfile>();
 
         public bool HasActiveOverride => Enabled && (LeftActive || RightActive);
+        public bool HasGameRumbleVibration => Enabled &&
+            (LeftGameRumbleVibration || RightGameRumbleVibration);
 
         public void RememberSplitState()
         {
@@ -414,7 +418,8 @@ namespace DS4Windows
                 Right = Left.Clone();
             }
 
-            Enabled &= LeftActive || RightActive;
+            Enabled &= LeftActive || RightActive ||
+                LeftGameRumbleVibration || RightGameRumbleVibration;
             return this;
         }
 
@@ -424,6 +429,8 @@ namespace DS4Windows
             Linked = Linked,
             LeftActive = LeftActive,
             RightActive = RightActive,
+            LeftGameRumbleVibration = LeftGameRumbleVibration,
+            RightGameRumbleVibration = RightGameRumbleVibration,
             Left = Left?.Clone(),
             Right = Right?.Clone(),
             HasSplitState = HasSplitState,
@@ -436,6 +443,7 @@ namespace DS4Windows
 
         public bool IsDefaultConfiguration() =>
             !Enabled && Linked && !LeftActive && !RightActive &&
+            !LeftGameRumbleVibration && !RightGameRumbleVibration &&
             !HasSplitState && (CustomProfiles?.Count ?? 0) == 0 &&
             IsDefaultEffect(Left) && IsDefaultEffect(Right);
 

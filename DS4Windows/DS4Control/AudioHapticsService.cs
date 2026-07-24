@@ -16,7 +16,6 @@ using System;
 using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Linq;
-using System.Runtime.InteropServices;
 using System.Threading;
 
 namespace DS4Windows
@@ -188,10 +187,7 @@ namespace DS4Windows
             private readonly ManualResetEventSlim stopped = new(false);
 
             private WasapiCapture capture;
-            private AudioClient directCaptureAudioClient;
-            private AudioCaptureClient directCaptureClient;
-            private EventWaitHandle directCaptureEvent;
-            private Thread directCaptureThread;
+            private ProcessLoopbackWaveCapture processCapture;
             private Thread writerThread;
             private AudioHapticsProcessor processor;
             private WaveFormat captureFormat;
@@ -199,7 +195,6 @@ namespace DS4Windows
             private MMDevice usbOutputEndpoint;
             private WasapiOut usbOutput;
             private BufferedWaveProvider usbProvider;
-            private byte[] directCaptureScratch = Array.Empty<byte>();
             private byte[] usbScratch = Array.Empty<byte>();
             private int captureFramePosition;
             private int queueRead;
@@ -250,7 +245,7 @@ namespace DS4Windows
 
                 if (settings.Source == AudioHapticsSourceKind.AppSession)
                 {
-                    StartProcessCapture(ResolveProcessId());
+                    StartProcessCapture();
                 }
                 else
                 {
@@ -274,7 +269,11 @@ namespace DS4Windows
                     Priority = ThreadPriority.Highest,
                 };
                 writerThread.Start();
-                status = AudioHapticsRuntimeStatus.Running;
+                status = settings.AutomaticGameDetection &&
+                    processCapture?.CurrentProcessId <= 0
+                    ? new AudioHapticsRuntimeStatus(false,
+                        "Waiting for a detected game")
+                    : AudioHapticsRuntimeStatus.Running;
             }
 
             public bool ApplyToGameHaptics(byte[] report, int sampleOffset)
@@ -368,79 +367,37 @@ namespace DS4Windows
                 capture.StartRecording();
             }
 
-            private void StartProcessCapture(int processId)
+            private void StartProcessCapture()
             {
-                directCaptureAudioClient = ProcessLoopbackAudioClient.Activate(
-                    processId, TimeSpan.FromSeconds(5));
-                captureFormat = new WaveFormat(44100, 16, 2);
-                long bufferDuration = CaptureBufferMilliseconds * 10000L;
-                directCaptureAudioClient.Initialize(AudioClientShareMode.Shared,
-                    AudioClientStreamFlags.Loopback |
-                        AudioClientStreamFlags.EventCallback,
-                    bufferDuration, 0, captureFormat, Guid.Empty);
-                directCaptureEvent = new EventWaitHandle(false,
-                    EventResetMode.AutoReset);
-                directCaptureAudioClient.SetEventHandle(
-                    directCaptureEvent.SafeWaitHandle.DangerousGetHandle());
-                directCaptureClient = directCaptureAudioClient.AudioCaptureClient;
+                if (settings.AutomaticGameDetection)
+                {
+                    processCapture = ProcessLoopbackWaveCapture
+                        .CreateAutomatic(slot);
+                    sourceDisplayName = "Waiting for a detected game";
+                    status = new AudioHapticsRuntimeStatus(false,
+                        "Waiting for a game");
+                }
+                else
+                {
+                    int processId = ProcessLoopbackWaveCapture.ResolveProcessId(
+                        settings);
+                    if (processId <= 0)
+                    {
+                        throw new InvalidOperationException(
+                            "The selected application is not currently producing an audio session.");
+                    }
+                    processCapture = new ProcessLoopbackWaveCapture(processId);
+                    sourceDisplayName = string.IsNullOrWhiteSpace(
+                        settings.DisplayName) ? $"process {processId}" :
+                        settings.DisplayName;
+                }
+                captureFormat = processCapture.WaveFormat;
                 processor = new AudioHapticsProcessor(settings,
                     captureFormat.SampleRate);
-                sourceDisplayName = string.IsNullOrWhiteSpace(settings.DisplayName)
-                    ? $"process {processId}" : settings.DisplayName;
-                directCaptureThread = new Thread(DirectCaptureLoop)
-                {
-                    IsBackground = true,
-                    Name = $"DS4W App Haptics Capture {slot + 1}",
-                    Priority = ThreadPriority.Highest,
-                };
-                directCaptureThread.Start();
-                directCaptureAudioClient.Start();
-            }
-
-            private int ResolveProcessId()
-            {
-                if (settings.ProcessId > 0)
-                {
-                    try
-                    {
-                        using Process process = Process.GetProcessById(
-                            settings.ProcessId);
-                        if (!process.HasExited)
-                        {
-                            return settings.ProcessId;
-                        }
-                    }
-                    catch { }
-                }
-
-                foreach (Process process in Process.GetProcesses())
-                {
-                    using (process)
-                    {
-                        try
-                        {
-                            string path = process.MainModule?.FileName ??
-                                string.Empty;
-                            if (!string.IsNullOrWhiteSpace(settings.ProcessPath) &&
-                                string.Equals(path, settings.ProcessPath,
-                                    StringComparison.OrdinalIgnoreCase))
-                            {
-                                return process.Id;
-                            }
-                            if (!string.IsNullOrWhiteSpace(
-                                    settings.ExecutableName) &&
-                                string.Equals(process.ProcessName,
-                                    settings.ExecutableName,
-                                    StringComparison.OrdinalIgnoreCase))
-                            {
-                                return process.Id;
-                            }
-                        }
-                        catch { }
-                    }
-                }
-                throw new InvalidOperationException(
-                    "The selected application is not currently producing an audio session.");
+                processCapture.DataAvailable += Capture_DataAvailable;
+                processCapture.RecordingStopped += Capture_RecordingStopped;
+                processCapture.SourceChanged += ProcessCapture_SourceChanged;
+                processCapture.StartRecording();
             }
 
             private void Capture_DataAvailable(object sender,
@@ -467,78 +424,15 @@ namespace DS4Windows
                 }
             }
 
-            private void DirectCaptureLoop()
+            private void ProcessCapture_SourceChanged(object sender,
+                ProcessAudioSourceChangedEventArgs eventArgs)
             {
-                WaitHandle[] waits = { stopped.WaitHandle, directCaptureEvent };
-                try
-                {
-                    while (Volatile.Read(ref disposed) == 0)
-                    {
-                        int signaled = WaitHandle.WaitAny(waits, 1000);
-                        if (signaled == 0)
-                        {
-                            break;
-                        }
-                        if (signaled == 1)
-                        {
-                            DrainDirectCapture();
-                        }
-                    }
-                }
-                catch (Exception exception) when (
-                    Volatile.Read(ref disposed) == 0)
-                {
-                    status = new AudioHapticsRuntimeStatus(false,
-                        $"App capture stopped: {exception.Message}");
-                    AppLogger.LogToGui(
-                        $"Per-app Audio Haptics stopped for controller {slot + 1}: {exception.Message}",
-                        true);
-                }
-            }
-
-            private void DrainDirectCapture()
-            {
-                while (Volatile.Read(ref disposed) == 0)
-                {
-                    int nextFrames = directCaptureClient.GetNextPacketSize();
-                    if (nextFrames <= 0)
-                    {
-                        return;
-                    }
-
-                    IntPtr buffer = directCaptureClient.GetBuffer(
-                        out int framesAvailable, out AudioClientBufferFlags flags,
-                        out _, out _);
-                    try
-                    {
-                        if (framesAvailable <= 0)
-                        {
-                            continue;
-                        }
-                        int byteCount = checked(framesAvailable *
-                            captureFormat.BlockAlign);
-                        if (directCaptureScratch.Length < byteCount)
-                        {
-                            directCaptureScratch = new byte[byteCount];
-                        }
-                        if ((flags & AudioClientBufferFlags.Silent) != 0 ||
-                            buffer == IntPtr.Zero)
-                        {
-                            Array.Clear(directCaptureScratch, 0, byteCount);
-                        }
-                        else
-                        {
-                            Marshal.Copy(buffer, directCaptureScratch, 0,
-                                byteCount);
-                        }
-                        ProcessPcm(directCaptureScratch, byteCount,
-                            captureFormat);
-                    }
-                    finally
-                    {
-                        directCaptureClient.ReleaseBuffer(framesAvailable);
-                    }
-                }
+                sourceDisplayName = eventArgs.DisplayName;
+                status = eventArgs.ProcessId > 0
+                    ? new AudioHapticsRuntimeStatus(true,
+                        $"Active · {eventArgs.DisplayName}")
+                    : new AudioHapticsRuntimeStatus(false,
+                        "Waiting for a detected game");
             }
 
             private void ProcessPcm(byte[] buffer, int byteCount,
@@ -1004,8 +898,13 @@ namespace DS4Windows
                 }
                 status = AudioHapticsRuntimeStatus.Inactive;
                 stopped.Set();
-                try { directCaptureAudioClient?.Stop(); } catch { }
-                try { directCaptureEvent?.Set(); } catch { }
+                if (processCapture != null)
+                {
+                    processCapture.DataAvailable -= Capture_DataAvailable;
+                    processCapture.RecordingStopped -= Capture_RecordingStopped;
+                    processCapture.SourceChanged -= ProcessCapture_SourceChanged;
+                    try { processCapture.StopRecording(); } catch { }
+                }
                 if (capture != null)
                 {
                     capture.DataAvailable -= Capture_DataAvailable;
@@ -1017,16 +916,8 @@ namespace DS4Windows
                 {
                     writerThread.Join(1200);
                 }
-                if (directCaptureThread != null &&
-                    !ReferenceEquals(directCaptureThread,
-                        Thread.CurrentThread))
-                {
-                    directCaptureThread.Join(1200);
-                }
                 capture?.Dispose();
-                directCaptureClient?.Dispose();
-                directCaptureAudioClient?.Dispose();
-                directCaptureEvent?.Dispose();
+                processCapture?.Dispose();
                 try { usbOutput?.Stop(); } catch { }
                 usbOutput?.Dispose();
                 usbOutputEndpoint?.Dispose();

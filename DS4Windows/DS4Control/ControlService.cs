@@ -2733,6 +2733,11 @@ namespace DS4Windows
 
             AudioHapticsProfileSettings settings =
                 Global.store.audioHapticsSettings[index];
+            if (settings?.AutomaticGameDetection == true)
+            {
+                return ProcessLoopbackWaveCapture
+                    .BuildAutomaticEndpointId(index);
+            }
             int processId = ProcessLoopbackWaveCapture.ResolveProcessId(settings);
             if (processId <= 0)
             {

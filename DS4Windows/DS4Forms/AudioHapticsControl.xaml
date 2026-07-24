@@ -210,6 +210,32 @@
                                         Click="RefreshSources_Click" />
                             </Grid>
 
+                            <Border Margin="0,12,0,0" Padding="12,10"
+                                    Background="{DynamicResource RaisedBackgroundColor}"
+                                    BorderBrush="{DynamicResource BorderColor}"
+                                    BorderThickness="1" CornerRadius="5">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Margin="0,0,12,0">
+                                        <TextBlock Text="Automatically follow games"
+                                                   FontWeight="SemiBold" />
+                                        <TextBlock Text="Switch to the active game's audio using Windows game records and installed launcher manifests."
+                                                   Margin="0,3,0,0" FontSize="11"
+                                                   TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource MutedForegroundColor}" />
+                                    </StackPanel>
+                                    <CheckBox x:Name="automaticGameDetectionToggle"
+                                              Grid.Column="1"
+                                              Style="{StaticResource ModernToggle}"
+                                              VerticalAlignment="Center"
+                                              ToolTip="Follows games recognized by Windows, Steam, Epic, or GOG. The selected app remains the fallback."
+                                              Click="AutomaticGameDetectionToggle_Click" />
+                                </Grid>
+                            </Border>
+
                             <Border x:Name="streamAppToSpeakerPanel"
                                     Margin="0,12,0,0" Padding="12,10"
                                     Background="{DynamicResource RaisedBackgroundColor}"

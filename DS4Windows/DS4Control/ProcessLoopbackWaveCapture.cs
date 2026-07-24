@@ -16,14 +16,20 @@ namespace DS4Windows
     internal sealed class ProcessLoopbackWaveCapture : IWaveIn
     {
         public const string EndpointPrefix = "DS4Windows:AudioHapticsApp:";
+        public const string AutomaticEndpointPrefix =
+            "DS4Windows:AudioHapticsAuto:";
         private const int CaptureBufferMilliseconds = 5;
-        private readonly AudioClient audioClient;
-        private readonly AudioCaptureClient captureClient;
-        private readonly EventWaitHandle captureEvent = new(false,
-            EventResetMode.AutoReset);
+        private const int DetectionIntervalMilliseconds = 500;
+        private readonly int fixedProcessId;
+        private readonly int automaticSlot = -1;
+        private readonly AudioHapticsProfileSettings automaticSettings;
+        private readonly AutomaticGameAudioDetector automaticDetector;
+        private readonly object sessionLock = new();
         private readonly ManualResetEvent stopped = new(false);
-        private readonly Thread captureThread;
-        private byte[] scratch = Array.Empty<byte>();
+        private ProcessCaptureSession session;
+        private Thread monitorThread;
+        private int currentProcessId;
+        private string currentSourceDisplayName = string.Empty;
         private int started;
         private int disposed;
 
@@ -34,28 +40,41 @@ namespace DS4Windows
                 throw new ArgumentOutOfRangeException(nameof(processId));
             }
 
+            fixedProcessId = processId;
             WaveFormat = new WaveFormat(44100, 16, 2);
-            audioClient = ProcessLoopbackAudioClient.Activate(processId,
-                TimeSpan.FromSeconds(5));
-            audioClient.Initialize(AudioClientShareMode.Shared,
-                AudioClientStreamFlags.Loopback |
-                    AudioClientStreamFlags.EventCallback,
-                CaptureBufferMilliseconds * 10000L, 0, WaveFormat,
-                Guid.Empty);
-            audioClient.SetEventHandle(
-                captureEvent.SafeWaitHandle.DangerousGetHandle());
-            captureClient = audioClient.AudioCaptureClient;
-            captureThread = new Thread(CaptureLoop)
+        }
+
+        private ProcessLoopbackWaveCapture(int automaticSlot,
+            AudioHapticsProfileSettings settings)
+        {
+            if (automaticSlot < 0 ||
+                automaticSlot >= Global.TEST_PROFILE_ITEM_COUNT)
             {
-                IsBackground = true,
-                Name = $"DS4W app speaker capture {processId}",
-                Priority = ThreadPriority.AboveNormal,
-            };
+                throw new ArgumentOutOfRangeException(nameof(automaticSlot));
+            }
+            this.automaticSlot = automaticSlot;
+            automaticSettings = (settings ??
+                new AudioHapticsProfileSettings()).Clone();
+            automaticDetector = new AutomaticGameAudioDetector();
+            WaveFormat = new WaveFormat(44100, 16, 2);
         }
 
         public WaveFormat WaveFormat { get; set; }
+        public int CurrentProcessId => Volatile.Read(ref currentProcessId);
+        public string CurrentSourceDisplayName
+        {
+            get
+            {
+                lock (sessionLock) return currentSourceDisplayName;
+            }
+        }
         public event EventHandler<WaveInEventArgs> DataAvailable;
         public event EventHandler<StoppedEventArgs> RecordingStopped;
+        public event EventHandler<ProcessAudioSourceChangedEventArgs>
+            SourceChanged;
+
+        public static ProcessLoopbackWaveCapture CreateAutomatic(int slot) =>
+            new(slot, Global.store.audioHapticsSettings[slot]);
 
         public void StartRecording()
         {
@@ -65,8 +84,21 @@ namespace DS4Windows
                 return;
             }
 
-            captureThread.Start();
-            audioClient.Start();
+            if (automaticSlot >= 0)
+            {
+                monitorThread = new Thread(AutomaticMonitorLoop)
+                {
+                    IsBackground = true,
+                    Name = $"DS4W automatic game audio {automaticSlot + 1}",
+                    Priority = ThreadPriority.AboveNormal,
+                };
+                monitorThread.Start();
+            }
+            else
+            {
+                SwitchToProcess(fixedProcessId,
+                    DescribeProcess(fixedProcessId), "selected app");
+            }
         }
 
         public void StopRecording()
@@ -77,36 +109,64 @@ namespace DS4Windows
             }
 
             stopped.Set();
-            try { audioClient.Stop(); } catch { }
-            captureEvent.Set();
-            if (captureThread.IsAlive &&
-                !ReferenceEquals(Thread.CurrentThread, captureThread))
+            ProcessCaptureSession oldSession;
+            lock (sessionLock)
             {
-                captureThread.Join(1200);
+                oldSession = session;
+                session = null;
+                currentProcessId = 0;
+            }
+            oldSession?.Dispose();
+            if (automaticSlot >= 0)
+            {
+                SourceChanged?.Invoke(this,
+                    new ProcessAudioSourceChangedEventArgs(0,
+                        "Waiting for a detected game", "waiting"));
+            }
+            if (monitorThread?.IsAlive == true &&
+                !ReferenceEquals(Thread.CurrentThread, monitorThread))
+            {
+                monitorThread.Join(1200);
             }
         }
 
         public void Dispose()
         {
             StopRecording();
-            captureClient.Dispose();
-            audioClient.Dispose();
-            captureEvent.Dispose();
             stopped.Dispose();
         }
 
         public static string BuildEndpointId(int processId) =>
             $"{EndpointPrefix}{processId}";
 
+        public static string BuildAutomaticEndpointId(int slot) =>
+            $"{AutomaticEndpointPrefix}{slot}";
+
         public static bool IsProcessEndpointId(string endpointId) =>
             endpointId?.StartsWith(EndpointPrefix,
+                StringComparison.Ordinal) == true ||
+            IsAutomaticEndpointId(endpointId);
+
+        public static bool IsAutomaticEndpointId(string endpointId) =>
+            endpointId?.StartsWith(AutomaticEndpointPrefix,
                 StringComparison.Ordinal) == true;
+
+        public static bool TryParseAutomaticEndpointId(string endpointId,
+            out int slot)
+        {
+            slot = -1;
+            return IsAutomaticEndpointId(endpointId) &&
+                int.TryParse(endpointId.Substring(
+                    AutomaticEndpointPrefix.Length), out slot) &&
+                slot >= 0 && slot < Global.TEST_PROFILE_ITEM_COUNT;
+        }
 
         public static bool TryParseEndpointId(string endpointId,
             out int processId)
         {
             processId = 0;
-            return IsProcessEndpointId(endpointId) &&
+            return endpointId?.StartsWith(EndpointPrefix,
+                    StringComparison.Ordinal) == true &&
                 int.TryParse(endpointId.Substring(EndpointPrefix.Length),
                     out processId) && processId > 0;
         }
@@ -163,75 +223,359 @@ namespace DS4Windows
             return 0;
         }
 
-        private void CaptureLoop()
+        private void AutomaticMonitorLoop()
         {
-            Exception stoppedWith = null;
-            WaitHandle[] waits = { stopped, captureEvent };
+            int proposedProcessId = 0;
+            int proposedCount = 0;
+            int misses = 0;
             try
             {
                 while (Volatile.Read(ref disposed) == 0)
                 {
-                    int signaled = WaitHandle.WaitAny(waits, 1000);
-                    if (signaled == 0)
+                    int current = CurrentProcessId;
+                    GameAudioCandidate candidate = null;
+                    bool detected = automaticDetector.TryDetect(current,
+                        out candidate);
+                    if (!detected && current == 0)
                     {
-                        break;
+                        int fallback = ResolveProcessId(automaticSettings);
+                        if (fallback > 0)
+                        {
+                            candidate = new GameAudioCandidate
+                            {
+                                ProcessId = fallback,
+                                DisplayName = DescribeProcess(fallback),
+                                Evidence = GameDetectionEvidence.None,
+                            };
+                            detected = true;
+                        }
                     }
-                    if (signaled == 1)
+
+                    if (detected && candidate.ProcessId == current)
                     {
-                        DrainCapture();
+                        proposedProcessId = 0;
+                        proposedCount = 0;
+                        misses = 0;
                     }
+                    else if (detected)
+                    {
+                        misses = 0;
+                        if (candidate.ProcessId == proposedProcessId)
+                        {
+                            proposedCount++;
+                        }
+                        else
+                        {
+                            proposedProcessId = candidate.ProcessId;
+                            proposedCount = 1;
+                        }
+                        // Acquire the first game immediately. Require two
+                        // consistent scans before changing an active stream.
+                        if (current == 0 || proposedCount >= 2)
+                        {
+                            try
+                            {
+                                SwitchToProcess(candidate.ProcessId,
+                                    candidate.DisplayName,
+                                    candidate.EvidenceDescription);
+                            }
+                            catch (Exception exception)
+                            {
+                                AppLogger.LogToGui(
+                                    $"Automatic game audio could not attach to '{candidate.DisplayName}': {exception.Message}",
+                                    true);
+                            }
+                            proposedProcessId = 0;
+                            proposedCount = 0;
+                        }
+                    }
+                    else if (current > 0 && ++misses >= 10 &&
+                        !ProcessIsAlive(current))
+                    {
+                        ClearCurrentSession();
+                        misses = 0;
+                    }
+
+                    if (stopped.WaitOne(DetectionIntervalMilliseconds)) break;
                 }
             }
-            catch (Exception ex) when (Volatile.Read(ref disposed) == 0)
-            {
-                stoppedWith = ex;
-            }
-            finally
+            catch (Exception exception) when (
+                Volatile.Read(ref disposed) == 0)
             {
                 RecordingStopped?.Invoke(this,
-                    new StoppedEventArgs(stoppedWith));
+                    new StoppedEventArgs(exception));
             }
         }
 
-        private void DrainCapture()
+        private void SwitchToProcess(int processId, string displayName,
+            string evidence)
         {
-            while (Volatile.Read(ref disposed) == 0)
+            if (processId <= 0 || processId == CurrentProcessId ||
+                Volatile.Read(ref disposed) != 0)
             {
-                int nextFrames = captureClient.GetNextPacketSize();
-                if (nextFrames <= 0)
+                return;
+            }
+
+            ProcessCaptureSession replacement = null;
+            replacement = new ProcessCaptureSession(processId, WaveFormat,
+                (buffer, count) => OnSessionData(replacement, buffer, count),
+                (_, exception) => OnSessionStopped(replacement, exception));
+            ProcessCaptureSession oldSession;
+            int oldProcessId;
+            string oldDisplayName;
+            lock (sessionLock)
+            {
+                if (Volatile.Read(ref disposed) != 0)
                 {
+                    replacement.Dispose();
                     return;
                 }
+                oldSession = session;
+                oldProcessId = currentProcessId;
+                oldDisplayName = currentSourceDisplayName;
+                session = replacement;
+                currentProcessId = processId;
+                currentSourceDisplayName = string.IsNullOrWhiteSpace(
+                    displayName) ? DescribeProcess(processId) : displayName;
+            }
+            try
+            {
+                replacement.Start();
+            }
+            catch
+            {
+                lock (sessionLock)
+                {
+                    if (ReferenceEquals(session, replacement))
+                    {
+                        session = oldSession;
+                        currentProcessId = oldProcessId;
+                        currentSourceDisplayName = oldDisplayName;
+                    }
+                }
+                replacement.Dispose();
+                throw;
+            }
+            oldSession?.Dispose();
+            string selector = automaticSlot >= 0 ?
+                "Automatic game audio" : "App audio";
+            AppLogger.LogToGui(
+                $"{selector} selected '{CurrentSourceDisplayName}' " +
+                $"(process {processId}, {evidence}).", false);
+            SourceChanged?.Invoke(this,
+                new ProcessAudioSourceChangedEventArgs(processId,
+                    CurrentSourceDisplayName, evidence));
+        }
 
-                IntPtr buffer = captureClient.GetBuffer(
-                    out int framesAvailable, out AudioClientBufferFlags flags,
-                    out _, out _);
+        private void ClearCurrentSession()
+        {
+            ProcessCaptureSession oldSession;
+            lock (sessionLock)
+            {
+                oldSession = session;
+                session = null;
+                currentProcessId = 0;
+                currentSourceDisplayName = string.Empty;
+            }
+            oldSession?.Dispose();
+            SourceChanged?.Invoke(this,
+                new ProcessAudioSourceChangedEventArgs(0,
+                    "Waiting for a detected game", "waiting"));
+        }
+
+        private void OnSessionData(ProcessCaptureSession source,
+            byte[] buffer, int byteCount)
+        {
+            if (ReferenceEquals(session, source))
+            {
+                DataAvailable?.Invoke(this,
+                    new WaveInEventArgs(buffer, byteCount));
+            }
+        }
+
+        private void OnSessionStopped(ProcessCaptureSession source,
+            Exception exception)
+        {
+            if (Volatile.Read(ref disposed) != 0) return;
+            bool wasCurrent = false;
+            lock (sessionLock)
+            {
+                if (ReferenceEquals(session, source))
+                {
+                    session = null;
+                    currentProcessId = 0;
+                    currentSourceDisplayName = string.Empty;
+                    wasCurrent = true;
+                }
+            }
+            source?.Dispose();
+            if (wasCurrent && automaticSlot >= 0)
+            {
+                SourceChanged?.Invoke(this,
+                    new ProcessAudioSourceChangedEventArgs(0,
+                        "Waiting for a detected game", "waiting"));
+            }
+            else if (wasCurrent)
+            {
+                RecordingStopped?.Invoke(this,
+                    new StoppedEventArgs(exception));
+            }
+        }
+
+        private static bool ProcessIsAlive(int processId)
+        {
+            try
+            {
+                using Process process = Process.GetProcessById(processId);
+                return !process.HasExited;
+            }
+            catch { return false; }
+        }
+
+        private static string DescribeProcess(int processId)
+        {
+            try
+            {
+                using Process process = Process.GetProcessById(processId);
+                return !string.IsNullOrWhiteSpace(process.MainWindowTitle)
+                    ? process.MainWindowTitle : process.ProcessName;
+            }
+            catch { return $"process {processId}"; }
+        }
+
+        private sealed class ProcessCaptureSession : IDisposable
+        {
+            private readonly AudioClient audioClient;
+            private readonly AudioCaptureClient captureClient;
+            private readonly EventWaitHandle captureEvent = new(false,
+                EventResetMode.AutoReset);
+            private readonly ManualResetEvent stopped = new(false);
+            private readonly Thread captureThread;
+            private readonly WaveFormat waveFormat;
+            private readonly Action<byte[], int> dataAvailable;
+            private readonly Action<int, Exception> recordingStopped;
+            private byte[] scratch = Array.Empty<byte>();
+            private int disposed;
+
+            public ProcessCaptureSession(int processId, WaveFormat waveFormat,
+                Action<byte[], int> dataAvailable,
+                Action<int, Exception> recordingStopped)
+            {
+                ProcessId = processId;
+                this.waveFormat = waveFormat;
+                this.dataAvailable = dataAvailable;
+                this.recordingStopped = recordingStopped;
+                audioClient = ProcessLoopbackAudioClient.Activate(processId,
+                    TimeSpan.FromSeconds(5));
+                audioClient.Initialize(AudioClientShareMode.Shared,
+                    AudioClientStreamFlags.Loopback |
+                        AudioClientStreamFlags.EventCallback,
+                    CaptureBufferMilliseconds * 10000L, 0, waveFormat,
+                    Guid.Empty);
+                audioClient.SetEventHandle(
+                    captureEvent.SafeWaitHandle.DangerousGetHandle());
+                captureClient = audioClient.AudioCaptureClient;
+                captureThread = new Thread(CaptureLoop)
+                {
+                    IsBackground = true,
+                    Name = $"DS4W app audio capture {processId}",
+                    Priority = ThreadPriority.Highest,
+                };
+            }
+
+            public int ProcessId { get; }
+
+            public void Start()
+            {
+                captureThread.Start();
+                audioClient.Start();
+            }
+
+            private void CaptureLoop()
+            {
+                Exception stoppedWith = null;
+                WaitHandle[] waits = { stopped, captureEvent };
                 try
                 {
-                    int byteCount = checked(framesAvailable *
-                        WaveFormat.BlockAlign);
-                    if (scratch.Length < byteCount)
+                    while (Volatile.Read(ref disposed) == 0)
                     {
-                        scratch = new byte[byteCount];
+                        int signaled = WaitHandle.WaitAny(waits, 1000);
+                        if (signaled == 0) break;
+                        if (signaled == 1) DrainCapture();
                     }
-                    if ((flags & AudioClientBufferFlags.Silent) != 0 ||
-                        buffer == IntPtr.Zero)
-                    {
-                        Array.Clear(scratch, 0, byteCount);
-                    }
-                    else
-                    {
-                        Marshal.Copy(buffer, scratch, 0, byteCount);
-                    }
-
-                    DataAvailable?.Invoke(this,
-                        new WaveInEventArgs(scratch, byteCount));
+                }
+                catch (Exception exception) when (
+                    Volatile.Read(ref disposed) == 0)
+                {
+                    stoppedWith = exception;
                 }
                 finally
                 {
-                    captureClient.ReleaseBuffer(framesAvailable);
+                    if (Volatile.Read(ref disposed) == 0)
+                    {
+                        recordingStopped?.Invoke(ProcessId, stoppedWith);
+                    }
                 }
             }
+
+            private void DrainCapture()
+            {
+                while (Volatile.Read(ref disposed) == 0)
+                {
+                    int nextFrames = captureClient.GetNextPacketSize();
+                    if (nextFrames <= 0) return;
+                    IntPtr buffer = captureClient.GetBuffer(
+                        out int framesAvailable,
+                        out AudioClientBufferFlags flags, out _, out _);
+                    try
+                    {
+                        int byteCount = checked(framesAvailable *
+                            waveFormat.BlockAlign);
+                        if (scratch.Length < byteCount)
+                            scratch = new byte[byteCount];
+                        if ((flags & AudioClientBufferFlags.Silent) != 0 ||
+                            buffer == IntPtr.Zero)
+                            Array.Clear(scratch, 0, byteCount);
+                        else
+                            Marshal.Copy(buffer, scratch, 0, byteCount);
+                        dataAvailable?.Invoke(scratch, byteCount);
+                    }
+                    finally
+                    {
+                        captureClient.ReleaseBuffer(framesAvailable);
+                    }
+                }
+            }
+
+            public void Dispose()
+            {
+                if (Interlocked.Exchange(ref disposed, 1) != 0) return;
+                stopped.Set();
+                try { audioClient.Stop(); } catch { }
+                captureEvent.Set();
+                if (captureThread.IsAlive &&
+                    !ReferenceEquals(Thread.CurrentThread, captureThread))
+                    captureThread.Join(1200);
+                captureClient.Dispose();
+                audioClient.Dispose();
+                captureEvent.Dispose();
+                stopped.Dispose();
+            }
         }
+    }
+
+    internal sealed class ProcessAudioSourceChangedEventArgs : EventArgs
+    {
+        public ProcessAudioSourceChangedEventArgs(int processId,
+            string displayName, string evidence)
+        {
+            ProcessId = processId;
+            DisplayName = displayName ?? string.Empty;
+            Evidence = evidence ?? string.Empty;
+        }
+
+        public int ProcessId { get; }
+        public string DisplayName { get; }
+        public string Evidence { get; }
     }
 }

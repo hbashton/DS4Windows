@@ -87,6 +87,8 @@ namespace DS4WinWPF.DS4Forms
                 attackCombo.SelectedIndex = (int)settings.Attack;
                 releaseCombo.SelectedIndex = (int)settings.Release;
                 SelectStoredSource(settings);
+                automaticGameDetectionToggle.IsChecked =
+                    settings.AutomaticGameDetection;
                 streamAppToSpeakerToggle.IsChecked =
                     settings.StreamAppAudioToController;
                 SetEditorEnabled(true);
@@ -112,6 +114,14 @@ namespace DS4WinWPF.DS4Forms
                 new AudioSourceChoice { DisplayName = "System audio", Kind = AudioHapticsSourceKind.SystemAudio },
                 new AudioSourceChoice { DisplayName = "Controller audio", Kind = AudioHapticsSourceKind.ControllerAudio },
             };
+            if (settings?.AutomaticGameDetection == true)
+            {
+                choices.Add(new AudioSourceChoice
+                {
+                    DisplayName = "No fallback app selected",
+                    Kind = AudioHapticsSourceKind.AppSession,
+                });
+            }
 
             try
             {
@@ -191,6 +201,11 @@ namespace DS4WinWPF.DS4Forms
         {
             sourceCombo.SelectedItem = sourceCombo.Items.Cast<AudioSourceChoice>()
                 .FirstOrDefault(choice => SourceMatches(choice, settings))
+                ?? (settings.AutomaticGameDetection
+                    ? sourceCombo.Items.Cast<AudioSourceChoice>()
+                        .FirstOrDefault(choice => choice.Kind ==
+                            AudioHapticsSourceKind.AppSession)
+                    : null)
                 ?? sourceCombo.Items.Cast<AudioSourceChoice>().FirstOrDefault();
         }
 
@@ -198,6 +213,10 @@ namespace DS4WinWPF.DS4Forms
         {
             if (choice.Kind != settings.Source) return false;
             if (choice.Kind != AudioHapticsSourceKind.AppSession) return true;
+            if (settings.AutomaticGameDetection && settings.ProcessId == 0 &&
+                string.IsNullOrWhiteSpace(settings.ExecutableName) &&
+                choice.ProcessId == 0 &&
+                string.IsNullOrWhiteSpace(choice.ExecutableName)) return true;
             if (!string.IsNullOrEmpty(settings.SessionInstanceIdentifier) &&
                 choice.SessionInstanceIdentifier == settings.SessionInstanceIdentifier) return true;
             if (!string.IsNullOrEmpty(settings.SessionIdentifier) &&
@@ -219,6 +238,7 @@ namespace DS4WinWPF.DS4Forms
             attackCombo.IsEnabled = hasDevice;
             releaseCombo.IsEnabled = hasDevice;
             streamAppToSpeakerToggle.IsEnabled = hasDevice;
+            automaticGameDetectionToggle.IsEnabled = hasDevice;
         }
 
         private void UpdateAppSpeakerOption(
@@ -292,7 +312,8 @@ namespace DS4WinWPF.DS4Forms
 
             AudioHapticsRuntimeStatus runtime =
                 Program.rootHub.GetAudioHapticsStatus(deviceIndex);
-            statusText.Text = runtime.Active ? "Active" : runtime.Message;
+            statusText.Text = runtime.Active &&
+                !settings.AutomaticGameDetection ? "Active" : runtime.Message;
             statusDot.Fill = runtime.Active
                 ? FindBrush("SuccessColor", Brushes.LimeGreen)
                 : FindBrush("AccentColor", Brushes.DodgerBlue);
@@ -301,6 +322,8 @@ namespace DS4WinWPF.DS4Forms
         private static string SourceDisplayName(AudioHapticsProfileSettings settings) => settings.Source switch
         {
             AudioHapticsSourceKind.ControllerAudio => "Controller audio",
+            AudioHapticsSourceKind.AppSession when
+                settings.AutomaticGameDetection => "Automatic game detection",
             AudioHapticsSourceKind.AppSession => string.IsNullOrWhiteSpace(settings.DisplayName)
                 ? (string.IsNullOrWhiteSpace(settings.ExecutableName) ? "Selected app" : settings.ExecutableName)
                 : settings.DisplayName,
@@ -339,13 +362,36 @@ namespace DS4WinWPF.DS4Forms
             Commit(settings =>
             {
                 settings.Source = choice.Kind;
+                if (choice.Kind != AudioHapticsSourceKind.AppSession)
+                {
+                    settings.AutomaticGameDetection = false;
+                }
                 settings.ProcessId = choice.ProcessId;
-                settings.DisplayName = choice.DisplayName.Replace("  ·  App", string.Empty).Replace("  ·  Unavailable", string.Empty);
+                settings.DisplayName = settings.AutomaticGameDetection &&
+                    choice.ProcessId == 0 &&
+                    string.IsNullOrWhiteSpace(choice.ExecutableName)
+                    ? string.Empty
+                    : choice.DisplayName.Replace("  ·  App", string.Empty)
+                        .Replace("  ·  Unavailable", string.Empty);
                 settings.ExecutableName = choice.ExecutableName;
                 settings.ProcessPath = choice.ProcessPath;
                 settings.SessionIdentifier = choice.SessionIdentifier;
                 settings.SessionInstanceIdentifier = choice.SessionInstanceIdentifier;
             });
+        }
+        private void AutomaticGameDetectionToggle_Click(object sender,
+            RoutedEventArgs e)
+        {
+            Commit(settings =>
+            {
+                settings.AutomaticGameDetection =
+                    automaticGameDetectionToggle.IsChecked == true;
+                if (settings.AutomaticGameDetection)
+                {
+                    settings.Source = AudioHapticsSourceKind.AppSession;
+                }
+            });
+            RefreshSourcesAndSettings();
         }
         private void StreamAppToSpeakerToggle_Click(object sender,
             RoutedEventArgs e) => Commit(settings =>

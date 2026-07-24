@@ -487,6 +487,23 @@ namespace DS4Windows
 
             StopCapture();
 
+            if (ProcessLoopbackWaveCapture.TryParseAutomaticEndpointId(
+                    requestedCaptureEndpointId, out int automaticSlot))
+            {
+                capture = ProcessLoopbackWaveCapture.CreateAutomatic(
+                    automaticSlot);
+                captureEndpointId = requestedCaptureEndpointId;
+                captureEndpointKind = endpointKind;
+                captureFormat = capture.WaveFormat;
+                capture.DataAvailable += Capture_DataAvailable;
+                capture.RecordingStopped += Capture_RecordingStopped;
+                capture.StartRecording();
+                AppLogger.LogToGui(
+                    "DualSense audio passthrough capture source: automatic game detection",
+                    false);
+                return;
+            }
+
             if (ProcessLoopbackWaveCapture.TryParseEndpointId(
                     requestedCaptureEndpointId, out int processId))
             {
@@ -837,6 +854,10 @@ namespace DS4Windows
             bool explicitEndpointOwnedByDirectSource)
         {
             endpointId ??= string.Empty;
+            if (ProcessLoopbackWaveCapture.IsProcessEndpointId(endpointId))
+            {
+                return false;
+            }
             if (string.IsNullOrEmpty(endpointId) ||
                 string.Equals(endpointId, AutoDetectGameAudioEndpointId,
                     StringComparison.Ordinal))
@@ -859,6 +880,10 @@ namespace DS4Windows
             DirectSpeakerEndpointOwnership explicitEndpointOwnership)
         {
             endpointId ??= string.Empty;
+            if (ProcessLoopbackWaveCapture.IsProcessEndpointId(endpointId))
+            {
+                return DirectSpeakerRouteDecision.Loopback;
+            }
             if (string.Equals(endpointId, DefaultSystemAudioEndpointId,
                 StringComparison.Ordinal))
             {

@@ -45,6 +45,7 @@ namespace DS4WindowsTests
             true, false)]
         [DataRow("{0.0.0.00000000}.{virtual-controller}", true, true)]
         [DataRow("{0.0.0.00000000}.{other-endpoint}", false, false)]
+        [DataRow("DS4Windows:AudioHapticsAuto:0", true, false)]
         public void DirectSpeakerRouteHonorsExplicitEndpointOwnership(
             string endpointId, bool endpointOwnedByDirectSource, bool expected)
         {
@@ -77,6 +78,9 @@ namespace DS4WindowsTests
             (int)DirectSpeakerRouteDecision.Loopback)]
         [DataRow("explicit", false, false,
             (int)DirectSpeakerEndpointOwnership.Unresolved,
+            (int)DirectSpeakerRouteDecision.Loopback)]
+        [DataRow("DS4Windows:AudioHapticsAuto:0", true, true,
+            (int)DirectSpeakerEndpointOwnership.Owned,
             (int)DirectSpeakerRouteDecision.Loopback)]
         public void DirectSpeakerRouteRetriesTransientEnumerationAndRecovery(
             string endpointId, bool capable, bool active, int ownership,

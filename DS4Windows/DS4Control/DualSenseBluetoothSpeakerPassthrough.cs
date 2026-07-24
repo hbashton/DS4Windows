@@ -765,6 +765,14 @@ namespace DS4Windows
         private static IWaveIn CreateCapture(string endpointId,
             ControllerAudioEndpointKind endpointKind, out string sourceName)
         {
+            if (ProcessLoopbackWaveCapture.TryParseAutomaticEndpointId(
+                    endpointId, out int automaticSlot))
+            {
+                sourceName = "automatic game detection";
+                return ProcessLoopbackWaveCapture.CreateAutomatic(
+                    automaticSlot);
+            }
+
             if (ProcessLoopbackWaveCapture.TryParseEndpointId(endpointId,
                     out int processId))
             {

@@ -71,6 +71,7 @@ namespace DS4Windows
 
         public bool Enabled { get; set; }
         public bool StreamAppAudioToController { get; set; }
+        public bool AutomaticGameDetection { get; set; }
         public AudioHapticsSourceKind Source { get; set; } = AudioHapticsSourceKind.SystemAudio;
         public AudioHapticsMode Mode { get; set; } = AudioHapticsMode.Mix;
         public int GainPercent { get; set; } = DefaultGainPercent;
@@ -104,6 +105,10 @@ namespace DS4Windows
             SessionIdentifier = (SessionIdentifier ?? string.Empty).Trim();
             SessionInstanceIdentifier = (SessionInstanceIdentifier ?? string.Empty).Trim();
             ProcessId = Math.Max(0, ProcessId);
+            if (AutomaticGameDetection)
+            {
+                Source = AudioHapticsSourceKind.AppSession;
+            }
             if (Source != AudioHapticsSourceKind.AppSession)
             {
                 StreamAppAudioToController = false;
@@ -115,6 +120,7 @@ namespace DS4Windows
         {
             Enabled = Enabled,
             StreamAppAudioToController = StreamAppAudioToController,
+            AutomaticGameDetection = AutomaticGameDetection,
             Source = Source,
             Mode = Mode,
             GainPercent = GainPercent,
@@ -132,6 +138,7 @@ namespace DS4Windows
 
         public bool IsDefaultConfiguration() =>
             !Enabled && !StreamAppAudioToController &&
+            !AutomaticGameDetection &&
             Source == AudioHapticsSourceKind.SystemAudio &&
             Mode == AudioHapticsMode.Mix && GainPercent == DefaultGainPercent &&
             BassFocus == AudioHapticsBassFocus.Balanced &&

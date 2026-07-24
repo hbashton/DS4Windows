@@ -58,6 +58,7 @@ namespace DS4WindowsTests
                 AudioHapticsSettings = new AudioHapticsProfileSettings
                 {
                     Enabled = true,
+                    AutomaticGameDetection = true,
                     Source = AudioHapticsSourceKind.AppSession,
                     Mode = AudioHapticsMode.Replace,
                     GainPercent = 145,
@@ -91,6 +92,8 @@ namespace DS4WindowsTests
 
             Assert.IsTrue(xml.Contains("<AudioHaptics>"));
             Assert.IsTrue(restored.AudioHapticsSettings.Enabled);
+            Assert.IsTrue(restored.AudioHapticsSettings
+                .AutomaticGameDetection);
             Assert.AreEqual(AudioHapticsSourceKind.AppSession,
                 restored.AudioHapticsSettings.Source);
             Assert.AreEqual(AudioHapticsMode.Replace,
@@ -134,6 +137,114 @@ namespace DS4WindowsTests
             settings.Source = AudioHapticsSourceKind.SystemAudio;
             settings.Normalize();
             Assert.IsFalse(settings.StreamAppAudioToController);
+        }
+
+        [TestMethod]
+        public void AutomaticGameDetectionForcesAnAppSessionSource()
+        {
+            AudioHapticsProfileSettings settings =
+                new AudioHapticsProfileSettings
+                {
+                    AutomaticGameDetection = true,
+                    Source = AudioHapticsSourceKind.SystemAudio,
+                }.Normalize();
+
+            Assert.AreEqual(AudioHapticsSourceKind.AppSession,
+                settings.Source);
+            Assert.IsTrue(settings.Clone().AutomaticGameDetection);
+            Assert.IsFalse(settings.IsDefaultConfiguration());
+        }
+
+        [TestMethod]
+        public void ManifestGameBeatsAnUnclassifiedAudioApp()
+        {
+            GameAudioCandidate game = AutomaticGameAudioDetector.ScoreCandidate(
+                42, "game.exe", @"C:\Games\Example\game.exe", "Example",
+                hasActiveAudio: true, isForeground: false,
+                fullscreenDirect3D: false,
+                GameDetectionEvidence.InstalledGameManifest, "Example Game");
+            GameAudioCandidate app = AutomaticGameAudioDetector.ScoreCandidate(
+                43, "music.exe", @"C:\Apps\music.exe", "Music",
+                hasActiveAudio: true, isForeground: true,
+                fullscreenDirect3D: false, GameDetectionEvidence.None,
+                string.Empty);
+
+            Assert.IsNotNull(game);
+            Assert.AreEqual("Example Game", game.DisplayName);
+            Assert.IsNull(app,
+                "Ordinary foreground audio must never be guessed to be a game.");
+        }
+
+        [TestMethod]
+        public void FullscreenDirect3DForegroundAppIsAWindowsGameCandidate()
+        {
+            GameAudioCandidate candidate =
+                AutomaticGameAudioDetector.ScoreCandidate(42, "unknown.exe",
+                    @"C:\Games\Unknown\unknown.exe", "Unknown Game",
+                    hasActiveAudio: true, isForeground: true,
+                    fullscreenDirect3D: true, GameDetectionEvidence.None,
+                    string.Empty);
+
+            Assert.IsNotNull(candidate);
+            Assert.AreEqual(GameDetectionEvidence.FullscreenDirect3D,
+                candidate.Evidence);
+        }
+
+        [TestMethod]
+        public void LauncherProcessesAreNeverAutomaticGameCandidates()
+        {
+            GameAudioCandidate candidate =
+                AutomaticGameAudioDetector.ScoreCandidate(42,
+                    "EpicGamesLauncher.exe",
+                    @"C:\Apps\EpicGamesLauncher.exe", "Epic",
+                    hasActiveAudio: true, isForeground: true,
+                    fullscreenDirect3D: true,
+                    GameDetectionEvidence.WindowsGameRecord, "Epic");
+
+            Assert.IsNull(candidate);
+        }
+
+        [TestMethod]
+        public void AutomaticProcessEndpointRoundTripsControllerSlot()
+        {
+            string endpoint = ProcessLoopbackWaveCapture
+                .BuildAutomaticEndpointId(2);
+
+            Assert.IsTrue(ProcessLoopbackWaveCapture
+                .TryParseAutomaticEndpointId(endpoint, out int slot));
+            Assert.AreEqual(2, slot);
+            Assert.IsFalse(ProcessLoopbackWaveCapture.TryParseEndpointId(
+                endpoint, out _));
+        }
+
+        [TestMethod]
+        public void InstalledCatalogMatchesExactWindowsRecordsAndGameRoots()
+        {
+            InstalledGameCatalog catalog = InstalledGameCatalog.FromEntries(
+                new[]
+                {
+                    (@"C:\Recorded\game.exe", "Recorded Game",
+                        GameDetectionEvidence.WindowsGameRecord),
+                    (@"C:\Steam\common\Example", "Manifest Game",
+                        GameDetectionEvidence.InstalledGameManifest),
+                });
+
+            Assert.AreEqual(GameDetectionEvidence.WindowsGameRecord,
+                catalog.Match(@"C:\Recorded\game.exe", "game", string.Empty,
+                    out string recordedName));
+            Assert.AreEqual("Recorded Game", recordedName);
+            Assert.AreEqual(GameDetectionEvidence.WindowsGameRecord,
+                catalog.Match(string.Empty, "game.exe", string.Empty,
+                    out string executableName));
+            Assert.AreEqual("Recorded Game", executableName);
+            Assert.AreEqual(GameDetectionEvidence.InstalledGameManifest,
+                catalog.Match(@"C:\Steam\common\Example\bin\game.exe",
+                    "game", string.Empty, out string manifestName));
+            Assert.AreEqual("Manifest Game", manifestName);
+            Assert.AreEqual(GameDetectionEvidence.InstalledGameManifest,
+                catalog.Match(string.Empty, "unknown.exe",
+                    "Manifest Game - DirectX 12", out string windowName));
+            Assert.AreEqual("Manifest Game", windowName);
         }
 
         [TestMethod]

@@ -3388,6 +3388,19 @@ namespace DS4Windows
         internal static void ApplyProductionDuplexAudioMode(byte[] report,
             bool microphoneEnabled)
         {
+            // The validated clean 0x12 capture used the controller's maximum
+            // (one-millisecond) input interval for the entire audio session.
+            // Propagating a slower profile interval into every 4 ms speaker
+            // report made inbound HID traffic and outbound ACL completions
+            // collapse into the same periodic credit window. Keep the audio
+            // lane at the Sony default while preserving the A0/A1 duplex mode.
+            if (report == null || report.Length < 7)
+            {
+                throw new ArgumentException(
+                    "A production-duplex-a1 report must include a Bluetooth CRC.",
+                    nameof(report));
+            }
+            report[1] = (byte)(report[1] & 0xC0);
             ApplySpeakerOnlyAudioMode(report, "production-duplex-a1",
                 DualShock4AudioTransportSettings.
                     GetProductionDuplexAudioMode(microphoneEnabled));

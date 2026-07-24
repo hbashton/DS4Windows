@@ -868,11 +868,13 @@ namespace DS4WindowsTests
             byte[] frame = new byte[
                 DualShock4BluetoothAudioProtocol.SpeakerSbcFrameLength];
             byte[] report = DualShock4BluetoothAudioProtocol.
-                BuildSpeakerReport(11, new[] { frame });
+                BuildSpeakerReport(11, new[] { frame },
+                    bluetoothPollRate: 5);
 
             DualShock4BluetoothSpeakerPassthrough.
                 ApplyProductionDuplexAudioMode(report,
                     microphoneEnabled: false);
+            Assert.AreEqual(0x40, report[1]);
             Assert.AreEqual(0xA0, report[2]);
             Assert.AreEqual(
                 DualShock4BluetoothAudioProtocol.ComputeBluetoothCrc(
@@ -891,10 +893,12 @@ namespace DS4WindowsTests
             byte[] control = DualShock4BluetoothAudioProtocol.
                 BuildAudioControlReport(speakerEnabled: true,
                     microphoneEnabled: true, speakerVolume: 0x4F,
-                    headphoneVolume: 0x4F, microphoneVolume: 0x4F);
+                    headphoneVolume: 0x4F, microphoneVolume: 0x4F,
+                    bluetoothPollRate: 5);
             DualShock4BluetoothSpeakerPassthrough.
                 ApplyProductionDuplexAudioMode(control,
                     microphoneEnabled: true);
+            Assert.AreEqual(0xC0, control[1]);
             Assert.AreEqual(0xA1, control[2]);
             Assert.AreEqual(
                 DualShock4BluetoothAudioProtocol.ComputeBluetoothCrc(

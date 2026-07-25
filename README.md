@@ -1,7 +1,7 @@
 # DS4Windows
 
-[![CI Build](https://github.com/hbashton/DS4Windows/actions/workflows/ci-build.yml/badge.svg?branch=viiper-ui-rebuild)](https://github.com/hbashton/DS4Windows/actions/workflows/ci-build.yml?query=branch%3Aviiper-ui-rebuild)
-[![Download CI builds](https://img.shields.io/badge/download-CI%20artifacts-2f81f7?logo=githubactions&logoColor=white)](https://github.com/hbashton/DS4Windows/actions/workflows/ci-build.yml?query=branch%3Aviiper-ui-rebuild)
+[![CI Build](https://github.com/hbashton/DS4Windows/actions/workflows/ci-build.yml/badge.svg?branch=main)](https://github.com/hbashton/DS4Windows/actions/workflows/ci-build.yml?query=branch%3Amain)
+[![Download CI builds](https://img.shields.io/badge/download-CI%20artifacts-2f81f7?logo=githubactions&logoColor=white)](https://github.com/hbashton/DS4Windows/actions/workflows/ci-build.yml?query=branch%3Amain)
 [![Reddit](https://img.shields.io/badge/community-Reddit-ff4500?logo=reddit&logoColor=white)](https://www.reddit.com/r/DS4Windows/)
 [![Support on PayPal](https://img.shields.io/badge/support-PayPal-0070ba?logo=paypal&logoColor=white)](https://www.paypal.com/paypalme/hbashton)
 

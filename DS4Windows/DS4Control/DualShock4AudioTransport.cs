@@ -57,6 +57,18 @@ namespace DS4Windows
             ProductionReplayPrimeFrames +
                 ProductionReplayRetainedSourceFrames;
         internal const int ProductionReplayCadenceMilliseconds = 8;
+        // WASAPI loopback is encoded at 16 kHz as well. Preserve the old
+        // controller-side 80 ms prime and 64 ms source reserve in units of
+        // eight-millisecond SBC frames. Using the 32 kHz protocol constants
+        // here accidentally drove one 8 ms frame every 4 ms, eventually
+        // filling every overlapped HID slot and producing static/dropouts.
+        internal const int CaptureLoopbackCadenceMilliseconds =
+            ProductionReplayCadenceMilliseconds;
+        internal const int CaptureLoopbackPrimeReports = 10;
+        internal const int CaptureLoopbackRetainedSourceFrames = 8;
+        internal const int CaptureLoopbackStartupBufferedFrames =
+            CaptureLoopbackPrimeReports +
+                CaptureLoopbackRetainedSourceFrames;
         internal const byte RealtimeReportId = 0x12;
         internal const int ProductionReplayIdleReprimeMilliseconds = 200;
         internal const byte ProductionReplaySpeakerAudioMode = 0xA2;

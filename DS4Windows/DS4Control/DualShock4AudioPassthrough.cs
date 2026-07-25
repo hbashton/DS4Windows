@@ -49,7 +49,8 @@ namespace DS4Windows
         public void Start(int slot, DS4Device device, byte speakerVolume,
             DualSenseSpeakerCompression compression, byte bassBoost,
             string captureEndpointId, OutContType emulatedControllerType,
-            ViiperOutDevice directSpeakerSource = null)
+            ViiperOutDevice directSpeakerSource = null,
+            bool headsetOnlyAudio = false)
         {
             if (slot < 0 || slot >= slots.Length)
             {
@@ -71,14 +72,15 @@ namespace DS4Windows
             {
                 if (slots[slot]?.Matches(device, speakerVolume, compression,
                     bassBoost, captureEndpointId, endpointKind,
-                    directSpeakerSource) == true)
+                    directSpeakerSource, headsetOnlyAudio) == true)
                 {
                     return;
                 }
 
                 if (pendingStarts[slot]?.Matches(device, speakerVolume,
                     compression, bassBoost, captureEndpointId,
-                    endpointKind, directSpeakerSource) == true)
+                    endpointKind, directSpeakerSource,
+                    headsetOnlyAudio) == true)
                 {
                     return;
                 }
@@ -89,7 +91,7 @@ namespace DS4Windows
                 generation = ++startGenerations[slot];
                 pendingStarts[slot] = new StartRequest(device, speakerVolume,
                     compression, bassBoost, captureEndpointId, endpointKind,
-                    directSpeakerSource, generation);
+                    directSpeakerSource, headsetOnlyAudio, generation);
             }
 
             AppLogger.LogToGui(
@@ -103,7 +105,7 @@ namespace DS4Windows
                     previous?.Dispose();
                     StartWorker(slot, device, speakerVolume, compression,
                         bassBoost, captureEndpointId, endpointKind,
-                        directSpeakerSource, generation);
+                        directSpeakerSource, headsetOnlyAudio, generation);
                 }
             }, $"DualShock 4 audio startup {slot + 1}");
         }
@@ -186,7 +188,8 @@ namespace DS4Windows
         private void StartWorker(int slot, DS4Device device, byte speakerVolume,
             DualSenseSpeakerCompression compression, byte bassBoost,
             string captureEndpointId, ControllerAudioEndpointKind endpointKind,
-            ViiperOutDevice directSpeakerSource, int generation)
+            ViiperOutDevice directSpeakerSource, bool headsetOnlyAudio,
+            int generation)
         {
             const int attempts = 20;
             Exception lastError = null;
@@ -229,7 +232,8 @@ namespace DS4Windows
                         directSpeakerSource : null;
                 var playback = new DualShock4BluetoothSpeakerPassthrough(device,
                     speakerVolume, compression, bassBoost, captureEndpointId,
-                    endpointKind, activeDirectSpeakerSource);
+                    endpointKind, activeDirectSpeakerSource,
+                    headsetOnlyAudio);
                 try
                 {
                     playback.Start();
@@ -316,12 +320,14 @@ namespace DS4Windows
             private readonly string sourceEndpointId;
             private readonly ControllerAudioEndpointKind sourceEndpointKind;
             private readonly ViiperOutDevice directSpeakerSource;
+            private readonly bool headsetOnlyAudio;
 
             public StartRequest(DS4Device device, byte speakerVolume,
                 DualSenseSpeakerCompression compression, byte bassBoost,
                 string sourceEndpointId,
                 ControllerAudioEndpointKind sourceEndpointKind,
-                ViiperOutDevice directSpeakerSource, int generation)
+                ViiperOutDevice directSpeakerSource, bool headsetOnlyAudio,
+                int generation)
             {
                 this.device = device;
                 this.speakerVolume = speakerVolume;
@@ -334,6 +340,7 @@ namespace DS4Windows
                 this.sourceEndpointId = sourceEndpointId ?? string.Empty;
                 this.sourceEndpointKind = sourceEndpointKind;
                 this.directSpeakerSource = directSpeakerSource;
+                this.headsetOnlyAudio = headsetOnlyAudio;
                 Generation = generation;
             }
 
@@ -343,7 +350,8 @@ namespace DS4Windows
                 DualSenseSpeakerCompression candidateCompression,
                 byte candidateBassBoost, string candidateSourceEndpointId,
                 ControllerAudioEndpointKind candidateSourceEndpointKind,
-                ViiperOutDevice candidateDirectSpeakerSource)
+                ViiperOutDevice candidateDirectSpeakerSource,
+                bool candidateHeadsetOnlyAudio)
             {
                 return ReferenceEquals(device, candidate) &&
                     speakerVolume == candidateVolume &&
@@ -357,6 +365,7 @@ namespace DS4Windows
                     sourceEndpointKind == candidateSourceEndpointKind &&
                     ReferenceEquals(directSpeakerSource,
                         candidateDirectSpeakerSource) &&
+                    headsetOnlyAudio == candidateHeadsetOnlyAudio &&
                     string.Equals(sourceEndpointId,
                         candidateSourceEndpointId ?? string.Empty,
                         StringComparison.Ordinal);

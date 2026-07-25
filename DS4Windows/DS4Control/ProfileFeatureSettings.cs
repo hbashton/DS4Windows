@@ -71,6 +71,7 @@ namespace DS4Windows
 
         public bool Enabled { get; set; }
         public bool StreamAppAudioToController { get; set; }
+        public bool StreamAppAudioToHeadsetOnly { get; set; }
         public bool AutomaticGameDetection { get; set; }
         public AudioHapticsSourceKind Source { get; set; } = AudioHapticsSourceKind.SystemAudio;
         public AudioHapticsMode Mode { get; set; } = AudioHapticsMode.Mix;
@@ -113,6 +114,10 @@ namespace DS4Windows
             {
                 StreamAppAudioToController = false;
             }
+            if (!StreamAppAudioToController)
+            {
+                StreamAppAudioToHeadsetOnly = false;
+            }
             return this;
         }
 
@@ -120,6 +125,7 @@ namespace DS4Windows
         {
             Enabled = Enabled,
             StreamAppAudioToController = StreamAppAudioToController,
+            StreamAppAudioToHeadsetOnly = StreamAppAudioToHeadsetOnly,
             AutomaticGameDetection = AutomaticGameDetection,
             Source = Source,
             Mode = Mode,
@@ -138,6 +144,7 @@ namespace DS4Windows
 
         public bool IsDefaultConfiguration() =>
             !Enabled && !StreamAppAudioToController &&
+            !StreamAppAudioToHeadsetOnly &&
             !AutomaticGameDetection &&
             Source == AudioHapticsSourceKind.SystemAudio &&
             Mode == AudioHapticsMode.Mix && GainPercent == DefaultGainPercent &&

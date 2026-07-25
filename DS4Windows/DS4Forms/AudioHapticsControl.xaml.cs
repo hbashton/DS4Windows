@@ -91,6 +91,8 @@ namespace DS4WinWPF.DS4Forms
                     settings.AutomaticGameDetection;
                 streamAppToSpeakerToggle.IsChecked =
                     settings.StreamAppAudioToController;
+                streamAppToHeadsetOnlyToggle.IsChecked =
+                    settings.StreamAppAudioToHeadsetOnly;
                 SetEditorEnabled(true);
                 UpdateAppSpeakerOption(settings);
                 UpdateModeVisuals(settings.Mode);
@@ -238,6 +240,7 @@ namespace DS4WinWPF.DS4Forms
             attackCombo.IsEnabled = hasDevice;
             releaseCombo.IsEnabled = hasDevice;
             streamAppToSpeakerToggle.IsEnabled = hasDevice;
+            streamAppToHeadsetOnlyToggle.IsEnabled = hasDevice;
             automaticGameDetectionToggle.IsEnabled = hasDevice;
         }
 
@@ -253,6 +256,11 @@ namespace DS4WinWPF.DS4Forms
                 CurrentSettings != null && appSelected;
             streamAppToSpeakerToggle.IsChecked = appSelected &&
                 settings.StreamAppAudioToController;
+            bool canSelectHeadset = CurrentSettings != null && appSelected &&
+                settings.StreamAppAudioToController;
+            streamAppToHeadsetOnlyPanel.IsEnabled = canSelectHeadset;
+            streamAppToHeadsetOnlyToggle.IsChecked = canSelectHeadset &&
+                settings.StreamAppAudioToHeadsetOnly;
         }
 
         private void UpdateModeVisuals(AudioHapticsMode mode)
@@ -399,11 +407,22 @@ namespace DS4WinWPF.DS4Forms
                 settings.StreamAppAudioToController =
                     streamAppToSpeakerToggle.IsChecked == true &&
                     settings.Source == AudioHapticsSourceKind.AppSession;
+                if (!settings.StreamAppAudioToController)
+                {
+                    settings.StreamAppAudioToHeadsetOnly = false;
+                }
                 if (settings.StreamAppAudioToController && deviceIndex >= 0 &&
                     deviceIndex < Global.TEST_PROFILE_ITEM_COUNT)
                 {
                     Global.DualSenseEnableSpeakerOutput[deviceIndex] = true;
                 }
+            });
+        private void StreamAppToHeadsetOnlyToggle_Click(object sender,
+            RoutedEventArgs e) => Commit(settings =>
+            {
+                settings.StreamAppAudioToHeadsetOnly =
+                    settings.StreamAppAudioToController &&
+                    streamAppToHeadsetOnlyToggle.IsChecked == true;
             });
         private void MixMode_Click(object sender, RoutedEventArgs e) => Commit(settings => settings.Mode = AudioHapticsMode.Mix);
         private void ReplaceMode_Click(object sender, RoutedEventArgs e) => Commit(settings => settings.Mode = AudioHapticsMode.Replace);

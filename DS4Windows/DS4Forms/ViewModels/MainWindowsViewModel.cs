@@ -418,9 +418,32 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public void RefreshRuntimeState(ControlService controlService)
         {
-            foreach (CompositeDeviceModel controller in controllerCol)
+            // Controller discovery can add/remove an item while this UI timer
+            // is firing. ObservableCollection's enumerator is fail-fast, so
+            // an otherwise harmless startup overlap used to terminate the
+            // whole application. Index a captured collection reference and
+            // tolerate a concurrent removal; the next timer tick reconciles
+            // anything that moved.
+            ObservableCollection<CompositeDeviceModel> controllers =
+                controllerCol;
+            int count = controllers.Count;
+            for (int index = 0; index < count; index++)
             {
-                controller.SynchronizeRuntimeProfile();
+                CompositeDeviceModel controller;
+                try
+                {
+                    if (index >= controllers.Count)
+                    {
+                        break;
+                    }
+                    controller = controllers[index];
+                }
+                catch (ArgumentOutOfRangeException)
+                {
+                    break;
+                }
+
+                controller?.SynchronizeRuntimeProfile();
             }
 
             OverviewRuntimeSnapshot snapshot =

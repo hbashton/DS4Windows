@@ -152,7 +152,7 @@ function Get-GithubReleaseAsset([string]$repo, [string]$assetPattern) {
 
 function Get-ViiperAssetUrl {
     $errors = @()
-    foreach ($repo in @("hbashton/VIIPER", "Alia5/VIIPER")) {
+    foreach ($repo in @("hbashton/VIIPER")) {
         try {
             Write-SetupLog "Checking release assets in $repo"
             return Get-GithubReleaseAsset $repo (

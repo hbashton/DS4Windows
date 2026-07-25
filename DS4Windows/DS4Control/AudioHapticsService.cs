@@ -176,6 +176,7 @@ namespace DS4Windows
             internal const int CaptureBufferMilliseconds = 5;
             internal const int MaximumLivePacketAgeMilliseconds = 24;
             internal const int UsbOutputLatencyMilliseconds = 10;
+            private const int ControllerAudioEndpointRetryIntervalMilliseconds = 250;
             private const long PacketIntervalNumerator =
                 FramesPerPacket * 10000000L;
             private const int TelemetryIntervalMilliseconds = 5000;
@@ -228,6 +229,7 @@ namespace DS4Windows
             private string sourceDisplayName = "audio source";
             private AudioHapticsRuntimeStatus status =
                 AudioHapticsRuntimeStatus.Starting;
+            private long nextControllerAudioRetryTicks;
 
             public SlotRuntime(int slot, DualSenseDevice device,
                 AudioHapticsProfileSettings settings, OutContType outputType,
@@ -252,6 +254,9 @@ namespace DS4Windows
                 {
                     return;
                 }
+
+                status = AudioHapticsRuntimeStatus.Starting;
+                nextControllerAudioRetryTicks = 0;
 
                 if (settings.Source == AudioHapticsSourceKind.AppSession)
                 {
@@ -279,11 +284,6 @@ namespace DS4Windows
                     Priority = ThreadPriority.Highest,
                 };
                 writerThread.Start();
-                status = settings.AutomaticGameDetection &&
-                    processCapture?.CurrentProcessId <= 0
-                    ? new AudioHapticsRuntimeStatus(false,
-                        "Waiting for a detected game")
-                    : AudioHapticsRuntimeStatus.Running;
             }
 
             public bool ApplyToGameHaptics(byte[] report, int sampleOffset)
@@ -343,7 +343,7 @@ namespace DS4Windows
 
             private void StartEndpointCapture()
             {
-                MMDeviceEnumerator enumerator = new MMDeviceEnumerator();
+                using MMDeviceEnumerator enumerator = new MMDeviceEnumerator();
                 MMDevice endpoint = null;
                 if (settings.Source == AudioHapticsSourceKind.ControllerAudio)
                 {
@@ -353,9 +353,10 @@ namespace DS4Windows
                         controllerAudioUsbipPort);
                     if (endpoint == null)
                     {
-                        enumerator.Dispose();
-                        throw new InvalidOperationException(
-                            "The emulated controller audio endpoint is not available yet.");
+                        sourceDisplayName = "Waiting for controller audio source";
+                        status = new AudioHapticsRuntimeStatus(false,
+                            "Waiting for a controller audio source");
+                        return;
                     }
                 }
                 else
@@ -364,7 +365,12 @@ namespace DS4Windows
                         Role.Multimedia);
                 }
 
-                enumerator.Dispose();
+                if (endpoint == null)
+                {
+                    throw new InvalidOperationException(
+                        "The emulated controller audio endpoint is not available yet.");
+                }
+
                 captureEndpoint = endpoint;
                 sourceDisplayName = endpoint.FriendlyName;
                 capture = new LowLatencyLoopbackCapture(endpoint,
@@ -375,6 +381,7 @@ namespace DS4Windows
                 capture.DataAvailable += Capture_DataAvailable;
                 capture.RecordingStopped += Capture_RecordingStopped;
                 capture.StartRecording();
+                status = AudioHapticsRuntimeStatus.Running;
             }
 
             private void StartProcessCapture()
@@ -408,6 +415,41 @@ namespace DS4Windows
                 processCapture.RecordingStopped += Capture_RecordingStopped;
                 processCapture.SourceChanged += ProcessCapture_SourceChanged;
                 processCapture.StartRecording();
+                if (!settings.AutomaticGameDetection)
+                {
+                    status = AudioHapticsRuntimeStatus.Running;
+                }
+            }
+
+            private void EnsureControllerAudioCapture()
+            {
+                if (settings.Source != AudioHapticsSourceKind.ControllerAudio ||
+                    capture != null || processCapture != null ||
+                    Volatile.Read(ref disposed) != 0)
+                {
+                    return;
+                }
+
+                long now = Stopwatch.GetTimestamp();
+                if (now < nextControllerAudioRetryTicks)
+                {
+                    return;
+                }
+
+                long retryInterval = (long)(ControllerAudioEndpointRetryIntervalMilliseconds *
+                    (double)Stopwatch.Frequency / 1000.0);
+                nextControllerAudioRetryTicks = now + retryInterval;
+
+                try
+                {
+                    StartEndpointCapture();
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.LogToGui(
+                        $"Audio Haptics could not initialize source for controller {slot + 1}: {ex.Message}",
+                        true);
+                }
             }
 
             private void Capture_DataAvailable(object sender,
@@ -547,6 +589,7 @@ namespace DS4Windows
 
                 while (Volatile.Read(ref disposed) == 0)
                 {
+                    EnsureControllerAudioCapture();
                     WaitUntil(clock, nextPacketTicks);
                     nextPacketTicks += packetIntervalTicks;
                     if (clock.ElapsedTicks - nextPacketTicks >

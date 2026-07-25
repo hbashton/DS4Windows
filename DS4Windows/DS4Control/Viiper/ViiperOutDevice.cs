@@ -254,6 +254,7 @@ namespace DS4Windows
         private bool triggerLabRumbleStateKnown;
         private bool lastTriggerLabLeftRumbleEnabled;
         private bool lastTriggerLabRightRumbleEnabled;
+        private readonly object triggerLabRumbleLock = new object();
         private int dualShock4DecodedPcmFifoCount;
         private int dualShock4LastDecodedPcmCount;
         private ushort dualShock4LastMicrophoneSequence;
@@ -569,6 +570,11 @@ namespace DS4Windows
 
         internal void BindPhysicalController(int deviceIndex)
         {
+            int previousDeviceIndex = Volatile.Read(ref lastInputDeviceIndex);
+            if (previousDeviceIndex != deviceIndex)
+            {
+                ReleaseTriggerLabRumbleOverrides(previousDeviceIndex);
+            }
             Volatile.Write(ref lastInputDeviceIndex, deviceIndex);
             if (connected)
             {
@@ -1019,6 +1025,8 @@ namespace DS4Windows
             // old monitor from reattaching after this synchronous detach.
             DetachBluetoothMicrophoneSource();
             ResetLegacyDualSenseRumbleDeduplication();
+            ReleaseTriggerLabRumbleOverrides(
+                Volatile.Read(ref lastInputDeviceIndex));
             ResetTriggerLabRumbleState();
             StopMicrophoneInterfaceMonitor();
             lock (pendingPacketLock)
@@ -3280,12 +3288,50 @@ namespace DS4Windows
 
         private void ResetTriggerLabRumbleState()
         {
-            triggerLabRumbleStateKnown = false;
-            lastTriggerLabLeftRumble = 0;
-            lastTriggerLabRightRumble = 0;
-            lastTriggerLabRumbleSignature = 0;
-            lastTriggerLabLeftRumbleEnabled = false;
-            lastTriggerLabRightRumbleEnabled = false;
+            lock (triggerLabRumbleLock)
+            {
+                triggerLabRumbleStateKnown = false;
+                lastTriggerLabLeftRumble = 0;
+                lastTriggerLabRightRumble = 0;
+                lastTriggerLabRumbleSignature = 0;
+                lastTriggerLabLeftRumbleEnabled = false;
+                lastTriggerLabRightRumbleEnabled = false;
+            }
+        }
+
+        private void ReleaseTriggerLabRumbleOverrides(int deviceIndex)
+        {
+            lock (triggerLabRumbleLock)
+            {
+                if (!triggerLabRumbleStateKnown ||
+                    (!lastTriggerLabLeftRumbleEnabled &&
+                        !lastTriggerLabRightRumbleEnabled) ||
+                    deviceIndex < 0 || Program.rootHub == null ||
+                    deviceIndex >= Program.rootHub.DS4Controllers.Length ||
+                    Program.rootHub.DS4Controllers[deviceIndex] is not
+                        DualSenseDevice dualSenseDevice ||
+                    !IsCurrentPhysicalSonyDualSense(dualSenseDevice))
+                {
+                    return;
+                }
+
+                TriggerLabProfileSettings settings =
+                    TriggerLabForDevice(deviceIndex);
+                if (lastTriggerLabLeftRumbleEnabled)
+                {
+                    TriggerLabEffectEncoder.ApplyToDevice(dualSenseDevice,
+                        TriggerId.LeftTrigger, settings?.Left,
+                        settings?.Enabled == true &&
+                            settings.LeftActive);
+                }
+                if (lastTriggerLabRightRumbleEnabled)
+                {
+                    TriggerLabEffectEncoder.ApplyToDevice(dualSenseDevice,
+                        TriggerId.RightTrigger, settings?.Right,
+                        settings?.Enabled == true &&
+                            settings.RightActive);
+                }
+            }
         }
 
         private void ApplyGameRumbleTriggerVibration(DS4Device device,
@@ -3297,58 +3343,62 @@ namespace DS4Windows
                 return;
             }
 
-            TriggerLabProfileSettings settings =
-                TriggerLabForDevice(deviceIndex);
-            bool leftEnabled = settings?.Enabled == true &&
-                settings.LeftGameRumbleVibration;
-            bool rightEnabled = settings?.Enabled == true &&
-                settings.RightGameRumbleVibration;
-            int signature = TriggerLabRumbleSignature(settings);
-            if (triggerLabRumbleStateKnown &&
-                lastTriggerLabLeftRumble == heavySlow &&
-                lastTriggerLabRightRumble == lightFast &&
-                lastTriggerLabRumbleSignature == signature &&
-                lastTriggerLabLeftRumbleEnabled == leftEnabled &&
-                lastTriggerLabRightRumbleEnabled == rightEnabled)
+            lock (triggerLabRumbleLock)
             {
-                return;
-            }
+                TriggerLabProfileSettings settings =
+                    TriggerLabForDevice(deviceIndex);
+                bool leftEnabled = settings?.Enabled == true &&
+                    settings.LeftGameRumbleVibration;
+                bool rightEnabled = settings?.Enabled == true &&
+                    settings.RightGameRumbleVibration;
+                int signature = TriggerLabRumbleSignature(settings);
+                if (triggerLabRumbleStateKnown &&
+                    lastTriggerLabLeftRumble == heavySlow &&
+                    lastTriggerLabRightRumble == lightFast &&
+                    lastTriggerLabRumbleSignature == signature &&
+                    lastTriggerLabLeftRumbleEnabled == leftEnabled &&
+                    lastTriggerLabRightRumbleEnabled == rightEnabled)
+                {
+                    return;
+                }
 
-            bool restoreLeft = lastTriggerLabLeftRumbleEnabled &&
-                !leftEnabled;
-            bool restoreRight = lastTriggerLabRightRumbleEnabled &&
-                !rightEnabled;
-            triggerLabRumbleStateKnown = true;
-            lastTriggerLabLeftRumble = heavySlow;
-            lastTriggerLabRightRumble = lightFast;
-            lastTriggerLabRumbleSignature = signature;
-            lastTriggerLabLeftRumbleEnabled = leftEnabled;
-            lastTriggerLabRightRumbleEnabled = rightEnabled;
+                bool restoreLeft = lastTriggerLabLeftRumbleEnabled &&
+                    !leftEnabled;
+                bool restoreRight = lastTriggerLabRightRumbleEnabled &&
+                    !rightEnabled;
+                triggerLabRumbleStateKnown = true;
+                lastTriggerLabLeftRumble = heavySlow;
+                lastTriggerLabRightRumble = lightFast;
+                lastTriggerLabRumbleSignature = signature;
+                lastTriggerLabLeftRumbleEnabled = leftEnabled;
+                lastTriggerLabRightRumbleEnabled = rightEnabled;
 
-            if (leftEnabled)
-            {
-                TriggerLabEffectEncoder.ApplyGameRumbleToDevice(
-                    dualSenseDevice, TriggerId.LeftTrigger, settings.Left,
-                    settings.LeftActive, heavySlow);
-            }
-            else if (restoreLeft)
-            {
-                TriggerLabEffectEncoder.ApplyToDevice(dualSenseDevice,
-                    TriggerId.LeftTrigger, settings?.Left,
-                    settings?.Enabled == true && settings.LeftActive);
-            }
+                if (leftEnabled)
+                {
+                    TriggerLabEffectEncoder.ApplyGameRumbleToDevice(
+                        dualSenseDevice, TriggerId.LeftTrigger, settings.Left,
+                        settings.LeftActive, heavySlow);
+                }
+                else if (restoreLeft)
+                {
+                    TriggerLabEffectEncoder.ApplyToDevice(dualSenseDevice,
+                        TriggerId.LeftTrigger, settings?.Left,
+                        settings?.Enabled == true && settings.LeftActive);
+                }
 
-            if (rightEnabled)
-            {
-                TriggerLabEffectEncoder.ApplyGameRumbleToDevice(
-                    dualSenseDevice, TriggerId.RightTrigger, settings.Right,
-                    settings.RightActive, lightFast);
-            }
-            else if (restoreRight)
-            {
-                TriggerLabEffectEncoder.ApplyToDevice(dualSenseDevice,
-                    TriggerId.RightTrigger, settings?.Right,
-                    settings?.Enabled == true && settings.RightActive);
+                if (rightEnabled)
+                {
+                    TriggerLabEffectEncoder.ApplyGameRumbleToDevice(
+                        dualSenseDevice, TriggerId.RightTrigger,
+                        settings.Right, settings.RightActive, lightFast);
+                }
+                else if (restoreRight)
+                {
+                    TriggerLabEffectEncoder.ApplyToDevice(dualSenseDevice,
+                        TriggerId.RightTrigger, settings?.Right,
+                        settings?.Enabled == true &&
+                            settings.RightActive);
+                }
             }
         }
 

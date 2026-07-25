@@ -3,23 +3,44 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
+$script:ExitCode = 0
+$script:RebootRecommended = $false
+$script:InstallDir = Join-Path $env:LOCALAPPDATA "VIIPER"
+$script:LogPath = Join-Path $script:InstallDir "install.log"
+$script:TempDir = Join-Path ([IO.Path]::GetTempPath()) (
+    "DS4Windows-VIIPER-Setup-" + [Guid]::NewGuid().ToString("N"))
 
-function Write-Step($message) {
+function Write-SetupLog([string]$message, [ConsoleColor]$color =
+        [ConsoleColor]::Gray) {
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    Write-Host $message -ForegroundColor $color
+    try {
+        Add-Content -LiteralPath $script:LogPath -Value (
+            "[$timestamp] $message") -Encoding UTF8
+    }
+    catch { }
+}
+
+function Write-Step([string]$message) {
     Write-Host ""
-    Write-Host "== $message ==" -ForegroundColor Cyan
+    Write-SetupLog "== $message ==" Cyan
 }
 
 function Test-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = [Security.Principal.WindowsPrincipal]::new($identity)
-    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    return $principal.IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
 function Get-UsbipInstalledVersion {
     $driverPath = Join-Path $env:SystemRoot "System32\drivers\usbip2_ude.sys"
-    if (Test-Path $driverPath) {
+    if (Test-Path -LiteralPath $driverPath) {
         try {
-            return [Version](Get-Item $driverPath).VersionInfo.FileVersion
+            $versionText = (Get-Item -LiteralPath $driverPath).
+                VersionInfo.FileVersion
+            if ($versionText) { return [Version]$versionText }
         }
         catch { }
     }
@@ -32,207 +53,292 @@ function Get-UsbipInstalledVersion {
             Where-Object { $_.DisplayName -match "USB/IP|USBip" } |
             Select-Object -First 1
         if ($entry -and $entry.DisplayVersion) {
-            try {
-                return [Version]$entry.DisplayVersion
-            }
-            catch { }
+            try { return [Version]$entry.DisplayVersion } catch { }
         }
     }
 
     return $null
 }
 
-function Invoke-Download($url, $outFile) {
-    Write-Host "Downloading $url"
-    Invoke-WebRequest -Uri $url -OutFile $outFile -UseBasicParsing
+function Invoke-Download([string]$url, [string]$outFile) {
+    $lastError = $null
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        try {
+            Write-SetupLog "Downloading $url (attempt $attempt of 3)"
+            Invoke-WebRequest -Uri $url -OutFile $outFile -UseBasicParsing `
+                -TimeoutSec 60 -Headers @{ "User-Agent" =
+                    "DS4Windows-VIIPER-Setup" }
+            if (-not (Test-Path -LiteralPath $outFile) -or
+                (Get-Item -LiteralPath $outFile).Length -le 0) {
+                throw "The downloaded file was empty."
+            }
+            return
+        }
+        catch {
+            $lastError = $_.Exception
+            if ($attempt -lt 3) { Start-Sleep -Seconds $attempt }
+        }
+    }
+
+    throw "Download failed after three attempts: $($lastError.Message)"
 }
 
-function Get-GithubReleaseAsset($repo, $assetPattern) {
+function Get-GithubReleaseAsset([string]$repo, [string]$assetPattern) {
     $apiUrl = "https://api.github.com/repos/$repo/releases?per_page=20"
-    $releases = Invoke-RestMethod -Uri $apiUrl -Headers @{ "User-Agent" = "DS4Windows-VIIPER-Setup" }
-
-    if (-not $releases) {
-        throw "No releases were found in $repo."
+    $releases = Invoke-RestMethod -Uri $apiUrl -TimeoutSec 30 -Headers @{
+        "User-Agent" = "DS4Windows-VIIPER-Setup"
+        "Accept" = "application/vnd.github+json"
     }
+    if (-not $releases) { throw "No releases were found in $repo." }
 
     foreach ($release in @($releases | Where-Object { -not $_.draft })) {
         $asset = @($release.assets) |
             Where-Object { $_.name -match $assetPattern } |
             Sort-Object @{ Expression = {
-                if ($_.name -match '(?i)^viiper-(windows|win)-(amd64|x64)\.zip$') { 0 }
+                if ($_.name -match
+                    '(?i)^viiper-(windows|win)-(amd64|x64)\.zip$') { 0 }
                 elseif ($_.name -match '(?i)^viiper\.exe$') { 1 }
-                elseif ($_.name -match '(?i)(windows|win).*(amd64|x64).*\.(exe|zip)$') { 2 }
+                elseif ($_.name -match
+                    '(?i)(windows|win).*(amd64|x64).*\.(exe|zip)$') { 2 }
                 elseif ($_.name -match '(?i)\.(exe|zip)$') { 3 }
                 else { 4 }
-            }}, name |
-            Select-Object -First 1
-
+            }}, name | Select-Object -First 1
         if ($asset) {
-            $label = if ($release.tag_name) { $release.tag_name } elseif ($release.name) { $release.name } else { $release.id }
-            Write-Host "Using VIIPER asset '$($asset.name)' from $repo release '$label'"
+            $label = if ($release.tag_name) { $release.tag_name }
+                elseif ($release.name) { $release.name } else { $release.id }
+            Write-SetupLog (
+                "Using '$($asset.name)' from $repo release '$label'.")
             return $asset.browser_download_url
         }
     }
 
-    $assetNames = @($releases | ForEach-Object { $_.assets } | ForEach-Object { $_.name }) -join ", "
-    throw "Could not find a usable Windows VIIPER asset in $repo releases. Assets seen: $assetNames"
+    $names = @($releases | ForEach-Object { $_.assets } |
+        ForEach-Object { $_.name }) -join ", "
+    throw "No supported Windows VIIPER asset was found. Assets seen: $names"
 }
 
-function Get-GithubLatestAssetWithFallback($repos, $assetPattern) {
+function Get-ViiperAssetUrl {
     $errors = @()
-    foreach ($repo in $repos) {
+    foreach ($repo in @("hbashton/VIIPER")) {
         try {
-            Write-Host "Checking VIIPER release assets in $repo"
-            return Get-GithubReleaseAsset $repo $assetPattern
+            Write-SetupLog "Checking release assets in $repo"
+            return Get-GithubReleaseAsset $repo (
+                "(?i)^(?!.*(libviiper|client|headers|linux|arm64|\.nupkg|" +
+                "\.crate|\.tgz)).*\.(exe|zip)$")
         }
         catch {
             $errors += "${repo}: $($_.Exception.Message)"
-            Write-Host "Could not use ${repo}: $($_.Exception.Message)" -ForegroundColor Yellow
+            Write-SetupLog "Could not use ${repo}: $($_.Exception.Message)" Yellow
         }
     }
-
-    throw "Could not find a usable VIIPER release asset. Attempts: $($errors -join '; ')"
+    throw "Could not locate VIIPER. $($errors -join '; ')"
 }
 
-function Install-ViiperAsset($assetUrl, $installPath, $tempDir) {
+function Expand-ViiperAsset([string]$assetUrl, [string]$candidatePath) {
     $extension = [IO.Path]::GetExtension(([Uri]$assetUrl).AbsolutePath)
-    $downloadPath = Join-Path $tempDir ("viiper-download" + $extension)
+    $downloadPath = Join-Path $script:TempDir ("viiper-download" + $extension)
     Invoke-Download $assetUrl $downloadPath
 
     if ($extension -ieq ".exe") {
-        Copy-Item $downloadPath $installPath -Force
-        return
+        Copy-Item -LiteralPath $downloadPath -Destination $candidatePath -Force
     }
-
-    if ($extension -ieq ".zip") {
-        $extractDir = Join-Path $tempDir "viiper-extract"
-        if (Test-Path $extractDir) {
-            Remove-Item $extractDir -Recurse -Force
-        }
-
-        Expand-Archive -LiteralPath $downloadPath -DestinationPath $extractDir -Force
-        $executable = Get-ChildItem -Path $extractDir -Recurse -Filter "viiper.exe" |
-            Select-Object -First 1
-
+    elseif ($extension -ieq ".zip") {
+        $extractDir = Join-Path $script:TempDir "viiper-extract"
+        Expand-Archive -LiteralPath $downloadPath -DestinationPath $extractDir `
+            -Force
+        $executable = Get-ChildItem -LiteralPath $extractDir -Recurse `
+            -Filter "viiper.exe" | Select-Object -First 1
         if (-not $executable) {
-            throw "Downloaded VIIPER archive did not contain viiper.exe."
+            throw "The VIIPER archive did not contain viiper.exe."
         }
-
-        Copy-Item $executable.FullName $installPath -Force
-        return
-    }
-
-    throw "Unsupported VIIPER release asset type '$extension' from $assetUrl"
-}
-
-if (-not (Test-Administrator)) {
-    throw "Please run this script as Administrator. DS4Windows normally launches it elevated for you."
-}
-
-$tempDir = Join-Path $env:TEMP "DS4Windows-VIIPER-Setup"
-$installDir = Join-Path $env:LOCALAPPDATA "VIIPER"
-$viiperPath = Join-Path $installDir "viiper.exe"
-New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
-New-Item -ItemType Directory -Path $installDir -Force | Out-Null
-
-Write-Host "DS4Windows VIIPER virtual controller setup" -ForegroundColor Green
-Write-Host "This installs/repairs VIIPER and usbip-win2 for local virtual USB controller output."
-
-Write-Step "Checking usbip-win2"
-$requiredUsbipVersion = [Version]"0.9.7.7"
-$usbipVersion = Get-UsbipInstalledVersion
-if ($usbipVersion -and $usbipVersion -ge $requiredUsbipVersion) {
-    Write-Host "usbip-win2 already installed: $usbipVersion" -ForegroundColor Green
-}
-else {
-    if ($usbipVersion) {
-        Write-Host "usbip-win2 is installed but old: $usbipVersion. Updating to $requiredUsbipVersion." -ForegroundColor Yellow
+        Copy-Item -LiteralPath $executable.FullName `
+            -Destination $candidatePath -Force
     }
     else {
-        Write-Host "usbip-win2 driver was not found. Installing $requiredUsbipVersion." -ForegroundColor Yellow
+        throw "Unsupported VIIPER asset type '$extension'."
     }
 
-    $usbipUrl = "https://github.com/vadimgrn/usbip-win2/releases/download/v.0.9.7.7/USBip-0.9.7.7-x64.exe"
-    $usbipInstaller = Join-Path $tempDir "USBip-0.9.7.7-x64.exe"
-    Invoke-Download $usbipUrl $usbipInstaller
-    Write-Host "Launching usbip-win2 installer. Windows may briefly restart USB hub devices." -ForegroundColor Yellow
-    Start-Process -FilePath $usbipInstaller -ArgumentList "/S" -Wait
+    $candidate = Get-Item -LiteralPath $candidatePath
+    if ($candidate.Length -lt 65536) {
+        throw "The downloaded VIIPER executable is unexpectedly small."
+    }
+    if ($candidate.Extension -ine ".exe") {
+        throw "The downloaded VIIPER payload is not a Windows executable."
+    }
 }
 
-Write-Step "Installing VIIPER"
-$viiperRepos = @(
-    "hbashton/VIIPER"
-)
-$viiperAssetUrl = Get-GithubLatestAssetWithFallback $viiperRepos "(?i)^(?!.*(libviiper|client|headers|linux|arm64|\.nupkg|\.crate|\.tgz)).*\.(exe|zip)$"
-Install-ViiperAsset $viiperAssetUrl $viiperPath $tempDir
-Write-Host "VIIPER installed to $viiperPath" -ForegroundColor Green
+function Install-ViiperAtomically([string]$candidatePath,
+        [string]$viiperPath) {
+    $newPath = "$viiperPath.new"
+    $backupPath = "$viiperPath.previous"
+    Copy-Item -LiteralPath $candidatePath -Destination $newPath -Force
 
-Write-Step "Registering and starting VIIPER server"
+    # An explicit repair/update may replace a running backend. Stop only the
+    # VIIPER process and leave DS4Windows and every physical Bluetooth device
+    # alone.
+    Get-Process -Name "viiper" -ErrorAction SilentlyContinue |
+        Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 300
+
+    try {
+        if (Test-Path -LiteralPath $viiperPath) {
+            [IO.File]::Replace($newPath, $viiperPath, $backupPath, $true)
+        }
+        else {
+            Move-Item -LiteralPath $newPath -Destination $viiperPath -Force
+        }
+    }
+    catch {
+        if (Test-Path -LiteralPath $backupPath) {
+            Copy-Item -LiteralPath $backupPath -Destination $viiperPath -Force
+        }
+        throw
+    }
+}
+
+function Test-ViiperApi([int]$timeoutMilliseconds = 1000) {
+    $client = $null
+    try {
+        $client = [Net.Sockets.TcpClient]::new()
+        $client.NoDelay = $true
+        $client.SendTimeout = $timeoutMilliseconds
+        $client.ReceiveTimeout = $timeoutMilliseconds
+        $connect = $client.BeginConnect("127.0.0.1", 3242, $null, $null)
+        if (-not $connect.AsyncWaitHandle.WaitOne($timeoutMilliseconds)) {
+            return $false
+        }
+        $client.EndConnect($connect)
+        $stream = $client.GetStream()
+        $bytes = [Text.Encoding]::UTF8.GetBytes("ping`0")
+        $stream.Write($bytes, 0, $bytes.Length)
+        $buffer = New-Object byte[] 512
+        $read = $stream.Read($buffer, 0, $buffer.Length)
+        if ($read -le 0) { return $false }
+        $response = [Text.Encoding]::UTF8.GetString($buffer, 0, $read)
+        return $response.IndexOf("VIIPER",
+            [StringComparison]::OrdinalIgnoreCase) -ge 0
+    }
+    catch { return $false }
+    finally { if ($client) { $client.Dispose() } }
+}
+
+function Start-AndVerifyViiper([string]$viiperPath) {
+    if (Test-ViiperApi) { return $true }
+    Start-Process -FilePath $viiperPath -ArgumentList "server" `
+        -WindowStyle Hidden | Out-Null
+    for ($attempt = 0; $attempt -lt 10; $attempt++) {
+        Start-Sleep -Milliseconds 500
+        if (Test-ViiperApi) { return $true }
+    }
+    return $false
+}
+
 try {
-    Start-Process -FilePath $viiperPath -ArgumentList "install" -WindowStyle Hidden -Wait
-}
-catch {
-    Write-Host "VIIPER install command failed: $($_.Exception.Message)" -ForegroundColor Yellow
-}
+    if (-not (Test-Administrator)) {
+        throw "Administrator permission is required. Launch setup from DS4Windows so Windows can request it automatically."
+    }
 
-# Keep the backend available after sign-in without a console window or UAC
-# prompt. Re-registering makes repair/update runs idempotent and refreshes the
-# executable path if the install location ever changes.
-try {
+    New-Item -ItemType Directory -Path $script:InstallDir -Force | Out-Null
+    New-Item -ItemType Directory -Path $script:TempDir -Force | Out-Null
+    Write-SetupLog ""
+    Write-SetupLog "DS4Windows VIIPER virtual controller setup" Green
+    Write-SetupLog "Installing or repairing VIIPER and usbip-win2."
+
+    Write-Step "Checking usbip-win2"
+    $requiredUsbipVersion = [Version]"0.9.7.7"
+    $usbipVersion = Get-UsbipInstalledVersion
+    if ($usbipVersion -and $usbipVersion -ge $requiredUsbipVersion) {
+        Write-SetupLog "usbip-win2 is ready: $usbipVersion" Green
+    }
+    else {
+        $state = if ($usbipVersion) { "old ($usbipVersion)" } else { "missing" }
+        Write-SetupLog "usbip-win2 is $state; installing $requiredUsbipVersion." Yellow
+        $usbipUrl = "https://github.com/vadimgrn/usbip-win2/releases/download/v.0.9.7.7/USBip-0.9.7.7-x64.exe"
+        $usbipInstaller = Join-Path $script:TempDir "USBip-0.9.7.7-x64.exe"
+        Invoke-Download $usbipUrl $usbipInstaller
+        Write-SetupLog "Windows may briefly restart USB hub devices." Yellow
+        $installer = Start-Process -FilePath $usbipInstaller `
+            -ArgumentList "/S" -PassThru -Wait
+        if ($installer.ExitCode -notin @(0, 1641, 3010)) {
+            throw "usbip-win2 setup failed with exit code $($installer.ExitCode)."
+        }
+        if ($installer.ExitCode -in @(1641, 3010)) {
+            $script:RebootRecommended = $true
+        }
+        $usbipVersion = Get-UsbipInstalledVersion
+        if (-not $usbipVersion) {
+            $script:RebootRecommended = $true
+            Write-SetupLog "The driver will finish registering after a Windows restart." Yellow
+        }
+    }
+
+    Write-Step "Installing VIIPER"
+    $viiperPath = Join-Path $script:InstallDir "viiper.exe"
+    $candidatePath = Join-Path $script:TempDir "viiper.exe"
+    Expand-ViiperAsset (Get-ViiperAssetUrl) $candidatePath
+    Install-ViiperAtomically $candidatePath $viiperPath
+    Write-SetupLog "VIIPER installed to $viiperPath" Green
+
+    Write-Step "Registering VIIPER"
+    $registration = Start-Process -FilePath $viiperPath `
+        -ArgumentList "install" -WindowStyle Hidden -PassThru -Wait
+    if ($registration.ExitCode -ne 0) {
+        throw "VIIPER registration failed with exit code $($registration.ExitCode)."
+    }
+
     $taskName = "RunVIIPER"
-    $quotedViiper = $viiperPath.Replace("'", "''")
-    $taskCommand = "& '$quotedViiper' server"
-    $taskAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument (
-        "-NoProfile -NonInteractive -WindowStyle Hidden -Command `"$taskCommand`"")
+    $taskAction = New-ScheduledTaskAction -Execute $viiperPath `
+        -Argument "server"
     $taskUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
     $taskTrigger = New-ScheduledTaskTrigger -AtLogOn -User $taskUser
-    $taskPrincipal = New-ScheduledTaskPrincipal -UserId $taskUser -RunLevel Highest -LogonType Interactive
-    $taskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
-    Register-ScheduledTask -TaskName $taskName -Action $taskAction -Trigger $taskTrigger -Principal $taskPrincipal -Settings $taskSettings -Force | Out-Null
-    Write-Host "Registered hidden logon task '$taskName'." -ForegroundColor Green
-}
-catch {
-    Write-Host "Could not register the VIIPER logon task: $($_.Exception.Message)" -ForegroundColor Yellow
-    Write-Host "DS4Windows will still attempt to start VIIPER when it launches." -ForegroundColor Yellow
-}
+    $taskPrincipal = New-ScheduledTaskPrincipal -UserId $taskUser `
+        -RunLevel Highest -LogonType Interactive
+    $taskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
+        -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) `
+        -MultipleInstances IgnoreNew
+    Register-ScheduledTask -TaskName $taskName -Action $taskAction `
+        -Trigger $taskTrigger -Principal $taskPrincipal -Settings $taskSettings `
+        -Force | Out-Null
+    Write-SetupLog "Registered hidden logon task '$taskName'." Green
 
-try {
-    Start-Process -FilePath $viiperPath -ArgumentList "server" -WindowStyle Hidden
-    Start-Sleep -Seconds 2
-}
-catch {
-    Write-Host "VIIPER server start failed: $($_.Exception.Message)" -ForegroundColor Yellow
-}
-
-Write-Step "Verification"
-$client = $null
-try {
-    $client = [Net.Sockets.TcpClient]::new()
-    $connect = $client.BeginConnect("127.0.0.1", 3242, $null, $null)
-    if (-not $connect.AsyncWaitHandle.WaitOne([TimeSpan]::FromSeconds(3))) {
-        throw "Timed out connecting to VIIPER API."
+    Write-Step "Verification"
+    if (Start-AndVerifyViiper $viiperPath) {
+        Write-SetupLog "VIIPER API is ready." Green
+        $backupPath = "$viiperPath.previous"
+        if (Test-Path -LiteralPath $backupPath) {
+            Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue
+        }
     }
-    $client.EndConnect($connect)
-    $stream = $client.GetStream()
-    $bytes = [Text.Encoding]::UTF8.GetBytes("ping`0")
-    $stream.Write($bytes, 0, $bytes.Length)
-    $buffer = New-Object byte[] 512
-    $read = $stream.Read($buffer, 0, $buffer.Length)
-    $response = [Text.Encoding]::UTF8.GetString($buffer, 0, $read)
-    Write-Host "VIIPER API response: $response" -ForegroundColor Green
+    elseif ($script:RebootRecommended) {
+        Write-SetupLog "VIIPER is installed; restart Windows to finish driver setup." Yellow
+    }
+    else {
+        throw "VIIPER installed, but its local API did not start. See $script:LogPath"
+    }
+
+    Write-Host ""
+    $finish = if ($script:RebootRecommended) {
+        "Setup complete. Restart Windows once before using a virtual controller."
+    } else {
+        "Setup complete. VIIPER is ready for DS4Windows."
+    }
+    Write-SetupLog $finish Green
 }
 catch {
-    Write-Host "VIIPER was installed, but the API did not respond yet: $($_.Exception.Message)" -ForegroundColor Yellow
-    Write-Host "A reboot may be required after installing usbip-win2." -ForegroundColor Yellow
+    $script:ExitCode = 1
+    Write-Host ""
+    Write-SetupLog "Setup could not finish: $($_.Exception.Message)" Red
+    Write-SetupLog "Details were saved to $script:LogPath" Yellow
 }
 finally {
-    if ($client) { $client.Dispose() }
+    if (Test-Path -LiteralPath $script:TempDir) {
+        Remove-Item -LiteralPath $script:TempDir -Recurse -Force `
+            -ErrorAction SilentlyContinue
+    }
+    if (-not $NoPause) {
+        Write-Host ""
+        Read-Host "Press Enter to close"
+    }
 }
 
-Write-Host ""
-Write-Host "Setup complete. If DS4Windows still reports usbip-win2 missing, reboot Windows once." -ForegroundColor Green
-
-if (-not $NoPause) {
-    Write-Host ""
-    Read-Host "Press Enter to close"
-}
+exit $script:ExitCode

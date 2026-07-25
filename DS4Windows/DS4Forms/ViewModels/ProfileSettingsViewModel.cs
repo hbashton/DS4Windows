@@ -3247,6 +3247,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 if (audioHaptics?.StreamAppAudioToController == true)
                 {
                     audioHaptics.StreamAppAudioToController = false;
+                    audioHaptics.StreamAppAudioToHeadsetOnly = false;
                     RaiseAudioHapticsSpeakerOverrideStateChanged();
                 }
             }

@@ -60,6 +60,16 @@ namespace DS4Windows
         }
 
         public WaveFormat WaveFormat { get; set; }
+        // Process-loopback activation is a virtual render endpoint. Windows'
+        // reference implementation explicitly asks the audio engine to
+        // convert the selected app's native mix into our fixed PCM format.
+        // Omitting these flags made 48 kHz float apps sound harsh and
+        // time-warped when streamed through the controller.
+        internal const AudioClientStreamFlags CaptureStreamFlags =
+            AudioClientStreamFlags.Loopback |
+            AudioClientStreamFlags.EventCallback |
+            AudioClientStreamFlags.AutoConvertPcm |
+            AudioClientStreamFlags.SrcDefaultQuality;
         public int CurrentProcessId => Volatile.Read(ref currentProcessId);
         public string CurrentSourceDisplayName
         {
@@ -468,8 +478,7 @@ namespace DS4Windows
                 audioClient = ProcessLoopbackAudioClient.Activate(processId,
                     TimeSpan.FromSeconds(5));
                 audioClient.Initialize(AudioClientShareMode.Shared,
-                    AudioClientStreamFlags.Loopback |
-                        AudioClientStreamFlags.EventCallback,
+                    CaptureStreamFlags,
                     CaptureBufferMilliseconds * 10000L, 0, waveFormat,
                     Guid.Empty);
                 audioClient.SetEventHandle(

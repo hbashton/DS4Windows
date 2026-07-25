@@ -18,6 +18,18 @@ namespace DS4WindowsTests
             typeof(DualSenseDevice).GetMethod(
                 "ApplyBluetoothSpeakerVolumeAndRouting",
                 BindingFlags.NonPublic | BindingFlags.Static);
+        private static readonly MethodInfo ApplyVolumeAndRoutingMethod =
+            typeof(DualSenseDevice).GetMethod(
+                "ApplyBluetoothSpeakerVolumeAndRoutingCore",
+                BindingFlags.NonPublic | BindingFlags.Static);
+        private static readonly MethodInfo MapHeadphoneVolumeMethod =
+            typeof(DualSenseDevice).GetMethod(
+                "MapDualSenseHeadphoneVolume",
+                BindingFlags.NonPublic | BindingFlags.Static);
+        private static readonly MethodInfo GetSpeakerPacketTypeMethod =
+            typeof(DualSenseDevice).GetMethod(
+                "GetBluetoothCombinedSpeakerPacketType",
+                BindingFlags.NonPublic | BindingFlags.Static);
         private static readonly MethodInfo SanitizeAudioSnapshotMethod =
             typeof(DualSenseDevice).GetMethod(
                 "SanitizeBluetoothSpeakerAudioSnapshot",
@@ -65,8 +77,48 @@ namespace DS4WindowsTests
             Assert.AreEqual((byte)0xA5, report[13]);
             Assert.AreEqual((byte)0x84, report[14]);
             Assert.AreEqual(MapVolume(20), report[18]);
-            Assert.AreEqual((byte)0x30, report[20]);
+            Assert.AreEqual((byte)0x20, report[20]);
             Assert.AreEqual((byte)0x03, report[50]);
+        }
+
+        [TestMethod]
+        public void HeadsetRouteUsesAuxDacAndHeadsetAudioPacket()
+        {
+            byte[] report = new byte[64];
+            report[13] = 0xFF;
+            report[14] = 0xFF;
+            report[50] = 0x07;
+
+            Assert.IsNotNull(ApplyVolumeAndRoutingMethod);
+            ApplyVolumeAndRoutingMethod.Invoke(null, new object[]
+            {
+                report, (byte)255, true, (byte)255,
+            });
+
+            Assert.AreEqual((byte)0xDF, report[13],
+                "Headset routing retained the speaker-volume validity bit.");
+            Assert.AreEqual((byte)0x7F, report[17]);
+            Assert.AreEqual((byte)0x00, report[18]);
+            Assert.AreEqual((byte)0x00, report[20]);
+            Assert.AreEqual((byte)0x7F, report[14],
+                "Headset routing retained speaker preamp control.");
+            Assert.AreEqual((byte)0x00, report[50]);
+            Assert.AreEqual((byte)0x96,
+                InvokePacketType(headsetOnlyAudio: true));
+            Assert.AreEqual((byte)0x93,
+                InvokePacketType(headsetOnlyAudio: false));
+        }
+
+        [TestMethod]
+        public void HeadphoneProfileRangeMapsToFirmwareRange()
+        {
+            Assert.IsNotNull(MapHeadphoneVolumeMethod);
+            Assert.AreEqual((byte)0x00,
+                MapHeadphoneVolumeMethod.Invoke(null,
+                    new object[] { (byte)0 }));
+            Assert.AreEqual((byte)0x7F,
+                MapHeadphoneVolumeMethod.Invoke(null,
+                    new object[] { (byte)255 }));
         }
 
         [TestMethod]
@@ -98,6 +150,9 @@ namespace DS4WindowsTests
             report[19] = 0xFF;
             report[21] = 0x01;
             report[22] = 0x50;
+            report[57] = 0x12;
+            report[58] = 0x34;
+            report[59] = 0x56;
 
             Assert.IsNotNull(SanitizeAudioSnapshotMethod);
             SanitizeAudioSnapshotMethod.Invoke(null, new object[] { report });
@@ -108,10 +163,13 @@ namespace DS4WindowsTests
             Assert.AreEqual((byte)0xBF, report[13]);
             Assert.AreEqual((byte)0xFE, report[14]);
             Assert.AreEqual((byte)0x00, report[19]);
-            Assert.AreEqual((byte)0x30, report[20]);
+            Assert.AreEqual((byte)0x20, report[20]);
             Assert.AreEqual((byte)0x00, report[21]);
             Assert.AreEqual((byte)0x40, report[22]);
             Assert.AreEqual((byte)0x03, report[50]);
+            Assert.AreEqual((byte)0x12, report[57]);
+            Assert.AreEqual((byte)0x34, report[58]);
+            Assert.AreEqual((byte)0x56, report[59]);
         }
 
         [TestMethod]
@@ -139,6 +197,13 @@ namespace DS4WindowsTests
             Assert.IsNotNull(MapMicrophoneVolumeMethod);
             return (byte)MapMicrophoneVolumeMethod.Invoke(null,
                 new object[] { value });
+        }
+
+        private static byte InvokePacketType(bool headsetOnlyAudio)
+        {
+            Assert.IsNotNull(GetSpeakerPacketTypeMethod);
+            return (byte)GetSpeakerPacketTypeMethod.Invoke(null,
+                new object[] { headsetOnlyAudio });
         }
     }
 }

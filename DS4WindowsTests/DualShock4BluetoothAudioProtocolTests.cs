@@ -1483,6 +1483,47 @@ namespace DS4WindowsTests
             Assert.AreEqual(0xA1, speaker[2]);
         }
 
+        [TestMethod]
+        public void CaptureLoopbackPacesSixteenKilohertzFramesAtEightMilliseconds()
+        {
+            Assert.AreEqual(8, DualShock4AudioTransportSettings.
+                CaptureLoopbackCadenceMilliseconds);
+            Assert.AreEqual(10, DualShock4AudioTransportSettings.
+                CaptureLoopbackPrimeReports);
+            Assert.AreEqual(8, DualShock4AudioTransportSettings.
+                CaptureLoopbackRetainedSourceFrames);
+            Assert.AreEqual(18, DualShock4AudioTransportSettings.
+                CaptureLoopbackStartupBufferedFrames);
+
+            int primeDuration = DualShock4AudioTransportSettings.
+                CaptureLoopbackPrimeReports *
+                DualShock4AudioTransportSettings.
+                    CaptureLoopbackCadenceMilliseconds;
+            int reserveDuration = DualShock4AudioTransportSettings.
+                CaptureLoopbackRetainedSourceFrames *
+                DualShock4AudioTransportSettings.
+                    CaptureLoopbackCadenceMilliseconds;
+            Assert.AreEqual(80, primeDuration);
+            Assert.AreEqual(64, reserveDuration);
+        }
+
+        [TestMethod]
+        public void HeadsetSpeakerReportUsesSonyAuxAudioTarget()
+        {
+            byte[] frame = new byte[
+                DualShock4BluetoothAudioProtocol.SpeakerSbcFrameLength];
+            byte[] report =
+                DualShock4BluetoothAudioProtocol.BuildSpeakerReport(
+                    0, new[] { frame }, audioTarget: 0x24);
+
+            Assert.AreEqual((byte)0x12, report[0]);
+            Assert.AreEqual((byte)0x24, report[5]);
+            Assert.AreEqual(
+                DualShock4BluetoothAudioProtocol.ComputeBluetoothCrc(
+                    0xA2, report, report.Length - sizeof(uint)),
+                ReadUInt32(report, report.Length - sizeof(uint)));
+        }
+
         [DataTestMethod]
         [DataRow(1, 0x12)]
         [DataRow(2, 0x14)]

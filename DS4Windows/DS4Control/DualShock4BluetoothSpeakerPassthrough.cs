@@ -237,8 +237,8 @@ namespace DS4Windows
             DualShock4BluetoothAudioProtocol.SpeakerSbcFrameLength;
         private const int DiagnosticTimelineCapacity = 16384;
         private const double ReportCadenceMilliseconds =
-            DualShock4BluetoothAudioProtocol.
-                SpeakerRealtimeReportDurationMilliseconds;
+            DualShock4AudioTransportSettings.
+                CaptureLoopbackCadenceMilliseconds;
         private const double DirectReportCadenceMilliseconds =
             DualShock4BluetoothAudioProtocol.
                 SpeakerDirectReportDurationMilliseconds;
@@ -428,11 +428,13 @@ namespace DS4Windows
         private long creditBufferedReprimes;
         private long creditBufferedSkippedTicks;
         private int creditBufferedPrimeLogged;
+        private readonly byte audioTarget;
 
         public DualShock4BluetoothSpeakerPassthrough(DS4Device device, byte speakerVolume,
             DualSenseSpeakerCompression compression, byte bassBoost,
             string sourceEndpointId, ControllerAudioEndpointKind sourceEndpointKind,
-            ViiperOutDevice directSpeakerSource = null)
+            ViiperOutDevice directSpeakerSource = null,
+            bool headsetOnlyAudio = false)
         {
             this.device = device ?? throw new ArgumentNullException(nameof(device));
             this.speakerVolume = speakerVolume;
@@ -444,6 +446,7 @@ namespace DS4Windows
             this.sourceEndpointId = sourceEndpointId ?? string.Empty;
             this.sourceEndpointKind = sourceEndpointKind;
             this.directSpeakerSource = directSpeakerSource;
+            audioTarget = headsetOnlyAudio ? (byte)0x24 : (byte)0x02;
             directSpeakerSampleRate = directSpeakerSource?.
                 DirectSpeakerPcmSampleRate ?? 0;
             directDriftMode = DualShock4AudioDriftSettings.Parse(
@@ -477,7 +480,8 @@ namespace DS4Windows
             DualSenseSpeakerCompression candidateCompression, byte candidateBassBoost,
             string candidateSourceEndpointId,
             ControllerAudioEndpointKind candidateSourceEndpointKind,
-            ViiperOutDevice candidateDirectSpeakerSource = null)
+            ViiperOutDevice candidateDirectSpeakerSource = null,
+            bool candidateHeadsetOnlyAudio = false)
         {
             return !stopping && ReferenceEquals(device, candidate) &&
                 speakerVolume == candidateVolume &&
@@ -487,6 +491,8 @@ namespace DS4Windows
                 bassBoost == Math.Min(candidateBassBoost,
                     DualSenseSpeakerProcessor.MaximumBassBoostDb) &&
                 sourceEndpointKind == candidateSourceEndpointKind &&
+                audioTarget == (candidateHeadsetOnlyAudio ?
+                    (byte)0x24 : (byte)0x02) &&
                 ReferenceEquals(directSpeakerSource,
                     candidateDirectSpeakerSource) &&
                 string.Equals(sourceEndpointId, candidateSourceEndpointId ?? string.Empty,
@@ -2401,14 +2407,19 @@ namespace DS4Windows
             IntPtr mmcssHandle = RegisterMultimediaScheduler();
             long cadenceTicks = (long)Math.Round(Stopwatch.Frequency *
                 ReportCadenceMilliseconds / 1000.0);
+            Interlocked.Exchange(ref directCurrentCadenceTicks,
+                cadenceTicks);
+            Interlocked.Exchange(ref directTargetCadenceTicks,
+                cadenceTicks);
             try
             {
-                // Build 36 frames, queue the 20-frame (80 ms) hardware cushion,
-                // and retain sixteen source frames for capture callback jitter.
+                // Build an 80 ms hardware cushion plus a 64 ms source reserve.
+                // These are ten and eight frames respectively at 16 kHz.
                 captureAvailable.WaitOne(100);
                 for (int prime = 0; prime <
-                        DualShock4BluetoothAudioProtocol.
-                            SpeakerMinimumBufferedFrames && !stopping; prime++)
+                        DualShock4AudioTransportSettings.
+                            CaptureLoopbackStartupBufferedFrames && !stopping;
+                        prime++)
                 {
                     Array.Clear(sourceSamples, 0, sourceSamples.Length);
                     int samplesRead;
@@ -2426,8 +2437,8 @@ namespace DS4Windows
                     ResampleAndEncode(SourceFramesPerTick);
                 }
                 for (int prime = 0; prime <
-                        DualShock4BluetoothAudioProtocol.
-                            SpeakerRealtimePrimeFrames && !stopping; prime++)
+                        DualShock4AudioTransportSettings.
+                            CaptureLoopbackPrimeReports && !stopping; prime++)
                 {
                     SubmitEncodedFrames(DualShock4BluetoothAudioProtocol.
                         SpeakerRealtimeFramesPerReport, allowSilence: true);
@@ -2614,39 +2625,104 @@ namespace DS4Windows
         private void SubmitEncodedFrames(int count, bool allowSilence = false,
             bool forceSilence = false)
         {
-            byte[] report;
-            bool containsSyntheticSilence = false;
-            bool submitted = EnsureSpeakerWritePool();
-            bool hardFailure = false;
-            lock (syncRoot)
+            if ((count != DualShock4BluetoothAudioProtocol.
+                    SpeakerRealtimeFramesPerReport &&
+                 count != DualShock4BluetoothAudioProtocol.
+                    SpeakerSmallFramesPerReport &&
+                 count != DualShock4BluetoothAudioProtocol.
+                    SpeakerLargeFramesPerReport) || count <= 0)
             {
-                if ((count != DualShock4BluetoothAudioProtocol.
-                        SpeakerRealtimeFramesPerReport &&
-                     count != DualShock4BluetoothAudioProtocol.
-                        SpeakerSmallFramesPerReport &&
-                     count != DualShock4BluetoothAudioProtocol.
-                        SpeakerLargeFramesPerReport) || count <= 0)
-                {
-                    return;
-                }
+                return;
+            }
 
-                int realFrameCount = GetRealFrameCountForSubmission(count,
-                    encodedFrames.Count, allowSilence, forceSilence);
-                if (realFrameCount < 0)
+            if (!EnsureSpeakerWritePool())
+            {
+                if (Interlocked.Exchange(ref writeFailureLogged, 1) == 0)
                 {
-                    return;
+                    AppLogger.LogToGui(
+                        "DualShock 4 Bluetooth speaker could not open its dedicated audio transport.",
+                        true);
                 }
+                return;
+            }
 
-                for (int index = 0; index < realFrameCount; index++)
+            byte[] report = count switch
+            {
+                DualShock4BluetoothAudioProtocol.
+                    SpeakerRealtimeFramesPerReport => speakerRealtimeReport,
+                DualShock4BluetoothAudioProtocol.
+                    SpeakerLargeFramesPerReport => speakerLargeReport,
+                _ => speakerSmallReport,
+            };
+            bool containsSyntheticSilence = false;
+            int realFrameCount = 0;
+            bool prepared = false;
+            bool submitted = false;
+            bool hardFailure = false;
+            bool saturated = false;
+            device.ReadDualShock4BluetoothAudioModeSynchronized(
+                microphoneEnabled =>
                 {
-                    speakerFrameBatch[index] = encodedFrames.Dequeue();
-                }
-                for (int index = realFrameCount; index < count; index++)
-                {
-                    speakerFrameBatch[index] = GetEncodedSilenceFrame();
-                }
+                    submitted = speakerWritePool.TrySendPrepared(report,
+                        DualShock4AudioTransportSettings.
+                            ProductionReplaySlotCount,
+                        () =>
+                        {
+                            lock (syncRoot)
+                            {
+                                realFrameCount =
+                                    GetRealFrameCountForSubmission(count,
+                                        encodedFrames.Count, allowSilence,
+                                        forceSilence);
+                                if (realFrameCount < 0)
+                                {
+                                    return false;
+                                }
 
-                containsSyntheticSilence = realFrameCount < count;
+                                for (int index = 0;
+                                    index < realFrameCount; index++)
+                                {
+                                    speakerFrameBatch[index] =
+                                        encodedFrames.Dequeue();
+                                }
+                                for (int index = realFrameCount;
+                                    index < count; index++)
+                                {
+                                    speakerFrameBatch[index] =
+                                        GetEncodedSilenceFrame();
+                                }
+
+                                containsSyntheticSilence =
+                                    realFrameCount < count;
+                                DualShock4BluetoothAudioProtocol.
+                                    WriteSpeakerReport(report, frameNumber,
+                                        speakerFrameBatch, count,
+                                        audioTarget: audioTarget,
+                                        microphoneEnabled:
+                                            microphoneEnabled,
+                                        bluetoothPollRate:
+                                            GetBluetoothPollRate());
+                                frameNumber += (ushort)count;
+                                prepared = true;
+                                return true;
+                            }
+                        }, out hardFailure, out saturated);
+                });
+
+            if (prepared)
+            {
+                lock (syncRoot)
+                {
+                    for (int index = 0; index < count; index++)
+                    {
+                        if (index < realFrameCount)
+                        {
+                            freeEncodedFrames.Enqueue(
+                                speakerFrameBatch[index]);
+                        }
+                        speakerFrameBatch[index] = null;
+                    }
+                }
                 if (containsSyntheticSilence)
                 {
                     Interlocked.Increment(ref syntheticSilenceReports);
@@ -2660,60 +2736,28 @@ namespace DS4Windows
                         Interlocked.Increment(ref directCadenceUnderruns);
                     }
                 }
-
-                report = count switch
-                {
-                    DualShock4BluetoothAudioProtocol.
-                        SpeakerRealtimeFramesPerReport => speakerRealtimeReport,
-                    DualShock4BluetoothAudioProtocol.
-                        SpeakerLargeFramesPerReport => speakerLargeReport,
-                    _ => speakerSmallReport,
-                };
-                if (submitted)
-                {
-                    // Hold the physical audio-state gate from the moment the
-                    // A0/A1 mode byte is chosen until this report is queued.
-                    // A microphone 0x11 transition takes the same gate, drains
-                    // all older speaker writes, and therefore cannot be
-                    // followed by a stale speaker-only A0 packet.
-                    device.ReadDualShock4BluetoothAudioModeSynchronized(
-                        microphoneEnabled =>
-                        {
-                            DualShock4BluetoothAudioProtocol.WriteSpeakerReport(
-                                report, frameNumber, speakerFrameBatch, count,
-                                microphoneEnabled: microphoneEnabled,
-                                bluetoothPollRate: GetBluetoothPollRate());
-                            submitted = speakerWritePool.TrySend(report,
-                                out hardFailure);
-                        });
-                }
-                frameNumber += (ushort)count;
-                for (int index = 0; index < count; index++)
-                {
-                    if (index < realFrameCount)
-                    {
-                        freeEncodedFrames.Enqueue(speakerFrameBatch[index]);
-                    }
-                    speakerFrameBatch[index] = null;
-                }
             }
 
+            if (saturated)
+            {
+                // No report was built and no SBC frame was consumed. Retry
+                // the exact next frame when HID returns a credit instead of
+                // advancing the media clock and turning saturation into
+                // audible static.
+                Interlocked.Increment(ref directWriteSaturations);
+                return;
+            }
             if (!submitted)
             {
                 if (hardFailure)
                 {
                     Interlocked.Increment(ref directHardWriteFailures);
                 }
-                else
-                {
-                    Interlocked.Increment(ref directWriteSaturations);
-                }
-                if (Interlocked.Exchange(ref writeFailureLogged, 1) == 0)
+                if (hardFailure &&
+                    Interlocked.Exchange(ref writeFailureLogged, 1) == 0)
                 {
                     AppLogger.LogToGui(
-                        $"DualShock 4 Bluetooth speaker HID transport failed: " +
-                        (hardFailure ? "dedicated audio handle write failed" :
-                            "dedicated overlapped audio queue is full"),
+                        "DualShock 4 Bluetooth speaker dedicated audio handle write failed.",
                         true);
                 }
             }
@@ -2798,6 +2842,7 @@ namespace DS4Windows
                                 WriteSpeakerReport(report,
                                     reportFrameNumber, speakerFrameBatch,
                                     count,
+                                    audioTarget: audioTarget,
                                     microphoneEnabled: microphoneEnabled,
                                     bluetoothPollRate:
                                         GetBluetoothPollRate());
@@ -2828,7 +2873,8 @@ namespace DS4Windows
                     {
                         DualShock4BluetoothAudioProtocol.WriteSpeakerReport(
                             report, reportFrameNumber, speakerFrameBatch,
-                            count, microphoneEnabled: microphoneEnabled,
+                            count, audioTarget: audioTarget,
+                            microphoneEnabled: microphoneEnabled,
                             bluetoothPollRate: GetBluetoothPollRate());
                         CaptureDiagnosticSubmittedSbc(report, count);
                         submitted = speakerWritePool.SendAndWait(report,
@@ -2924,6 +2970,7 @@ namespace DS4Windows
                                 DualShock4BluetoothAudioProtocol.
                                     WriteSpeakerReport(report, frameNumber,
                                         speakerFrameBatch, count,
+                                        audioTarget: audioTarget,
                                         microphoneEnabled:
                                             microphoneEnabled,
                                         bluetoothPollRate:
@@ -3084,6 +3131,7 @@ namespace DS4Windows
                                 DualShock4BluetoothAudioProtocol.
                                     WriteSpeakerReport(report, frameNumber,
                                         speakerFrameBatch, count,
+                                        audioTarget: audioTarget,
                                         microphoneEnabled:
                                             effectiveMicrophoneEnabled,
                                         bluetoothPollRate:
@@ -3243,6 +3291,7 @@ namespace DS4Windows
                                 DualShock4BluetoothAudioProtocol.
                                     WriteSpeakerReport(report, frameNumber,
                                         speakerFrameBatch, count,
+                                        audioTarget: audioTarget,
                                         microphoneEnabled:
                                             microphoneEnabled,
                                         bluetoothPollRate:
@@ -3368,6 +3417,7 @@ namespace DS4Windows
                                 DualShock4BluetoothAudioProtocol.
                                     WriteSpeakerReport(report, frameNumber,
                                         speakerFrameBatch, count,
+                                        audioTarget: audioTarget,
                                         microphoneEnabled: false,
                                         bluetoothPollRate:
                                             GetBluetoothPollRate());

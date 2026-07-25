@@ -10,6 +10,7 @@ the Free Software Foundation, either version 3 of the License, or
 
 using Microsoft.Win32;
 using System;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -71,6 +72,7 @@ namespace DS4Windows
         private static readonly object serverStartLock = new object();
         private static DateTime lastServerStartAttemptUtc = DateTime.MinValue;
         private static int promptShownThisSession;
+        private static int installerRunning;
 
         public static bool IsViiperOutputType(OutContType type) => ViiperOutDevice.IsViiperType(type);
 
@@ -153,31 +155,106 @@ namespace DS4Windows
                 return false;
             }
 
+            if (Interlocked.CompareExchange(ref installerRunning, 1, 0) != 0)
+            {
+                ShowInstallerMessage(owner,
+                    "VIIPER setup is already running. Finish the open setup window, then use Refresh to verify it.",
+                    "VIIPER setup", MessageBoxImage.Information);
+                return true;
+            }
+
             try
             {
                 ProcessStartInfo startInfo = new ProcessStartInfo
                 {
                     FileName = "powershell.exe",
-                    Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{status.SetupScriptPath}\"",
+                    Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{status.SetupScriptPath}\" -NoPause",
                     UseShellExecute = true,
                     Verb = "runas",
                 };
-                Process.Start(startInfo);
+                Process process = Process.Start(startInfo);
+                if (process == null)
+                {
+                    throw new InvalidOperationException(
+                        "Windows did not start the setup process.");
+                }
+
+                process.EnableRaisingEvents = true;
+                process.Exited += (_, _) => InstallerProcess_Exited(process,
+                    owner);
                 return true;
+            }
+            catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
+            {
+                Interlocked.Exchange(ref installerRunning, 0);
+                ShowInstallerMessage(owner,
+                    "VIIPER setup was canceled at the Windows administrator prompt. No changes were made.",
+                    "VIIPER setup canceled", MessageBoxImage.Information);
+                return false;
             }
             catch (Exception ex)
             {
+                Interlocked.Exchange(ref installerRunning, 0);
                 string message = $"Could not launch VIIPER setup: {ex.Message}";
-                if (owner != null)
-                {
-                    MessageBox.Show(owner, message, "VIIPER setup", MessageBoxButton.OK, MessageBoxImage.Error);
-                }
-                else
-                {
-                    MessageBox.Show(message, "VIIPER setup", MessageBoxButton.OK, MessageBoxImage.Error);
-                }
+                ShowInstallerMessage(owner, message, "VIIPER setup",
+                    MessageBoxImage.Error);
 
                 return false;
+            }
+        }
+
+        private static void InstallerProcess_Exited(Process process,
+            Window owner)
+        {
+            int exitCode = -1;
+            try { exitCode = process.ExitCode; } catch { }
+            try { process.Dispose(); } catch { }
+            Interlocked.Exchange(ref installerRunning, 0);
+
+            Application application = Application.Current;
+            if (application?.Dispatcher == null ||
+                application.Dispatcher.HasShutdownStarted)
+            {
+                return;
+            }
+
+            application.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                ViiperPrerequisiteStatus refreshed = GetStatus(
+                    tryStartServer: true);
+                if (exitCode == 0 && refreshed.Ready)
+                {
+                    Interlocked.Exchange(ref promptShownThisSession, 0);
+                    ShowInstallerMessage(owner,
+                        "VIIPER setup finished successfully. Virtual controllers are ready.",
+                        "VIIPER is ready", MessageBoxImage.Information);
+                    return;
+                }
+
+                string logPath = Path.Combine(
+                    Environment.GetFolderPath(
+                        Environment.SpecialFolder.LocalApplicationData),
+                    "VIIPER", "install.log");
+                string message = exitCode == 0
+                    ? "VIIPER was installed, but Windows is not reporting every component as ready yet. Restart Windows once, then click Refresh."
+                    : $"VIIPER setup could not finish (exit code {exitCode}). Review the setup log and try Repair again.\n\n{logPath}";
+                ShowInstallerMessage(owner, message, "VIIPER setup",
+                    exitCode == 0 ? MessageBoxImage.Warning :
+                        MessageBoxImage.Error);
+            }));
+        }
+
+        private static void ShowInstallerMessage(Window owner, string message,
+            string caption, MessageBoxImage image)
+        {
+            if (owner != null && owner.IsLoaded)
+            {
+                MessageBox.Show(owner, message, caption, MessageBoxButton.OK,
+                    image);
+            }
+            else
+            {
+                MessageBox.Show(message, caption, MessageBoxButton.OK, image);
             }
         }
 

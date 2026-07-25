@@ -400,6 +400,7 @@ namespace DS4Windows.InputDevices
             1000;
         private const byte DualSenseSpeakerVolumeMinimum = 0x3D;
         private const byte DualSenseSpeakerVolumeMaximum = 0x64;
+        private const byte DualSenseHeadphoneVolumeMaximum = 0x7F;
         private const byte DualSenseMicrophoneVolumeMaximum = 0x40;
         private const byte DualSenseSpeakerPreGain = 0x03;
         private const byte DualSenseOutputFlag0SpeakerVolumeEnable = 0x20;
@@ -415,7 +416,13 @@ namespace DS4Windows.InputDevices
         private const byte BluetoothNormalInputBit = 0x01;
         private const byte BluetoothMicrophoneInputBit = 0x02;
         private const byte BluetoothMicrophoneControlEnable = 0x01;
-        private const byte DualSenseAudioControlOutputSpeaker = 0x30;
+        // Keep the established DS4Windows speaker route byte intact. AUX is a
+        // separate route; changing the normal path to DS5 Bridge's combined
+        // 0x30 value regressed otherwise healthy speaker playback here.
+        private const byte DualSenseAudioControlOutputSpeaker = 0x20;
+        private const byte DualSenseAudioControlOutputHeadphones = 0x00;
+        private const byte BluetoothCombinedSpeakerPacketType = 0x93;
+        private const byte BluetoothCombinedHeadsetPacketType = 0x96;
         private static readonly byte[] DefaultBluetoothCombinedState =
         {
             0xFD, 0xF7, 0x00, 0x00, 0x7F, 0x64, 0xFF, 0x09,
@@ -2588,15 +2595,17 @@ namespace DS4Windows.InputDevices
                 // 0x40 Enable modification of microphone volume
                 // 0x80 Enable internal mic (even while headset is connected)
                 outputReport[1] = (byte)((useRumble ? 0x0F : 0x0C) | 0x10 | 0x40 |
-                    (enableSpeakerOutput ? DualSenseOutputFlag0SpeakerVolumeEnable |
-                        DualSenseOutputFlag0AudioControlEnable : 0x00));
+                    (enableSpeakerOutput ? DualSenseOutputFlag0AudioControlEnable |
+                        (headsetOnlyAudio ? 0x00 :
+                            DualSenseOutputFlag0SpeakerVolumeEnable) : 0x00));
 
                 // 0x01 Toggling microphone LED, 0x02 Toggling Audio/Mic Mute
                 // 0x04 Toggling LED strips on the sides of the Touchpad, 0x08 Turn off all LED lights
                 // 0x10 Toggle player LED lights below Touchpad, 0x20 ???
                 // 0x40 Adjust overall motor/effect power, 0x80 ???
                 outputReport[2] = (byte)(0x55 |
-                    (enableSpeakerOutput ? DualSenseOutputFlag1AudioControl2Enable : 0x00) |
+                    (enableSpeakerOutput && !headsetOnlyAudio ?
+                        DualSenseOutputFlag1AudioControl2Enable : 0x00) |
                     (muteLedOverride || microphoneMuteOverride ? 0x01 : 0x00) |
                     (microphoneMuteOverride ? 0x02 : 0x00));
 
@@ -2609,17 +2618,21 @@ namespace DS4Windows.InputDevices
                 }
 
                 // Headphone volume
-                outputReport[5] = headphoneVolume; // Left and Right
+                outputReport[5] = headsetOnlyAudio ?
+                    MapDualSenseHeadphoneVolume(headphoneVolume) :
+                    headphoneVolume; // Left and Right
                 // Internal speaker volume
                 outputReport[6] = headsetOnlyAudio ? (byte)0 :
                     MapDualSenseSpeakerVolume(speakerVolume);
                 // Internal microphone volume
                 outputReport[7] = MapDualSenseMicrophoneVolume(
                     microphoneVolume);
-                // 0x01 Enable internal microphone, 0x10 Disable attached headphones (must set 0x20 as well)
-                // 0x20 Enable internal speaker
-                outputReport[8] = enableSpeakerOutput && !headsetOnlyAudio ?
-                    (byte)0x20 : (byte)0x00;
+                // Route the Opus stream to either the controller speaker or
+                // the 3.5 mm headset DAC. This byte is an output-path field,
+                // not merely an internal-speaker enable bit.
+                outputReport[8] = enableSpeakerOutput ?
+                    (headsetOnlyAudio ? DualSenseAudioControlOutputHeadphones :
+                        DualSenseAudioControlOutputSpeaker) : (byte)0x00;
 
                 // Mute button LED. 0x01 = Solid. 0x02 = Pulsating
                 outputReport[9] = muteLedOverride ? (muteLedOn ? (byte)0x01 : (byte)0x00) :
@@ -2659,7 +2672,8 @@ namespace DS4Windows.InputDevices
                 // (lower nibble: main motor; upper nibble trigger effects) 0x00 to 0x07 - reduce overall power of the respective motors/effects by 12.5% per increment (this does not affect the regular trigger motor settings, just the automatically repeating trigger effects)
                 outputReport[37] = hapticPowerLevel;
                 // Volume of internal speaker (0-7; ties in with index 6. The PS5 default appears to be set a 4)
-                outputReport[38] = DualSenseSpeakerPreGain;
+                outputReport[38] = enableSpeakerOutput && !headsetOnlyAudio ?
+                    DualSenseSpeakerPreGain : (byte)0x00;
 
                 /* Player LED section (and improved rumble flag) */
                 // 0x01 Enabled LED brightness (value in index 43)
@@ -2730,15 +2744,17 @@ namespace DS4Windows.InputDevices
                 // 0x40 Enable modification of microphone volume
                 // 0x80 Enable internal mic (even while headset is connected)
                 outputReport[2] = (byte)((useRumble ? 0x0F : 0x0C) | 0x10 | 0x40 |
-                    (enableSpeakerOutput ? DualSenseOutputFlag0SpeakerVolumeEnable |
-                        DualSenseOutputFlag0AudioControlEnable : 0x00));
+                    (enableSpeakerOutput ? DualSenseOutputFlag0AudioControlEnable |
+                        (headsetOnlyAudio ? 0x00 :
+                            DualSenseOutputFlag0SpeakerVolumeEnable) : 0x00));
 
                 // 0x01 Toggling microphone LED, 0x02 Toggling Audio/Mic Mute
                 // 0x04 Toggling LED strips on the sides of the Touchpad, 0x08 Turn off all LED lights
                 // 0x10 Toggle player LED lights below Touchpad, 0x20 ???
                 // 0x40 Adjust overall motor/effect power, 0x80 ???
                 outputReport[3] = (byte)(0x55 |
-                    (enableSpeakerOutput ? DualSenseOutputFlag1AudioControl2Enable : 0x00) |
+                    (enableSpeakerOutput && !headsetOnlyAudio ?
+                        DualSenseOutputFlag1AudioControl2Enable : 0x00) |
                     (muteLedOverride || microphoneMuteOverride ? 0x01 : 0x00) |
                     (microphoneMuteOverride ? 0x02 : 0x00));
 
@@ -2751,17 +2767,19 @@ namespace DS4Windows.InputDevices
                 }
 
                 // Headphone volume
-                outputReport[6] = headphoneVolume; // Left and Right
+                outputReport[6] = headsetOnlyAudio ?
+                    MapDualSenseHeadphoneVolume(headphoneVolume) :
+                    headphoneVolume; // Left and Right
                 // Internal speaker volume
                 outputReport[7] = headsetOnlyAudio ? (byte)0 :
                     MapDualSenseSpeakerVolume(speakerVolume);
                 // Internal microphone volume
                 outputReport[8] = MapDualSenseMicrophoneVolume(
                     microphoneVolume);
-                // 0x01 Enable internal microphone, 0x10 Disable attached headphones (must set 0x20 as well)
-                // 0x20 Enable internal speaker
-                outputReport[9] = enableSpeakerOutput && !headsetOnlyAudio ?
-                    (byte)0x20 : (byte)0x00;
+                // Select the physical speaker or AUX/headset DAC.
+                outputReport[9] = enableSpeakerOutput ?
+                    (headsetOnlyAudio ? DualSenseAudioControlOutputHeadphones :
+                        DualSenseAudioControlOutputSpeaker) : (byte)0x00;
 
                 // Mute button LED. 0x01 = Solid. 0x02 = Pulsating
                 outputReport[10] = muteLedOverride ? (muteLedOn ? (byte)0x01 : (byte)0x00) :
@@ -2801,7 +2819,8 @@ namespace DS4Windows.InputDevices
                 // (lower nibble: main motor; upper nibble trigger effects) 0x00 to 0x07 - reduce overall power of the respective motors/effects by 12.5% per increment (this does not affect the regular trigger motor settings, just the automatically repeating trigger effects)
                 outputReport[38] = hapticPowerLevel;
                 // Volume of internal speaker (0-7; ties in with index 6. The PS5 default appears to be set a 4)
-                outputReport[39] = DualSenseSpeakerPreGain;
+                outputReport[39] = enableSpeakerOutput && !headsetOnlyAudio ?
+                    DualSenseSpeakerPreGain : (byte)0x00;
 
                 /* Player LED section (and improved rumble  flag) */
                 // 0x01 Enabled LED brightness (value in index 43)
@@ -3596,7 +3615,8 @@ namespace DS4Windows.InputDevices
             combined[7] = BluetoothCombinedSpeakerBufferLength;
             combined[8] = BluetoothCombinedSpeakerBufferLength;
             combined[9] = BluetoothCombinedSpeakerBufferLength;
-            combined[BluetoothCombinedSpeakerOffset] = 0x93;
+            combined[BluetoothCombinedSpeakerOffset] =
+                GetBluetoothCombinedSpeakerPacketType(headsetOnlyAudio);
             combined[BluetoothCombinedSpeakerOffset + 1] =
                 BluetoothCombinedSpeakerFrameLength;
             SanitizeBluetoothSpeakerAudioSnapshot(combined);
@@ -3853,6 +3873,17 @@ namespace DS4Windows.InputDevices
                 byte.MaxValue);
         }
 
+        private static byte MapDualSenseHeadphoneVolume(byte profileVolume)
+        {
+            return (byte)((profileVolume * DualSenseHeadphoneVolumeMaximum +
+                byte.MaxValue / 2) / byte.MaxValue);
+        }
+
+        private static byte GetBluetoothCombinedSpeakerPacketType(
+            bool headsetOnlyAudio) => headsetOnlyAudio ?
+                BluetoothCombinedHeadsetPacketType :
+                BluetoothCombinedSpeakerPacketType;
+
         // Retain the two-argument protocol helper for callers and regression
         // tests that only need the standard speaker route.
         private static void ApplyBluetoothSpeakerVolumeAndRouting(
@@ -3870,19 +3901,35 @@ namespace DS4Windows.InputDevices
             // firmware range used by the PS5 is 0x3D-0x64; values above it do
             // not add volume, while zero is the explicit mute value.
             combined[BluetoothCombinedStateFlag0Offset] |=
-                DualSenseOutputFlag0SpeakerVolumeEnable |
                 DualSenseOutputFlag0AudioControlEnable;
-            combined[BluetoothCombinedStateFlag1Offset] |=
-                DualSenseOutputFlag1AudioControl2Enable;
             combined[BluetoothCombinedStateHeadphoneVolumeOffset] =
-                headphoneVolume;
+                headsetOnlyAudio ?
+                    MapDualSenseHeadphoneVolume(headphoneVolume) :
+                    headphoneVolume;
             combined[BluetoothCombinedStateSpeakerVolumeOffset] =
                 headsetOnlyAudio ? (byte)0 :
                     MapDualSenseSpeakerVolume(profileVolume);
-            combined[BluetoothCombinedStateAudioControlOffset] =
-                DualSenseAudioControlOutputSpeaker;
-            combined[BluetoothCombinedStateAudioControl2Offset] =
-                DualSenseSpeakerPreGain;
+            if (headsetOnlyAudio)
+            {
+                combined[BluetoothCombinedStateFlag0Offset] &=
+                    unchecked((byte)~DualSenseOutputFlag0SpeakerVolumeEnable);
+                combined[BluetoothCombinedStateFlag1Offset] &=
+                    unchecked((byte)~DualSenseOutputFlag1AudioControl2Enable);
+                combined[BluetoothCombinedStateAudioControlOffset] =
+                    DualSenseAudioControlOutputHeadphones;
+                combined[BluetoothCombinedStateAudioControl2Offset] = 0;
+            }
+            else
+            {
+                combined[BluetoothCombinedStateFlag0Offset] |=
+                    DualSenseOutputFlag0SpeakerVolumeEnable;
+                combined[BluetoothCombinedStateFlag1Offset] |=
+                    DualSenseOutputFlag1AudioControl2Enable;
+                combined[BluetoothCombinedStateAudioControlOffset] =
+                    DualSenseAudioControlOutputSpeaker;
+                combined[BluetoothCombinedStateAudioControl2Offset] =
+                    DualSenseSpeakerPreGain;
+            }
         }
 
         private static byte MapDualSenseMicrophoneVolume(byte profileVolume)

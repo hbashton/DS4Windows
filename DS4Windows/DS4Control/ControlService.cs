@@ -2593,7 +2593,8 @@ namespace DS4Windows
                 dualsense.EnableSpeakerOutput = speakerEnabled;
                 dualsense.SpeakerVolume = DualSenseSpeakerVolume[ind];
                 dualsense.HeadphoneVolume = DualSenseHeadphoneVolume[ind];
-                dualsense.HeadsetOnlyAudio = DualSenseHeadsetOnlyAudio[ind];
+                bool headsetOnlyAudio = IsControllerHeadsetOnlyAudio(ind);
+                dualsense.HeadsetOnlyAudio = headsetOnlyAudio;
                 bool useViiperControllerMicrophone =
                     ControllerMicrophoneRoutePolicy.CanRouteDirectViiperMicrophone(
                         DualSenseEnableMicrophonePassthrough[ind], dualsense,
@@ -2639,7 +2640,8 @@ namespace DS4Windows
                 bool speakerEnabled = IsControllerSpeakerEnabled(ind);
                 string speakerCaptureEndpointId =
                     GetControllerSpeakerCaptureEndpointId(ind);
-                byte physicalSpeakerVolume = DualSenseHeadsetOnlyAudio[ind]
+                bool headsetOnlyAudio = IsControllerHeadsetOnlyAudio(ind);
+                byte physicalSpeakerVolume = headsetOnlyAudio
                     ? (byte)0
                     : DualSenseSpeakerVolume[ind];
                 bool useViiperControllerMicrophone =
@@ -2671,7 +2673,8 @@ namespace DS4Windows
                         Global.DualSenseSpeakerBassBoost[ind],
                         speakerCaptureEndpointId,
                         playStationFeatureOutputType,
-                        playStationFeatureOutput);
+                        playStationFeatureOutput,
+                        headsetOnlyAudio);
                 }
                 else
                 {
@@ -2723,6 +2726,17 @@ namespace DS4Windows
         private static bool IsControllerSpeakerEnabled(int index) =>
             Global.DualSenseEnableSpeakerOutput[index] ||
             IsAudioHapticsSpeakerOverrideActive(index);
+
+        private static bool IsControllerHeadsetOnlyAudio(int index)
+        {
+            if (IsAudioHapticsSpeakerOverrideActive(index))
+            {
+                return Global.store.audioHapticsSettings[index]
+                    .StreamAppAudioToHeadsetOnly;
+            }
+
+            return Global.DualSenseHeadsetOnlyAudio[index];
+        }
 
         private static string GetControllerSpeakerCaptureEndpointId(int index)
         {

@@ -58,6 +58,8 @@ namespace DS4WindowsTests
                 AudioHapticsSettings = new AudioHapticsProfileSettings
                 {
                     Enabled = true,
+                    StreamAppAudioToController = true,
+                    StreamAppAudioToHeadsetOnly = true,
                     AutomaticGameDetection = true,
                     Source = AudioHapticsSourceKind.AppSession,
                     Mode = AudioHapticsMode.Replace,
@@ -92,6 +94,8 @@ namespace DS4WindowsTests
 
             Assert.IsTrue(xml.Contains("<AudioHaptics>"));
             Assert.IsTrue(restored.AudioHapticsSettings.Enabled);
+            Assert.IsTrue(restored.AudioHapticsSettings
+                .StreamAppAudioToHeadsetOnly);
             Assert.IsTrue(restored.AudioHapticsSettings
                 .AutomaticGameDetection);
             Assert.AreEqual(AudioHapticsSourceKind.AppSession,
@@ -130,13 +134,16 @@ namespace DS4WindowsTests
                 Source = AudioHapticsSourceKind.AppSession,
                 ProcessId = 1234,
                 StreamAppAudioToController = true,
+                StreamAppAudioToHeadsetOnly = true,
             }.Normalize();
             Assert.IsTrue(settings.StreamAppAudioToController);
             Assert.IsTrue(settings.Clone().StreamAppAudioToController);
+            Assert.IsTrue(settings.Clone().StreamAppAudioToHeadsetOnly);
 
             settings.Source = AudioHapticsSourceKind.SystemAudio;
             settings.Normalize();
             Assert.IsFalse(settings.StreamAppAudioToController);
+            Assert.IsFalse(settings.StreamAppAudioToHeadsetOnly);
         }
 
         [TestMethod]
@@ -376,6 +383,32 @@ namespace DS4WindowsTests
                 AudioHapticsService.SlotRuntime.ShouldPublishStandaloneFrame(
                     hasFrame: true, maximumMagnitude: 0,
                     hapticsActive: true));
+        }
+
+        [TestMethod]
+        public void MissingCaptureFrameReleasesAnActiveEffect()
+        {
+            Assert.IsTrue(
+                AudioHapticsService.SlotRuntime.ShouldPublishStandaloneFrame(
+                    hasFrame: false, maximumMagnitude: 0,
+                    hapticsActive: true),
+                "A capture restart must publish one zero frame so the previous effect cannot stick.");
+        }
+
+        [TestMethod]
+        public void AppCaptureRequestsWindowsFormatConversion()
+        {
+            NAudio.CoreAudioApi.AudioClientStreamFlags flags =
+                ProcessLoopbackWaveCapture.CaptureStreamFlags;
+
+            Assert.IsTrue((flags &
+                NAudio.CoreAudioApi.AudioClientStreamFlags.Loopback) != 0);
+            Assert.IsTrue((flags &
+                NAudio.CoreAudioApi.AudioClientStreamFlags.EventCallback) != 0);
+            Assert.IsTrue((flags &
+                NAudio.CoreAudioApi.AudioClientStreamFlags.AutoConvertPcm) != 0);
+            Assert.IsTrue((flags &
+                NAudio.CoreAudioApi.AudioClientStreamFlags.SrcDefaultQuality) != 0);
         }
     }
 }

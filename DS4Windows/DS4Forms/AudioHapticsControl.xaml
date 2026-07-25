@@ -243,6 +243,10 @@
                                     BorderThickness="1" CornerRadius="5"
                                     Visibility="Collapsed">
                                 <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
@@ -261,6 +265,28 @@
                                               VerticalAlignment="Center"
                                               ToolTip="Overrides Advanced > Controller audio source while enabled. Choosing another source there releases this override."
                                               Click="StreamAppToSpeakerToggle_Click" />
+                                    <Grid x:Name="streamAppToHeadsetOnlyPanel"
+                                          Grid.Row="1" Grid.ColumnSpan="2"
+                                          Margin="0,10,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,12,0">
+                                            <TextBlock Text="Headset only"
+                                                       FontWeight="SemiBold" />
+                                            <TextBlock Text="Send the captured app only through the controller AUX port."
+                                                       Margin="0,3,0,0" FontSize="11"
+                                                       TextWrapping="Wrap"
+                                                       Foreground="{DynamicResource MutedForegroundColor}" />
+                                        </StackPanel>
+                                        <CheckBox x:Name="streamAppToHeadsetOnlyToggle"
+                                                  Grid.Column="1"
+                                                  Style="{StaticResource ModernToggle}"
+                                                  VerticalAlignment="Center"
+                                                  ToolTip="Routes captured app audio to headphones connected to the controller and mutes the controller speaker."
+                                                  Click="StreamAppToHeadsetOnlyToggle_Click" />
+                                    </Grid>
                                 </Grid>
                             </Border>
 

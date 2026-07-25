@@ -63,10 +63,19 @@ namespace DS4Windows
                     return;
                 }
 
+                OutContType normalizedOutputType = outputType.Normalize();
+                SlotRuntime runtime = slots[slot];
+                if (runtime != null && runtime.TryUpdateSettings(settings,
+                        normalizedOutputType, requestedPhysicalEndpointId,
+                        controllerAudioUsbipPort))
+                {
+                    return;
+                }
+
                 slots[slot]?.Dispose();
                 slots[slot] = null;
-                SlotRuntime runtime = new SlotRuntime(slot, dualSense,
-                    settings, outputType.Normalize(),
+                runtime = new SlotRuntime(slot, dualSense,
+                    settings, normalizedOutputType,
                     requestedPhysicalEndpointId, controllerAudioUsbipPort);
                 try
                 {
@@ -176,16 +185,20 @@ namespace DS4Windows
             internal const int CaptureBufferMilliseconds = 5;
             internal const int MaximumLivePacketAgeMilliseconds = 24;
             internal const int UsbOutputLatencyMilliseconds = 10;
+            private const int CaptureRetryIntervalMilliseconds = 250;
+            private const int BluetoothTransportRetryIntervalMilliseconds =
+                2000;
             private const long PacketIntervalNumerator =
                 FramesPerPacket * 10000000L;
             private const int TelemetryIntervalMilliseconds = 5000;
 
             private readonly int slot;
             private readonly DualSenseDevice device;
-            private readonly AudioHapticsProfileSettings settings;
-            private readonly OutContType outputType;
-            private readonly string requestedPhysicalEndpointId;
-            private readonly int controllerAudioUsbipPort;
+            private AudioHapticsProfileSettings settings;
+            private OutContType outputType;
+            private string requestedPhysicalEndpointId;
+            private int controllerAudioUsbipPort;
+            private readonly object captureLifecycleLock = new object();
             private readonly object frameLock = new object();
             private readonly byte[][] frameQueue = Enumerable.Range(0,
                 QueueCapacity).Select(_ => new byte[FrameBytes]).ToArray();
@@ -225,9 +238,13 @@ namespace DS4Windows
             private int maximumCapturedMagnitude;
             private int started;
             private int disposed;
+            private int consecutiveBluetoothWriteFailures;
             private string sourceDisplayName = "audio source";
             private AudioHapticsRuntimeStatus status =
                 AudioHapticsRuntimeStatus.Starting;
+            private long nextCaptureRetryTimestamp;
+            private long nextBluetoothTransportRetryTimestamp;
+            private int bluetoothTransportReady;
 
             public SlotRuntime(int slot, DualSenseDevice device,
                 AudioHapticsProfileSettings settings, OutContType outputType,
@@ -253,23 +270,39 @@ namespace DS4Windows
                     return;
                 }
 
-                if (settings.Source == AudioHapticsSourceKind.AppSession)
+                status = AudioHapticsRuntimeStatus.Starting;
+                lock (captureLifecycleLock)
                 {
-                    StartProcessCapture();
-                }
-                else
-                {
-                    StartEndpointCapture();
+                    try
+                    {
+                        StartCaptureForCurrentSettings();
+                    }
+                    catch (Exception exception)
+                    {
+                        // A saved app session or controller endpoint can be
+                        // unavailable during profile/bootstrap ordering. Keep
+                        // the runtime alive so its capture retry loop can bind
+                        // as soon as the source appears.
+                        status = new AudioHapticsRuntimeStatus(false,
+                            $"Waiting for audio source: {exception.Message}");
+                        Volatile.Write(ref nextCaptureRetryTimestamp, 0);
+                    }
                 }
 
                 if (device.ConnectionType != ConnectionType.BT)
                 {
                     StartUsbHapticsOutput();
+                    Volatile.Write(ref bluetoothTransportReady, 1);
                 }
-                else if (!device.EnsureBluetoothCombinedOutputTransport())
+                else
                 {
-                    throw new InvalidOperationException(
-                        device.LastBluetoothHapticsWriteStatus);
+                    // The combined template is cheap to seed. The dedicated
+                    // writer owns pacer preparation and retries it without
+                    // coupling Audio Haptics startup to speaker playback.
+                    device.EnsureBluetoothCombinedOutputTransport();
+                    Volatile.Write(ref bluetoothTransportReady, 0);
+                    Volatile.Write(ref nextBluetoothTransportRetryTimestamp,
+                        0);
                 }
 
                 writerThread = new Thread(WriterLoop)
@@ -279,11 +312,7 @@ namespace DS4Windows
                     Priority = ThreadPriority.Highest,
                 };
                 writerThread.Start();
-                status = settings.AutomaticGameDetection &&
-                    processCapture?.CurrentProcessId <= 0
-                    ? new AudioHapticsRuntimeStatus(false,
-                        "Waiting for a detected game")
-                    : AudioHapticsRuntimeStatus.Running;
+                UpdateRuntimeStatus();
             }
 
             public bool ApplyToGameHaptics(byte[] report, int sampleOffset)
@@ -299,7 +328,9 @@ namespace DS4Windows
                     bool liveFrameAvailable = latestFrameAvailable &&
                         !IsLivePacketExpired(latestFrameTimestamp,
                             now);
-                    if (!ApplyLiveFrame(settings.Mode, latestFrame,
+                    AudioHapticsProfileSettings activeSettings =
+                        Volatile.Read(ref settings);
+                    if (!ApplyLiveFrame(activeSettings.Mode, latestFrame,
                             liveFrameAvailable, report, sampleOffset))
                     {
                         Interlocked.Increment(ref gameCarrierMisses);
@@ -343,9 +374,12 @@ namespace DS4Windows
 
             private void StartEndpointCapture()
             {
-                MMDeviceEnumerator enumerator = new MMDeviceEnumerator();
+                using MMDeviceEnumerator enumerator = new MMDeviceEnumerator();
                 MMDevice endpoint = null;
-                if (settings.Source == AudioHapticsSourceKind.ControllerAudio)
+                AudioHapticsProfileSettings activeSettings =
+                    Volatile.Read(ref settings);
+                if (activeSettings.Source ==
+                    AudioHapticsSourceKind.ControllerAudio)
                 {
                     endpoint = DualSenseAudioPassthrough.FindActiveGameAudioEndpoint(
                         enumerator, null,
@@ -353,9 +387,11 @@ namespace DS4Windows
                         controllerAudioUsbipPort);
                     if (endpoint == null)
                     {
-                        enumerator.Dispose();
-                        throw new InvalidOperationException(
-                            "The emulated controller audio endpoint is not available yet.");
+                        sourceDisplayName =
+                            "Waiting for controller audio source";
+                        status = new AudioHapticsRuntimeStatus(false,
+                            "Waiting for the emulated controller audio endpoint");
+                        return;
                     }
                 }
                 else
@@ -364,22 +400,24 @@ namespace DS4Windows
                         Role.Multimedia);
                 }
 
-                enumerator.Dispose();
                 captureEndpoint = endpoint;
                 sourceDisplayName = endpoint.FriendlyName;
                 capture = new LowLatencyLoopbackCapture(endpoint,
                     CaptureBufferMilliseconds);
                 captureFormat = capture.WaveFormat;
-                processor = new AudioHapticsProcessor(settings,
+                processor = new AudioHapticsProcessor(activeSettings,
                     captureFormat.SampleRate);
                 capture.DataAvailable += Capture_DataAvailable;
                 capture.RecordingStopped += Capture_RecordingStopped;
                 capture.StartRecording();
+                UpdateRuntimeStatus();
             }
 
             private void StartProcessCapture()
             {
-                if (settings.AutomaticGameDetection)
+                AudioHapticsProfileSettings activeSettings =
+                    Volatile.Read(ref settings);
+                if (activeSettings.AutomaticGameDetection)
                 {
                     processCapture = ProcessLoopbackWaveCapture
                         .CreateAutomatic(slot);
@@ -390,7 +428,7 @@ namespace DS4Windows
                 else
                 {
                     int processId = ProcessLoopbackWaveCapture.ResolveProcessId(
-                        settings);
+                        activeSettings);
                     if (processId <= 0)
                     {
                         throw new InvalidOperationException(
@@ -398,40 +436,348 @@ namespace DS4Windows
                     }
                     processCapture = new ProcessLoopbackWaveCapture(processId);
                     sourceDisplayName = string.IsNullOrWhiteSpace(
-                        settings.DisplayName) ? $"process {processId}" :
-                        settings.DisplayName;
+                        activeSettings.DisplayName) ? $"process {processId}" :
+                        activeSettings.DisplayName;
                 }
                 captureFormat = processCapture.WaveFormat;
-                processor = new AudioHapticsProcessor(settings,
+                processor = new AudioHapticsProcessor(activeSettings,
                     captureFormat.SampleRate);
                 processCapture.DataAvailable += Capture_DataAvailable;
                 processCapture.RecordingStopped += Capture_RecordingStopped;
                 processCapture.SourceChanged += ProcessCapture_SourceChanged;
                 processCapture.StartRecording();
+                UpdateRuntimeStatus();
+            }
+
+            private void StartCaptureForCurrentSettings()
+            {
+                AudioHapticsProfileSettings activeSettings =
+                    Volatile.Read(ref settings);
+                if (activeSettings.Source ==
+                    AudioHapticsSourceKind.AppSession)
+                {
+                    StartProcessCapture();
+                }
+                else
+                {
+                    StartEndpointCapture();
+                }
+            }
+
+            private void EnsureCapture()
+            {
+                if (Volatile.Read(ref disposed) != 0)
+                {
+                    return;
+                }
+
+                AudioHapticsProfileSettings activeSettings =
+                    Volatile.Read(ref settings);
+                bool missing = activeSettings.Source ==
+                    AudioHapticsSourceKind.AppSession
+                        ? processCapture == null : capture == null;
+                if (!missing)
+                {
+                    return;
+                }
+
+                long now = Stopwatch.GetTimestamp();
+                if (now < Volatile.Read(ref nextCaptureRetryTimestamp))
+                {
+                    return;
+                }
+
+                lock (captureLifecycleLock)
+                {
+                    activeSettings = Volatile.Read(ref settings);
+                    missing = activeSettings.Source ==
+                        AudioHapticsSourceKind.AppSession
+                            ? processCapture == null : capture == null;
+                    if (!missing || Volatile.Read(ref disposed) != 0)
+                    {
+                        return;
+                    }
+
+                    Volatile.Write(ref nextCaptureRetryTimestamp,
+                        now + Stopwatch.Frequency *
+                            CaptureRetryIntervalMilliseconds / 1000);
+                    try
+                    {
+                        StartCaptureForCurrentSettings();
+                    }
+                    catch (Exception exception)
+                    {
+                        status = new AudioHapticsRuntimeStatus(false,
+                            $"Waiting for audio source: {exception.Message}");
+                    }
+                }
+            }
+
+            private void EnsureBluetoothTransport()
+            {
+                if (device.ConnectionType != ConnectionType.BT ||
+                    Volatile.Read(ref bluetoothTransportReady) != 0 ||
+                    Volatile.Read(ref disposed) != 0)
+                {
+                    return;
+                }
+
+                long now = Stopwatch.GetTimestamp();
+                if (now < Volatile.Read(
+                        ref nextBluetoothTransportRetryTimestamp))
+                {
+                    return;
+                }
+
+                Volatile.Write(ref nextBluetoothTransportRetryTimestamp,
+                    now + Stopwatch.Frequency *
+                        BluetoothTransportRetryIntervalMilliseconds / 1000);
+                if (device.PrepareBluetoothSpeakerClockTransport())
+                {
+                    Volatile.Write(ref bluetoothTransportReady, 1);
+                    UpdateRuntimeStatus();
+                }
+                else
+                {
+                    status = new AudioHapticsRuntimeStatus(false,
+                        "Starting Bluetooth haptics transport");
+                }
+            }
+
+            private void UpdateRuntimeStatus()
+            {
+                if (Volatile.Read(ref disposed) != 0)
+                {
+                    status = AudioHapticsRuntimeStatus.Inactive;
+                    return;
+                }
+
+                AudioHapticsProfileSettings activeSettings =
+                    Volatile.Read(ref settings);
+                bool captureReady = activeSettings.Source ==
+                    AudioHapticsSourceKind.AppSession
+                        ? processCapture != null : capture != null;
+                if (!captureReady)
+                {
+                    status = new AudioHapticsRuntimeStatus(false,
+                        "Waiting for audio source");
+                    return;
+                }
+
+                if (activeSettings.AutomaticGameDetection &&
+                    processCapture?.CurrentProcessId <= 0)
+                {
+                    status = new AudioHapticsRuntimeStatus(false,
+                        "Waiting for a detected game");
+                    return;
+                }
+
+                if (device.ConnectionType == ConnectionType.BT &&
+                    Volatile.Read(ref bluetoothTransportReady) == 0)
+                {
+                    status = new AudioHapticsRuntimeStatus(false,
+                        "Starting Bluetooth haptics transport");
+                    return;
+                }
+
+                status = AudioHapticsRuntimeStatus.Running;
+            }
+
+            public bool TryUpdateSettings(
+                AudioHapticsProfileSettings nextSettings,
+                OutContType nextOutputType, string nextPhysicalEndpointId,
+                int nextUsbipPort)
+            {
+                if (Volatile.Read(ref disposed) != 0 ||
+                    Volatile.Read(ref started) == 0)
+                {
+                    return false;
+                }
+
+                nextSettings = (nextSettings ??
+                    new AudioHapticsProfileSettings()).Clone();
+                nextOutputType = nextOutputType.Normalize();
+                nextPhysicalEndpointId ??= string.Empty;
+                AudioHapticsProfileSettings previousSettings =
+                    Volatile.Read(ref settings);
+
+                bool sourceChanged = previousSettings.Source !=
+                    nextSettings.Source ||
+                    previousSettings.AutomaticGameDetection !=
+                        nextSettings.AutomaticGameDetection;
+                bool processChanged = nextSettings.Source ==
+                    AudioHapticsSourceKind.AppSession &&
+                    !nextSettings.AutomaticGameDetection &&
+                    !SettingsMatchProcessIdentity(previousSettings,
+                        nextSettings);
+                bool controllerEndpointChanged = nextSettings.Source ==
+                    AudioHapticsSourceKind.ControllerAudio &&
+                    (outputType != nextOutputType ||
+                        controllerAudioUsbipPort != nextUsbipPort);
+                bool restartCapture = sourceChanged || processChanged ||
+                    controllerEndpointChanged;
+                bool restartUsbOutput = device.ConnectionType !=
+                    ConnectionType.BT &&
+                    !string.Equals(requestedPhysicalEndpointId,
+                        nextPhysicalEndpointId, StringComparison.Ordinal);
+
+                if (restartUsbOutput)
+                {
+                    return false;
+                }
+
+                Volatile.Write(ref settings, nextSettings);
+                outputType = nextOutputType;
+                requestedPhysicalEndpointId = nextPhysicalEndpointId;
+                controllerAudioUsbipPort = nextUsbipPort;
+
+                lock (captureLifecycleLock)
+                {
+                    if (restartCapture)
+                    {
+                        RetireCapture(stopRecording: true);
+                        RetireProcessCapture(stopRecording: true);
+                        ResetCapturedFrames();
+                        Volatile.Write(ref nextCaptureRetryTimestamp, 0);
+                    }
+                    else if (captureFormat != null)
+                    {
+                        Volatile.Write(ref processor,
+                            new AudioHapticsProcessor(nextSettings,
+                                captureFormat.SampleRate));
+                    }
+                }
+
+                EnsureCapture();
+                UpdateRuntimeStatus();
+                return true;
+            }
+
+            private static bool SettingsMatchProcessIdentity(
+                AudioHapticsProfileSettings left,
+                AudioHapticsProfileSettings right)
+            {
+                return left.ProcessId == right.ProcessId &&
+                    string.Equals(left.ExecutableName,
+                        right.ExecutableName,
+                        StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(left.ProcessPath, right.ProcessPath,
+                        StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(left.SessionIdentifier,
+                        right.SessionIdentifier,
+                        StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(left.SessionInstanceIdentifier,
+                        right.SessionInstanceIdentifier,
+                        StringComparison.OrdinalIgnoreCase);
+            }
+
+            private void ResetCapturedFrames()
+            {
+                lock (frameLock)
+                {
+                    queueRead = 0;
+                    queueWrite = 0;
+                    queuedFrames = 0;
+                    latestFrameAvailable = false;
+                    latestFrameTimestamp = 0;
+                    captureFramePosition = 0;
+                    resampleCredit = 0;
+                    Array.Clear(captureFrame, 0, captureFrame.Length);
+                    Array.Clear(latestFrame, 0, latestFrame.Length);
+                }
             }
 
             private void Capture_DataAvailable(object sender,
                 WaveInEventArgs eventArgs)
             {
-                if (eventArgs.BytesRecorded > 0 && captureFormat != null)
+                WaveFormat format = captureFormat;
+                if (eventArgs.BytesRecorded > 0 && format != null)
                 {
                     ProcessPcm(eventArgs.Buffer, eventArgs.BytesRecorded,
-                        captureFormat);
+                        format);
                 }
             }
 
             private void Capture_RecordingStopped(object sender,
                 StoppedEventArgs eventArgs)
             {
-                if (eventArgs.Exception != null &&
-                    Volatile.Read(ref disposed) == 0)
+                if (Volatile.Read(ref disposed) != 0)
                 {
-                    status = new AudioHapticsRuntimeStatus(false,
-                        $"Capture stopped: {eventArgs.Exception.Message}");
-                    AppLogger.LogToGui(
-                        $"Audio Haptics capture stopped for controller {slot + 1}: {eventArgs.Exception.Message}",
-                        true);
+                    return;
                 }
+
+                bool recognized = false;
+                lock (captureLifecycleLock)
+                {
+                    if (ReferenceEquals(sender, capture))
+                    {
+                        RetireCapture(stopRecording: false);
+                        recognized = true;
+                    }
+                    else if (ReferenceEquals(sender, processCapture))
+                    {
+                        RetireProcessCapture(stopRecording: false);
+                        recognized = true;
+                    }
+                }
+
+                if (recognized)
+                {
+                    Volatile.Write(ref nextCaptureRetryTimestamp, 0);
+                    status = new AudioHapticsRuntimeStatus(false,
+                        eventArgs?.Exception == null ?
+                            "Audio capture stopped; reconnecting" :
+                            $"Capture stopped: {eventArgs.Exception.Message}");
+                    if (eventArgs?.Exception != null)
+                    {
+                        AppLogger.LogToGui(
+                            $"Audio Haptics capture stopped for controller {slot + 1}: {eventArgs.Exception.Message}",
+                            true);
+                    }
+                }
+            }
+
+            private void RetireCapture(bool stopRecording)
+            {
+                WasapiCapture current = capture;
+                MMDevice endpoint = captureEndpoint;
+                capture = null;
+                captureEndpoint = null;
+                captureFormat = null;
+                if (current == null)
+                {
+                    endpoint?.Dispose();
+                    return;
+                }
+
+                current.DataAvailable -= Capture_DataAvailable;
+                current.RecordingStopped -= Capture_RecordingStopped;
+                if (stopRecording)
+                {
+                    try { current.StopRecording(); } catch { }
+                }
+                current.Dispose();
+                endpoint?.Dispose();
+            }
+
+            private void RetireProcessCapture(bool stopRecording)
+            {
+                ProcessLoopbackWaveCapture current = processCapture;
+                processCapture = null;
+                captureFormat = null;
+                if (current == null)
+                {
+                    return;
+                }
+
+                current.DataAvailable -= Capture_DataAvailable;
+                current.RecordingStopped -= Capture_RecordingStopped;
+                current.SourceChanged -= ProcessCapture_SourceChanged;
+                if (stopRecording)
+                {
+                    try { current.StopRecording(); } catch { }
+                }
+                current.Dispose();
             }
 
             private void ProcessCapture_SourceChanged(object sender,
@@ -448,6 +794,15 @@ namespace DS4Windows
             private void ProcessPcm(byte[] buffer, int byteCount,
                 WaveFormat format)
             {
+                AudioHapticsProfileSettings activeSettings =
+                    Volatile.Read(ref settings);
+                AudioHapticsProcessor activeProcessor =
+                    Volatile.Read(ref processor);
+                if (activeProcessor == null)
+                {
+                    return;
+                }
+
                 int channels = Math.Max(1, format.Channels);
                 int bytesPerSample = Math.Max(1, format.BitsPerSample / 8);
                 int frameBytes = Math.Max(1, format.BlockAlign);
@@ -456,8 +811,10 @@ namespace DS4Windows
                     (double)format.SampleRate;
                 bool preserveCapturedNativeHaptics =
                     device.ConnectionType != ConnectionType.BT &&
-                    settings.Source == AudioHapticsSourceKind.ControllerAudio &&
-                    channels >= 4 && settings.Mode == AudioHapticsMode.Mix;
+                    activeSettings.Source ==
+                        AudioHapticsSourceKind.ControllerAudio &&
+                    channels >= 4 && activeSettings.Mode ==
+                        AudioHapticsMode.Mix;
 
                 for (int frame = 0; frame < frameCount; frame++)
                 {
@@ -465,7 +822,7 @@ namespace DS4Windows
                     float left = ReadSample(buffer, byteCount, offset, format);
                     float right = channels > 1 ? ReadSample(buffer, byteCount,
                         offset + bytesPerSample, format) : left;
-                    processor.Process(left, right, out float hapticLeft,
+                    activeProcessor.Process(left, right, out float hapticLeft,
                         out float hapticRight);
 
                     if (preserveCapturedNativeHaptics)
@@ -547,6 +904,8 @@ namespace DS4Windows
 
                 while (Volatile.Read(ref disposed) == 0)
                 {
+                    EnsureCapture();
+                    EnsureBluetoothTransport();
                     WaitUntil(clock, nextPacketTicks);
                     nextPacketTicks += packetIntervalTicks;
                     if (clock.ElapsedTicks - nextPacketTicks >
@@ -597,6 +956,11 @@ namespace DS4Windows
 
                     if (device.ConnectionType == ConnectionType.BT)
                     {
+                        if (Volatile.Read(ref bluetoothTransportReady) == 0)
+                        {
+                            continue;
+                        }
+
                         long carrierTimestamp = Volatile.Read(
                             ref lastGameCarrierTimestamp);
                         bool gameCarrierOwnsCadence = carrierTimestamp > 0 &&
@@ -608,6 +972,7 @@ namespace DS4Windows
                             if (device.WriteBluetoothHapticsSamples(writerFrame,
                                     0, FrameBytes))
                             {
+                                consecutiveBluetoothWriteFailures = 0;
                                 Interlocked.Increment(ref standaloneWrites);
                                 standaloneHapticsActive = frameMagnitude > 0;
                             }
@@ -615,6 +980,17 @@ namespace DS4Windows
                             {
                                 Interlocked.Increment(
                                     ref standaloneWriteFailures);
+                                if (++consecutiveBluetoothWriteFailures >= 3)
+                                {
+                                    consecutiveBluetoothWriteFailures = 0;
+                                    Volatile.Write(ref bluetoothTransportReady,
+                                        0);
+                                    Volatile.Write(ref
+                                        nextBluetoothTransportRetryTimestamp,
+                                        0);
+                                    status = new AudioHapticsRuntimeStatus(false,
+                                        "Recovering Bluetooth haptics transport");
+                                }
                             }
                         }
                         else if (gameCarrierOwnsCadence && publishStandaloneFrame)
@@ -652,7 +1028,7 @@ namespace DS4Windows
                 // cadence that can contend with controller speaker audio. A
                 // silent frame only needs publication once: to release a
                 // previously active derived effect.
-                return hasFrame && (maximumMagnitude > 0 || hapticsActive);
+                return (hasFrame && maximumMagnitude > 0) || hapticsActive;
             }
 
             private void LogTelemetry()
@@ -907,27 +1283,35 @@ namespace DS4Windows
                     return;
                 }
                 status = AudioHapticsRuntimeStatus.Inactive;
-                stopped.Set();
-                if (processCapture != null)
+                if (standaloneHapticsActive)
                 {
-                    processCapture.DataAvailable -= Capture_DataAvailable;
-                    processCapture.RecordingStopped -= Capture_RecordingStopped;
-                    processCapture.SourceChanged -= ProcessCapture_SourceChanged;
-                    try { processCapture.StopRecording(); } catch { }
+                    Array.Clear(writerFrame, 0, writerFrame.Length);
+                    if (device.ConnectionType == ConnectionType.BT)
+                    {
+                        try
+                        {
+                            device.WriteBluetoothHapticsSamples(writerFrame, 0,
+                                FrameBytes, waitForWrite: true);
+                        }
+                        catch { }
+                    }
+                    else
+                    {
+                        try { WriteUsbFrame(writerFrame); } catch { }
+                    }
+                    standaloneHapticsActive = false;
                 }
-                if (capture != null)
+                stopped.Set();
+                lock (captureLifecycleLock)
                 {
-                    capture.DataAvailable -= Capture_DataAvailable;
-                    capture.RecordingStopped -= Capture_RecordingStopped;
-                    try { capture.StopRecording(); } catch { }
+                    RetireProcessCapture(stopRecording: true);
+                    RetireCapture(stopRecording: true);
                 }
                 if (writerThread != null &&
                     !ReferenceEquals(writerThread, Thread.CurrentThread))
                 {
                     writerThread.Join(1200);
                 }
-                capture?.Dispose();
-                processCapture?.Dispose();
                 try { usbOutput?.Stop(); } catch { }
                 usbOutput?.Dispose();
                 usbOutputEndpoint?.Dispose();

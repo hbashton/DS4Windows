@@ -347,10 +347,7 @@ namespace DS4Windows
                 MMDevice endpoint = null;
                 if (settings.Source == AudioHapticsSourceKind.ControllerAudio)
                 {
-                    endpoint = DualSenseAudioPassthrough.FindActiveGameAudioEndpoint(
-                        enumerator, null,
-                        DualSenseAudioPassthrough.GetEndpointKind(outputType),
-                        controllerAudioUsbipPort);
+                    endpoint = FindPreferredControllerAudioEndpoint(enumerator);
                     if (endpoint == null)
                     {
                         sourceDisplayName = "Waiting for controller audio source";
@@ -382,6 +379,47 @@ namespace DS4Windows
                 capture.RecordingStopped += Capture_RecordingStopped;
                 capture.StartRecording();
                 status = AudioHapticsRuntimeStatus.Running;
+            }
+
+            private MMDevice FindPreferredControllerAudioEndpoint(
+                MMDeviceEnumerator enumerator)
+            {
+                ControllerAudioEndpointKind endpointKind =
+                    DualSenseAudioPassthrough.GetEndpointKind(outputType);
+                string preferredEndpointId =
+                    slot >= 0 && slot < Global.DualSenseAudioCaptureEndpointId.Length
+                    ? Global.DualSenseAudioCaptureEndpointId[slot]
+                    : string.Empty;
+                preferredEndpointId ??= string.Empty;
+                if (!string.IsNullOrWhiteSpace(preferredEndpointId) &&
+                    !string.Equals(preferredEndpointId,
+                        DualSenseAudioPassthrough.DefaultSystemAudioEndpointId,
+                        StringComparison.Ordinal) &&
+                    !string.Equals(preferredEndpointId,
+                        DualSenseAudioPassthrough.AutoDetectGameAudioEndpointId,
+                        StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        MMDevice explicitEndpoint =
+                            enumerator.GetDevice(preferredEndpointId);
+                        if (explicitEndpoint != null &&
+                            DualSenseAudioPassthrough.IsControllerAudioEndpoint(
+                                explicitEndpoint))
+                        {
+                            return explicitEndpoint;
+                        }
+                    }
+                    catch
+                    {
+                        // Fall back to auto-detection if the configured capture
+                        // endpoint is not currently available.
+                    }
+                }
+
+                return DualSenseAudioPassthrough.FindActiveGameAudioEndpoint(
+                    enumerator, null, endpointKind, controllerAudioUsbipPort,
+                    requireActive: false);
             }
 
             private void StartProcessCapture()

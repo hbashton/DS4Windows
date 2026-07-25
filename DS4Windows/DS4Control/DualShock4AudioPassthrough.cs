@@ -216,14 +216,6 @@ namespace DS4Windows
                 DirectSpeakerRouteDecision route =
                     DualSenseAudioPassthrough.EvaluateDirectSpeakerRoute(
                         captureEndpointId, endpointKind, directSpeakerSource);
-                if (route == DirectSpeakerRouteDecision.Pending)
-                {
-                    lastError = new InvalidOperationException(
-                        "The selected VIIPER controller audio endpoint is still enumerating or its direct stream is recovering.");
-                    Thread.Sleep(500);
-                    continue;
-                }
-
                 ViiperOutDevice activeDirectSpeakerSource =
                     route == DirectSpeakerRouteDecision.Direct ?
                         directSpeakerSource : null;

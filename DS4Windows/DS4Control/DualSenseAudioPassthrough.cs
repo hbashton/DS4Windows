@@ -456,12 +456,6 @@ namespace DS4Windows
                 DirectSpeakerRouteDecision route =
                     EvaluateDirectSpeakerRoute(requestedCaptureEndpointId,
                         endpointKind, directSpeakerSource);
-                if (route == DirectSpeakerRouteDecision.Pending)
-                {
-                    lastError = new InvalidOperationException(
-                        "The selected VIIPER controller audio endpoint is still enumerating or its direct stream is recovering.");
-                    return false;
-                }
 
                 ViiperOutDevice activeDirectSpeakerSource =
                     route == DirectSpeakerRouteDecision.Direct ?
@@ -840,10 +834,12 @@ namespace DS4Windows
         internal static MMDevice FindActiveGameAudioEndpoint(MMDeviceEnumerator enumerator,
             string previousEndpointId = null,
             ControllerAudioEndpointKind preferredKind = ControllerAudioEndpointKind.Any,
-            int preferredUsbipPort = -1)
+            int preferredUsbipPort = -1,
+            bool requireActive = true)
         {
+            DeviceState endpointState = requireActive ? DeviceState.Active : DeviceState.All;
             IEnumerable<MMDevice> endpoints = enumerator
-                .EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active)
+                .EnumerateAudioEndPoints(DataFlow.Render, endpointState)
                 .Where(IsControllerAudioEndpoint);
 
             if (preferredKind != ControllerAudioEndpointKind.Any)
@@ -949,7 +945,7 @@ namespace DS4Windows
             if (automatic)
             {
                 return directStreamActive ? DirectSpeakerRouteDecision.Direct :
-                    DirectSpeakerRouteDecision.Pending;
+                    DirectSpeakerRouteDecision.Loopback;
             }
 
             return explicitEndpointOwnership switch
@@ -957,10 +953,10 @@ namespace DS4Windows
                 DirectSpeakerEndpointOwnership.Owned when directStreamActive =>
                     DirectSpeakerRouteDecision.Direct,
                 DirectSpeakerEndpointOwnership.Owned =>
-                    DirectSpeakerRouteDecision.Pending,
+                    DirectSpeakerRouteDecision.Loopback,
                 DirectSpeakerEndpointOwnership.Unowned =>
                     DirectSpeakerRouteDecision.Loopback,
-                _ => DirectSpeakerRouteDecision.Pending,
+                _ => DirectSpeakerRouteDecision.Loopback,
             };
         }
 

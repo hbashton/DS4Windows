@@ -687,15 +687,16 @@ namespace DS4Windows
                     }
 
                     isGameAudioEndpoint = true;
+                    // Subscribe to both callback styles when available. The sidecar may
+                    // emit direct PCM only or atomic packets depending on VIIPER stream
+                    // state and game activity. Subscribing both avoids silent audio when
+                    // one packet family is not active.
+                    directSpeakerSource.VirtualSpeakerPcmReceived +=
+                        DirectSpeakerSource_VirtualSpeakerPcmReceived;
                     if (directSpeakerSource.SupportsAtomicAudioHaptics)
                     {
                         directSpeakerSource.VirtualAtomicAudioHapticsReceived +=
                             DirectSpeakerSource_VirtualAtomicAudioHapticsReceived;
-                    }
-                    else
-                    {
-                        directSpeakerSource.VirtualSpeakerPcmReceived +=
-                            DirectSpeakerSource_VirtualSpeakerPcmReceived;
                     }
                     worker = new Thread(StreamLoop)
                     {

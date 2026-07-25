@@ -416,6 +416,7 @@ namespace DS4Windows.InputDevices
         private const byte BluetoothMicrophoneInputBit = 0x02;
         private const byte BluetoothMicrophoneControlEnable = 0x01;
         private const byte DualSenseAudioControlOutputSpeaker = 0x30;
+        private const byte DualSenseAudioControlOutputHeadset = 0x00;
         private static readonly byte[] DefaultBluetoothCombinedState =
         {
             0xFD, 0xF7, 0x00, 0x00, 0x7F, 0x64, 0xFF, 0x09,
@@ -3880,7 +3881,8 @@ namespace DS4Windows.InputDevices
                 headsetOnlyAudio ? (byte)0 :
                     MapDualSenseSpeakerVolume(profileVolume);
             combined[BluetoothCombinedStateAudioControlOffset] =
-                DualSenseAudioControlOutputSpeaker;
+                headsetOnlyAudio ? DualSenseAudioControlOutputHeadset :
+                    DualSenseAudioControlOutputSpeaker;
             combined[BluetoothCombinedStateAudioControl2Offset] =
                 DualSenseSpeakerPreGain;
         }

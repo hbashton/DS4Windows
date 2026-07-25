@@ -69,9 +69,14 @@ namespace DS4Windows
                     return ControllerRuntimeLaneState.Ready;
                 }
 
-                return startFailed[slot]
-                    ? ControllerRuntimeLaneState.Unavailable
-                    : ControllerRuntimeLaneState.Starting;
+                if (startFailed[slot])
+                {
+                    return ControllerRuntimeLaneState.Unavailable;
+                }
+
+                return bluetoothStartPending[slot]
+                    ? ControllerRuntimeLaneState.Starting
+                    : ControllerRuntimeLaneState.Unavailable;
             }
         }
 
@@ -242,6 +247,7 @@ namespace DS4Windows
                     bluetoothSlots[slot] = null;
                     bluetoothStartPending[slot] = false;
                     bluetoothStartGeneration[slot]++;
+                    startFailed[slot] = true;
 
                     if (!slots.Any(item => item != null))
                     {
@@ -251,6 +257,38 @@ namespace DS4Windows
 
                 playback?.Dispose();
                 bluetoothPlayback?.Dispose();
+            }
+        }
+
+        public void ResetForServiceStop()
+        {
+            var playbacks = new SlotPlayback[slots.Length];
+            var bluetoothPlaybacks = new DualSenseBluetoothSpeakerPassthrough[slots.Length];
+
+            lock (syncRoot)
+            {
+                disposed = false;
+                for (int i = 0; i < slots.Length; i++)
+                {
+                    playbacks[i] = slots[i];
+                    slots[i] = null;
+                    bluetoothPlaybacks[i] = bluetoothSlots[i];
+                    bluetoothSlots[i] = null;
+                    bluetoothStartPending[i] = false;
+                    startFailed[i] = false;
+                    bluetoothStartGeneration[i]++;
+                }
+
+                StopCapture();
+            }
+
+            for (int i = 0; i < slots.Length; i++)
+            {
+                lock (bluetoothStartGates[i])
+                {
+                    playbacks[i]?.Dispose();
+                    bluetoothPlaybacks[i]?.Dispose();
+                }
             }
         }
 
@@ -274,6 +312,7 @@ namespace DS4Windows
                     bluetoothPlaybacks[i] = bluetoothSlots[i];
                     bluetoothSlots[i] = null;
                     bluetoothStartPending[i] = false;
+                    startFailed[i] = false;
                     bluetoothStartGeneration[i]++;
                 }
 
@@ -364,6 +403,14 @@ namespace DS4Windows
                     return;
                 }
 
+                lock (syncRoot)
+                {
+                    if (disposed || generation != bluetoothStartGeneration[slot])
+                    {
+                        return;
+                    }
+                }
+
                 // Endpoint enumeration is not an ownership operation. Keep the
                 // per-slot gate free while waiting so disconnect/profile-change
                 // teardown is immediate and can cancel this generation.
@@ -402,7 +449,7 @@ namespace DS4Windows
                     if (disposed ||
                         generation != bluetoothStartGeneration[slot])
                     {
-                        return true;
+                        return false;
                     }
                 }
 
@@ -442,7 +489,7 @@ namespace DS4Windows
                     if (superseded)
                     {
                         bluetoothPlayback.Dispose();
-                        return true;
+                        return false;
                     }
 
                     return true;
@@ -467,6 +514,7 @@ namespace DS4Windows
                     bluetoothSlots[slot] = null;
                     bluetoothStartPending[slot] = false;
                     bluetoothStartGeneration[slot]++;
+                    startFailed[slot] = true;
                 }
 
                 bluetoothPlayback?.Dispose();

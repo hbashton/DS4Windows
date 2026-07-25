@@ -35,9 +35,14 @@ namespace DS4Windows
                     return ControllerRuntimeLaneState.Ready;
                 }
 
-                return startFailed[slot]
-                    ? ControllerRuntimeLaneState.Unavailable
-                    : ControllerRuntimeLaneState.Starting;
+                if (startFailed[slot])
+                {
+                    return ControllerRuntimeLaneState.Unavailable;
+                }
+
+                return pendingStarts[slot] != null
+                    ? ControllerRuntimeLaneState.Starting
+                    : ControllerRuntimeLaneState.Unavailable;
             }
         }
 
@@ -117,7 +122,7 @@ namespace DS4Windows
                 bool hadPendingStart = pendingStarts[slot] != null;
                 slots[slot] = null;
                 pendingStarts[slot] = null;
-                startFailed[slot] = false;
+                startFailed[slot] = true;
                 startGenerations[slot]++;
                 if (playback != null || hadPendingStart)
                 {
@@ -128,6 +133,30 @@ namespace DS4Windows
             }
 
             DisposeInBackground(slot, playback);
+        }
+
+        public void ResetForServiceStop()
+        {
+            var previous = new DualShock4BluetoothSpeakerPassthrough[slots.Length];
+            lock (syncRoot)
+            {
+                for (int slot = 0; slot < slots.Length; slot++)
+                {
+                    previous[slot] = slots[slot];
+                    slots[slot] = null;
+                    pendingStarts[slot] = null;
+                    startFailed[slot] = false;
+                    startGenerations[slot]++;
+                }
+            }
+
+            for (int slot = 0; slot < previous.Length; slot++)
+            {
+                lock (slotWorkerLocks[slot])
+                {
+                    previous[slot]?.Dispose();
+                }
+            }
         }
 
         public void Dispose()
@@ -175,6 +204,11 @@ namespace DS4Windows
                 {
                     if (generation != startGenerations[slot])
                     {
+                        if (pendingStarts[slot] == null)
+                        {
+                            startFailed[slot] = true;
+                        }
+
                         return;
                     }
                 }

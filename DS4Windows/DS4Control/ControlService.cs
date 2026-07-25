@@ -1985,18 +1985,18 @@ namespace DS4Windows
                 if (showlog)
                     LogDebug(DS4WinWPF.Properties.Resources.StoppingDS4);
 
-                StartupDiag("ControlService.Stop DualSenseAudio dispose begin");
-                dualSenseAudioPassthrough.Dispose();
-                StartupDiag("ControlService.Stop DualSenseAudio dispose end");
-                StartupDiag("ControlService.Stop DualShock4Audio dispose begin");
-                dualShock4AudioPassthrough.Dispose();
-                StartupDiag("ControlService.Stop DualShock4Audio dispose end");
-                StartupDiag("ControlService.Stop DualSenseMicrophone dispose begin");
-                dualSenseMicrophonePassthrough.Dispose();
-                StartupDiag("ControlService.Stop DualSenseMicrophone dispose end");
-                StartupDiag("ControlService.Stop AudioHaptics dispose begin");
-                audioHapticsService.Dispose();
-                StartupDiag("ControlService.Stop AudioHaptics dispose end");
+                StartupDiag("ControlService.Stop DualSenseAudio reset begin");
+                dualSenseAudioPassthrough.ResetForServiceStop();
+                StartupDiag("ControlService.Stop DualSenseAudio reset end");
+                StartupDiag("ControlService.Stop DualShock4Audio reset begin");
+                dualShock4AudioPassthrough.ResetForServiceStop();
+                StartupDiag("ControlService.Stop DualShock4Audio reset end");
+                StartupDiag("ControlService.Stop DualSenseMicrophone stop begin");
+                dualSenseMicrophonePassthrough.Stop();
+                StartupDiag("ControlService.Stop DualSenseMicrophone stop end");
+                StartupDiag("ControlService.Stop AudioHaptics reset begin");
+                audioHapticsService.ResetForServiceStop();
+                StartupDiag("ControlService.Stop AudioHaptics reset end");
                 StartupDiag("ControlService.Stop PlayStation feature outputs begin");
                 StopAllPlayStationFeatureOutputs();
                 StartupDiag("ControlService.Stop PlayStation feature outputs end");

@@ -101,6 +101,16 @@ namespace DS4Windows
             }
         }
 
+        public void ResetForServiceStop()
+        {
+            for (int slot = 0; slot < slots.Length; slot++)
+            {
+                Stop(slot);
+            }
+
+            disposed = false;
+        }
+
         /// <summary>
         /// Applies the newest audio-derived haptic frame directly to an
         /// incoming game haptics block. Calling this also grants the game

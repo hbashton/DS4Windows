@@ -40,7 +40,8 @@ function Get-UsbipInstalledVersion {
         try {
             $versionText = (Get-Item -LiteralPath $driverPath).
                 VersionInfo.FileVersion
-            if ($versionText) { return [Version]$versionText }
+            $version = ConvertTo-VersionFromObject $versionText
+            if ($version) { return $version }
         }
         catch { }
     }
@@ -50,11 +51,43 @@ function Get-UsbipInstalledVersion {
         "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
     )) {
         $entry = Get-ItemProperty $root -ErrorAction SilentlyContinue |
-            Where-Object { $_.DisplayName -match "USB/IP|USBip" } |
+            Where-Object {
+                $displayName = $_.DisplayName
+                if ($null -eq $displayName) { return $false }
+                $nameText = $displayName -as [string]
+                return $nameText -match "USB/IP|USBip"
+            } |
             Select-Object -First 1
         if ($entry -and $entry.DisplayVersion) {
-            try { return [Version]$entry.DisplayVersion } catch { }
+            $version = ConvertTo-VersionFromObject $entry.DisplayVersion
+            if ($version) { return $version }
         }
+    }
+
+    return $null
+}
+
+function ConvertTo-VersionFromObject([object]$value) {
+    if ($null -eq $value) { return $null }
+    if ($value -is [Version]) { return $value }
+
+    try {
+        if ($value -is [string]) {
+            $text = $value.Trim()
+        }
+        else {
+            $text = [string]$value
+            if ($null -eq $text) { return $null }
+            $text = $text.Trim()
+        }
+    }
+    catch { return $null }
+
+    if ($text.Length -eq 0) { return $null }
+
+    $parsed = $null
+    if ([Version]::TryParse($text, [ref]$parsed)) {
+        return $parsed
     }
 
     return $null
@@ -119,7 +152,7 @@ function Get-GithubReleaseAsset([string]$repo, [string]$assetPattern) {
 
 function Get-ViiperAssetUrl {
     $errors = @()
-    foreach ($repo in @("hbashton/VIIPER")) {
+    foreach ($repo in @("hbashton/VIIPER", "Alia5/VIIPER")) {
         try {
             Write-SetupLog "Checking release assets in $repo"
             return Get-GithubReleaseAsset $repo (
@@ -233,6 +266,46 @@ function Start-AndVerifyViiper([string]$viiperPath) {
     return $false
 }
 
+function Register-ViiperRunTask([string]$viiperPath, [string]$taskName) {
+    try {
+        $taskAction = New-ScheduledTaskAction -Execute $viiperPath `
+            -Argument "server"
+        $taskTrigger = New-ScheduledTaskTrigger -AtLogOn
+        $taskPrincipal = New-ScheduledTaskPrincipal `
+            -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) `
+            -RunLevel Highest -LogonType Interactive
+        $taskSettings = New-ScheduledTaskSettingsSet `
+            -AllowStartIfOnBatteries `
+            -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) `
+            -MultipleInstances IgnoreNew
+
+        Register-ScheduledTask -TaskName $taskName -Action $taskAction `
+            -Trigger $taskTrigger -Principal $taskPrincipal -Settings $taskSettings `
+            -Force | Out-Null
+        return $true
+    }
+    catch {
+        Write-SetupLog "Failed modern scheduled task registration: $($_.Exception.Message)" Yellow
+    }
+
+    try {
+        $runCommand = '"{0}" server' -f $viiperPath
+        $scheduledResult = Start-Process -FilePath "schtasks.exe" `
+            -ArgumentList "/Create /F /TN `"$taskName`" /SC ONLOGON /RL HIGHEST /IT /TR `"$runCommand`"" `
+            -WindowStyle Hidden -PassThru -Wait
+        if ($scheduledResult.ExitCode -eq 0) {
+            return $true
+        }
+
+        Write-SetupLog "Fallback schtasks command exited with code $($scheduledResult.ExitCode)." Yellow
+    }
+    catch {
+        Write-SetupLog "Failed fallback scheduled task registration: $($_.Exception.Message)" Yellow
+    }
+
+    return $false
+}
+
 try {
     if (-not (Test-Administrator)) {
         throw "Administrator permission is required. Launch setup from DS4Windows so Windows can request it automatically."
@@ -246,7 +319,13 @@ try {
 
     Write-Step "Checking usbip-win2"
     $requiredUsbipVersion = [Version]"0.9.7.7"
-    $usbipVersion = Get-UsbipInstalledVersion
+    try {
+        $usbipVersion = Get-UsbipInstalledVersion
+    }
+    catch {
+        Write-SetupLog "usbip-win2 version check failed: $($_.Exception.Message)" Yellow
+        $usbipVersion = $null
+    }
     if ($usbipVersion -and $usbipVersion -ge $requiredUsbipVersion) {
         Write-SetupLog "usbip-win2 is ready: $usbipVersion" Green
     }
@@ -287,19 +366,12 @@ try {
     }
 
     $taskName = "RunVIIPER"
-    $taskAction = New-ScheduledTaskAction -Execute $viiperPath `
-        -Argument "server"
-    $taskUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-    $taskTrigger = New-ScheduledTaskTrigger -AtLogOn -User $taskUser
-    $taskPrincipal = New-ScheduledTaskPrincipal -UserId $taskUser `
-        -RunLevel Highest -LogonType Interactive
-    $taskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
-        -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) `
-        -MultipleInstances IgnoreNew
-    Register-ScheduledTask -TaskName $taskName -Action $taskAction `
-        -Trigger $taskTrigger -Principal $taskPrincipal -Settings $taskSettings `
-        -Force | Out-Null
-    Write-SetupLog "Registered hidden logon task '$taskName'." Green
+    if (Register-ViiperRunTask $viiperPath $taskName) {
+        Write-SetupLog "Registered hidden logon task '$taskName'." Green
+    }
+    else {
+        Write-SetupLog "Could not create hidden logon task. Setup will continue; VIIPER can still be started by DS4Windows when needed." Yellow
+    }
 
     Write-Step "Verification"
     if (Start-AndVerifyViiper $viiperPath) {

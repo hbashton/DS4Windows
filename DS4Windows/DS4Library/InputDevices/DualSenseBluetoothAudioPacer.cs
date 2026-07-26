@@ -25,7 +25,7 @@ namespace DS4Windows.InputDevices
         internal const int HostReservoirCapacity = 64;
 
         private const string HelperArgument = "--dualsense-bt-audio-pacer-helper";
-        private const int ProtocolVersion = 5;
+        private const int ProtocolVersion = 6;
         private const int PipeConnectTimeoutMilliseconds = 5000;
         private const int HelperReadyTimeoutMilliseconds = 5000;
         private const int HelperStopTimeoutMilliseconds = 3000;
@@ -582,7 +582,8 @@ namespace DS4Windows.InputDevices
         /// Updates are coalesced and only alter future fractional intervals;
         /// the helper never restarts or bursts the stream.
         /// </summary>
-        public bool UpdateCadenceRatio(double controllerClockRatio)
+        public bool UpdateCadenceRatio(double controllerClockRatio,
+            long inputArrivalQpc = 0)
         {
             if (!double.IsFinite(controllerClockRatio) ||
                 controllerClockRatio <
@@ -594,9 +595,12 @@ namespace DS4Windows.InputDevices
                 return false;
             }
 
-            byte[] payload = new byte[sizeof(long)];
+            byte[] payload = new byte[sizeof(long) * 2];
             BinaryPrimitives.WriteInt64LittleEndian(payload,
                 BitConverter.DoubleToInt64Bits(controllerClockRatio));
+            BinaryPrimitives.WriteInt64LittleEndian(
+                payload.AsSpan(sizeof(long), sizeof(long)),
+                Math.Max(0, inputArrivalQpc));
             lock (stateLock)
             {
                 foreach (OutboundCommand removed in
@@ -1560,6 +1564,7 @@ namespace DS4Windows.InputDevices
             private int currentEpoch = InitialEpoch;
             private long cadenceRatioBits =
                 BitConverter.DoubleToInt64Bits(1.0);
+            private long inputArrivalQpc;
             private bool primeRequired = true;
             private int disposed;
             private readonly string presentationTraceDirectory;
@@ -1877,7 +1882,7 @@ namespace DS4Windows.InputDevices
 
             private void ReceiveCadence(byte[] payload, int payloadLength)
             {
-                if (payloadLength != sizeof(long))
+                if (payloadLength != sizeof(long) * 2)
                 {
                     throw new InvalidDataException(
                         "Invalid DualSense pacer cadence payload length.");
@@ -1897,6 +1902,9 @@ namespace DS4Windows.InputDevices
 
                 Interlocked.Exchange(ref cadenceRatioBits,
                     BitConverter.DoubleToInt64Bits(ratio));
+                Interlocked.Exchange(ref inputArrivalQpc,
+                    BinaryPrimitives.ReadInt64LittleEndian(
+                        payload.AsSpan(sizeof(long), sizeof(long))));
             }
 
             private void PacerLoop()
@@ -1947,7 +1955,10 @@ namespace DS4Windows.InputDevices
                             scheduler.SetRateRatio(
                                 BitConverter.Int64BitsToDouble(
                                     Interlocked.Read(ref cadenceRatioBits)));
-                            WaitUntil(timer, scheduler.NextDeadlineQpc,
+                            scheduler.SetInputPhaseReference(
+                                Interlocked.Read(ref inputArrivalQpc));
+                            WaitUntil(timer,
+                                scheduler.PresentationDeadlineQpc,
                                 stopRequested);
                         }
                         if (stopRequested.WaitOne(0))
@@ -2632,6 +2643,8 @@ namespace DS4Windows.InputDevices
     {
         internal const int CadenceNumerator = 32;
         internal const int CadenceDenominator = 3000;
+        internal const int InputReportsPerSecond = 800;
+        internal const int InputPhaseOffsetMicroseconds = 350;
         internal const double MinimumRateRatio = 0.995;
         internal const double MaximumRateRatio = 1.005;
 
@@ -2645,6 +2658,7 @@ namespace DS4Windows.InputDevices
         private bool nominalRatio;
         private double rateRatio;
         private long nextDeadlineQpc;
+        private long inputPhaseReferenceQpc;
         private bool started;
 
         public DualSenseBluetoothAudioPacerScheduler(long clockFrequency)
@@ -2661,7 +2675,13 @@ namespace DS4Windows.InputDevices
         public bool IsStarted => started;
         public long NextDeadlineQpc => started ? nextDeadlineQpc :
             throw new InvalidOperationException("The pacer clock has not started.");
+        public long PresentationDeadlineQpc => GetPresentationDeadlineQpc();
         public double RateRatio => rateRatio;
+
+        public void SetInputPhaseReference(long inputArrivalQpc)
+        {
+            inputPhaseReferenceQpc = Math.Max(0, inputArrivalQpc);
+        }
 
         public void SetRateRatio(double controllerClockRatio)
         {
@@ -2732,6 +2752,32 @@ namespace DS4Windows.InputDevices
             nextDeadlineQpc = phaseGap >= minimumPhaseGap ?
                 phaseDeadline : checked(presentationQpc + interval);
             return nextDeadlineQpc;
+        }
+
+        private long GetPresentationDeadlineQpc()
+        {
+            if (!started)
+            {
+                throw new InvalidOperationException(
+                    "The pacer clock has not started.");
+            }
+
+            if (inputPhaseReferenceQpc <= 0)
+            {
+                return nextDeadlineQpc;
+            }
+
+            double inputPeriodTicks = clockFrequency /
+                (double)InputReportsPerSecond;
+            double targetPhaseQpc = inputPhaseReferenceQpc +
+                clockFrequency * (InputPhaseOffsetMicroseconds /
+                    1_000_000.0);
+            double periodsFromReference =
+                (nextDeadlineQpc - targetPhaseQpc) / inputPeriodTicks;
+            long nearestPeriod = checked((long)Math.Round(
+                periodsFromReference, MidpointRounding.AwayFromZero));
+            return checked((long)Math.Round(targetPhaseQpc +
+                nearestPeriod * inputPeriodTicks));
         }
 
         private long NextIntervalTicks()

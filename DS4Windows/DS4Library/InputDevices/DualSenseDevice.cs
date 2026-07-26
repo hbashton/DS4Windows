@@ -282,6 +282,8 @@ namespace DS4Windows.InputDevices
         private uint deltaTimeCurrent = 0;
         private readonly DualSenseControllerClockEstimator
             bluetoothControllerClock = new();
+        private long bluetoothLastInputArrivalQpc;
+        private long bluetoothLastInputPhasePublishQpc;
         public double DualSenseControllerClockRatio =>
             bluetoothControllerClock.Ratio;
         public int DualSenseControllerClockCompletedWindows =>
@@ -403,6 +405,7 @@ namespace DS4Windows.InputDevices
         private const int BluetoothSpeakerClockPresentedLeaseMilliseconds =
             3000;
         private const int BluetoothAudioPacerStartupRetryMilliseconds = 2000;
+        private const int BluetoothInputPhasePublishMilliseconds = 100;
         private const uint BluetoothFinalControlWriteTimeoutMilliseconds = 1000;
         private const uint BluetoothWriterOwnershipHandoffTimeoutMilliseconds =
             1000;
@@ -1300,6 +1303,11 @@ namespace DS4Windows.InputDevices
                         lock (bluetoothAudioPacerLock)
                         {
                             bluetoothAudioPacer = candidate;
+                            bluetoothAudioPacer.UpdateCadenceRatio(
+                                DualSenseControllerClockStable ?
+                                    DualSenseControllerClockRatio : 1.0,
+                                Volatile.Read(
+                                    ref bluetoothLastInputArrivalQpc));
                             candidate = null;
                         }
 
@@ -1434,11 +1442,10 @@ namespace DS4Windows.InputDevices
                 }
 
                 bluetoothAudioPacer = pacer;
-                if (DualSenseControllerClockStable)
-                {
-                    pacer.UpdateCadenceRatio(
-                        DualSenseControllerClockRatio);
-                }
+                pacer.UpdateCadenceRatio(
+                    DualSenseControllerClockStable ?
+                        DualSenseControllerClockRatio : 1.0,
+                    Volatile.Read(ref bluetoothLastInputArrivalQpc));
                 bluetoothAudioPacerLastError = string.Empty;
                 Volatile.Write(ref bluetoothAudioPacerRetryAfterTimestamp, 0);
                 return true;
@@ -1561,7 +1568,8 @@ namespace DS4Windows.InputDevices
             lock (bluetoothAudioPacerLock)
             {
                 return bluetoothAudioPacer?.IsRunning == true &&
-                    bluetoothAudioPacer.UpdateCadenceRatio(ratio);
+                    bluetoothAudioPacer.UpdateCadenceRatio(ratio,
+                        Volatile.Read(ref bluetoothLastInputArrivalQpc));
             }
         }
 
@@ -2356,11 +2364,26 @@ namespace DS4Windows.InputDevices
 
                     if (conType == ConnectionType.BT)
                     {
-                        if (bluetoothControllerClock.Observe(tempStamp,
-                                Stopwatch.GetTimestamp()))
+                        long inputArrivalQpc = Stopwatch.GetTimestamp();
+                        Volatile.Write(ref bluetoothLastInputArrivalQpc,
+                            inputArrivalQpc);
+                        bool clockRatioUpdated =
+                            bluetoothControllerClock.Observe(tempStamp,
+                                inputArrivalQpc);
+                        long previousPhasePublish = Volatile.Read(
+                            ref bluetoothLastInputPhasePublishQpc);
+                        bool phasePublishDue = inputArrivalQpc -
+                            previousPhasePublish >= Stopwatch.Frequency *
+                                BluetoothInputPhasePublishMilliseconds / 1000;
+                        if ((clockRatioUpdated || phasePublishDue) &&
+                            Interlocked.CompareExchange(
+                                ref bluetoothLastInputPhasePublishQpc,
+                                inputArrivalQpc, previousPhasePublish) ==
+                                    previousPhasePublish)
                         {
                             TryUpdateBluetoothAudioPacerCadenceRatio(
-                                bluetoothControllerClock.Ratio);
+                                DualSenseControllerClockStable ?
+                                    bluetoothControllerClock.Ratio : 1.0);
                         }
                     }
 

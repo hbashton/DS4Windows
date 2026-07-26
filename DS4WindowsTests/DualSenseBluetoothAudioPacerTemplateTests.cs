@@ -223,6 +223,48 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
+        public void SchedulerAlignsPresentationToControllerInputGridWithoutCadenceDrift()
+        {
+            const long qpcFrequency = 10_000_000;
+            const long startQpc = 20_000_000;
+            const long inputReferenceQpc = startQpc - 7_123;
+            const int intervals = 3000;
+            long inputPeriodTicks = qpcFrequency /
+                DualSenseBluetoothAudioPacerScheduler.InputReportsPerSecond;
+            long phaseOffsetTicks = qpcFrequency *
+                DualSenseBluetoothAudioPacerScheduler.
+                    InputPhaseOffsetMicroseconds / 1_000_000;
+            var scheduler = new DualSenseBluetoothAudioPacerScheduler(
+                qpcFrequency);
+            scheduler.SetInputPhaseReference(inputReferenceQpc);
+            scheduler.Start(startQpc);
+
+            for (int index = 0; index < intervals; index++)
+            {
+                long idealDeadline = scheduler.NextDeadlineQpc;
+                long presentationDeadline =
+                    scheduler.PresentationDeadlineQpc;
+                long phase = (presentationDeadline - inputReferenceQpc) %
+                    inputPeriodTicks;
+                if (phase < 0)
+                {
+                    phase += inputPeriodTicks;
+                }
+
+                Assert.AreEqual(phaseOffsetTicks, phase, 1,
+                    "Presentation escaped the measured input-report phase.");
+                Assert.IsTrue(Math.Abs(presentationDeadline - idealDeadline) <=
+                    inputPeriodTicks / 2 + 1,
+                    "Input phase alignment added more than half an input period.");
+                scheduler.AdvanceAfterSend(presentationDeadline);
+            }
+
+            Assert.AreEqual(startQpc + qpcFrequency * 32L,
+                scheduler.NextDeadlineQpc,
+                "Input phase alignment changed the exact average audio cadence.");
+        }
+
+        [TestMethod]
         public void CleanStopBarrierRequiresExplicitReleasedOwnershipAck()
         {
             Assert.IsFalse(DualSenseBluetoothAudioPacer.IsCleanStopBarrier(

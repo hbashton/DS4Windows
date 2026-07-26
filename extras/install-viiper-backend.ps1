@@ -209,8 +209,11 @@ function Install-ViiperAtomically([string]$candidatePath,
     # An explicit repair/update may replace a running backend. Stop only the
     # VIIPER process and leave DS4Windows and every physical Bluetooth device
     # alone.
-    Get-Process -Name "viiper" -ErrorAction SilentlyContinue |
-        Stop-Process -Force -ErrorAction SilentlyContinue
+    $stopped = Stop-ViiperProcesses "backend replacement"
+    if (-not $stopped) {
+        throw "Unable to stop the currently running VIIPER process automatically during install. " +
+              "Please close viiper.exe manually and try again."
+    }
     Start-Sleep -Milliseconds 300
 
     try {
@@ -227,6 +230,64 @@ function Install-ViiperAtomically([string]$candidatePath,
         }
         throw
     }
+}
+
+function Get-RunningViiperProcesses {
+    try {
+        Get-CimInstance Win32_Process -Filter "Name='viiper.exe'" -ErrorAction SilentlyContinue
+    }
+    catch {
+        @()
+    }
+}
+
+function Stop-ViiperProcesses([string]$operation) {
+    $attempts = 12
+    for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+        $processes = @(Get-RunningViiperProcesses)
+        if ($processes.Count -eq 0) { return $true }
+
+        if ($attempt -eq 1) {
+            Write-SetupLog "Stopping VIIPER process(es) for $operation..." Yellow
+        }
+
+        foreach ($process in $processes) {
+            if ($process.ProcessId -eq $PID) { continue }
+            try {
+                $identifier = if ($process.ExecutablePath) {
+                    $process.ExecutablePath
+                }
+                else {
+                    $process.ProcessId
+                }
+                Write-SetupLog "Stopping viiper PID=$($process.ProcessId) ($identifier)." Yellow
+                Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+            }
+            catch { }
+        }
+
+        Start-Sleep -Milliseconds 300
+
+        $remaining = @(Get-RunningViiperProcesses)
+        if ($remaining.Count -eq 0) { return $true }
+
+        if ($attempt -ge 3) {
+            foreach ($process in $remaining) {
+                if ($process.ProcessId -eq $PID) { continue }
+                try {
+                    & taskkill.exe /PID $process.ProcessId /T /F | Out-Null
+                }
+                catch { }
+            }
+            Start-Sleep -Milliseconds 200
+        }
+    }
+
+    Write-SetupLog (
+        "A VIIPER process is still running after stop attempts. " +
+        "Please close viiper.exe manually and rerun Install/Repair."
+    ) Yellow
+    return $false
 }
 
 function Test-ViiperApi([int]$timeoutMilliseconds = 1000) {
@@ -359,9 +420,18 @@ try {
     Write-SetupLog "VIIPER installed to $viiperPath" Green
 
     Write-Step "Registering VIIPER"
+    $registrationSafeToRun = $true
+    if (-not (Stop-ViiperProcesses "install registration")) {
+        $registrationSafeToRun = $false
+    }
+
     $registration = Start-Process -FilePath $viiperPath `
         -ArgumentList "install" -WindowStyle Hidden -PassThru -Wait
     if ($registration.ExitCode -ne 0) {
+        if (-not $registrationSafeToRun) {
+            throw "VIIPER registration could not proceed because a VIIPER process could not be closed automatically. " +
+                  "Please close viiper.exe manually, then run Install / Repair again."
+        }
         throw "VIIPER registration failed with exit code $($registration.ExitCode)."
     }
 

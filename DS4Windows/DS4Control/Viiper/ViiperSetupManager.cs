@@ -237,7 +237,9 @@ namespace DS4Windows
                     "VIIPER", "install.log");
                 string message = exitCode == 0
                     ? "VIIPER was installed, but Windows is not reporting every component as ready yet. Restart Windows once, then click Refresh."
-                    : $"VIIPER setup could not finish (exit code {exitCode}). Review the setup log and try Repair again.\n\n{logPath}";
+                    : $"VIIPER setup could not finish (exit code {exitCode}).\n\n" +
+                      "If a viiper.exe process was still running, it may have blocked the VIIPER registration step. " +
+                      "Close viiper.exe manually and run Repair again.\n\nReview the setup log for details:\n{logPath}";
                 ShowInstallerMessage(owner, message, "VIIPER setup",
                     exitCode == 0 ? MessageBoxImage.Warning :
                         MessageBoxImage.Error);

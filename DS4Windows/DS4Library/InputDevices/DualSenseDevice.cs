@@ -391,11 +391,12 @@ namespace DS4Windows.InputDevices
         private const int BluetoothCombinedStateLength = 63;
         private const int BluetoothCombinedNativeStateLength = USB_OUTPUT_CHANGE_LENGTH - 1;
         private const byte BluetoothCombinedLowLatencyBufferLength = 16;
-        // Keep the proven Sony-reference 64-byte setting. Field 9 can affect
-        // controller audio buffering, but isolated 128-byte and startup-prime
-        // trials did not prevent the measured lower-radio completion stalls;
-        // increasing it is not a sustainable substitute for fixing transport.
+        // Fields 5-8 retain Sony's 64-byte haptics/control latency. Field 9 is
+        // the speaker decoder buffer in the DS5Dongle trace. Pair 96 bytes
+        // with the pacer's measured 32 ms transfer; changing the field without
+        // causally filling it did not protect earlier trials.
         private const byte BluetoothCombinedSpeakerBufferLength = 64;
+        private const byte BluetoothCombinedSpeakerDecoderBufferLength = 96;
         // The game, not a wall-clock timeout in DS4Windows, owns the end of a
         // native DualSense effect by publishing an explicit silent haptics
         // block. Expiring the newest block between otherwise valid virtual-
@@ -3890,7 +3891,7 @@ namespace DS4Windows.InputDevices
             combined[6] = BluetoothCombinedSpeakerBufferLength;
             combined[7] = BluetoothCombinedSpeakerBufferLength;
             combined[8] = BluetoothCombinedSpeakerBufferLength;
-            combined[9] = BluetoothCombinedSpeakerBufferLength;
+            combined[9] = BluetoothCombinedSpeakerDecoderBufferLength;
             combined[BluetoothCombinedSpeakerOffset] =
                 GetBluetoothCombinedSpeakerPacketType(headsetOnlyAudio);
             combined[BluetoothCombinedSpeakerOffset + 1] =

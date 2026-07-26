@@ -223,6 +223,39 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
+        public void SchedulerTransfersMeasuredControllerReserveWithoutBursting()
+        {
+            const long qpcFrequency = 10_000_000;
+            const long startQpc = 1_000_000;
+            int transferIntervals =
+                DualSenseBluetoothAudioPacer.ControllerReserveTransferIntervals;
+            var scheduler = new DualSenseBluetoothAudioPacerScheduler(
+                qpcFrequency);
+            scheduler.Start(startQpc, transferIntervals);
+
+            for (int index = 0; index < transferIntervals; index++)
+            {
+                long previous = scheduler.NextDeadlineQpc;
+                scheduler.AdvanceAfterSend(previous);
+                Assert.AreEqual(qpcFrequency / 100,
+                    scheduler.NextDeadlineQpc - previous);
+            }
+
+            long beforeNominal = scheduler.NextDeadlineQpc;
+            scheduler.AdvanceAfterSend(beforeNominal);
+            Assert.AreEqual(106_666,
+                scheduler.NextDeadlineQpc - beforeNominal);
+
+            double transferredMilliseconds = transferIntervals *
+                ((1000.0 *
+                    DualSenseBluetoothAudioPacerScheduler.CadenceNumerator /
+                    DualSenseBluetoothAudioPacerScheduler.CadenceDenominator) -
+                 (DualSenseBluetoothAudioPacerScheduler.
+                    ControllerReserveTransferIntervalMicroseconds / 1000.0));
+            Assert.AreEqual(40.0, transferredMilliseconds, 0.001);
+        }
+
+        [TestMethod]
         public void SchedulerAlignsPresentationToControllerInputGridWithoutCadenceDrift()
         {
             const long qpcFrequency = 10_000_000;

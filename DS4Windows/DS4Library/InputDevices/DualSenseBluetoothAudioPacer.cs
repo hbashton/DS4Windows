@@ -23,6 +23,13 @@ namespace DS4Windows.InputDevices
         internal const int ReportLength = 398;
         internal const int PrimeReportCount = 8;
         internal const int HostReservoirCapacity = 64;
+        // Transfer 40 ms from the existing host prime into the controller.
+        // This does not increase end-to-end delay: it only redistributes the
+        // fixed ten-report reserve. The value covers the measured 35-37.5 ms
+        // completion stalls with one USB-poll margin while remaining below
+        // the proven 42.667 ms
+        // controller overfill point.
+        internal const int ControllerReserveTransferIntervals = 60;
 
         private const string HelperArgument = "--dualsense-bt-audio-pacer-helper";
         private const int ProtocolVersion = 6;
@@ -1935,7 +1942,8 @@ namespace DS4Windows.InputDevices
                                 !controlPrimeBypass)
                             {
                                 primeRequired = false;
-                                scheduler.Start(Stopwatch.GetTimestamp());
+                                scheduler.Start(Stopwatch.GetTimestamp(),
+                                    ControllerReserveTransferIntervals);
                             }
                         }
 
@@ -2645,6 +2653,8 @@ namespace DS4Windows.InputDevices
         internal const int CadenceDenominator = 3000;
         internal const int InputReportsPerSecond = 800;
         internal const int InputPhaseOffsetMicroseconds = 150;
+        internal const int ControllerReserveTransferIntervalMicroseconds =
+            10_000;
         internal const double MinimumRateRatio = 0.995;
         internal const double MaximumRateRatio = 1.005;
 
@@ -2657,6 +2667,7 @@ namespace DS4Windows.InputDevices
         private double fractionalRemainderAccumulator;
         private bool nominalRatio;
         private double rateRatio;
+        private int controllerReserveTransferIntervalsRemaining;
         private long nextDeadlineQpc;
         private long inputPhaseReferenceQpc;
         private bool started;
@@ -2723,8 +2734,22 @@ namespace DS4Windows.InputDevices
 
         public void Start(long nowQpc)
         {
+            Start(nowQpc, 0);
+        }
+
+        public void Start(long nowQpc,
+            int controllerReserveTransferIntervals)
+        {
+            if (controllerReserveTransferIntervals < 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(controllerReserveTransferIntervals));
+            }
+
             remainderAccumulator = 0;
             fractionalRemainderAccumulator = 0.0;
+            controllerReserveTransferIntervalsRemaining =
+                controllerReserveTransferIntervals;
             nextDeadlineQpc = nowQpc;
             started = true;
         }
@@ -2733,6 +2758,7 @@ namespace DS4Windows.InputDevices
         {
             remainderAccumulator = 0;
             fractionalRemainderAccumulator = 0.0;
+            controllerReserveTransferIntervalsRemaining = 0;
             nextDeadlineQpc = 0;
             started = false;
         }
@@ -2782,6 +2808,14 @@ namespace DS4Windows.InputDevices
 
         private long NextIntervalTicks()
         {
+            if (controllerReserveTransferIntervalsRemaining > 0)
+            {
+                controllerReserveTransferIntervalsRemaining--;
+                return checked(clockFrequency *
+                    ControllerReserveTransferIntervalMicroseconds /
+                    1_000_000);
+            }
+
             long interval = wholeTicks;
             if (nominalRatio)
             {

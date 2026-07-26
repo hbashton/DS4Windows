@@ -140,30 +140,62 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void CaptureClockUsesPadForgeTwentyMillisecondDeadbandTrim()
+        public void CaptureClockUsesBoundedFractionalCorrection()
         {
             int targetFrames = 48000 *
                 DualSenseBluetoothSpeakerPassthrough.TargetBufferMs / 1000;
 
             Assert.AreEqual(1.0,
                 DualSenseBluetoothSpeakerPassthrough.
-                    CalculateCaptureClockRatio(targetFrames, targetFrames),
+                    CalculateCaptureClockTargetRatio(
+                        targetFrames, targetFrames),
                 1.0e-12);
             Assert.AreEqual(1.0,
                 DualSenseBluetoothSpeakerPassthrough.
-                    CalculateCaptureClockRatio(
-                        targetFrames + 240, targetFrames),
+                    CalculateCaptureClockTargetRatio(
+                        targetFrames + 2.0, targetFrames),
                 1.0e-12);
-            Assert.AreEqual(516.0 / 512.0,
+            Assert.AreEqual(1.001,
                 DualSenseBluetoothSpeakerPassthrough.
-                    CalculateCaptureClockRatio(
-                        targetFrames + 241, targetFrames),
+                    CalculateCaptureClockTargetRatio(
+                        targetFrames + 1000.0, targetFrames),
                 1.0e-12);
-            Assert.AreEqual(508.0 / 512.0,
+            Assert.AreEqual(0.999,
                 DualSenseBluetoothSpeakerPassthrough.
-                    CalculateCaptureClockRatio(
-                        targetFrames - 241, targetFrames),
+                    CalculateCaptureClockTargetRatio(
+                        targetFrames - 1000.0, targetFrames),
                 1.0e-12);
+        }
+
+        [TestMethod]
+        public void CaptureClockCorrectionSlewsWithoutPitchStep()
+        {
+            Assert.AreEqual(1.000002,
+                DualSenseBluetoothSpeakerPassthrough.
+                    SlewCaptureClockRatio(1.0, 1.001),
+                1.0e-12);
+            Assert.AreEqual(0.999998,
+                DualSenseBluetoothSpeakerPassthrough.
+                    SlewCaptureClockRatio(1.0, 0.999),
+                1.0e-12);
+            Assert.AreEqual(1.0000005,
+                DualSenseBluetoothSpeakerPassthrough.
+                    SlewCaptureClockRatio(1.0, 1.0000005),
+                1.0e-12);
+        }
+
+        [TestMethod]
+        public void ControllerClockFeedForwardUsesReciprocalSourceRatio()
+        {
+            const double controllerClockRatio = 0.999800;
+            Assert.AreEqual(1.0 / controllerClockRatio,
+                DualSenseBluetoothSpeakerPassthrough.
+                    CalculateControllerLockedInputRateRatio(
+                        controllerClockRatio, true), 1.0e-12);
+            Assert.AreEqual(1.0,
+                DualSenseBluetoothSpeakerPassthrough.
+                    CalculateControllerLockedInputRateRatio(
+                        controllerClockRatio, false), 1.0e-12);
         }
 
         [DataTestMethod]

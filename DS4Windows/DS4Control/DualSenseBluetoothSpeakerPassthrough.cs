@@ -446,9 +446,17 @@ namespace DS4Windows
         internal const int TransientCaptureShortageLeaseMs = 50;
         private const int PacerPrewarmRetryMs = 2000;
         private const double BluetoothSpeakerCadenceMs = 10.0 + (2.0 / 3.0);
+        // The render and Bluetooth clocks are independent. Correct their
+        // long-run drift without audibly pitch-shifting the stream: filter the
+        // callback sawtooth, cap correction at 1000 ppm, and slew at two ppm
+        // per packet. The previous +/-4-of-512 frame snap was a +/-7812 ppm
+        // pitch step; the acoustic trace measured the resulting 523.41 Hz tone
+        // at about 519.08 Hz before it jumped back to nominal.
+        internal const double CaptureClockMaximumCorrection = 0.001;
+        internal const double CaptureClockCorrectionGain = 1.0 / 65536.0;
+        internal const double CaptureClockRatioSlewPerPacket = 0.000002;
         private const double CaptureClockSmoothingAlpha = 0.005319148936170213;
-        internal const int CaptureClockLagDeadbandFrames = 240;
-        internal const int CaptureClockTrimFrames = 4;
+        internal const double CaptureClockErrorDeadbandFrames = 2.0;
 
         private readonly object syncRoot = new object();
         private readonly object directPcmSync = new object();
@@ -477,11 +485,7 @@ namespace DS4Windows
             ViiperOutDevice.DualSenseAtomicFeedbackLength];
         private readonly float[] frame = new float[FrameSamples * Channels];
         private readonly float[] speakerResampleInput = new float[
-            SourcePullFrames * Channels];
-        private readonly float[] speakerResampleOutput = new float[
-            (FrameSamples + 8) * Channels];
-        private readonly float[] speakerResampleFifo = new float[
-            FrameSamples * Channels * 4];
+            DualSenseSpeakerFrameResampler.MaximumInputFrames * Channels];
         private readonly byte[] opusFrame = new byte[OpusBytes];
         private readonly float[] captureRing = new float[CaptureRingFrames * Channels];
         private readonly AutoResetEvent captureDataAvailable = new AutoResetEvent(false);
@@ -499,9 +503,6 @@ namespace DS4Windows
         private int captureRingReadIndex;
         private int captureRingWriteIndex;
         private int captureRingBufferedFrames;
-        private int speakerResampleFifoReadFrame;
-        private int speakerResampleFifoWriteFrame;
-        private int speakerResampleFifoFrames;
         private bool capturePrimed;
         private double captureSmoothedBufferedFrames;
         private double captureCurrentClockRatio = 1.0;
@@ -690,7 +691,10 @@ namespace DS4Windows
                     "Could not activate the DualSense Bluetooth speaker session.");
             }
 
-            if (!device.RearmBluetoothHeadsetOutputRoute())
+            // Preserve RC3's proven internal-speaker startup byte-for-byte.
+            // The ordinary 0x31 route preamble exists only to arm the separate
+            // 0x96 AUX decoder and must never touch the 0x93 speaker path.
+            if (headsetOnlyAudio && !device.RearmBluetoothHeadsetOutputRoute())
             {
                 throw new InvalidOperationException(
                     $"Could not arm the DualSense AUX output route: {device.LastBluetoothHapticsWriteStatus}");
@@ -1243,54 +1247,36 @@ namespace DS4Windows
             UpdateCaptureClockRatioLocked();
             speakerFrameResampler.SetInputRateRatio(
                 captureCurrentClockRatio);
-            while (speakerResampleFifoFrames < FrameSamples)
+            int requestedSourceFrames =
+                speakerFrameResampler.PrepareOutputFrame(FrameSamples);
+            if (captureRingBufferedFrames < requestedSourceFrames)
             {
-                if (captureRingBufferedFrames < SourcePullFrames)
-                {
-                    // A continuous VIIPER stream arrives in 320-frame source
-                    // callbacks while this lane consumes 512 frames per radio
-                    // tick. Seeing the ring briefly below one pull is normal
-                    // callback phase, not a new audio generation. Preserve the
-                    // partial source-converter block, ring tail, fractional
-                    // resampler phase, and output FIFO. Resetting any of them
-                    // here throws away real samples and turns a harmless
-                    // producer wait into a self-sustaining audible dropout.
-                    return false;
-                }
-
-                CopyCaptureFramesToSpeakerResamplerLocked();
-                int producedFrames = speakerFrameResampler.Convert(
-                    speakerResampleInput, 0, SourcePullFrames,
-                    speakerResampleOutput, 0,
-                    speakerResampleOutput.Length / Channels);
-                if (producedFrames <= 0 ||
-                    speakerResampleFifoFrames + producedFrames >
-                        speakerResampleFifo.Length / Channels)
-                {
-                    captureRingReadIndex = captureRingWriteIndex;
-                    captureRingBufferedFrames = 0;
-                    capturePrimed = false;
-                    captureClockInitialized = false;
-                    directPcmRateConverter?.Reset();
-                    ResetSpeakerResamplingLocked();
-                    return false;
-                }
-
-                AppendSpeakerResampleOutputLocked(producedFrames);
-                consumedSourceFrames += SourcePullFrames;
+                // A continuous VIIPER stream arrives in 320-frame source
+                // callbacks while this lane consumes about 512 frames per
+                // radio tick. Seeing the ring briefly below WDL's exact
+                // fractional request is normal callback phase, not a new
+                // audio generation. Preserve all source and resampler state.
+                return false;
             }
 
-            TakeSpeakerResampleFrameLocked();
-            return true;
+            CopyCaptureFramesToSpeakerResamplerLocked(
+                requestedSourceFrames);
+            int producedFrames =
+                speakerFrameResampler.ConvertPreparedOutput(
+                    speakerResampleInput, 0, requestedSourceFrames,
+                    frame, 0);
+            consumedSourceFrames = requestedSourceFrames;
+            return producedFrames == FrameSamples;
         }
 
-        private void CopyCaptureFramesToSpeakerResamplerLocked()
+        private void CopyCaptureFramesToSpeakerResamplerLocked(
+            int sourceFrames)
         {
-            int firstFrames = Math.Min(SourcePullFrames,
+            int firstFrames = Math.Min(sourceFrames,
                 CaptureRingFrames - captureRingReadIndex);
             Array.Copy(captureRing, captureRingReadIndex * Channels,
                 speakerResampleInput, 0, firstFrames * Channels);
-            int remainingFrames = SourcePullFrames - firstFrames;
+            int remainingFrames = sourceFrames - firstFrames;
             if (remainingFrames > 0)
             {
                 Array.Copy(captureRing, 0, speakerResampleInput,
@@ -1298,58 +1284,13 @@ namespace DS4Windows
             }
 
             captureRingReadIndex = (captureRingReadIndex +
-                SourcePullFrames) % CaptureRingFrames;
-            captureRingBufferedFrames -= SourcePullFrames;
-        }
-
-        private void AppendSpeakerResampleOutputLocked(int producedFrames)
-        {
-            int capacityFrames = speakerResampleFifo.Length / Channels;
-            int firstFrames = Math.Min(producedFrames,
-                capacityFrames - speakerResampleFifoWriteFrame);
-            Array.Copy(speakerResampleOutput, 0, speakerResampleFifo,
-                speakerResampleFifoWriteFrame * Channels,
-                firstFrames * Channels);
-            int remainingFrames = producedFrames - firstFrames;
-            if (remainingFrames > 0)
-            {
-                Array.Copy(speakerResampleOutput, firstFrames * Channels,
-                    speakerResampleFifo, 0, remainingFrames * Channels);
-            }
-
-            speakerResampleFifoWriteFrame =
-                (speakerResampleFifoWriteFrame + producedFrames) %
-                capacityFrames;
-            speakerResampleFifoFrames += producedFrames;
-        }
-
-        private void TakeSpeakerResampleFrameLocked()
-        {
-            int capacityFrames = speakerResampleFifo.Length / Channels;
-            int firstFrames = Math.Min(FrameSamples,
-                capacityFrames - speakerResampleFifoReadFrame);
-            Array.Copy(speakerResampleFifo,
-                speakerResampleFifoReadFrame * Channels, frame, 0,
-                firstFrames * Channels);
-            int remainingFrames = FrameSamples - firstFrames;
-            if (remainingFrames > 0)
-            {
-                Array.Copy(speakerResampleFifo, 0, frame,
-                    firstFrames * Channels, remainingFrames * Channels);
-            }
-
-            speakerResampleFifoReadFrame =
-                (speakerResampleFifoReadFrame + FrameSamples) %
-                capacityFrames;
-            speakerResampleFifoFrames -= FrameSamples;
+                sourceFrames) % CaptureRingFrames;
+            captureRingBufferedFrames -= sourceFrames;
         }
 
         private void ResetSpeakerResamplingLocked()
         {
             speakerFrameResampler.Reset();
-            speakerResampleFifoReadFrame = 0;
-            speakerResampleFifoWriteFrame = 0;
-            speakerResampleFifoFrames = 0;
         }
 
         private void ResetCapturePipelineAtSegmentBoundary()
@@ -1385,12 +1326,35 @@ namespace DS4Windows
         private void UpdateCaptureClockRatioLocked()
         {
             int targetFrames = (SampleRate * TargetBufferMs) / 1000;
+            if (directSpeakerSource != null)
+            {
+                // VIIPER publishes exact 512-frame source blocks. Ignore the
+                // ring's callback-phase sawtooth, which previously caused an
+                // audible pitch sweep, and use only the long-window physical
+                // controller clock fit. The reciprocal source ratio paired
+                // with the helper's controller-rate cadence consumes exactly
+                // 48 kHz on every PC without a hard-coded ppm correction.
+                captureSmoothedBufferedFrames +=
+                    (captureRingBufferedFrames -
+                        captureSmoothedBufferedFrames) *
+                    CaptureClockSmoothingAlpha;
+                captureTargetClockRatio =
+                    CalculateControllerLockedInputRateRatio(
+                        device.DualSenseControllerClockRatio,
+                        device.DualSenseControllerClockStable);
+                captureCurrentClockRatio = SlewCaptureClockRatio(
+                    captureCurrentClockRatio, captureTargetClockRatio);
+                captureClockInitialized = true;
+                return;
+            }
+
             if (!captureClockInitialized)
             {
-                captureSmoothedBufferedFrames = captureRingBufferedFrames;
-                captureTargetClockRatio = CalculateCaptureClockRatio(
-                    captureRingBufferedFrames, targetFrames);
-                captureCurrentClockRatio = captureTargetClockRatio;
+                // Do not bias the servo with whichever side of the normal
+                // 480/512 callback sawtooth happened to prime the stream.
+                captureSmoothedBufferedFrames = targetFrames;
+                captureTargetClockRatio = 1.0;
+                captureCurrentClockRatio = 1.0;
                 captureClockInitialized = true;
                 return;
             }
@@ -1398,39 +1362,59 @@ namespace DS4Windows
             captureSmoothedBufferedFrames +=
                 (captureRingBufferedFrames - captureSmoothedBufferedFrames) *
                 CaptureClockSmoothingAlpha;
-            // Match PadForge's proven DualSense transport discipline: keep a
-            // 20 ms source cushion and trim the 512 -> 480 conversion by four
-            // source frames only when lag leaves a +/-5 ms deadband. The
-            // correction happens inside the continuous resampler, so the
-            // physical 10.667 ms report clock never skips, catches up, or
-            // receives a fabricated zero packet.
-            captureTargetClockRatio = CalculateCaptureClockRatio(
-                captureRingBufferedFrames, targetFrames);
-            captureCurrentClockRatio = captureTargetClockRatio;
+            double controllerLockedRatio =
+                CalculateControllerLockedInputRateRatio(
+                    device.DualSenseControllerClockRatio,
+                    device.DualSenseControllerClockStable);
+            captureTargetClockRatio = Math.Clamp(
+                controllerLockedRatio * CalculateCaptureClockTargetRatio(
+                    captureSmoothedBufferedFrames, targetFrames),
+                1.0 - CaptureClockMaximumCorrection,
+                1.0 + CaptureClockMaximumCorrection);
+            captureCurrentClockRatio = SlewCaptureClockRatio(
+                captureCurrentClockRatio, captureTargetClockRatio);
             if (Math.Abs(captureCurrentClockRatio - 1.0) > 0.000001)
             {
                 Interlocked.Increment(ref captureDriftAdjustments);
             }
         }
 
-        internal static double CalculateCaptureClockRatio(
-            int bufferedFrames, int targetFrames)
+        internal static double CalculateCaptureClockTargetRatio(
+            double smoothedBufferedFrames, int targetFrames)
         {
-            if (bufferedFrames >
-                targetFrames + CaptureClockLagDeadbandFrames)
+            double errorFrames = smoothedBufferedFrames - targetFrames;
+            if (Math.Abs(errorFrames) <= CaptureClockErrorDeadbandFrames)
             {
-                return (SourcePullFrames + CaptureClockTrimFrames) /
-                    (double)SourcePullFrames;
+                errorFrames = 0.0;
             }
 
-            if (bufferedFrames <
-                targetFrames - CaptureClockLagDeadbandFrames)
+            return 1.0 + Math.Clamp(
+                errorFrames * CaptureClockCorrectionGain,
+                -CaptureClockMaximumCorrection,
+                CaptureClockMaximumCorrection);
+        }
+
+        internal static double SlewCaptureClockRatio(double currentRatio,
+            double targetRatio)
+        {
+            return currentRatio + Math.Clamp(targetRatio - currentRatio,
+                -CaptureClockRatioSlewPerPacket,
+                CaptureClockRatioSlewPerPacket);
+        }
+
+        internal static double CalculateControllerLockedInputRateRatio(
+            double controllerClockRatio, bool clockStable)
+        {
+            if (!clockStable || !double.IsFinite(controllerClockRatio) ||
+                controllerClockRatio < 0.995 ||
+                controllerClockRatio > 1.005)
             {
-                return (SourcePullFrames - CaptureClockTrimFrames) /
-                    (double)SourcePullFrames;
+                return 1.0;
             }
 
-            return 1.0;
+            return Math.Clamp(1.0 / controllerClockRatio,
+                1.0 - CaptureClockMaximumCorrection,
+                1.0 + CaptureClockMaximumCorrection);
         }
 
         private void WaitForInitialCaptureBuffer()
@@ -1478,11 +1462,11 @@ namespace DS4Windows
                     (SampleRate * InitialBufferMs) / 1000;
             }
 
-            // A drift-adjusted 512-frame conversion can leave a complete
-            // 480-frame Opus packet in the resampler FIFO. Do not wait for
-            // another source block when that packet is already available.
-            return speakerResampleFifoFrames >= FrameSamples ||
-                captureRingBufferedFrames >= SourcePullFrames;
+            // The exact output-driven request is normally 512 or 513 frames.
+            // At 512 this method can report ready one callback fraction early;
+            // TryFillOutputFrame then defers without consuming anything until
+            // the final fractional source frame arrives.
+            return captureRingBufferedFrames >= SourcePullFrames;
         }
 
         internal static bool ShouldAttemptPacerLifecycle(
@@ -2177,8 +2161,12 @@ namespace DS4Windows
                          $"transientCaptureDeferrals={Interlocked.Read(ref transientCaptureDeferrals)} " +
                          $"captureOverflowFrames={Interlocked.Read(ref captureOverflowFrames)} " +
                          $"driftAdjustments={Interlocked.Read(ref captureDriftAdjustments)} " +
+                         $"clockMode={(directSpeakerSource != null ? "controller-locked" : "adaptive-controller-locked")} " +
                          $"clockRatio={GetCaptureCurrentClockRatio():F7}/" +
                          $"{GetCaptureTargetClockRatio():F7} " +
+                         $"controllerClock={device.DualSenseControllerClockRatio:F7} " +
+                         $"controllerClockWindows={device.DualSenseControllerClockCompletedWindows} " +
+                         $"controllerClockStable={device.DualSenseControllerClockStable} " +
                          $"smoothedBufferedFrames={GetCaptureSmoothedBufferedFrames():F1} " +
                          $"directPcmCallbacks={Interlocked.Read(ref directPcmCallbacks)} " +
                          $"directPcmFrames={Interlocked.Read(ref directPcmInputFrames)}/" +
@@ -2209,6 +2197,13 @@ namespace DS4Windows
                          $"inFlightWaits={device.BluetoothAudioPacerInFlightLimitWaits} " +
                          $"inFlightEscapes={device.BluetoothAudioPacerInFlightLimitEscapes} " +
                          $"inFlightWaitMaxMs={device.BluetoothAudioPacerMaximumInFlightLimitWaitMilliseconds:F2} " +
+                         $"helperWriteCompletions={device.BluetoothAudioPacerCompletedWrites} " +
+                         $"helperSlowCompletions={device.BluetoothAudioPacerSlowCompletions} " +
+                         $"helperCompletionMaxMs={device.BluetoothAudioPacerMaximumCompletionMilliseconds:F2} " +
+                         $"helperLateSubmissions={device.BluetoothAudioPacerLateSubmissions} " +
+                         $"helperSubmissionGapMaxMs={device.BluetoothAudioPacerMaximumSubmissionGapMilliseconds:F2} " +
+                         $"helperSlowNativeSubmissions={device.BluetoothAudioPacerSlowNativeSubmissions} " +
+                         $"helperNativeSubmissionMaxMs={device.BluetoothAudioPacerMaximumNativeSubmissionMilliseconds:F2} " +
                          $"pacerError='{device.BluetoothAudioPacerLastError}' " +
                         $"speakerWrites={device.BluetoothCombinedSpeakerReportsWritten} " +
                         $"speakerWriteFailures={device.BluetoothCombinedSpeakerWriteFailures} " +

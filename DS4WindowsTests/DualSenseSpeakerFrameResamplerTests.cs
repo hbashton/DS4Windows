@@ -8,130 +8,131 @@ namespace DS4Windows.Tests
     public class DualSenseSpeakerFrameResamplerTests
     {
         [TestMethod]
-        public void NominalBlocksProduceExactlyOneOpusFrameAndMatchSingleChunk()
+        public void OutputDrivenNominalPacketsAreExactAndBounded()
         {
-            const int blockCount = 64;
-            int sourceFrames = blockCount *
+            const int packetCount = 2000;
+            var converter = new DualSenseSpeakerFrameResampler();
+            float[] source = new float[
+                DualSenseSpeakerFrameResampler.MaximumInputFrames * 2];
+            float[] output = new float[
+                DualSenseSpeakerFrameResampler.OutputFrames * 2];
+            long sourceFrame = 0;
+            for (int packet = 0; packet < packetCount; packet++)
+            {
+                int requested = converter.PrepareOutputFrame();
+                Assert.IsTrue(requested > 0 && requested <=
+                    DualSenseSpeakerFrameResampler.MaximumInputFrames);
+                FillStereoFloat(source, requested, sourceFrame,
+                    DualSenseSpeakerFrameResampler.NominalInputRate,
+                    431.0, 997.0, 0.72);
+                Assert.AreEqual(
+                    DualSenseSpeakerFrameResampler.OutputFrames,
+                    converter.ConvertPreparedOutput(source, 0, requested,
+                        output, 0));
+                sourceFrame += requested;
+            }
+
+            long nominalSourceFrames = packetCount *
                 DualSenseSpeakerFrameResampler.NominalInputFrames;
-            float[] source = CreateStereoFloat(sourceFrames,
+            Assert.IsTrue(Math.Abs(sourceFrame - nominalSourceFrames) <=
+                DualSenseSpeakerFrameResampler.MaximumInputFrames,
+                $"Output-driven conversion consumed {sourceFrame} source " +
+                $"frames instead of approximately {nominalSourceFrames}.");
+        }
+
+        [TestMethod]
+        public void RepeatedPrepareWithoutConversionDoesNotAdvancePhase()
+        {
+            var converter = new DualSenseSpeakerFrameResampler();
+            int firstRequest = converter.PrepareOutputFrame();
+            int secondRequest = converter.PrepareOutputFrame();
+            Assert.AreEqual(firstRequest, secondRequest);
+            float[] source = CreateStereoFloat(secondRequest,
                 DualSenseSpeakerFrameResampler.NominalInputRate,
                 431.0, 997.0, 0.72);
-
-            var blockConverter = new DualSenseSpeakerFrameResampler();
-            float[] blockOutput = new float[blockCount *
+            float[] output = new float[
                 DualSenseSpeakerFrameResampler.OutputFrames * 2];
-            for (int block = 0; block < blockCount; block++)
-            {
-                blockConverter.ConvertNominalFrame(source,
-                    block * DualSenseSpeakerFrameResampler.NominalInputFrames * 2,
-                    blockOutput,
-                    block * DualSenseSpeakerFrameResampler.OutputFrames * 2);
-            }
-
-            var singleConverter = new DualSenseSpeakerFrameResampler();
-            float[] singleOutput = new float[
-                singleConverter.GetMaximumOutputFrames(sourceFrames) * 2];
-            int singleFrames = singleConverter.Convert(source, 0,
-                sourceFrames, singleOutput, 0, singleOutput.Length / 2);
-
-            Assert.AreEqual(blockCount *
-                DualSenseSpeakerFrameResampler.OutputFrames, singleFrames);
-            AssertSamplesEqual(singleOutput, blockOutput,
-                blockOutput.Length, 1.0e-7f);
+            Assert.AreEqual(DualSenseSpeakerFrameResampler.OutputFrames,
+                converter.ConvertPreparedOutput(source, 0, secondRequest,
+                    output, 0));
         }
 
         [TestMethod]
-        public void NominalFrameMatchesReferenceLinearPhase()
+        public void FractionalClockCorrectionNeverPrefetchesAnOutputPacket()
         {
-            var source = new float[
-                DualSenseSpeakerFrameResampler.NominalInputFrames * 2];
-            for (int frame = 0;
-                frame < DualSenseSpeakerFrameResampler.NominalInputFrames;
-                frame++)
-            {
-                source[frame * 2] = frame / 1024.0f;
-                source[frame * 2 + 1] = -frame / 2048.0f;
-            }
-
-            var output = new float[
-                DualSenseSpeakerFrameResampler.OutputFrames * 2];
+            const int packetCount = 4000;
             var converter = new DualSenseSpeakerFrameResampler();
-            converter.ConvertNominalFrame(source, 0, output, 0);
-
-            double sourceStep =
-                DualSenseSpeakerFrameResampler.NominalInputRate /
-                DualSenseSpeakerFrameResampler.OutputRate;
-            for (int frame = 0;
-                frame < DualSenseSpeakerFrameResampler.OutputFrames; frame++)
+            converter.SetInputRateRatio(1.000035);
+            float[] source = new float[
+                DualSenseSpeakerFrameResampler.MaximumInputFrames * 2];
+            float[] output = new float[
+                DualSenseSpeakerFrameResampler.OutputFrames * 2];
+            int minimumRequest = int.MaxValue;
+            int maximumRequest = 0;
+            long consumed = 0;
+            for (int packet = 0; packet < packetCount; packet++)
             {
-                double sourcePosition = frame * sourceStep;
-                float expectedLeft = (float)(sourcePosition / 1024.0);
-                float expectedRight = (float)(-sourcePosition / 2048.0);
-                Assert.AreEqual(expectedLeft, output[frame * 2], 1.0e-7f,
-                    $"Left reference phase differed at frame {frame}.");
-                Assert.AreEqual(expectedRight, output[frame * 2 + 1],
-                    1.0e-7f,
-                    $"Right reference phase differed at frame {frame}.");
+                int requested = converter.PrepareOutputFrame();
+                minimumRequest = Math.Min(minimumRequest, requested);
+                maximumRequest = Math.Max(maximumRequest, requested);
+                Assert.IsTrue(requested <=
+                    DualSenseSpeakerFrameResampler.MaximumInputFrames);
+                Assert.AreEqual(DualSenseSpeakerFrameResampler.OutputFrames,
+                    converter.ConvertPreparedOutput(source, 0, requested,
+                        output, 0));
+                consumed += requested;
             }
-        }
 
-        [TestMethod]
-        public void ArbitraryFloatChunkBoundariesMatchSingleBuffer()
-        {
-            const int sourceFrames = 8193;
-            float[] source = CreateStereoFloat(sourceFrames,
-                DualSenseSpeakerFrameResampler.NominalInputRate,
-                613.0, 7043.0, 0.65);
-
-            float[] single = ConvertFloatInChunks(source, sourceFrames);
-            float[] chunked = ConvertFloatInChunks(source,
-                1, 7, 31, 2, 257, 3, 64, 5, 509, 11, 127, 1024);
-
-            Assert.AreEqual(single.Length, chunked.Length,
-                "Input chunking changed the streaming output count.");
-            AssertSamplesEqual(single, chunked, single.Length, 1.0e-7f);
+            // The old feed-driven design sometimes consumed a second full
+            // 512-frame block just to complete one 480-frame packet. An exact
+            // output-driven request remains one source packet (plus WDL's
+            // one-time look-ahead), even while the fractional phase advances.
+            Assert.IsTrue(maximumRequest <
+                DualSenseSpeakerFrameResampler.NominalInputFrames + 16,
+                $"A packet unexpectedly requested {maximumRequest} frames.");
+            Assert.IsTrue(maximumRequest > minimumRequest,
+                "The fractional correction never advanced source phase.");
+            double expected = packetCount *
+                DualSenseSpeakerFrameResampler.NominalInputFrames * 1.000035;
+            Assert.IsTrue(Math.Abs(consumed - expected) < 16.0,
+                $"Fractional input count was {consumed}, expected " +
+                $"approximately {expected:F3}.");
         }
 
         [TestMethod]
         public void SlewedClockCorrectionPreservesWaveformContinuity()
         {
-            const int blockCount = 200;
+            const int blockCount = 2000;
             const double frequency = 997.0;
-            int sourceFrames = blockCount *
-                DualSenseSpeakerFrameResampler.NominalInputFrames;
-            float[] source = CreateStereoFloat(sourceFrames,
-                DualSenseSpeakerFrameResampler.NominalInputRate,
-                frequency, frequency, 0.7);
             var converter = new DualSenseSpeakerFrameResampler();
             var output = new List<float>();
-            int sourceFrame = 0;
-            int totalFrames = 0;
+            float[] source = new float[
+                DualSenseSpeakerFrameResampler.MaximumInputFrames * 2];
+            float[] converted = new float[
+                DualSenseSpeakerFrameResampler.OutputFrames * 2];
+            long sourceFrame = 0;
             for (int block = 0; block < blockCount; block++)
             {
                 double ratio = 1.0 + Math.Sin(block * 0.04) * 0.001;
                 converter.SetInputRateRatio(ratio);
-                int capacity = converter.GetMaximumOutputFrames(
-                    DualSenseSpeakerFrameResampler.NominalInputFrames);
-                float[] converted = new float[capacity * 2];
-                int produced = converter.Convert(source, sourceFrame * 2,
-                    DualSenseSpeakerFrameResampler.NominalInputFrames,
-                    converted, 0, capacity);
+                int requested = converter.PrepareOutputFrame();
+                FillStereoFloat(source, requested, sourceFrame,
+                    DualSenseSpeakerFrameResampler.NominalInputRate,
+                    frequency, frequency, 0.7);
+                int produced = converter.ConvertPreparedOutput(source, 0,
+                    requested, converted, 0);
+                Assert.AreEqual(
+                    DualSenseSpeakerFrameResampler.OutputFrames, produced);
                 for (int sample = 0; sample < produced * 2; sample++)
                 {
                     output.Add(converted[sample]);
                 }
 
-                sourceFrame +=
-                    DualSenseSpeakerFrameResampler.NominalInputFrames;
-                totalFrames += produced;
+                sourceFrame += requested;
             }
 
-            int nominalFrames = blockCount *
+            int totalFrames = blockCount *
                 DualSenseSpeakerFrameResampler.OutputFrames;
-            Assert.IsTrue(Math.Abs(totalFrames - nominalFrames) < 80,
-                $"Clock correction produced an implausible count " +
-                $"({totalFrames} versus {nominalFrames}).");
-
             float maximumStep = 0.0f;
             for (int frame = 1; frame < totalFrames; frame++)
             {
@@ -150,20 +151,18 @@ namespace DS4Windows.Tests
         [TestMethod]
         public void NominalFrameHotPathDoesNotAllocateAfterWarmup()
         {
-            float[] source = CreateStereoFloat(
-                DualSenseSpeakerFrameResampler.NominalInputFrames,
-                DualSenseSpeakerFrameResampler.NominalInputRate,
-                1000.0, 1000.0, 0.5);
+            float[] source = new float[
+                DualSenseSpeakerFrameResampler.MaximumInputFrames * 2];
             float[] output = new float[
                 DualSenseSpeakerFrameResampler.OutputFrames * 2];
             var converter = new DualSenseSpeakerFrameResampler();
 
-            converter.ConvertNominalFrame(source, 0, output, 0);
-            converter.ConvertNominalFrame(source, 0, output, 0);
+            ConvertOneOutputFrame(converter, source, output);
+            ConvertOneOutputFrame(converter, source, output);
             long before = GC.GetAllocatedBytesForCurrentThread();
             for (int iteration = 0; iteration < 1000; iteration++)
             {
-                converter.ConvertNominalFrame(source, 0, output, 0);
+                ConvertOneOutputFrame(converter, source, output);
             }
             long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
@@ -174,18 +173,24 @@ namespace DS4Windows.Tests
         [TestMethod]
         public void ResetRestartsFramePhaseDeterministically()
         {
-            float[] source = CreateStereoFloat(
-                DualSenseSpeakerFrameResampler.NominalInputFrames,
-                DualSenseSpeakerFrameResampler.NominalInputRate,
-                317.0, 881.0, 0.7);
+            float[] source = new float[
+                DualSenseSpeakerFrameResampler.MaximumInputFrames * 2];
             float[] first = new float[
                 DualSenseSpeakerFrameResampler.OutputFrames * 2];
             float[] second = new float[first.Length];
             var converter = new DualSenseSpeakerFrameResampler();
 
-            converter.ConvertNominalFrame(source, 0, first, 0);
+            int firstRequest = converter.PrepareOutputFrame();
+            FillStereoFloat(source, firstRequest, 0,
+                DualSenseSpeakerFrameResampler.NominalInputRate,
+                317.0, 881.0, 0.7);
+            converter.ConvertPreparedOutput(source, 0, firstRequest,
+                first, 0);
             converter.Reset();
-            converter.ConvertNominalFrame(source, 0, second, 0);
+            int secondRequest = converter.PrepareOutputFrame();
+            Assert.AreEqual(firstRequest, secondRequest);
+            converter.ConvertPreparedOutput(source, 0, secondRequest,
+                second, 0);
 
             AssertSamplesEqual(first, second, first.Length, 0.0f);
         }
@@ -422,33 +427,13 @@ namespace DS4Windows.Tests
                 "The unity-rate PCM path allocated after warmup.");
         }
 
-        private static float[] ConvertFloatInChunks(float[] source,
-            params int[] chunkPattern)
+        private static void ConvertOneOutputFrame(
+            DualSenseSpeakerFrameResampler converter, float[] source,
+            float[] output)
         {
-            var converter = new DualSenseSpeakerFrameResampler();
-            var result = new List<float>();
-            int totalFrames = source.Length / 2;
-            int sourceFrame = 0;
-            int patternIndex = 0;
-            while (sourceFrame < totalFrames)
-            {
-                int requested = chunkPattern[patternIndex %
-                    chunkPattern.Length];
-                int frames = Math.Min(requested, totalFrames - sourceFrame);
-                int capacity = converter.GetMaximumOutputFrames(frames);
-                float[] converted = new float[capacity * 2];
-                int produced = converter.Convert(source, sourceFrame * 2,
-                    frames, converted, 0, capacity);
-                for (int sample = 0; sample < produced * 2; sample++)
-                {
-                    result.Add(converted[sample]);
-                }
-
-                sourceFrame += frames;
-                patternIndex++;
-            }
-
-            return result.ToArray();
+            int requested = converter.PrepareOutputFrame();
+            converter.ConvertPreparedOutput(source, 0, requested, output,
+                0);
         }
 
         private static float[] ConvertPcmInChunks(byte[] source,
@@ -499,6 +484,20 @@ namespace DS4Windows.Tests
             }
 
             return result;
+        }
+
+        private static void FillStereoFloat(float[] destination, int frames,
+            long startFrame, double sampleRate, double leftFrequency,
+            double rightFrequency, double amplitude)
+        {
+            for (int frame = 0; frame < frames; frame++)
+            {
+                long position = startFrame + frame;
+                destination[frame * 2] = (float)(amplitude * Math.Sin(
+                    2.0 * Math.PI * leftFrequency * position / sampleRate));
+                destination[frame * 2 + 1] = (float)(amplitude * Math.Sin(
+                    2.0 * Math.PI * rightFrequency * position / sampleRate));
+            }
         }
 
         private static byte[] CreateStereoPcm16(int frames, int sampleRate,

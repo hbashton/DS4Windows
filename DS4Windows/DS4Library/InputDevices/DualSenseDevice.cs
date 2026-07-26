@@ -391,6 +391,10 @@ namespace DS4Windows.InputDevices
         private const int BluetoothCombinedStateLength = 63;
         private const int BluetoothCombinedNativeStateLength = USB_OUTPUT_CHANGE_LENGTH - 1;
         private const byte BluetoothCombinedLowLatencyBufferLength = 16;
+        // Keep the proven Sony-reference 64-byte setting. Field 9 can affect
+        // controller audio buffering, but isolated 128-byte and startup-prime
+        // trials did not prevent the measured lower-radio completion stalls;
+        // increasing it is not a sustainable substitute for fixing transport.
         private const byte BluetoothCombinedSpeakerBufferLength = 64;
         // The game, not a wall-clock timeout in DS4Windows, owns the end of a
         // native DualSense effect by publishing an explicit silent haptics

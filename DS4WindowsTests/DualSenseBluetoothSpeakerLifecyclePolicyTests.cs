@@ -198,6 +198,23 @@ namespace DS4WindowsTests
                         controllerClockRatio, false), 1.0e-12);
         }
 
+        [TestMethod]
+        public void IndependentSourceAndControllerClocksUseTheirQuotient()
+        {
+            const double sourceClockRatio = 0.999670;
+            const double controllerClockRatio = 0.999800;
+            Assert.AreEqual(sourceClockRatio / controllerClockRatio,
+                DualSenseBluetoothSpeakerPassthrough.
+                    CalculateSourceControllerLockedInputRateRatio(
+                        sourceClockRatio, true,
+                        controllerClockRatio, true), 1.0e-12);
+            Assert.AreEqual(sourceClockRatio,
+                DualSenseBluetoothSpeakerPassthrough.
+                    CalculateSourceControllerLockedInputRateRatio(
+                        sourceClockRatio, true,
+                        controllerClockRatio, false), 1.0e-12);
+        }
+
         [DataTestMethod]
         [DataRow(6, true, false, true)]
         [DataRow(6, false, true, true)]

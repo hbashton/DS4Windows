@@ -471,6 +471,7 @@ namespace DS4Windows
         private readonly ViiperOutDevice directSpeakerSource;
         private readonly int directSpeakerSampleRate;
         private readonly DualSensePcm16SourceRateConverter directPcmRateConverter;
+        private readonly DualSenseSourceClockEstimator directSourceClockEstimator;
         private readonly DualSenseSpeakerFrameResampler speakerFrameResampler =
             new DualSenseSpeakerFrameResampler();
         private Pcm16WaveTraceWriter rawDirectPcmTrace;
@@ -592,6 +593,8 @@ namespace DS4Windows
             {
                 directPcmRateConverter = new DualSensePcm16SourceRateConverter(
                     directSpeakerSampleRate, SampleRate);
+                directSourceClockEstimator = new DualSenseSourceClockEstimator(
+                    directSpeakerSampleRate);
                 TryCreateDirectPcmTraces();
             }
         }
@@ -1023,8 +1026,10 @@ namespace DS4Windows
             }
 
             Interlocked.Increment(ref directPcmCallbacks);
-            Interlocked.Add(ref directPcmInputFrames,
+            long totalInputFrames = Interlocked.Add(ref directPcmInputFrames,
                 alignedLength / (sizeof(short) * Channels));
+            directSourceClockEstimator?.Observe(totalInputFrames,
+                callbackEntered);
             rawDirectPcmTrace?.Write(pcm, offset, alignedLength);
             int consumed = 0;
             while (consumed < alignedLength && !stopping)
@@ -1330,16 +1335,18 @@ namespace DS4Windows
             {
                 // VIIPER publishes exact 512-frame source blocks. Ignore the
                 // ring's callback-phase sawtooth, which previously caused an
-                // audible pitch sweep, and use only the long-window physical
-                // controller clock fit. The reciprocal source ratio paired
-                // with the helper's controller-rate cadence consumes exactly
-                // 48 kHz on every PC without a hard-coded ppm correction.
+                // audible pitch sweep. Independent thirty-second fits measure
+                // the source and controller clocks; their quotient consumes
+                // exactly the source production rate without a hard-coded ppm
+                // correction or an occupancy servo.
                 captureSmoothedBufferedFrames +=
                     (captureRingBufferedFrames -
                         captureSmoothedBufferedFrames) *
                     CaptureClockSmoothingAlpha;
                 captureTargetClockRatio =
-                    CalculateControllerLockedInputRateRatio(
+                    CalculateSourceControllerLockedInputRateRatio(
+                        directSourceClockEstimator?.Ratio ?? 1.0,
+                        directSourceClockEstimator?.IsStable ?? false,
                         device.DualSenseControllerClockRatio,
                         device.DualSenseControllerClockStable);
                 captureCurrentClockRatio = SlewCaptureClockRatio(
@@ -1405,14 +1412,25 @@ namespace DS4Windows
         internal static double CalculateControllerLockedInputRateRatio(
             double controllerClockRatio, bool clockStable)
         {
-            if (!clockStable || !double.IsFinite(controllerClockRatio) ||
-                controllerClockRatio < 0.995 ||
-                controllerClockRatio > 1.005)
-            {
-                return 1.0;
-            }
+            return CalculateSourceControllerLockedInputRateRatio(
+                1.0, false, controllerClockRatio, clockStable);
+        }
 
-            return Math.Clamp(1.0 / controllerClockRatio,
+        internal static double CalculateSourceControllerLockedInputRateRatio(
+            double sourceClockRatio, bool sourceClockStable,
+            double controllerClockRatio, bool controllerClockStable)
+        {
+            double sourceRatio = sourceClockStable &&
+                double.IsFinite(sourceClockRatio) &&
+                sourceClockRatio >= 0.995 && sourceClockRatio <= 1.005 ?
+                sourceClockRatio : 1.0;
+            double controllerRatio = controllerClockStable &&
+                double.IsFinite(controllerClockRatio) &&
+                controllerClockRatio >= 0.995 &&
+                controllerClockRatio <= 1.005 ?
+                controllerClockRatio : 1.0;
+
+            return Math.Clamp(sourceRatio / controllerRatio,
                 1.0 - CaptureClockMaximumCorrection,
                 1.0 + CaptureClockMaximumCorrection);
         }
@@ -2167,6 +2185,9 @@ namespace DS4Windows
                          $"controllerClock={device.DualSenseControllerClockRatio:F7} " +
                          $"controllerClockWindows={device.DualSenseControllerClockCompletedWindows} " +
                          $"controllerClockStable={device.DualSenseControllerClockStable} " +
+                         $"sourceClock={directSourceClockEstimator?.Ratio ?? 1.0:F7} " +
+                         $"sourceClockWindows={directSourceClockEstimator?.CompletedWindows ?? 0} " +
+                         $"sourceClockStable={directSourceClockEstimator?.IsStable ?? false} " +
                          $"smoothedBufferedFrames={GetCaptureSmoothedBufferedFrames():F1} " +
                          $"directPcmCallbacks={Interlocked.Read(ref directPcmCallbacks)} " +
                          $"directPcmFrames={Interlocked.Read(ref directPcmInputFrames)}/" +

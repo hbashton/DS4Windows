@@ -2644,7 +2644,7 @@ namespace DS4Windows.InputDevices
         internal const int CadenceNumerator = 32;
         internal const int CadenceDenominator = 3000;
         internal const int InputReportsPerSecond = 800;
-        internal const int InputPhaseOffsetMicroseconds = 350;
+        internal const int InputPhaseOffsetMicroseconds = 150;
         internal const double MinimumRateRatio = 0.995;
         internal const double MaximumRateRatio = 1.005;
 

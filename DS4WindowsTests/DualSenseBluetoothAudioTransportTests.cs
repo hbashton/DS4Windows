@@ -61,6 +61,14 @@ namespace DS4WindowsTests
             typeof(DualSenseDevice).GetField(
                 "bluetoothCombinedSpeakerPacketSequence",
                 BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo CachedCombinedReportField =
+            typeof(DualSenseDevice).GetField(
+                "latestBluetoothCombinedSpeakerReport",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo NativeStateTimestampField =
+            typeof(DualSenseDevice).GetField(
+                "latestBluetoothCombinedNativeStateTimestamp",
+                BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly MethodInfo BuildCombinedControlReportMethod =
             typeof(DualSenseDevice).GetMethod(
                 "BuildBluetoothCombinedControlReport",
@@ -302,6 +310,47 @@ namespace DS4WindowsTests
             Assert.IsFalse(device.WriteBluetoothSpeakerAudioOutputReport(
                 report, 0, report.Length),
                 "The compatibility API hid the physical speaker submission failure.");
+        }
+
+        [TestMethod]
+        public void AudioOnlyCombinedCarrierPreservesProfileLightbar()
+        {
+            DualSenseDevice device = CreateBluetoothDevice();
+            device.LightBarColor = new DS4Color(12, 34, 56);
+            byte[] report = BuildCombinedControlReport(0, 0, false);
+
+            device.WriteBluetoothCombinedHapticsAudioOutputReport(report, 0,
+                report.Length, hasNativeGameState: false);
+
+            byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
+                device);
+            Assert.AreEqual((byte)12, cached[13 + 44]);
+            Assert.AreEqual((byte)34, cached[13 + 45]);
+            Assert.AreEqual((byte)56, cached[13 + 46]);
+            Assert.AreEqual(0L, GetFieldValue<long>(
+                NativeStateTimestampField, device));
+        }
+
+        [TestMethod]
+        public void NativeGameCombinedCarrierRemainsAuthoritative()
+        {
+            DualSenseDevice device = CreateBluetoothDevice();
+            device.LightBarColor = new DS4Color(12, 34, 56);
+            byte[] report = BuildCombinedControlReport(0, 0, false);
+            report[13 + 44] = 90;
+            report[13 + 45] = 91;
+            report[13 + 46] = 92;
+
+            device.WriteBluetoothCombinedHapticsAudioOutputReport(report, 0,
+                report.Length, hasNativeGameState: true);
+
+            byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
+                device);
+            Assert.AreEqual((byte)90, cached[13 + 44]);
+            Assert.AreEqual((byte)91, cached[13 + 45]);
+            Assert.AreEqual((byte)92, cached[13 + 46]);
+            Assert.IsTrue(GetFieldValue<long>(NativeStateTimestampField,
+                device) > 0);
         }
 
         [TestMethod]

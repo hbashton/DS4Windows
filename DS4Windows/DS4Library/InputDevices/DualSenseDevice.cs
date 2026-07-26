@@ -451,6 +451,8 @@ namespace DS4Windows.InputDevices
         private long bluetoothCombinedSubmittedHapticsGeneration;
         private byte bluetoothCombinedSpeakerReportSequence;
         private byte bluetoothCombinedSpeakerPacketSequence;
+        private byte bluetoothAudioRouteReportSequence;
+        private bool bluetoothHeadsetOutputRouteArmed;
         private bool bluetoothCombinedSpeakerSequenceInitialized;
         private readonly object bluetoothRealtimeWriterLock = new object();
         private DualSenseBluetoothRealtimeWriter bluetoothRealtimeWriter;
@@ -854,6 +856,115 @@ namespace DS4Windows.InputDevices
                 bluetoothActiveSpeakerGeneration = 0;
                 return true;
             }
+        }
+
+        internal bool RearmBluetoothHeadsetOutputRoute()
+        {
+            if (conType != ConnectionType.BT || !enableSpeakerOutput)
+            {
+                return true;
+            }
+
+            // DualSense firmware does not reliably arm the AUX DAC when its
+            // first state already requests the headphone route. The working
+            // controller sequence uses two ordinary tagged 0x31 states before
+            // the 0x96 stream: speaker first, then headphones. Do this before
+            // the 0x36 pacer starts; a control-only 0x36 is not equivalent for
+            // this firmware transition.
+            lock (bluetoothCombinedTransportWriteLock)
+            {
+                // The standard speaker startup path was already stable before
+                // AUX support. Only issue a speaker-route transition when this
+                // device instance was actually armed for headphones.
+                if (!headsetOnlyAudio &&
+                    !bluetoothHeadsetOutputRouteArmed)
+                {
+                    return true;
+                }
+
+                StopBluetoothAudioPacerLocked();
+                if (!DisposeBluetoothRealtimeWriter(
+                        BluetoothWriterOwnershipHandoffTimeoutMilliseconds))
+                {
+                    LastBluetoothHapticsWriteStatus =
+                        "Could not arm AUX: prior Bluetooth HID ownership is still retiring.";
+                    return false;
+                }
+
+                if (!TryWriteBluetoothAudioRouteState(headsetRoute: false,
+                        headsetOnlyAudio ? "AUX speaker-route rearm" :
+                            "speaker-route restore"))
+                {
+                    return false;
+                }
+
+                if (!headsetOnlyAudio)
+                {
+                    bluetoothHeadsetOutputRouteArmed = false;
+                    return true;
+                }
+
+                bool armed = TryWriteBluetoothAudioRouteState(
+                    headsetRoute: true, "AUX headphone-route rearm");
+                if (armed)
+                {
+                    bluetoothHeadsetOutputRouteArmed = true;
+                }
+                return armed;
+            }
+        }
+
+        private bool TryWriteBluetoothAudioRouteState(bool headsetRoute,
+            string description)
+        {
+            byte[] report = BuildBluetoothAudioRouteStateReport(
+                bluetoothAudioRouteReportSequence++, headsetRoute);
+            bool written = hDevice.WriteOutputReportViaInterrupt(report,
+                READ_STREAM_TIMEOUT);
+            LastBluetoothHapticsWriteStatus = written ?
+                $"Direct Bluetooth {description} write completed." :
+                $"Direct Bluetooth {description} write failed.";
+            return written;
+        }
+
+        private static byte[] BuildBluetoothAudioRouteStateReport(
+            byte sequence, bool headsetRoute)
+        {
+            byte[] report = new byte[BT_OUTPUT_REPORT_LENGTH];
+            report[0] = OUTPUT_REPORT_ID_BT;
+            report[1] = (byte)((sequence & 0x0F) << 4);
+            report[2] = 0x10;
+
+            const int payloadOffset = 3;
+            report[payloadOffset] = DualSenseOutputFlag0AudioControlEnable;
+            if (headsetRoute)
+            {
+                report[payloadOffset + 4] =
+                    DualSenseHeadphoneVolumeMaximum;
+                report[payloadOffset + 7] =
+                    DualSenseAudioControlOutputHeadphones;
+            }
+            else
+            {
+                report[payloadOffset] |=
+                    DualSenseOutputFlag0SpeakerVolumeEnable;
+                report[payloadOffset + 1] =
+                    DualSenseOutputFlag1AudioControl2Enable;
+                report[payloadOffset + 5] =
+                    DualSenseSpeakerVolumeMaximum;
+                report[payloadOffset + 7] =
+                    DualSenseAudioControlOutputSpeaker;
+                report[payloadOffset + 37] = DualSenseSpeakerPreGain;
+            }
+
+            uint crc = ~Crc32Algorithm.Compute(new byte[] { 0xA2 });
+            crc = ~Crc32Algorithm.CalculateBasicHash(ref crc, ref report, 0,
+                BT_OUTPUT_REPORT_LENGTH - sizeof(uint));
+            report[74] = (byte)crc;
+            report[75] = (byte)(crc >> 8);
+            report[76] = (byte)(crc >> 16);
+            report[77] = (byte)(crc >> 24);
+            return report;
         }
 
         internal bool BeginBluetoothAtomicSpeakerFrame(long speakerSession)
@@ -2618,9 +2729,12 @@ namespace DS4Windows.InputDevices
                 }
 
                 // Headphone volume
-                outputReport[5] = headsetOnlyAudio ?
-                    MapDualSenseHeadphoneVolume(headphoneVolume) :
-                    headphoneVolume; // Left and Right
+                // The UI/profile uses a byte-wide level, while Sony's AUX DAC
+                // accepts only 0x00-0x7F. Never place the raw profile byte on
+                // the wire: the default 255 otherwise becomes an invalid gain
+                // whenever speaker and AUX output are enabled together.
+                outputReport[5] = MapDualSenseHeadphoneVolume(
+                    headphoneVolume); // Left and Right
                 // Internal speaker volume
                 outputReport[6] = headsetOnlyAudio ? (byte)0 :
                     MapDualSenseSpeakerVolume(speakerVolume);
@@ -2767,9 +2881,9 @@ namespace DS4Windows.InputDevices
                 }
 
                 // Headphone volume
-                outputReport[6] = headsetOnlyAudio ?
-                    MapDualSenseHeadphoneVolume(headphoneVolume) :
-                    headphoneVolume; // Left and Right
+                // Keep the AUX gain valid on the normal speaker+AUX route too.
+                outputReport[6] = MapDualSenseHeadphoneVolume(
+                    headphoneVolume); // Left and Right
                 // Internal speaker volume
                 outputReport[7] = headsetOnlyAudio ? (byte)0 :
                     MapDualSenseSpeakerVolume(speakerVolume);
@@ -3090,7 +3204,8 @@ namespace DS4Windows.InputDevices
         /// speaker audio is active, this refreshes the newest native state and
         /// haptics block; the fixed-cadence speaker clock owns physical writes.
         /// </summary>
-        public bool WriteBluetoothCombinedHapticsAudioOutputReport(byte[] report, int offset, int length)
+        public bool WriteBluetoothCombinedHapticsAudioOutputReport(byte[] report,
+            int offset, int length, bool hasNativeGameState = true)
         {
             if (report == null || offset < 0 || length != BluetoothCombinedOutputReportLength ||
                 offset + length > report.Length || report[offset] != 0x36 ||
@@ -3110,7 +3225,8 @@ namespace DS4Windows.InputDevices
                 return false;
             }
 
-            long hapticsGeneration = CacheBluetoothCombinedSpeakerReport(report, offset);
+            long hapticsGeneration = CacheBluetoothCombinedSpeakerReport(report,
+                offset, hasNativeGameState);
 
             bool written = TryPublishCachedBluetoothCombinedState(
                 includeNativeHaptics: true,
@@ -3160,18 +3276,48 @@ namespace DS4Windows.InputDevices
             return report;
         }
 
-        private long CacheBluetoothCombinedSpeakerReport(byte[] report, int offset)
+        private long CacheBluetoothCombinedSpeakerReport(byte[] report,
+            int offset, bool hasNativeGameState)
         {
             long hapticsGeneration;
             lock (bluetoothCombinedSpeakerReportLock)
             {
-                // VIIPER owns the native game state and haptics payload, but the
-                // physical transport header, mic flag, local counters, speaker
-                // block, padding, and CRC always remain DS4Windows-owned.
-                Array.Copy(report, offset + BluetoothCombinedStateOffset,
-                    latestBluetoothCombinedSpeakerReport,
-                    BluetoothCombinedStateOffset,
-                    BluetoothCombinedStateLength);
+                // VIIPER owns this state only after a game has actually sent a
+                // native USB output report. Audio-only sidecars and a newly
+                // enumerated virtual pad otherwise repeat vDS's green default
+                // carrier on every PCM packet. Preserve DS4Windows' current
+                // profile/custom lightbar and audio routing in that case.
+                if (hasNativeGameState)
+                {
+                    Array.Copy(report, offset + BluetoothCombinedStateOffset,
+                        latestBluetoothCombinedSpeakerReport,
+                        BluetoothCombinedStateOffset,
+                        BluetoothCombinedStateLength);
+                    latestBluetoothCombinedNativeStateTimestamp =
+                        Stopwatch.GetTimestamp();
+                }
+                else if (outputReport != null &&
+                    outputReport.Length >= 2 +
+                        BluetoothCombinedNativeStateLength &&
+                    outputReport[0] == OUTPUT_REPORT_ID_BT)
+                {
+                    Array.Copy(outputReport, 2,
+                        latestBluetoothCombinedSpeakerReport,
+                        BluetoothCombinedStateOffset,
+                        BluetoothCombinedNativeStateLength);
+                    latestBluetoothCombinedNativeStateTimestamp = 0;
+                }
+                else
+                {
+                    int lightbarOffset = BluetoothCombinedStateOffset + 44;
+                    latestBluetoothCombinedSpeakerReport[lightbarOffset] =
+                        currentHap.lightbarState.LightBarColor.red;
+                    latestBluetoothCombinedSpeakerReport[lightbarOffset + 1] =
+                        currentHap.lightbarState.LightBarColor.green;
+                    latestBluetoothCombinedSpeakerReport[lightbarOffset + 2] =
+                        currentHap.lightbarState.LightBarColor.blue;
+                    latestBluetoothCombinedNativeStateTimestamp = 0;
+                }
                 latestBluetoothCombinedSpeakerReport[BluetoothCombinedHapticsOffset] =
                     0x92;
                 latestBluetoothCombinedSpeakerReport[
@@ -3184,7 +3330,6 @@ namespace DS4Windows.InputDevices
                 bluetoothCombinedSpeakerReportAvailable = true;
                 long now = Stopwatch.GetTimestamp();
                 latestBluetoothCombinedSpeakerReportTimestamp = now;
-                latestBluetoothCombinedNativeStateTimestamp = now;
                 bluetoothCombinedHapticsGeneration++;
                 hapticsGeneration = bluetoothCombinedHapticsGeneration;
             }
@@ -3903,9 +4048,7 @@ namespace DS4Windows.InputDevices
             combined[BluetoothCombinedStateFlag0Offset] |=
                 DualSenseOutputFlag0AudioControlEnable;
             combined[BluetoothCombinedStateHeadphoneVolumeOffset] =
-                headsetOnlyAudio ?
-                    MapDualSenseHeadphoneVolume(headphoneVolume) :
-                    headphoneVolume;
+                MapDualSenseHeadphoneVolume(headphoneVolume);
             combined[BluetoothCombinedStateSpeakerVolumeOffset] =
                 headsetOnlyAudio ? (byte)0 :
                     MapDualSenseSpeakerVolume(profileVolume);
@@ -3913,11 +4056,16 @@ namespace DS4Windows.InputDevices
             {
                 combined[BluetoothCombinedStateFlag0Offset] &=
                     unchecked((byte)~DualSenseOutputFlag0SpeakerVolumeEnable);
-                combined[BluetoothCombinedStateFlag1Offset] &=
-                    unchecked((byte)~DualSenseOutputFlag1AudioControl2Enable);
+                // A 0x96 headset frame is the same fixed-cadence audio lane as
+                // 0x93. Keep a valid gain snapshot just as the DS5 Bridge
+                // combined transport does; clearing it can leave the AUX DAC
+                // quiet or inconsistently armed on controller firmware.
+                combined[BluetoothCombinedStateFlag1Offset] |=
+                    DualSenseOutputFlag1AudioControl2Enable;
                 combined[BluetoothCombinedStateAudioControlOffset] =
                     DualSenseAudioControlOutputHeadphones;
-                combined[BluetoothCombinedStateAudioControl2Offset] = 0;
+                combined[BluetoothCombinedStateAudioControl2Offset] =
+                    DualSenseSpeakerPreGain;
             }
             else
             {

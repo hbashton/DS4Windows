@@ -34,6 +34,10 @@ namespace DS4WindowsTests
             typeof(DualSenseDevice).GetMethod(
                 "SanitizeBluetoothSpeakerAudioSnapshot",
                 BindingFlags.NonPublic | BindingFlags.Static);
+        private static readonly MethodInfo BuildAudioRouteStateMethod =
+            typeof(DualSenseDevice).GetMethod(
+                "BuildBluetoothAudioRouteStateReport",
+                BindingFlags.NonPublic | BindingFlags.Static);
 
         [TestMethod]
         public void ZeroProfileVolumeMutesSpeaker()
@@ -100,9 +104,9 @@ namespace DS4WindowsTests
             Assert.AreEqual((byte)0x7F, report[17]);
             Assert.AreEqual((byte)0x00, report[18]);
             Assert.AreEqual((byte)0x00, report[20]);
-            Assert.AreEqual((byte)0x7F, report[14],
-                "Headset routing retained speaker preamp control.");
-            Assert.AreEqual((byte)0x00, report[50]);
+            Assert.AreEqual((byte)0xFF, report[14],
+                "Headset routing cleared the shared audio gain validity bit.");
+            Assert.AreEqual((byte)0x03, report[50]);
             Assert.AreEqual((byte)0x96,
                 InvokePacketType(headsetOnlyAudio: true));
             Assert.AreEqual((byte)0x93,
@@ -119,6 +123,51 @@ namespace DS4WindowsTests
             Assert.AreEqual((byte)0x7F,
                 MapHeadphoneVolumeMethod.Invoke(null,
                     new object[] { (byte)255 }));
+        }
+
+        [TestMethod]
+        public void SpeakerAndAuxRouteMapsProfileGainToFirmwareRange()
+        {
+            byte[] report = new byte[64];
+
+            Assert.IsNotNull(ApplyVolumeAndRoutingMethod);
+            ApplyVolumeAndRoutingMethod.Invoke(null, new object[]
+            {
+                report, (byte)255, false, (byte)255,
+            });
+
+            Assert.AreEqual((byte)0x7F, report[17],
+                "The normal speaker+AUX route wrote the byte-wide profile value directly to Sony's 7-bit DAC gain.");
+            Assert.AreEqual((byte)0x64, report[18]);
+            Assert.AreEqual((byte)0x20, report[20]);
+            Assert.AreEqual((byte)0x03, report[50]);
+        }
+
+        [TestMethod]
+        public void HeadsetRoutePrimerMatchesDualSenseControlProtocol()
+        {
+            Assert.IsNotNull(BuildAudioRouteStateMethod);
+            byte[] speaker = (byte[])BuildAudioRouteStateMethod.Invoke(null,
+                new object[] { (byte)5, false });
+            byte[] headset = (byte[])BuildAudioRouteStateMethod.Invoke(null,
+                new object[] { (byte)6, true });
+
+            Assert.AreEqual((byte)0x31, speaker[0]);
+            Assert.AreEqual((byte)0x50, speaker[1]);
+            Assert.AreEqual((byte)0xA0, speaker[3]);
+            Assert.AreEqual((byte)0x80, speaker[4]);
+            Assert.AreEqual((byte)0x64, speaker[8]);
+            Assert.AreEqual((byte)0x20, speaker[10]);
+            Assert.AreEqual((byte)0x03, speaker[40]);
+
+            Assert.AreEqual((byte)0x31, headset[0]);
+            Assert.AreEqual((byte)0x60, headset[1]);
+            Assert.AreEqual((byte)0x80, headset[3]);
+            Assert.AreEqual((byte)0x00, headset[4]);
+            Assert.AreEqual((byte)0x7F, headset[7]);
+            Assert.AreEqual((byte)0x00, headset[8]);
+            Assert.AreEqual((byte)0x00, headset[10]);
+            Assert.AreEqual((byte)0x00, headset[40]);
         }
 
         [TestMethod]

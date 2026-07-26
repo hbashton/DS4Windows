@@ -453,6 +453,7 @@ namespace DS4Windows
         private readonly object syncRoot = new object();
         private readonly object directPcmSync = new object();
         private readonly DualSenseDevice device;
+        private readonly bool headsetOnlyAudio;
         private readonly string sourceEndpointId;
         private readonly ControllerAudioEndpointKind sourceEndpointKind;
         private readonly byte speakerVolume;
@@ -466,6 +467,10 @@ namespace DS4Windows
             new DualSenseSpeakerFrameResampler();
         private Pcm16WaveTraceWriter rawDirectPcmTrace;
         private Pcm16WaveTraceWriter preOpusPcmTrace;
+        private Pcm16WaveTraceWriter postOpusPcmTrace;
+        private IOpusDecoder traceOpusDecoder;
+        private readonly float[] traceDecodedFrame = new float[
+            FrameSamples * Channels];
         private readonly float[] directPcmFrame = new float[
             DirectPcmMaximumOutputFrames * Channels];
         private readonly byte[] atomicFeedback = new byte[
@@ -568,6 +573,7 @@ namespace DS4Windows
             ViiperOutDevice directSpeakerSource = null)
         {
             this.device = device ?? throw new ArgumentNullException(nameof(device));
+            headsetOnlyAudio = device.HeadsetOnlyAudio;
             speakerSessionId = this.device.CreateBluetoothSpeakerSession();
             this.speakerVolume = speakerVolume;
             this.speakerCompression = (DualSenseSpeakerCompression)Math.Clamp(
@@ -607,14 +613,24 @@ namespace DS4Windows
                     $"dualsense-{stamp}-raw-{directSpeakerSampleRate}hz.wav");
                 string preOpusPath = Path.Combine(directory,
                     $"dualsense-{stamp}-pre-opus-48000hz.wav");
+                string postOpusPath = Path.Combine(directory,
+                    $"dualsense-{stamp}-post-opus-48000hz.wav");
                 rawDirectPcmTrace = Pcm16WaveTraceWriter.TryCreate(rawPath,
                     directSpeakerSampleRate, Channels);
                 preOpusPcmTrace = Pcm16WaveTraceWriter.TryCreate(preOpusPath,
                     SampleRate, Channels);
-                if (rawDirectPcmTrace != null && preOpusPcmTrace != null)
+                postOpusPcmTrace = Pcm16WaveTraceWriter.TryCreate(
+                    postOpusPath, SampleRate, Channels);
+                if (postOpusPcmTrace != null)
+                {
+                    traceOpusDecoder = OpusCodecFactory.CreateDecoder(
+                        SampleRate, Channels);
+                }
+                if (rawDirectPcmTrace != null && preOpusPcmTrace != null &&
+                    postOpusPcmTrace != null)
                 {
                     AppLogger.LogToGui(
-                        $"DualSense PCM trace enabled: raw='{rawPath}', preOpus='{preOpusPath}'",
+                        $"DualSense PCM trace enabled: raw='{rawPath}', preOpus='{preOpusPath}', postOpus='{postOpusPath}'",
                         false);
                 }
             }
@@ -622,8 +638,12 @@ namespace DS4Windows
             {
                 rawDirectPcmTrace?.Dispose();
                 preOpusPcmTrace?.Dispose();
+                postOpusPcmTrace?.Dispose();
+                traceOpusDecoder?.Dispose();
                 rawDirectPcmTrace = null;
                 preOpusPcmTrace = null;
+                postOpusPcmTrace = null;
+                traceOpusDecoder = null;
                 AppLogger.LogToGui(
                     $"DualSense PCM trace could not initialize: {ex.Message}",
                     true);
@@ -637,6 +657,7 @@ namespace DS4Windows
             ViiperOutDevice candidateDirectSpeakerSource = null)
         {
             return !stopping && ReferenceEquals(device, candidateDevice) &&
+                headsetOnlyAudio == candidateDevice.HeadsetOnlyAudio &&
                 speakerVolume == candidateVolume &&
                 speakerCompression == (DualSenseSpeakerCompression)Math.Clamp(
                     (int)candidateCompression, (int)DualSenseSpeakerCompression.Off,
@@ -667,6 +688,12 @@ namespace DS4Windows
             {
                 throw new InvalidOperationException(
                     "Could not activate the DualSense Bluetooth speaker session.");
+            }
+
+            if (!device.RearmBluetoothHeadsetOutputRoute())
+            {
+                throw new InvalidOperationException(
+                    $"Could not arm the DualSense AUX output route: {device.LastBluetoothHapticsWriteStatus}");
             }
 
             try
@@ -2461,6 +2488,25 @@ namespace DS4Windows
                 return false;
             }
 
+            if (traceOpusDecoder != null && postOpusPcmTrace != null)
+            {
+                try
+                {
+                    int decodedFrames = traceOpusDecoder.Decode(
+                        opusFrame.AsSpan(), traceDecodedFrame.AsSpan(),
+                        FrameSamples, false);
+                    if (decodedFrames > 0)
+                    {
+                        postOpusPcmTrace.Write(traceDecodedFrame,
+                            decodedFrames * Channels);
+                    }
+                }
+                catch
+                {
+                    // Diagnostic decoding must never affect presentation.
+                }
+            }
+
             return true;
         }
 
@@ -2669,8 +2715,12 @@ namespace DS4Windows
             pacerLifecycleRequested.Dispose();
             rawDirectPcmTrace?.Dispose();
             preOpusPcmTrace?.Dispose();
+            postOpusPcmTrace?.Dispose();
+            traceOpusDecoder?.Dispose();
             rawDirectPcmTrace = null;
             preOpusPcmTrace = null;
+            postOpusPcmTrace = null;
+            traceOpusDecoder = null;
         }
     }
 }

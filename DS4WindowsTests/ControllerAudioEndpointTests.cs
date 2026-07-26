@@ -76,6 +76,12 @@ namespace DS4WindowsTests
         [DataRow("explicit", true, true,
             (int)DirectSpeakerEndpointOwnership.Unowned,
             (int)DirectSpeakerRouteDecision.Loopback)]
+        [DataRow("explicit", true, true,
+            (int)DirectSpeakerEndpointOwnership.Missing,
+            (int)DirectSpeakerRouteDecision.Direct)]
+        [DataRow("explicit", true, false,
+            (int)DirectSpeakerEndpointOwnership.Missing,
+            (int)DirectSpeakerRouteDecision.Pending)]
         [DataRow("explicit", false, false,
             (int)DirectSpeakerEndpointOwnership.Unresolved,
             (int)DirectSpeakerRouteDecision.Loopback)]

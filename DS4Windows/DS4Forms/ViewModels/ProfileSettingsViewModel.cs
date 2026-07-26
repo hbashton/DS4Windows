@@ -20,6 +20,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -3236,6 +3237,17 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             set
             {
                 string normalized = value ?? string.Empty;
+                // A VIIPER controller endpoint is recreated with a new
+                // Windows GUID whenever its virtual USB function is rebuilt.
+                // Persist controller-audio intent, not that transient GUID.
+                if (AudioEndpointChoiceCache.RenderEndpoints.Any(endpoint =>
+                        endpoint.IsControllerAudio && string.Equals(
+                            endpoint.EndpointId, normalized,
+                            StringComparison.Ordinal)))
+                {
+                    normalized = string.Empty;
+                }
+
                 if (Global.DualSenseAudioCaptureEndpointId[device] == normalized)
                 {
                     return;

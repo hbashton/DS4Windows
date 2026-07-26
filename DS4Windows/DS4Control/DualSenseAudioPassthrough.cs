@@ -29,6 +29,7 @@ namespace DS4Windows
         Unresolved,
         Owned,
         Unowned,
+        Missing,
     }
 
     public sealed class DualSenseAudioPassthrough : IDisposable
@@ -84,7 +85,8 @@ namespace DS4Windows
             DualSenseSpeakerCompression speakerCompression, byte speakerBassBoost,
             string requestedCaptureEndpointId, string requestedSpeakerEndpointId,
             OutContType emulatedControllerType,
-            ViiperOutDevice directSpeakerSource = null)
+            ViiperOutDevice directSpeakerSource = null,
+            Func<ViiperOutDevice> directSpeakerSourceResolver = null)
         {
             if (slot < 0 || slot >= slots.Length)
             {
@@ -100,7 +102,8 @@ namespace DS4Windows
             {
                 StartBluetooth(slot, dualSenseDevice, speakerVolume, speakerCompression,
                     speakerBassBoost, requestedCaptureEndpointId,
-                    emulatedControllerType, directSpeakerSource);
+                    emulatedControllerType, directSpeakerSource,
+                    directSpeakerSourceResolver);
                 return;
             }
 
@@ -332,16 +335,20 @@ namespace DS4Windows
         private void StartBluetooth(int slot, DualSenseDevice device, byte speakerVolume,
             DualSenseSpeakerCompression speakerCompression, byte speakerBassBoost,
             string requestedCaptureEndpointId, OutContType emulatedControllerType,
-            ViiperOutDevice directSpeakerSource)
+            ViiperOutDevice directSpeakerSource,
+            Func<ViiperOutDevice> directSpeakerSourceResolver)
         {
             requestedCaptureEndpointId ??= string.Empty;
             ControllerAudioEndpointKind endpointKind = GetEndpointKind(emulatedControllerType);
+            ViiperOutDevice currentDirectSpeakerSource =
+                ResolveDirectSpeakerSource(directSpeakerSourceResolver,
+                    directSpeakerSource);
             DirectSpeakerRouteDecision initialRoute =
                 EvaluateDirectSpeakerRoute(requestedCaptureEndpointId,
-                    endpointKind, directSpeakerSource);
+                    endpointKind, currentDirectSpeakerSource);
             if (initialRoute == DirectSpeakerRouteDecision.Loopback)
             {
-                directSpeakerSource = null;
+                currentDirectSpeakerSource = null;
             }
 
             int generation;
@@ -359,7 +366,7 @@ namespace DS4Windows
                     if (bluetoothSlots[slot]?.Matches(device, speakerVolume,
                         speakerCompression, speakerBassBoost,
                         requestedCaptureEndpointId, endpointKind,
-                        directSpeakerSource) == true)
+                        currentDirectSpeakerSource) == true)
                     {
                         return;
                     }
@@ -383,22 +390,26 @@ namespace DS4Windows
 
             _ = Task.Run(() => StartBluetoothWithRetry(slot, device, speakerVolume,
                 speakerCompression, speakerBassBoost, requestedCaptureEndpointId,
-                endpointKind, directSpeakerSource, generation));
+                endpointKind, directSpeakerSource,
+                directSpeakerSourceResolver, generation));
         }
 
         private void StartBluetoothWithRetry(int slot, DualSenseDevice device, byte speakerVolume,
             DualSenseSpeakerCompression speakerCompression, byte speakerBassBoost,
             string requestedCaptureEndpointId, ControllerAudioEndpointKind endpointKind,
-            ViiperOutDevice directSpeakerSource, int generation)
+            ViiperOutDevice directSpeakerSource,
+            Func<ViiperOutDevice> directSpeakerSourceResolver,
+            int generation)
         {
             Exception lastError = null;
-            for (int attempt = 0; attempt < BluetoothStartRetryAttempts;
-                attempt++)
+            bool prolongedWaitLogged = false;
+            for (int attempt = 0; ; attempt++)
             {
                 if (TryStartBluetoothOnce(slot, device, speakerVolume,
                     speakerCompression, speakerBassBoost,
                     requestedCaptureEndpointId, endpointKind,
-                    directSpeakerSource, generation, out lastError))
+                    directSpeakerSource, directSpeakerSourceResolver,
+                    generation, out lastError))
                 {
                     return;
                 }
@@ -414,21 +425,18 @@ namespace DS4Windows
                 // Endpoint enumeration is not an ownership operation. Keep the
                 // per-slot gate free while waiting so disconnect/profile-change
                 // teardown is immediate and can cancel this generation.
-                Thread.Sleep(BluetoothStartRetryDelayMilliseconds);
-            }
-
-            lock (syncRoot)
-            {
-                if (disposed || generation != bluetoothStartGeneration[slot])
+                if (!prolongedWaitLogged &&
+                    attempt + 1 >= BluetoothStartRetryAttempts)
                 {
-                    return;
+                    prolongedWaitLogged = true;
+                    AppLogger.LogToGui(
+                        $"DualSense Bluetooth speaker is still waiting for its current VIIPER audio stream and will keep recovering in the background: {lastError?.Message}",
+                        true);
                 }
 
-                bluetoothStartPending[slot] = false;
-                startFailed[slot] = true;
+                Thread.Sleep(prolongedWaitLogged ? 1000 :
+                    BluetoothStartRetryDelayMilliseconds);
             }
-
-            AppLogger.LogToGui($"DualSense Bluetooth speaker passthrough could not start after waiting for the selected audio endpoint: {lastError?.Message}", true);
         }
 
         private bool TryStartBluetoothOnce(int slot,
@@ -436,7 +444,9 @@ namespace DS4Windows
             DualSenseSpeakerCompression speakerCompression,
             byte speakerBassBoost, string requestedCaptureEndpointId,
             ControllerAudioEndpointKind endpointKind,
-            ViiperOutDevice directSpeakerSource, int generation,
+            ViiperOutDevice directSpeakerSource,
+            Func<ViiperOutDevice> directSpeakerSourceResolver,
+            int generation,
             out Exception lastError)
         {
             lastError = null;
@@ -453,9 +463,25 @@ namespace DS4Windows
                     }
                 }
 
+                ViiperOutDevice currentDirectSpeakerSource =
+                    ResolveDirectSpeakerSource(directSpeakerSourceResolver,
+                        directSpeakerSource);
+                bool directRouteExpected = directSpeakerSourceResolver != null &&
+                    !ProcessLoopbackWaveCapture.IsProcessEndpointId(
+                        requestedCaptureEndpointId) &&
+                    !string.Equals(requestedCaptureEndpointId,
+                        DefaultSystemAudioEndpointId,
+                        StringComparison.Ordinal);
+                if (directRouteExpected && currentDirectSpeakerSource == null)
+                {
+                    lastError = new InvalidOperationException(
+                        "The current VIIPER controller audio stream is being recreated.");
+                    return false;
+                }
+
                 DirectSpeakerRouteDecision route =
                     EvaluateDirectSpeakerRoute(requestedCaptureEndpointId,
-                        endpointKind, directSpeakerSource);
+                        endpointKind, currentDirectSpeakerSource);
                 if (route == DirectSpeakerRouteDecision.Pending)
                 {
                     lastError = new InvalidOperationException(
@@ -465,7 +491,7 @@ namespace DS4Windows
 
                 ViiperOutDevice activeDirectSpeakerSource =
                     route == DirectSpeakerRouteDecision.Direct ?
-                        directSpeakerSource : null;
+                        currentDirectSpeakerSource : null;
                 var bluetoothPlayback = new DualSenseBluetoothSpeakerPassthrough(device,
                     speakerVolume, speakerCompression, speakerBassBoost,
                     requestedCaptureEndpointId, endpointKind,
@@ -500,6 +526,24 @@ namespace DS4Windows
                     bluetoothPlayback.Dispose();
                     return false;
                 }
+            }
+        }
+
+        private static ViiperOutDevice ResolveDirectSpeakerSource(
+            Func<ViiperOutDevice> resolver, ViiperOutDevice fallback)
+        {
+            if (resolver == null)
+            {
+                return fallback;
+            }
+
+            try
+            {
+                return resolver();
+            }
+            catch
+            {
+                return null;
             }
         }
 
@@ -958,6 +1002,15 @@ namespace DS4Windows
                     DirectSpeakerRouteDecision.Direct,
                 DirectSpeakerEndpointOwnership.Owned =>
                     DirectSpeakerRouteDecision.Pending,
+                // VIIPER controller audio endpoints are recreated with a new
+                // MMDevice GUID. An old concrete controller GUID must not
+                // leave the physical speaker waiting forever. Once the
+                // controller-bound direct stream is live, it is the safe
+                // replacement for a saved endpoint that no longer exists.
+                DirectSpeakerEndpointOwnership.Missing when directStreamActive =>
+                    DirectSpeakerRouteDecision.Direct,
+                DirectSpeakerEndpointOwnership.Missing =>
+                    DirectSpeakerRouteDecision.Pending,
                 DirectSpeakerEndpointOwnership.Unowned =>
                     DirectSpeakerRouteDecision.Loopback,
                 _ => DirectSpeakerRouteDecision.Pending,
@@ -1063,6 +1116,7 @@ namespace DS4Windows
                     }
                 }
 
+                bool savedEndpointMissing = false;
                 try
                 {
                     using MMDevice savedEndpoint =
@@ -1083,11 +1137,12 @@ namespace DS4Windows
                 }
                 catch
                 {
-                    // Missing and inactive saved endpoints are both transient:
-                    // the VIIPER USB audio function may still be enumerating.
+                    savedEndpointMissing = true;
                 }
 
-                return DirectSpeakerEndpointOwnership.Unresolved;
+                return savedEndpointMissing
+                    ? DirectSpeakerEndpointOwnership.Missing
+                    : DirectSpeakerEndpointOwnership.Unresolved;
             }
             catch
             {

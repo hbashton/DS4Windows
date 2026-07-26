@@ -3306,6 +3306,15 @@ namespace DS4WinWPF.DS4Control.DTOXml
                 get; set;
             }
 
+            [XmlElement("HeadsetPluggedIn")]
+            public bool LegacyHeadsetPluggedIn
+            {
+                get => HeadsetOnlyAudio;
+                set => HeadsetOnlyAudio = value;
+            }
+
+            public bool ShouldSerializeLegacyHeadsetPluggedIn() => false;
+
             [XmlElement("SpeakerVolume")]
             public byte SpeakerVolume
             {
@@ -3328,7 +3337,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
             public byte HeadphoneVolume
             {
                 get; set;
-            } = 128;
+            } = 255;
 
             [XmlElement("MicrophoneVolume")]
             public byte MicrophoneVolume

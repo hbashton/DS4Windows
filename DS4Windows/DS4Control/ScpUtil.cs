@@ -3889,7 +3889,7 @@ namespace DS4Windows
         public byte[] dualSenseSpeakerVolume = new byte[Global.TEST_PROFILE_ITEM_COUNT] { 128, 128, 128, 128, 128, 128, 128, 128, 128 };
         public byte[] dualSenseSpeakerCompression = new byte[Global.TEST_PROFILE_ITEM_COUNT];
         public byte[] dualSenseSpeakerBassBoost = new byte[Global.TEST_PROFILE_ITEM_COUNT];
-        public byte[] dualSenseHeadphoneVolume = new byte[Global.TEST_PROFILE_ITEM_COUNT] { 128, 128, 128, 128, 128, 128, 128, 128, 128 };
+        public byte[] dualSenseHeadphoneVolume = new byte[Global.TEST_PROFILE_ITEM_COUNT] { 255, 255, 255, 255, 255, 255, 255, 255, 255 };
         public byte[] dualSenseMicrophoneVolume = new byte[Global.TEST_PROFILE_ITEM_COUNT] { 128, 128, 128, 128, 128, 128, 128, 128, 128 };
         public byte[] dualSenseMicrophoneNoiseSuppression = new byte[Global.TEST_PROFILE_ITEM_COUNT] { 1, 1, 1, 1, 1, 1, 1, 1, 1 };
         public string[] dualSenseAudioCaptureEndpointId = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
@@ -7508,7 +7508,14 @@ namespace DS4Windows
 
                         try
                         {
-                            Item = xmlDSAudioGroupElement.SelectSingleNode("HeadsetOnlyAudio");
+                            // Early UI builds persisted this option as
+                            // HeadsetPluggedIn. Preserve those profiles instead
+                            // of silently routing their audio back to the
+                            // controller speaker.
+                            Item = xmlDSAudioGroupElement.SelectSingleNode(
+                                "HeadsetOnlyAudio") ??
+                                xmlDSAudioGroupElement.SelectSingleNode(
+                                    "HeadsetPluggedIn");
                             bool.TryParse(Item?.InnerText, out bool temp);
                             dualSenseHeadsetOnlyAudio[device] = temp;
                         }

@@ -21,19 +21,30 @@ namespace DS4Windows
         internal const double OutputRate = 48000.0;
         internal const double MinimumInputRateRatio = 0.99;
         internal const double MaximumInputRateRatio = 1.01;
+        // WDL retains a small interpolation look-ahead. At the maximum
+        // permitted correction, 480 output frames require at most 518 new
+        // source frames plus that look-ahead. Keep the bound explicit so the
+        // realtime caller never allocates or accepts an unbounded request.
+        internal const int MaximumInputFrames = 522;
 
         private readonly WdlResampler resampler;
-        private readonly float[] stagedInput = new float[
-            NominalInputFrames * Channels];
         private double inputRateRatio = 1.0;
-        private int stagedInputFrames;
-        private bool nominalFramePhase = true;
+        private float[] preparedInputBuffer;
+        private int preparedInputBufferOffset;
+        private int preparedInputFrames;
+        private int preparedOutputFrames;
 
         internal DualSenseSpeakerFrameResampler()
         {
             resampler = new WdlResampler();
             resampler.SetMode(true, 0, false);
-            resampler.SetFeedMode(true);
+            // Output-driven operation is essential here. A feed-driven fixed
+            // 512-frame block occasionally produces only 479 frames under a
+            // fractional clock correction, which made the caller pull a
+            // second full block and silently added one 10.7 ms packet of
+            // latency. WDL now retains only its interpolation look-ahead and
+            // tells the caller whether this packet needs 512 or 513 frames.
+            resampler.SetFeedMode(false);
             resampler.SetRates(NominalInputRate, OutputRate);
         }
 
@@ -60,150 +71,84 @@ namespace DS4Windows
 
             inputRateRatio = ratio;
             resampler.SetRates(NominalInputRate * ratio, OutputRate);
-            if (ratio != 1.0)
-            {
-                nominalFramePhase = false;
-            }
         }
 
         /// <summary>
-        /// Converts one reference-sized block. This allocation-free hot path
-        /// is valid at the nominal ratio and always produces one Opus frame.
-        /// Offsets are interleaved-float sample offsets, not frame offsets.
+        /// Prepares one fixed-size output packet and returns the exact number
+        /// of source frames WDL requires. It is safe to call this again if the
+        /// source ring does not yet contain the returned count.
         /// </summary>
-        internal void ConvertNominalFrame(float[] source,
-            int sourceSampleOffset, float[] destination,
+        internal int PrepareOutputFrame(int outputFrames = OutputFrames)
+        {
+            if (outputFrames <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(outputFrames));
+            }
+
+            int requested = resampler.ResamplePrepare(outputFrames, Channels,
+                out preparedInputBuffer, out preparedInputBufferOffset);
+            if (requested < 0 || requested > MaximumInputFrames)
+            {
+                throw new InvalidOperationException(
+                    $"WDL requested {requested} source frames for " +
+                    $"{outputFrames} DualSense output frames.");
+            }
+
+            preparedInputFrames = requested;
+            preparedOutputFrames = outputFrames;
+            return requested;
+        }
+
+        /// <summary>
+        /// Supplies the exact source request returned by PrepareOutputFrame
+        /// and always emits the requested fixed-size output packet. Offsets
+        /// are interleaved-float sample offsets.
+        /// </summary>
+        internal int ConvertPreparedOutput(float[] source,
+            int sourceSampleOffset, int sourceFrames, float[] destination,
             int destinationSampleOffset)
         {
-            if (inputRateRatio != 1.0 || !nominalFramePhase ||
-                stagedInputFrames != 0)
+            if (preparedInputBuffer == null ||
+                sourceFrames != preparedInputFrames ||
+                preparedOutputFrames <= 0)
             {
                 throw new InvalidOperationException(
-                    "Reset or use Convert when a non-nominal streaming " +
-                    "phase is active.");
+                    "PrepareOutputFrame must immediately precede conversion " +
+                    "with its exact source-frame request.");
             }
 
-            ValidateFloatRange(source, sourceSampleOffset,
-                NominalInputFrames, nameof(source));
-            ValidateFloatRange(destination, destinationSampleOffset,
-                OutputFrames, nameof(destination));
-
-            int produced = ConvertPreparedBlock(source, sourceSampleOffset,
-                NominalInputFrames, destination, destinationSampleOffset,
-                OutputFrames);
-            if (produced != OutputFrames)
-            {
-                throw new InvalidOperationException(
-                    $"The nominal DualSense frame resampler produced " +
-                    $"{produced} frames instead of {OutputFrames}.");
-            }
-        }
-
-        /// <summary>
-        /// Converts an arbitrary streaming input block. This form is intended
-        /// for clock-corrected operation, where a block can yield one frame
-        /// more or less than the nominal count. The caller must accumulate the
-        /// returned frames before taking fixed 480-frame Opus packets.
-        /// Offsets are interleaved-float sample offsets.
-        /// </summary>
-        internal int Convert(float[] source, int sourceSampleOffset,
-            int sourceFrames, float[] destination,
-            int destinationSampleOffset, int destinationCapacityFrames)
-        {
             ValidateFloatRange(source, sourceSampleOffset, sourceFrames,
                 nameof(source));
             ValidateFloatRange(destination, destinationSampleOffset,
-                destinationCapacityFrames, nameof(destination));
+                preparedOutputFrames, nameof(destination));
 
-            int requiredCapacity = GetMaximumOutputFrames(sourceFrames);
-            if (destinationCapacityFrames < requiredCapacity)
+            Array.Copy(source, sourceSampleOffset, preparedInputBuffer,
+                preparedInputBufferOffset, sourceFrames * Channels);
+            int expectedOutputFrames = preparedOutputFrames;
+            int produced = resampler.ResampleOut(destination,
+                destinationSampleOffset, sourceFrames,
+                expectedOutputFrames, Channels);
+            preparedInputBuffer = null;
+            preparedInputBufferOffset = 0;
+            preparedInputFrames = 0;
+            preparedOutputFrames = 0;
+            if (produced != expectedOutputFrames)
             {
-                throw new ArgumentException(
-                    $"Destination capacity must be at least " +
-                    $"{requiredCapacity} frames for this input block.",
-                    nameof(destinationCapacityFrames));
+                throw new InvalidOperationException(
+                    $"WDL produced {produced} frames instead of the " +
+                    $"prepared {expectedOutputFrames} frames.");
             }
 
-            int remainingFrames = sourceFrames;
-            int sourceOffset = sourceSampleOffset;
-            int producedFrames = 0;
-            while (remainingFrames > 0)
-            {
-                int copiedFrames = Math.Min(remainingFrames,
-                    NominalInputFrames - stagedInputFrames);
-                Array.Copy(source, sourceOffset, stagedInput,
-                    stagedInputFrames * Channels, copiedFrames * Channels);
-                stagedInputFrames += copiedFrames;
-                sourceOffset += copiedFrames * Channels;
-                remainingFrames -= copiedFrames;
-
-                if (stagedInputFrames != NominalInputFrames)
-                {
-                    continue;
-                }
-
-                producedFrames += ConvertPreparedBlock(stagedInput, 0,
-                    NominalInputFrames, destination,
-                    destinationSampleOffset + producedFrames * Channels,
-                    destinationCapacityFrames - producedFrames);
-                stagedInputFrames = 0;
-            }
-
-            return producedFrames;
-        }
-
-        internal int GetMaximumOutputFrames(int sourceFrames)
-        {
-            if (sourceFrames < 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(sourceFrames));
-            }
-
-            long availableFrames = (long)stagedInputFrames + sourceFrames;
-            long completeInputFrames = availableFrames /
-                NominalInputFrames * NominalInputFrames;
-            if (completeInputFrames == 0)
-            {
-                return 0;
-            }
-
-            double inputFramesPerOutputFrame =
-                NominalInputRate * inputRateRatio / OutputRate;
-            return CheckedCeiling(completeInputFrames /
-                inputFramesPerOutputFrame + 2.0);
+            return produced;
         }
 
         internal void Reset()
         {
             resampler.Reset();
-            stagedInputFrames = 0;
-            nominalFramePhase = inputRateRatio == 1.0;
-        }
-
-        private int ConvertPreparedBlock(float[] source,
-            int sourceSampleOffset,
-            int sourceFrames, float[] destination,
-            int destinationSampleOffset, int destinationCapacityFrames)
-        {
-            if (sourceFrames == 0)
-            {
-                return 0;
-            }
-
-            int requested = resampler.ResamplePrepare(sourceFrames, Channels,
-                out float[] inputBuffer, out int inputBufferOffset);
-            if (requested != sourceFrames)
-            {
-                throw new InvalidOperationException(
-                    $"WDL accepted {requested} of {sourceFrames} input " +
-                    "frames.");
-            }
-
-            Array.Copy(source, sourceSampleOffset, inputBuffer,
-                inputBufferOffset, sourceFrames * Channels);
-            return resampler.ResampleOut(destination,
-                destinationSampleOffset, sourceFrames,
-                destinationCapacityFrames, Channels);
+            preparedInputBuffer = null;
+            preparedInputBufferOffset = 0;
+            preparedInputFrames = 0;
+            preparedOutputFrames = 0;
         }
 
         private static void ValidateFloatRange(float[] buffer,
@@ -218,15 +163,6 @@ namespace DS4Windows
             }
         }
 
-        private static int CheckedCeiling(double value)
-        {
-            if (!double.IsFinite(value) || value > int.MaxValue)
-            {
-                throw new ArgumentOutOfRangeException(nameof(value));
-            }
-
-            return (int)Math.Ceiling(value);
-        }
     }
 
     /// <summary>

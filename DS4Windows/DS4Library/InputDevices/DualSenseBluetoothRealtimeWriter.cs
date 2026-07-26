@@ -28,6 +28,7 @@ namespace DS4Windows.InputDevices
         private const uint CancellationCompletionGraceMilliseconds = 100;
         private const int LateSubmissionMilliseconds = 15;
         private const int SlowCompletionMilliseconds = 20;
+        private const int SlowNativeSubmissionMilliseconds = 2;
         private const int NormalAudioInFlightLimit = 2;
         private const uint InFlightLimitWaitMilliseconds = 3;
 
@@ -99,6 +100,8 @@ namespace DS4Windows.InputDevices
         private long maximumCompletionTicks;
         private long lateSubmissionCount;
         private long maximumSubmissionGapTicks;
+        private long slowNativeSubmissionCount;
+        private long maximumNativeSubmissionTicks;
         private long lastSubmissionTimestamp;
         private long inFlightLimitWaitCount;
         private long inFlightLimitEscapeCount;
@@ -110,10 +113,18 @@ namespace DS4Windows.InputDevices
         public long CompletedWrites => Interlocked.Read(ref completedWrites);
         public long SlowCompletionCount => Interlocked.Read(ref slowCompletionCount);
         public long LateSubmissionCount => Interlocked.Read(ref lateSubmissionCount);
+        public long MaximumCompletionTicks =>
+            Interlocked.Read(ref maximumCompletionTicks);
+        public long MaximumSubmissionGapTicks =>
+            Interlocked.Read(ref maximumSubmissionGapTicks);
+        public long SlowNativeSubmissionCount =>
+            Interlocked.Read(ref slowNativeSubmissionCount);
+        public long MaximumNativeSubmissionTicks =>
+            Interlocked.Read(ref maximumNativeSubmissionTicks);
         public double MaximumCompletionMilliseconds =>
-            Interlocked.Read(ref maximumCompletionTicks) * 1000.0 / Stopwatch.Frequency;
+            MaximumCompletionTicks * 1000.0 / Stopwatch.Frequency;
         public double MaximumSubmissionGapMilliseconds =>
-            Interlocked.Read(ref maximumSubmissionGapTicks) * 1000.0 / Stopwatch.Frequency;
+            MaximumSubmissionGapTicks * 1000.0 / Stopwatch.Frequency;
         public long InFlightLimitWaitCount =>
             Interlocked.Read(ref inFlightLimitWaitCount);
         public long InFlightLimitEscapeCount =>
@@ -322,8 +333,11 @@ namespace DS4Windows.InputDevices
                 var overlapped = new NativeOverlappedData { EventHandle = slot.EventHandle };
                 Marshal.StructureToPtr(overlapped, slot.Overlapped, false);
 
+                long nativeSubmissionStarted = Stopwatch.GetTimestamp();
                 bool completed = WriteFile(deviceHandle, slot.BufferHandle.AddrOfPinnedObject(),
                     (uint)report.Length, IntPtr.Zero, slot.Overlapped);
+                RecordNativeSubmission(Stopwatch.GetTimestamp() -
+                    nativeSubmissionStarted);
                 if (!completed)
                 {
                     int error = Marshal.GetLastWin32Error();
@@ -539,9 +553,12 @@ namespace DS4Windows.InputDevices
                 }, slot.Overlapped, false);
 
                 long submitted = Stopwatch.GetTimestamp();
+                long nativeSubmissionStarted = Stopwatch.GetTimestamp();
                 bool completed = WriteFile(deviceHandle,
                     slot.BufferHandle.AddrOfPinnedObject(), (uint)report.Length,
                     IntPtr.Zero, slot.Overlapped);
+                RecordNativeSubmission(Stopwatch.GetTimestamp() -
+                    nativeSubmissionStarted);
                 if (!completed)
                 {
                     int error = Marshal.GetLastWin32Error();
@@ -703,6 +720,17 @@ namespace DS4Windows.InputDevices
             if (elapsedTicks > Stopwatch.Frequency * SlowCompletionMilliseconds / 1000)
             {
                 Interlocked.Increment(ref slowCompletionCount);
+            }
+        }
+
+        private void RecordNativeSubmission(long elapsedTicks)
+        {
+            elapsedTicks = Math.Max(0, elapsedTicks);
+            UpdateMaximum(ref maximumNativeSubmissionTicks, elapsedTicks);
+            if (elapsedTicks > Stopwatch.Frequency *
+                SlowNativeSubmissionMilliseconds / 1000)
+            {
+                Interlocked.Increment(ref slowNativeSubmissionCount);
             }
         }
 

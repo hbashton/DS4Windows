@@ -25,7 +25,7 @@ namespace DS4Windows.InputDevices
         internal const int HostReservoirCapacity = 64;
 
         private const string HelperArgument = "--dualsense-bt-audio-pacer-helper";
-        private const int ProtocolVersion = 3;
+        private const int ProtocolVersion = 5;
         private const int PipeConnectTimeoutMilliseconds = 5000;
         private const int HelperReadyTimeoutMilliseconds = 5000;
         private const int HelperStopTimeoutMilliseconds = 3000;
@@ -43,6 +43,7 @@ namespace DS4Windows.InputDevices
             UpdateTemplate = 3,
             Clear = 4,
             Stop = 5,
+            UpdateCadence = 6,
             Ready = 0x80,
             ReportAcknowledged = 0x81,
             Stopped = 0x82,
@@ -110,6 +111,13 @@ namespace DS4Windows.InputDevices
         private long helperInFlightLimitWaitCount;
         private long helperInFlightLimitEscapeCount;
         private long helperMaximumInFlightLimitWaitTicks;
+        private long helperCompletedWriteCount;
+        private long helperSlowCompletionCount;
+        private long helperMaximumCompletionTicks;
+        private long helperLateSubmissionCount;
+        private long helperMaximumSubmissionGapTicks;
+        private long helperSlowNativeSubmissionCount;
+        private long helperMaximumNativeSubmissionTicks;
         private long clearedReports;
         private long transportFaultReports;
         private int currentEpoch = InitialEpoch;
@@ -162,6 +170,23 @@ namespace DS4Windows.InputDevices
         public double HelperMaximumInFlightLimitWaitMilliseconds =>
             Interlocked.Read(ref helperMaximumInFlightLimitWaitTicks) *
             1000.0 / Stopwatch.Frequency;
+        public long HelperCompletedWriteCount =>
+            Interlocked.Read(ref helperCompletedWriteCount);
+        public long HelperSlowCompletionCount =>
+            Interlocked.Read(ref helperSlowCompletionCount);
+        public double HelperMaximumCompletionMilliseconds =>
+            Interlocked.Read(ref helperMaximumCompletionTicks) * 1000.0 /
+            Stopwatch.Frequency;
+        public long HelperLateSubmissionCount =>
+            Interlocked.Read(ref helperLateSubmissionCount);
+        public double HelperMaximumSubmissionGapMilliseconds =>
+            Interlocked.Read(ref helperMaximumSubmissionGapTicks) * 1000.0 /
+            Stopwatch.Frequency;
+        public long HelperSlowNativeSubmissionCount =>
+            Interlocked.Read(ref helperSlowNativeSubmissionCount);
+        public double HelperMaximumNativeSubmissionMilliseconds =>
+            Interlocked.Read(ref helperMaximumNativeSubmissionTicks) * 1000.0 /
+            Stopwatch.Frequency;
         public long ClearedReports => Interlocked.Read(ref clearedReports);
         public long TransportFaultReports =>
             Interlocked.Read(ref transportFaultReports);
@@ -553,6 +578,45 @@ namespace DS4Windows.InputDevices
         }
 
         /// <summary>
+        /// Phase-locks presentation to the physical controller oscillator.
+        /// Updates are coalesced and only alter future fractional intervals;
+        /// the helper never restarts or bursts the stream.
+        /// </summary>
+        public bool UpdateCadenceRatio(double controllerClockRatio)
+        {
+            if (!double.IsFinite(controllerClockRatio) ||
+                controllerClockRatio <
+                    DualSenseBluetoothAudioPacerScheduler.MinimumRateRatio ||
+                controllerClockRatio >
+                    DualSenseBluetoothAudioPacerScheduler.MaximumRateRatio ||
+                !IsRunning)
+            {
+                return false;
+            }
+
+            byte[] payload = new byte[sizeof(long)];
+            BinaryPrimitives.WriteInt64LittleEndian(payload,
+                BitConverter.DoubleToInt64Bits(controllerClockRatio));
+            lock (stateLock)
+            {
+                foreach (OutboundCommand removed in
+                    outboundCommands.RemoveWhere(command =>
+                        command.Kind == MessageKind.UpdateCadence))
+                {
+                }
+
+                if (!outboundCommands.TryEnqueue(new OutboundCommand(
+                    MessageKind.UpdateCadence, payload)))
+                {
+                    return false;
+                }
+            }
+
+            outboundAvailable.Set();
+            return true;
+        }
+
+        /// <summary>
         /// Drops every report not yet presented and re-arms the eight-report
         /// prime gate. Reports already sent to the helper are acknowledged as
         /// cleared; unsent reports are released here.
@@ -767,7 +831,7 @@ namespace DS4Windows.InputDevices
 
         private void ProcessAcknowledgement(byte[] payload)
         {
-            const int writerMetricCount = 3;
+            const int writerMetricCount = 10;
             int metricOffset = sizeof(long) + sizeof(byte) + sizeof(long);
             if (payload.Length != metricOffset +
                 writerMetricCount * sizeof(long))
@@ -790,6 +854,34 @@ namespace DS4Windows.InputDevices
                     metricOffset, sizeof(long))));
             metricOffset += sizeof(long);
             Interlocked.Exchange(ref helperMaximumInFlightLimitWaitTicks,
+                BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
+                    metricOffset, sizeof(long))));
+            metricOffset += sizeof(long);
+            Interlocked.Exchange(ref helperCompletedWriteCount,
+                BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
+                    metricOffset, sizeof(long))));
+            metricOffset += sizeof(long);
+            Interlocked.Exchange(ref helperSlowCompletionCount,
+                BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
+                    metricOffset, sizeof(long))));
+            metricOffset += sizeof(long);
+            Interlocked.Exchange(ref helperMaximumCompletionTicks,
+                BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
+                    metricOffset, sizeof(long))));
+            metricOffset += sizeof(long);
+            Interlocked.Exchange(ref helperLateSubmissionCount,
+                BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
+                    metricOffset, sizeof(long))));
+            metricOffset += sizeof(long);
+            Interlocked.Exchange(ref helperMaximumSubmissionGapTicks,
+                BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
+                    metricOffset, sizeof(long))));
+            metricOffset += sizeof(long);
+            Interlocked.Exchange(ref helperSlowNativeSubmissionCount,
+                BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
+                    metricOffset, sizeof(long))));
+            metricOffset += sizeof(long);
+            Interlocked.Exchange(ref helperMaximumNativeSubmissionTicks,
                 BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
                     metricOffset, sizeof(long))));
 
@@ -1466,6 +1558,8 @@ namespace DS4Windows.InputDevices
             private long latestTemplateHapticsExpiryQpc;
             private bool latestTemplateAvailable;
             private int currentEpoch = InitialEpoch;
+            private long cadenceRatioBits =
+                BitConverter.DoubleToInt64Bits(1.0);
             private bool primeRequired = true;
             private int disposed;
             private readonly string presentationTraceDirectory;
@@ -1576,6 +1670,9 @@ namespace DS4Windows.InputDevices
                                 break;
                             case MessageKind.Clear:
                                 ReceiveClear(commandPayload, payloadLength);
+                                break;
+                            case MessageKind.UpdateCadence:
+                                ReceiveCadence(commandPayload, payloadLength);
                                 break;
                             case MessageKind.Stop:
                                 if (payloadLength != 0)
@@ -1778,6 +1875,30 @@ namespace DS4Windows.InputDevices
                 reservoirChanged.Set();
             }
 
+            private void ReceiveCadence(byte[] payload, int payloadLength)
+            {
+                if (payloadLength != sizeof(long))
+                {
+                    throw new InvalidDataException(
+                        "Invalid DualSense pacer cadence payload length.");
+                }
+
+                double ratio = BitConverter.Int64BitsToDouble(
+                    BinaryPrimitives.ReadInt64LittleEndian(
+                        payload.AsSpan(0, sizeof(long))));
+                if (!double.IsFinite(ratio) || ratio <
+                        DualSenseBluetoothAudioPacerScheduler.MinimumRateRatio ||
+                    ratio >
+                        DualSenseBluetoothAudioPacerScheduler.MaximumRateRatio)
+                {
+                    throw new InvalidDataException(
+                        "Invalid DualSense pacer cadence ratio.");
+                }
+
+                Interlocked.Exchange(ref cadenceRatioBits,
+                    BitConverter.DoubleToInt64Bits(ratio));
+            }
+
             private void PacerLoop()
             {
                 timeBeginPeriod(1);
@@ -1823,6 +1944,9 @@ namespace DS4Windows.InputDevices
 
                         if (!controlPrimeBypass)
                         {
+                            scheduler.SetRateRatio(
+                                BitConverter.Int64BitsToDouble(
+                                    Interlocked.Read(ref cadenceRatioBits)));
                             WaitUntil(timer, scheduler.NextDeadlineQpc,
                                 stopRequested);
                         }
@@ -1980,7 +2104,7 @@ namespace DS4Windows.InputDevices
 
             private void AcknowledgementLoop()
             {
-                const int writerMetricCount = 3;
+                const int writerMetricCount = 10;
                 byte[] payload = new byte[
                     sizeof(long) + sizeof(byte) + sizeof(long) +
                     writerMetricCount * sizeof(long)];
@@ -2016,6 +2140,34 @@ namespace DS4Windows.InputDevices
                         BinaryPrimitives.WriteInt64LittleEndian(
                             payload.AsSpan(metricOffset, sizeof(long)),
                             writer.MaximumInFlightLimitWaitTicks);
+                        metricOffset += sizeof(long);
+                        BinaryPrimitives.WriteInt64LittleEndian(
+                            payload.AsSpan(metricOffset, sizeof(long)),
+                            writer.CompletedWrites);
+                        metricOffset += sizeof(long);
+                        BinaryPrimitives.WriteInt64LittleEndian(
+                            payload.AsSpan(metricOffset, sizeof(long)),
+                            writer.SlowCompletionCount);
+                        metricOffset += sizeof(long);
+                        BinaryPrimitives.WriteInt64LittleEndian(
+                            payload.AsSpan(metricOffset, sizeof(long)),
+                            writer.MaximumCompletionTicks);
+                        metricOffset += sizeof(long);
+                        BinaryPrimitives.WriteInt64LittleEndian(
+                            payload.AsSpan(metricOffset, sizeof(long)),
+                            writer.LateSubmissionCount);
+                        metricOffset += sizeof(long);
+                        BinaryPrimitives.WriteInt64LittleEndian(
+                            payload.AsSpan(metricOffset, sizeof(long)),
+                            writer.MaximumSubmissionGapTicks);
+                        metricOffset += sizeof(long);
+                        BinaryPrimitives.WriteInt64LittleEndian(
+                            payload.AsSpan(metricOffset, sizeof(long)),
+                            writer.SlowNativeSubmissionCount);
+                        metricOffset += sizeof(long);
+                        BinaryPrimitives.WriteInt64LittleEndian(
+                            payload.AsSpan(metricOffset, sizeof(long)),
+                            writer.MaximumNativeSubmissionTicks);
                         lock (pipeWriteLock)
                         {
                             WriteFrame(pipe, MessageKind.ReportAcknowledged,
@@ -2480,12 +2632,18 @@ namespace DS4Windows.InputDevices
     {
         internal const int CadenceNumerator = 32;
         internal const int CadenceDenominator = 3000;
+        internal const double MinimumRateRatio = 0.995;
+        internal const double MaximumRateRatio = 1.005;
 
         private readonly long clockFrequency;
-        private readonly long wholeTicks;
-        private readonly long remainderTicks;
+        private long wholeTicks;
+        private long remainderTicks;
         private readonly long maximumCatchUpTicks;
         private long remainderAccumulator;
+        private double fractionalRemainderTicks;
+        private double fractionalRemainderAccumulator;
+        private bool nominalRatio;
+        private double rateRatio;
         private long nextDeadlineQpc;
         private bool started;
 
@@ -2496,19 +2654,57 @@ namespace DS4Windows.InputDevices
                 throw new ArgumentOutOfRangeException(nameof(clockFrequency));
             }
             this.clockFrequency = clockFrequency;
-            long scaled = checked(clockFrequency * CadenceNumerator);
-            wholeTicks = scaled / CadenceDenominator;
-            remainderTicks = scaled % CadenceDenominator;
             maximumCatchUpTicks = Math.Max(1, clockFrequency / 1000);
+            SetRateRatio(1.0);
         }
 
         public bool IsStarted => started;
         public long NextDeadlineQpc => started ? nextDeadlineQpc :
             throw new InvalidOperationException("The pacer clock has not started.");
+        public double RateRatio => rateRatio;
+
+        public void SetRateRatio(double controllerClockRatio)
+        {
+            if (!double.IsFinite(controllerClockRatio) ||
+                controllerClockRatio < MinimumRateRatio ||
+                controllerClockRatio > MaximumRateRatio)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(controllerClockRatio));
+            }
+
+            if (controllerClockRatio == rateRatio && wholeTicks != 0)
+            {
+                return;
+            }
+
+            rateRatio = controllerClockRatio;
+            nominalRatio = Math.Abs(controllerClockRatio - 1.0) < 1.0e-12;
+            if (nominalRatio)
+            {
+                long scaled = checked(clockFrequency * CadenceNumerator);
+                wholeTicks = scaled / CadenceDenominator;
+                remainderTicks = scaled % CadenceDenominator;
+                fractionalRemainderTicks = 0.0;
+            }
+            else
+            {
+                double exactTicks = clockFrequency *
+                    (double)CadenceNumerator /
+                    (CadenceDenominator * controllerClockRatio);
+                wholeTicks = (long)Math.Floor(exactTicks);
+                remainderTicks = 0;
+                fractionalRemainderTicks = exactTicks - wholeTicks;
+            }
+
+            remainderAccumulator = 0;
+            fractionalRemainderAccumulator = 0.0;
+        }
 
         public void Start(long nowQpc)
         {
             remainderAccumulator = 0;
+            fractionalRemainderAccumulator = 0.0;
             nextDeadlineQpc = nowQpc;
             started = true;
         }
@@ -2516,6 +2712,7 @@ namespace DS4Windows.InputDevices
         public void Reset()
         {
             remainderAccumulator = 0;
+            fractionalRemainderAccumulator = 0.0;
             nextDeadlineQpc = 0;
             started = false;
         }
@@ -2540,12 +2737,27 @@ namespace DS4Windows.InputDevices
         private long NextIntervalTicks()
         {
             long interval = wholeTicks;
-            remainderAccumulator += remainderTicks;
-            if (remainderAccumulator >= CadenceDenominator)
+            if (nominalRatio)
             {
-                long extraTicks = remainderAccumulator / CadenceDenominator;
-                interval += extraTicks;
-                remainderAccumulator -= extraTicks * CadenceDenominator;
+                remainderAccumulator += remainderTicks;
+                if (remainderAccumulator >= CadenceDenominator)
+                {
+                    long extraTicks = remainderAccumulator /
+                        CadenceDenominator;
+                    interval += extraTicks;
+                    remainderAccumulator -= extraTicks *
+                        CadenceDenominator;
+                }
+            }
+            else
+            {
+                fractionalRemainderAccumulator += fractionalRemainderTicks;
+                if (fractionalRemainderAccumulator >= 1.0)
+                {
+                    long extraTicks = (long)fractionalRemainderAccumulator;
+                    interval += extraTicks;
+                    fractionalRemainderAccumulator -= extraTicks;
+                }
             }
 
             return Math.Max(1, interval);
@@ -2602,8 +2814,8 @@ namespace DS4Windows.InputDevices
                 // buffer depths), byte 10 (packet counter), and bytes 142-343
                 // (speaker TLV + 200-byte Opus frame). A live control-only
                 // template uses the low-latency depth of 16; copying that over
-                // a queued speaker report would replace its required depth of
-                // 64 immediately before presentation.
+                // a queued speaker report would replace its independent audio
+                // playback reserve immediately before presentation.
                 Buffer.BlockCopy(latestTemplate, 2, queuedReport, 2, 3);
                 Buffer.BlockCopy(latestTemplate, 11, queuedReport, 11, 131);
             }

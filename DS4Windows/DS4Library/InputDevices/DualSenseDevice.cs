@@ -280,6 +280,14 @@ namespace DS4Windows.InputDevices
         private bool timeStampInit = false;
         private uint timeStampPrevious = 0;
         private uint deltaTimeCurrent = 0;
+        private readonly DualSenseControllerClockEstimator
+            bluetoothControllerClock = new();
+        public double DualSenseControllerClockRatio =>
+            bluetoothControllerClock.Ratio;
+        public int DualSenseControllerClockCompletedWindows =>
+            bluetoothControllerClock.CompletedWindows;
+        public bool DualSenseControllerClockStable =>
+            bluetoothControllerClock.IsStable;
         private bool outputDirty = false;
         private DS4HapticState previousHapticState = new DS4HapticState();
         private byte[] outputBTCrc32Head = new byte[] { 0xA2 };
@@ -631,6 +639,80 @@ namespace DS4Windows.InputDevices
                 }
             }
         }
+        public long BluetoothAudioPacerCompletedWrites
+        {
+            get
+            {
+                lock (bluetoothAudioPacerLock)
+                {
+                    return bluetoothAudioPacer?.HelperCompletedWriteCount ?? 0;
+                }
+            }
+        }
+        public long BluetoothAudioPacerSlowCompletions
+        {
+            get
+            {
+                lock (bluetoothAudioPacerLock)
+                {
+                    return bluetoothAudioPacer?.HelperSlowCompletionCount ?? 0;
+                }
+            }
+        }
+        public double BluetoothAudioPacerMaximumCompletionMilliseconds
+        {
+            get
+            {
+                lock (bluetoothAudioPacerLock)
+                {
+                    return bluetoothAudioPacer?.HelperMaximumCompletionMilliseconds ?? 0.0;
+                }
+            }
+        }
+        public long BluetoothAudioPacerLateSubmissions
+        {
+            get
+            {
+                lock (bluetoothAudioPacerLock)
+                {
+                    return bluetoothAudioPacer?.HelperLateSubmissionCount ?? 0;
+                }
+            }
+        }
+        public double BluetoothAudioPacerMaximumSubmissionGapMilliseconds
+        {
+            get
+            {
+                lock (bluetoothAudioPacerLock)
+                {
+                    return bluetoothAudioPacer?.HelperMaximumSubmissionGapMilliseconds ?? 0.0;
+                }
+            }
+        }
+
+        public long BluetoothAudioPacerSlowNativeSubmissions
+        {
+            get
+            {
+                lock (bluetoothAudioPacerLock)
+                {
+                    return bluetoothAudioPacer?.
+                        HelperSlowNativeSubmissionCount ?? 0;
+                }
+            }
+        }
+
+        public double BluetoothAudioPacerMaximumNativeSubmissionMilliseconds
+        {
+            get
+            {
+                lock (bluetoothAudioPacerLock)
+                {
+                    return bluetoothAudioPacer?.
+                        HelperMaximumNativeSubmissionMilliseconds ?? 0.0;
+                }
+            }
+        }
         public string BluetoothAudioPacerLastError
         {
             get
@@ -857,7 +939,6 @@ namespace DS4Windows.InputDevices
                 return true;
             }
         }
-
         internal bool RearmBluetoothHeadsetOutputRoute()
         {
             if (conType != ConnectionType.BT || !enableSpeakerOutput)
@@ -1353,6 +1434,11 @@ namespace DS4Windows.InputDevices
                 }
 
                 bluetoothAudioPacer = pacer;
+                if (DualSenseControllerClockStable)
+                {
+                    pacer.UpdateCadenceRatio(
+                        DualSenseControllerClockRatio);
+                }
                 bluetoothAudioPacerLastError = string.Empty;
                 Volatile.Write(ref bluetoothAudioPacerRetryAfterTimestamp, 0);
                 return true;
@@ -1467,6 +1553,15 @@ namespace DS4Windows.InputDevices
 
                 return bluetoothAudioPacer.TryQueueReport(report,
                     hapticsExpiryQpc);
+            }
+        }
+
+        private bool TryUpdateBluetoothAudioPacerCadenceRatio(double ratio)
+        {
+            lock (bluetoothAudioPacerLock)
+            {
+                return bluetoothAudioPacer?.IsRunning == true &&
+                    bluetoothAudioPacer.UpdateCadenceRatio(ratio);
             }
         }
 
@@ -2259,6 +2354,16 @@ namespace DS4Windows.InputDevices
                                 (uint)(inputReport[30+reportOffset] << 16) |
                                 (uint)(inputReport[31+reportOffset] << 24);
 
+                    if (conType == ConnectionType.BT)
+                    {
+                        if (bluetoothControllerClock.Observe(tempStamp,
+                                Stopwatch.GetTimestamp()))
+                        {
+                            TryUpdateBluetoothAudioPacerCadenceRatio(
+                                bluetoothControllerClock.Ratio);
+                        }
+                    }
+
                     if (timeStampInit == false)
                     {
                         timeStampInit = true;
@@ -2729,12 +2834,11 @@ namespace DS4Windows.InputDevices
                 }
 
                 // Headphone volume
-                // The UI/profile uses a byte-wide level, while Sony's AUX DAC
-                // accepts only 0x00-0x7F. Never place the raw profile byte on
-                // the wire: the default 255 otherwise becomes an invalid gain
-                // whenever speaker and AUX output are enabled together.
-                outputReport[5] = MapDualSenseHeadphoneVolume(
-                    headphoneVolume); // Left and Right
+                // RC3's internal-speaker state carried the profile byte here.
+                // Only the isolated AUX route requires Sony's 0x00-0x7F map.
+                outputReport[5] = headsetOnlyAudio ?
+                    MapDualSenseHeadphoneVolume(headphoneVolume) :
+                    headphoneVolume; // Left and Right
                 // Internal speaker volume
                 outputReport[6] = headsetOnlyAudio ? (byte)0 :
                     MapDualSenseSpeakerVolume(speakerVolume);
@@ -2881,9 +2985,11 @@ namespace DS4Windows.InputDevices
                 }
 
                 // Headphone volume
-                // Keep the AUX gain valid on the normal speaker+AUX route too.
-                outputReport[6] = MapDualSenseHeadphoneVolume(
-                    headphoneVolume); // Left and Right
+                // Keep the proven RC3 speaker report unchanged. The 0x96 AUX
+                // path alone uses the controller's 0x00-0x7F gain range.
+                outputReport[6] = headsetOnlyAudio ?
+                    MapDualSenseHeadphoneVolume(headphoneVolume) :
+                    headphoneVolume; // Left and Right
                 // Internal speaker volume
                 outputReport[7] = headsetOnlyAudio ? (byte)0 :
                     MapDualSenseSpeakerVolume(speakerVolume);
@@ -3750,11 +3856,9 @@ namespace DS4Windows.InputDevices
                 return false;
             }
 
-            // VIIPER uses the minimum documented 0x11 buffer depth for
-            // haptics-only traffic. Those same fields control speaker audio,
-            // where the DS5Dongle reference uses 64 to absorb Bluetooth
-            // scheduling jitter. Restore the audio depth only on reports that
-            // actually carry an Opus speaker frame.
+            // Preserve the proven controller-side speaker configuration on
+            // every audio report. This is protocol state, not a host-side
+            // startup prefill; presentation still starts immediately.
             combined[5] = BluetoothCombinedSpeakerBufferLength;
             combined[6] = BluetoothCombinedSpeakerBufferLength;
             combined[7] = BluetoothCombinedSpeakerBufferLength;
@@ -4048,7 +4152,9 @@ namespace DS4Windows.InputDevices
             combined[BluetoothCombinedStateFlag0Offset] |=
                 DualSenseOutputFlag0AudioControlEnable;
             combined[BluetoothCombinedStateHeadphoneVolumeOffset] =
-                MapDualSenseHeadphoneVolume(headphoneVolume);
+                headsetOnlyAudio ?
+                    MapDualSenseHeadphoneVolume(headphoneVolume) :
+                    headphoneVolume;
             combined[BluetoothCombinedStateSpeakerVolumeOffset] =
                 headsetOnlyAudio ? (byte)0 :
                     MapDualSenseSpeakerVolume(profileVolume);

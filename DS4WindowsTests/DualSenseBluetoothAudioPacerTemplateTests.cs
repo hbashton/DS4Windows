@@ -201,6 +201,28 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
+        public void SchedulerTracksFractionalControllerClockWithoutDrift()
+        {
+            const long qpcFrequency = 10_000_000;
+            const double controllerClockRatio = 0.999800;
+            const int intervals = 3000;
+            var scheduler = new DualSenseBluetoothAudioPacerScheduler(
+                qpcFrequency);
+            scheduler.SetRateRatio(controllerClockRatio);
+            scheduler.Start(0);
+
+            for (int index = 0; index < intervals; index++)
+            {
+                scheduler.AdvanceAfterSend(scheduler.NextDeadlineQpc);
+            }
+
+            double expected = qpcFrequency * 32.0 /
+                controllerClockRatio;
+            Assert.AreEqual(expected, scheduler.NextDeadlineQpc, 1.0,
+                "Fractional correction accumulated report-clock drift.");
+        }
+
+        [TestMethod]
         public void CleanStopBarrierRequiresExplicitReleasedOwnershipAck()
         {
             Assert.IsFalse(DualSenseBluetoothAudioPacer.IsCleanStopBarrier(

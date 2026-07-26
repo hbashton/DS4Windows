@@ -475,7 +475,13 @@ namespace DS4Windows.InputDevices
         internal static bool IsSpeakerAudioReport(byte[] report)
         {
             return report != null && report.Length == ReportLength &&
-                report[142] == 0x93 && report[143] == 200;
+                (report[142] == 0x93 || report[142] == 0x96) &&
+                report[143] == 200;
+        }
+
+        internal static bool IsHeadsetAudioReport(byte[] report)
+        {
+            return IsSpeakerAudioReport(report) && report[142] == 0x96;
         }
 
         internal static bool CanPresentFromPrimeGate(bool primeRequired,
@@ -1390,6 +1396,7 @@ namespace DS4Windows.InputDevices
         {
             private const int AcknowledgementCapacity =
                 HostReservoirCapacity * 2;
+            private const int PresentationTraceCapacity = 65536;
 
             private sealed class QueuedReport
             {
@@ -1461,6 +1468,20 @@ namespace DS4Windows.InputDevices
             private int currentEpoch = InitialEpoch;
             private bool primeRequired = true;
             private int disposed;
+            private readonly string presentationTraceDirectory;
+            private readonly long[] presentationTraceQpc;
+            private readonly byte[] presentationTraceReportSequence;
+            private readonly byte[] presentationTracePacketSequence;
+            private readonly byte[] presentationTracePacketType;
+            private readonly byte[] presentationTraceReservoirCount;
+            private readonly byte[] presentationTraceAudioFlags0;
+            private readonly byte[] presentationTraceAudioFlags1;
+            private readonly byte[] presentationTraceHeadphoneVolume;
+            private readonly byte[] presentationTraceSpeakerVolume;
+            private readonly byte[] presentationTraceAudioRoute;
+            private readonly byte[] presentationTraceAudioGain;
+            private readonly uint[] presentationTraceHapticsHash;
+            private int presentationTraceCount;
 
             public HelperHost(Stream pipe,
                 DualSenseBluetoothRealtimeWriter writer,
@@ -1471,6 +1492,44 @@ namespace DS4Windows.InputDevices
                 this.writer = writer;
                 this.duplicatedDeviceHandle = duplicatedDeviceHandle;
                 this.parentProcessId = parentProcessId;
+                string traceDirectory = Environment.GetEnvironmentVariable(
+                    "DS4WINDOWS_DUALSENSE_PCM_TRACE_DIRECTORY");
+                if (!string.IsNullOrWhiteSpace(traceDirectory))
+                {
+                    try
+                    {
+                        presentationTraceDirectory = Path.GetFullPath(
+                            traceDirectory);
+                        presentationTraceQpc = new long[
+                            PresentationTraceCapacity];
+                        presentationTraceReportSequence = new byte[
+                            PresentationTraceCapacity];
+                        presentationTracePacketSequence = new byte[
+                            PresentationTraceCapacity];
+                        presentationTracePacketType = new byte[
+                            PresentationTraceCapacity];
+                        presentationTraceReservoirCount = new byte[
+                            PresentationTraceCapacity];
+                        presentationTraceAudioFlags0 = new byte[
+                            PresentationTraceCapacity];
+                        presentationTraceAudioFlags1 = new byte[
+                            PresentationTraceCapacity];
+                        presentationTraceHeadphoneVolume = new byte[
+                            PresentationTraceCapacity];
+                        presentationTraceSpeakerVolume = new byte[
+                            PresentationTraceCapacity];
+                        presentationTraceAudioRoute = new byte[
+                            PresentationTraceCapacity];
+                        presentationTraceAudioGain = new byte[
+                            PresentationTraceCapacity];
+                        presentationTraceHapticsHash = new uint[
+                            PresentationTraceCapacity];
+                    }
+                    catch
+                    {
+                        presentationTraceDirectory = null;
+                    }
+                }
                 for (int index = 0; index < HostReservoirCapacity; index++)
                 {
                     if (!availableReports.TryEnqueue(new QueuedReport()))
@@ -1586,6 +1645,8 @@ namespace DS4Windows.InputDevices
                         {
                         }
                     }
+
+                    WritePresentationTrace();
                 }
             }
 
@@ -1822,6 +1883,8 @@ namespace DS4Windows.InputDevices
                                     item.Report, item.HapticsExpiryQpc,
                                     latestTemplateAvailable ? latestTemplate : null,
                                     latestTemplateHapticsExpiryQpc, presentedAt);
+                                RecordPresentationTrace(item.Report,
+                                    presentedAt, reservoir.Count);
                                 bool transportFault;
                                 bool accepted = controlOnly ?
                                     writer.TryWriteAndWait(item.Report,
@@ -2023,6 +2086,93 @@ namespace DS4Windows.InputDevices
                 catch
                 {
                     return IntPtr.Zero;
+                }
+            }
+
+            private void RecordPresentationTrace(byte[] report,
+                long presentedAt, int reservoirCount)
+            {
+                int index = presentationTraceCount;
+                if (presentationTraceQpc == null ||
+                    index >= PresentationTraceCapacity)
+                {
+                    return;
+                }
+
+                presentationTraceQpc[index] = presentedAt;
+                presentationTraceReportSequence[index] =
+                    (byte)(report[1] >> 4);
+                presentationTracePacketSequence[index] = report[10];
+                presentationTracePacketType[index] = report[142];
+                presentationTraceReservoirCount[index] = (byte)Math.Clamp(
+                    reservoirCount, 0, byte.MaxValue);
+                presentationTraceAudioFlags0[index] = report[13];
+                presentationTraceAudioFlags1[index] = report[14];
+                presentationTraceHeadphoneVolume[index] = report[17];
+                presentationTraceSpeakerVolume[index] = report[18];
+                presentationTraceAudioRoute[index] = report[20];
+                presentationTraceAudioGain[index] = report[50];
+                uint hash = 2166136261u;
+                for (int offset = 78; offset < 142; offset++)
+                {
+                    hash = (hash ^ report[offset]) * 16777619u;
+                }
+                presentationTraceHapticsHash[index] = hash;
+                presentationTraceCount = index + 1;
+            }
+
+            private void WritePresentationTrace()
+            {
+                if (presentationTraceQpc == null ||
+                    string.IsNullOrWhiteSpace(presentationTraceDirectory) ||
+                    presentationTraceCount == 0)
+                {
+                    return;
+                }
+
+                try
+                {
+                    Directory.CreateDirectory(presentationTraceDirectory);
+                    string path = Path.Combine(presentationTraceDirectory,
+                        $"dualsense-{DateTime.UtcNow:yyyyMMdd-HHmmss-fff}-reports-{Environment.ProcessId}.csv");
+                    using var output = new StreamWriter(path, false,
+                        new UTF8Encoding(false));
+                    output.WriteLine($"qpcFrequency,{Stopwatch.Frequency}");
+                    output.WriteLine(
+                        "index,qpc,reportSequence,packetSequence,packetType,reservoirCount,audioFlags0,audioFlags1,headphoneVolume,speakerVolume,audioRoute,audioGain,hapticsHash");
+                    for (int index = 0; index < presentationTraceCount;
+                        index++)
+                    {
+                        output.Write(index);
+                        output.Write(',');
+                        output.Write(presentationTraceQpc[index]);
+                        output.Write(',');
+                        output.Write(presentationTraceReportSequence[index]);
+                        output.Write(',');
+                        output.Write(presentationTracePacketSequence[index]);
+                        output.Write(',');
+                        output.Write(presentationTracePacketType[index]);
+                        output.Write(',');
+                        output.Write(presentationTraceReservoirCount[index]);
+                        output.Write(',');
+                        output.Write(presentationTraceAudioFlags0[index]);
+                        output.Write(',');
+                        output.Write(presentationTraceAudioFlags1[index]);
+                        output.Write(',');
+                        output.Write(presentationTraceHeadphoneVolume[index]);
+                        output.Write(',');
+                        output.Write(presentationTraceSpeakerVolume[index]);
+                        output.Write(',');
+                        output.Write(presentationTraceAudioRoute[index]);
+                        output.Write(',');
+                        output.Write(presentationTraceAudioGain[index]);
+                        output.Write(',');
+                        output.WriteLine(presentationTraceHapticsHash[index]);
+                    }
+                }
+                catch
+                {
+                    // Diagnostics must never affect the audio transport.
                 }
             }
 
@@ -2345,7 +2495,6 @@ namespace DS4Windows.InputDevices
             {
                 throw new ArgumentOutOfRangeException(nameof(clockFrequency));
             }
-
             this.clockFrequency = clockFrequency;
             long scaled = checked(clockFrequency * CadenceNumerator);
             wholeTicks = scaled / CadenceDenominator;

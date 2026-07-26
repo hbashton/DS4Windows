@@ -2615,7 +2615,8 @@ namespace DS4Windows
                         speakerCaptureEndpointId,
                         DualSenseAudioSpeakerEndpointId[ind],
                         playStationFeatureOutputType,
-                        playStationFeatureOutput);
+                        playStationFeatureOutput,
+                        () => GetPlayStationFeatureOutput(ind));
                 }
                 else
                 {
@@ -2674,7 +2675,8 @@ namespace DS4Windows
                         speakerCaptureEndpointId,
                         playStationFeatureOutputType,
                         playStationFeatureOutput,
-                        headsetOnlyAudio);
+                        headsetOnlyAudio,
+                        () => GetPlayStationFeatureOutput(ind));
                 }
                 else
                 {

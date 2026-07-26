@@ -3011,7 +3011,11 @@ namespace DS4Windows
                         Program.rootHub.SetDevRumble(device, feedback[1], feedback[0], deviceIndex);
                         ApplyGameRumbleTriggerVibration(device, deviceIndex,
                             feedback[0], feedback[1]);
-                        ApplyLightbar(device, feedback[2], feedback[3], feedback[4], feedback[5], feedback[6]);
+                        if (ShouldApplyGameLightbar(deviceIndex))
+                        {
+                            ApplyLightbar(device, feedback[2], feedback[3],
+                                feedback[4], feedback[5], feedback[6]);
+                        }
                     }
                     break;
 
@@ -3059,7 +3063,11 @@ namespace DS4Windows
                             Program.rootHub.SetDevRumble(device, lightFast,
                                 heavySlow, deviceIndex);
                         }
-                        ApplyLightbar(device, feedback[2], feedback[3], feedback[4], 0, 0);
+                        if (ShouldApplyGameLightbar(deviceIndex))
+                        {
+                            ApplyLightbar(device, feedback[2], feedback[3],
+                                feedback[4], 0, 0);
+                        }
                         ApplyDualSenseTriggerFeedback(device, deviceIndex, feedback, feedbackLength);
                         ApplyGameRumbleTriggerVibration(device, deviceIndex,
                             lightFast, heavySlow);
@@ -3973,9 +3981,13 @@ namespace DS4Windows
                     feedback[0]);
             }
 
+            bool hasNativeGameState =
+                feedback.Length > DualSenseNativeOutputReportOffset &&
+                feedback[DualSenseNativeOutputReportOffset] == 0x02;
             return dualSenseDevice.WriteBluetoothCombinedHapticsAudioOutputReport(report,
                 DualSenseCombinedBluetoothReportOffset,
-                DualSenseCombinedBluetoothReportLength);
+                DualSenseCombinedBluetoothReportLength,
+                hasNativeGameState);
         }
 
         private static void ApplyTriggerLabNativeOverrides(byte[] report,
@@ -4234,6 +4246,14 @@ namespace DS4Windows
                 LightBarFlashDurationOff = flashOff,
             };
             device.SetLightbarState(ref lightState);
+        }
+
+        private static bool ShouldApplyGameLightbar(int deviceIndex)
+        {
+            return deviceIndex >= 0 &&
+                deviceIndex < Global.TEST_PROFILE_ITEM_COUNT &&
+                Global.getLightbarSettingsInfo(deviceIndex).mode ==
+                    LightbarMode.Passthru;
         }
 
         private static byte MaxByte(byte[] data, int start, int count)

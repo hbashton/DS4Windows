@@ -283,6 +283,30 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
+        public void HeadsetAudioUsesTheSamePrimeReservoirAsSpeakerAudio()
+        {
+            byte[] headset = CreateReport(0x52);
+            headset[142] = 0x96;
+
+            Assert.IsTrue(
+                DualSenseBluetoothAudioPacer.IsSpeakerAudioReport(headset));
+            Assert.IsTrue(
+                DualSenseBluetoothAudioPacer.IsHeadsetAudioReport(headset));
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.CanPresentFromPrimeGate(
+                    primeRequired: true,
+                    speakerReportCount:
+                        DualSenseBluetoothAudioPacer.PrimeReportCount - 1,
+                    nextReport: headset));
+            Assert.IsTrue(
+                DualSenseBluetoothAudioPacer.CanPresentFromPrimeGate(
+                    primeRequired: true,
+                    speakerReportCount:
+                        DualSenseBluetoothAudioPacer.PrimeReportCount,
+                    nextReport: headset));
+        }
+
+        [TestMethod]
         public void LowLatencyProducerReservoirCoversMeasuredWindowsCallbackStall()
         {
             double presentationReserveMilliseconds =

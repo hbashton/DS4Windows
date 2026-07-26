@@ -2432,8 +2432,8 @@
                                                                 <ColumnDefinition Width="Auto" />
                                                                 <ColumnDefinition Width="*" />
                                                             </Grid.ColumnDefinitions>
-                                                            <Label Content="Headset volume:" Grid.Column="0"
-                                                                   ToolTip="Physical controller headset-output gain. This value remains stored with the profile across emulated-device changes." />
+                                                            <Label Content="Headset / AUX volume:" Grid.Column="0"
+                                                                   ToolTip="Controls the headset jack independently from the controller speaker. DualShock 4 maps the full slider range to Sony's documented 0-80 headset gain." />
                                                             <xctk:IntegerUpDown Value="{Binding DualSenseHeadphoneVolume}" Minimum="0" Maximum="255"
                                                                                 Grid.Column="1" Margin="{StaticResource spaceMargin}" />
                                                         </Grid>

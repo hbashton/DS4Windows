@@ -433,6 +433,26 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void LegacyHeadsetPluggedInEnablesHeadsetOnlyAudio()
+        {
+            var serializer = new XmlSerializer(
+                typeof(DualSenseControllerSettings.AudioSettings));
+            const string legacyXml =
+                "<AudioSettings><HeadsetPluggedIn>true</HeadsetPluggedIn></AudioSettings>";
+
+            using var reader = new StringReader(legacyXml);
+            var settings = (DualSenseControllerSettings.AudioSettings)
+                serializer.Deserialize(reader);
+            Assert.IsTrue(settings.HeadsetOnlyAudio);
+
+            using var writer = new StringWriter();
+            serializer.Serialize(writer, settings);
+            StringAssert.Contains(writer.ToString(),
+                "<HeadsetOnlyAudio>true</HeadsetOnlyAudio>");
+            Assert.IsFalse(writer.ToString().Contains("HeadsetPluggedIn"));
+        }
+
+        [TestMethod]
         public void CheckWriteProfile()
         {
             BackingStore tempStore = new BackingStore();

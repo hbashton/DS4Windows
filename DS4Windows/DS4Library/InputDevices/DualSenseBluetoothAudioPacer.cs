@@ -33,7 +33,7 @@ namespace DS4Windows.InputDevices
         internal const int ControllerReserveTransferIntervals = 0;
 
         private const string HelperArgument = "--dualsense-bt-audio-pacer-helper";
-        private const int ProtocolVersion = 7;
+        private const int ProtocolVersion = 6;
         private const int PipeConnectTimeoutMilliseconds = 5000;
         private const int HelperReadyTimeoutMilliseconds = 5000;
         private const int HelperStopTimeoutMilliseconds = 3000;
@@ -43,7 +43,6 @@ namespace DS4Windows.InputDevices
         private const int OutboundCommandCapacity = HostReservoirCapacity + 16;
         private const int InitialEpoch = 1;
         private const uint DuplicateSameAccess = 0x00000002;
-        internal const int PairedWriterQueueDepth = 10;
 
         private enum MessageKind : byte
         {
@@ -94,7 +93,6 @@ namespace DS4Windows.InputDevices
         private readonly object pipeWriteLock = new object();
         private readonly NamedPipeServerStream pipe;
         private readonly Process helperProcess;
-        private readonly EventWaitHandle controllerInputReadyEvent;
         private readonly DualSenseBluetoothAudioPacerRing<OutboundCommand>
             outboundCommands = new DualSenseBluetoothAudioPacerRing<OutboundCommand>(
                 OutboundCommandCapacity);
@@ -137,12 +135,10 @@ namespace DS4Windows.InputDevices
         private string lastError = string.Empty;
 
         private DualSenseBluetoothAudioPacer(NamedPipeServerStream pipe,
-            Process helperProcess, EventWaitHandle controllerInputReadyEvent)
+            Process helperProcess)
         {
             this.pipe = pipe;
             this.helperProcess = helperProcess;
-            this.controllerInputReadyEvent = controllerInputReadyEvent ??
-                throw new ArgumentNullException(nameof(controllerInputReadyEvent));
             senderThread = new Thread(SenderLoop)
             {
                 IsBackground = true,
@@ -311,7 +307,6 @@ namespace DS4Windows.InputDevices
             NamedPipeServerStream server = null;
             Process child = null;
             DualSenseBluetoothAudioPacer candidate = null;
-            EventWaitHandle inputReadyEvent = null;
 
             try
             {
@@ -320,8 +315,6 @@ namespace DS4Windows.InputDevices
                     PipeOptions.Asynchronous | PipeOptions.WriteThrough |
                     PipeOptions.CurrentUserOnly,
                     4096, 4096);
-                inputReadyEvent = new EventWaitHandle(false,
-                    EventResetMode.AutoReset);
 
                 ProcessStartInfo startInfo = new ProcessStartInfo
                 {
@@ -342,7 +335,6 @@ namespace DS4Windows.InputDevices
                 {
                     error = "Windows did not create the DualSense audio pacer process.";
                     server.Dispose();
-                    inputReadyEvent.Dispose();
                     return false;
                 }
 
@@ -351,7 +343,6 @@ namespace DS4Windows.InputDevices
                 {
                     error = "Timed out waiting for the DualSense audio pacer pipe.";
                     server.Dispose();
-                    inputReadyEvent.Dispose();
                     TryTerminateUninitializedHelper(child);
                     return false;
                 }
@@ -363,31 +354,15 @@ namespace DS4Windows.InputDevices
                     error = "Could not duplicate the active DualSense HID handle " +
                         $"into the pacer. Win32Error={duplicateError}.";
                     server.Dispose();
-                    inputReadyEvent.Dispose();
                     TryTerminateUninitializedHelper(child);
                     return false;
                 }
 
-                if (!TryDuplicateHandleIntoChild(inputReadyEvent.SafeWaitHandle,
-                    child, out IntPtr childInputReadyHandle,
-                    out duplicateError))
-                {
-                    error = "Could not duplicate the DualSense input-readiness " +
-                        $"event into the pacer. Win32Error={duplicateError}.";
-                    server.Dispose();
-                    inputReadyEvent.Dispose();
-                    TryTerminateUninitializedHelper(child);
-                    return false;
-                }
-
-                candidate = new DualSenseBluetoothAudioPacer(server, child,
-                    inputReadyEvent);
-                inputReadyEvent = null;
+                candidate = new DualSenseBluetoothAudioPacer(server, child);
                 candidate.latestTemplate = (byte[])initialTemplate.Clone();
                 candidate.latestTemplateHapticsExpiryQpc = hapticsExpiryQpc;
                 candidate.receiverThread.Start();
-                candidate.SendHello(childHandle, childInputReadyHandle,
-                    authenticationToken);
+                candidate.SendHello(childHandle, authenticationToken);
 
                 if (!candidate.readyEvent.Wait(HelperReadyTimeoutMilliseconds))
                 {
@@ -422,7 +397,6 @@ namespace DS4Windows.InputDevices
                 else
                 {
                     server?.Dispose();
-                    inputReadyEvent?.Dispose();
                     if (child != null)
                     {
                         TryTerminateUninitializedHelper(child);
@@ -430,28 +404,6 @@ namespace DS4Windows.InputDevices
                 }
 
                 return false;
-            }
-        }
-
-        /// <summary>
-        /// Signals the helper that the Bluetooth interrupt link has just
-        /// delivered a controller report. DS5Dongle uses CAN_SEND_NOW for this
-        /// boundary; on HidBth, a fresh input arrival is the observable
-        /// equivalent and avoids submitting audio into a stale radio window.
-        /// </summary>
-        public void SignalControllerInputArrival()
-        {
-            if (!IsRunning)
-            {
-                return;
-            }
-
-            try
-            {
-                controllerInputReadyEvent.Set();
-            }
-            catch (ObjectDisposedException)
-            {
             }
         }
 
@@ -799,18 +751,15 @@ namespace DS4Windows.InputDevices
             }
         }
 
-        private void SendHello(IntPtr childHandle, IntPtr childInputReadyHandle,
-            Guid authenticationToken)
+        private void SendHello(IntPtr childHandle, Guid authenticationToken)
         {
-            byte[] payload = new byte[sizeof(int) + sizeof(long) * 2 + 16];
+            byte[] payload = new byte[sizeof(int) + sizeof(long) + 16];
             BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, sizeof(int)),
                 ProtocolVersion);
             BinaryPrimitives.WriteInt64LittleEndian(payload.AsSpan(sizeof(int),
                 sizeof(long)), childHandle.ToInt64());
-            BinaryPrimitives.WriteInt64LittleEndian(payload.AsSpan(sizeof(int) +
-                sizeof(long), sizeof(long)), childInputReadyHandle.ToInt64());
             authenticationToken.TryWriteBytes(payload.AsSpan(sizeof(int) +
-                sizeof(long) * 2, 16));
+                sizeof(long), 16));
             SendFrame(MessageKind.Hello, payload);
         }
 
@@ -1199,7 +1148,7 @@ namespace DS4Windows.InputDevices
         }
 
         private static bool TryDuplicateHandleIntoChild(
-            SafeHandle sourceHandle, Process child,
+            SafeFileHandle sourceHandle, Process child,
             out IntPtr childHandle, out int error)
         {
             childHandle = IntPtr.Zero;
@@ -1303,7 +1252,6 @@ namespace DS4Windows.InputDevices
             }
 
             helperProcess.Dispose();
-            controllerInputReadyEvent.Dispose();
             outboundAvailable.Dispose();
             readyEvent.Dispose();
             stoppedEvent.Dispose();
@@ -1371,11 +1319,10 @@ namespace DS4Windows.InputDevices
                 helperPipe.Connect(PipeConnectTimeoutMilliseconds);
                 ReadFrame(helperPipe, out MessageKind kind, out byte[] payload);
                 long duplicatedHandleValue = 0;
-                long duplicatedInputReadyHandleValue = 0;
                 string helloError = string.Empty;
                 if (kind != MessageKind.Hello || !TryParseHello(payload,
                     authenticationToken, out duplicatedHandleValue,
-                    out duplicatedInputReadyHandleValue, out helloError))
+                    out helloError))
                 {
                     TryWriteError(helperPipe, string.IsNullOrEmpty(helloError) ?
                         "Invalid pacer hello message." : helloError);
@@ -1391,10 +1338,6 @@ namespace DS4Windows.InputDevices
 
                 using var duplicatedHandle = new SafeFileHandle(
                     new IntPtr(duplicatedHandleValue), true);
-                using var inputReadyEvent = new EventWaitHandle(false,
-                    EventResetMode.AutoReset);
-                inputReadyEvent.SafeWaitHandle = new SafeWaitHandle(
-                    new IntPtr(duplicatedInputReadyHandleValue), true);
                 int writerError = 6;
                 if (duplicatedHandle.IsInvalid ||
                     !DualSenseBluetoothRealtimeWriter.TryCreate(duplicatedHandle,
@@ -1402,8 +1345,7 @@ namespace DS4Windows.InputDevices
                             DualSenseBluetoothPairedAudioReportBuilder.ReportLength :
                             ReportLength,
                         out DualSenseBluetoothRealtimeWriter writer,
-                        out writerError, slotCount: UsePairedAudioReports ?
-                            PairedWriterQueueDepth : PrimeReportCount))
+                        out writerError, slotCount: PrimeReportCount))
                 {
                     TryWriteError(helperPipe,
                         "Could not initialize the duplicated DualSense HID handle. " +
@@ -1413,7 +1355,7 @@ namespace DS4Windows.InputDevices
 
                 using (writer)
                 using (var host = new HelperHost(helperPipe, writer,
-                    duplicatedHandle, inputReadyEvent, parentProcessId))
+                    duplicatedHandle, parentProcessId))
                 {
                     WriteFrame(helperPipe, MessageKind.Ready, Array.Empty<byte>());
                     host.Run();
@@ -1427,13 +1369,11 @@ namespace DS4Windows.InputDevices
 
         private static bool TryParseHello(byte[] payload,
             Guid expectedAuthenticationToken, out long duplicatedHandle,
-            out long duplicatedInputReadyHandle, out string error)
+            out string error)
         {
             duplicatedHandle = 0;
-            duplicatedInputReadyHandle = 0;
             error = string.Empty;
-            if (payload == null || payload.Length !=
-                sizeof(int) + sizeof(long) * 2 + 16)
+            if (payload == null || payload.Length != sizeof(int) + sizeof(long) + 16)
             {
                 error = "Invalid pacer hello payload length.";
                 return false;
@@ -1443,10 +1383,7 @@ namespace DS4Windows.InputDevices
                 payload.AsSpan(0, sizeof(int)));
             duplicatedHandle = BinaryPrimitives.ReadInt64LittleEndian(
                 payload.AsSpan(sizeof(int), sizeof(long)));
-            duplicatedInputReadyHandle = BinaryPrimitives.ReadInt64LittleEndian(
-                payload.AsSpan(sizeof(int) + sizeof(long), sizeof(long)));
-            Guid token = new Guid(payload.AsSpan(sizeof(int) +
-                sizeof(long) * 2, 16));
+            Guid token = new Guid(payload.AsSpan(sizeof(int) + sizeof(long), 16));
             if (version != ProtocolVersion)
             {
                 error = $"Unsupported pacer protocol version {version}.";
@@ -1462,13 +1399,6 @@ namespace DS4Windows.InputDevices
             if (duplicatedHandle == 0 || duplicatedHandle == -1)
             {
                 error = "The duplicated DualSense HID handle is invalid.";
-                return false;
-            }
-
-            if (duplicatedInputReadyHandle == 0 ||
-                duplicatedInputReadyHandle == -1)
-            {
-                error = "The duplicated DualSense input-readiness event is invalid.";
                 return false;
             }
 
@@ -1636,8 +1566,6 @@ namespace DS4Windows.InputDevices
             private readonly Stream pipe;
             private readonly DualSenseBluetoothRealtimeWriter writer;
             private readonly SafeFileHandle duplicatedDeviceHandle;
-            private readonly EventWaitHandle controllerInputReadyEvent;
-            private readonly WaitHandle[] sendReadinessWaitHandles;
             private readonly int parentProcessId;
             private readonly DualSenseBluetoothAudioPacerRing<QueuedReport>
                 reservoir = new DualSenseBluetoothAudioPacerRing<QueuedReport>(
@@ -1697,19 +1625,12 @@ namespace DS4Windows.InputDevices
             public HelperHost(Stream pipe,
                 DualSenseBluetoothRealtimeWriter writer,
                 SafeFileHandle duplicatedDeviceHandle,
-                EventWaitHandle controllerInputReadyEvent,
                 int parentProcessId)
             {
                 this.pipe = pipe;
                 this.writer = writer;
                 this.duplicatedDeviceHandle = duplicatedDeviceHandle;
-                this.controllerInputReadyEvent = controllerInputReadyEvent;
                 this.parentProcessId = parentProcessId;
-                sendReadinessWaitHandles = new WaitHandle[]
-                {
-                    controllerInputReadyEvent,
-                    stopRequested,
-                };
                 string traceDirectory = Environment.GetEnvironmentVariable(
                     "DS4WINDOWS_DUALSENSE_PCM_TRACE_DIRECTORY");
                 if (!string.IsNullOrWhiteSpace(traceDirectory))
@@ -2086,11 +2007,6 @@ namespace DS4Windows.InputDevices
                             WaitUntil(timer,
                                 scheduler.PresentationDeadlineQpc,
                                 stopRequested);
-                            if (UsePairedAudioReports &&
-                                !WaitForControllerSendReadiness())
-                            {
-                                break;
-                            }
                         }
                         if (stopRequested.WaitOne(0))
                         {
@@ -2573,38 +2489,6 @@ namespace DS4Windows.InputDevices
                 }
             }
 
-            private bool WaitForControllerSendReadiness()
-            {
-                // Discard an input notification that predates this audio
-                // deadline. The next interrupt report proves that the shared
-                // Bluetooth link is actively scheduling the controller now,
-                // which is HidBth's observable equivalent of DS5Dongle's
-                // L2CAP_EVENT_CAN_SEND_NOW boundary.
-                controllerInputReadyEvent.Reset();
-                while (!stopRequested.WaitOne(0))
-                {
-                    int signaled = WaitHandle.WaitAny(
-                        sendReadinessWaitHandles, 1000);
-                    if (signaled == 0)
-                    {
-                        return true;
-                    }
-
-                    if (signaled == 1)
-                    {
-                        return false;
-                    }
-
-                    if (!IsExpectedParentAlive(parentProcessId))
-                    {
-                        stopRequested.Set();
-                        return false;
-                    }
-                }
-
-                return false;
-            }
-
             private static IntPtr CreateHighResolutionTimer()
             {
                 IntPtr timer = CreateWaitableTimerExW(IntPtr.Zero, null,
@@ -2919,6 +2803,7 @@ namespace DS4Windows.InputDevices
         private readonly long clockFrequency;
         private long wholeTicks;
         private long remainderTicks;
+        private readonly long maximumCatchUpTicks;
         private long remainderAccumulator;
         private double fractionalRemainderTicks;
         private double fractionalRemainderAccumulator;
@@ -2937,6 +2822,7 @@ namespace DS4Windows.InputDevices
                 throw new ArgumentOutOfRangeException(nameof(clockFrequency));
             }
             this.clockFrequency = clockFrequency;
+            maximumCatchUpTicks = Math.Max(1, clockFrequency / 1000);
             SetRateRatio(1.0);
         }
 
@@ -3043,11 +2929,12 @@ namespace DS4Windows.InputDevices
             }
 
             long interval = NextIntervalTicks();
-            // Keep the source clock absolute when CAN_SEND_NOW/readiness is
-            // late. DS5Dongle retains queued audio and drains it on subsequent
-            // send-ready events; rebasing to the late submission would instead
-            // turn a transient radio pause into permanent audio-clock drift.
-            nextDeadlineQpc = checked(nextDeadlineQpc + interval);
+            long phaseDeadline = checked(nextDeadlineQpc + interval);
+            long minimumPhaseGap = Math.Max(1,
+                interval - maximumCatchUpTicks);
+            long phaseGap = phaseDeadline - presentationQpc;
+            nextDeadlineQpc = phaseGap >= minimumPhaseGap ?
+                phaseDeadline : checked(presentationQpc + interval);
             return nextDeadlineQpc;
         }
 

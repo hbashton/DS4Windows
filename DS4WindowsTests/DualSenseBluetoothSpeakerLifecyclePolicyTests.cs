@@ -111,15 +111,14 @@ namespace DS4WindowsTests
                     DualSenseBluetoothSpeakerPassthrough.
                         ShouldEmitStartupWarmup(remaining,
                             lifecycleGateActive: false,
-                            recoveryRequired: false,
-                            captureReady: true));
+                            recoveryRequired: false));
                 remaining--;
             }
 
             Assert.IsFalse(
                 DualSenseBluetoothSpeakerPassthrough.ShouldEmitStartupWarmup(
                     remaining, lifecycleGateActive: false,
-                    recoveryRequired: false, captureReady: true),
+                    recoveryRequired: false),
                 "Content remained gated after all six warmup reports were accepted.");
         }
 
@@ -216,16 +215,40 @@ namespace DS4WindowsTests
         }
 
         [DataTestMethod]
-        [DataRow(6, true, false, true)]
-        [DataRow(6, false, true, true)]
-        [DataRow(6, false, false, false)]
-        public void WarmupNeverRunsAcrossLifecycleGateOrWithoutContentReady(
-            int remaining, bool lifecycleGate, bool recovery,
-            bool captureReady)
+        [DataRow(6, true, false)]
+        [DataRow(6, false, true)]
+        [DataRow(0, false, false)]
+        public void WarmupNeverRunsAcrossLifecycleGateOrAfterCompletion(
+            int remaining, bool lifecycleGate, bool recovery)
         {
             Assert.IsFalse(
                 DualSenseBluetoothSpeakerPassthrough.ShouldEmitStartupWarmup(
-                    remaining, lifecycleGate, recovery, captureReady));
+                    remaining, lifecycleGate, recovery));
+        }
+
+        [TestMethod]
+        public void WarmupCanArmIdleCarrierBeforeContentArrives()
+        {
+            Assert.IsTrue(
+                DualSenseBluetoothSpeakerPassthrough.ShouldEmitStartupWarmup(
+                    reportsRemaining: 6, lifecycleGateActive: false,
+                    recoveryRequired: false));
+        }
+
+        [TestMethod]
+        public void ProducerCannotAccumulateBeyondItsLatencyReservoir()
+        {
+            int target = DualSenseBluetoothSpeakerPassthrough.
+                PacerReservoirTargetFrames;
+
+            Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
+                ShouldBackpressurePacerProducer(true, target - 1));
+            Assert.IsTrue(DualSenseBluetoothSpeakerPassthrough.
+                ShouldBackpressurePacerProducer(true, target));
+            Assert.IsTrue(DualSenseBluetoothSpeakerPassthrough.
+                ShouldBackpressurePacerProducer(true, target + 40));
+            Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
+                ShouldBackpressurePacerProducer(false, target));
         }
 
         [TestMethod]

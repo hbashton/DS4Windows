@@ -23,13 +23,18 @@ namespace DS4Windows.InputDevices
         internal const int ReportLength = 398;
         internal const int PrimeReportCount = 8;
         internal const int HostReservoirCapacity = 64;
-        // Transfer 40 ms from the existing host prime into the controller.
-        // This does not increase end-to-end delay: it only redistributes the
-        // fixed ten-report reserve. The value covers the measured 35-37.5 ms
-        // completion stalls with one USB-poll margin while remaining below
-        // the proven 42.667 ms
-        // controller overfill point.
-        internal const int ControllerReserveTransferIntervals = 60;
+        // Let the first large-report Bluetooth burst settle before moving the
+        // host reservoir into the controller. HCI traces consistently show a
+        // 75-80 ms completion stall when 0x36 traffic first starts; transferring
+        // reserve during that stall spends the reserve before it exists.
+        internal const int ControllerLinkWarmupIntervals = 64;
+        // Transfer 85.333 ms from the existing host reservoir into the
+        // controller after that settle window. A complete HCI/acoustic trace
+        // measured an 80.509 ms delivered-frame drawdown while the encoded lane
+        // remained complete, sequential, and exactly paced. This only relocates
+        // the existing ten-report reserve; it does not add another end-to-end
+        // queue.
+        internal const int ControllerReserveTransferIntervals = 128;
 
         private const string HelperArgument = "--dualsense-bt-audio-pacer-helper";
         private const int ProtocolVersion = 6;
@@ -1943,6 +1948,7 @@ namespace DS4Windows.InputDevices
                             {
                                 primeRequired = false;
                                 scheduler.Start(Stopwatch.GetTimestamp(),
+                                    ControllerLinkWarmupIntervals,
                                     ControllerReserveTransferIntervals);
                             }
                         }
@@ -2652,7 +2658,7 @@ namespace DS4Windows.InputDevices
         internal const int CadenceNumerator = 32;
         internal const int CadenceDenominator = 3000;
         internal const int InputReportsPerSecond = 800;
-        internal const int InputPhaseOffsetMicroseconds = 150;
+        internal const int InputPhaseOffsetMicroseconds = 350;
         internal const int ControllerReserveTransferIntervalMicroseconds =
             10_000;
         internal const double MinimumRateRatio = 0.995;
@@ -2667,6 +2673,7 @@ namespace DS4Windows.InputDevices
         private double fractionalRemainderAccumulator;
         private bool nominalRatio;
         private double rateRatio;
+        private int controllerLinkWarmupIntervalsRemaining;
         private int controllerReserveTransferIntervalsRemaining;
         private long nextDeadlineQpc;
         private long inputPhaseReferenceQpc;
@@ -2740,6 +2747,18 @@ namespace DS4Windows.InputDevices
         public void Start(long nowQpc,
             int controllerReserveTransferIntervals)
         {
+            Start(nowQpc, 0, controllerReserveTransferIntervals);
+        }
+
+        public void Start(long nowQpc,
+            int controllerLinkWarmupIntervals,
+            int controllerReserveTransferIntervals)
+        {
+            if (controllerLinkWarmupIntervals < 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(controllerLinkWarmupIntervals));
+            }
             if (controllerReserveTransferIntervals < 0)
             {
                 throw new ArgumentOutOfRangeException(
@@ -2748,6 +2767,8 @@ namespace DS4Windows.InputDevices
 
             remainderAccumulator = 0;
             fractionalRemainderAccumulator = 0.0;
+            controllerLinkWarmupIntervalsRemaining =
+                controllerLinkWarmupIntervals;
             controllerReserveTransferIntervalsRemaining =
                 controllerReserveTransferIntervals;
             nextDeadlineQpc = nowQpc;
@@ -2758,6 +2779,7 @@ namespace DS4Windows.InputDevices
         {
             remainderAccumulator = 0;
             fractionalRemainderAccumulator = 0.0;
+            controllerLinkWarmupIntervalsRemaining = 0;
             controllerReserveTransferIntervalsRemaining = 0;
             nextDeadlineQpc = 0;
             started = false;
@@ -2788,26 +2810,22 @@ namespace DS4Windows.InputDevices
                     "The pacer clock has not started.");
             }
 
-            if (inputPhaseReferenceQpc <= 0)
-            {
-                return nextDeadlineQpc;
-            }
-
-            double inputPeriodTicks = clockFrequency /
-                (double)InputReportsPerSecond;
-            double targetPhaseQpc = inputPhaseReferenceQpc +
-                clockFrequency * (InputPhaseOffsetMicroseconds /
-                    1_000_000.0);
-            double periodsFromReference =
-                (nextDeadlineQpc - targetPhaseQpc) / inputPeriodTicks;
-            long nearestPeriod = checked((long)Math.Round(
-                periodsFromReference, MidpointRounding.AwayFromZero));
-            return checked((long)Math.Round(targetPhaseQpc +
-                nearestPeriod * inputPeriodTicks));
+            // The audio clock must remain continuous. Re-snapping every
+            // deadline to the latest Bluetooth HID arrival quantized the
+            // 10.667 ms cadence into alternating 10/11.25 ms gaps and copied
+            // radio delivery jitter into the speaker transport. The measured
+            // controller clock still disciplines the fractional cadence.
+            return nextDeadlineQpc;
         }
 
         private long NextIntervalTicks()
         {
+            if (controllerLinkWarmupIntervalsRemaining > 0)
+            {
+                controllerLinkWarmupIntervalsRemaining--;
+                return NextNominalIntervalTicks();
+            }
+
             if (controllerReserveTransferIntervalsRemaining > 0)
             {
                 controllerReserveTransferIntervalsRemaining--;
@@ -2816,6 +2834,11 @@ namespace DS4Windows.InputDevices
                     1_000_000);
             }
 
+            return NextNominalIntervalTicks();
+        }
+
+        private long NextNominalIntervalTicks()
+        {
             long interval = wholeTicks;
             if (nominalRatio)
             {
@@ -2852,6 +2875,12 @@ namespace DS4Windows.InputDevices
         internal const int ReportLength =
             DualSenseBluetoothAudioPacer.ReportLength;
         private const int CrcLength = sizeof(uint);
+        private const int StateFlag0Offset = 13;
+        private const int StateFlag1Offset = 14;
+        private const int MicrophoneVolumeOffset = 19;
+        private const int MicrophoneMuteLedOffset = 21;
+        private const byte MicrophoneVolumeValidityBit = 0x40;
+        private const byte MicrophoneMuteLedValidityBit = 0x01;
         private const int HapticsDataOffset = 78;
         private const int HapticsDataLength = 64;
 
@@ -2890,6 +2919,24 @@ namespace DS4Windows.InputDevices
                         nameof(latestTemplate));
                 }
 
+                // The speaker producer deliberately strips one-shot microphone
+                // volume / mute-LED validity from every ordinary audio
+                // snapshot. Preserve that decision while overlaying current
+                // lightbar, trigger, rumble, routing, and haptics state. Copying
+                // those two validity bits back from the controller-update
+                // template made the physical audio engine alternate between
+                // two state shapes every few reports; the captured acoustic
+                // pops land on those transitions.
+                byte microphoneVolumeValidity = (byte)(
+                    queuedReport[StateFlag0Offset] &
+                    MicrophoneVolumeValidityBit);
+                byte microphoneMuteLedValidity = (byte)(
+                    queuedReport[StateFlag1Offset] &
+                    MicrophoneMuteLedValidityBit);
+                byte microphoneVolume = queuedReport[MicrophoneVolumeOffset];
+                byte microphoneMuteLed =
+                    queuedReport[MicrophoneMuteLedOffset];
+
                 // Preserve queued byte 1 (Sony sequence), bytes 5-9 (speaker
                 // buffer depths), byte 10 (packet counter), and bytes 142-343
                 // (speaker TLV + 200-byte Opus frame). A live control-only
@@ -2898,6 +2945,16 @@ namespace DS4Windows.InputDevices
                 // playback reserve immediately before presentation.
                 Buffer.BlockCopy(latestTemplate, 2, queuedReport, 2, 3);
                 Buffer.BlockCopy(latestTemplate, 11, queuedReport, 11, 131);
+                queuedReport[StateFlag0Offset] = (byte)(
+                    (queuedReport[StateFlag0Offset] &
+                        ~MicrophoneVolumeValidityBit) |
+                    microphoneVolumeValidity);
+                queuedReport[StateFlag1Offset] = (byte)(
+                    (queuedReport[StateFlag1Offset] &
+                        ~MicrophoneMuteLedValidityBit) |
+                    microphoneMuteLedValidity);
+                queuedReport[MicrophoneVolumeOffset] = microphoneVolume;
+                queuedReport[MicrophoneMuteLedOffset] = microphoneMuteLed;
             }
 
             if (hapticsExpiryQpc <= nowQpc)

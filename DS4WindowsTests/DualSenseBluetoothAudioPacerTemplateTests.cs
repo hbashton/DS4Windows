@@ -121,6 +121,63 @@ namespace DS4Windows.Tests
             AssertCrcIsValid(queued);
         }
 
+        [TestMethod]
+        public void SpeakerMicrophoneSnapshotSurvivesControlTemplateOverlay()
+        {
+            const long nowQpc = 50_000_000;
+            byte[] queued = CreateReport(0x28);
+            byte[] latestTemplate = CreateReport(0x63);
+
+            // The ordinary speaker snapshot has already stripped these
+            // one-shot controller-state fields. The periodically refreshed
+            // template still contains them.
+            queued[13] &= unchecked((byte)~0x40);
+            queued[14] &= unchecked((byte)~0x01);
+            queued[19] = 0;
+            queued[21] = 0;
+            latestTemplate[13] |= 0x40;
+            latestTemplate[14] |= 0x01;
+            latestTemplate[19] = 0x40;
+            latestTemplate[21] = 0x01;
+            latestTemplate[57] = 0xA5;
+
+            DualSenseBluetoothAudioReportPatcher.PatchForPresentation(
+                queued, latestTemplate, nowQpc + 1, nowQpc);
+
+            Assert.AreEqual((byte)0, (byte)(queued[13] & 0x40));
+            Assert.AreEqual((byte)0, (byte)(queued[14] & 0x01));
+            Assert.AreEqual((byte)0, queued[19]);
+            Assert.AreEqual((byte)0, queued[21]);
+            Assert.AreEqual((byte)0xA5, queued[57],
+                "Unrelated current controller state must still be overlaid.");
+            AssertCrcIsValid(queued);
+        }
+
+        [TestMethod]
+        public void PendingMicrophoneControlSurvivesControlTemplateOverlay()
+        {
+            const long nowQpc = 50_000_000;
+            byte[] queued = CreateReport(0x28);
+            byte[] latestTemplate = CreateReport(0x63);
+            queued[13] |= 0x40;
+            queued[14] |= 0x01;
+            queued[19] = 0x2F;
+            queued[21] = 0x01;
+            latestTemplate[13] &= unchecked((byte)~0x40);
+            latestTemplate[14] &= unchecked((byte)~0x01);
+            latestTemplate[19] = 0;
+            latestTemplate[21] = 0;
+
+            DualSenseBluetoothAudioReportPatcher.PatchForPresentation(
+                queued, latestTemplate, nowQpc + 1, nowQpc);
+
+            Assert.AreEqual((byte)0x40, (byte)(queued[13] & 0x40));
+            Assert.AreEqual((byte)0x01, (byte)(queued[14] & 0x01));
+            Assert.AreEqual((byte)0x2F, queued[19]);
+            Assert.AreEqual((byte)0x01, queued[21]);
+            AssertCrcIsValid(queued);
+        }
+
         [DataTestMethod]
         [DataRow(0)]
         [DataRow(500)]
@@ -252,49 +309,73 @@ namespace DS4Windows.Tests
                     DualSenseBluetoothAudioPacerScheduler.CadenceDenominator) -
                  (DualSenseBluetoothAudioPacerScheduler.
                     ControllerReserveTransferIntervalMicroseconds / 1000.0));
-            Assert.AreEqual(40.0, transferredMilliseconds, 0.001);
+            Assert.AreEqual(85.333, transferredMilliseconds, 0.001);
         }
 
         [TestMethod]
-        public void SchedulerAlignsPresentationToControllerInputGridWithoutCadenceDrift()
+        public void SchedulerSettlesLinkBeforeTransferringControllerReserve()
+        {
+            const long qpcFrequency = 10_000_000;
+            const long startQpc = 1_000_000;
+            int warmupIntervals =
+                DualSenseBluetoothAudioPacer.ControllerLinkWarmupIntervals;
+            int transferIntervals =
+                DualSenseBluetoothAudioPacer.ControllerReserveTransferIntervals;
+            var scheduler = new DualSenseBluetoothAudioPacerScheduler(
+                qpcFrequency);
+            scheduler.Start(startQpc, warmupIntervals, transferIntervals);
+
+            for (int index = 0; index < warmupIntervals; index++)
+            {
+                long previous = scheduler.NextDeadlineQpc;
+                scheduler.AdvanceAfterSend(previous);
+                long interval = scheduler.NextDeadlineQpc - previous;
+                Assert.IsTrue(interval == 106_666 || interval == 106_667);
+            }
+
+            for (int index = 0; index < transferIntervals; index++)
+            {
+                long previous = scheduler.NextDeadlineQpc;
+                scheduler.AdvanceAfterSend(previous);
+                Assert.AreEqual(qpcFrequency / 100,
+                    scheduler.NextDeadlineQpc - previous);
+            }
+
+            long beforeNominal = scheduler.NextDeadlineQpc;
+            scheduler.AdvanceAfterSend(beforeNominal);
+            long nominalInterval = scheduler.NextDeadlineQpc - beforeNominal;
+            Assert.IsTrue(nominalInterval == 106_666 ||
+                nominalInterval == 106_667);
+        }
+
+        [TestMethod]
+        public void SchedulerKeepsContinuousAudioClockWhenInputArrivalPhaseMoves()
         {
             const long qpcFrequency = 10_000_000;
             const long startQpc = 20_000_000;
-            const long inputReferenceQpc = startQpc - 7_123;
             const int intervals = 3000;
-            long inputPeriodTicks = qpcFrequency /
-                DualSenseBluetoothAudioPacerScheduler.InputReportsPerSecond;
-            long phaseOffsetTicks = qpcFrequency *
-                DualSenseBluetoothAudioPacerScheduler.
-                    InputPhaseOffsetMicroseconds / 1_000_000;
             var scheduler = new DualSenseBluetoothAudioPacerScheduler(
                 qpcFrequency);
-            scheduler.SetInputPhaseReference(inputReferenceQpc);
             scheduler.Start(startQpc);
 
             for (int index = 0; index < intervals; index++)
             {
+                // Model the latest HID arrival wandering across the audio
+                // cadence. It is useful for measuring the controller clock,
+                // but must not move an already scheduled audio deadline.
+                scheduler.SetInputPhaseReference(startQpc + index * 12_500L +
+                    ((index % 7) - 3) * 997L);
                 long idealDeadline = scheduler.NextDeadlineQpc;
                 long presentationDeadline =
                     scheduler.PresentationDeadlineQpc;
-                long phase = (presentationDeadline - inputReferenceQpc) %
-                    inputPeriodTicks;
-                if (phase < 0)
-                {
-                    phase += inputPeriodTicks;
-                }
-
-                Assert.AreEqual(phaseOffsetTicks, phase, 1,
-                    "Presentation escaped the measured input-report phase.");
-                Assert.IsTrue(Math.Abs(presentationDeadline - idealDeadline) <=
-                    inputPeriodTicks / 2 + 1,
-                    "Input phase alignment added more than half an input period.");
+                Assert.AreEqual(idealDeadline, presentationDeadline,
+                    "HID arrival jitter leaked into the audio presentation clock.");
                 scheduler.AdvanceAfterSend(presentationDeadline);
             }
 
             Assert.AreEqual(startQpc + qpcFrequency * 32L,
                 scheduler.NextDeadlineQpc,
-                "Input phase alignment changed the exact average audio cadence.");
+                "The continuous scheduler changed the exact average audio cadence.");
         }
 
         [TestMethod]

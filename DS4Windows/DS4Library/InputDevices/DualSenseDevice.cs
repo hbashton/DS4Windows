@@ -1576,6 +1576,12 @@ namespace DS4Windows.InputDevices
             }
         }
 
+        private void SignalBluetoothAudioPacerInputReadiness()
+        {
+            Volatile.Read(ref bluetoothAudioPacer)?.
+                SignalControllerInputArrival();
+        }
+
         private bool TryCommitBluetoothControlThroughAudioPacer(byte[] report,
             long hapticsExpiryQpc, bool waitForCompletion,
             out bool pacerOwnsTransport)
@@ -2370,6 +2376,7 @@ namespace DS4Windows.InputDevices
                         long inputArrivalQpc = Stopwatch.GetTimestamp();
                         Volatile.Write(ref bluetoothLastInputArrivalQpc,
                             inputArrivalQpc);
+                        SignalBluetoothAudioPacerInputReadiness();
                         bool clockRatioUpdated =
                             bluetoothControllerClock.Observe(tempStamp,
                                 inputArrivalQpc);

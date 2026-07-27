@@ -22,20 +22,15 @@ namespace DS4Windows.InputDevices
     {
         internal const int ReportLength = 398;
         internal const bool UsePairedAudioReports = true;
-        internal const int PrimeReportCount = 8;
+        // Sony's 0x39 report is complete as soon as one two-frame pair exists.
+        // DS5Dongle does not wait for an additional host-side prime before it
+        // hands that indivisible report to L2CAP.
+        internal const int PrimeReportCount = 2;
         internal const int HostReservoirCapacity = 64;
-        // Let the first large-report Bluetooth burst settle before moving the
-        // host reservoir into the controller. HCI traces consistently show a
-        // 75-80 ms completion stall when 0x36 traffic first starts; transferring
-        // reserve during that stall spends the reserve before it exists.
-        internal const int ControllerLinkWarmupIntervals = 64;
-        // Transfer 85.333 ms from the existing host reservoir into the
-        // controller after that settle window. A complete HCI/acoustic trace
-        // measured an 80.509 ms delivered-frame drawdown while the encoded lane
-        // remained complete, sequential, and exactly paced. This only relocates
-        // the existing ten-report reserve; it does not add another end-to-end
-        // queue.
-        internal const int ControllerReserveTransferIntervals = 128;
+        // The paired path is source-driven like DS5Dongle. It must not replay
+        // 398-era startup phases after a normal two-frame queue boundary.
+        internal const int ControllerLinkWarmupIntervals = 0;
+        internal const int ControllerReserveTransferIntervals = 0;
 
         private const string HelperArgument = "--dualsense-bt-audio-pacer-helper";
         private const int ProtocolVersion = 6;
@@ -550,7 +545,12 @@ namespace DS4Windows.InputDevices
         internal static bool ShouldRequireAudioPrimeAfterPresentation(
             bool presentedControlReport, int remainingReportCount)
         {
-            return presentedControlReport || remainingReportCount == 0;
+            // A momentarily empty producer queue is normal at the boundary
+            // between source callbacks. DS5Dongle simply waits until the next
+            // complete pair exists. Resetting here made DS4Windows wait for a
+            // fresh prime and replay its startup rate transfer on every
+            // shortage, creating 77 ms gaps followed by a 20 ms burst cadence.
+            return presentedControlReport;
         }
 
         public bool TryQueueReport(byte[] report, long hapticsExpiryQpc)

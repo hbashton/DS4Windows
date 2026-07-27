@@ -461,6 +461,21 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
+        public void PairedSpeakerAudioNeverPresentsAnUnpairedHalf()
+        {
+            byte[] speaker = CreateReport(0x52);
+
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.CanPresentFromTransportGate(
+                    primeRequired: false, speakerReportCount: 1,
+                    nextReport: speaker));
+            Assert.IsTrue(
+                DualSenseBluetoothAudioPacer.CanPresentFromTransportGate(
+                    primeRequired: false, speakerReportCount: 2,
+                    nextReport: speaker));
+        }
+
+        [TestMethod]
         public void HeadsetAudioUsesTheSamePrimeReservoirAsSpeakerAudio()
         {
             byte[] headset = CreateReport(0x52);

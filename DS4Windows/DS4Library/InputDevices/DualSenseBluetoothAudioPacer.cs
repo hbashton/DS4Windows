@@ -530,6 +530,23 @@ namespace DS4Windows.InputDevices
                 speakerReportCount >= PrimeReportCount;
         }
 
+        internal static bool CanPresentFromTransportGate(bool primeRequired,
+            int speakerReportCount, byte[] nextReport)
+        {
+            if (!CanPresentFromPrimeGate(primeRequired, speakerReportCount,
+                nextReport))
+            {
+                return false;
+            }
+
+            // A 547-byte report is indivisible: it carries exactly two Opus
+            // and two haptics frames. Never admit one speaker frame by itself,
+            // even after the initial prime has completed.
+            return !UsePairedAudioReports ||
+                !IsSpeakerAudioReport(nextReport) ||
+                speakerReportCount >= 2;
+        }
+
         internal static bool ShouldRequireAudioPrimeAfterPresentation(
             bool presentedControlReport, int remainingReportCount)
         {
@@ -1575,8 +1592,15 @@ namespace DS4Windows.InputDevices
                 sizeof(long) + sizeof(int) + sizeof(long) + ReportLength];
 
             private readonly byte[] latestTemplate = new byte[ReportLength];
+            private readonly byte[] previousTemplate = new byte[ReportLength];
+            private readonly byte[] pairedAudioReport = new byte[
+                DualSenseBluetoothPairedAudioReportBuilder.ReportLength];
             private long latestTemplateHapticsExpiryQpc;
+            private long previousTemplateHapticsExpiryQpc;
             private bool latestTemplateAvailable;
+            private bool previousTemplateAvailable;
+            private readonly DualSenseBluetoothPhysicalOutputSequence
+                physicalOutputSequence = new();
             private int currentEpoch = InitialEpoch;
             private long cadenceRatioBits =
                 BitConverter.DoubleToInt64Bits(1.0);
@@ -1810,6 +1834,7 @@ namespace DS4Windows.InputDevices
                     // (and allocate another clone/payload/command) every
                     // 10.667 ms. Explicit UpdateTemplate remains available for
                     // state changes that arrive between audio reports.
+                    ShiftLatestTemplateToPrevious();
                     Buffer.BlockCopy(report.Report, 0, latestTemplate, 0,
                         ReportLength);
                     latestTemplateHapticsExpiryQpc = hapticsExpiryQpc;
@@ -1861,6 +1886,7 @@ namespace DS4Windows.InputDevices
                         payload.AsSpan(0, sizeof(long)));
                 lock (stateLock)
                 {
+                    ShiftLatestTemplateToPrevious();
                     Buffer.BlockCopy(payload, sizeof(long), latestTemplate, 0,
                         ReportLength);
                     latestTemplateHapticsExpiryQpc = hapticsExpiryQpc;
@@ -1940,13 +1966,16 @@ namespace DS4Windows.InputDevices
                         lock (stateLock)
                         {
                             reservoir.TryPeek(out QueuedReport nextReport);
-                            int speakerReportCount = primeRequired ?
-                                reservoir.CountLeading(IsQueuedSpeakerReport) : 0;
+                            int speakerReportCount = nextReport != null &&
+                                IsSpeakerAudioReport(nextReport.Report) ?
+                                    reservoir.CountLeading(
+                                        IsQueuedSpeakerReport) : 0;
                             controlPrimeBypass = primeRequired &&
                                 nextReport != null &&
                                 !IsSpeakerAudioReport(nextReport.Report);
-                            canPresent = CanPresentFromPrimeGate(primeRequired,
-                                speakerReportCount, nextReport?.Report);
+                            canPresent = CanPresentFromTransportGate(
+                                primeRequired, speakerReportCount,
+                                nextReport?.Report);
                             if (canPresent && primeRequired &&
                                 !controlPrimeBypass)
                             {
@@ -1985,9 +2014,14 @@ namespace DS4Windows.InputDevices
                         }
 
                         QueuedReport item;
+                        QueuedReport pairedItem = null;
                         long itemId;
+                        long pairedItemId = 0;
                         AcknowledgementDisposition disposition;
+                        AcknowledgementDisposition pairedDisposition =
+                            AcknowledgementDisposition.Rejected;
                         long presentedAt;
+                        long pairedPresentedAt = 0;
                         bool advanceScheduler;
                         bool controlOnly;
                         lock (stateLock)
@@ -2025,31 +2059,97 @@ namespace DS4Windows.InputDevices
                             presentedAt = Stopwatch.GetTimestamp();
                             controlOnly = !IsSpeakerAudioReport(item.Report);
 
-                            if (item.Epoch != currentEpoch)
+                            if (UsePairedAudioReports && !controlOnly)
+                            {
+                                // Report 0x39 is one physical transport unit.
+                                // Match DS5Dongle's queue boundary: two logical
+                                // frames leave the reservoir atomically and no
+                                // unsent half receives an acknowledgement.
+                                if (!reservoir.TryDequeue(out pairedItem) ||
+                                    !IsSpeakerAudioReport(pairedItem.Report))
+                                {
+                                    throw new InvalidOperationException(
+                                        "The paired DualSense audio gate admitted an incomplete 0x39 report.");
+                                }
+
+                                pairedItemId = pairedItem.Id;
+                            }
+
+                            if (item.Epoch != currentEpoch ||
+                                (pairedItem != null &&
+                                    pairedItem.Epoch != currentEpoch))
                             {
                                 disposition =
                                     AcknowledgementDisposition.StaleEpoch;
+                                pairedDisposition = disposition;
                             }
                             else
                             {
                                 DualSenseBluetoothAudioReportPatcher.PatchForPresentation(
                                     item.Report, item.HapticsExpiryQpc,
-                                    latestTemplateAvailable ? latestTemplate : null,
-                                    latestTemplateHapticsExpiryQpc, presentedAt);
-                                RecordPresentationTrace(item.Report,
-                                    presentedAt, reservoir.Count);
+                                    pairedItem != null &&
+                                        previousTemplateAvailable ?
+                                            previousTemplate :
+                                        latestTemplateAvailable ?
+                                            latestTemplate : null,
+                                    pairedItem != null &&
+                                        previousTemplateAvailable ?
+                                            previousTemplateHapticsExpiryQpc :
+                                        latestTemplateHapticsExpiryQpc,
+                                    presentedAt);
+                                if (pairedItem != null)
+                                {
+                                    DualSenseBluetoothAudioReportPatcher.PatchForPresentation(
+                                        pairedItem.Report,
+                                        pairedItem.HapticsExpiryQpc,
+                                        latestTemplateAvailable ?
+                                            latestTemplate : null,
+                                        latestTemplateHapticsExpiryQpc,
+                                        presentedAt);
+                                }
+
                                 bool transportFault;
-                                bool accepted = controlOnly ?
-                                    writer.TryWriteAndWait(item.Report,
-                                        HelperControlWriteTimeoutMilliseconds,
-                                        out transportFault) :
-                                    writer.TryWrite(item.Report,
+                                bool accepted;
+                                if (pairedItem == null)
+                                {
+                                    physicalOutputSequence.PrepareControl(
+                                        item.Report);
+                                    RecordPresentationTrace(item.Report,
+                                        presentedAt, reservoir.Count);
+                                    accepted = controlOnly ?
+                                        writer.TryWriteAndWait(item.Report,
+                                            HelperControlWriteTimeoutMilliseconds,
+                                            out transportFault) :
+                                        writer.TryWrite(item.Report,
+                                            out transportFault);
+                                }
+                                else
+                                {
+                                    physicalOutputSequence.PreparePairedAudio(
+                                        item.Report, pairedItem.Report,
+                                        pairedAudioReport);
+                                    RecordPresentationTrace(item.Report,
+                                        presentedAt, reservoir.Count + 1);
+                                    RecordPresentationTrace(
+                                        pairedItem.Report, presentedAt,
+                                        reservoir.Count);
+                                    accepted = writer.TryWrite(
+                                        pairedAudioReport,
                                         out transportFault);
+                                }
+
+                                if (accepted)
+                                {
+                                    physicalOutputSequence.Commit(
+                                        pairedItem != null);
+                                }
+
                                 disposition = accepted ?
                                     AcknowledgementDisposition.Presented :
                                     transportFault ?
                                         AcknowledgementDisposition.TransportFault :
                                         AcknowledgementDisposition.Rejected;
+                                pairedDisposition = disposition;
                             }
 
                             if (ShouldRequireAudioPrimeAfterPresentation(
@@ -2069,12 +2169,34 @@ namespace DS4Windows.InputDevices
                                     "The pacer report pool overflowed after presentation.");
                             }
 
+                            if (pairedItem != null &&
+                                !availableReports.TryEnqueue(pairedItem))
+                            {
+                                throw new InvalidOperationException(
+                                    "The pacer report pool overflowed after paired presentation.");
+                            }
+
                             advanceScheduler = !controlPrimeBypass &&
                                 !primeRequired;
                         }
 
+                        if (advanceScheduler)
+                        {
+                            pairedPresentedAt =
+                                scheduler.AdvanceAfterSend(presentedAt);
+                            if (pairedItem != null)
+                            {
+                                scheduler.AdvanceAfterSend(presentedAt);
+                            }
+                        }
+
                         QueueAcknowledgement(itemId, disposition,
                             controlOnly ? 0 : presentedAt);
+                        if (pairedItem != null)
+                        {
+                            QueueAcknowledgement(pairedItemId,
+                                pairedDisposition, pairedPresentedAt);
+                        }
                         if (IsFatalAcknowledgementDisposition(disposition))
                         {
                             // The writer is permanently unusable until a new
@@ -2087,10 +2209,6 @@ namespace DS4Windows.InputDevices
                             break;
                         }
 
-                        if (advanceScheduler)
-                        {
-                            scheduler.AdvanceAfterSend(presentedAt);
-                        }
                     }
                 }
                 finally
@@ -2112,6 +2230,20 @@ namespace DS4Windows.InputDevices
             private static bool IsQueuedSpeakerReport(QueuedReport report)
             {
                 return report != null && IsSpeakerAudioReport(report.Report);
+            }
+
+            private void ShiftLatestTemplateToPrevious()
+            {
+                if (!latestTemplateAvailable)
+                {
+                    return;
+                }
+
+                Buffer.BlockCopy(latestTemplate, 0, previousTemplate, 0,
+                    ReportLength);
+                previousTemplateHapticsExpiryQpc =
+                    latestTemplateHapticsExpiryQpc;
+                previousTemplateAvailable = true;
             }
 
             private void QueueAcknowledgement(long reportId,
@@ -3001,6 +3133,94 @@ namespace DS4Windows.InputDevices
             uint crc = ComputeSonyCrc(report, ReportLength - CrcLength);
             BinaryPrimitives.WriteUInt32LittleEndian(
                 report.AsSpan(ReportLength - CrcLength, CrcLength), crc);
+        }
+    }
+
+    /// <summary>
+    /// Owns the sequence numbers that the controller observes on the physical
+    /// Bluetooth output lane. Sony's report sequence advances once per accepted
+    /// physical report, while its media packet counter advances only when the
+    /// two Opus frames in a 0x39 report are accepted. Keeping both counters here
+    /// prevents logical 0x36 staging frames or control-only reports from
+    /// consuming counters that never appear on the wire.
+    /// </summary>
+    internal sealed class DualSenseBluetoothPhysicalOutputSequence
+    {
+        private const int CrcLength = sizeof(uint);
+        private bool initialized;
+        private byte nextReportSequence;
+        private byte mediaPacketSequence;
+
+        internal byte NextReportSequence => nextReportSequence;
+        internal byte MediaPacketSequence => mediaPacketSequence;
+
+        internal void PrepareControl(byte[] report)
+        {
+            ValidateSource(report, nameof(report));
+            EnsureInitialized(report);
+
+            report[1] = (byte)((nextReportSequence & 0x0F) << 4);
+            report[10] = mediaPacketSequence;
+            WriteSonyCrc(report);
+        }
+
+        internal void PreparePairedAudio(byte[] first, byte[] second,
+            byte[] destination)
+        {
+            ValidateSource(first, nameof(first));
+            ValidateSource(second, nameof(second));
+            EnsureInitialized(first);
+
+            DualSenseBluetoothPairedAudioReportBuilder.Build(first, second,
+                nextReportSequence, (byte)(mediaPacketSequence + 2),
+                destination);
+        }
+
+        internal void Commit(bool pairedAudio)
+        {
+            if (!initialized)
+            {
+                throw new InvalidOperationException(
+                    "A DualSense output sequence cannot be committed before it is prepared.");
+            }
+
+            nextReportSequence = (byte)((nextReportSequence + 1) & 0x0F);
+            if (pairedAudio)
+            {
+                mediaPacketSequence += 2;
+            }
+        }
+
+        private void EnsureInitialized(byte[] report)
+        {
+            if (initialized)
+            {
+                return;
+            }
+
+            nextReportSequence = (byte)(report[1] >> 4);
+            mediaPacketSequence = report[10];
+            initialized = true;
+        }
+
+        private static void ValidateSource(byte[] report, string parameter)
+        {
+            if (report == null ||
+                report.Length != DualSenseBluetoothAudioPacer.ReportLength ||
+                report[0] != 0x36)
+            {
+                throw new ArgumentException(
+                    "Source report must be a 398-byte DualSense 0x36 report.",
+                    parameter);
+            }
+        }
+
+        private static void WriteSonyCrc(byte[] report)
+        {
+            uint crc = DualSenseBluetoothAudioReportPatcher.ComputeSonyCrc(
+                report, report.Length - CrcLength);
+            BinaryPrimitives.WriteUInt32LittleEndian(report.AsSpan(
+                report.Length - CrcLength, CrcLength), crc);
         }
     }
 

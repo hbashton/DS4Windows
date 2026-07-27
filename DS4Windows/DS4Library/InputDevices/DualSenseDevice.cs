@@ -391,12 +391,10 @@ namespace DS4Windows.InputDevices
         private const int BluetoothCombinedStateLength = 63;
         private const int BluetoothCombinedNativeStateLength = USB_OUTPUT_CHANGE_LENGTH - 1;
         private const byte BluetoothCombinedLowLatencyBufferLength = 16;
-        // Fields 5-8 retain Sony's 64-byte haptics/control latency. Field 9 is
-        // the speaker decoder buffer in the DS5Dongle trace. Pair 96 bytes
-        // with the pacer's measured 32 ms transfer; changing the field without
-        // causally filling it did not protect earlier trials.
+        // Sony's 0x36 transport uses the same 64-byte depth for every lane.
+        // Dropout prevention belongs to clock discipline and packet delivery,
+        // not a larger device-side buffer field.
         private const byte BluetoothCombinedSpeakerBufferLength = 64;
-        private const byte BluetoothCombinedSpeakerDecoderBufferLength = 96;
         // The game, not a wall-clock timeout in DS4Windows, owns the end of a
         // native DualSense effect by publishing an explicit silent haptics
         // block. Expiring the newest block between otherwise valid virtual-
@@ -3471,7 +3469,8 @@ namespace DS4Windows.InputDevices
             return hapticsGeneration;
         }
 
-        private void ApplyNextBluetoothCombinedSequence(byte[] report)
+        private void ApplyNextBluetoothCombinedSequence(byte[] report,
+            bool advancesMediaPacketSequence)
         {
             lock (bluetoothCombinedSpeakerReportLock)
             {
@@ -3488,7 +3487,10 @@ namespace DS4Windows.InputDevices
                 report[10] = bluetoothCombinedSpeakerPacketSequence;
                 bluetoothCombinedSpeakerReportSequence =
                     (byte)((bluetoothCombinedSpeakerReportSequence + 1) & 0x0F);
-                bluetoothCombinedSpeakerPacketSequence++;
+                if (advancesMediaPacketSequence)
+                {
+                    bluetoothCombinedSpeakerPacketSequence++;
+                }
             }
         }
 
@@ -3744,7 +3746,11 @@ namespace DS4Windows.InputDevices
                 }
 
                 ApplyBluetoothMicrophoneStreamingRequest(combined);
-                ApplyNextBluetoothCombinedSequence(combined);
+                // A control-only report participates in Sony's shared output
+                // report sequence but carries no media frame. DS5Dongle leaves
+                // the audio packet counter untouched on this path.
+                ApplyNextBluetoothCombinedSequence(combined,
+                    advancesMediaPacketSequence: false);
                 ApplyBluetoothCombinedCrc(combined);
 
                 if (waitForCompletion && !commitThroughPacer)
@@ -3891,7 +3897,7 @@ namespace DS4Windows.InputDevices
             combined[6] = BluetoothCombinedSpeakerBufferLength;
             combined[7] = BluetoothCombinedSpeakerBufferLength;
             combined[8] = BluetoothCombinedSpeakerBufferLength;
-            combined[9] = BluetoothCombinedSpeakerDecoderBufferLength;
+            combined[9] = BluetoothCombinedSpeakerBufferLength;
             combined[BluetoothCombinedSpeakerOffset] =
                 GetBluetoothCombinedSpeakerPacketType(headsetOnlyAudio);
             combined[BluetoothCombinedSpeakerOffset + 1] =
@@ -3910,7 +3916,8 @@ namespace DS4Windows.InputDevices
                 sequenceInitializedBefore =
                     bluetoothCombinedSpeakerSequenceInitialized;
             }
-            ApplyNextBluetoothCombinedSequence(combined);
+            ApplyNextBluetoothCombinedSequence(combined,
+                advancesMediaPacketSequence: true);
             ApplyBluetoothCombinedCrc(combined);
 
             long hapticsExpiryQpc = PersistentBluetoothHapticsExpiryQpc;

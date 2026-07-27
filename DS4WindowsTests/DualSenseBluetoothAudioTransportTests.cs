@@ -44,6 +44,58 @@ namespace DS4WindowsTests
                     paired.AsSpan(paired.Length - sizeof(uint))));
         }
 
+        [TestMethod]
+        public void PhysicalSequenceMatchesDs5DongleControlThenAudio()
+        {
+            var sequence = new DualSenseBluetoothPhysicalOutputSequence();
+            byte[] control = CreateSpeakerReport(0x00, 0x00, 0x00);
+
+            sequence.PrepareControl(control);
+
+            Assert.AreEqual((byte)0x00, control[1]);
+            Assert.AreEqual((byte)0x00, control[10]);
+            sequence.Commit(pairedAudio: false);
+            Assert.AreEqual((byte)1, sequence.NextReportSequence);
+            Assert.AreEqual((byte)0, sequence.MediaPacketSequence,
+                "A control-only report consumed the media packet counter.");
+
+            byte[] first = CreateSpeakerReport(0x11, 0x21, 0xA0);
+            byte[] second = CreateSpeakerReport(0x12, 0x22, 0xB0);
+            byte[] paired = new byte[
+                DualSenseBluetoothPairedAudioReportBuilder.ReportLength];
+            sequence.PreparePairedAudio(first, second, paired);
+
+            Assert.AreEqual((byte)0x10, paired[1],
+                "The first 0x39 did not follow the accepted control report.");
+            Assert.AreEqual((byte)2, paired[9],
+                "The first 0x39 did not publish DS5Dongle's first two-frame media counter.");
+            sequence.Commit(pairedAudio: true);
+            Assert.AreEqual((byte)2, sequence.NextReportSequence);
+            Assert.AreEqual((byte)2, sequence.MediaPacketSequence);
+        }
+
+        [TestMethod]
+        public void PhysicalSequenceAdvancesOnlyAfterAcceptedPairedReport()
+        {
+            var sequence = new DualSenseBluetoothPhysicalOutputSequence();
+            byte[] first = CreateSpeakerReport(0x11, 0x21, 0x00);
+            byte[] second = CreateSpeakerReport(0x12, 0x22, 0x10);
+            byte[] initial = new byte[
+                DualSenseBluetoothPairedAudioReportBuilder.ReportLength];
+            byte[] retried = new byte[initial.Length];
+            byte[] following = new byte[initial.Length];
+
+            sequence.PreparePairedAudio(first, second, initial);
+            sequence.PreparePairedAudio(first, second, retried);
+            CollectionAssert.AreEqual(initial, retried,
+                "A rejected/uncommitted physical write spent sequence numbers.");
+
+            sequence.Commit(pairedAudio: true);
+            sequence.PreparePairedAudio(first, second, following);
+            Assert.AreEqual((byte)0x10, following[1]);
+            Assert.AreEqual((byte)4, following[9]);
+        }
+
         private static byte[] CreateSpeakerReport(byte haptics,
             byte audio, byte sequence)
         {

@@ -26,11 +26,16 @@ namespace DS4Windows.InputDevices
         // DS5Dongle does not wait for an additional host-side prime before it
         // hands that indivisible report to L2CAP.
         internal const int PrimeReportCount = 2;
+        // DS5Dongle keeps a 10-packet interrupt FIFO behind that two-frame
+        // report boundary. Keep the same transport cushion separate from the
+        // audio-prime rule so a delayed Windows HID completion does not reject
+        // an otherwise on-time 0x39 report.
+        internal const int PairedAudioTransportSlotCount = 10;
         internal const int HostReservoirCapacity = 64;
         // The paired path is source-driven like DS5Dongle. It must not replay
         // 398-era startup phases after a normal two-frame queue boundary.
         internal const int ControllerLinkWarmupIntervals = 0;
-        internal const int ControllerReserveTransferIntervals = 0;
+        internal const int ControllerReserveTransferIntervals = 24;
 
         private const string HelperArgument = "--dualsense-bt-audio-pacer-helper";
         private const int ProtocolVersion = 6;
@@ -1345,7 +1350,13 @@ namespace DS4Windows.InputDevices
                             DualSenseBluetoothPairedAudioReportBuilder.ReportLength :
                             ReportLength,
                         out DualSenseBluetoothRealtimeWriter writer,
-                        out writerError, slotCount: PrimeReportCount))
+                        out writerError,
+                        slotCount: UsePairedAudioReports ?
+                            PairedAudioTransportSlotCount :
+                            PrimeReportCount,
+                        audioInFlightLimit: UsePairedAudioReports ?
+                            PrimeReportCount :
+                            PrimeReportCount))
                 {
                     TryWriteError(helperPipe,
                         "Could not initialize the duplicated DualSense HID handle. " +
@@ -2796,7 +2807,7 @@ namespace DS4Windows.InputDevices
         internal const int InputReportsPerSecond = 800;
         internal const int InputPhaseOffsetMicroseconds = 350;
         internal const int ControllerReserveTransferIntervalMicroseconds =
-            10_000;
+            5_000;
         internal const double MinimumRateRatio = 0.995;
         internal const double MaximumRateRatio = 1.005;
 

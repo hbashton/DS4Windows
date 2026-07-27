@@ -2034,13 +2034,17 @@ namespace DS4Windows
                         // next physical reports. Do not replace one of them
                         // with an invented zero frame just because the drift
                         // resampler is waiting for the next callback block.
-                        // Backpressure here lets that reservoir bridge the
-                        // producer phase and preserves the continuous PCM
-                        // timeline on the following attempt.
+                        // DS5Dongle only hands a paired report to L2CAP after
+                        // the speaker queue contains the next two frames; when
+                        // our Windows source is one fractional frame short,
+                        // wait for that source edge instead of sleeping an
+                        // entire 10.667 ms radio cadence and creating an
+                        // audible amplitude notch.
                         Interlocked.Increment(
                             ref transientCaptureDeferrals);
-                        ScheduleNextStreamTick(false, ref nextTick,
-                            cadenceTicks, highResolutionTimer);
+                        captureFramesAvailable.WaitOne(1);
+                        nextTick = Stopwatch.GetTimestamp();
+                        LogStreamDiagnosticsIfVerbose();
                         continue;
                     }
 
@@ -2178,6 +2182,7 @@ namespace DS4Windows
             ref long nextTick, long cadenceTicks, IntPtr highResolutionTimer)
         {
             if (submittedFrameThisTick &&
+                !audioSegmentActive &&
                 device.BluetoothAudioPacerActive &&
                 device.PendingBluetoothSpeakerFrames <
                     PacerReservoirTargetFrames)
@@ -2185,6 +2190,10 @@ namespace DS4Windows
                 // The producer may fill the host reservoir immediately. Only
                 // the isolated helper presents reports to hardware, at exactly
                 // one report per 10.667 ms and never in catch-up bursts.
+                // During audible playback, keep this parent producer paced too:
+                // burst-refilling the DS5-style FIFO can steal time from the
+                // render callback and then turns its own burst into a 10 ms
+                // active schedule miss on the following tick.
                 nextTick = Stopwatch.GetTimestamp();
                 LogStreamDiagnosticsIfVerbose();
                 return;

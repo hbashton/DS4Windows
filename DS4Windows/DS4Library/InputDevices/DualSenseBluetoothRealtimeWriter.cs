@@ -91,6 +91,7 @@ namespace DS4Windows.InputDevices
         private readonly bool ownsDeviceHandle;
         private bool sharedHandleReferenceAdded;
         private readonly WriteSlot[] slots;
+        private readonly int audioInFlightLimit;
         private int nextSlot;
         private bool disposed;
         private bool nativeResourcesReleased;
@@ -145,10 +146,12 @@ namespace DS4Windows.InputDevices
             Interlocked.Exchange(ref lastSubmissionTimestamp, 0);
         }
 
-        private DualSenseBluetoothRealtimeWriter(IntPtr deviceHandle, int reportLength, int slotCount)
+        private DualSenseBluetoothRealtimeWriter(IntPtr deviceHandle,
+            int reportLength, int slotCount, int audioInFlightLimit)
         {
             this.deviceHandle = deviceHandle;
             ownsDeviceHandle = true;
+            this.audioInFlightLimit = Math.Max(1, audioInFlightLimit);
             slots = new WriteSlot[slotCount];
             try
             {
@@ -168,7 +171,8 @@ namespace DS4Windows.InputDevices
             }
         }
 
-        private DualSenseBluetoothRealtimeWriter(SafeFileHandle deviceHandle, int reportLength, int slotCount)
+        private DualSenseBluetoothRealtimeWriter(SafeFileHandle deviceHandle,
+            int reportLength, int slotCount, int audioInFlightLimit)
         {
             if (deviceHandle == null || deviceHandle.IsInvalid || deviceHandle.IsClosed)
             {
@@ -183,6 +187,7 @@ namespace DS4Windows.InputDevices
                 sharedDeviceHandle = deviceHandle;
                 sharedHandleReferenceAdded = addedReference;
                 this.deviceHandle = deviceHandle.DangerousGetHandle();
+                this.audioInFlightLimit = Math.Max(1, audioInFlightLimit);
                 createdSlots = new WriteSlot[slotCount];
                 slots = createdSlots;
                 for (int index = 0; index < slots.Length; index++)
@@ -227,7 +232,9 @@ namespace DS4Windows.InputDevices
 
             try
             {
-                writer = new DualSenseBluetoothRealtimeWriter(handle, reportLength, slotCount: 8);
+                writer = new DualSenseBluetoothRealtimeWriter(handle,
+                    reportLength, slotCount: 8,
+                    audioInFlightLimit: NormalAudioInFlightLimit);
                 return true;
             }
             catch
@@ -246,6 +253,15 @@ namespace DS4Windows.InputDevices
             out DualSenseBluetoothRealtimeWriter writer, out int error,
             int slotCount = 3)
         {
+            return TryCreate(deviceHandle, reportLength, out writer,
+                out error, slotCount, audioInFlightLimit:
+                    NormalAudioInFlightLimit);
+        }
+
+        public static bool TryCreate(SafeFileHandle deviceHandle, int reportLength,
+            out DualSenseBluetoothRealtimeWriter writer, out int error,
+            int slotCount, int audioInFlightLimit)
+        {
             writer = null;
             error = 0;
             if (deviceHandle == null || deviceHandle.IsInvalid || deviceHandle.IsClosed)
@@ -257,7 +273,8 @@ namespace DS4Windows.InputDevices
             try
             {
                 writer = new DualSenseBluetoothRealtimeWriter(deviceHandle, reportLength,
-                    Math.Max(1, slotCount));
+                    Math.Max(1, slotCount),
+                    Math.Max(1, audioInFlightLimit));
                 return true;
             }
             catch
@@ -394,7 +411,7 @@ namespace DS4Windows.InputDevices
                 }
             }
 
-            if (!ShouldThrottleFragmentedAudioWrites(pendingCount) ||
+            if (pendingCount < audioInFlightLimit ||
                 oldest == null)
             {
                 return true;
@@ -721,6 +738,7 @@ namespace DS4Windows.InputDevices
             {
                 Interlocked.Increment(ref slowCompletionCount);
             }
+
         }
 
         private void RecordNativeSubmission(long elapsedTicks)

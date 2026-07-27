@@ -706,6 +706,13 @@ namespace DS4Windows
             try
             {
                 opusEncoder = CreateSpeakerOpusEncoder();
+                // Start the physical 0x36 lane before an application produces
+                // sound. A continuous valid Opus-silence carrier lets the
+                // Bluetooth link settle and the controller reserve fill while
+                // idle, so the first real frame replaces silence instead of
+                // paying the adapter's measured startup stall.
+                Volatile.Write(ref startupWarmupFramesRemaining,
+                    StartupWarmupReportCount);
                 StartPacerLifecycleWorker();
                 RequestPacerLifecyclePreparation(recovery: false,
                     gateSource: true);
@@ -1171,14 +1178,23 @@ namespace DS4Windows
 
                     Volatile.Write(
                         ref pacerPrewarmAttemptedForSegment, 0);
-                    Volatile.Write(ref startupWarmupFramesRemaining,
-                        StartupWarmupReportCount);
-                    // Request during cooldown without consuming the attempt
-                    // latch. The lifecycle worker waits until retryAfter while
-                    // the stream gate preserves source history; only an actual
-                    // attempt consumes the one-per-generation latch.
-                    RequestPacerLifecyclePreparation(recovery: false,
-                        gateSource: true);
+                    // The idle 0x36 carrier keeps an active helper primed. Do
+                    // not clear it or insert another six silent frames when a
+                    // new application begins rendering; real audio can replace
+                    // the carrier on the next 10.667 ms boundary. Recovery and
+                    // first ownership still use the full gated warmup path.
+                    if (!device.BluetoothAudioPacerActive ||
+                        device.BluetoothAudioPacerRecoveryRequired ||
+                        device.BluetoothAudioLifecycleTransitioning)
+                    {
+                        Volatile.Write(ref startupWarmupFramesRemaining,
+                            StartupWarmupReportCount);
+                        // Request during cooldown without consuming the attempt
+                        // latch. The lifecycle worker waits until retryAfter
+                        // while the stream gate preserves source history.
+                        RequestPacerLifecyclePreparation(recovery: false,
+                            gateSource: true);
+                    }
                 }
             }
 
@@ -1510,11 +1526,17 @@ namespace DS4Windows
         }
 
         internal static bool ShouldEmitStartupWarmup(int reportsRemaining,
-            bool lifecycleGateActive, bool recoveryRequired,
-            bool captureReady)
+            bool lifecycleGateActive, bool recoveryRequired)
         {
             return reportsRemaining > 0 && !lifecycleGateActive &&
-                !recoveryRequired && captureReady;
+                !recoveryRequired;
+        }
+
+        internal static bool ShouldBackpressurePacerProducer(
+            bool helperActive, int pendingFrames)
+        {
+            return helperActive && pendingFrames >=
+                PacerReservoirTargetFrames;
         }
 
         internal static double StartupWarmupLatencyMilliseconds =>
@@ -1871,20 +1893,39 @@ namespace DS4Windows
                         continue;
                     }
 
-                    if (device.BluetoothAudioPacerActive &&
-                        device.PendingBluetoothSpeakerFrames > 1 &&
-                        !HasEnoughBufferedCaptureForNextFrame())
+
+                    // The helper owns presentation cadence. Never let a
+                    // transient helper/startup stall turn the bounded safety
+                    // reservoir into permanent stale audio. Production resumes
+                    // immediately when one presentation credit is returned,
+                    // retaining the intended ten-report reserve without the
+                    // previously observed 51-53 report steady-state backlog.
+                    if (ShouldBackpressurePacerProducer(
+                        device.BluetoothAudioPacerActive,
+                        device.PendingBluetoothSpeakerFrames))
                     {
-                        captureFramesAvailable.WaitOne(2);
+                        nextTick = Stopwatch.GetTimestamp();
+                        captureFramesAvailable.WaitOne(1);
                         continue;
                     }
 
                     bool captureReady =
                         HasEnoughBufferedCaptureForNextFrame();
+                    bool sourceRecentlyActive = audioSegmentActive ||
+                        HasRecentRawAudible(Stopwatch.GetTimestamp(),
+                            TransientCaptureShortageLeaseMs);
+                    if (device.BluetoothAudioPacerActive &&
+                        device.PendingBluetoothSpeakerFrames > 1 &&
+                        !captureReady && sourceRecentlyActive)
+                    {
+                        captureFramesAvailable.WaitOne(2);
+                        continue;
+                    }
+
                     int warmupReportsRemaining = Volatile.Read(
                         ref startupWarmupFramesRemaining);
                     if (ShouldEmitStartupWarmup(warmupReportsRemaining,
-                        lifecycleGateActive, recoveryRequired, captureReady))
+                        lifecycleGateActive, recoveryRequired))
                     {
                         // Encode real fixed-size CBR Opus silence with the same
                         // encoder and 0x36 combined report path as content. No
@@ -1911,6 +1952,36 @@ namespace DS4Windows
 
                         ScheduleNextStreamTick(submittedWarmup, ref nextTick,
                             cadenceTicks, highResolutionTimer);
+                        continue;
+                    }
+
+                    if (!captureReady && !sourceRecentlyActive)
+                    {
+                        // Preserve a fully armed controller-side stream while
+                        // Windows is silent. This is real fixed-size CBR Opus
+                        // silence over the same atomic 0x36 path; no source
+                        // audio is consumed or delayed. It prevents the first
+                        // audible frame from re-triggering Bluetooth startup
+                        // credit stalls and retains the measured reserve.
+                        Array.Clear(frame, 0, frame.Length);
+                        bool submittedIdleCarrier = EncodeCurrentFrame() &&
+                            SendEncodedFrame();
+                        if (submittedIdleCarrier)
+                        {
+                            Interlocked.Increment(ref framesSent);
+                            Interlocked.Increment(ref silentFramesSent);
+                        }
+                        else if (device.BluetoothAudioPacerRecoveryRequired ||
+                            device.BluetoothAudioLifecycleTransitioning)
+                        {
+                            Volatile.Write(ref startupWarmupFramesRemaining,
+                                StartupWarmupReportCount);
+                            RequestPacerLifecyclePreparation(recovery: true,
+                                gateSource: true);
+                        }
+
+                        ScheduleNextStreamTick(submittedIdleCarrier,
+                            ref nextTick, cadenceTicks, highResolutionTimer);
                         continue;
                     }
 
@@ -2057,10 +2128,18 @@ namespace DS4Windows
                     }
                     else if (audioSegmentActive)
                     {
-                        if (!stopping)
+                        // Transition directly from source silence to the idle
+                        // carrier without an empty 0x36 cadence slot. The
+                        // helper/session remains alive so the next segment can
+                        // replace this frame immediately.
+                        Array.Clear(frame, 0, frame.Length);
+                        bool submittedIdleCarrier = EncodeCurrentFrame() &&
+                            SendEncodedFrame();
+                        if (submittedIdleCarrier)
                         {
-                            RequestGenerationEnd(Interlocked.Read(
-                                ref speakerGeneration));
+                            submittedFrameThisTick = true;
+                            Interlocked.Increment(ref framesSent);
+                            Interlocked.Increment(ref silentFramesSent);
                         }
                         audioSegmentActive = false;
                         Volatile.Write(

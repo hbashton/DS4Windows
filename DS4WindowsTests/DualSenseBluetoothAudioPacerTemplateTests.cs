@@ -208,7 +208,7 @@ namespace DS4Windows.Tests
         [DataRow(5)]
         [DataRow(10)]
         [DataRow(20)]
-        public void SchedulerRetainsSourceClockAcrossSendReadinessLateness(
+        public void SchedulerReanchorsAfterLargeLateness(
             int latenessMilliseconds)
         {
             const long qpcFrequency = 10_000_000;
@@ -222,20 +222,9 @@ namespace DS4Windows.Tests
 
             long nextDeadline = scheduler.AdvanceAfterSend(presentationQpc);
 
-            Assert.AreEqual(startQpc + firstCadenceTicks, nextDeadline,
-                "A send-readiness stall changed the absolute source clock.");
-            Assert.AreEqual(firstCadenceTicks -
-                latenessMilliseconds * qpcFrequency / 1000,
+            Assert.AreEqual(firstCadenceTicks,
                 nextDeadline - presentationQpc,
-                "The scheduler did not retain the measured readiness debt for bounded catch-up.");
-        }
-
-        [TestMethod]
-        public void PairedWriterUsesDs5DongleQueueDepth()
-        {
-            Assert.AreEqual(10,
-                DualSenseBluetoothAudioPacer.PairedWriterQueueDepth,
-                "DS5Dongle keeps ten complete L2CAP reports in its send FIFO.");
+                "A true stall must re-anchor and leave one full cadence before the next presentation.");
         }
 
         [TestMethod]

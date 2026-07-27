@@ -21,6 +21,7 @@ namespace DS4Windows.InputDevices
     internal sealed class DualSenseBluetoothAudioPacer : IDisposable
     {
         internal const int ReportLength = 398;
+        internal const bool UsePairedAudioReports = true;
         internal const int PrimeReportCount = 8;
         internal const int HostReservoirCapacity = 64;
         // Let the first large-report Bluetooth burst settle before moving the
@@ -1323,7 +1324,10 @@ namespace DS4Windows.InputDevices
                 int writerError = 6;
                 if (duplicatedHandle.IsInvalid ||
                     !DualSenseBluetoothRealtimeWriter.TryCreate(duplicatedHandle,
-                        ReportLength, out DualSenseBluetoothRealtimeWriter writer,
+                        UsePairedAudioReports ?
+                            DualSenseBluetoothPairedAudioReportBuilder.ReportLength :
+                            ReportLength,
+                        out DualSenseBluetoothRealtimeWriter writer,
                         out writerError, slotCount: PrimeReportCount))
                 {
                     TryWriteError(helperPipe,
@@ -2997,6 +3001,71 @@ namespace DS4Windows.InputDevices
             uint crc = ComputeSonyCrc(report, ReportLength - CrcLength);
             BinaryPrimitives.WriteUInt32LittleEndian(
                 report.AsSpan(ReportLength - CrcLength, CrcLength), crc);
+        }
+    }
+
+    /// <summary>
+    /// Packs two sequential 0x36 audio snapshots into Sony's lower-transaction
+    /// 0x39 form. The controller receives the same two 64-byte haptics blocks
+    /// and two 200-byte Opus frames, but one L2CAP/HID transaction replaces
+    /// two independently fragmented writes.
+    /// </summary>
+    internal static class DualSenseBluetoothPairedAudioReportBuilder
+    {
+        internal const int ReportLength = 547;
+        private const int SourceReportLength =
+            DualSenseBluetoothAudioPacer.ReportLength;
+        private const int CrcLength = sizeof(uint);
+
+        public static void Build(byte[] first, byte[] second,
+            byte reportSequence, byte packetSequence, byte[] destination)
+        {
+            ValidateSource(first, nameof(first));
+            ValidateSource(second, nameof(second));
+            if (destination == null || destination.Length != ReportLength)
+            {
+                throw new ArgumentException(
+                    $"Destination report must be exactly {ReportLength} bytes.",
+                    nameof(destination));
+            }
+
+            Array.Clear(destination, 0, destination.Length);
+            destination[0] = 0x39;
+            destination[1] = (byte)((reportSequence & 0x0F) << 4);
+            destination[2] = 0x91;
+            destination[3] = 6;
+            destination[4] = (byte)(second[4] & 0x7F);
+            destination[5] = second[5];
+            destination[6] = second[6];
+            destination[7] = second[7];
+            destination[8] = second[8];
+            destination[9] = packetSequence;
+
+            destination[10] = (byte)((second[76] & 0x3F) | 0xC0);
+            destination[11] = 64;
+            Buffer.BlockCopy(first, 78, destination, 12, 64);
+            Buffer.BlockCopy(second, 78, destination, 76, 64);
+
+            destination[140] = (byte)((second[142] & 0x3F) | 0xC0);
+            destination[141] = 200;
+            Buffer.BlockCopy(first, 144, destination, 142, 200);
+            Buffer.BlockCopy(second, 144, destination, 342, 200);
+
+            uint crc = DualSenseBluetoothAudioReportPatcher.ComputeSonyCrc(
+                destination, ReportLength - CrcLength);
+            BinaryPrimitives.WriteUInt32LittleEndian(destination.AsSpan(
+                ReportLength - CrcLength, CrcLength), crc);
+        }
+
+        private static void ValidateSource(byte[] report, string parameter)
+        {
+            if (report == null || report.Length != SourceReportLength ||
+                report[0] != 0x36 || report[143] != 200)
+            {
+                throw new ArgumentException(
+                    "Source must be a complete 398-byte 0x36 speaker report.",
+                    parameter);
+            }
         }
     }
 }

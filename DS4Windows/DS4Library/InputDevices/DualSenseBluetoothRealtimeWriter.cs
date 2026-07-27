@@ -106,6 +106,14 @@ namespace DS4Windows.InputDevices
         private long inFlightLimitWaitCount;
         private long inFlightLimitEscapeCount;
         private long maximumInFlightLimitWaitTicks;
+        private readonly byte[] pendingPairedAudioReport = new byte[
+            DualSenseBluetoothAudioPacer.ReportLength];
+        private readonly byte[] pairedAudioWriteReport = new byte[
+            DualSenseBluetoothPairedAudioReportBuilder.ReportLength];
+        private bool pendingPairedAudioReportAvailable;
+        private bool pairedAudioSequenceInitialized;
+        private byte pairedAudioReportSequence;
+        private byte pairedAudioPacketSequence;
         private readonly TaskCompletionSource<bool> disposalCompletion =
             new TaskCompletionSource<bool>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
@@ -289,6 +297,36 @@ namespace DS4Windows.InputDevices
                     return false;
                 }
 
+                byte[] physicalReport = report;
+                bool completesPairedAudioReport = false;
+                if (DualSenseBluetoothAudioPacer.UsePairedAudioReports &&
+                    DualSenseBluetoothAudioPacer.IsSpeakerAudioReport(report))
+                {
+                    if (!pendingPairedAudioReportAvailable)
+                    {
+                        Buffer.BlockCopy(report, 0,
+                            pendingPairedAudioReport, 0, report.Length);
+                        pendingPairedAudioReportAvailable = true;
+                        if (!pairedAudioSequenceInitialized)
+                        {
+                            pairedAudioReportSequence =
+                                (byte)(report[1] >> 4);
+                            pairedAudioPacketSequence =
+                                (byte)(report[10] + 2);
+                            pairedAudioSequenceInitialized = true;
+                        }
+
+                        return true;
+                    }
+
+                    DualSenseBluetoothPairedAudioReportBuilder.Build(
+                        pendingPairedAudioReport, report,
+                        pairedAudioReportSequence,
+                        pairedAudioPacketSequence, pairedAudioWriteReport);
+                    physicalReport = pairedAudioWriteReport;
+                    completesPairedAudioReport = true;
+                }
+
                 ObserveCompletedWrites();
                 if (!WaitForNormalAudioInFlightWindow(out transportFault))
                 {
@@ -328,14 +366,15 @@ namespace DS4Windows.InputDevices
                     slot.SubmittedTimestamp = 0;
                 }
 
-                Buffer.BlockCopy(report, 0, slot.Buffer, 0, report.Length);
+                Buffer.BlockCopy(physicalReport, 0, slot.Buffer, 0,
+                    physicalReport.Length);
                 ResetEvent(slot.EventHandle);
                 var overlapped = new NativeOverlappedData { EventHandle = slot.EventHandle };
                 Marshal.StructureToPtr(overlapped, slot.Overlapped, false);
 
                 long nativeSubmissionStarted = Stopwatch.GetTimestamp();
                 bool completed = WriteFile(deviceHandle, slot.BufferHandle.AddrOfPinnedObject(),
-                    (uint)report.Length, IntPtr.Zero, slot.Overlapped);
+                    (uint)physicalReport.Length, IntPtr.Zero, slot.Overlapped);
                 RecordNativeSubmission(Stopwatch.GetTimestamp() -
                     nativeSubmissionStarted);
                 if (!completed)
@@ -361,6 +400,13 @@ namespace DS4Windows.InputDevices
 
                 RecordSubmissionGap(now);
                 nextSlot = (slotIndex + 1) % slots.Length;
+                if (completesPairedAudioReport)
+                {
+                    pendingPairedAudioReportAvailable = false;
+                    pairedAudioReportSequence = (byte)(
+                        (pairedAudioReportSequence + 1) & 0x0F);
+                    pairedAudioPacketSequence += 2;
+                }
                 return true;
             }
         }
@@ -463,6 +509,11 @@ namespace DS4Windows.InputDevices
                     transportFault = true;
                     return false;
                 }
+
+                // A completion-aware control report is an ordering boundary.
+                // Never carry one pre-boundary audio half into the following
+                // generation.
+                pendingPairedAudioReportAvailable = false;
 
                 long waitStarted = Stopwatch.GetTimestamp();
                 ObserveCompletedWrites();

@@ -12,6 +12,56 @@ namespace DS4WindowsTests
     public class DualSenseBluetoothAudioTransportTests
     {
         [TestMethod]
+        public void PairedReportPreservesBothSequentialAudioFrames()
+        {
+            byte[] first = CreateSpeakerReport(0x11, 0x21, 0x31);
+            byte[] second = CreateSpeakerReport(0x12, 0x22, 0x32);
+            byte[] paired = new byte[
+                DualSenseBluetoothPairedAudioReportBuilder.ReportLength];
+
+            DualSenseBluetoothPairedAudioReportBuilder.Build(first, second,
+                reportSequence: 7, packetSequence: 0x42, paired);
+
+            Assert.AreEqual(0x39, paired[0]);
+            Assert.AreEqual(0x70, paired[1]);
+            Assert.AreEqual(0x91, paired[2]);
+            Assert.AreEqual(6, paired[3]);
+            Assert.AreEqual(0x7E, paired[4]);
+            Assert.AreEqual(0x42, paired[9]);
+            Assert.AreEqual(0xD2, paired[10]);
+            Assert.AreEqual(64, paired[11]);
+            Assert.AreEqual(0x11, paired[12]);
+            Assert.AreEqual(0x12, paired[76]);
+            Assert.AreEqual(0xD3, paired[140]);
+            Assert.AreEqual(200, paired[141]);
+            Assert.AreEqual(0x21, paired[142]);
+            Assert.AreEqual(0x22, paired[342]);
+            uint expectedCrc =
+                DualSenseBluetoothAudioReportPatcher.ComputeSonyCrc(paired,
+                    paired.Length - sizeof(uint));
+            Assert.AreEqual(expectedCrc,
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    paired.AsSpan(paired.Length - sizeof(uint))));
+        }
+
+        private static byte[] CreateSpeakerReport(byte haptics,
+            byte audio, byte sequence)
+        {
+            byte[] report = new byte[DualSenseBluetoothAudioPacer.ReportLength];
+            report[0] = 0x36;
+            report[1] = sequence;
+            report[4] = 0xFE;
+            report[5] = report[6] = report[7] = report[8] = 64;
+            report[76] = 0xD2;
+            report[77] = 64;
+            Array.Fill(report, haptics, 78, 64);
+            report[142] = 0xD3;
+            report[143] = 200;
+            Array.Fill(report, audio, 144, 200);
+            return report;
+        }
+
+        [TestMethod]
         public void RealtimeWriterBoundsNormalFragmentedAudioToTwoIrps()
         {
             Assert.IsFalse(DualSenseBluetoothRealtimeWriter

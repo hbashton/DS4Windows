@@ -44,10 +44,6 @@ namespace DS4Windows.InputDevices
         private const int InitialEpoch = 1;
         private const uint DuplicateSameAccess = 0x00000002;
         internal const int PairedWriterQueueDepth = 10;
-        internal const int SendReadinessHalfWindowMicroseconds = 625;
-        private const uint WaitObject0 = 0;
-        private const uint WaitFailed = 0xFFFFFFFF;
-        private const uint Infinite = 0xFFFFFFFF;
 
         private enum MessageKind : byte
         {
@@ -1641,7 +1637,7 @@ namespace DS4Windows.InputDevices
             private readonly DualSenseBluetoothRealtimeWriter writer;
             private readonly SafeFileHandle duplicatedDeviceHandle;
             private readonly EventWaitHandle controllerInputReadyEvent;
-            private readonly IntPtr[] sendReadinessNativeHandles;
+            private readonly WaitHandle[] sendReadinessWaitHandles;
             private readonly int parentProcessId;
             private readonly DualSenseBluetoothAudioPacerRing<QueuedReport>
                 reservoir = new DualSenseBluetoothAudioPacerRing<QueuedReport>(
@@ -1709,12 +1705,10 @@ namespace DS4Windows.InputDevices
                 this.duplicatedDeviceHandle = duplicatedDeviceHandle;
                 this.controllerInputReadyEvent = controllerInputReadyEvent;
                 this.parentProcessId = parentProcessId;
-                sendReadinessNativeHandles = new IntPtr[]
+                sendReadinessWaitHandles = new WaitHandle[]
                 {
-                    controllerInputReadyEvent.SafeWaitHandle.
-                        DangerousGetHandle(),
-                    stopRequested.SafeWaitHandle.DangerousGetHandle(),
-                    IntPtr.Zero,
+                    controllerInputReadyEvent,
+                    stopRequested,
                 };
                 string traceDirectory = Environment.GetEnvironmentVariable(
                     "DS4WINDOWS_DUALSENSE_PCM_TRACE_DIRECTORY");
@@ -2039,7 +2033,6 @@ namespace DS4Windows.InputDevices
                 timeBeginPeriod(1);
                 IntPtr multimediaHandle = RegisterMultimediaScheduler();
                 IntPtr timer = CreateHighResolutionTimer();
-                sendReadinessNativeHandles[2] = timer;
                 var scheduler = new DualSenseBluetoothAudioPacerScheduler(
                     Stopwatch.Frequency);
 
@@ -2090,13 +2083,11 @@ namespace DS4Windows.InputDevices
                                     Interlocked.Read(ref cadenceRatioBits)));
                             scheduler.SetInputPhaseReference(
                                 Interlocked.Read(ref inputArrivalQpc));
-                            bool sendOpportunityReady =
-                                !UsePairedAudioReports ?
-                                    WaitForExactPresentationDeadline(timer,
-                                        scheduler.PresentationDeadlineQpc) :
-                                    WaitForControllerSendOpportunity(timer,
-                                        scheduler.PresentationDeadlineQpc);
-                            if (!sendOpportunityReady)
+                            WaitUntil(timer,
+                                scheduler.PresentationDeadlineQpc,
+                                stopRequested);
+                            if (UsePairedAudioReports &&
+                                !WaitForControllerSendReadiness())
                             {
                                 break;
                             }
@@ -2582,86 +2573,36 @@ namespace DS4Windows.InputDevices
                 }
             }
 
-            private bool WaitForExactPresentationDeadline(IntPtr timer,
-                long deadlineQpc)
+            private bool WaitForControllerSendReadiness()
             {
-                WaitUntil(timer, deadlineQpc, stopRequested);
-                return !stopRequested.WaitOne(0);
-            }
-
-            private bool WaitForControllerSendOpportunity(IntPtr timer,
-                long deadlineQpc)
-            {
-                // DS5Dongle submits only on CAN_SEND_NOW. HidBth does not
-                // expose that event, but a fresh interrupt input is a useful
-                // send-opportunity signal. It is not safe to wait for one
-                // without a deadline: real Bluetooth input pauses reach
-                // 20-30 ms and would starve the controller's audio clock.
-                // Search one 1.25-ms input period centered on the absolute
-                // source deadline, then fall back to that bounded deadline.
-                long halfWindowTicks = Math.Max(1,
-                    Stopwatch.Frequency *
-                    SendReadinessHalfWindowMicroseconds / 1_000_000);
-                long windowStartQpc = deadlineQpc - halfWindowTicks;
-                long windowEndQpc = deadlineQpc + halfWindowTicks;
-                WaitUntil(timer, windowStartQpc, stopRequested);
-                if (stopRequested.WaitOne(0))
-                {
-                    return false;
-                }
-
+                // Discard an input notification that predates this audio
+                // deadline. The next interrupt report proves that the shared
+                // Bluetooth link is actively scheduling the controller now,
+                // which is HidBth's observable equivalent of DS5Dongle's
+                // L2CAP_EVENT_CAN_SEND_NOW boundary.
                 controllerInputReadyEvent.Reset();
-                if (timer != IntPtr.Zero &&
-                    TryArmWaitableTimer(timer, windowEndQpc))
+                while (!stopRequested.WaitOne(0))
                 {
-                    uint signaled = WaitForMultipleObjects(
-                        (uint)sendReadinessNativeHandles.Length,
-                        sendReadinessNativeHandles, false, Infinite);
-                    if (signaled == WaitObject0 ||
-                        signaled == WaitObject0 + 2)
+                    int signaled = WaitHandle.WaitAny(
+                        sendReadinessWaitHandles, 1000);
+                    if (signaled == 0)
                     {
                         return true;
                     }
 
-                    if (signaled == WaitObject0 + 1)
+                    if (signaled == 1)
                     {
                         return false;
                     }
 
-                    if (signaled != WaitFailed)
+                    if (!IsExpectedParentAlive(parentProcessId))
                     {
-                        return true;
+                        stopRequested.Set();
+                        return false;
                     }
-                }
-
-                // The high-resolution timer path is expected on supported
-                // Windows versions. Keep the fallback bounded and
-                // allocation-free if timer creation or arming fails.
-                while (!stopRequested.WaitOne(0))
-                {
-                    if (controllerInputReadyEvent.WaitOne(0) ||
-                        Stopwatch.GetTimestamp() >= windowEndQpc)
-                    {
-                        return true;
-                    }
-
-                    Thread.SpinWait(64);
                 }
 
                 return false;
-            }
-
-            private static bool TryArmWaitableTimer(IntPtr timer,
-                long targetQpc)
-            {
-                long remainingTicks = Math.Max(1,
-                    targetQpc - Stopwatch.GetTimestamp());
-                long relativeHundredNanoseconds = -Math.Max(1,
-                    (long)(remainingTicks * 10_000_000.0 /
-                        Stopwatch.Frequency));
-                return SetWaitableTimer(timer,
-                    ref relativeHundredNanoseconds, 0, IntPtr.Zero,
-                    IntPtr.Zero, false);
             }
 
             private static IntPtr CreateHighResolutionTimer()
@@ -2785,12 +2726,6 @@ namespace DS4Windows.InputDevices
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern uint WaitForSingleObject(IntPtr handle,
-            uint milliseconds);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern uint WaitForMultipleObjects(uint count,
-            [In] IntPtr[] handles,
-            [MarshalAs(UnmanagedType.Bool)] bool waitAll,
             uint milliseconds);
 
         [DllImport("kernel32.dll", SetLastError = true)]

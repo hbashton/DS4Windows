@@ -280,40 +280,32 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
-        public void SchedulerTransfersMeasuredControllerReserveWithoutBursting()
+        public void PairedSchedulerDoesNotReplayLegacyReserveTransfer()
         {
             const long qpcFrequency = 10_000_000;
             const long startQpc = 1_000_000;
-            int transferIntervals =
-                DualSenseBluetoothAudioPacer.ControllerReserveTransferIntervals;
             var scheduler = new DualSenseBluetoothAudioPacerScheduler(
                 qpcFrequency);
-            scheduler.Start(startQpc, transferIntervals);
+            scheduler.Start(startQpc,
+                DualSenseBluetoothAudioPacer.ControllerLinkWarmupIntervals,
+                DualSenseBluetoothAudioPacer.ControllerReserveTransferIntervals);
 
-            for (int index = 0; index < transferIntervals; index++)
+            Assert.AreEqual(0,
+                DualSenseBluetoothAudioPacer.ControllerLinkWarmupIntervals);
+            Assert.AreEqual(0,
+                DualSenseBluetoothAudioPacer.ControllerReserveTransferIntervals);
+            for (int index = 0; index < 128; index++)
             {
                 long previous = scheduler.NextDeadlineQpc;
                 scheduler.AdvanceAfterSend(previous);
-                Assert.AreEqual(qpcFrequency / 100,
-                    scheduler.NextDeadlineQpc - previous);
+                long interval = scheduler.NextDeadlineQpc - previous;
+                Assert.IsTrue(interval == 106_666 || interval == 106_667,
+                    "The paired path replayed a 10 ms startup burst.");
             }
-
-            long beforeNominal = scheduler.NextDeadlineQpc;
-            scheduler.AdvanceAfterSend(beforeNominal);
-            Assert.AreEqual(106_666,
-                scheduler.NextDeadlineQpc - beforeNominal);
-
-            double transferredMilliseconds = transferIntervals *
-                ((1000.0 *
-                    DualSenseBluetoothAudioPacerScheduler.CadenceNumerator /
-                    DualSenseBluetoothAudioPacerScheduler.CadenceDenominator) -
-                 (DualSenseBluetoothAudioPacerScheduler.
-                    ControllerReserveTransferIntervalMicroseconds / 1000.0));
-            Assert.AreEqual(85.333, transferredMilliseconds, 0.001);
         }
 
         [TestMethod]
-        public void SchedulerSettlesLinkBeforeTransferringControllerReserve()
+        public void PairedSchedulerStartsAtNativeCadenceImmediately()
         {
             const long qpcFrequency = 10_000_000;
             const long startQpc = 1_000_000;
@@ -325,25 +317,11 @@ namespace DS4Windows.Tests
                 qpcFrequency);
             scheduler.Start(startQpc, warmupIntervals, transferIntervals);
 
-            for (int index = 0; index < warmupIntervals; index++)
-            {
-                long previous = scheduler.NextDeadlineQpc;
-                scheduler.AdvanceAfterSend(previous);
-                long interval = scheduler.NextDeadlineQpc - previous;
-                Assert.IsTrue(interval == 106_666 || interval == 106_667);
-            }
-
-            for (int index = 0; index < transferIntervals; index++)
-            {
-                long previous = scheduler.NextDeadlineQpc;
-                scheduler.AdvanceAfterSend(previous);
-                Assert.AreEqual(qpcFrequency / 100,
-                    scheduler.NextDeadlineQpc - previous);
-            }
-
-            long beforeNominal = scheduler.NextDeadlineQpc;
-            scheduler.AdvanceAfterSend(beforeNominal);
-            long nominalInterval = scheduler.NextDeadlineQpc - beforeNominal;
+            Assert.AreEqual(0, warmupIntervals);
+            Assert.AreEqual(0, transferIntervals);
+            long previous = scheduler.NextDeadlineQpc;
+            scheduler.AdvanceAfterSend(previous);
+            long nominalInterval = scheduler.NextDeadlineQpc - previous;
             Assert.IsTrue(nominalInterval == 106_666 ||
                 nominalInterval == 106_667);
         }
@@ -436,11 +414,11 @@ namespace DS4Windows.Tests
                 DualSenseBluetoothAudioPacer.CanPresentFromPrimeGate(
                     primeRequired: true, speakerReportCount: 0,
                     nextReport: control),
-                "A completion-aware mic/haptics control must not wait for eight audio packets.");
+                "A completion-aware mic/haptics control must not wait for a paired audio report.");
         }
 
         [TestMethod]
-        public void SpeakerAudioStillRequiresCompletePrimeReservoir()
+        public void SpeakerAudioRequiresExactlyOneCompletePairedReport()
         {
             byte[] speaker = CreateReport(0x52);
 
@@ -543,7 +521,7 @@ namespace DS4Windows.Tests
                     speakerReportCount:
                         DualSenseBluetoothAudioPacer.PrimeReportCount - 1,
                     nextReport: speaker),
-                "Seven speaker reports plus a control report must not satisfy the eight-speaker prime.");
+                "One speaker frame plus a control report must not satisfy the two-frame pair gate.");
         }
 
         [TestMethod]
@@ -564,6 +542,17 @@ namespace DS4Windows.Tests
                         remainingReportCount:
                             DualSenseBluetoothAudioPacer.PrimeReportCount),
                 "A control commit must hard re-prime audio even when speaker reports remain queued.");
+        }
+
+        [TestMethod]
+        public void EmptySourceQueueDoesNotRestartPairedAudioClock()
+        {
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.
+                    ShouldRequireAudioPrimeAfterPresentation(
+                        presentedControlReport: false,
+                        remainingReportCount: 0),
+                "DS5Dongle waits for the next complete pair without replaying startup pacing.");
         }
 
         [TestMethod]

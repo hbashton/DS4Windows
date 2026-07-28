@@ -1494,34 +1494,13 @@ namespace DS4Windows.InputDevices
         {
             pacer = null;
             error = string.Empty;
-            Microsoft.Win32.SafeHandles.SafeFileHandle audioHandle = null;
-            bool dedicatedHandle = false;
-            try
-            {
-                dedicatedHandle = hDevice != null &&
-                    hDevice.TryOpenDedicatedAudioHandle(out audioHandle);
-                Microsoft.Win32.SafeHandles.SafeFileHandle selectedHandle =
-                    dedicatedHandle ? audioHandle : hDevice?.SafeReadHandle;
-                bool started = DualSenseBluetoothAudioPacer.TryStart(
-                    selectedHandle, initialTemplate, initialHapticsExpiry,
-                    out pacer, out error);
-                if (started)
-                {
-                    AppLogger.LogToGui(dedicatedHandle ?
-                        "DualSense Bluetooth audio pacer owns a dedicated shared HID session." :
-                        "DualSense Bluetooth audio pacer could not open its dedicated HID session; using the primary HID session.",
-                        warning: !dedicatedHandle);
-                }
-
-                return started;
-            }
-            finally
-            {
-                // TryStart duplicates the selected handle into the isolated
-                // helper before returning. The helper owns that duplicate;
-                // close only this short-lived parent copy.
-                audioHandle?.Dispose();
-            }
+            // Keep audio on the same HidBth file object as controller input.
+            // The isolated helper duplicates this handle before returning.
+            // This is the ownership path used by the clean 6a89c7d speaker
+            // and edefeaa true-duplex checkpoints.
+            return DualSenseBluetoothAudioPacer.TryStart(
+                hDevice?.SafeReadHandle, initialTemplate,
+                initialHapticsExpiry, out pacer, out error);
         }
 
         private void StopBluetoothAudioPacerLocked()

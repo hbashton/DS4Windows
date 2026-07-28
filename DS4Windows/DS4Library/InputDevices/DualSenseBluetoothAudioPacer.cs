@@ -2076,7 +2076,25 @@ namespace DS4Windows.InputDevices
                                 continue;
                             }
 
-                            if (!reservoir.TryDequeue(out item))
+                            bool pairedAudioAtHead = UsePairedAudioReports &&
+                                reservoir.TryPeek(out QueuedReport headReport) &&
+                                IsSpeakerAudioReport(headReport.Report);
+                            if (pairedAudioAtHead)
+                            {
+                                // The gate above is intentionally checked before
+                                // the presentation wait. Revalidate and remove the
+                                // complete 0x39 pair as one FIFO operation after
+                                // that wait; Clear/control admission can otherwise
+                                // invalidate the earlier observation and leave an
+                                // unpaired first half behind.
+                                if (!reservoir.TryDequeuePair(
+                                        IsQueuedSpeakerReport, out item,
+                                        out pairedItem))
+                                {
+                                    continue;
+                                }
+                            }
+                            else if (!reservoir.TryDequeue(out item))
                             {
                                 primeRequired = true;
                                 scheduler.Reset();
@@ -2094,19 +2112,8 @@ namespace DS4Windows.InputDevices
                             presentedAt = Stopwatch.GetTimestamp();
                             controlOnly = !IsSpeakerAudioReport(item.Report);
 
-                            if (UsePairedAudioReports && !controlOnly)
+                            if (pairedItem != null)
                             {
-                                // Report 0x39 is one physical transport unit.
-                                // Match DS5Dongle's queue boundary: two logical
-                                // frames leave the reservoir atomically and no
-                                // unsent half receives an acknowledgement.
-                                if (!reservoir.TryDequeue(out pairedItem) ||
-                                    !IsSpeakerAudioReport(pairedItem.Report))
-                                {
-                                    throw new InvalidOperationException(
-                                        "The paired DualSense audio gate admitted an incomplete 0x39 report.");
-                                }
-
                                 pairedItemId = pairedItem.Id;
                             }
 
@@ -2728,6 +2735,42 @@ namespace DS4Windows.InputDevices
                 entries[head] = default;
                 head = (head + 1) % entries.Length;
                 count--;
+                return true;
+            }
+        }
+
+        public bool TryDequeuePair(Predicate<T> predicate, out T first,
+            out T second)
+        {
+            if (predicate == null)
+            {
+                throw new ArgumentNullException(nameof(predicate));
+            }
+
+            lock (syncRoot)
+            {
+                if (count < 2)
+                {
+                    first = default;
+                    second = default;
+                    return false;
+                }
+
+                int secondIndex = (head + 1) % entries.Length;
+                if (!predicate(entries[head]) ||
+                    !predicate(entries[secondIndex]))
+                {
+                    first = default;
+                    second = default;
+                    return false;
+                }
+
+                first = entries[head];
+                second = entries[secondIndex];
+                entries[head] = default;
+                entries[secondIndex] = default;
+                head = (head + 2) % entries.Length;
+                count -= 2;
                 return true;
             }
         }

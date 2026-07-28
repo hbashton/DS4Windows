@@ -280,7 +280,7 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
-        public void PairedSchedulerDoesNotReplayLegacyReserveTransfer()
+        public void PairedSchedulerTransfersReserveOnceThenUsesNativeCadence()
         {
             const long qpcFrequency = 10_000_000;
             const long startQpc = 1_000_000;
@@ -292,20 +292,31 @@ namespace DS4Windows.Tests
 
             Assert.AreEqual(0,
                 DualSenseBluetoothAudioPacer.ControllerLinkWarmupIntervals);
-            Assert.AreEqual(0,
+            Assert.AreEqual(24,
                 DualSenseBluetoothAudioPacer.ControllerReserveTransferIntervals);
             for (int index = 0; index < 128; index++)
             {
                 long previous = scheduler.NextDeadlineQpc;
                 scheduler.AdvanceAfterSend(previous);
                 long interval = scheduler.NextDeadlineQpc - previous;
-                Assert.IsTrue(interval == 106_666 || interval == 106_667,
-                    "The paired path replayed a 10 ms startup burst.");
+                if (index <
+                    DualSenseBluetoothAudioPacer.
+                        ControllerReserveTransferIntervals)
+                {
+                    Assert.AreEqual(50_000, interval,
+                        "The bounded startup transfer did not establish the controller reserve.");
+                }
+                else
+                {
+                    Assert.IsTrue(interval == 106_666 ||
+                        interval == 106_667,
+                        "The paired path did not settle at native cadence after its one-time reserve transfer.");
+                }
             }
         }
 
         [TestMethod]
-        public void PairedSchedulerStartsAtNativeCadenceImmediately()
+        public void PairedSchedulerStartsWithBoundedReserveTransfer()
         {
             const long qpcFrequency = 10_000_000;
             const long startQpc = 1_000_000;
@@ -318,12 +329,11 @@ namespace DS4Windows.Tests
             scheduler.Start(startQpc, warmupIntervals, transferIntervals);
 
             Assert.AreEqual(0, warmupIntervals);
-            Assert.AreEqual(0, transferIntervals);
+            Assert.AreEqual(24, transferIntervals);
             long previous = scheduler.NextDeadlineQpc;
             scheduler.AdvanceAfterSend(previous);
-            long nominalInterval = scheduler.NextDeadlineQpc - previous;
-            Assert.IsTrue(nominalInterval == 106_666 ||
-                nominalInterval == 106_667);
+            Assert.AreEqual(50_000,
+                scheduler.NextDeadlineQpc - previous);
         }
 
         [TestMethod]
@@ -346,8 +356,12 @@ namespace DS4Windows.Tests
                 long idealDeadline = scheduler.NextDeadlineQpc;
                 long presentationDeadline =
                     scheduler.PresentationDeadlineQpc;
-                Assert.AreEqual(idealDeadline, presentationDeadline,
-                    "HID arrival jitter leaked into the audio presentation clock.");
+                long maximumPhaseCorrectionTicks = qpcFrequency *
+                    DualSenseBluetoothAudioPacerScheduler.
+                        MaximumInputPhaseCorrectionMicroseconds / 1_000_000;
+                Assert.IsTrue(Math.Abs(presentationDeadline - idealDeadline) <=
+                    maximumPhaseCorrectionTicks,
+                    "HID phase correction exceeded its bounded presentation-only window.");
                 scheduler.AdvanceAfterSend(presentationDeadline);
             }
 

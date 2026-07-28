@@ -49,7 +49,15 @@ namespace DS4Windows
         private const int MaxAutomationVisitCount = 500;
         private const int MaxAutomationDepth = 5;
         private const int MaxDiagnosticTextLength = 160;
-        private const int LiveGameBarApiPollMs = 150;
+        // The API probe is deliberately isolated out of process because the
+        // WinRT surface can hang or fault. Do not turn that safety boundary
+        // into continuous process churn: the controller-routing requirement
+        // permits a one-second hidden-to-visible transition, and HWND
+        // enumeration still detects a visible overlay on the 100 ms service
+        // tick. At 150 ms an elevated DS4Windows launched several full WPF
+        // helper processes per second, visibly busying the cursor and
+        // correlating with otherwise unexplained physical-audio stalls.
+        private const int LiveGameBarApiPollMs = 1000;
         private const int LiveGameBarApiProbeTimeoutMs = 1500;
         private const int LiveGameBarApiHangMs = 2500;
         private const int LiveAutomationPollMs = 1000;

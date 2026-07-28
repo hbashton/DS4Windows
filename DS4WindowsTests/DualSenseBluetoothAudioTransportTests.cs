@@ -54,7 +54,7 @@ namespace DS4WindowsTests
 
             Assert.AreEqual((byte)0x00, control[1]);
             Assert.AreEqual((byte)0x00, control[10]);
-            sequence.Commit(pairedAudio: false);
+            sequence.Commit(mediaReport: false);
             Assert.AreEqual((byte)1, sequence.NextReportSequence);
             Assert.AreEqual((byte)0, sequence.MediaPacketSequence,
                 "A control-only report consumed the media packet counter.");
@@ -69,7 +69,7 @@ namespace DS4WindowsTests
                 "The first 0x39 did not follow the accepted control report.");
             Assert.AreEqual((byte)2, paired[9],
                 "The first 0x39 did not publish DS5Dongle's first two-frame media counter.");
-            sequence.Commit(pairedAudio: true);
+            sequence.Commit(mediaReport: true);
             Assert.AreEqual((byte)2, sequence.NextReportSequence);
             Assert.AreEqual((byte)2, sequence.MediaPacketSequence);
         }
@@ -101,7 +101,7 @@ namespace DS4WindowsTests
                     microphoneStatus.AsSpan(
                         microphoneStatus.Length - sizeof(uint))));
 
-            sequence.Commit(pairedAudio: false);
+            sequence.Commit(mediaReport: false);
             byte[] first = CreateSpeakerReport(0x11, 0x21, 0xA0, 0x23);
             byte[] second = CreateSpeakerReport(0x12, 0x22, 0xB0, 0x24);
             byte[] paired = new byte[
@@ -143,7 +143,7 @@ namespace DS4WindowsTests
                 BinaryPrimitives.ReadUInt32LittleEndian(
                     state.AsSpan(state.Length - sizeof(uint))));
 
-            sequence.Commit(pairedAudio: false);
+            sequence.Commit(mediaReport: false);
             Assert.AreEqual((byte)11, sequence.NextReportSequence);
             Assert.AreEqual((byte)0x22, sequence.MediaPacketSequence,
                 "A controller-state report consumed the media counter.");
@@ -209,12 +209,42 @@ namespace DS4WindowsTests
             CollectionAssert.AreEqual(initial, retried,
                 "A rejected/uncommitted physical write spent sequence numbers.");
 
-            sequence.Commit(pairedAudio: true);
+            sequence.Commit(mediaReport: true);
             first[10] = 3;
             second[10] = 4;
             sequence.PreparePairedAudio(first, second, following);
             Assert.AreEqual((byte)0x10, following[1]);
             Assert.AreEqual((byte)4, following[9]);
+        }
+
+        [TestMethod]
+        public void SingleAudioReportCarriesStateWithoutSpendingMedia()
+        {
+            var sequence = new DualSenseBluetoothPhysicalOutputSequence();
+            byte[] report = CreateSpeakerReport(0x11, 0x21, 0xA0, 0x37);
+            report[13 + 44] = 0x12;
+            report[13 + 45] = 0x34;
+            report[13 + 46] = 0x56;
+
+            sequence.PrepareSingleAudio(report);
+
+            Assert.AreEqual((byte)0x36, report[0]);
+            Assert.AreEqual((byte)0xA0, report[1]);
+            Assert.AreEqual((byte)0x37, report[10]);
+            Assert.AreEqual((byte)0x12, report[13 + 44]);
+            Assert.AreEqual((byte)0x34, report[13 + 45]);
+            Assert.AreEqual((byte)0x56, report[13 + 46]);
+            uint expectedCrc =
+                DualSenseBluetoothAudioReportPatcher.ComputeSonyCrc(report,
+                    report.Length - sizeof(uint));
+            Assert.AreEqual(expectedCrc,
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    report.AsSpan(report.Length - sizeof(uint))));
+
+            sequence.Commit(mediaReport: true);
+            Assert.AreEqual((byte)11, sequence.NextReportSequence);
+            Assert.AreEqual((byte)0x37, sequence.MediaPacketSequence,
+                "A state-bearing 0x36 did not advance the media stream.");
         }
 
         private static byte[] CreateSpeakerReport(byte haptics,

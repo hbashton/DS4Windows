@@ -1324,7 +1324,6 @@ namespace DS4Windows
                 Channels, OpusApplication.OPUS_APPLICATION_AUDIO);
             encoder.Bitrate = OpusBytes * 8 * 100;
             encoder.UseVBR = false;
-            encoder.Complexity = 0;
             return encoder;
         }
 

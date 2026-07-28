@@ -13,8 +13,8 @@ namespace DS4Windows.Tests
             using IOpusEncoder encoder =
                 DualSenseBluetoothSpeakerPassthrough.CreateSpeakerOpusEncoder();
 
-            Assert.AreEqual(0, encoder.Complexity,
-                "The DualSense Bluetooth speaker encoder should match the low-latency DS5Dongle transport profile.");
+            Assert.AreEqual(9, encoder.Complexity,
+                "The DualSense Bluetooth speaker encoder should retain the PadForge/Concentus default complexity.");
             Assert.AreEqual(OpusFramesize.OPUS_FRAMESIZE_ARG,
                 encoder.ExpertFrameDuration,
                 "The 480-sample input should select the natural 10 ms frame.");

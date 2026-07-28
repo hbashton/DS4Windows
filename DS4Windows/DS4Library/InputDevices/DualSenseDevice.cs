@@ -394,7 +394,7 @@ namespace DS4Windows.InputDevices
         // Sony's 0x36 transport uses the same 64-byte depth for every lane.
         // Dropout prevention belongs to clock discipline and packet delivery,
         // not a larger device-side buffer field.
-        private const byte BluetoothCombinedSpeakerBufferLength = 64;
+        private const byte BluetoothCombinedSpeakerBufferLength = 80;
         // The game, not a wall-clock timeout in DS4Windows, owns the end of a
         // native DualSense effect by publishing an explicit silent haptics
         // block. Expiring the newest block between otherwise valid virtual-

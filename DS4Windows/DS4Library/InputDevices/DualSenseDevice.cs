@@ -1318,8 +1318,8 @@ namespace DS4Windows.InputDevices
                     ApplyBluetoothSpeakerVolumeAndRoutingCore(initialTemplate,
                         speakerVolume, headsetOnlyAudio, headphoneVolume);
                     ApplyBluetoothMicrophoneStreamingRequest(initialTemplate);
-                    if (!DualSenseBluetoothAudioPacer.TryStart(
-                        hDevice?.SafeReadHandle, initialTemplate,
+                    if (!TryStartBluetoothAudioPacer(
+                        initialTemplate,
                         initialHapticsExpiry, out candidate, out string error))
                     {
                         bluetoothAudioPacerLastError = error ?? string.Empty;
@@ -1464,8 +1464,8 @@ namespace DS4Windows.InputDevices
                     return false;
                 }
                 long initialHapticsExpiry = GetBluetoothHapticsExpiryQpc();
-                if (!DualSenseBluetoothAudioPacer.TryStart(
-                    hDevice?.SafeReadHandle, initialTemplate,
+                if (!TryStartBluetoothAudioPacer(
+                    initialTemplate,
                     initialHapticsExpiry,
                     out DualSenseBluetoothAudioPacer pacer,
                     out string error))
@@ -1485,6 +1485,42 @@ namespace DS4Windows.InputDevices
                 bluetoothAudioPacerLastError = string.Empty;
                 Volatile.Write(ref bluetoothAudioPacerRetryAfterTimestamp, 0);
                 return true;
+            }
+        }
+
+        private bool TryStartBluetoothAudioPacer(byte[] initialTemplate,
+            long initialHapticsExpiry,
+            out DualSenseBluetoothAudioPacer pacer, out string error)
+        {
+            pacer = null;
+            error = string.Empty;
+            Microsoft.Win32.SafeHandles.SafeFileHandle audioHandle = null;
+            bool dedicatedHandle = false;
+            try
+            {
+                dedicatedHandle = hDevice != null &&
+                    hDevice.TryOpenDedicatedAudioHandle(out audioHandle);
+                Microsoft.Win32.SafeHandles.SafeFileHandle selectedHandle =
+                    dedicatedHandle ? audioHandle : hDevice?.SafeReadHandle;
+                bool started = DualSenseBluetoothAudioPacer.TryStart(
+                    selectedHandle, initialTemplate, initialHapticsExpiry,
+                    out pacer, out error);
+                if (started)
+                {
+                    AppLogger.LogToGui(dedicatedHandle ?
+                        "DualSense Bluetooth audio pacer owns a dedicated shared HID session." :
+                        "DualSense Bluetooth audio pacer could not open its dedicated HID session; using the primary HID session.",
+                        warning: !dedicatedHandle);
+                }
+
+                return started;
+            }
+            finally
+            {
+                // TryStart duplicates the selected handle into the isolated
+                // helper before returning. The helper owns that duplicate;
+                // close only this short-lived parent copy.
+                audioHandle?.Dispose();
             }
         }
 
@@ -1606,6 +1642,15 @@ namespace DS4Windows.InputDevices
                 return bluetoothAudioPacer?.IsRunning == true &&
                     bluetoothAudioPacer.UpdateCadenceRatio(ratio,
                         Volatile.Read(ref bluetoothLastInputArrivalQpc));
+            }
+        }
+
+        internal bool RefillBluetoothAudioControllerReserve()
+        {
+            lock (bluetoothAudioPacerLock)
+            {
+                return bluetoothAudioPacer?.IsRunning == true &&
+                    bluetoothAudioPacer.RefillControllerReserve();
             }
         }
 

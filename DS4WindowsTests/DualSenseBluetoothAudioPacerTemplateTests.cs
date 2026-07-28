@@ -454,6 +454,52 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
+        public void PairedSpeakerDequeueIsAtomicAcrossFinalGateRevalidation()
+        {
+            var ring = new DualSenseBluetoothAudioPacerRing<byte[]>(4);
+            byte[] first = CreateReport(0x51);
+            byte[] second = CreateReport(0x52);
+            Assert.IsTrue(ring.TryEnqueue(first));
+
+            Assert.IsFalse(ring.TryDequeuePair(
+                DualSenseBluetoothAudioPacer.IsSpeakerAudioReport,
+                out _, out _));
+            Assert.AreEqual(1, ring.Count,
+                "A failed paired dequeue must not consume its first half.");
+            Assert.IsTrue(ring.TryPeek(out byte[] retained));
+            Assert.AreSame(first, retained);
+
+            Assert.IsTrue(ring.TryEnqueue(second));
+            Assert.IsTrue(ring.TryDequeuePair(
+                DualSenseBluetoothAudioPacer.IsSpeakerAudioReport,
+                out byte[] dequeuedFirst, out byte[] dequeuedSecond));
+            Assert.AreSame(first, dequeuedFirst);
+            Assert.AreSame(second, dequeuedSecond);
+            Assert.AreEqual(0, ring.Count);
+        }
+
+        [TestMethod]
+        public void PairedSpeakerDequeueRejectsControlWithoutMutatingFifo()
+        {
+            var ring = new DualSenseBluetoothAudioPacerRing<byte[]>(4);
+            byte[] speaker = CreateReport(0x61);
+            byte[] control = CreateReport(0x62);
+            control[142] = 0;
+            control[143] = 0;
+            Assert.IsTrue(ring.TryEnqueue(speaker));
+            Assert.IsTrue(ring.TryEnqueue(control));
+
+            Assert.IsFalse(ring.TryDequeuePair(
+                DualSenseBluetoothAudioPacer.IsSpeakerAudioReport,
+                out _, out _));
+            Assert.AreEqual(2, ring.Count);
+            Assert.IsTrue(ring.TryDequeue(out byte[] retainedSpeaker));
+            Assert.AreSame(speaker, retainedSpeaker);
+            Assert.IsTrue(ring.TryDequeue(out byte[] retainedControl));
+            Assert.AreSame(control, retainedControl);
+        }
+
+        [TestMethod]
         public void HeadsetAudioUsesTheSamePrimeReservoirAsSpeakerAudio()
         {
             byte[] headset = CreateReport(0x52);

@@ -75,6 +75,43 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void PhysicalSequenceMatchesDs5DongleMicrophoneTransition()
+        {
+            var sequence = new DualSenseBluetoothPhysicalOutputSequence();
+            byte[] initialization = CreateSpeakerReport(
+                0x00, 0x00, 0x50, 0x22);
+            byte[] microphoneStatus = new byte[
+                DualSenseBluetoothPhysicalOutputSequence.
+                    MicrophoneStatusReportLength];
+
+            sequence.PrepareMicrophoneStatus(enabled: true, initialization,
+                microphoneStatus);
+
+            Assert.AreEqual((byte)0x32, microphoneStatus[0]);
+            Assert.AreEqual((byte)0x50, microphoneStatus[1]);
+            Assert.AreEqual((byte)0x91, microphoneStatus[2]);
+            Assert.AreEqual((byte)0x01, microphoneStatus[3]);
+            Assert.AreEqual((byte)0x03, microphoneStatus[4]);
+            uint expectedCrc =
+                DualSenseBluetoothAudioReportPatcher.ComputeSonyCrc(
+                    microphoneStatus,
+                    microphoneStatus.Length - sizeof(uint));
+            Assert.AreEqual(expectedCrc,
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    microphoneStatus.AsSpan(
+                        microphoneStatus.Length - sizeof(uint))));
+
+            sequence.Commit(pairedAudio: false);
+            byte[] first = CreateSpeakerReport(0x11, 0x21, 0xA0, 0x23);
+            byte[] second = CreateSpeakerReport(0x12, 0x22, 0xB0, 0x24);
+            byte[] paired = new byte[
+                DualSenseBluetoothPairedAudioReportBuilder.ReportLength];
+            sequence.PreparePairedAudio(first, second, paired);
+            Assert.AreEqual((byte)0x60, paired[1]);
+            Assert.AreEqual((byte)0x24, paired[9]);
+        }
+
+        [TestMethod]
         public void PhysicalSequenceAdvancesOnlyAfterAcceptedPairedReport()
         {
             var sequence = new DualSenseBluetoothPhysicalOutputSequence();

@@ -4123,7 +4123,13 @@ namespace DS4Windows.InputDevices
                 if (enableSpeakerOutput && IsBluetoothSpeakerClockActive() &&
                     !microphonePrewarmed)
                 {
-                    bool published =
+                    bool statusQueued;
+                    lock (bluetoothAudioPacerLock)
+                    {
+                        statusQueued = bluetoothAudioPacer?.
+                            UpdateMicrophoneStatus(enabled) == true;
+                    }
+                    bool published = statusQueued &&
                         RefreshBluetoothAudioPacerTemplateFromCache();
                     LastBluetoothMicrophoneWriteStatus = published ?
                         (enabled ?

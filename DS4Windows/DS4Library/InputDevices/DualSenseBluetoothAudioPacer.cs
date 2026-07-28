@@ -2308,13 +2308,8 @@ namespace DS4Windows.InputDevices
                             scheduler.SetRateRatio(
                                 BitConverter.Int64BitsToDouble(
                                     Interlocked.Read(ref cadenceRatioBits)));
-                            // DS5Dongle and DS5 Bridge keep speaker cadence in
-                            // its own audio clock domain. Do not phase-lock HID
-                            // output to the latest 800 Hz input arrival: that
-                            // makes every media transfer chase bidirectional
-                            // Bluetooth traffic and is unsupported by either
-                            // reference, especially during microphone duplex.
-                            scheduler.SetInputPhaseReference(0);
+                            scheduler.SetInputPhaseReference(
+                                Interlocked.Read(ref inputArrivalQpc));
                             WaitUntil(timer,
                                 scheduler.PresentationDeadlineQpc,
                                 stopRequested);

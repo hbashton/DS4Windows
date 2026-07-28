@@ -431,6 +431,7 @@ namespace DS4Windows
         // prebuffer duplicated that protection and made game audio feel late.
         internal const int InitialBufferMs = 20;
         internal const int TargetBufferMs = 20;
+        private const int DirectTargetBufferMs = TargetBufferMs;
         // Keep two reports beyond the helper's eight-report prime. Together
         // with the causal source target this protects roughly 123 ms, above the
         // 86.7 ms callback stall measured in a live trace, without the former
@@ -457,6 +458,11 @@ namespace DS4Windows
         internal const double CaptureClockRatioSlewPerPacket = 0.000002;
         private const double CaptureClockSmoothingAlpha = 0.005319148936170213;
         internal const double CaptureClockErrorDeadbandFrames = 2.0;
+        private const double DirectCaptureClockMaximumCorrection = 0.00035;
+        private const double DirectCaptureClockCorrectionGain = 1.0 / 262144.0;
+        private const double DirectCaptureClockRatioSlewPerPacket = 0.0000005;
+        private const double DirectCaptureClockSmoothingAlpha = 0.00125;
+        private const double DirectCaptureClockErrorDeadbandFrames = 192.0;
 
         private readonly object syncRoot = new object();
         private readonly object directPcmSync = new object();
@@ -1089,6 +1095,7 @@ namespace DS4Windows
                 Channels, OpusApplication.OPUS_APPLICATION_AUDIO);
             encoder.Bitrate = OpusBytes * 8 * 100;
             encoder.UseVBR = false;
+            encoder.Complexity = 0;
             return encoder;
         }
 
@@ -1209,7 +1216,7 @@ namespace DS4Windows
                         overflowFrames) % CaptureRingFrames;
                     captureRingBufferedFrames -= overflowFrames;
                     capturePrimed = false;
-                    captureClockInitialized = false;
+                    ResetCaptureClockLocked(resetSourceClock: false);
                     directPcmRateConverter?.Reset();
                     ResetSpeakerResamplingLocked();
                     fadeInAfterCaptureUnderrun = true;
@@ -1314,6 +1321,19 @@ namespace DS4Windows
             speakerFrameResampler.Reset();
         }
 
+        private void ResetCaptureClockLocked(bool resetSourceClock)
+        {
+            captureClockInitialized = false;
+            captureSmoothedBufferedFrames =
+                (SampleRate * TargetBufferMs) / 1000;
+            captureTargetClockRatio = 1.0;
+            captureCurrentClockRatio = 1.0;
+            if (resetSourceClock)
+            {
+                directSourceClockEstimator?.Reset();
+            }
+        }
+
         private void ResetCapturePipelineAtSegmentBoundary()
         {
             if (directSpeakerSource != null)
@@ -1339,7 +1359,7 @@ namespace DS4Windows
             captureRingReadIndex = captureRingWriteIndex;
             captureRingBufferedFrames = 0;
             capturePrimed = false;
-            captureClockInitialized = false;
+            ResetCaptureClockLocked(resetSourceClock: true);
             directPcmRateConverter?.Reset();
             ResetSpeakerResamplingLocked();
         }
@@ -1349,24 +1369,37 @@ namespace DS4Windows
             int targetFrames = (SampleRate * TargetBufferMs) / 1000;
             if (directSpeakerSource != null)
             {
-                // VIIPER publishes exact 512-frame source blocks. Ignore the
-                // ring's callback-phase sawtooth, which previously caused an
-                // audible pitch sweep. Independent thirty-second fits measure
-                // the source and controller clocks; their quotient consumes
-                // exactly the source production rate without a hard-coded ppm
-                // correction or an occupancy servo.
+                int directTargetFrames =
+                    (SampleRate * DirectTargetBufferMs) / 1000;
+                // VIIPER publishes exact 512-frame source blocks, but Windows
+                // may batch those callbacks by tens of milliseconds before the
+                // passthrough sees them. That makes host-time source-clock fits
+                // lie badly enough to clamp the resampler and produce audible
+                // stalls. Treat the direct source as nominal and only follow
+                // the controller's measured Bluetooth clock.
                 captureSmoothedBufferedFrames +=
                     (captureRingBufferedFrames -
                         captureSmoothedBufferedFrames) *
-                    CaptureClockSmoothingAlpha;
-                captureTargetClockRatio =
-                    CalculateSourceControllerLockedInputRateRatio(
-                        directSourceClockEstimator?.Ratio ?? 1.0,
-                        directSourceClockEstimator?.IsStable ?? false,
+                    DirectCaptureClockSmoothingAlpha;
+                double directControllerLockedRatio =
+                    CalculateControllerLockedInputRateRatio(
                         device.DualSenseControllerClockRatio,
                         device.DualSenseControllerClockStable);
+                double directBufferRatio =
+                    CalculateDirectCaptureClockTargetRatio(
+                        captureSmoothedBufferedFrames,
+                        directTargetFrames);
+                captureTargetClockRatio = Math.Clamp(
+                    directControllerLockedRatio * directBufferRatio,
+                    1.0 - DirectCaptureClockMaximumCorrection,
+                    1.0 + DirectCaptureClockMaximumCorrection);
                 captureCurrentClockRatio = SlewCaptureClockRatio(
-                    captureCurrentClockRatio, captureTargetClockRatio);
+                    captureCurrentClockRatio, captureTargetClockRatio,
+                    DirectCaptureClockRatioSlewPerPacket);
+                if (Math.Abs(captureCurrentClockRatio - 1.0) > 0.000001)
+                {
+                    Interlocked.Increment(ref captureDriftAdjustments);
+                }
                 captureClockInitialized = true;
                 return;
             }
@@ -1420,9 +1453,30 @@ namespace DS4Windows
         internal static double SlewCaptureClockRatio(double currentRatio,
             double targetRatio)
         {
-            return currentRatio + Math.Clamp(targetRatio - currentRatio,
-                -CaptureClockRatioSlewPerPacket,
+            return SlewCaptureClockRatio(currentRatio, targetRatio,
                 CaptureClockRatioSlewPerPacket);
+        }
+
+        internal static double SlewCaptureClockRatio(double currentRatio,
+            double targetRatio, double maximumStep)
+        {
+            return currentRatio + Math.Clamp(targetRatio - currentRatio,
+                -maximumStep, maximumStep);
+        }
+
+        internal static double CalculateDirectCaptureClockTargetRatio(
+            double smoothedBufferedFrames, int targetFrames)
+        {
+            double errorFrames = smoothedBufferedFrames - targetFrames;
+            if (Math.Abs(errorFrames) <= DirectCaptureClockErrorDeadbandFrames)
+            {
+                errorFrames = 0.0;
+            }
+
+            return 1.0 + Math.Clamp(
+                errorFrames * DirectCaptureClockCorrectionGain,
+                -DirectCaptureClockMaximumCorrection,
+                DirectCaptureClockMaximumCorrection);
         }
 
         internal static double CalculateControllerLockedInputRateRatio(
@@ -2306,6 +2360,9 @@ namespace DS4Windows
                          $"inFlightWaits={device.BluetoothAudioPacerInFlightLimitWaits} " +
                          $"inFlightEscapes={device.BluetoothAudioPacerInFlightLimitEscapes} " +
                          $"inFlightWaitMaxMs={device.BluetoothAudioPacerMaximumInFlightLimitWaitMilliseconds:F2} " +
+                         $"inFlightSubmitMax={device.BluetoothAudioPacerMaximumAudioPendingBeforeSubmission} " +
+                         $"inFlightSubmitShallow={device.BluetoothAudioPacerShallowAudioSubmissions} " +
+                         $"inFlightSubmitFull={device.BluetoothAudioPacerFullAudioSubmissions} " +
                          $"helperWriteCompletions={device.BluetoothAudioPacerCompletedWrites} " +
                          $"helperSlowCompletions={device.BluetoothAudioPacerSlowCompletions} " +
                          $"helperCompletionMaxMs={device.BluetoothAudioPacerMaximumCompletionMilliseconds:F2} " +
@@ -2805,7 +2862,7 @@ namespace DS4Windows
                 capture = null;
                 captureBuffer = null;
                 capturePrimed = false;
-                captureClockInitialized = false;
+                ResetCaptureClockLocked(resetSourceClock: true);
                 directPcmRateConverter?.Reset();
                 ResetSpeakerResamplingLocked();
             }

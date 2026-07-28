@@ -1,4 +1,4 @@
-﻿/*
+/*
 DS4Windows
 Copyright (C) 2023  Travis Nickles
 
@@ -642,6 +642,39 @@ namespace DS4Windows.InputDevices
                 {
                     return bluetoothAudioPacer?.
                         HelperMaximumInFlightLimitWaitMilliseconds ?? 0.0;
+                }
+            }
+        }
+        public long BluetoothAudioPacerMaximumAudioPendingBeforeSubmission
+        {
+            get
+            {
+                lock (bluetoothAudioPacerLock)
+                {
+                    return bluetoothAudioPacer?.
+                        HelperMaximumAudioPendingBeforeSubmission ?? 0;
+                }
+            }
+        }
+        public long BluetoothAudioPacerShallowAudioSubmissions
+        {
+            get
+            {
+                lock (bluetoothAudioPacerLock)
+                {
+                    return bluetoothAudioPacer?.
+                        HelperShallowAudioSubmissionCount ?? 0;
+                }
+            }
+        }
+        public long BluetoothAudioPacerFullAudioSubmissions
+        {
+            get
+            {
+                lock (bluetoothAudioPacerLock)
+                {
+                    return bluetoothAudioPacer?.
+                        HelperFullAudioSubmissionCount ?? 0;
                 }
             }
         }
@@ -3361,7 +3394,7 @@ namespace DS4Windows.InputDevices
                 offset, hasNativeGameState);
 
             bool written = TryPublishCachedBluetoothCombinedState(
-                includeNativeHaptics: true,
+                includeNativeHaptics: hasNativeGameState,
                 activeStatus:
                     "Cached native Bluetooth haptics for the next speaker-clocked frame.",
                 idleReportDescription: "combined haptics/audio",
@@ -3455,14 +3488,26 @@ namespace DS4Windows.InputDevices
                 latestBluetoothCombinedSpeakerReport[
                     BluetoothCombinedHapticsOffset + 1] =
                     BluetoothCombinedHapticsDataLength;
-                Array.Copy(report, offset + BluetoothCombinedHapticsDataOffset,
-                    latestBluetoothCombinedSpeakerReport,
-                    BluetoothCombinedHapticsDataOffset,
-                    BluetoothCombinedHapticsDataLength);
-                bluetoothCombinedSpeakerReportAvailable = true;
                 long now = Stopwatch.GetTimestamp();
-                latestBluetoothCombinedSpeakerReportTimestamp = now;
-                bluetoothCombinedHapticsGeneration++;
+                if (hasNativeGameState)
+                {
+                    Array.Copy(report,
+                        offset + BluetoothCombinedHapticsDataOffset,
+                        latestBluetoothCombinedSpeakerReport,
+                        BluetoothCombinedHapticsDataOffset,
+                        BluetoothCombinedHapticsDataLength);
+                    latestBluetoothCombinedSpeakerReportTimestamp = now;
+                    bluetoothCombinedHapticsGeneration++;
+                }
+                else
+                {
+                    Array.Clear(latestBluetoothCombinedSpeakerReport,
+                        BluetoothCombinedHapticsDataOffset,
+                        BluetoothCombinedHapticsDataLength);
+                    latestBluetoothCombinedSpeakerReportTimestamp = 0;
+                }
+
+                bluetoothCombinedSpeakerReportAvailable = true;
                 hapticsGeneration = bluetoothCombinedHapticsGeneration;
             }
 

@@ -47,6 +47,22 @@ namespace DS4Windows
         public int CompletedWindows => Volatile.Read(ref completedWindows);
         public bool IsStable => CompletedWindows > 0;
 
+        public void Reset()
+        {
+            initialized = false;
+            frameEpoch = 0;
+            previousFramePosition = 0;
+            hostEpoch = 0;
+            previousHostTimestamp = 0;
+            sampleCount = 0;
+            sumX = 0.0;
+            sumY = 0.0;
+            sumXX = 0.0;
+            sumXY = 0.0;
+            Volatile.Write(ref publishedRatio, 1.0);
+            Volatile.Write(ref completedWindows, 0);
+        }
+
         public bool Observe(long framePosition, long hostTimestamp)
         {
             if (!initialized)

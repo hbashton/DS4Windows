@@ -28,9 +28,10 @@ namespace DS4Windows.InputDevices
         private const uint CancellationCompletionGraceMilliseconds = 100;
         private const int LateSubmissionMilliseconds = 15;
         private const int SlowCompletionMilliseconds = 20;
+        private const int SevereCompletionMilliseconds = 40;
         private const int SlowNativeSubmissionMilliseconds = 2;
-        private const int NormalAudioInFlightLimit = 2;
-        private const uint InFlightLimitWaitMilliseconds = 3;
+        private const int NormalAudioInFlightLimit = 4;
+        private const uint InFlightLimitWaitMilliseconds = 8;
 
         [StructLayout(LayoutKind.Sequential)]
         private struct NativeOverlappedData
@@ -98,6 +99,7 @@ namespace DS4Windows.InputDevices
         private int deferredDisposeStarted;
         private long completedWrites;
         private long slowCompletionCount;
+        private long severeCompletionCount;
         private long maximumCompletionTicks;
         private long lateSubmissionCount;
         private long maximumSubmissionGapTicks;
@@ -107,12 +109,17 @@ namespace DS4Windows.InputDevices
         private long inFlightLimitWaitCount;
         private long inFlightLimitEscapeCount;
         private long maximumInFlightLimitWaitTicks;
+        private long maximumAudioPendingBeforeSubmission;
+        private long shallowAudioSubmissionCount;
+        private long fullAudioSubmissionCount;
         private readonly TaskCompletionSource<bool> disposalCompletion =
             new TaskCompletionSource<bool>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
 
         public long CompletedWrites => Interlocked.Read(ref completedWrites);
         public long SlowCompletionCount => Interlocked.Read(ref slowCompletionCount);
+        public long SevereCompletionCount =>
+            Interlocked.Read(ref severeCompletionCount);
         public long LateSubmissionCount => Interlocked.Read(ref lateSubmissionCount);
         public long MaximumCompletionTicks =>
             Interlocked.Read(ref maximumCompletionTicks);
@@ -132,6 +139,12 @@ namespace DS4Windows.InputDevices
             Interlocked.Read(ref inFlightLimitEscapeCount);
         public long MaximumInFlightLimitWaitTicks =>
             Interlocked.Read(ref maximumInFlightLimitWaitTicks);
+        public long MaximumAudioPendingBeforeSubmission =>
+            Interlocked.Read(ref maximumAudioPendingBeforeSubmission);
+        public long ShallowAudioSubmissionCount =>
+            Interlocked.Read(ref shallowAudioSubmissionCount);
+        public long FullAudioSubmissionCount =>
+            Interlocked.Read(ref fullAudioSubmissionCount);
         public bool NativeResourcesReleased =>
             disposalCompletion.Task.IsCompletedSuccessfully;
 
@@ -312,12 +325,6 @@ namespace DS4Windows.InputDevices
                     return false;
                 }
                 long now = Stopwatch.GetTimestamp();
-                // Preserve the exact kernel submission order used by
-                // PadForge's proven eight-slot pool. Skipping over the oldest
-                // in-flight slot to reuse a later completion can place a newer
-                // Opus packet ahead of an older HID IRP on stacks that complete
-                // overlapped requests out of order. One rejected late frame is
-                // concealable; reordered audio is an audible phase hiccup.
                 int slotIndex = nextSlot;
                 WriteSlot slot = slots[slotIndex];
                 uint waitResult = WaitForSingleObject(slot.EventHandle, 0);
@@ -329,7 +336,11 @@ namespace DS4Windows.InputDevices
 
                 if (waitResult != WAIT_OBJECT_0)
                 {
-                    return false;
+                    if (!TryFindReusableSlot(out slotIndex, out slot,
+                            out transportFault))
+                    {
+                        return false;
+                    }
                 }
 
                 if (slot.Pending)
@@ -345,6 +356,7 @@ namespace DS4Windows.InputDevices
                     slot.SubmittedTimestamp = 0;
                 }
 
+                RecordAudioPendingBeforeSubmission(CountPendingSlots());
                 Buffer.BlockCopy(report, 0, slot.Buffer, 0, report.Length);
                 ResetEvent(slot.EventHandle);
                 var overlapped = new NativeOverlappedData { EventHandle = slot.EventHandle };
@@ -380,6 +392,83 @@ namespace DS4Windows.InputDevices
                 nextSlot = (slotIndex + 1) % slots.Length;
                 return true;
             }
+        }
+
+        private int CountPendingSlots()
+        {
+            int pendingCount = 0;
+            foreach (WriteSlot candidate in slots)
+            {
+                if (candidate.Pending)
+                {
+                    pendingCount++;
+                }
+            }
+
+            return pendingCount;
+        }
+
+        private void RecordAudioPendingBeforeSubmission(int pendingCount)
+        {
+            UpdateMaximum(ref maximumAudioPendingBeforeSubmission,
+                pendingCount);
+            if (pendingCount <= 1)
+            {
+                Interlocked.Increment(ref shallowAudioSubmissionCount);
+            }
+            else if (pendingCount >= audioInFlightLimit - 1)
+            {
+                Interlocked.Increment(ref fullAudioSubmissionCount);
+            }
+        }
+
+        private bool TryFindReusableSlot(out int slotIndex, out WriteSlot slot,
+            out bool transportFault)
+        {
+            transportFault = false;
+            long now = Stopwatch.GetTimestamp();
+            for (int offset = 1; offset < slots.Length; offset++)
+            {
+                int candidateIndex = (nextSlot + offset) % slots.Length;
+                WriteSlot candidate = slots[candidateIndex];
+                uint waitResult = WaitForSingleObject(candidate.EventHandle, 0);
+                if (waitResult == WAIT_FAILED)
+                {
+                    transportFault = true;
+                    slotIndex = 0;
+                    slot = null;
+                    return false;
+                }
+
+                if (waitResult != WAIT_OBJECT_0)
+                {
+                    continue;
+                }
+
+                if (candidate.Pending)
+                {
+                    if (!GetOverlappedResult(deviceHandle,
+                        candidate.Overlapped, out _, false))
+                    {
+                        transportFault = true;
+                        slotIndex = 0;
+                        slot = null;
+                        return false;
+                    }
+
+                    RecordCompletion(now - candidate.SubmittedTimestamp);
+                    candidate.Pending = false;
+                    candidate.SubmittedTimestamp = 0;
+                }
+
+                slotIndex = candidateIndex;
+                slot = candidate;
+                return true;
+            }
+
+            slotIndex = 0;
+            slot = null;
+            return false;
         }
 
         /// <summary>
@@ -738,7 +827,10 @@ namespace DS4Windows.InputDevices
             {
                 Interlocked.Increment(ref slowCompletionCount);
             }
-
+            if (elapsedTicks > Stopwatch.Frequency * SevereCompletionMilliseconds / 1000)
+            {
+                Interlocked.Increment(ref severeCompletionCount);
+            }
         }
 
         private void RecordNativeSubmission(long elapsedTicks)

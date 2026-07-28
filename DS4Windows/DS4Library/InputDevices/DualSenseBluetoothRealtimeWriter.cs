@@ -31,7 +31,6 @@ namespace DS4Windows.InputDevices
         private const int SevereCompletionMilliseconds = 40;
         private const int SlowNativeSubmissionMilliseconds = 2;
         private const int NormalAudioInFlightLimit = 4;
-        private const uint InFlightLimitWaitMilliseconds = 8;
 
         [StructLayout(LayoutKind.Sequential)]
         private struct NativeOverlappedData
@@ -147,12 +146,6 @@ namespace DS4Windows.InputDevices
             Interlocked.Read(ref fullAudioSubmissionCount);
         public bool NativeResourcesReleased =>
             disposalCompletion.Task.IsCompletedSuccessfully;
-
-        internal static bool ShouldThrottleFragmentedAudioWrites(
-            int pendingWriteCount)
-        {
-            return pendingWriteCount >= NormalAudioInFlightLimit;
-        }
 
         public void ResetSubmissionClock()
         {
@@ -320,10 +313,6 @@ namespace DS4Windows.InputDevices
                 }
 
                 ObserveCompletedWrites();
-                if (!WaitForNormalAudioInFlightWindow(out transportFault))
-                {
-                    return false;
-                }
                 long now = Stopwatch.GetTimestamp();
                 int slotIndex = nextSlot;
                 WriteSlot slot = slots[slotIndex];
@@ -336,11 +325,12 @@ namespace DS4Windows.InputDevices
 
                 if (waitResult != WAIT_OBJECT_0)
                 {
-                    if (!TryFindReusableSlot(out slotIndex, out slot,
-                            out transportFault))
-                    {
-                        return false;
-                    }
+                    // PadForge advances a strict oldest-slot ring and
+                    // DS5Dongle removes exactly one oldest FIFO entry for each
+                    // CAN_SEND_NOW event. Never scan past this slot: doing so
+                    // can admit a newer Opus pair around an older pending HID
+                    // IRP on stacks whose OVERLAPPED completions are delayed.
+                    return false;
                 }
 
                 if (slot.Pending)
@@ -420,129 +410,6 @@ namespace DS4Windows.InputDevices
             {
                 Interlocked.Increment(ref fullAudioSubmissionCount);
             }
-        }
-
-        private bool TryFindReusableSlot(out int slotIndex, out WriteSlot slot,
-            out bool transportFault)
-        {
-            transportFault = false;
-            long now = Stopwatch.GetTimestamp();
-            for (int offset = 1; offset < slots.Length; offset++)
-            {
-                int candidateIndex = (nextSlot + offset) % slots.Length;
-                WriteSlot candidate = slots[candidateIndex];
-                uint waitResult = WaitForSingleObject(candidate.EventHandle, 0);
-                if (waitResult == WAIT_FAILED)
-                {
-                    transportFault = true;
-                    slotIndex = 0;
-                    slot = null;
-                    return false;
-                }
-
-                if (waitResult != WAIT_OBJECT_0)
-                {
-                    continue;
-                }
-
-                if (candidate.Pending)
-                {
-                    if (!GetOverlappedResult(deviceHandle,
-                        candidate.Overlapped, out _, false))
-                    {
-                        transportFault = true;
-                        slotIndex = 0;
-                        slot = null;
-                        return false;
-                    }
-
-                    RecordCompletion(now - candidate.SubmittedTimestamp);
-                    candidate.Pending = false;
-                    candidate.SubmittedTimestamp = 0;
-                }
-
-                slotIndex = candidateIndex;
-                slot = candidate;
-                return true;
-            }
-
-            slotIndex = 0;
-            slot = null;
-            return false;
-        }
-
-        /// <summary>
-        /// A 398-byte 0x36 report takes about 21.8 ms to complete on the live
-        /// Bluetooth stack while reports are presented every 10.667 ms. Two
-        /// overlapping IRPs therefore sustain the stream. Briefly wait for the
-        /// oldest of those two before admitting a third fragmented report; if
-        /// the adapter is experiencing a longer abnormal stall, escape rather
-        /// than dropping the audio frame or growing a latency queue.
-        /// </summary>
-        private bool WaitForNormalAudioInFlightWindow(
-            out bool transportFault)
-        {
-            transportFault = false;
-            int pendingCount = 0;
-            WriteSlot oldest = null;
-            foreach (WriteSlot candidate in slots)
-            {
-                if (!candidate.Pending)
-                {
-                    continue;
-                }
-
-                pendingCount++;
-                if (oldest == null || candidate.SubmittedTimestamp <
-                    oldest.SubmittedTimestamp)
-                {
-                    oldest = candidate;
-                }
-            }
-
-            if (pendingCount < audioInFlightLimit ||
-                oldest == null)
-            {
-                return true;
-            }
-
-            long waitStarted = Stopwatch.GetTimestamp();
-            uint waitResult = WaitForSingleObject(oldest.EventHandle,
-                InFlightLimitWaitMilliseconds);
-            long waitedTicks = Stopwatch.GetTimestamp() - waitStarted;
-            Interlocked.Increment(ref inFlightLimitWaitCount);
-            UpdateMaximum(ref maximumInFlightLimitWaitTicks, waitedTicks);
-            if (waitResult == WAIT_FAILED)
-            {
-                transportFault = true;
-                return false;
-            }
-
-            if (waitResult == WAIT_TIMEOUT)
-            {
-                // Preserve the existing low-latency failure policy for a real
-                // adapter stall. This is an escape from the normal two-IRP
-                // window, not permission to buffer or discard the frame.
-                Interlocked.Increment(ref inFlightLimitEscapeCount);
-                return true;
-            }
-
-            if (oldest.Pending)
-            {
-                if (!GetOverlappedResult(deviceHandle, oldest.Overlapped,
-                    out _, false))
-                {
-                    transportFault = true;
-                    return false;
-                }
-
-                RecordCompletion(Stopwatch.GetTimestamp() -
-                    oldest.SubmittedTimestamp);
-                oldest.Pending = false;
-                oldest.SubmittedTimestamp = 0;
-            }
-
-            return true;
         }
 
         /// <summary>

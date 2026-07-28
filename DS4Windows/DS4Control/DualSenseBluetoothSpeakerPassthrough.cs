@@ -404,6 +404,196 @@ namespace DS4Windows
     }
 
     /// <summary>
+    /// Learns the small residual rate error between VIIPER's direct PCM
+    /// producer and the physical DualSense audio consumer. The estimator uses
+    /// only exact frame accounting: frames appended to the capture ring and
+    /// frames actually accepted by WDL for successful output packets. A
+    /// least-squares fit of their balance over a non-overlapping thirty-second
+    /// window rejects the 320/512-frame callback sawtooth without depending on
+    /// Windows callback timestamps.
+    /// </summary>
+    internal sealed class DualSenseDirectPcmBalanceClockServo
+    {
+        internal const double MeasurementWindowSeconds = 30.0;
+        internal const double ErrorDeadbandPpm = 3.0;
+        internal const double CorrectionGain = 0.5;
+        internal const double MaximumAcceptedErrorPpm = 500.0;
+        internal const double MaximumTrimPpm = 250.0;
+        internal const double TrimSlewPpmPerSecond = 5.0;
+        private const int MinimumSamples = 100;
+        private const double NominalFramesPerSecond = 48000.0;
+        private const long MinimumWindowFrames =
+            (long)(NominalFramesPerSecond * MeasurementWindowSeconds);
+
+        private bool initialized;
+        private long producedEpoch;
+        private long consumedEpoch;
+        private long hostEpoch;
+        private long previousProducedPosition;
+        private long previousConsumedPosition;
+        private long previousHostTimestamp;
+        private int sampleCount;
+        private double sumX;
+        private double sumY;
+        private double sumXX;
+        private double sumXY;
+        private double targetTrimPpm;
+        private double appliedTrimPpm;
+        private double lastMeasuredErrorPpm;
+        private int completedWindows;
+        private int rejectedWindows;
+        private int resetWindows;
+
+        internal double TargetTrimRatio => 1.0 + targetTrimPpm / 1_000_000.0;
+        internal double AppliedTrimRatio => 1.0 + appliedTrimPpm / 1_000_000.0;
+        internal double TargetTrimPpm => targetTrimPpm;
+        internal double AppliedTrimPpm => appliedTrimPpm;
+        internal double LastMeasuredErrorPpm => lastMeasuredErrorPpm;
+        internal int CompletedWindows => completedWindows;
+        internal int RejectedWindows => rejectedWindows;
+        internal int ResetWindows => resetWindows;
+
+        internal bool Observe(long producedFramePosition,
+            long consumedFramePosition, long hostTimestamp)
+        {
+            if (!initialized)
+            {
+                BeginWindow(producedFramePosition, consumedFramePosition,
+                    hostTimestamp);
+                return false;
+            }
+
+            long producedStep = producedFramePosition -
+                previousProducedPosition;
+            long consumedStep = consumedFramePosition -
+                previousConsumedPosition;
+            long hostStep = hostTimestamp - previousHostTimestamp;
+            if (producedStep < 0 || consumedStep <= 0 || hostStep <= 0)
+            {
+                ResetWindow();
+                BeginWindow(producedFramePosition, consumedFramePosition,
+                    hostTimestamp);
+                return false;
+            }
+
+            previousProducedPosition = producedFramePosition;
+            previousConsumedPosition = consumedFramePosition;
+            previousHostTimestamp = hostTimestamp;
+
+            long consumedFrames = consumedFramePosition - consumedEpoch;
+            long producedFrames = producedFramePosition - producedEpoch;
+            if (consumedFrames <= 0 || producedFrames < 0)
+            {
+                return false;
+            }
+
+            // Regress balance against exact consumed audio time. Host time is
+            // used only to guarantee a long enough observation window, never
+            // as the rate signal, so callback batching cannot bias the trim.
+            double x = consumedFrames / NominalFramesPerSecond;
+            double y = producedFrames - (double)consumedFrames;
+            sampleCount++;
+            sumX += x;
+            sumY += y;
+            sumXX += x * x;
+            sumXY += x * y;
+
+            double elapsedSeconds = (hostTimestamp - hostEpoch) /
+                (double)Stopwatch.Frequency;
+            if (elapsedSeconds < MeasurementWindowSeconds ||
+                consumedFrames < MinimumWindowFrames ||
+                sampleCount < MinimumSamples)
+            {
+                return false;
+            }
+
+            bool accepted = false;
+            double denominator = sampleCount * sumXX - sumX * sumX;
+            if (denominator > 0.0)
+            {
+                double balanceFramesPerSecond =
+                    (sampleCount * sumXY - sumX * sumY) / denominator;
+                double errorPpm = balanceFramesPerSecond /
+                    NominalFramesPerSecond * 1_000_000.0;
+                if (double.IsFinite(errorPpm) &&
+                    Math.Abs(errorPpm) <= MaximumAcceptedErrorPpm)
+                {
+                    lastMeasuredErrorPpm = errorPpm;
+                    if (Math.Abs(errorPpm) > ErrorDeadbandPpm)
+                    {
+                        targetTrimPpm = Math.Clamp(targetTrimPpm +
+                            errorPpm * CorrectionGain,
+                            -MaximumTrimPpm, MaximumTrimPpm);
+                    }
+
+                    completedWindows++;
+                    accepted = true;
+                }
+            }
+
+            if (!accepted)
+            {
+                rejectedWindows++;
+            }
+
+            // Windows never overlap: the terminal sample becomes the epoch of
+            // the next fit, while the learned trim survives the boundary.
+            BeginWindow(producedFramePosition, consumedFramePosition,
+                hostTimestamp);
+            return accepted;
+        }
+
+        internal double AdvanceAppliedTrim(double elapsedSeconds)
+        {
+            if (!double.IsFinite(elapsedSeconds) || elapsedSeconds <= 0.0)
+            {
+                return AppliedTrimRatio;
+            }
+
+            double maximumStepPpm = TrimSlewPpmPerSecond * elapsedSeconds;
+            appliedTrimPpm += Math.Clamp(targetTrimPpm - appliedTrimPpm,
+                -maximumStepPpm, maximumStepPpm);
+            return AppliedTrimRatio;
+        }
+
+        internal void ResetWindow()
+        {
+            initialized = false;
+            sampleCount = 0;
+            sumX = 0.0;
+            sumY = 0.0;
+            sumXX = 0.0;
+            sumXY = 0.0;
+            resetWindows++;
+        }
+
+        internal void ResetLifecycle()
+        {
+            ResetWindow();
+            targetTrimPpm = 0.0;
+            appliedTrimPpm = 0.0;
+            lastMeasuredErrorPpm = 0.0;
+        }
+
+        private void BeginWindow(long producedFramePosition,
+            long consumedFramePosition, long hostTimestamp)
+        {
+            initialized = true;
+            producedEpoch = producedFramePosition;
+            consumedEpoch = consumedFramePosition;
+            hostEpoch = hostTimestamp;
+            previousProducedPosition = producedFramePosition;
+            previousConsumedPosition = consumedFramePosition;
+            previousHostTimestamp = hostTimestamp;
+            sampleCount = 0;
+            sumX = 0.0;
+            sumY = 0.0;
+            sumXX = 0.0;
+            sumXY = 0.0;
+        }
+    }
+
+    /// <summary>
     /// Mirrors a Windows render endpoint to a physical Bluetooth DualSense
     /// speaker. Every frame uses the vDS-style 0x36 combined transport so
     /// speaker audio, microphone state, haptics, and controller output never
@@ -431,7 +621,6 @@ namespace DS4Windows
         // prebuffer duplicated that protection and made game audio feel late.
         internal const int InitialBufferMs = 20;
         internal const int TargetBufferMs = 20;
-        private const int DirectTargetBufferMs = TargetBufferMs;
         // Keep two reports beyond the helper's eight-report prime. Together
         // with the causal source target this protects roughly 123 ms, above the
         // 86.7 ms callback stall measured in a live trace, without the former
@@ -459,10 +648,7 @@ namespace DS4Windows
         private const double CaptureClockSmoothingAlpha = 0.005319148936170213;
         internal const double CaptureClockErrorDeadbandFrames = 2.0;
         private const double DirectCaptureClockMaximumCorrection = 0.00035;
-        private const double DirectCaptureClockCorrectionGain = 1.0 / 262144.0;
         private const double DirectCaptureClockRatioSlewPerPacket = 0.0000005;
-        private const double DirectCaptureClockSmoothingAlpha = 0.00125;
-        private const double DirectCaptureClockErrorDeadbandFrames = 192.0;
 
         private readonly object syncRoot = new object();
         private readonly object directPcmSync = new object();
@@ -478,6 +664,8 @@ namespace DS4Windows
         private readonly int directSpeakerSampleRate;
         private readonly DualSensePcm16SourceRateConverter directPcmRateConverter;
         private readonly DualSenseSourceClockEstimator directSourceClockEstimator;
+        private readonly DualSenseDirectPcmBalanceClockServo
+            directPcmBalanceClockServo;
         private readonly DualSenseSpeakerFrameResampler speakerFrameResampler =
             new DualSenseSpeakerFrameResampler();
         private Pcm16WaveTraceWriter rawDirectPcmTrace;
@@ -549,6 +737,7 @@ namespace DS4Windows
         private long directPcmCallbacks;
         private long directPcmInputFrames;
         private long directPcmOutputFrames;
+        private long directPcmConsumedFrames;
         private long directPcmPreviousCallbackTimestamp;
         private long directPcmMaximumCallbackGapTicks;
         private long directPcmMaximumCallbackLockWaitTicks;
@@ -574,6 +763,7 @@ namespace DS4Windows
         private int deferredDisposeCleanupScheduled;
         private int disposeCleanupCompleted;
         private long startupWarmupReportsSent;
+        private bool directPcmRecoveryWindowInvalidated;
 
         public DualSenseBluetoothSpeakerPassthrough(DualSenseDevice device, byte speakerVolume,
             DualSenseSpeakerCompression speakerCompression, byte speakerBassBoost,
@@ -601,6 +791,8 @@ namespace DS4Windows
                     directSpeakerSampleRate, SampleRate);
                 directSourceClockEstimator = new DualSenseSourceClockEstimator(
                     directSpeakerSampleRate);
+                directPcmBalanceClockServo =
+                    new DualSenseDirectPcmBalanceClockServo();
                 TryCreateDirectPcmTraces();
             }
         }
@@ -1217,6 +1409,7 @@ namespace DS4Windows
                     captureRingBufferedFrames -= overflowFrames;
                     capturePrimed = false;
                     ResetCaptureClockLocked(resetSourceClock: false);
+                    ResetDirectPcmBalanceWindowLocked();
                     directPcmRateConverter?.Reset();
                     ResetSpeakerResamplingLocked();
                     fadeInAfterCaptureUnderrun = true;
@@ -1246,8 +1439,15 @@ namespace DS4Windows
                 {
                     lock (syncRoot)
                     {
-                        return TryFillOutputFrameLocked(
+                        bool filled = TryFillOutputFrameLocked(
                             out consumedSourceFrames);
+                        if (filled)
+                        {
+                            RecordDirectPcmBalanceLocked(
+                                consumedSourceFrames);
+                        }
+
+                        return filled;
                     }
                 }
             }
@@ -1297,6 +1497,26 @@ namespace DS4Windows
             return producedFrames == FrameSamples;
         }
 
+        private void RecordDirectPcmBalanceLocked(int consumedSourceFrames)
+        {
+            if (directPcmBalanceClockServo == null ||
+                consumedSourceFrames <= 0)
+            {
+                return;
+            }
+
+            long totalConsumedFrames = Interlocked.Add(
+                ref directPcmConsumedFrames, consumedSourceFrames);
+            directPcmBalanceClockServo.Observe(
+                Interlocked.Read(ref captureInputFrames),
+                totalConsumedFrames, Stopwatch.GetTimestamp());
+            // Advance only for a successfully produced radio packet. Retry
+            // loops and callback batching therefore cannot make a nominal
+            // five-ppm/second correction slew faster than audio time.
+            directPcmBalanceClockServo.AdvanceAppliedTrim(
+                BluetoothSpeakerCadenceMs / 1000.0);
+        }
+
         private void CopyCaptureFramesToSpeakerResamplerLocked(
             int sourceFrames)
         {
@@ -1334,6 +1554,27 @@ namespace DS4Windows
             }
         }
 
+        private void ResetDirectPcmBalanceWindow()
+        {
+            if (directPcmBalanceClockServo == null)
+            {
+                return;
+            }
+
+            lock (directPcmSync)
+            {
+                lock (syncRoot)
+                {
+                    ResetDirectPcmBalanceWindowLocked();
+                }
+            }
+        }
+
+        private void ResetDirectPcmBalanceWindowLocked()
+        {
+            directPcmBalanceClockServo?.ResetWindow();
+        }
+
         private void ResetCapturePipelineAtSegmentBoundary()
         {
             if (directSpeakerSource != null)
@@ -1360,6 +1601,7 @@ namespace DS4Windows
             captureRingBufferedFrames = 0;
             capturePrimed = false;
             ResetCaptureClockLocked(resetSourceClock: true);
+            ResetDirectPcmBalanceWindowLocked();
             directPcmRateConverter?.Reset();
             ResetSpeakerResamplingLocked();
         }
@@ -1369,28 +1611,19 @@ namespace DS4Windows
             int targetFrames = (SampleRate * TargetBufferMs) / 1000;
             if (directSpeakerSource != null)
             {
-                int directTargetFrames =
-                    (SampleRate * DirectTargetBufferMs) / 1000;
                 // VIIPER publishes exact 512-frame source blocks, but Windows
-                // may batch those callbacks by tens of milliseconds before the
-                // passthrough sees them. That makes host-time source-clock fits
-                // lie badly enough to clamp the resampler and produce audible
-                // stalls. Treat the direct source as nominal and only follow
-                // the controller's measured Bluetooth clock.
-                captureSmoothedBufferedFrames +=
-                    (captureRingBufferedFrames -
-                        captureSmoothedBufferedFrames) *
-                    DirectCaptureClockSmoothingAlpha;
+                // may batch them by tens of milliseconds. Instantaneous ring
+                // occupancy therefore contains a large callback sawtooth and
+                // is not a clock signal. Follow the controller feed-forward
+                // plus the independent thirty-second exact-balance trim.
                 double directControllerLockedRatio =
                     CalculateControllerLockedInputRateRatio(
                         device.DualSenseControllerClockRatio,
                         device.DualSenseControllerClockStable);
-                double directBufferRatio =
-                    CalculateDirectCaptureClockTargetRatio(
-                        captureSmoothedBufferedFrames,
-                        directTargetFrames);
+                double directBalanceTrimRatio =
+                    directPcmBalanceClockServo?.AppliedTrimRatio ?? 1.0;
                 captureTargetClockRatio = Math.Clamp(
-                    directControllerLockedRatio * directBufferRatio,
+                    directControllerLockedRatio * directBalanceTrimRatio,
                     1.0 - DirectCaptureClockMaximumCorrection,
                     1.0 + DirectCaptureClockMaximumCorrection);
                 captureCurrentClockRatio = SlewCaptureClockRatio(
@@ -1462,21 +1695,6 @@ namespace DS4Windows
         {
             return currentRatio + Math.Clamp(targetRatio - currentRatio,
                 -maximumStep, maximumStep);
-        }
-
-        internal static double CalculateDirectCaptureClockTargetRatio(
-            double smoothedBufferedFrames, int targetFrames)
-        {
-            double errorFrames = smoothedBufferedFrames - targetFrames;
-            if (Math.Abs(errorFrames) <= DirectCaptureClockErrorDeadbandFrames)
-            {
-                errorFrames = 0.0;
-            }
-
-            return 1.0 + Math.Clamp(
-                errorFrames * DirectCaptureClockCorrectionGain,
-                -DirectCaptureClockMaximumCorrection,
-                DirectCaptureClockMaximumCorrection);
         }
 
         internal static double CalculateControllerLockedInputRateRatio(
@@ -1923,6 +2141,11 @@ namespace DS4Windows
                         device.BluetoothAudioPacerRecoveryRequired;
                     if (recoveryRequired)
                     {
+                        if (!directPcmRecoveryWindowInvalidated)
+                        {
+                            ResetDirectPcmBalanceWindow();
+                            directPcmRecoveryWindowInvalidated = true;
+                        }
                         // A replacement helper must receive the same six valid
                         // Opus warmup reports before retained content. The
                         // source gate below keeps both the ring and any already
@@ -1938,6 +2161,11 @@ namespace DS4Windows
                         device.BluetoothAudioLifecycleTransitioning;
                     if (lifecycleGateActive)
                     {
+                        if (!directPcmRecoveryWindowInvalidated)
+                        {
+                            ResetDirectPcmBalanceWindow();
+                            directPcmRecoveryWindowInvalidated = true;
+                        }
                         // Do not consume, resample, process, or encode while HID
                         // ownership is moving. Resetting the local deadline also
                         // prevents the recovery duration from being counted as a
@@ -1946,6 +2174,8 @@ namespace DS4Windows
                         captureFramesAvailable.WaitOne(2);
                         continue;
                     }
+
+                    directPcmRecoveryWindowInvalidated = false;
 
 
                     // The helper owns presentation cadence. Never let a
@@ -2075,6 +2305,7 @@ namespace DS4Windows
                         if (wasAudioSegmentActive)
                         {
                             Interlocked.Increment(ref activeCaptureUnderruns);
+                            ResetDirectPcmBalanceWindow();
                         }
                     }
 
@@ -2303,6 +2534,32 @@ namespace DS4Windows
             {
                 try
                 {
+                    double directBalanceErrorPpm = 0.0;
+                    double directBalanceTargetPpm = 0.0;
+                    double directBalanceAppliedPpm = 0.0;
+                    int directBalanceWindows = 0;
+                    int directBalanceRejectedWindows = 0;
+                    int directBalanceResetWindows = 0;
+                    lock (syncRoot)
+                    {
+                        if (directPcmBalanceClockServo != null)
+                        {
+                            directBalanceErrorPpm =
+                                directPcmBalanceClockServo.
+                                    LastMeasuredErrorPpm;
+                            directBalanceTargetPpm =
+                                directPcmBalanceClockServo.TargetTrimPpm;
+                            directBalanceAppliedPpm =
+                                directPcmBalanceClockServo.AppliedTrimPpm;
+                            directBalanceWindows =
+                                directPcmBalanceClockServo.CompletedWindows;
+                            directBalanceRejectedWindows =
+                                directPcmBalanceClockServo.RejectedWindows;
+                            directBalanceResetWindows =
+                                directPcmBalanceClockServo.ResetWindows;
+                        }
+                    }
+
                     AppLogger.LogToGui(
                         $"DualSense Bluetooth combined stream stats: frames={Interlocked.Read(ref framesSent)} " +
                         $"silentFrames={Interlocked.Read(ref silentFramesSent)} " +
@@ -2334,6 +2591,13 @@ namespace DS4Windows
                          $"directPcmCallbacks={Interlocked.Read(ref directPcmCallbacks)} " +
                          $"directPcmFrames={Interlocked.Read(ref directPcmInputFrames)}/" +
                          $"{Interlocked.Read(ref directPcmOutputFrames)} " +
+                         $"directPcmConsumedFrames={Interlocked.Read(ref directPcmConsumedFrames)} " +
+                         $"directBalanceErrorPpm={directBalanceErrorPpm:F2} " +
+                         $"directBalanceTargetPpm={directBalanceTargetPpm:F2} " +
+                         $"directBalanceAppliedPpm={directBalanceAppliedPpm:F2} " +
+                         $"directBalanceWindows={directBalanceWindows} " +
+                         $"directBalanceRejects={directBalanceRejectedWindows} " +
+                         $"directBalanceResets={directBalanceResetWindows} " +
                          $"directPcmCallbackGapMaxMs={StopwatchTicksToMilliseconds(Interlocked.Read(ref directPcmMaximumCallbackGapTicks)):F1} " +
                          $"directPcmCallbackLockWaitMaxMs={StopwatchTicksToMilliseconds(Interlocked.Read(ref directPcmMaximumCallbackLockWaitTicks)):F1} " +
                          $"pacerPrewarm={Interlocked.Read(ref pacerPrewarmAttempts)}/" +
@@ -2696,13 +2960,20 @@ namespace DS4Windows
         {
             try
             {
-                return !stopping &&
+                bool accepted = !stopping &&
                     device.SetBluetoothSpeakerAudioFrame(opusFrame, OpusBytes,
                         speakerSessionId,
                         Interlocked.Read(ref speakerGeneration));
+                if (!accepted && !stopping)
+                {
+                    ResetDirectPcmBalanceWindow();
+                }
+
+                return accepted;
             }
             catch (Exception ex)
             {
+                ResetDirectPcmBalanceWindow();
                 if (Interlocked.Exchange(ref loggedWriteFailure, 1) == 0)
                 {
                     AppLogger.LogToGui(
@@ -2863,6 +3134,7 @@ namespace DS4Windows
                 captureBuffer = null;
                 capturePrimed = false;
                 ResetCaptureClockLocked(resetSourceClock: true);
+                directPcmBalanceClockServo?.ResetLifecycle();
                 directPcmRateConverter?.Reset();
                 ResetSpeakerResamplingLocked();
             }

@@ -99,7 +99,8 @@ namespace DS4Windows.InputDevices
 
         private readonly object stateLock = new object();
         private readonly object pipeWriteLock = new object();
-        private readonly NamedPipeServerStream pipe;
+        private readonly NamedPipeServerStream commandPipe;
+        private readonly NamedPipeServerStream responsePipe;
         private readonly Process helperProcess;
         private readonly DualSenseBluetoothAudioPacerRing<OutboundCommand>
             outboundCommands = new DualSenseBluetoothAudioPacerRing<OutboundCommand>(
@@ -145,10 +146,12 @@ namespace DS4Windows.InputDevices
         private int cleanStopAcknowledged;
         private string lastError = string.Empty;
 
-        private DualSenseBluetoothAudioPacer(NamedPipeServerStream pipe,
-            Process helperProcess)
+        private DualSenseBluetoothAudioPacer(
+            NamedPipeServerStream commandPipe,
+            NamedPipeServerStream responsePipe, Process helperProcess)
         {
-            this.pipe = pipe;
+            this.commandPipe = commandPipe;
+            this.responsePipe = responsePipe;
             this.helperProcess = helperProcess;
             senderThread = new Thread(SenderLoop)
             {
@@ -258,13 +261,15 @@ namespace DS4Windows.InputDevices
         /// </summary>
         public static bool TryRunHelper(string[] args)
         {
-            if (!TryParseHelperArguments(args, out string pipeName,
-                out Guid authenticationToken, out int parentProcessId))
+            if (!TryParseHelperArguments(args, out string commandPipeName,
+                out string responsePipeName, out Guid authenticationToken,
+                out int parentProcessId))
             {
                 return false;
             }
 
-            RunHelper(pipeName, authenticationToken, parentProcessId);
+            RunHelper(commandPipeName, responsePipeName,
+                authenticationToken, parentProcessId);
             return true;
         }
 
@@ -320,17 +325,25 @@ namespace DS4Windows.InputDevices
 
             string pipeName = "DS4Windows.DualSenseAudioPacer." +
                 Process.GetCurrentProcess().Id + "." + Guid.NewGuid().ToString("N");
+            string commandPipeName = pipeName + ".commands";
+            string responsePipeName = pipeName + ".responses";
             Guid authenticationToken = Guid.NewGuid();
-            NamedPipeServerStream server = null;
+            NamedPipeServerStream commandServer = null;
+            NamedPipeServerStream responseServer = null;
             Process child = null;
             DualSenseBluetoothAudioPacer candidate = null;
 
             try
             {
-                server = new NamedPipeServerStream(pipeName, PipeDirection.InOut,
+                commandServer = new NamedPipeServerStream(commandPipeName,
+                    PipeDirection.Out,
                     1, PipeTransmissionMode.Byte,
-                    PipeOptions.Asynchronous | PipeOptions.WriteThrough |
-                    PipeOptions.CurrentUserOnly,
+                    PipeOptions.WriteThrough | PipeOptions.CurrentUserOnly,
+                    4096, 4096);
+                responseServer = new NamedPipeServerStream(responsePipeName,
+                    PipeDirection.In,
+                    1, PipeTransmissionMode.Byte,
+                    PipeOptions.WriteThrough | PipeOptions.CurrentUserOnly,
                     4096, 4096);
 
                 ProcessStartInfo startInfo = new ProcessStartInfo
@@ -343,7 +356,8 @@ namespace DS4Windows.InputDevices
                         Environment.CurrentDirectory,
                 };
                 startInfo.ArgumentList.Add(HelperArgument);
-                startInfo.ArgumentList.Add(pipeName);
+                startInfo.ArgumentList.Add(commandPipeName);
+                startInfo.ArgumentList.Add(responsePipeName);
                 startInfo.ArgumentList.Add(authenticationToken.ToString("N"));
                 startInfo.ArgumentList.Add(Process.GetCurrentProcess().Id.ToString());
 
@@ -351,31 +365,47 @@ namespace DS4Windows.InputDevices
                 if (child == null)
                 {
                     error = "Windows did not create the DualSense audio pacer process.";
-                    server.Dispose();
+                    commandServer.Dispose();
+                    responseServer.Dispose();
                     return false;
                 }
 
-                Task connection = server.WaitForConnectionAsync();
-                if (!connection.Wait(PipeConnectTimeoutMilliseconds))
+                // The helper has one dedicated reader and one dedicated
+                // writer thread. Keep the connected pipe synchronous: using
+                // synchronous Read/Write against an OVERLAPPED pipe creates a
+                // kernel event for each IPC operation on Windows. During a
+                // 47 Hz paired-audio stream those events accumulated faster
+                // than finalization, eventually stalling UI/state delivery.
+                // Only the one-time connect needs a bounded background wait.
+                Task commandConnection =
+                    Task.Run(commandServer.WaitForConnection);
+                Task responseConnection =
+                    Task.Run(responseServer.WaitForConnection);
+                Task connections = Task.WhenAll(commandConnection,
+                    responseConnection);
+                if (!connections.Wait(PipeConnectTimeoutMilliseconds))
                 {
-                    error = "Timed out waiting for the DualSense audio pacer pipe.";
-                    server.Dispose();
+                    error = "Timed out waiting for the DualSense audio pacer pipes.";
+                    commandServer.Dispose();
+                    responseServer.Dispose();
                     TryTerminateUninitializedHelper(child);
                     return false;
                 }
 
-                connection.GetAwaiter().GetResult();
+                connections.GetAwaiter().GetResult();
                 if (!TryDuplicateHandleIntoChild(activeOverlappedHidHandle,
                     child, out IntPtr childHandle, out int duplicateError))
                 {
                     error = "Could not duplicate the active DualSense HID handle " +
                         $"into the pacer. Win32Error={duplicateError}.";
-                    server.Dispose();
+                    commandServer.Dispose();
+                    responseServer.Dispose();
                     TryTerminateUninitializedHelper(child);
                     return false;
                 }
 
-                candidate = new DualSenseBluetoothAudioPacer(server, child);
+                candidate = new DualSenseBluetoothAudioPacer(commandServer,
+                    responseServer, child);
                 candidate.latestTemplate = (byte[])initialTemplate.Clone();
                 candidate.latestTemplateHapticsExpiryQpc = hapticsExpiryQpc;
                 candidate.receiverThread.Start();
@@ -413,7 +443,8 @@ namespace DS4Windows.InputDevices
                 }
                 else
                 {
-                    server?.Dispose();
+                    commandServer?.Dispose();
+                    responseServer?.Dispose();
                     if (child != null)
                     {
                         TryTerminateUninitializedHelper(child);
@@ -850,7 +881,8 @@ namespace DS4Windows.InputDevices
             {
                 while (Volatile.Read(ref disposed) == 0)
                 {
-                    ReadFrame(pipe, out MessageKind kind, out byte[] payload);
+                    ReadFrame(responsePipe, out MessageKind kind,
+                        out byte[] payload);
                     switch (kind)
                     {
                         case MessageKind.Ready:
@@ -1122,7 +1154,7 @@ namespace DS4Windows.InputDevices
         {
             lock (pipeWriteLock)
             {
-                WriteFrame(pipe, kind, payload);
+                WriteFrame(commandPipe, kind, payload);
             }
         }
 
@@ -1177,18 +1209,20 @@ namespace DS4Windows.InputDevices
         }
 
         private static bool TryParseHelperArguments(string[] args,
-            out string pipeName, out Guid authenticationToken,
-            out int parentProcessId)
+            out string commandPipeName, out string responsePipeName,
+            out Guid authenticationToken, out int parentProcessId)
         {
-            pipeName = string.Empty;
+            commandPipeName = string.Empty;
+            responsePipeName = string.Empty;
             authenticationToken = Guid.Empty;
             parentProcessId = 0;
-            return args != null && args.Length >= 4 &&
+            return args != null && args.Length >= 5 &&
                 string.Equals(args[0], HelperArgument,
                     StringComparison.OrdinalIgnoreCase) &&
-                !string.IsNullOrWhiteSpace(pipeName = args[1]) &&
-                Guid.TryParseExact(args[2], "N", out authenticationToken) &&
-                int.TryParse(args[3], out parentProcessId) &&
+                !string.IsNullOrWhiteSpace(commandPipeName = args[1]) &&
+                !string.IsNullOrWhiteSpace(responsePipeName = args[2]) &&
+                Guid.TryParseExact(args[3], "N", out authenticationToken) &&
+                int.TryParse(args[4], out parentProcessId) &&
                 parentProcessId > 0;
         }
 
@@ -1364,38 +1398,53 @@ namespace DS4Windows.InputDevices
         {
             try
             {
-                pipe.Dispose();
+                commandPipe.Dispose();
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                responsePipe.Dispose();
             }
             catch
             {
             }
         }
 
-        private static void RunHelper(string pipeName, Guid authenticationToken,
+        private static void RunHelper(string commandPipeName,
+            string responsePipeName, Guid authenticationToken,
             int parentProcessId)
         {
-            using var helperPipe = new NamedPipeClientStream(".", pipeName,
-                PipeDirection.InOut, PipeOptions.Asynchronous |
-                PipeOptions.WriteThrough | PipeOptions.CurrentUserOnly);
+            using var commandPipe = new NamedPipeClientStream(".",
+                commandPipeName, PipeDirection.In, PipeOptions.WriteThrough |
+                PipeOptions.CurrentUserOnly);
+            using var responsePipe = new NamedPipeClientStream(".",
+                responsePipeName, PipeDirection.Out, PipeOptions.WriteThrough |
+                PipeOptions.CurrentUserOnly);
 
             try
             {
-                helperPipe.Connect(PipeConnectTimeoutMilliseconds);
-                ReadFrame(helperPipe, out MessageKind kind, out byte[] payload);
+                commandPipe.Connect(PipeConnectTimeoutMilliseconds);
+                responsePipe.Connect(PipeConnectTimeoutMilliseconds);
+                ReadFrame(commandPipe, out MessageKind kind,
+                    out byte[] payload);
                 long duplicatedHandleValue = 0;
                 string helloError = string.Empty;
                 if (kind != MessageKind.Hello || !TryParseHello(payload,
                     authenticationToken, out duplicatedHandleValue,
                     out helloError))
                 {
-                    TryWriteError(helperPipe, string.IsNullOrEmpty(helloError) ?
+                    TryWriteError(responsePipe,
+                        string.IsNullOrEmpty(helloError) ?
                         "Invalid pacer hello message." : helloError);
                     return;
                 }
 
                 if (!IsExpectedParentAlive(parentProcessId))
                 {
-                    TryWriteError(helperPipe,
+                    TryWriteError(responsePipe,
                         "The pacer parent process exited during initialization.");
                     return;
                 }
@@ -1417,23 +1466,25 @@ namespace DS4Windows.InputDevices
                             PairedAudioInFlightLimit :
                             PrimeReportCount))
                 {
-                    TryWriteError(helperPipe,
+                    TryWriteError(responsePipe,
                         "Could not initialize the duplicated DualSense HID handle. " +
                         $"Win32Error={writerError}.");
                     return;
                 }
 
                 using (writer)
-                using (var host = new HelperHost(helperPipe, writer,
-                    duplicatedHandle, parentProcessId))
+                using (var host = new HelperHost(commandPipe, responsePipe,
+                    writer, duplicatedHandle, parentProcessId))
                 {
-                    WriteFrame(helperPipe, MessageKind.Ready, Array.Empty<byte>());
+                    WriteFrame(responsePipe, MessageKind.Ready,
+                        Array.Empty<byte>());
                     host.Run();
                 }
             }
             catch (Exception ex)
             {
-                TryWriteError(helperPipe, ex.GetType().Name + ": " + ex.Message);
+                TryWriteError(responsePipe,
+                    ex.GetType().Name + ": " + ex.Message);
             }
         }
 
@@ -1633,7 +1684,8 @@ namespace DS4Windows.InputDevices
 
             private readonly object stateLock = new object();
             private readonly object pipeWriteLock = new object();
-            private readonly Stream pipe;
+            private readonly Stream commandPipe;
+            private readonly Stream responsePipe;
             private readonly DualSenseBluetoothRealtimeWriter writer;
             private readonly SafeFileHandle duplicatedDeviceHandle;
             private readonly int parentProcessId;
@@ -1668,6 +1720,10 @@ namespace DS4Windows.InputDevices
             private readonly byte[] microphoneStatusReport = new byte[
                 DualSenseBluetoothPhysicalOutputSequence.
                     MicrophoneStatusReportLength];
+            private readonly byte[] stateReport = new byte[
+                DualSenseBluetoothStateReportBuilder.ReportLength];
+            private readonly byte[] presentedComparableState = new byte[
+                DualSenseBluetoothStateReportBuilder.ComparableStateLength];
             private long latestTemplateHapticsExpiryQpc;
             private long previousTemplateHapticsExpiryQpc;
             private bool latestTemplateAvailable;
@@ -1681,6 +1737,7 @@ namespace DS4Windows.InputDevices
             private bool primeRequired = true;
             private int pendingMicrophoneStatus = -1;
             private int microphoneStatusReportsAhead;
+            private bool presentedComparableStateAvailable;
             private int disposed;
             private readonly string presentationTraceDirectory;
             private readonly long[] presentationTraceQpc;
@@ -1697,12 +1754,13 @@ namespace DS4Windows.InputDevices
             private readonly uint[] presentationTraceHapticsHash;
             private int presentationTraceCount;
 
-            public HelperHost(Stream pipe,
+            public HelperHost(Stream commandPipe, Stream responsePipe,
                 DualSenseBluetoothRealtimeWriter writer,
                 SafeFileHandle duplicatedDeviceHandle,
                 int parentProcessId)
             {
-                this.pipe = pipe;
+                this.commandPipe = commandPipe;
+                this.responsePipe = responsePipe;
                 this.writer = writer;
                 this.duplicatedDeviceHandle = duplicatedDeviceHandle;
                 this.parentProcessId = parentProcessId;
@@ -1777,7 +1835,8 @@ namespace DS4Windows.InputDevices
                 {
                     while (!stopRequested.WaitOne(0))
                     {
-                        int payloadLength = ReadFrameInto(pipe, commandHeader,
+                        int payloadLength = ReadFrameInto(commandPipe,
+                            commandHeader,
                             commandPayload, out MessageKind kind);
                         switch (kind)
                         {
@@ -1858,7 +1917,7 @@ namespace DS4Windows.InputDevices
                         {
                             lock (pipeWriteLock)
                             {
-                                WriteFrame(pipe, MessageKind.Stopped,
+                                WriteFrame(responsePipe, MessageKind.Stopped,
                                     Array.Empty<byte>());
                             }
                         }
@@ -2063,14 +2122,23 @@ namespace DS4Windows.InputDevices
                     while (!stopRequested.WaitOne(0))
                     {
                         bool canPresent;
+                        bool transportGateReady;
                         bool controlPrimeBypass;
                         bool microphoneStatusReady;
+                        bool stateReportReady;
                         lock (stateLock)
                         {
                             microphoneStatusReady =
                                 pendingMicrophoneStatus >= 0 &&
                                 microphoneStatusReportsAhead <= 0;
                             reservoir.TryPeek(out QueuedReport nextReport);
+                            stateReportReady = latestTemplateAvailable &&
+                                (nextReport == null ||
+                                    IsSpeakerAudioReport(nextReport.Report)) &&
+                                DualSenseBluetoothStateReportBuilder.
+                                    HasMeaningfulStateChanged(latestTemplate,
+                                        presentedComparableState,
+                                        presentedComparableStateAvailable);
                             int speakerReportCount = nextReport != null &&
                                 IsSpeakerAudioReport(nextReport.Report) ?
                                     reservoir.CountLeading(
@@ -2078,11 +2146,13 @@ namespace DS4Windows.InputDevices
                             controlPrimeBypass = primeRequired &&
                                 nextReport != null &&
                                 !IsSpeakerAudioReport(nextReport.Report);
-                            canPresent = microphoneStatusReady ||
+                            transportGateReady =
                                 CanPresentFromTransportGate(
                                     primeRequired, speakerReportCount,
                                     nextReport?.Report);
-                            if (canPresent && primeRequired &&
+                            canPresent = stateReportReady ||
+                                microphoneStatusReady || transportGateReady;
+                            if (transportGateReady && primeRequired &&
                                 !controlPrimeBypass)
                             {
                                 primeRequired = false;
@@ -2101,6 +2171,68 @@ namespace DS4Windows.InputDevices
                             }
 
                             continue;
+                        }
+
+                        if (stateReportReady)
+                        {
+                            bool transportFault;
+                            bool accepted;
+                            lock (stateLock)
+                            {
+                                if (!latestTemplateAvailable ||
+                                    !DualSenseBluetoothStateReportBuilder.
+                                        HasMeaningfulStateChanged(
+                                            latestTemplate,
+                                            presentedComparableState,
+                                            presentedComparableStateAvailable))
+                                {
+                                    accepted = true;
+                                    transportFault = false;
+                                }
+                                else
+                                {
+                                    // 0x39 carries only the two audio and
+                                    // haptics TLVs. Publish DS5Dongle's 0x32
+                                    // state lane first so routing, gain,
+                                    // lightbar, triggers, and ordinary rumble
+                                    // remain armed while media is streaming.
+                                    physicalOutputSequence.PrepareState(
+                                        latestTemplate, stateReport);
+                                    accepted = writer.TryWrite(stateReport,
+                                        out transportFault);
+                                    if (accepted)
+                                    {
+                                        physicalOutputSequence.Commit(
+                                            pairedAudio: false);
+                                        DualSenseBluetoothStateReportBuilder.
+                                            CaptureComparableState(
+                                                latestTemplate,
+                                                presentedComparableState);
+                                        presentedComparableStateAvailable =
+                                            true;
+                                    }
+                                }
+                            }
+
+                            if (transportFault)
+                            {
+                                stopRequested.Set();
+                                reservoirChanged.Set();
+                                acknowledgementAvailable.Set();
+                                break;
+                            }
+
+                            if (!accepted)
+                            {
+                                reservoirChanged.WaitOne(1);
+                                continue;
+                            }
+
+                            if (!transportGateReady &&
+                                !microphoneStatusReady)
+                            {
+                                continue;
+                            }
                         }
 
                         if (microphoneStatusReady)
@@ -2322,6 +2454,14 @@ namespace DS4Windows.InputDevices
                                 {
                                     physicalOutputSequence.Commit(
                                         pairedItem != null);
+                                    if (controlOnly)
+                                    {
+                                        DualSenseBluetoothStateReportBuilder.
+                                            CaptureComparableState(item.Report,
+                                                presentedComparableState);
+                                        presentedComparableStateAvailable =
+                                            true;
+                                    }
                                 }
 
                                 disposition = accepted ?
@@ -2523,7 +2663,8 @@ namespace DS4Windows.InputDevices
                             writer.MaximumNativeSubmissionTicks);
                         lock (pipeWriteLock)
                         {
-                            WriteFrame(pipe, MessageKind.ReportAcknowledged,
+                            WriteFrame(responsePipe,
+                                MessageKind.ReportAcknowledged,
                                 payload);
                         }
                     }
@@ -3466,6 +3607,16 @@ namespace DS4Windows.InputDevices
             WriteSonyCrc(destination);
         }
 
+        internal void PrepareState(byte[] initializationReport,
+            byte[] destination)
+        {
+            ValidateSource(initializationReport,
+                nameof(initializationReport));
+            EnsureInitialized(initializationReport);
+            DualSenseBluetoothStateReportBuilder.Build(
+                initializationReport, nextReportSequence, destination);
+        }
+
         internal void Commit(bool pairedAudio)
         {
             if (!initialized)
@@ -3511,6 +3662,151 @@ namespace DS4Windows.InputDevices
                 report, report.Length - CrcLength);
             BinaryPrimitives.WriteUInt32LittleEndian(report.AsSpan(
                 report.Length - CrcLength, CrcLength), crc);
+        }
+    }
+
+    /// <summary>
+    /// Projects the controller-state section of a combined 0x36 snapshot into
+    /// Sony's compact 0x32 state report. DS5Dongle uses this lane alongside
+    /// 0x39 media reports; a 0x39 contains only audio and haptics and therefore
+    /// cannot arm routing or carry lightbar/trigger/rumble state by itself.
+    /// </summary>
+    internal static class DualSenseBluetoothStateReportBuilder
+    {
+        internal const int ReportLength = 142;
+        internal const int StateOffset = 13;
+        internal const int StateLength = 63;
+        internal const int ComparableStateLength = StateLength;
+        private const int DestinationStateOffset = 4;
+        private const int HostTimestampStateOffset = 32;
+        private const int HostTimestampLength = sizeof(uint);
+        private const int StateFlag0Offset = 0;
+        private const int StateFlag1Offset = 1;
+        private const int MicrophoneVolumeOffset = 6;
+        private const byte MicrophoneVolumeValidityBit = 0x40;
+        private const byte MicrophoneMuteLedValidityBit = 0x01;
+        private const int CrcLength = sizeof(uint);
+
+        internal static void Build(byte[] combinedReport,
+            byte reportSequence, byte[] destination)
+        {
+            ValidateCombinedReport(combinedReport);
+            if (destination == null || destination.Length != ReportLength)
+            {
+                throw new ArgumentException(
+                    $"State report must be exactly {ReportLength} bytes.",
+                    nameof(destination));
+            }
+
+            Array.Clear(destination, 0, destination.Length);
+            destination[0] = 0x32;
+            destination[1] = (byte)((reportSequence & 0x0F) << 4);
+            destination[2] = 0x90;
+            destination[3] = StateLength;
+            Buffer.BlockCopy(combinedReport, StateOffset, destination,
+                DestinationStateOffset, StateLength);
+            WriteSonyCrc(destination);
+        }
+
+        internal static bool HasMeaningfulStateChanged(byte[] combinedReport,
+            byte[] comparableState, bool comparableStateAvailable)
+        {
+            ValidateCombinedReport(combinedReport);
+            if (comparableState == null ||
+                comparableState.Length != ComparableStateLength)
+            {
+                throw new ArgumentException(
+                    $"Comparable state must be exactly {ComparableStateLength} bytes.",
+                    nameof(comparableState));
+            }
+
+            if (!comparableStateAvailable)
+            {
+                return true;
+            }
+
+            for (int index = 0; index < StateLength; index++)
+            {
+                if (index >= HostTimestampStateOffset &&
+                    index < HostTimestampStateOffset + HostTimestampLength)
+                {
+                    continue;
+                }
+
+                if (NormalizeComparableByte(index,
+                        combinedReport[StateOffset + index]) !=
+                    NormalizeComparableByte(index, comparableState[index]))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        internal static void CaptureComparableState(byte[] combinedReport,
+            byte[] comparableState)
+        {
+            ValidateCombinedReport(combinedReport);
+            if (comparableState == null ||
+                comparableState.Length != ComparableStateLength)
+            {
+                throw new ArgumentException(
+                    $"Comparable state must be exactly {ComparableStateLength} bytes.",
+                    nameof(comparableState));
+            }
+
+            Buffer.BlockCopy(combinedReport, StateOffset, comparableState, 0,
+                StateLength);
+            Array.Clear(comparableState, HostTimestampStateOffset,
+                HostTimestampLength);
+            comparableState[StateFlag0Offset] &=
+                unchecked((byte)~MicrophoneVolumeValidityBit);
+            comparableState[StateFlag1Offset] &=
+                unchecked((byte)~MicrophoneMuteLedValidityBit);
+            comparableState[MicrophoneVolumeOffset] = 0;
+        }
+
+        private static byte NormalizeComparableByte(int index, byte value)
+        {
+            // Speaker snapshots intentionally strip the one-shot mic-volume
+            // and mute-LED validity fields while controller-update snapshots
+            // carry them. Those two snapshots alternated in the live trace,
+            // producing 460 redundant 0x32 packets in 30 seconds. Each short
+            // state packet occupied an L2CAP send opportunity that should have
+            // carried the next 0x39 audio pair. Mic transitions already have
+            // their ordered compact 0x32/control lane, so exclude only those
+            // transient fields while retaining routing, gains, triggers,
+            // rumble, and RGB state in this comparator.
+            return index switch
+            {
+                StateFlag0Offset => (byte)(value &
+                    ~MicrophoneVolumeValidityBit),
+                StateFlag1Offset => (byte)(value &
+                    ~MicrophoneMuteLedValidityBit),
+                MicrophoneVolumeOffset => 0,
+                _ => value,
+            };
+        }
+
+        private static void ValidateCombinedReport(byte[] report)
+        {
+            if (report == null ||
+                report.Length != DualSenseBluetoothAudioPacer.ReportLength ||
+                report[0] != 0x36)
+            {
+                throw new ArgumentException(
+                    "Source report must be a 398-byte DualSense 0x36 report.",
+                    nameof(report));
+            }
+        }
+
+        private static void WriteSonyCrc(byte[] report)
+        {
+            uint crc = DualSenseBluetoothAudioReportPatcher.ComputeSonyCrc(
+                report, ReportLength - CrcLength);
+            BinaryPrimitives.WriteUInt32LittleEndian(report.AsSpan(
+                ReportLength - CrcLength, CrcLength), crc);
         }
     }
 

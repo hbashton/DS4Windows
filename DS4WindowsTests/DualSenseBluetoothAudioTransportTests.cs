@@ -112,6 +112,88 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void PhysicalSequencePublishesDs5DongleStateBeforeAudio()
+        {
+            var sequence = new DualSenseBluetoothPhysicalOutputSequence();
+            byte[] initialization = CreateSpeakerReport(
+                0x00, 0x00, 0xA0, 0x22);
+            initialization[13] = 0xFD;
+            initialization[14] = 0xF7;
+            initialization[17] = 0x7F;
+            initialization[18] = 0x64;
+            initialization[57] = 0x12;
+            initialization[58] = 0x34;
+            initialization[59] = 0x56;
+            byte[] state = new byte[
+                DualSenseBluetoothStateReportBuilder.ReportLength];
+
+            sequence.PrepareState(initialization, state);
+
+            Assert.AreEqual((byte)0x32, state[0]);
+            Assert.AreEqual((byte)0xA0, state[1]);
+            Assert.AreEqual((byte)0x90, state[2]);
+            Assert.AreEqual((byte)63, state[3]);
+            CollectionAssert.AreEqual(
+                initialization.AsSpan(13, 63).ToArray(),
+                state.AsSpan(4, 63).ToArray());
+            uint expectedCrc =
+                DualSenseBluetoothAudioReportPatcher.ComputeSonyCrc(state,
+                    state.Length - sizeof(uint));
+            Assert.AreEqual(expectedCrc,
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    state.AsSpan(state.Length - sizeof(uint))));
+
+            sequence.Commit(pairedAudio: false);
+            Assert.AreEqual((byte)11, sequence.NextReportSequence);
+            Assert.AreEqual((byte)0x22, sequence.MediaPacketSequence,
+                "A controller-state report consumed the media counter.");
+        }
+
+        [TestMethod]
+        public void StateCoalescingIgnoresHostTimestampButDetectsLightbar()
+        {
+            byte[] report = CreateSpeakerReport(0, 0, 0);
+            byte[] comparable = new byte[
+                DualSenseBluetoothStateReportBuilder.ComparableStateLength];
+
+            Assert.IsTrue(DualSenseBluetoothStateReportBuilder.
+                HasMeaningfulStateChanged(report, comparable,
+                    comparableStateAvailable: false));
+            DualSenseBluetoothStateReportBuilder.CaptureComparableState(
+                report, comparable);
+            Assert.IsFalse(DualSenseBluetoothStateReportBuilder.
+                HasMeaningfulStateChanged(report, comparable,
+                    comparableStateAvailable: true));
+
+            // The speaker producer strips these one-shot microphone fields,
+            // while an ordered microphone-control snapshot carries them.
+            // Alternating between those templates must not consume audio
+            // report slots on the physical Bluetooth lane.
+            report[13] ^= 0x40;
+            report[14] ^= 0x01;
+            report[13 + 6] = 0x40;
+            Assert.IsFalse(DualSenseBluetoothStateReportBuilder.
+                HasMeaningfulStateChanged(report, comparable,
+                    comparableStateAvailable: true));
+
+            // SetStateData.HostTimestamp is state bytes 32-35. It changes on
+            // every normal output update and must not flood the 0x32 lane.
+            report[13 + 32] = 0x11;
+            report[13 + 33] = 0x22;
+            report[13 + 34] = 0x33;
+            report[13 + 35] = 0x44;
+            Assert.IsFalse(DualSenseBluetoothStateReportBuilder.
+                HasMeaningfulStateChanged(report, comparable,
+                    comparableStateAvailable: true));
+
+            report[13 + 44] = 0x80;
+            Assert.IsTrue(DualSenseBluetoothStateReportBuilder.
+                HasMeaningfulStateChanged(report, comparable,
+                    comparableStateAvailable: true),
+                "A lightbar change was coalesced out of the physical state lane.");
+        }
+
+        [TestMethod]
         public void PhysicalSequenceAdvancesOnlyAfterAcceptedPairedReport()
         {
             var sequence = new DualSenseBluetoothPhysicalOutputSequence();

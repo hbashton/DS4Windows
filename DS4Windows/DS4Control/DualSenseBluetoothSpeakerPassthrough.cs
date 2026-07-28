@@ -2111,6 +2111,7 @@ namespace DS4Windows
                         {
                             audioSegmentActive = true;
                             Interlocked.Increment(ref audioSegmentStarts);
+                            device.RefillBluetoothAudioControllerReserve();
                         }
                     }
 

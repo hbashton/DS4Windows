@@ -87,13 +87,14 @@ namespace DS4Windows
                     if (safeReadHandle == null || safeReadHandle.IsClosed || safeReadHandle.IsInvalid)
                     {
                         safeReadHandle?.Dispose();
-                        // DS4 Bluetooth audio is a distinct HID file session in
-                        // every working Windows reference. Keep the primary
+                        // Sony Bluetooth audio is a distinct HID file session in
+                        // the working Windows references. Keep the primary
                         // handle shareable inside this HidHide-protected process
                         // so the dedicated audio session can coexist with input.
-                        bool shareForDs4Audio = IsSonyBluetoothDualShock4();
+                        bool shareForSonyAudio =
+                            IsSonyBluetoothAudioController();
                         safeReadHandle = OpenHandle(_devicePath,
-                            exclusive && !shareForDs4Audio,
+                            exclusive && !shareForSonyAudio,
                             enumerate: false);
                     }
                 }
@@ -112,7 +113,7 @@ namespace DS4Windows
         internal bool TryOpenDedicatedAudioHandle(out SafeFileHandle handle)
         {
             handle = null;
-            if (!IsSonyBluetoothDualShock4())
+            if (!IsSonyBluetoothAudioController())
             {
                 return false;
             }
@@ -137,11 +138,13 @@ namespace DS4Windows
             }
         }
 
-        private bool IsSonyBluetoothDualShock4()
+        private bool IsSonyBluetoothAudioController()
         {
             if (_deviceAttributes?.VendorId != 0x054C ||
                 (_deviceAttributes.ProductId != 0x05C4 &&
-                 _deviceAttributes.ProductId != 0x09CC))
+                 _deviceAttributes.ProductId != 0x09CC &&
+                 _deviceAttributes.ProductId != 0x0CE6 &&
+                 _deviceAttributes.ProductId != 0x0DF2))
             {
                 return false;
             }

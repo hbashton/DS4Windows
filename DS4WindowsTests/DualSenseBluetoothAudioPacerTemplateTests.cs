@@ -337,6 +337,37 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
+        public void SchedulerRefillsControllerReserveWithoutResettingClock()
+        {
+            const long qpcFrequency = 10_000_000;
+            const long startQpc = 1_000_000;
+            var scheduler = new DualSenseBluetoothAudioPacerScheduler(
+                qpcFrequency);
+            scheduler.Start(startQpc);
+
+            long previous = scheduler.NextDeadlineQpc;
+            scheduler.AdvanceAfterSend(previous);
+            Assert.AreEqual(106_666,
+                scheduler.NextDeadlineQpc - previous);
+
+            scheduler.RefillControllerReserve(3);
+            for (int index = 0; index < 3; index++)
+            {
+                previous = scheduler.NextDeadlineQpc;
+                scheduler.AdvanceAfterSend(previous);
+                Assert.AreEqual(50_000,
+                    scheduler.NextDeadlineQpc - previous,
+                    "A requested reserve refill must use the bounded transfer cadence.");
+            }
+
+            previous = scheduler.NextDeadlineQpc;
+            scheduler.AdvanceAfterSend(previous);
+            Assert.AreEqual(106_667,
+                scheduler.NextDeadlineQpc - previous,
+                "The refill must resume the existing rational phase instead of restarting it.");
+        }
+
+        [TestMethod]
         public void SchedulerKeepsContinuousAudioClockWhenInputArrivalPhaseMoves()
         {
             const long qpcFrequency = 10_000_000;

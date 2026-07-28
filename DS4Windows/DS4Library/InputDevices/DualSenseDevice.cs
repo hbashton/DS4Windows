@@ -4238,9 +4238,7 @@ namespace DS4Windows.InputDevices
             combined[BluetoothCombinedStateFlag0Offset] |=
                 DualSenseOutputFlag0AudioControlEnable;
             combined[BluetoothCombinedStateHeadphoneVolumeOffset] =
-                headsetOnlyAudio ?
-                    MapDualSenseHeadphoneVolume(headphoneVolume) :
-                    headphoneVolume;
+                MapDualSenseHeadphoneVolume(headphoneVolume);
             combined[BluetoothCombinedStateSpeakerVolumeOffset] =
                 headsetOnlyAudio ? (byte)0 :
                     MapDualSenseSpeakerVolume(profileVolume);

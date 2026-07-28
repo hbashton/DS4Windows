@@ -497,12 +497,17 @@ namespace DS4Windows.InputDevices
         private readonly object bluetoothPadForgeGameStateLock = new object();
         private readonly byte[] latestBluetoothPadForgeGameState =
             new byte[BluetoothCombinedNativeStateLength];
+        private readonly byte[] lastBluetoothPadForgePreparedState =
+            new byte[BluetoothCombinedNativeStateLength];
         private bool bluetoothPadForgeGameStateAvailable;
+        private bool bluetoothPadForgePreparedStateAvailable;
         private bool bluetoothPadForgeGameStateWriteScheduled;
         private long bluetoothPadForgeGameStateScheduledSession;
         private long bluetoothPadForgeGameStateWrites;
         private long bluetoothPadForgeGameStateDuplicates;
         private long bluetoothPadForgeGameStateCoalesced;
+        private long bluetoothPadForgePreparedStateWrites;
+        private long bluetoothPadForgePreparedStateDuplicates;
         private int bluetoothOutputTransportStopping;
         private int bluetoothMicrophoneStreamingRequested;
         private int bluetoothMicrophoneControlUpdatePending;
@@ -850,6 +855,12 @@ namespace DS4Windows.InputDevices
         internal long BluetoothPadForgeGameStateCoalesced =>
             Interlocked.Read(ref bluetoothPadForgeGameStateCoalesced);
 
+        internal long BluetoothPadForgePreparedStateWrites =>
+            Interlocked.Read(ref bluetoothPadForgePreparedStateWrites);
+
+        internal long BluetoothPadForgePreparedStateDuplicates =>
+            Interlocked.Read(ref bluetoothPadForgePreparedStateDuplicates);
+
         internal bool ActivateBluetoothPadForgeSpeakerTransport(
             long speakerSession)
         {
@@ -925,7 +936,10 @@ namespace DS4Windows.InputDevices
             {
                 Array.Clear(latestBluetoothPadForgeGameState, 0,
                     latestBluetoothPadForgeGameState.Length);
+                Array.Clear(lastBluetoothPadForgePreparedState, 0,
+                    lastBluetoothPadForgePreparedState.Length);
                 bluetoothPadForgeGameStateAvailable = false;
+                bluetoothPadForgePreparedStateAvailable = false;
                 bluetoothPadForgeGameStateWriteScheduled = false;
                 bluetoothPadForgeGameStateScheduledSession = 0;
             }
@@ -3927,6 +3941,11 @@ namespace DS4Windows.InputDevices
                             idleReportDescription: "controller state",
                             out _);
                 }
+                else if (conType == ConnectionType.BT &&
+                    BluetoothPadForgeSpeakerTransportEnabled)
+                {
+                    published = TryWriteBluetoothPadForgePreparedState();
+                }
                 else
                 {
                     WriteReport();
@@ -3945,6 +3964,44 @@ namespace DS4Windows.InputDevices
 
             outputDirty = false;
             currentHap.dirty = false;
+        }
+
+        /// <summary>
+        /// PadForge sends static user effects only when they change. DS4Windows'
+        /// physical input loop can mark an otherwise identical prepared state
+        /// dirty at controller cadence, so apply the same state-based rule at
+        /// the final 0x31 boundary rather than spending one Bluetooth report per
+        /// input sample. Genuine rumble, trigger, lightbar, routing, and LED
+        /// changes still write immediately.
+        /// </summary>
+        private bool TryWriteBluetoothPadForgePreparedState()
+        {
+            byte[] state = new byte[BluetoothCombinedNativeStateLength];
+            Array.Copy(outputReport, 2, state, 0, state.Length);
+            lock (bluetoothPadForgeGameStateLock)
+            {
+                if (bluetoothPadForgePreparedStateAvailable &&
+                    BuffersEqual(lastBluetoothPadForgePreparedState, state))
+                {
+                    Interlocked.Increment(
+                        ref bluetoothPadForgePreparedStateDuplicates);
+                    return true;
+                }
+            }
+
+            if (!WriteReport())
+            {
+                return false;
+            }
+
+            lock (bluetoothPadForgeGameStateLock)
+            {
+                Array.Copy(state, lastBluetoothPadForgePreparedState,
+                    state.Length);
+                bluetoothPadForgePreparedStateAvailable = true;
+            }
+            Interlocked.Increment(ref bluetoothPadForgePreparedStateWrites);
+            return true;
         }
 
         private void DrainQueuedInputEvents()

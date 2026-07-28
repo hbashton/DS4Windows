@@ -50,7 +50,8 @@ namespace DS4Windows
             DualSenseSpeakerCompression compression, byte bassBoost,
             string captureEndpointId, OutContType emulatedControllerType,
             ViiperOutDevice directSpeakerSource = null,
-            bool headsetOnlyAudio = false)
+            bool headsetOnlyAudio = false,
+            Func<ViiperOutDevice> directSpeakerSourceResolver = null)
         {
             if (slot < 0 || slot >= slots.Length)
             {
@@ -61,25 +62,29 @@ namespace DS4Windows
             int generation;
             ControllerAudioEndpointKind endpointKind =
                 DualSenseAudioPassthrough.GetEndpointKind(emulatedControllerType);
+            ViiperOutDevice currentDirectSpeakerSource =
+                ResolveDirectSpeakerSource(directSpeakerSourceResolver,
+                    directSpeakerSource);
             DirectSpeakerRouteDecision initialRoute =
                 DualSenseAudioPassthrough.EvaluateDirectSpeakerRoute(
-                    captureEndpointId, endpointKind, directSpeakerSource);
+                    captureEndpointId, endpointKind,
+                    currentDirectSpeakerSource);
             if (initialRoute == DirectSpeakerRouteDecision.Loopback)
             {
-                directSpeakerSource = null;
+                currentDirectSpeakerSource = null;
             }
             lock (syncRoot)
             {
                 if (slots[slot]?.Matches(device, speakerVolume, compression,
                     bassBoost, captureEndpointId, endpointKind,
-                    directSpeakerSource, headsetOnlyAudio) == true)
+                    currentDirectSpeakerSource, headsetOnlyAudio) == true)
                 {
                     return;
                 }
 
                 if (pendingStarts[slot]?.Matches(device, speakerVolume,
                     compression, bassBoost, captureEndpointId,
-                    endpointKind, directSpeakerSource,
+                    endpointKind, currentDirectSpeakerSource,
                     headsetOnlyAudio) == true)
                 {
                     return;
@@ -91,7 +96,7 @@ namespace DS4Windows
                 generation = ++startGenerations[slot];
                 pendingStarts[slot] = new StartRequest(device, speakerVolume,
                     compression, bassBoost, captureEndpointId, endpointKind,
-                    directSpeakerSource, headsetOnlyAudio, generation);
+                    currentDirectSpeakerSource, headsetOnlyAudio, generation);
             }
 
             AppLogger.LogToGui(
@@ -105,7 +110,8 @@ namespace DS4Windows
                     previous?.Dispose();
                     StartWorker(slot, device, speakerVolume, compression,
                         bassBoost, captureEndpointId, endpointKind,
-                        directSpeakerSource, headsetOnlyAudio, generation);
+                        directSpeakerSource, directSpeakerSourceResolver,
+                        headsetOnlyAudio, generation);
                 }
             }, $"DualShock 4 audio startup {slot + 1}");
         }
@@ -188,11 +194,14 @@ namespace DS4Windows
         private void StartWorker(int slot, DS4Device device, byte speakerVolume,
             DualSenseSpeakerCompression compression, byte bassBoost,
             string captureEndpointId, ControllerAudioEndpointKind endpointKind,
-            ViiperOutDevice directSpeakerSource, bool headsetOnlyAudio,
+            ViiperOutDevice directSpeakerSource,
+            Func<ViiperOutDevice> directSpeakerSourceResolver,
+            bool headsetOnlyAudio,
             int generation)
         {
             const int attempts = 20;
             Exception lastError = null;
+            bool prolongedWaitLogged = false;
 
             // Apply this before opening the audio HID lane. Reboots and power
             // plan changes can silently restore selective suspend, producing
@@ -201,7 +210,7 @@ namespace DS4Windows
             DualShock4BluetoothPowerPolicy.
                 EnsureDisabledForActivePowerScheme();
 
-            for (int attempt = 0; attempt < attempts; attempt++)
+            for (int attempt = 0; ; attempt++)
             {
                 lock (syncRoot)
                 {
@@ -216,20 +225,48 @@ namespace DS4Windows
                     }
                 }
 
+                ViiperOutDevice currentDirectSpeakerSource =
+                    ResolveDirectSpeakerSource(directSpeakerSourceResolver,
+                        directSpeakerSource);
+                bool directRouteExpected = directSpeakerSourceResolver != null &&
+                    !ProcessLoopbackWaveCapture.IsProcessEndpointId(
+                        captureEndpointId) &&
+                    !string.Equals(captureEndpointId,
+                        DualSenseAudioPassthrough.DefaultSystemAudioEndpointId,
+                        StringComparison.Ordinal);
+                if (directRouteExpected && currentDirectSpeakerSource == null)
+                {
+                    lastError = new InvalidOperationException(
+                        "The current VIIPER controller audio stream is being recreated.");
+                    if (!prolongedWaitLogged && attempt + 1 >= attempts)
+                    {
+                        prolongedWaitLogged = true;
+                        LogProlongedWait(lastError);
+                    }
+                    Thread.Sleep(prolongedWaitLogged ? 1000 : 500);
+                    continue;
+                }
+
                 DirectSpeakerRouteDecision route =
                     DualSenseAudioPassthrough.EvaluateDirectSpeakerRoute(
-                        captureEndpointId, endpointKind, directSpeakerSource);
+                        captureEndpointId, endpointKind,
+                        currentDirectSpeakerSource);
                 if (route == DirectSpeakerRouteDecision.Pending)
                 {
                     lastError = new InvalidOperationException(
                         "The selected VIIPER controller audio endpoint is still enumerating or its direct stream is recovering.");
-                    Thread.Sleep(500);
+                    if (!prolongedWaitLogged && attempt + 1 >= attempts)
+                    {
+                        prolongedWaitLogged = true;
+                        LogProlongedWait(lastError);
+                    }
+                    Thread.Sleep(prolongedWaitLogged ? 1000 : 500);
                     continue;
                 }
 
                 ViiperOutDevice activeDirectSpeakerSource =
                     route == DirectSpeakerRouteDecision.Direct ?
-                        directSpeakerSource : null;
+                        currentDirectSpeakerSource : null;
                 var playback = new DualShock4BluetoothSpeakerPassthrough(device,
                     speakerVolume, compression, bassBoost, captureEndpointId,
                     endpointKind, activeDirectSpeakerSource,
@@ -270,18 +307,37 @@ namespace DS4Windows
 
                     Thread.Sleep(500);
                 }
+
+                if (!prolongedWaitLogged && attempt + 1 >= attempts)
+                {
+                    prolongedWaitLogged = true;
+                    LogProlongedWait(lastError);
+                }
+            }
+        }
+
+        private static void LogProlongedWait(Exception lastError)
+        {
+            AppLogger.LogToGui(
+                $"DualShock 4 Bluetooth speaker is still waiting for its current VIIPER audio stream and will keep recovering in the background: {lastError?.Message}",
+                true);
+        }
+
+        private static ViiperOutDevice ResolveDirectSpeakerSource(
+            Func<ViiperOutDevice> resolver, ViiperOutDevice fallback)
+        {
+            if (resolver == null)
+            {
+                return fallback;
             }
 
-            AppLogger.LogToGui(
-                $"DualShock 4 Bluetooth speaker passthrough could not start after waiting for the selected audio endpoint: {lastError?.Message}",
-                true);
-            lock (syncRoot)
+            try
             {
-                if (generation == startGenerations[slot])
-                {
-                    pendingStarts[slot] = null;
-                    startFailed[slot] = true;
-                }
+                return resolver();
+            }
+            catch
+            {
+                return null;
             }
         }
 

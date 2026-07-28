@@ -492,6 +492,8 @@ namespace DS4Windows.InputDevices
         private long bluetoothCombinedHapticsPairedWrites;
         private long bluetoothCombinedSpeakerFallbackWrites;
         private int bluetoothCombinedOutputTransportEnabled;
+        private int bluetoothPadForgeSpeakerTransportEnabled;
+        private long bluetoothPadForgeSpeakerSession;
         private int bluetoothOutputTransportStopping;
         private int bluetoothMicrophoneStreamingRequested;
         private int bluetoothMicrophoneControlUpdatePending;
@@ -824,12 +826,92 @@ namespace DS4Windows.InputDevices
         public bool BluetoothCombinedOutputTransportEnabled =>
             Volatile.Read(ref bluetoothCombinedOutputTransportEnabled) != 0;
 
+        internal bool BluetoothPadForgeSpeakerTransportEnabled =>
+            Volatile.Read(ref bluetoothPadForgeSpeakerTransportEnabled) != 0;
+
+        internal bool BluetoothMicrophoneStreamingRequested =>
+            Volatile.Read(ref bluetoothMicrophoneStreamingRequested) != 0;
+
+        internal bool ActivateBluetoothPadForgeSpeakerTransport(
+            long speakerSession)
+        {
+            if (conType != ConnectionType.BT || speakerSession == 0)
+            {
+                LastBluetoothHapticsWriteStatus =
+                    "Rejected: PadForge speaker transport requires a Bluetooth DualSense session.";
+                return false;
+            }
+
+            lock (bluetoothCombinedTransportWriteLock)
+            {
+                if (Volatile.Read(ref bluetoothOutputTransportStopping) != 0 ||
+                    bluetoothActiveSpeakerSession != speakerSession)
+                {
+                    LastBluetoothHapticsWriteStatus =
+                        "Rejected: the DualSense speaker session is not active.";
+                    return false;
+                }
+
+                // Publish the mode gate before retiring the 0x36 owner. Any
+                // concurrent VIIPER feedback must stop at the PadForge-aware
+                // branches below rather than recreating combined transport.
+                Volatile.Write(ref bluetoothPadForgeSpeakerTransportEnabled, 1);
+                bluetoothPadForgeSpeakerSession = speakerSession;
+                StopBluetoothAudioPacerLocked();
+                if (!DisposeBluetoothRealtimeWriter(
+                        BluetoothWriterOwnershipHandoffTimeoutMilliseconds))
+                {
+                    Volatile.Write(
+                        ref bluetoothPadForgeSpeakerTransportEnabled, 0);
+                    bluetoothPadForgeSpeakerSession = 0;
+                    LastBluetoothHapticsWriteStatus =
+                        "Could not enter 0x35 mode while the previous 0x36 HID owner is retiring.";
+                    return false;
+                }
+
+                Volatile.Write(ref bluetoothCombinedOutputTransportEnabled, 0);
+                lock (bluetoothSpeakerClockClaimLock)
+                {
+                    bluetoothSpeakerClockActiveClaim = 0;
+                    bluetoothSpeakerClockLeaseExpiryTimestamp = 0;
+                }
+                outputDirty = true;
+                LastBluetoothHapticsWriteStatus =
+                    "DualSense PadForge-style 0x35 speaker transport is active.";
+                return true;
+            }
+        }
+
+        internal void DeactivateBluetoothPadForgeSpeakerTransport(
+            long speakerSession)
+        {
+            lock (bluetoothCombinedTransportWriteLock)
+            {
+                if (speakerSession == 0 ||
+                    bluetoothPadForgeSpeakerSession != speakerSession)
+                {
+                    return;
+                }
+
+                bluetoothPadForgeSpeakerSession = 0;
+                Volatile.Write(ref bluetoothPadForgeSpeakerTransportEnabled, 0);
+                outputDirty = true;
+            }
+        }
+
         public bool EnsureBluetoothCombinedOutputTransport()
         {
             if (conType != ConnectionType.BT)
             {
                 LastBluetoothHapticsWriteStatus =
                     $"Rejected: controller connection type is {conType}, not Bluetooth.";
+                return false;
+            }
+
+            if (BluetoothPadForgeSpeakerTransportEnabled)
+            {
+                LastBluetoothHapticsWriteStatus =
+                    "Combined 0x36 transport is disabled while the PadForge-style 0x35 speaker lane owns audio.";
                 return false;
             }
 
@@ -2711,7 +2793,8 @@ namespace DS4Windows.InputDevices
         private bool UsesCombinedBluetoothOutputTransport()
         {
             return conType == ConnectionType.BT &&
-                BluetoothCombinedOutputTransportEnabled;
+                BluetoothCombinedOutputTransportEnabled &&
+                !BluetoothPadForgeSpeakerTransportEnabled;
         }
 
         protected override void StopOutputUpdate()
@@ -2724,6 +2807,11 @@ namespace DS4Windows.InputDevices
             Interlocked.Exchange(ref bluetoothOutputTransportStopping, 1);
             lock (bluetoothCombinedTransportWriteLock)
             {
+                bool wasPadForgeTransport =
+                    Volatile.Read(
+                        ref bluetoothPadForgeSpeakerTransportEnabled) != 0;
+                Volatile.Write(ref bluetoothPadForgeSpeakerTransportEnabled, 0);
+                bluetoothPadForgeSpeakerSession = 0;
                 StopBluetoothAudioPacerLocked();
                 Volatile.Write(ref bluetoothAudioPacerRetryAfterTimestamp, 0);
                 lock (bluetoothSpeakerClockClaimLock)
@@ -2732,11 +2820,19 @@ namespace DS4Windows.InputDevices
                     bluetoothSpeakerClockLeaseExpiryTimestamp = 0;
                 }
 
-                if (conType == ConnectionType.BT &&
+                if (!wasPadForgeTransport && conType == ConnectionType.BT &&
                     (Volatile.Read(ref bluetoothMicrophoneStreamingRequested) != 0 ||
                         Volatile.Read(ref bluetoothMicrophoneControlUpdatePending) != 0))
                 {
                     DisableBluetoothMicrophoneStreamingForShutdown();
+                }
+                else if (wasPadForgeTransport)
+                {
+                    Volatile.Write(ref bluetoothMicrophoneStreamingRequested, 0);
+                    Interlocked.Exchange(
+                        ref bluetoothMicrophoneControlUpdatePending, 0);
+                    Interlocked.Exchange(
+                        ref bluetoothMicrophoneLastFrameTimestamp, 0);
                 }
 
                 bool writerReleased = DisposeBluetoothRealtimeWriter(
@@ -3341,6 +3437,18 @@ namespace DS4Windows.InputDevices
                 return false;
             }
 
+            if (BluetoothPadForgeSpeakerTransportEnabled)
+            {
+                // The 334-byte 0x35 report has no room for the 64-byte native
+                // haptics lane. Do not silently restart 0x36 and displace a
+                // speaker frame; the caller can still fall back to the native
+                // 0x31 state/rumble path while the coordinated 0x32 extension
+                // is brought up independently.
+                LastBluetoothHapticsWriteStatus =
+                    "Native 0x32 haptics are deferred while validating the isolated 0x35 speaker lane.";
+                return false;
+            }
+
             if (!EnsureBluetoothCombinedOutputTransport())
             {
                 return false;
@@ -3418,6 +3526,16 @@ namespace DS4Windows.InputDevices
             {
                 LastBluetoothHapticsWriteStatus =
                     "Rejected: invalid combined Bluetooth haptics/audio report.";
+                return false;
+            }
+
+            if (BluetoothPadForgeSpeakerTransportEnabled)
+            {
+                // Returning false lets VIIPER continue through its ordinary
+                // native-state fallback. Never let a virtual 0x36 packet take
+                // ownership away from the active physical 0x35 stream.
+                LastBluetoothHapticsWriteStatus =
+                    "Virtual combined feedback was left on the 0x31 fallback while 0x35 audio is active.";
                 return false;
             }
 
@@ -4110,6 +4228,27 @@ namespace DS4Windows.InputDevices
                 LastBluetoothMicrophoneWriteStatus =
                     $"Rejected: controller connection type is {conType}, not Bluetooth.";
                 return false;
+            }
+
+            if (BluetoothPadForgeSpeakerTransportEnabled)
+            {
+                // Report 0x35 owns the input mask while this mode is active.
+                // Publish the request lock-free so the next 10.667 ms audio
+                // report switches FE <-> FF without restarting either lane.
+                Volatile.Write(ref bluetoothMicrophoneStreamingRequested,
+                    enabled ? 1 : 0);
+                Interlocked.Exchange(
+                    ref bluetoothMicrophoneControlUpdatePending, 0);
+                if (!enabled)
+                {
+                    Interlocked.Exchange(
+                        ref bluetoothMicrophoneLastFrameTimestamp, 0);
+                }
+                outputDirty = true;
+                LastBluetoothMicrophoneWriteStatus = enabled ?
+                    "Microphone input will be armed on the next 0x35 speaker report." :
+                    "Microphone input will be disabled on the next 0x35 speaker report.";
+                return true;
             }
 
             // Do not hold the combined transport lock across helper/process or

@@ -653,6 +653,7 @@ namespace DS4Windows
         private readonly object syncRoot = new object();
         private readonly object directPcmSync = new object();
         private readonly DualSenseDevice device;
+        private readonly bool usePadForgeSpeakerTransport;
         private readonly bool headsetOnlyAudio;
         private readonly string sourceEndpointId;
         private readonly ControllerAudioEndpointKind sourceEndpointKind;
@@ -694,6 +695,8 @@ namespace DS4Windows
         private Thread capturePump;
         private Thread pacerLifecycleWorker;
         private IOpusEncoder opusEncoder;
+        private DualSenseBluetoothPadForgeSpeakerTransport
+            padForgeSpeakerTransport;
         private volatile bool stopping;
         private int captureRingReadIndex;
         private int captureRingWriteIndex;
@@ -771,6 +774,10 @@ namespace DS4Windows
             ViiperOutDevice directSpeakerSource = null)
         {
             this.device = device ?? throw new ArgumentNullException(nameof(device));
+            usePadForgeSpeakerTransport = !string.Equals(
+                Environment.GetEnvironmentVariable(
+                    "DS4WINDOWS_DUALSENSE_AUDIO_TRANSPORT"),
+                "547", StringComparison.OrdinalIgnoreCase);
             headsetOnlyAudio = device.HeadsetOnlyAudio;
             speakerSessionId = this.device.CreateBluetoothSpeakerSession();
             this.speakerVolume = speakerVolume;
@@ -880,16 +887,25 @@ namespace DS4Windows
                 throw new InvalidOperationException("Bluetooth speaker passthrough requires a physical Sony DualSense or DualSense Edge.");
             }
 
-            if (!device.EnsureBluetoothCombinedOutputTransport())
-            {
-                throw new InvalidOperationException(
-                    $"Could not initialize the DualSense combined Bluetooth transport: {device.LastBluetoothHapticsWriteStatus}");
-            }
-
             if (!device.ActivateBluetoothSpeakerSession(speakerSessionId))
             {
                 throw new InvalidOperationException(
                     "Could not activate the DualSense Bluetooth speaker session.");
+            }
+
+            if (usePadForgeSpeakerTransport)
+            {
+                if (!device.ActivateBluetoothPadForgeSpeakerTransport(
+                        speakerSessionId))
+                {
+                    throw new InvalidOperationException(
+                        $"Could not initialize the DualSense 0x35 transport: {device.LastBluetoothHapticsWriteStatus}");
+                }
+            }
+            else if (!device.EnsureBluetoothCombinedOutputTransport())
+            {
+                throw new InvalidOperationException(
+                    $"Could not initialize the DualSense combined Bluetooth transport: {device.LastBluetoothHapticsWriteStatus}");
             }
 
             // Preserve RC3's proven internal-speaker startup byte-for-byte.
@@ -897,6 +913,11 @@ namespace DS4Windows
             // 0x96 AUX decoder and must never touch the 0x93 speaker path.
             if (headsetOnlyAudio && !device.RearmBluetoothHeadsetOutputRoute())
             {
+                if (usePadForgeSpeakerTransport)
+                {
+                    device.DeactivateBluetoothPadForgeSpeakerTransport(
+                        speakerSessionId);
+                }
                 throw new InvalidOperationException(
                     $"Could not arm the DualSense AUX output route: {device.LastBluetoothHapticsWriteStatus}");
             }
@@ -904,16 +925,27 @@ namespace DS4Windows
             try
             {
                 opusEncoder = CreateSpeakerOpusEncoder();
-                // Start the physical 0x36 lane before an application produces
-                // sound. A continuous valid Opus-silence carrier lets the
-                // Bluetooth link settle and the controller reserve fill while
-                // idle, so the first real frame replaces silence instead of
-                // paying the adapter's measured startup stall.
-                Volatile.Write(ref startupWarmupFramesRemaining,
-                    StartupWarmupReportCount);
-                StartPacerLifecycleWorker();
-                RequestPacerLifecyclePreparation(recovery: false,
-                    gateSource: true);
+                if (usePadForgeSpeakerTransport)
+                {
+                    if (!DualSenseBluetoothPadForgeSpeakerTransport.TryCreate(
+                            device, headsetOnlyAudio,
+                            out padForgeSpeakerTransport,
+                            out string transportError))
+                    {
+                        throw new InvalidOperationException(transportError);
+                    }
+                }
+                else
+                {
+                    // Start the physical 0x36 lane before an application
+                    // produces sound. The six fixed-size warmup reports are a
+                    // property of the saved 547-byte path, not report 0x35.
+                    Volatile.Write(ref startupWarmupFramesRemaining,
+                        StartupWarmupReportCount);
+                    StartPacerLifecycleWorker();
+                    RequestPacerLifecyclePreparation(recovery: false,
+                        gateSource: true);
+                }
 
                 if (directSpeakerSource != null)
                 {
@@ -939,7 +971,9 @@ namespace DS4Windows
                     worker = new Thread(StreamLoop)
                     {
                         IsBackground = true,
-                        Name = "DualSense Bluetooth direct speaker audio",
+                        Name = usePadForgeSpeakerTransport ?
+                            "DualSense Bluetooth 0x35 direct speaker audio" :
+                            "DualSense Bluetooth direct speaker audio",
                         Priority = ThreadPriority.Highest,
                     };
                     // Establish the reusable HID owner while the endpoint is
@@ -947,7 +981,7 @@ namespace DS4Windows
                     // speaker-only segment without blocking profile/UI setup.
                     worker.Start();
                     AppLogger.LogToGui(
-                        $"DualSense Bluetooth speaker passthrough started: direct VIIPER PCM ({directSpeakerSampleRate / 1000} kHz source, no WASAPI loopback, phase-continuous clock correction)",
+                        $"DualSense Bluetooth speaker passthrough started: direct VIIPER PCM ({directSpeakerSampleRate / 1000} kHz source, no WASAPI loopback, phase-continuous clock correction, transport={(usePadForgeSpeakerTransport ? "PadForge-style 0x35/eight native writes" : "saved 547-byte combined")})",
                         false);
                     return;
                 }
@@ -980,7 +1014,9 @@ namespace DS4Windows
                 worker = new Thread(StreamLoop)
                 {
                     IsBackground = true,
-                    Name = "DualSense Bluetooth speaker audio",
+                    Name = usePadForgeSpeakerTransport ?
+                        "DualSense Bluetooth 0x35 speaker audio" :
+                        "DualSense Bluetooth speaker audio",
                     Priority = ThreadPriority.Highest,
                 };
                 capture.StartRecording();
@@ -1186,6 +1222,7 @@ namespace DS4Windows
                     bool speakerAudible = HasAudiblePcm16(payload,
                         speakerPcmOffset, speakerPcmLength);
                     if (speakerAudible &&
+                        !usePadForgeSpeakerTransport &&
                         !device.BeginBluetoothAtomicSpeakerFrame(
                             speakerSessionId))
                     {
@@ -2126,6 +2163,12 @@ namespace DS4Windows
 
         private void StreamLoop()
         {
+            if (usePadForgeSpeakerTransport)
+            {
+                StreamPadForgeSpeakerLoop();
+                return;
+            }
+
             timeBeginPeriod(1);
             IntPtr mmcssHandle = RegisterMultimediaScheduler();
             IntPtr highResolutionTimer = CreateHighResolutionTimer();
@@ -2459,6 +2502,111 @@ namespace DS4Windows
                     CloseHandle(highResolutionTimer);
                 }
 
+                timeEndPeriod(1);
+            }
+        }
+
+        /// <summary>
+        /// PadForge's physical contract is deliberately simpler than the
+        /// saved 547-byte path: consume one source interval, encode one Opus
+        /// frame, and submit one 0x35 report on an absolute 10.667 ms clock.
+        /// A late tick is skipped rather than repaid with a burst, and a busy
+        /// eighth native slot drops only that current report.
+        /// </summary>
+        private void StreamPadForgeSpeakerLoop()
+        {
+            timeBeginPeriod(1);
+            IntPtr mmcssHandle = RegisterMultimediaScheduler();
+            IntPtr highResolutionTimer = CreateHighResolutionTimer();
+            long cadenceTicks = Math.Max(1, (long)Math.Round(
+                BluetoothSpeakerCadenceMs * Stopwatch.Frequency / 1000.0));
+            long nextTick = Stopwatch.GetTimestamp();
+            try
+            {
+                while (!stopping)
+                {
+                    Array.Clear(frame, 0, frame.Length);
+                    bool wasAudioSegmentActive = audioSegmentActive;
+                    bool captured = TryFillOutputFrame(out _);
+                    if (!captured)
+                    {
+                        Interlocked.Increment(ref captureUnderruns);
+                        if (wasAudioSegmentActive)
+                        {
+                            Interlocked.Increment(ref activeCaptureUnderruns);
+                            ResetDirectPcmBalanceWindow();
+                        }
+                        FadeOutCaptureUnderrun();
+                        fadeInAfterCaptureUnderrun = true;
+                    }
+                    else if (fadeInAfterCaptureUnderrun)
+                    {
+                        FadeInRecoveredCapture();
+                        fadeInAfterCaptureUnderrun = false;
+                    }
+
+                    long now = Stopwatch.GetTimestamp();
+                    bool audible = captured &&
+                        HasAudibleSamples(frame, frame.Length);
+                    if (audible)
+                    {
+                        Interlocked.Exchange(ref lastAudibleTimestamp, now);
+                        if (!audioSegmentActive)
+                        {
+                            audioSegmentActive = true;
+                            Interlocked.Increment(ref audioSegmentStarts);
+                        }
+                    }
+
+                    long audibleTimestamp = Interlocked.Read(
+                        ref lastAudibleTimestamp);
+                    bool recentlyAudible = audibleTimestamp != 0 &&
+                        now >= audibleTimestamp &&
+                        now - audibleTimestamp <= Stopwatch.Frequency *
+                            IdleKeepAliveMs / 1000;
+                    bool submitted = false;
+                    if (audioSegmentActive && recentlyAudible)
+                    {
+                        speakerProcessor.Process(frame, FrameSamples);
+                        int tailOffset = (FrameSamples - 1) * Channels;
+                        previousOutputLeft = frame[tailOffset];
+                        previousOutputRight = frame[tailOffset + 1];
+                        preOpusPcmTrace?.Write(frame, frame.Length);
+                        if (EncodeCurrentFrame())
+                        {
+                            submitted = SendEncodedFrame();
+                            if (submitted)
+                            {
+                                Interlocked.Increment(ref framesSent);
+                                if (!audible)
+                                {
+                                    Interlocked.Increment(ref silentFramesSent);
+                                }
+                            }
+                        }
+                    }
+                    else if (audioSegmentActive)
+                    {
+                        audioSegmentActive = false;
+                        Interlocked.Exchange(ref lastRawAudibleTimestamp, 0);
+                        ResetCapturePipelineAtSegmentBoundary();
+                        Interlocked.Increment(ref audioSegmentStops);
+                    }
+
+                    ScheduleNextStreamTick(submitted, ref nextTick,
+                        cadenceTicks, highResolutionTimer);
+                }
+            }
+            finally
+            {
+                if (mmcssHandle != IntPtr.Zero)
+                {
+                    AvRevertMmThreadCharacteristics(mmcssHandle);
+                }
+                if (highResolutionTimer != IntPtr.Zero)
+                {
+                    CloseHandle(highResolutionTimer);
+                }
                 timeEndPeriod(1);
             }
         }
@@ -2960,11 +3108,33 @@ namespace DS4Windows
         {
             try
             {
-                bool accepted = !stopping &&
-                    device.SetBluetoothSpeakerAudioFrame(opusFrame, OpusBytes,
-                        speakerSessionId,
-                        Interlocked.Read(ref speakerGeneration));
-                if (!accepted && !stopping)
+                bool accepted;
+                if (usePadForgeSpeakerTransport)
+                {
+                    bool hardFault = false;
+                    accepted = !stopping &&
+                        padForgeSpeakerTransport != null &&
+                        padForgeSpeakerTransport.TrySend(opusFrame, OpusBytes,
+                            device.BluetoothMicrophoneStreamingRequested,
+                            out hardFault);
+                    if (!accepted && hardFault && !stopping &&
+                        Interlocked.Exchange(ref loggedWriteFailure, 1) == 0)
+                    {
+                        ResetDirectPcmBalanceWindow();
+                        AppLogger.LogToGui(
+                            "DualSense Bluetooth 0x35 writer faulted; the audio report was not submitted.",
+                            true);
+                    }
+                }
+                else
+                {
+                    accepted = !stopping &&
+                        device.SetBluetoothSpeakerAudioFrame(opusFrame,
+                            OpusBytes, speakerSessionId,
+                            Interlocked.Read(ref speakerGeneration));
+                }
+                if (!accepted && !stopping &&
+                    !usePadForgeSpeakerTransport)
                 {
                     ResetDirectPcmBalanceWindow();
                 }
@@ -3119,11 +3289,23 @@ namespace DS4Windows
                 return;
             }
 
-            long finalGeneration = Interlocked.Read(ref speakerGeneration);
-            if (!device.EndBluetoothSpeakerGeneration(speakerSessionId,
-                    finalGeneration))
+            if (usePadForgeSpeakerTransport)
             {
-                device.ResetBluetoothSpeakerSession(speakerSessionId);
+                DualSenseBluetoothPadForgeSpeakerTransport oldTransport =
+                    padForgeSpeakerTransport;
+                padForgeSpeakerTransport = null;
+                oldTransport?.Dispose();
+                device.DeactivateBluetoothPadForgeSpeakerTransport(
+                    speakerSessionId);
+            }
+            else
+            {
+                long finalGeneration = Interlocked.Read(ref speakerGeneration);
+                if (!device.EndBluetoothSpeakerGeneration(speakerSessionId,
+                        finalGeneration))
+                {
+                    device.ResetBluetoothSpeakerSession(speakerSessionId);
+                }
             }
 
             IWaveIn oldCapture;

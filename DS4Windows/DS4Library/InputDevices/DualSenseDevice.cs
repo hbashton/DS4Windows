@@ -494,6 +494,15 @@ namespace DS4Windows.InputDevices
         private int bluetoothCombinedOutputTransportEnabled;
         private int bluetoothPadForgeSpeakerTransportEnabled;
         private long bluetoothPadForgeSpeakerSession;
+        private readonly object bluetoothPadForgeGameStateLock = new object();
+        private readonly byte[] latestBluetoothPadForgeGameState =
+            new byte[BluetoothCombinedNativeStateLength];
+        private bool bluetoothPadForgeGameStateAvailable;
+        private bool bluetoothPadForgeGameStateWriteScheduled;
+        private long bluetoothPadForgeGameStateScheduledSession;
+        private long bluetoothPadForgeGameStateWrites;
+        private long bluetoothPadForgeGameStateDuplicates;
+        private long bluetoothPadForgeGameStateCoalesced;
         private int bluetoothOutputTransportStopping;
         private int bluetoothMicrophoneStreamingRequested;
         private int bluetoothMicrophoneControlUpdatePending;
@@ -832,6 +841,15 @@ namespace DS4Windows.InputDevices
         internal bool BluetoothMicrophoneStreamingRequested =>
             Volatile.Read(ref bluetoothMicrophoneStreamingRequested) != 0;
 
+        internal long BluetoothPadForgeGameStateWrites =>
+            Interlocked.Read(ref bluetoothPadForgeGameStateWrites);
+
+        internal long BluetoothPadForgeGameStateDuplicates =>
+            Interlocked.Read(ref bluetoothPadForgeGameStateDuplicates);
+
+        internal long BluetoothPadForgeGameStateCoalesced =>
+            Interlocked.Read(ref bluetoothPadForgeGameStateCoalesced);
+
         internal bool ActivateBluetoothPadForgeSpeakerTransport(
             long speakerSession)
         {
@@ -870,6 +888,7 @@ namespace DS4Windows.InputDevices
                 }
 
                 Volatile.Write(ref bluetoothCombinedOutputTransportEnabled, 0);
+                ResetBluetoothPadForgeGameStateCache();
                 lock (bluetoothSpeakerClockClaimLock)
                 {
                     bluetoothSpeakerClockActiveClaim = 0;
@@ -895,7 +914,20 @@ namespace DS4Windows.InputDevices
 
                 bluetoothPadForgeSpeakerSession = 0;
                 Volatile.Write(ref bluetoothPadForgeSpeakerTransportEnabled, 0);
+                ResetBluetoothPadForgeGameStateCache();
                 outputDirty = true;
+            }
+        }
+
+        private void ResetBluetoothPadForgeGameStateCache()
+        {
+            lock (bluetoothPadForgeGameStateLock)
+            {
+                Array.Clear(latestBluetoothPadForgeGameState, 0,
+                    latestBluetoothPadForgeGameState.Length);
+                bluetoothPadForgeGameStateAvailable = false;
+                bluetoothPadForgeGameStateWriteScheduled = false;
+                bluetoothPadForgeGameStateScheduledSession = 0;
             }
         }
 
@@ -2812,6 +2844,7 @@ namespace DS4Windows.InputDevices
                         ref bluetoothPadForgeSpeakerTransportEnabled) != 0;
                 Volatile.Write(ref bluetoothPadForgeSpeakerTransportEnabled, 0);
                 bluetoothPadForgeSpeakerSession = 0;
+                ResetBluetoothPadForgeGameStateCache();
                 StopBluetoothAudioPacerLocked();
                 Volatile.Write(ref bluetoothAudioPacerRetryAfterTimestamp, 0);
                 lock (bluetoothSpeakerClockClaimLock)
@@ -3352,6 +3385,12 @@ namespace DS4Windows.InputDevices
                 return false;
             }
 
+            if (conType == ConnectionType.BT &&
+                BluetoothPadForgeSpeakerTransportEnabled)
+            {
+                return QueueBluetoothPadForgeGameState(report, offset);
+            }
+
             queueEvent(() =>
             {
                 if (UsesCombinedBluetoothOutputTransport() &&
@@ -3399,6 +3438,144 @@ namespace DS4Windows.InputDevices
 
                 WriteReport();
             });
+
+            return true;
+        }
+
+        /// <summary>
+        /// Mirrors PadForge's audio-session ownership boundary for native game
+        /// state. Rumble, triggers, lightbar, player LEDs, and microphone LED
+        /// remain untouched, while the game's volume/routing validity bits are
+        /// stripped so they cannot reconfigure the independently-owned 0x35
+        /// stream. The latest-state mailbox prevents an unchanged virtual
+        /// carrier from filling the ordinary 0x31 queue at audio cadence.
+        /// </summary>
+        private bool QueueBluetoothPadForgeGameState(byte[] report, int offset)
+        {
+            byte[] sanitized = new byte[BluetoothCombinedNativeStateLength];
+            Array.Copy(report, offset + 1, sanitized, 0, sanitized.Length);
+            MaskBluetoothPadForgeGameAudioControl(sanitized);
+
+            long speakerSession = bluetoothPadForgeSpeakerSession;
+            if (speakerSession == 0)
+            {
+                return false;
+            }
+
+            bool scheduleWrite = false;
+            lock (bluetoothPadForgeGameStateLock)
+            {
+                if (bluetoothPadForgeGameStateAvailable &&
+                    BuffersEqual(latestBluetoothPadForgeGameState, sanitized))
+                {
+                    Interlocked.Increment(
+                        ref bluetoothPadForgeGameStateDuplicates);
+                    return true;
+                }
+
+                if (bluetoothPadForgeGameStateWriteScheduled)
+                {
+                    Interlocked.Increment(
+                        ref bluetoothPadForgeGameStateCoalesced);
+                }
+
+                Array.Copy(sanitized, latestBluetoothPadForgeGameState,
+                    sanitized.Length);
+                bluetoothPadForgeGameStateAvailable = true;
+                if (!bluetoothPadForgeGameStateWriteScheduled ||
+                    bluetoothPadForgeGameStateScheduledSession !=
+                        speakerSession)
+                {
+                    bluetoothPadForgeGameStateWriteScheduled = true;
+                    bluetoothPadForgeGameStateScheduledSession =
+                        speakerSession;
+                    scheduleWrite = true;
+                }
+            }
+
+            if (scheduleWrite)
+            {
+                queueEvent(() =>
+                    FlushBluetoothPadForgeGameState(speakerSession));
+            }
+
+            return true;
+        }
+
+        private void FlushBluetoothPadForgeGameState(long speakerSession)
+        {
+            byte[] state = new byte[BluetoothCombinedNativeStateLength];
+            lock (bluetoothPadForgeGameStateLock)
+            {
+                if (!bluetoothPadForgeGameStateWriteScheduled ||
+                    bluetoothPadForgeGameStateScheduledSession !=
+                        speakerSession ||
+                    !bluetoothPadForgeGameStateAvailable)
+                {
+                    return;
+                }
+
+                Array.Copy(latestBluetoothPadForgeGameState, state,
+                    state.Length);
+                bluetoothPadForgeGameStateWriteScheduled = false;
+                bluetoothPadForgeGameStateScheduledSession = 0;
+            }
+
+            if (!BluetoothPadForgeSpeakerTransportEnabled ||
+                bluetoothPadForgeSpeakerSession != speakerSession)
+            {
+                return;
+            }
+
+            Array.Clear(outputReport, 0, outputReport.Length);
+            outputReport[0] = OUTPUT_REPORT_ID_BT;
+            outputReport[1] = OUTPUT_REPORT_ID_DATA;
+            Array.Copy(state, 0, outputReport, 2, state.Length);
+
+            uint crc = ~Crc32Algorithm.Compute(outputBTCrc32Head);
+            crc = ~Crc32Algorithm.CalculateBasicHash(ref crc,
+                ref outputReport, 0, BT_OUTPUT_REPORT_LENGTH - 4);
+            outputReport[74] = (byte)crc;
+            outputReport[75] = (byte)(crc >> 8);
+            outputReport[76] = (byte)(crc >> 16);
+            outputReport[77] = (byte)(crc >> 24);
+            if (WriteReport())
+            {
+                Interlocked.Increment(ref bluetoothPadForgeGameStateWrites);
+            }
+        }
+
+        private static void MaskBluetoothPadForgeGameAudioControl(byte[] state)
+        {
+            if (state == null || state.Length <
+                BluetoothCombinedNativeStateLength)
+            {
+                return;
+            }
+
+            state[0] &= 0x0F;
+            state[1] &= 0x7F;
+            state[4] = 0;
+            state[5] = 0;
+            state[6] = 0;
+            state[7] = 0;
+            state[37] = 0;
+        }
+
+        private static bool BuffersEqual(byte[] left, byte[] right)
+        {
+            if (left == null || right == null || left.Length != right.Length)
+            {
+                return false;
+            }
+
+            for (int index = 0; index < left.Length; index++)
+            {
+                if (left[index] != right[index])
+                {
+                    return false;
+                }
+            }
 
             return true;
         }

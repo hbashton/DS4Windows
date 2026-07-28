@@ -252,6 +252,28 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void SegmentStartTransfersOnlyTheExistingSourceCushion()
+        {
+            int target = DualSenseBluetoothSpeakerPassthrough.
+                PacerReservoirTargetFrames;
+
+            Assert.AreEqual(2, DualSenseBluetoothSpeakerPassthrough.
+                ControllerReserveSourceTransferFrames);
+            Assert.IsTrue(DualSenseBluetoothSpeakerPassthrough.
+                ShouldTransferSourceCushionToControllerReserve(
+                    segmentActive: true, transferFramesRemaining: 2,
+                    pacerActive: true, pendingFrames: target - 1));
+            Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
+                ShouldTransferSourceCushionToControllerReserve(
+                    segmentActive: true, transferFramesRemaining: 0,
+                    pacerActive: true, pendingFrames: target - 1));
+            Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
+                ShouldTransferSourceCushionToControllerReserve(
+                    segmentActive: true, transferFramesRemaining: 2,
+                    pacerActive: true, pendingFrames: target));
+        }
+
+        [TestMethod]
         public void SixWarmupPacketsAreValidFixedSizeCbrOpus()
         {
             var encoder = DualSenseBluetoothSpeakerPassthrough.

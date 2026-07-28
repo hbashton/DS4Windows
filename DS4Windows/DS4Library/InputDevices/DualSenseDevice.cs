@@ -1645,15 +1645,6 @@ namespace DS4Windows.InputDevices
             }
         }
 
-        internal bool RefillBluetoothAudioControllerReserve()
-        {
-            lock (bluetoothAudioPacerLock)
-            {
-                return bluetoothAudioPacer?.IsRunning == true &&
-                    bluetoothAudioPacer.RefillControllerReserve();
-            }
-        }
-
         private bool TryCommitBluetoothControlThroughAudioPacer(byte[] report,
             long hapticsExpiryQpc, bool waitForCompletion,
             out bool pacerOwnsTransport)
@@ -4125,9 +4116,10 @@ namespace DS4Windows.InputDevices
             // OVERLAPPED retirement waits. Speaker-session traffic performs
             // this transition on its dedicated lifecycle worker; this control
             // path is never the real-time speaker producer.
-            bool microphonePrewarmed = enabled &&
-                !IsBluetoothSpeakerClockActive() &&
+            if (enabled && !IsBluetoothSpeakerClockActive())
+            {
                 PrepareBluetoothSpeakerClockTransport();
+            }
 
             lock (bluetoothCombinedTransportWriteLock)
             {
@@ -4165,9 +4157,12 @@ namespace DS4Windows.InputDevices
                         latestBluetoothCombinedSpeakerReport, enabled);
                 }
 
-                if (enableSpeakerOutput && IsBluetoothSpeakerClockActive() &&
-                    !microphonePrewarmed)
+                if (enableSpeakerOutput && IsBluetoothSpeakerClockActive())
                 {
+                    // Recheck ownership only after entering the transport lock.
+                    // The speaker can claim the clock while prewarm is running;
+                    // publishing a standalone control in that race would drain
+                    // queued audio and force an audible eight-frame re-prime.
                     bool statusQueued;
                     lock (bluetoothAudioPacerLock)
                     {

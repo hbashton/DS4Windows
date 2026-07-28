@@ -437,10 +437,6 @@ namespace DS4Windows
         // 86.7 ms callback stall measured in a live trace, without the former
         // ~235 ms steady-state presentation delay.
         internal const int PacerReservoirTargetFrames = 10;
-        // Move exactly the existing 20 ms source cushion into the controller
-        // reserve at a segment boundary so at least one complete 0x39 pair
-        // stays available without increasing total audio latency.
-        internal const int ControllerReserveSourceTransferFrames = 2;
         internal const int StartupWarmupReportCount = 6;
         private const int CaptureRingFrames = (SampleRate * CaptureBufferMs) / 1000;
         private const int CapturePumpBufferFrames = 2048;
@@ -529,7 +525,6 @@ namespace DS4Windows
         private int disposeStarted;
         private bool isGameAudioEndpoint;
         private volatile bool audioSegmentActive;
-        private int controllerReserveSourceTransferFramesRemaining;
         private readonly long speakerSessionId;
         private long speakerGeneration;
         private int startupWarmupFramesRemaining;
@@ -1126,7 +1121,6 @@ namespace DS4Windows
         private void Capture_RecordingStopped(object sender, StoppedEventArgs e)
         {
             audioSegmentActive = false;
-            Volatile.Write(ref controllerReserveSourceTransferFramesRemaining, 0);
             RequestGenerationEnd(Interlocked.Read(ref speakerGeneration));
             Volatile.Write(ref pacerPrewarmAttemptedForSegment, 0);
             Interlocked.Exchange(ref lastRawAudibleTimestamp, 0);
@@ -2117,10 +2111,6 @@ namespace DS4Windows
                         {
                             audioSegmentActive = true;
                             Interlocked.Increment(ref audioSegmentStarts);
-                            Volatile.Write(
-                                ref controllerReserveSourceTransferFramesRemaining,
-                                ControllerReserveSourceTransferFrames);
-                            device.RefillBluetoothAudioControllerReserve();
                         }
                     }
 
@@ -2211,9 +2201,6 @@ namespace DS4Windows
                         }
                         audioSegmentActive = false;
                         Volatile.Write(
-                            ref controllerReserveSourceTransferFramesRemaining,
-                            0);
-                        Volatile.Write(
                             ref pacerPrewarmAttemptedForSegment, 0);
                         Interlocked.Exchange(
                             ref lastRawAudibleTimestamp, 0);
@@ -2248,21 +2235,6 @@ namespace DS4Windows
         private void ScheduleNextStreamTick(bool submittedFrameThisTick,
             ref long nextTick, long cadenceTicks, IntPtr highResolutionTimer)
         {
-            if (submittedFrameThisTick &&
-                ShouldTransferSourceCushionToControllerReserve(
-                    audioSegmentActive,
-                    Volatile.Read(
-                        ref controllerReserveSourceTransferFramesRemaining),
-                    device.BluetoothAudioPacerActive,
-                    device.PendingBluetoothSpeakerFrames))
-            {
-                Interlocked.Decrement(
-                    ref controllerReserveSourceTransferFramesRemaining);
-                nextTick = Stopwatch.GetTimestamp();
-                LogStreamDiagnosticsIfVerbose();
-                return;
-            }
-
             if (submittedFrameThisTick &&
                 !audioSegmentActive &&
                 device.BluetoothAudioPacerActive &&
@@ -2301,14 +2273,6 @@ namespace DS4Windows
 
             LogStreamDiagnosticsIfVerbose();
             WaitUntil(highResolutionTimer, nextTick);
-        }
-
-        internal static bool ShouldTransferSourceCushionToControllerReserve(
-            bool segmentActive, int transferFramesRemaining,
-            bool pacerActive, int pendingFrames)
-        {
-            return segmentActive && transferFramesRemaining > 0 &&
-                pacerActive && pendingFrames < PacerReservoirTargetFrames;
         }
 
         private void LogStreamDiagnosticsIfVerbose()

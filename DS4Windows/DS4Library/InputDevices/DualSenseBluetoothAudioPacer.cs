@@ -40,7 +40,7 @@ namespace DS4Windows.InputDevices
         internal const int ControllerReserveTransferIntervals = 24;
 
         private const string HelperArgument = "--dualsense-bt-audio-pacer-helper";
-        private const int ProtocolVersion = 8;
+        private const int ProtocolVersion = 7;
         private const int PipeConnectTimeoutMilliseconds = 5000;
         private const int HelperReadyTimeoutMilliseconds = 5000;
         private const int HelperStopTimeoutMilliseconds = 3000;
@@ -60,7 +60,6 @@ namespace DS4Windows.InputDevices
             Stop = 5,
             UpdateCadence = 6,
             UpdateMicrophoneStatus = 7,
-            RefillControllerReserve = 8,
             Ready = 0x80,
             ReportAcknowledged = 0x81,
             Stopped = 0x82,
@@ -690,42 +689,6 @@ namespace DS4Windows.InputDevices
 
                 if (!outboundCommands.TryEnqueue(new OutboundCommand(
                     MessageKind.UpdateCadence, payload)))
-                {
-                    return false;
-                }
-            }
-
-            outboundAvailable.Set();
-            return true;
-        }
-
-        /// <summary>
-        /// Moves the already-buffered silent carrier from the host reservoir
-        /// into the controller before a new audible segment reaches the head
-        /// of the FIFO. Bluetooth delivery stalls can consume the controller's
-        /// reserve while the idle carrier runs; retaining that reserve only on
-        /// the host cannot protect the next audible segment. This reuses the
-        /// bounded startup transfer cadence without resetting or bursting the
-        /// rational audio clock.
-        /// </summary>
-        public bool RefillControllerReserve()
-        {
-            if (!IsRunning)
-            {
-                return false;
-            }
-
-            lock (stateLock)
-            {
-                foreach (OutboundCommand removed in
-                    outboundCommands.RemoveWhere(command =>
-                        command.Kind == MessageKind.RefillControllerReserve))
-                {
-                }
-
-                if (!outboundCommands.TryEnqueue(new OutboundCommand(
-                    MessageKind.RefillControllerReserve,
-                    Array.Empty<byte>())))
                 {
                     return false;
                 }
@@ -1771,7 +1734,6 @@ namespace DS4Windows.InputDevices
             private long cadenceRatioBits =
                 BitConverter.DoubleToInt64Bits(1.0);
             private long inputArrivalQpc;
-            private int controllerReserveRefillRequested;
             private bool primeRequired = true;
             private int pendingMicrophoneStatus = -1;
             private int microphoneStatusReportsAhead;
@@ -1894,9 +1856,6 @@ namespace DS4Windows.InputDevices
                             case MessageKind.UpdateMicrophoneStatus:
                                 ReceiveMicrophoneStatus(commandPayload,
                                     payloadLength);
-                                break;
-                            case MessageKind.RefillControllerReserve:
-                                ReceiveControllerReserveRefill(payloadLength);
                                 break;
                             case MessageKind.Stop:
                                 if (payloadLength != 0)
@@ -2150,18 +2109,6 @@ namespace DS4Windows.InputDevices
                 reservoirChanged.Set();
             }
 
-            private void ReceiveControllerReserveRefill(int payloadLength)
-            {
-                if (payloadLength != 0)
-                {
-                    throw new InvalidDataException(
-                        "Invalid controller-reserve refill payload.");
-                }
-
-                Interlocked.Exchange(ref controllerReserveRefillRequested, 1);
-                reservoirChanged.Set();
-            }
-
             private void PacerLoop()
             {
                 timeBeginPeriod(1);
@@ -2222,13 +2169,6 @@ namespace DS4Windows.InputDevices
                                     ControllerLinkWarmupIntervals,
                                     ControllerReserveTransferIntervals);
                             }
-                        }
-
-                        if (scheduler.IsStarted && Interlocked.Exchange(
-                                ref controllerReserveRefillRequested, 0) != 0)
-                        {
-                            scheduler.RefillControllerReserve(
-                                ControllerReserveTransferIntervals);
                         }
 
                         if (!canPresent)
@@ -3380,28 +3320,6 @@ namespace DS4Windows.InputDevices
             controllerReserveTransferIntervalsRemaining = 0;
             nextDeadlineQpc = 0;
             started = false;
-        }
-
-        public void RefillControllerReserve(int transferIntervals)
-        {
-            if (transferIntervals < 0)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(transferIntervals));
-            }
-            if (!started)
-            {
-                throw new InvalidOperationException(
-                    "The pacer clock has not started.");
-            }
-
-            // Never shorten an in-progress transfer and never disturb the
-            // rational phase accumulators. The next presentations simply use
-            // the same bounded 5 ms cadence that established the initial
-            // controller-side reserve.
-            controllerReserveTransferIntervalsRemaining = Math.Max(
-                controllerReserveTransferIntervalsRemaining,
-                transferIntervals);
         }
 
         public long AdvanceAfterSend(long presentationQpc)

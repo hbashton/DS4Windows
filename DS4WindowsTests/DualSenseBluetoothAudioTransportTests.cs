@@ -59,8 +59,8 @@ namespace DS4WindowsTests
             Assert.AreEqual((byte)0, sequence.MediaPacketSequence,
                 "A control-only report consumed the media packet counter.");
 
-            byte[] first = CreateSpeakerReport(0x11, 0x21, 0xA0);
-            byte[] second = CreateSpeakerReport(0x12, 0x22, 0xB0);
+            byte[] first = CreateSpeakerReport(0x11, 0x21, 0xA0, 1);
+            byte[] second = CreateSpeakerReport(0x12, 0x22, 0xB0, 2);
             byte[] paired = new byte[
                 DualSenseBluetoothPairedAudioReportBuilder.ReportLength];
             sequence.PreparePairedAudio(first, second, paired);
@@ -78,8 +78,8 @@ namespace DS4WindowsTests
         public void PhysicalSequenceAdvancesOnlyAfterAcceptedPairedReport()
         {
             var sequence = new DualSenseBluetoothPhysicalOutputSequence();
-            byte[] first = CreateSpeakerReport(0x11, 0x21, 0x00);
-            byte[] second = CreateSpeakerReport(0x12, 0x22, 0x10);
+            byte[] first = CreateSpeakerReport(0x11, 0x21, 0x00, 1);
+            byte[] second = CreateSpeakerReport(0x12, 0x22, 0x10, 2);
             byte[] initial = new byte[
                 DualSenseBluetoothPairedAudioReportBuilder.ReportLength];
             byte[] retried = new byte[initial.Length];
@@ -91,18 +91,21 @@ namespace DS4WindowsTests
                 "A rejected/uncommitted physical write spent sequence numbers.");
 
             sequence.Commit(pairedAudio: true);
+            first[10] = 3;
+            second[10] = 4;
             sequence.PreparePairedAudio(first, second, following);
             Assert.AreEqual((byte)0x10, following[1]);
             Assert.AreEqual((byte)4, following[9]);
         }
 
         private static byte[] CreateSpeakerReport(byte haptics,
-            byte audio, byte sequence)
+            byte audio, byte sequence, byte packetSequence = 0)
         {
             byte[] report = new byte[DualSenseBluetoothAudioPacer.ReportLength];
             report[0] = 0x36;
             report[1] = sequence;
             report[4] = 0xFE;
+            report[10] = packetSequence;
             report[5] = report[6] = report[7] = report[8] = 64;
             report[76] = 0xD2;
             report[77] = 64;
@@ -420,6 +423,8 @@ namespace DS4WindowsTests
             DualSenseDevice device = CreateBluetoothDevice();
             device.LightBarColor = new DS4Color(12, 34, 56);
             byte[] report = BuildCombinedControlReport(0, 0, false);
+            report[78] = 0x44;
+            report[79] = 0x55;
 
             device.WriteBluetoothCombinedHapticsAudioOutputReport(report, 0,
                 report.Length, hasNativeGameState: false);
@@ -429,6 +434,8 @@ namespace DS4WindowsTests
             Assert.AreEqual((byte)12, cached[13 + 44]);
             Assert.AreEqual((byte)34, cached[13 + 45]);
             Assert.AreEqual((byte)56, cached[13 + 46]);
+            AssertRangeIsZero(cached, 78, 64,
+                "Audio-only carriers must not refresh stale native haptics.");
             Assert.AreEqual(0L, GetFieldValue<long>(
                 NativeStateTimestampField, device));
         }

@@ -26,6 +26,7 @@ namespace DS4Windows.InputDevices
         // DS5Dongle does not wait for an additional host-side prime before it
         // hands that indivisible report to L2CAP.
         internal const int PrimeReportCount = 2;
+        internal const int PairedAudioInFlightLimit = 3;
         // DS5Dongle keeps a 10-packet interrupt FIFO behind that two-frame
         // report boundary. Keep the same transport cushion separate from the
         // audio-prime rule so a delayed Windows HID completion does not reject
@@ -124,6 +125,9 @@ namespace DS4Windows.InputDevices
         private long helperInFlightLimitWaitCount;
         private long helperInFlightLimitEscapeCount;
         private long helperMaximumInFlightLimitWaitTicks;
+        private long helperMaximumAudioPendingBeforeSubmission;
+        private long helperShallowAudioSubmissionCount;
+        private long helperFullAudioSubmissionCount;
         private long helperCompletedWriteCount;
         private long helperSlowCompletionCount;
         private long helperMaximumCompletionTicks;
@@ -183,6 +187,12 @@ namespace DS4Windows.InputDevices
         public double HelperMaximumInFlightLimitWaitMilliseconds =>
             Interlocked.Read(ref helperMaximumInFlightLimitWaitTicks) *
             1000.0 / Stopwatch.Frequency;
+        public long HelperMaximumAudioPendingBeforeSubmission =>
+            Interlocked.Read(ref helperMaximumAudioPendingBeforeSubmission);
+        public long HelperShallowAudioSubmissionCount =>
+            Interlocked.Read(ref helperShallowAudioSubmissionCount);
+        public long HelperFullAudioSubmissionCount =>
+            Interlocked.Read(ref helperFullAudioSubmissionCount);
         public long HelperCompletedWriteCount =>
             Interlocked.Read(ref helperCompletedWriteCount);
         public long HelperSlowCompletionCount =>
@@ -870,7 +880,7 @@ namespace DS4Windows.InputDevices
 
         private void ProcessAcknowledgement(byte[] payload)
         {
-            const int writerMetricCount = 10;
+            const int writerMetricCount = 13;
             int metricOffset = sizeof(long) + sizeof(byte) + sizeof(long);
             if (payload.Length != metricOffset +
                 writerMetricCount * sizeof(long))
@@ -893,6 +903,19 @@ namespace DS4Windows.InputDevices
                     metricOffset, sizeof(long))));
             metricOffset += sizeof(long);
             Interlocked.Exchange(ref helperMaximumInFlightLimitWaitTicks,
+                BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
+                    metricOffset, sizeof(long))));
+            metricOffset += sizeof(long);
+            Interlocked.Exchange(
+                ref helperMaximumAudioPendingBeforeSubmission,
+                BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
+                    metricOffset, sizeof(long))));
+            metricOffset += sizeof(long);
+            Interlocked.Exchange(ref helperShallowAudioSubmissionCount,
+                BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
+                    metricOffset, sizeof(long))));
+            metricOffset += sizeof(long);
+            Interlocked.Exchange(ref helperFullAudioSubmissionCount,
                 BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
                     metricOffset, sizeof(long))));
             metricOffset += sizeof(long);
@@ -1355,7 +1378,7 @@ namespace DS4Windows.InputDevices
                             PairedAudioTransportSlotCount :
                             PrimeReportCount,
                         audioInFlightLimit: UsePairedAudioReports ?
-                            PrimeReportCount :
+                            PairedAudioInFlightLimit :
                             PrimeReportCount))
                 {
                     TryWriteError(helperPipe,
@@ -2276,7 +2299,7 @@ namespace DS4Windows.InputDevices
 
             private void AcknowledgementLoop()
             {
-                const int writerMetricCount = 10;
+                const int writerMetricCount = 13;
                 byte[] payload = new byte[
                     sizeof(long) + sizeof(byte) + sizeof(long) +
                     writerMetricCount * sizeof(long)];
@@ -2312,6 +2335,18 @@ namespace DS4Windows.InputDevices
                         BinaryPrimitives.WriteInt64LittleEndian(
                             payload.AsSpan(metricOffset, sizeof(long)),
                             writer.MaximumInFlightLimitWaitTicks);
+                        metricOffset += sizeof(long);
+                        BinaryPrimitives.WriteInt64LittleEndian(
+                            payload.AsSpan(metricOffset, sizeof(long)),
+                            writer.MaximumAudioPendingBeforeSubmission);
+                        metricOffset += sizeof(long);
+                        BinaryPrimitives.WriteInt64LittleEndian(
+                            payload.AsSpan(metricOffset, sizeof(long)),
+                            writer.ShallowAudioSubmissionCount);
+                        metricOffset += sizeof(long);
+                        BinaryPrimitives.WriteInt64LittleEndian(
+                            payload.AsSpan(metricOffset, sizeof(long)),
+                            writer.FullAudioSubmissionCount);
                         metricOffset += sizeof(long);
                         BinaryPrimitives.WriteInt64LittleEndian(
                             payload.AsSpan(metricOffset, sizeof(long)),
@@ -2402,7 +2437,7 @@ namespace DS4Windows.InputDevices
                         ref taskIndex);
                     if (handle != IntPtr.Zero)
                     {
-                        AvSetMmThreadPriority(handle, AvrtPriority.High);
+                        AvSetMmThreadPriority(handle, AvrtPriority.Critical);
                     }
 
                     return handle;
@@ -2574,6 +2609,7 @@ namespace DS4Windows.InputDevices
         {
             Normal = 0,
             High = 1,
+            Critical = 2,
         }
 
         [DllImport("kernel32.dll", EntryPoint = "GetCurrentProcess")]
@@ -2806,6 +2842,8 @@ namespace DS4Windows.InputDevices
         internal const int CadenceDenominator = 3000;
         internal const int InputReportsPerSecond = 800;
         internal const int InputPhaseOffsetMicroseconds = 350;
+        internal const int MaximumInputPhaseCorrectionMicroseconds = 250;
+        internal const double ControllerReserveCadenceRatio = 1.0;
         internal const int ControllerReserveTransferIntervalMicroseconds =
             5_000;
         internal const double MinimumRateRatio = 0.995;
@@ -2957,12 +2995,40 @@ namespace DS4Windows.InputDevices
                     "The pacer clock has not started.");
             }
 
-            // The audio clock must remain continuous. Re-snapping every
-            // deadline to the latest Bluetooth HID arrival quantized the
-            // 10.667 ms cadence into alternating 10/11.25 ms gaps and copied
-            // radio delivery jitter into the speaker transport. The measured
-            // controller clock still disciplines the fractional cadence.
-            return nextDeadlineQpc;
+            long inputReference = inputPhaseReferenceQpc;
+            if (inputReference <= 0)
+            {
+                return nextDeadlineQpc;
+            }
+
+            long inputPeriodTicks = Math.Max(1,
+                clockFrequency / InputReportsPerSecond);
+            long phaseOffsetTicks = checked(clockFrequency *
+                InputPhaseOffsetMicroseconds / 1_000_000);
+            long correctionLimitTicks = Math.Max(1, checked(clockFrequency *
+                MaximumInputPhaseCorrectionMicroseconds / 1_000_000));
+            long phaseOrigin = inputReference + phaseOffsetTicks;
+            long delta = nextDeadlineQpc - phaseOrigin;
+            long periods = delta >= 0 ?
+                (delta + inputPeriodTicks / 2) / inputPeriodTicks :
+                -((-delta + inputPeriodTicks / 2) / inputPeriodTicks);
+            long nearestInputPhase = phaseOrigin +
+                periods * inputPeriodTicks;
+            long correction = nearestInputPhase - nextDeadlineQpc;
+            if (correction > correctionLimitTicks)
+            {
+                correction = correctionLimitTicks;
+            }
+            else if (correction < -correctionLimitTicks)
+            {
+                correction = -correctionLimitTicks;
+            }
+
+            // Keep the rational audio clock continuous, but bias each
+            // presentation a fraction of a millisecond toward the controller's
+            // own 800 Hz input phase. The cap avoids the old hard re-snap that
+            // quantized 10.667 ms audio cadence into audible 10/11.25 ms jitter.
+            return nextDeadlineQpc + correction;
         }
 
         private long NextIntervalTicks()
@@ -3008,6 +3074,12 @@ namespace DS4Windows.InputDevices
                     interval += extraTicks;
                     fractionalRemainderAccumulator -= extraTicks;
                 }
+            }
+
+            if (ControllerReserveCadenceRatio < 1.0)
+            {
+                interval = Math.Max(1,
+                    (long)Math.Round(interval * ControllerReserveCadenceRatio));
             }
 
             return Math.Max(1, interval);
@@ -3161,6 +3233,7 @@ namespace DS4Windows.InputDevices
         private bool initialized;
         private byte nextReportSequence;
         private byte mediaPacketSequence;
+        private byte preparedMediaPacketSequence;
 
         internal byte NextReportSequence => nextReportSequence;
         internal byte MediaPacketSequence => mediaPacketSequence;
@@ -3181,10 +3254,10 @@ namespace DS4Windows.InputDevices
             ValidateSource(first, nameof(first));
             ValidateSource(second, nameof(second));
             EnsureInitialized(first);
+            preparedMediaPacketSequence = second[10];
 
             DualSenseBluetoothPairedAudioReportBuilder.Build(first, second,
-                nextReportSequence, (byte)(mediaPacketSequence + 2),
-                destination);
+                nextReportSequence, preparedMediaPacketSequence, destination);
         }
 
         internal void Commit(bool pairedAudio)
@@ -3198,7 +3271,7 @@ namespace DS4Windows.InputDevices
             nextReportSequence = (byte)((nextReportSequence + 1) & 0x0F);
             if (pairedAudio)
             {
-                mediaPacketSequence += 2;
+                mediaPacketSequence = preparedMediaPacketSequence;
             }
         }
 

@@ -26,7 +26,8 @@ namespace DS4Windows.InputDevices
         // DS5Dongle does not wait for an additional host-side prime before it
         // hands that indivisible report to L2CAP.
         internal const int PrimeReportCount = 2;
-        internal const int PairedAudioInFlightLimit = 3;
+        internal const int PairedAudioInFlightLimit =
+            PairedAudioTransportSlotCount;
         // DS5Dongle keeps a 10-packet interrupt FIFO behind that two-frame
         // report boundary. Keep the same transport cushion separate from the
         // audio-prime rule so a delayed Windows HID completion does not reject

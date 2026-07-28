@@ -2132,13 +2132,22 @@ namespace DS4Windows.InputDevices
                                 pendingMicrophoneStatus >= 0 &&
                                 microphoneStatusReportsAhead <= 0;
                             reservoir.TryPeek(out QueuedReport nextReport);
-                            stateReportReady = latestTemplateAvailable &&
-                                (nextReport == null ||
-                                    IsSpeakerAudioReport(nextReport.Report)) &&
+                            bool meaningfulStatePending =
+                                latestTemplateAvailable &&
                                 DualSenseBluetoothStateReportBuilder.
                                     HasMeaningfulStateChanged(latestTemplate,
                                         presentedComparableState,
                                         presentedComparableStateAvailable);
+                            // A live 0x36 media report already contains Sony's
+                            // 0x10/63-byte controller-state section. DS5 Bridge
+                            // composes state into that report instead of spending
+                            // the media send opportunity on a separate 0x32. Keep
+                            // 0x32 only for the idle/control path; the dequeue
+                            // path below presents one native 0x36 whenever state
+                            // changes during a paired 0x39 stream.
+                            stateReportReady = meaningfulStatePending &&
+                                (nextReport == null ||
+                                    !IsSpeakerAudioReport(nextReport.Report));
                             int speakerReportCount = nextReport != null &&
                                 IsSpeakerAudioReport(nextReport.Report) ?
                                     reservoir.CountLeading(
@@ -2191,11 +2200,11 @@ namespace DS4Windows.InputDevices
                                 }
                                 else
                                 {
-                                    // 0x39 carries only the two audio and
-                                    // haptics TLVs. Publish DS5Dongle's 0x32
-                                    // state lane first so routing, gain,
-                                    // lightbar, triggers, and ordinary rumble
-                                    // remain armed while media is streaming.
+                                    // No media is queued, so publish
+                                    // DS5Dongle's compact state lane directly.
+                                    // During media, the native 0x36 compositor
+                                    // below carries this state without replacing
+                                    // an audio frame.
                                     physicalOutputSequence.PrepareState(
                                         latestTemplate, stateReport);
                                     accepted = writer.TryWrite(stateReport,
@@ -2203,7 +2212,7 @@ namespace DS4Windows.InputDevices
                                     if (accepted)
                                     {
                                         physicalOutputSequence.Commit(
-                                            pairedAudio: false);
+                                            mediaReport: false);
                                         DualSenseBluetoothStateReportBuilder.
                                             CaptureComparableState(
                                                 latestTemplate,
@@ -2269,7 +2278,7 @@ namespace DS4Windows.InputDevices
                                     if (accepted)
                                     {
                                         physicalOutputSequence.Commit(
-                                            pairedAudio: false);
+                                            mediaReport: false);
                                         if (pendingMicrophoneStatus == status)
                                         {
                                             pendingMicrophoneStatus = -1;
@@ -2321,6 +2330,7 @@ namespace DS4Windows.InputDevices
                         long pairedPresentedAt = 0;
                         bool advanceScheduler;
                         bool controlOnly;
+                        bool stateCarriedByAudio;
                         lock (stateLock)
                         {
                             if (controlPrimeBypass)
@@ -2341,7 +2351,13 @@ namespace DS4Windows.InputDevices
                             bool pairedAudioAtHead = UsePairedAudioReports &&
                                 reservoir.TryPeek(out QueuedReport headReport) &&
                                 IsSpeakerAudioReport(headReport.Report);
-                            if (pairedAudioAtHead)
+                            stateCarriedByAudio = pairedAudioAtHead &&
+                                latestTemplateAvailable &&
+                                DualSenseBluetoothStateReportBuilder.
+                                    HasMeaningfulStateChanged(latestTemplate,
+                                        presentedComparableState,
+                                        presentedComparableStateAvailable);
+                            if (pairedAudioAtHead && !stateCarriedByAudio)
                             {
                                 // The gate above is intentionally checked before
                                 // the presentation wait. Revalidate and remove the
@@ -2424,8 +2440,21 @@ namespace DS4Windows.InputDevices
                                 bool accepted;
                                 if (pairedItem == null)
                                 {
-                                    physicalOutputSequence.PrepareControl(
-                                        item.Report);
+                                    if (controlOnly)
+                                    {
+                                        physicalOutputSequence.PrepareControl(
+                                            item.Report);
+                                    }
+                                    else
+                                    {
+                                        // DS5 Bridge's 0x36 report carries
+                                        // state + haptics + speaker audio in one
+                                        // media opportunity. Use that native
+                                        // form for a changed snapshot, then
+                                        // resume lower-transaction 0x39 pairs.
+                                        physicalOutputSequence.
+                                            PrepareSingleAudio(item.Report);
+                                    }
                                     RecordPresentationTrace(item.Report,
                                         presentedAt, reservoir.Count);
                                     accepted = controlOnly ?
@@ -2453,8 +2482,8 @@ namespace DS4Windows.InputDevices
                                 if (accepted)
                                 {
                                     physicalOutputSequence.Commit(
-                                        pairedItem != null);
-                                    if (controlOnly)
+                                        mediaReport: !controlOnly);
+                                    if (controlOnly || stateCarriedByAudio)
                                     {
                                         DualSenseBluetoothStateReportBuilder.
                                             CaptureComparableState(item.Report,
@@ -3572,6 +3601,16 @@ namespace DS4Windows.InputDevices
             WriteSonyCrc(report);
         }
 
+        internal void PrepareSingleAudio(byte[] report)
+        {
+            ValidateSource(report, nameof(report));
+            EnsureInitialized(report);
+
+            report[1] = (byte)((nextReportSequence & 0x0F) << 4);
+            preparedMediaPacketSequence = report[10];
+            WriteSonyCrc(report);
+        }
+
         internal void PreparePairedAudio(byte[] first, byte[] second,
             byte[] destination)
         {
@@ -3617,7 +3656,7 @@ namespace DS4Windows.InputDevices
                 initializationReport, nextReportSequence, destination);
         }
 
-        internal void Commit(bool pairedAudio)
+        internal void Commit(bool mediaReport)
         {
             if (!initialized)
             {
@@ -3626,7 +3665,7 @@ namespace DS4Windows.InputDevices
             }
 
             nextReportSequence = (byte)((nextReportSequence + 1) & 0x0F);
-            if (pairedAudio)
+            if (mediaReport)
             {
                 mediaPacketSequence = preparedMediaPacketSequence;
             }

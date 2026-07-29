@@ -176,6 +176,93 @@ namespace DS4WindowsTests
                 DualSenseBluetoothAudioPacer.SingleAudioTransportSlotCount);
         }
 
+        [TestMethod]
+        public void PadForgeReportBuildsExactCompactSpeakerPacket()
+        {
+            byte[] source = CreateSpeakerReport(0x5A, 0x21, 0x70, 0x42);
+            byte[] original = (byte[])source.Clone();
+            for (int index = 0; index < 200; index++)
+            {
+                source[144 + index] = (byte)(index ^ 0xA5);
+                original[144 + index] = source[144 + index];
+            }
+            byte[] report = new byte[
+                DualSenseBluetoothPadForgeAudioReportBuilder.ReportLength];
+
+            DualSenseBluetoothPadForgeAudioReportBuilder.Build(source,
+                reportSequence: 9, packetSequence: 0x42, report);
+
+            Assert.AreEqual(334, report.Length);
+            Assert.AreEqual((byte)0x35, report[0]);
+            Assert.AreEqual((byte)0x90, report[1]);
+            Assert.AreEqual((byte)0x91, report[2]);
+            Assert.AreEqual((byte)7, report[3]);
+            Assert.AreEqual((byte)0xFE, report[4]);
+            AssertRangeIsZero(report, 5, 4,
+                "The compact session header contained unexpected bytes.");
+            Assert.AreEqual((byte)0xFF, report[9]);
+            Assert.AreEqual((byte)0x42, report[10]);
+            Assert.AreEqual((byte)0x93, report[11]);
+            Assert.AreEqual((byte)200, report[12]);
+            CollectionAssert.AreEqual(source.Skip(144).Take(200).ToArray(),
+                report.Skip(13).Take(200).ToArray());
+            AssertRangeIsZero(report, 213, report.Length - sizeof(uint) - 213,
+                "The compact report tail contained unexpected data.");
+            uint expectedCrc =
+                DualSenseBluetoothAudioReportPatcher.ComputeSonyCrc(report,
+                    report.Length - sizeof(uint));
+            Assert.AreEqual(expectedCrc,
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    report.AsSpan(report.Length - sizeof(uint))));
+            CollectionAssert.AreEqual(original, source,
+                "The pure compact-report builder mutated its logical source.");
+        }
+
+        [TestMethod]
+        public void PadForgePhysicalSequenceAdvancesOnlyAfterAcceptedWrites()
+        {
+            var sequence = new DualSenseBluetoothPhysicalOutputSequence();
+            byte[] first = CreateSpeakerReport(0x11, 0x21, 0xA0, 7);
+            byte[] initial = new byte[
+                DualSenseBluetoothPadForgeAudioReportBuilder.ReportLength];
+            byte[] retry = new byte[initial.Length];
+
+            sequence.PreparePadForgeAudio(first, initial);
+            sequence.PreparePadForgeAudio(first, retry);
+            CollectionAssert.AreEqual(initial, retry,
+                "An uncommitted compact write spent a physical sequence.");
+            Assert.AreEqual((byte)0xA0, initial[1]);
+            Assert.AreEqual((byte)7, initial[10]);
+
+            sequence.Commit(audio: true);
+            Assert.AreEqual((byte)11, sequence.NextReportSequence);
+            Assert.AreEqual((byte)7, sequence.MediaPacketSequence);
+
+            byte[] control = CreateSpeakerReport(0, 0, 0);
+            sequence.PrepareControl(control);
+            Assert.AreEqual((byte)0xB0, control[1]);
+            Assert.AreEqual((byte)7, control[10]);
+            sequence.Commit(audio: false);
+
+            byte[] second = CreateSpeakerReport(0x12, 0x22, 0, 8);
+            sequence.PreparePadForgeAudio(second, retry);
+            Assert.AreEqual((byte)0xC0, retry[1]);
+            Assert.AreEqual((byte)8, retry[10]);
+        }
+
+        [TestMethod]
+        public void CompactTransportToggleRequiresExact35Value()
+        {
+            Assert.IsTrue(DualSenseBluetoothAudioPacer.
+                UsePadForgeAudioTransport("35"));
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.
+                UsePadForgeAudioTransport(null));
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.
+                UsePadForgeAudioTransport("36"));
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.
+                UsePadForgeAudioTransport("0x35"));
+        }
+
         private static byte[] CreateSpeakerReport(byte haptics,
             byte audio, byte sequence, byte packetSequence = 0)
         {

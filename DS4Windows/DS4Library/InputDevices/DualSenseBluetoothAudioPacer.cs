@@ -21,6 +21,8 @@ namespace DS4Windows.InputDevices
     internal sealed class DualSenseBluetoothAudioPacer : IDisposable
     {
         internal const int ReportLength = 398;
+        internal const string AudioTransportEnvironmentVariable =
+            "DS4WINDOWS_DUALSENSE_AUDIO_TRANSPORT";
         // Match DS5 Bridge's physical audio cadence: one complete 398-byte
         // 0x36 generation every 10.667 ms. Pairing two logical generations
         // into a 547-byte 0x39 halves the host's opportunities to observe HID
@@ -54,6 +56,11 @@ namespace DS4Windows.InputDevices
         // paired path used a short 5 ms reserve-transfer phase; applying that
         // phase to 0x36 would burst reports at twice the firmware cadence.
         internal const int ControllerReserveTransferIntervals = 0;
+
+        internal static bool UsePadForgeAudioTransport(string value)
+        {
+            return string.Equals(value, "35", StringComparison.Ordinal);
+        }
 
         private const string HelperArgument = "--dualsense-bt-audio-pacer-helper";
         private const int ProtocolVersion = 6;
@@ -1657,6 +1664,9 @@ namespace DS4Windows.InputDevices
             private readonly byte[] previousTemplate = new byte[ReportLength];
             private readonly byte[] pairedAudioReport = new byte[
                 DualSenseBluetoothPairedAudioReportBuilder.ReportLength];
+            private readonly byte[] padForgeAudioReport = new byte[
+                DualSenseBluetoothPadForgeAudioReportBuilder.ReportLength];
+            private readonly bool usePadForgeAudioTransport;
             private long latestTemplateHapticsExpiryQpc;
             private long previousTemplateHapticsExpiryQpc;
             private bool latestTemplateAvailable;
@@ -1671,6 +1681,7 @@ namespace DS4Windows.InputDevices
             private int disposed;
             private readonly string presentationTraceDirectory;
             private readonly long[] presentationTraceQpc;
+            private readonly byte[] presentationTraceReportId;
             private readonly byte[] presentationTraceReportSequence;
             private readonly byte[] presentationTracePacketSequence;
             private readonly byte[] presentationTracePacketType;
@@ -1693,6 +1704,9 @@ namespace DS4Windows.InputDevices
                 this.writer = writer;
                 this.duplicatedDeviceHandle = duplicatedDeviceHandle;
                 this.parentProcessId = parentProcessId;
+                usePadForgeAudioTransport = UsePadForgeAudioTransport(
+                    Environment.GetEnvironmentVariable(
+                        AudioTransportEnvironmentVariable));
                 string traceDirectory = Environment.GetEnvironmentVariable(
                     "DS4WINDOWS_DUALSENSE_PCM_TRACE_DIRECTORY");
                 if (!string.IsNullOrWhiteSpace(traceDirectory))
@@ -1702,6 +1716,8 @@ namespace DS4Windows.InputDevices
                         presentationTraceDirectory = Path.GetFullPath(
                             traceDirectory);
                         presentationTraceQpc = new long[
+                            PresentationTraceCapacity];
+                        presentationTraceReportId = new byte[
                             PresentationTraceCapacity];
                         presentationTraceReportSequence = new byte[
                             PresentationTraceCapacity];
@@ -2074,6 +2090,7 @@ namespace DS4Windows.InputDevices
                         }
 
                         if (audioWriteAtHead &&
+                            !usePadForgeAudioTransport &&
                             !writer.WaitForNextWriteSlot(
                                 HelperAudioCreditPollMilliseconds,
                                 out bool creditTransportFault) &&
@@ -2196,18 +2213,33 @@ namespace DS4Windows.InputDevices
                                     }
                                     else
                                     {
-                                        physicalOutputSequence.PrepareSingleAudio(
-                                            item.Report);
+                                        if (usePadForgeAudioTransport)
+                                        {
+                                            physicalOutputSequence.
+                                                PreparePadForgeAudio(item.Report,
+                                                    padForgeAudioReport);
+                                        }
+                                        else
+                                        {
+                                            physicalOutputSequence.
+                                                PrepareSingleAudio(item.Report);
+                                        }
                                     }
                                     accepted = controlOnly ?
                                         writer.TryWriteAndWait(item.Report,
                                             HelperControlWriteTimeoutMilliseconds,
                                             out transportFault) :
-                                        writer.TryWrite(item.Report,
+                                        writer.TryWrite(
+                                            usePadForgeAudioTransport ?
+                                                padForgeAudioReport :
+                                                item.Report,
                                             out transportFault);
                                     if (accepted)
                                     {
-                                        RecordPresentationTrace(item.Report,
+                                        RecordPresentationTrace(
+                                            usePadForgeAudioTransport ?
+                                                padForgeAudioReport :
+                                                item.Report,
                                             presentedAt, reservoir.Count);
                                     }
                                 }
@@ -2229,7 +2261,18 @@ namespace DS4Windows.InputDevices
                                     }
                                 }
 
-                                if (accepted)
+                                // PadForge deliberately spends both counters
+                                // when its oldest OVERLAPPED slot is busy and
+                                // drops that single Opus generation. This lets
+                                // the controller's decoder conceal a sequence
+                                // gap instead of delaying the entire FIFO and
+                                // replaying stale audio in a catch-up cluster.
+                                bool padForgeSkippedSaturatedAudio =
+                                    usePadForgeAudioTransport &&
+                                    !controlOnly && pairedItem == null &&
+                                    !accepted && !transportFault;
+
+                                if (accepted || padForgeSkippedSaturatedAudio)
                                 {
                                     physicalOutputSequence.Commit(
                                         pairedItem != null || !controlOnly);
@@ -2242,8 +2285,9 @@ namespace DS4Windows.InputDevices
                                         AcknowledgementDisposition.Rejected;
                                 pairedDisposition = disposition;
 
-                                if (ShouldRetainSaturatedWrite(accepted,
-                                    transportFault))
+                                if (!padForgeSkippedSaturatedAudio &&
+                                    ShouldRetainSaturatedWrite(accepted,
+                                        transportFault))
                                 {
                                     retainedForRetry = pairedItem == null ?
                                         reservoir.TryEnqueueFront(item) :
@@ -2542,24 +2586,39 @@ namespace DS4Windows.InputDevices
                 }
 
                 presentationTraceQpc[index] = presentedAt;
+                presentationTraceReportId[index] = report[0];
                 presentationTraceReportSequence[index] =
                     (byte)(report[1] >> 4);
                 presentationTracePacketSequence[index] = report[10];
-                presentationTracePacketType[index] = report[142];
                 presentationTraceReservoirCount[index] = (byte)Math.Clamp(
                     reservoirCount, 0, byte.MaxValue);
-                presentationTraceAudioFlags0[index] = report[13];
-                presentationTraceAudioFlags1[index] = report[14];
-                presentationTraceHeadphoneVolume[index] = report[17];
-                presentationTraceSpeakerVolume[index] = report[18];
-                presentationTraceAudioRoute[index] = report[20];
-                presentationTraceAudioGain[index] = report[50];
-                uint hash = 2166136261u;
-                for (int offset = 78; offset < 142; offset++)
+                if (report[0] == 0x35)
                 {
-                    hash = (hash ^ report[offset]) * 16777619u;
+                    presentationTracePacketType[index] = report[11];
+                    presentationTraceAudioFlags0[index] = 0;
+                    presentationTraceAudioFlags1[index] = 0;
+                    presentationTraceHeadphoneVolume[index] = 0;
+                    presentationTraceSpeakerVolume[index] = 0;
+                    presentationTraceAudioRoute[index] = 0;
+                    presentationTraceAudioGain[index] = 0;
+                    presentationTraceHapticsHash[index] = 0;
                 }
-                presentationTraceHapticsHash[index] = hash;
+                else
+                {
+                    presentationTracePacketType[index] = report[142];
+                    presentationTraceAudioFlags0[index] = report[13];
+                    presentationTraceAudioFlags1[index] = report[14];
+                    presentationTraceHeadphoneVolume[index] = report[17];
+                    presentationTraceSpeakerVolume[index] = report[18];
+                    presentationTraceAudioRoute[index] = report[20];
+                    presentationTraceAudioGain[index] = report[50];
+                    uint hash = 2166136261u;
+                    for (int offset = 78; offset < 142; offset++)
+                    {
+                        hash = (hash ^ report[offset]) * 16777619u;
+                    }
+                    presentationTraceHapticsHash[index] = hash;
+                }
                 presentationTraceCount = index + 1;
             }
 
@@ -2581,13 +2640,15 @@ namespace DS4Windows.InputDevices
                         new UTF8Encoding(false));
                     output.WriteLine($"qpcFrequency,{Stopwatch.Frequency}");
                     output.WriteLine(
-                        "index,qpc,reportSequence,packetSequence,packetType,reservoirCount,audioFlags0,audioFlags1,headphoneVolume,speakerVolume,audioRoute,audioGain,hapticsHash");
+                        "index,qpc,reportId,reportSequence,packetSequence,packetType,reservoirCount,audioFlags0,audioFlags1,headphoneVolume,speakerVolume,audioRoute,audioGain,hapticsHash");
                     for (int index = 0; index < presentationTraceCount;
                         index++)
                     {
                         output.Write(index);
                         output.Write(',');
                         output.Write(presentationTraceQpc[index]);
+                        output.Write(',');
+                        output.Write(presentationTraceReportId[index]);
                         output.Write(',');
                         output.Write(presentationTraceReportSequence[index]);
                         output.Write(',');
@@ -3428,6 +3489,22 @@ namespace DS4Windows.InputDevices
             WriteSonyCrc(report);
         }
 
+        internal void PreparePadForgeAudio(byte[] source, byte[] destination)
+        {
+            ValidateSource(source, nameof(source));
+            if (!DualSenseBluetoothAudioPacer.IsSpeakerAudioReport(source))
+            {
+                throw new ArgumentException(
+                    "Source must be a complete 398-byte 0x36 speaker report.",
+                    nameof(source));
+            }
+
+            EnsureInitialized(source);
+            preparedMediaPacketSequence = source[10];
+            DualSenseBluetoothPadForgeAudioReportBuilder.Build(source,
+                nextReportSequence, preparedMediaPacketSequence, destination);
+        }
+
         internal void Commit(bool audio)
         {
             if (!initialized)
@@ -3473,6 +3550,64 @@ namespace DS4Windows.InputDevices
                 report, report.Length - CrcLength);
             BinaryPrimitives.WriteUInt32LittleEndian(report.AsSpan(
                 report.Length - CrcLength, CrcLength), crc);
+        }
+    }
+
+    /// <summary>
+    /// Converts one logical combined 0x36 speaker generation into PadForge's
+    /// compact physical 0x35 speaker report. The logical report remains the
+    /// source of the Opus payload and media counter; controller state and
+    /// control-only reports continue to use the normal 0x36 path.
+    /// </summary>
+    internal static class DualSenseBluetoothPadForgeAudioReportBuilder
+    {
+        internal const int ReportLength = 334;
+        private const int SourceReportLength =
+            DualSenseBluetoothAudioPacer.ReportLength;
+        private const int CrcLength = sizeof(uint);
+        private const int SourceSpeakerDataOffset = 144;
+        private const int SpeakerDataOffset = 13;
+        private const int SpeakerFrameLength = 200;
+
+        public static void Build(byte[] source, byte reportSequence,
+            byte packetSequence, byte[] destination)
+        {
+            ValidateSource(source);
+            if (destination == null || destination.Length != ReportLength)
+            {
+                throw new ArgumentException(
+                    $"Destination report must be exactly {ReportLength} bytes.",
+                    nameof(destination));
+            }
+
+            Array.Clear(destination, 0, destination.Length);
+            destination[0] = 0x35;
+            destination[1] = (byte)((reportSequence & 0x0F) << 4);
+            destination[2] = 0x91;
+            destination[3] = 7;
+            destination[4] = 0xFE;
+            destination[9] = 0xFF;
+            destination[10] = packetSequence;
+            destination[11] = 0x93;
+            destination[12] = SpeakerFrameLength;
+            Buffer.BlockCopy(source, SourceSpeakerDataOffset, destination,
+                SpeakerDataOffset, SpeakerFrameLength);
+
+            uint crc = DualSenseBluetoothAudioReportPatcher.ComputeSonyCrc(
+                destination, ReportLength - CrcLength);
+            BinaryPrimitives.WriteUInt32LittleEndian(destination.AsSpan(
+                ReportLength - CrcLength, CrcLength), crc);
+        }
+
+        private static void ValidateSource(byte[] source)
+        {
+            if (source == null || source.Length != SourceReportLength ||
+                source[0] != 0x36 || source[143] != SpeakerFrameLength)
+            {
+                throw new ArgumentException(
+                    "Source must be a complete 398-byte 0x36 speaker report.",
+                    nameof(source));
+            }
         }
     }
 

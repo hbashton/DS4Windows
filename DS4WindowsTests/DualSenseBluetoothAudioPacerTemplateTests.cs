@@ -327,7 +327,7 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
-        public void SchedulerKeepsContinuousAudioClockWhenInputArrivalPhaseMoves()
+        public void SchedulerBoundsInputPhaseBiasWithoutMovingRationalClock()
         {
             const long qpcFrequency = 10_000_000;
             const long startQpc = 20_000_000;
@@ -339,15 +339,21 @@ namespace DS4Windows.Tests
             for (int index = 0; index < intervals; index++)
             {
                 // Model the latest HID arrival wandering across the audio
-                // cadence. It is useful for measuring the controller clock,
-                // but must not move an already scheduled audio deadline.
+                // cadence. Presentation may receive the deliberately bounded
+                // sub-millisecond bias, while the rational clock itself must
+                // remain continuous and exact.
                 scheduler.SetInputPhaseReference(startQpc + index * 12_500L +
                     ((index % 7) - 3) * 997L);
                 long idealDeadline = scheduler.NextDeadlineQpc;
                 long presentationDeadline =
                     scheduler.PresentationDeadlineQpc;
-                Assert.AreEqual(idealDeadline, presentationDeadline,
-                    "HID arrival jitter leaked into the audio presentation clock.");
+                long maximumBiasTicks = qpcFrequency *
+                    DualSenseBluetoothAudioPacerScheduler.
+                        MaximumInputPhaseCorrectionMicroseconds / 1_000_000;
+                Assert.IsTrue(Math.Abs(
+                        presentationDeadline - idealDeadline) <=
+                    maximumBiasTicks,
+                    "The controller-input phase bias exceeded its hard cap.");
                 scheduler.AdvanceAfterSend(presentationDeadline);
             }
 
@@ -439,11 +445,11 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
-        public void PairedSpeakerAudioNeverPresentsAnUnpairedHalf()
+        public void SingleSpeakerAudioPresentsWithoutWaitingForAPair()
         {
             byte[] speaker = CreateReport(0x52);
 
-            Assert.IsFalse(
+            Assert.IsTrue(
                 DualSenseBluetoothAudioPacer.CanPresentFromTransportGate(
                     primeRequired: false, speakerReportCount: 1,
                     nextReport: speaker));
@@ -571,7 +577,7 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
-        public void ControlPrimeBypassKeepsAudioPrimeArmed()
+        public void SingleFrameControlDoesNotRestartAudioPrime()
         {
             byte[] control = CreateReport(0x37);
             control[142] = 0;
@@ -581,13 +587,13 @@ namespace DS4Windows.Tests
                 DualSenseBluetoothAudioPacer.CanPresentFromPrimeGate(
                     primeRequired: true, speakerReportCount: 0,
                     nextReport: control));
-            Assert.IsTrue(
+            Assert.IsFalse(
                 DualSenseBluetoothAudioPacer.
                     ShouldRequireAudioPrimeAfterPresentation(
                         presentedControlReport: true,
                         remainingReportCount:
                             DualSenseBluetoothAudioPacer.PrimeReportCount),
-                "A control commit must hard re-prime audio even when speaker reports remain queued.");
+                "A control commit must not restart the native 0x36 cadence.");
         }
 
         [TestMethod]
@@ -602,7 +608,7 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
-        public void PrimeCountsOnlyConsecutiveHeadSpeakerReports()
+        public void NativeSingleFramePrimeAllowsControlThenNextSpeaker()
         {
             var ring = new DualSenseBluetoothAudioPacerRing<byte[]>(9);
             for (int index = 0;
@@ -622,12 +628,23 @@ namespace DS4Windows.Tests
             Assert.AreEqual(DualSenseBluetoothAudioPacer.PrimeReportCount - 1,
                 leadingSpeakers);
             Assert.IsTrue(ring.TryPeek(out byte[] first));
-            Assert.IsFalse(
+            Assert.IsTrue(
                 DualSenseBluetoothAudioPacer.CanPresentFromPrimeGate(
                     primeRequired: true,
                     speakerReportCount: leadingSpeakers,
                     nextReport: first),
-                "A speaker after an intervening control must not complete the leading audio prime.");
+                "A control report must bypass the single-frame audio prime.");
+            Assert.IsTrue(ring.TryDequeue(out _));
+            leadingSpeakers = ring.CountLeading(
+                DualSenseBluetoothAudioPacer.IsSpeakerAudioReport);
+            Assert.AreEqual(1, leadingSpeakers);
+            Assert.IsTrue(ring.TryPeek(out first));
+            Assert.IsTrue(
+                DualSenseBluetoothAudioPacer.CanPresentFromTransportGate(
+                    primeRequired: true,
+                    speakerReportCount: leadingSpeakers,
+                    nextReport: first),
+                "One complete 0x36 must satisfy the native audio prime.");
         }
 
         [TestMethod]

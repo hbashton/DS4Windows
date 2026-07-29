@@ -21,11 +21,16 @@ namespace DS4Windows.InputDevices
     internal sealed class DualSenseBluetoothAudioPacer : IDisposable
     {
         internal const int ReportLength = 398;
-        internal const bool UsePairedAudioReports = true;
+        // Match DS5 Bridge's physical audio cadence: one complete 398-byte
+        // 0x36 generation every 10.667 ms. Pairing two logical generations
+        // into a 547-byte 0x39 halves the host's opportunities to observe HID
+        // completion/backpressure and makes each missed service turn audible
+        // as a two-frame discontinuity.
+        internal const bool UsePairedAudioReports = false;
         // Sony's 0x39 report is complete as soon as one two-frame pair exists.
         // DS5Dongle does not wait for an additional host-side prime before it
         // hands that indivisible report to L2CAP.
-        internal const int PrimeReportCount = 2;
+        internal const int PrimeReportCount = UsePairedAudioReports ? 2 : 1;
         internal const int PairedAudioInFlightLimit =
             PairedAudioTransportSlotCount;
         // DS5Dongle keeps a 10-packet interrupt FIFO behind that two-frame
@@ -33,11 +38,22 @@ namespace DS4Windows.InputDevices
         // audio-prime rule so a delayed Windows HID completion does not reject
         // an otherwise on-time 0x39 report.
         internal const int PairedAudioTransportSlotCount = 10;
+        // Windows does not expose BTstack's CAN_SEND_NOW credit. A strict
+        // ten-slot OVERLAPPED FIFO covers the measured 39-82 ms HidBth service
+        // drought while its oldest completion event remains our credit proxy.
+        // Ten 0x36 frames span 106.7 ms and still carry fewer queued bytes than
+        // the golden ten-slot 0x39 writer. Never scan around an unfinished
+        // oldest slot.
+        internal const int SingleAudioTransportSlotCount = 10;
+        internal const int SingleAudioInFlightLimit = 10;
         internal const int HostReservoirCapacity = 64;
         // The paired path is source-driven like DS5Dongle. It must not replay
         // 398-era startup phases after a normal two-frame queue boundary.
         internal const int ControllerLinkWarmupIntervals = 0;
-        internal const int ControllerReserveTransferIntervals = 24;
+        // A single-report stream starts directly at native cadence. The old
+        // paired path used a short 5 ms reserve-transfer phase; applying that
+        // phase to 0x36 would burst reports at twice the firmware cadence.
+        internal const int ControllerReserveTransferIntervals = 0;
 
         private const string HelperArgument = "--dualsense-bt-audio-pacer-helper";
         private const int ProtocolVersion = 6;
@@ -47,6 +63,7 @@ namespace DS4Windows.InputDevices
         private const int HelperProcessExitTimeoutMilliseconds = 3000;
         private const uint HelperWriterReleaseTimeoutMilliseconds = 3000;
         private const uint HelperControlWriteTimeoutMilliseconds = 750;
+        private const uint HelperAudioCreditPollMilliseconds = 1;
         private const int OutboundCommandCapacity = HostReservoirCapacity + 16;
         private const int InitialEpoch = 1;
         private const uint DuplicateSameAccess = 0x00000002;
@@ -566,7 +583,17 @@ namespace DS4Windows.InputDevices
             // complete pair exists. Resetting here made DS4Windows wait for a
             // fresh prime and replay its startup rate transfer on every
             // shortage, creating 77 ms gaps followed by a 20 ms burst cadence.
-            return presentedControlReport;
+            // A native 0x36 stream has no half-report generation to discard or
+            // rebuild. DS5 Bridge resumes audio on the next send opportunity
+            // after state, so keep the rational cadence continuous. Only the
+            // dormant paired transport requires a new complete pair.
+            return UsePairedAudioReports && presentedControlReport;
+        }
+
+        internal static bool ShouldRetainSaturatedWrite(bool accepted,
+            bool transportFault)
+        {
+            return !accepted && !transportFault;
         }
 
         public bool TryQueueReport(byte[] report, long hapticsExpiryQpc)
@@ -1377,10 +1404,10 @@ namespace DS4Windows.InputDevices
                         out writerError,
                         slotCount: UsePairedAudioReports ?
                             PairedAudioTransportSlotCount :
-                            PrimeReportCount,
+                            SingleAudioTransportSlotCount,
                         audioInFlightLimit: UsePairedAudioReports ?
                             PairedAudioInFlightLimit :
-                            PrimeReportCount))
+                            SingleAudioInFlightLimit))
                 {
                     TryWriteError(helperPipe,
                         "Could not initialize the duplicated DualSense HID handle. " +
@@ -1875,27 +1902,11 @@ namespace DS4Windows.InputDevices
                     latestTemplateHapticsExpiryQpc = hapticsExpiryQpc;
                     latestTemplateAvailable = true;
 
-                    if (!IsSpeakerAudioReport(report.Report))
-                    {
-                        // A completion-aware control is a physical barrier, not
-                        // an audio frame. Drop an incomplete/queued speaker
-                        // generation so the control can never be trapped behind
-                        // the eight-speaker prime gate, then force the following
-                        // generation to build a fresh full prime.
-                        primeRequired = true;
-                        foreach (QueuedReport removed in reservoir.RemoveWhere(
-                            IsQueuedSpeakerReport))
-                        {
-                            QueueAcknowledgement(removed.Id,
-                                AcknowledgementDisposition.Cleared);
-                            if (!availableReports.TryEnqueue(removed))
-                            {
-                                throw new InvalidOperationException(
-                                    "The pacer report pool overflowed while prioritizing a control report.");
-                            }
-                        }
-                    }
-
+                    // DS5 Bridge serializes/coalesces controller state without
+                    // purging audio already admitted to its FIFO. With native
+                    // single-frame 0x36 presentation there is no unmatched
+                    // paired half to bypass, so retain every admitted audio
+                    // generation and let this control follow it in order.
                     if (!reservoir.TryEnqueue(report))
                     {
                         availableReports.TryEnqueue(report);
@@ -2048,6 +2059,29 @@ namespace DS4Windows.InputDevices
                             break;
                         }
 
+                        // DS5 Bridge and DS5Dongle dequeue only after an actual
+                        // L2CAP CAN_SEND_NOW credit. HidBth does not expose that
+                        // signal, so wait for completion of our strict oldest
+                        // OVERLAPPED slot before consuming the corresponding
+                        // logical audio report. A true transport fault is left
+                        // for the normal submission path below to acknowledge.
+                        bool audioWriteAtHead;
+                        lock (stateLock)
+                        {
+                            audioWriteAtHead = !primeRequired &&
+                                reservoir.TryPeek(out QueuedReport creditReport) &&
+                                IsSpeakerAudioReport(creditReport.Report);
+                        }
+
+                        if (audioWriteAtHead &&
+                            !writer.WaitForNextWriteSlot(
+                                HelperAudioCreditPollMilliseconds,
+                                out bool creditTransportFault) &&
+                            !creditTransportFault)
+                        {
+                            continue;
+                        }
+
                         QueuedReport item;
                         QueuedReport pairedItem = null;
                         long itemId;
@@ -2059,6 +2093,7 @@ namespace DS4Windows.InputDevices
                         long pairedPresentedAt = 0;
                         bool advanceScheduler;
                         bool controlOnly;
+                        bool retainedForRetry = false;
                         lock (stateLock)
                         {
                             if (controlPrimeBypass)
@@ -2154,36 +2189,50 @@ namespace DS4Windows.InputDevices
                                 bool accepted;
                                 if (pairedItem == null)
                                 {
-                                    physicalOutputSequence.PrepareControl(
-                                        item.Report);
-                                    RecordPresentationTrace(item.Report,
-                                        presentedAt, reservoir.Count);
+                                    if (controlOnly)
+                                    {
+                                        physicalOutputSequence.PrepareControl(
+                                            item.Report);
+                                    }
+                                    else
+                                    {
+                                        physicalOutputSequence.PrepareSingleAudio(
+                                            item.Report);
+                                    }
                                     accepted = controlOnly ?
                                         writer.TryWriteAndWait(item.Report,
                                             HelperControlWriteTimeoutMilliseconds,
                                             out transportFault) :
                                         writer.TryWrite(item.Report,
                                             out transportFault);
+                                    if (accepted)
+                                    {
+                                        RecordPresentationTrace(item.Report,
+                                            presentedAt, reservoir.Count);
+                                    }
                                 }
                                 else
                                 {
                                     physicalOutputSequence.PreparePairedAudio(
                                         item.Report, pairedItem.Report,
                                         pairedAudioReport);
-                                    RecordPresentationTrace(item.Report,
-                                        presentedAt, reservoir.Count + 1);
-                                    RecordPresentationTrace(
-                                        pairedItem.Report, presentedAt,
-                                        reservoir.Count);
                                     accepted = writer.TryWrite(
                                         pairedAudioReport,
                                         out transportFault);
+                                    if (accepted)
+                                    {
+                                        RecordPresentationTrace(item.Report,
+                                            presentedAt, reservoir.Count + 1);
+                                        RecordPresentationTrace(
+                                            pairedItem.Report, presentedAt,
+                                            reservoir.Count);
+                                    }
                                 }
 
                                 if (accepted)
                                 {
                                     physicalOutputSequence.Commit(
-                                        pairedItem != null);
+                                        pairedItem != null || !controlOnly);
                                 }
 
                                 disposition = accepted ?
@@ -2192,9 +2241,24 @@ namespace DS4Windows.InputDevices
                                         AcknowledgementDisposition.TransportFault :
                                         AcknowledgementDisposition.Rejected;
                                 pairedDisposition = disposition;
+
+                                if (ShouldRetainSaturatedWrite(accepted,
+                                    transportFault))
+                                {
+                                    retainedForRetry = pairedItem == null ?
+                                        reservoir.TryEnqueueFront(item) :
+                                        reservoir.TryEnqueuePairFront(item,
+                                            pairedItem);
+                                    if (!retainedForRetry)
+                                    {
+                                        throw new InvalidOperationException(
+                                            "The pacer could not restore a saturated report to the FIFO head.");
+                                    }
+                                }
                             }
 
-                            if (ShouldRequireAudioPrimeAfterPresentation(
+                            if (!retainedForRetry &&
+                                ShouldRequireAudioPrimeAfterPresentation(
                                 controlOnly, reservoir.Count))
                             {
                                 primeRequired = true;
@@ -2205,21 +2269,32 @@ namespace DS4Windows.InputDevices
                                 }
                             }
 
-                            if (!availableReports.TryEnqueue(item))
+                            if (!retainedForRetry &&
+                                !availableReports.TryEnqueue(item))
                             {
                                 throw new InvalidOperationException(
                                     "The pacer report pool overflowed after presentation.");
                             }
 
-                            if (pairedItem != null &&
+                            if (!retainedForRetry && pairedItem != null &&
                                 !availableReports.TryEnqueue(pairedItem))
                             {
                                 throw new InvalidOperationException(
                                     "The pacer report pool overflowed after paired presentation.");
                             }
 
-                            advanceScheduler = !controlPrimeBypass &&
+                            advanceScheduler = !retainedForRetry &&
+                                !controlPrimeBypass &&
                                 !primeRequired;
+                        }
+
+                        if (retainedForRetry)
+                        {
+                            // Do not acknowledge, spend sequence/counter state,
+                            // or advance the rational clock. The next loop waits
+                            // for the same oldest writer credit and retries this
+                            // exact FIFO generation without a catch-up burst.
+                            continue;
                         }
 
                         if (advanceScheduler)
@@ -2721,6 +2796,39 @@ namespace DS4Windows.InputDevices
             }
         }
 
+        public bool TryEnqueueFront(T item)
+        {
+            lock (syncRoot)
+            {
+                if (count == entries.Length)
+                {
+                    return false;
+                }
+
+                head = (head + entries.Length - 1) % entries.Length;
+                entries[head] = item;
+                count++;
+                return true;
+            }
+        }
+
+        public bool TryEnqueuePairFront(T first, T second)
+        {
+            lock (syncRoot)
+            {
+                if (entries.Length - count < 2)
+                {
+                    return false;
+                }
+
+                head = (head + entries.Length - 2) % entries.Length;
+                entries[head] = first;
+                entries[(head + 1) % entries.Length] = second;
+                count += 2;
+                return true;
+            }
+        }
+
         public bool TryDequeue(out T item)
         {
             lock (syncRoot)
@@ -2887,7 +2995,7 @@ namespace DS4Windows.InputDevices
         internal const int InputReportsPerSecond = 800;
         internal const int InputPhaseOffsetMicroseconds = 350;
         internal const int MaximumInputPhaseCorrectionMicroseconds = 250;
-        internal const double ControllerReserveCadenceRatio = 1.0;
+        internal static readonly double ControllerReserveCadenceRatio = 1.0;
         internal const int ControllerReserveTransferIntervalMicroseconds =
             5_000;
         internal const double MinimumRateRatio = 0.995;
@@ -3304,7 +3412,23 @@ namespace DS4Windows.InputDevices
                 nextReportSequence, preparedMediaPacketSequence, destination);
         }
 
-        internal void Commit(bool pairedAudio)
+        internal void PrepareSingleAudio(byte[] report)
+        {
+            ValidateSource(report, nameof(report));
+            if (!DualSenseBluetoothAudioPacer.IsSpeakerAudioReport(report))
+            {
+                throw new ArgumentException(
+                    "Source must be a complete 398-byte 0x36 speaker report.",
+                    nameof(report));
+            }
+
+            EnsureInitialized(report);
+            preparedMediaPacketSequence = report[10];
+            report[1] = (byte)((nextReportSequence & 0x0F) << 4);
+            WriteSonyCrc(report);
+        }
+
+        internal void Commit(bool audio)
         {
             if (!initialized)
             {
@@ -3313,7 +3437,7 @@ namespace DS4Windows.InputDevices
             }
 
             nextReportSequence = (byte)((nextReportSequence + 1) & 0x0F);
-            if (pairedAudio)
+            if (audio)
             {
                 mediaPacketSequence = preparedMediaPacketSequence;
             }

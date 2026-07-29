@@ -66,6 +66,25 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void ActiveSpeakerClockAlwaysCarriesMicrophoneTransition()
+        {
+            Assert.IsTrue(DualSenseDevice.
+                ShouldPublishMicrophoneStateThroughSpeakerClock(
+                    speakerOutputEnabled: true,
+                    speakerClockActive: true),
+                "A prewarm-to-active race must not fall back to a draining " +
+                "control-only write.");
+            Assert.IsFalse(DualSenseDevice.
+                ShouldPublishMicrophoneStateThroughSpeakerClock(
+                    speakerOutputEnabled: true,
+                    speakerClockActive: false));
+            Assert.IsFalse(DualSenseDevice.
+                ShouldPublishMicrophoneStateThroughSpeakerClock(
+                    speakerOutputEnabled: false,
+                    speakerClockActive: true));
+        }
+
+        [TestMethod]
         public void ExplicitRecoveryOverridesSegmentLatchButHonorsCooldown()
         {
             Assert.IsFalse(

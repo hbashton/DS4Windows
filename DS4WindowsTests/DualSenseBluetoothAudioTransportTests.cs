@@ -12,6 +12,56 @@ namespace DS4WindowsTests
     public class DualSenseBluetoothAudioTransportTests
     {
         [TestMethod]
+        public void SaturatedWriterRetainsLogicalReportUnlessTransportFailed()
+        {
+            Assert.IsTrue(
+                DualSenseBluetoothAudioPacer.ShouldRetainSaturatedWrite(
+                    accepted: false, transportFault: false));
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.ShouldRetainSaturatedWrite(
+                    accepted: true, transportFault: false));
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.ShouldRetainSaturatedWrite(
+                    accepted: false, transportFault: true));
+        }
+
+        [TestMethod]
+        public void SaturatedReportsReturnToExactFifoHead()
+        {
+            var ring = new DualSenseBluetoothAudioPacerRing<int>(4);
+            Assert.IsTrue(ring.TryEnqueue(30));
+            Assert.IsTrue(ring.TryEnqueue(40));
+            Assert.IsTrue(ring.TryEnqueueFront(20));
+            Assert.IsTrue(ring.TryEnqueueFront(10));
+
+            foreach (int expected in new[] { 10, 20, 30, 40 })
+            {
+                Assert.IsTrue(ring.TryDequeue(out int actual));
+                Assert.AreEqual(expected, actual);
+            }
+        }
+
+        [TestMethod]
+        public void SaturatedPairedReportReturnsAtomicallyToFifoHead()
+        {
+            var ring = new DualSenseBluetoothAudioPacerRing<int>(5);
+            Assert.IsTrue(ring.TryEnqueue(1));
+            Assert.IsTrue(ring.TryEnqueue(2));
+            Assert.IsTrue(ring.TryEnqueue(30));
+            Assert.IsTrue(ring.TryDequeue(out _));
+            Assert.IsTrue(ring.TryDequeue(out _));
+            Assert.IsTrue(ring.TryEnqueue(40));
+            Assert.IsTrue(ring.TryEnqueue(50));
+            Assert.IsTrue(ring.TryEnqueuePairFront(10, 20));
+
+            foreach (int expected in new[] { 10, 20, 30, 40, 50 })
+            {
+                Assert.IsTrue(ring.TryDequeue(out int actual));
+                Assert.AreEqual(expected, actual);
+            }
+        }
+
+        [TestMethod]
         public void PairedReportPreservesBothSequentialAudioFrames()
         {
             byte[] first = CreateSpeakerReport(0x11, 0x21, 0x31);
@@ -54,7 +104,7 @@ namespace DS4WindowsTests
 
             Assert.AreEqual((byte)0x00, control[1]);
             Assert.AreEqual((byte)0x00, control[10]);
-            sequence.Commit(pairedAudio: false);
+            sequence.Commit(audio: false);
             Assert.AreEqual((byte)1, sequence.NextReportSequence);
             Assert.AreEqual((byte)0, sequence.MediaPacketSequence,
                 "A control-only report consumed the media packet counter.");
@@ -69,7 +119,7 @@ namespace DS4WindowsTests
                 "The first 0x39 did not follow the accepted control report.");
             Assert.AreEqual((byte)2, paired[9],
                 "The first 0x39 did not publish DS5Dongle's first two-frame media counter.");
-            sequence.Commit(pairedAudio: true);
+            sequence.Commit(audio: true);
             Assert.AreEqual((byte)2, sequence.NextReportSequence);
             Assert.AreEqual((byte)2, sequence.MediaPacketSequence);
         }
@@ -90,12 +140,40 @@ namespace DS4WindowsTests
             CollectionAssert.AreEqual(initial, retried,
                 "A rejected/uncommitted physical write spent sequence numbers.");
 
-            sequence.Commit(pairedAudio: true);
+            sequence.Commit(audio: true);
             first[10] = 3;
             second[10] = 4;
             sequence.PreparePairedAudio(first, second, following);
             Assert.AreEqual((byte)0x10, following[1]);
             Assert.AreEqual((byte)4, following[9]);
+        }
+
+        [TestMethod]
+        public void PhysicalSequencePresentsSingleAudioAtNativeCadenceShape()
+        {
+            var sequence = new DualSenseBluetoothPhysicalOutputSequence();
+            byte[] first = CreateSpeakerReport(0x11, 0x21, 0xA0, 1);
+            byte[] second = CreateSpeakerReport(0x12, 0x22, 0xB0, 2);
+
+            sequence.PrepareSingleAudio(first);
+            Assert.AreEqual((byte)0xA0, first[1]);
+            Assert.AreEqual((byte)1, first[10]);
+            Assert.AreEqual((byte)0x36, first[0]);
+            sequence.Commit(audio: true);
+
+            sequence.PrepareSingleAudio(second);
+            Assert.AreEqual((byte)0xB0, second[1]);
+            Assert.AreEqual((byte)2, second[10]);
+            Assert.AreEqual((byte)0x36, second[0]);
+            sequence.Commit(audio: true);
+
+            Assert.AreEqual((byte)12, sequence.NextReportSequence);
+            Assert.AreEqual((byte)2, sequence.MediaPacketSequence);
+            Assert.AreEqual(0,
+                DualSenseBluetoothAudioPacer.ControllerReserveTransferIntervals,
+                "The 0x36 route must not replay the paired 5 ms startup burst.");
+            Assert.AreEqual(10,
+                DualSenseBluetoothAudioPacer.SingleAudioTransportSlotCount);
         }
 
         private static byte[] CreateSpeakerReport(byte haptics,
@@ -110,7 +188,7 @@ namespace DS4WindowsTests
             report[76] = 0xD2;
             report[77] = 64;
             Array.Fill(report, haptics, 78, 64);
-            report[142] = 0xD3;
+            report[142] = 0x93;
             report[143] = 200;
             Array.Fill(report, audio, 144, 200);
             return report;

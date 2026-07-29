@@ -478,6 +478,8 @@ namespace DS4Windows
             directPcmBalanceClockServo;
         private readonly DualSenseSpeakerFrameResampler speakerFrameResampler =
             new DualSenseSpeakerFrameResampler();
+        private readonly DualSenseReferenceSpeakerFrameResampler
+            directSpeakerFrameResampler;
         private Pcm16WaveTraceWriter rawDirectPcmTrace;
         private Pcm16WaveTraceWriter preOpusPcmTrace;
         private Pcm16WaveTraceWriter postOpusPcmTrace;
@@ -513,6 +515,11 @@ namespace DS4Windows
         private double captureCurrentClockRatio = 1.0;
         private double captureTargetClockRatio = 1.0;
         private bool captureClockInitialized;
+        // A WDL output-driven prepare reserves its interpolation state. Cache
+        // that exact request until the source ring can satisfy it; otherwise
+        // the readiness check can wake on 512 frames while this packet really
+        // needs 513 and unnecessarily defer an entire controller interval.
+        private int preparedDirectSpeakerSourceFrames;
         private bool fadeInAfterCaptureUnderrun;
         private float previousOutputLeft;
         private float previousOutputRight;
@@ -603,6 +610,8 @@ namespace DS4Windows
                     directSpeakerSampleRate);
                 directPcmBalanceClockServo =
                     new DualSenseDirectPcmBalanceClockServo();
+                directSpeakerFrameResampler =
+                    new DualSenseReferenceSpeakerFrameResampler();
                 TryCreateDirectPcmTraces();
             }
         }
@@ -1282,11 +1291,29 @@ namespace DS4Windows
                 capturePrimed = true;
             }
 
-            UpdateCaptureClockRatioLocked();
-            speakerFrameResampler.SetInputRateRatio(
-                captureCurrentClockRatio);
-            int requestedSourceFrames =
-                speakerFrameResampler.PrepareOutputFrame(FrameSamples);
+            int requestedSourceFrames;
+            if (directSpeakerFrameResampler != null)
+            {
+                requestedSourceFrames = preparedDirectSpeakerSourceFrames;
+                if (requestedSourceFrames == 0)
+                {
+                    UpdateCaptureClockRatioLocked();
+                    directSpeakerFrameResampler.SetInputRateRatio(
+                        captureCurrentClockRatio);
+                    requestedSourceFrames =
+                        directSpeakerFrameResampler.PrepareOutputFrame();
+                    preparedDirectSpeakerSourceFrames =
+                        requestedSourceFrames;
+                }
+            }
+            else
+            {
+                UpdateCaptureClockRatioLocked();
+                speakerFrameResampler.SetInputRateRatio(
+                    captureCurrentClockRatio);
+                requestedSourceFrames =
+                    speakerFrameResampler.PrepareOutputFrame(FrameSamples);
+            }
             if (captureRingBufferedFrames < requestedSourceFrames)
             {
                 // A continuous VIIPER stream arrives in 320-frame source
@@ -1299,10 +1326,17 @@ namespace DS4Windows
 
             CopyCaptureFramesToSpeakerResamplerLocked(
                 requestedSourceFrames);
-            int producedFrames =
-                speakerFrameResampler.ConvertPreparedOutput(
+            int producedFrames = directSpeakerFrameResampler != null ?
+                directSpeakerFrameResampler.ConvertPreparedOutput(
                     speakerResampleInput, 0, requestedSourceFrames,
-                    frame, 0);
+                    frame, 0) :
+                    speakerFrameResampler.ConvertPreparedOutput(
+                        speakerResampleInput, 0, requestedSourceFrames,
+                        frame, 0);
+            if (directSpeakerFrameResampler != null)
+            {
+                preparedDirectSpeakerSourceFrames = 0;
+            }
             consumedSourceFrames = requestedSourceFrames;
             return producedFrames == FrameSamples;
         }
@@ -1348,6 +1382,8 @@ namespace DS4Windows
         private void ResetSpeakerResamplingLocked()
         {
             speakerFrameResampler.Reset();
+            directSpeakerFrameResampler?.Reset();
+            preparedDirectSpeakerSourceFrames = 0;
         }
 
         private void ResetDirectPcmBalanceWindow()
@@ -1578,10 +1614,22 @@ namespace DS4Windows
                     (SampleRate * InitialBufferMs) / 1000;
             }
 
-            // The exact output-driven request is normally 512 or 513 frames.
-            // At 512 this method can report ready one callback fraction early;
-            // TryFillOutputFrame then defers without consuming anything until
-            // the final fractional source frame arrives.
+            if (directSpeakerFrameResampler != null)
+            {
+                if (preparedDirectSpeakerSourceFrames == 0)
+                {
+                    UpdateCaptureClockRatioLocked();
+                    directSpeakerFrameResampler.SetInputRateRatio(
+                        captureCurrentClockRatio);
+                    preparedDirectSpeakerSourceFrames =
+                        directSpeakerFrameResampler.PrepareOutputFrame();
+                }
+
+                return captureRingBufferedFrames >=
+                    preparedDirectSpeakerSourceFrames;
+            }
+
+            // The WASAPI fallback retains its original output-driven route.
             return captureRingBufferedFrames >= SourcePullFrames;
         }
 

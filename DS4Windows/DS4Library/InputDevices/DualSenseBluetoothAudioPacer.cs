@@ -2652,10 +2652,12 @@ namespace DS4Windows.InputDevices
                     reservoirCount, 0, byte.MaxValue);
                 if (report[0] == 0x35)
                 {
+                    int compactAudioType = report[77] & 0x3F;
                     bool combinedHaptics =
                         (report[11] & 0x3F) == 0x12 &&
                         report[12] == 64 &&
-                        (report[77] & 0x3F) == 0x13 &&
+                        (compactAudioType == 0x13 ||
+                            compactAudioType == 0x16) &&
                         report[78] == 200;
                     presentationTracePacketType[index] = combinedHaptics ?
                         report[77] : report[11];
@@ -3681,7 +3683,10 @@ namespace DS4Windows.InputDevices
             destination[4] = 0xFE;
             destination[9] = 0xFF;
             destination[10] = packetSequence;
-            destination[11] = 0x93;
+            // Preserve the logical media destination. 0x93 targets the
+            // controller speaker; 0x96 targets the headset/AUX DAC. Rewriting
+            // both as 0x93 makes Headset Only silently fall back to speaker.
+            destination[11] = source[142];
             destination[12] = SpeakerFrameLength;
             Buffer.BlockCopy(source, SourceSpeakerDataOffset, destination,
                 SpeakerDataOffset, SpeakerFrameLength);
@@ -3695,12 +3700,20 @@ namespace DS4Windows.InputDevices
         private static void ValidateSource(byte[] source)
         {
             if (source == null || source.Length != SourceReportLength ||
-                source[0] != 0x36 || source[143] != SpeakerFrameLength)
+                source[0] != 0x36 ||
+                !IsSupportedAudioPacketType(source[142]) ||
+                source[143] != SpeakerFrameLength)
             {
                 throw new ArgumentException(
-                    "Source must be a complete 398-byte 0x36 speaker report.",
+                    "Source must be a complete 398-byte 0x36 speaker or AUX report.",
                     nameof(source));
             }
+        }
+
+        private static bool IsSupportedAudioPacketType(byte packetType)
+        {
+            int type = packetType & 0x3F;
+            return type == 0x13 || type == 0x16;
         }
     }
 
@@ -3748,7 +3761,9 @@ namespace DS4Windows.InputDevices
             destination[12] = HapticsLength;
             Buffer.BlockCopy(source, SourceHapticsOffset, destination,
                 HapticsOffset, HapticsLength);
-            destination[SpeakerHeaderOffset] = 0x93;
+            // Carry the selected physical output through the compact report:
+            // 0x93 is the speaker and 0x96 is the headset/AUX DAC.
+            destination[SpeakerHeaderOffset] = source[142];
             destination[SpeakerHeaderOffset + 1] = SpeakerFrameLength;
             Buffer.BlockCopy(source, SourceSpeakerDataOffset, destination,
                 SpeakerDataOffset, SpeakerFrameLength);
@@ -3765,13 +3780,19 @@ namespace DS4Windows.InputDevices
                 source[0] != 0x36 ||
                 (source[76] & 0x3F) != 0x12 ||
                 source[77] != HapticsLength ||
-                (source[142] & 0x3F) != 0x13 ||
+                !IsSupportedAudioPacketType(source[142]) ||
                 source[143] != SpeakerFrameLength)
             {
                 throw new ArgumentException(
-                    "Source must be a complete 398-byte 0x36 haptics and speaker report.",
+                    "Source must be a complete 398-byte 0x36 haptics and speaker or AUX report.",
                     nameof(source));
             }
+        }
+
+        private static bool IsSupportedAudioPacketType(byte packetType)
+        {
+            int type = packetType & 0x3F;
+            return type == 0x13 || type == 0x16;
         }
     }
 

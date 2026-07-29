@@ -126,7 +126,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void SpeakerAndAuxRouteMapsProfileGainToFirmwareRange()
+        public void SpeakerRouteMutesAuxAndMapsSpeakerGain()
         {
             byte[] report = new byte[64];
 
@@ -136,8 +136,10 @@ namespace DS4WindowsTests
                 report, (byte)255, false, (byte)255,
             });
 
-            Assert.AreEqual((byte)0x7F, report[17],
-                "The normal speaker+AUX route wrote the byte-wide profile value directly to Sony's 7-bit DAC gain.");
+            Assert.AreEqual((byte)0x00, report[17],
+                "The speaker route left the AUX DAC audible.");
+            Assert.AreEqual((byte)0xA0, report[13],
+                "The speaker route did not exclusively validate speaker gain.");
             Assert.AreEqual((byte)0x64, report[18]);
             Assert.AreEqual((byte)0x20, report[20]);
             Assert.AreEqual((byte)0x03, report[50]);
@@ -162,7 +164,7 @@ namespace DS4WindowsTests
 
             Assert.AreEqual((byte)0x31, headset[0]);
             Assert.AreEqual((byte)0x60, headset[1]);
-            Assert.AreEqual((byte)0x80, headset[3]);
+            Assert.AreEqual((byte)0x90, headset[3]);
             Assert.AreEqual((byte)0x00, headset[4]);
             Assert.AreEqual((byte)0x7F, headset[7]);
             Assert.AreEqual((byte)0x00, headset[8]);
@@ -209,7 +211,7 @@ namespace DS4WindowsTests
 
             Assert.AreEqual((byte)0xFF, report[4],
                 "Speaker snapshot sanitation disabled the microphone stream header.");
-            Assert.AreEqual((byte)0xBF, report[13]);
+            Assert.AreEqual((byte)0xAF, report[13]);
             Assert.AreEqual((byte)0xFE, report[14]);
             Assert.AreEqual((byte)0x00, report[19]);
             Assert.AreEqual((byte)0x20, report[20]);

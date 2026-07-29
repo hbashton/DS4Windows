@@ -711,13 +711,14 @@ namespace DS4Windows
                     "Could not activate the DualSense Bluetooth speaker session.");
             }
 
-            // Preserve RC3's proven internal-speaker startup byte-for-byte.
-            // The ordinary 0x31 route preamble exists only to arm the separate
-            // 0x96 AUX decoder and must never touch the 0x93 speaker path.
-            if (headsetOnlyAudio && !device.RearmBluetoothHeadsetOutputRoute())
+            // Serialize the selected physical output before the media lane
+            // starts. A fresh speaker session is a no-op; an AUX session gets
+            // Sony's speaker-then-headset primer, and the first speaker session
+            // after AUX explicitly restores the internal-speaker route.
+            if (!device.RearmBluetoothHeadsetOutputRoute())
             {
                 throw new InvalidOperationException(
-                    $"Could not arm the DualSense AUX output route: {device.LastBluetoothHapticsWriteStatus}");
+                    $"Could not arm the selected DualSense audio output route: {device.LastBluetoothHapticsWriteStatus}");
             }
 
             try

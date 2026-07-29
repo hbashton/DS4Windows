@@ -219,6 +219,23 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void PadForgeReportPreservesAuxDestination()
+        {
+            byte[] source = CreateSpeakerReport(0, 0, 0, 0x42);
+            source[142] = 0x96;
+            byte[] report = new byte[
+                DualSenseBluetoothPadForgeAudioReportBuilder.ReportLength];
+
+            DualSenseBluetoothPadForgeAudioReportBuilder.Build(source,
+                reportSequence: 9, packetSequence: 0x42, report);
+
+            Assert.AreEqual((byte)0x96, report[11]);
+            Assert.AreEqual((byte)200, report[12]);
+            CollectionAssert.AreEqual(source.Skip(144).Take(200).ToArray(),
+                report.Skip(13).Take(200).ToArray());
+        }
+
+        [TestMethod]
         public void PadForgePhysicalSequenceAdvancesOnlyAfterAcceptedWrites()
         {
             var sequence = new DualSenseBluetoothPhysicalOutputSequence();
@@ -296,6 +313,26 @@ namespace DS4WindowsTests
             Assert.AreEqual(expectedCrc,
                 BinaryPrimitives.ReadUInt32LittleEndian(
                     report.AsSpan(report.Length - sizeof(uint))));
+        }
+
+        [TestMethod]
+        public void CompactCombinedReportPreservesAuxDestination()
+        {
+            byte[] source = CreateSpeakerReport(0, 0, 0, 0x42);
+            source[142] = 0x96;
+            byte[] report = new byte[
+                DualSenseBluetoothPadForgeCombinedAudioReportBuilder.
+                    ReportLength];
+
+            DualSenseBluetoothPadForgeCombinedAudioReportBuilder.Build(source,
+                reportSequence: 9, packetSequence: 0x42, report);
+
+            Assert.AreEqual((byte)0x92, report[11]);
+            Assert.AreEqual((byte)64, report[12]);
+            Assert.AreEqual((byte)0x96, report[77]);
+            Assert.AreEqual((byte)200, report[78]);
+            CollectionAssert.AreEqual(source.Skip(144).Take(200).ToArray(),
+                report.Skip(79).Take(200).ToArray());
         }
 
         [TestMethod]

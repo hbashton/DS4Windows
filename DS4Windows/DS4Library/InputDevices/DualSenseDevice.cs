@@ -417,6 +417,7 @@ namespace DS4Windows.InputDevices
         private const byte DualSenseHeadphoneVolumeMaximum = 0x7F;
         private const byte DualSenseMicrophoneVolumeMaximum = 0x40;
         private const byte DualSenseSpeakerPreGain = 0x03;
+        private const byte DualSenseOutputFlag0HeadphoneVolumeEnable = 0x10;
         private const byte DualSenseOutputFlag0SpeakerVolumeEnable = 0x20;
         private const byte DualSenseOutputFlag0MicrophoneVolumeEnable = 0x40;
         private const byte DualSenseOutputFlag0AudioControlEnable = 0x80;
@@ -1056,7 +1057,10 @@ namespace DS4Windows.InputDevices
             report[2] = 0x10;
 
             const int payloadOffset = 3;
-            report[payloadOffset] = DualSenseOutputFlag0AudioControlEnable;
+            report[payloadOffset] = (byte)(
+                DualSenseOutputFlag0AudioControlEnable |
+                (headsetRoute ? DualSenseOutputFlag0HeadphoneVolumeEnable :
+                    DualSenseOutputFlag0SpeakerVolumeEnable));
             if (headsetRoute)
             {
                 report[payloadOffset + 4] =
@@ -1066,8 +1070,6 @@ namespace DS4Windows.InputDevices
             }
             else
             {
-                report[payloadOffset] |=
-                    DualSenseOutputFlag0SpeakerVolumeEnable;
                 report[payloadOffset + 1] =
                     DualSenseOutputFlag1AudioControl2Enable;
                 report[payloadOffset + 5] =
@@ -2871,7 +2873,8 @@ namespace DS4Windows.InputDevices
                 // 0x80 Enable internal mic (even while headset is connected)
                 outputReport[1] = (byte)((useRumble ? 0x0F : 0x0C) | 0x10 | 0x40 |
                     (enableSpeakerOutput ? DualSenseOutputFlag0AudioControlEnable |
-                        (headsetOnlyAudio ? 0x00 :
+                        (headsetOnlyAudio ?
+                            DualSenseOutputFlag0HeadphoneVolumeEnable :
                             DualSenseOutputFlag0SpeakerVolumeEnable) : 0x00));
 
                 // 0x01 Toggling microphone LED, 0x02 Toggling Audio/Mic Mute
@@ -2897,7 +2900,7 @@ namespace DS4Windows.InputDevices
                 // Only the isolated AUX route requires Sony's 0x00-0x7F map.
                 outputReport[5] = headsetOnlyAudio ?
                     MapDualSenseHeadphoneVolume(headphoneVolume) :
-                    headphoneVolume; // Left and Right
+                    (byte)0; // Left and Right; speaker mode keeps AUX muted.
                 // Internal speaker volume
                 outputReport[6] = headsetOnlyAudio ? (byte)0 :
                     MapDualSenseSpeakerVolume(speakerVolume);
@@ -3022,7 +3025,8 @@ namespace DS4Windows.InputDevices
                 // 0x80 Enable internal mic (even while headset is connected)
                 outputReport[2] = (byte)((useRumble ? 0x0F : 0x0C) | 0x10 | 0x40 |
                     (enableSpeakerOutput ? DualSenseOutputFlag0AudioControlEnable |
-                        (headsetOnlyAudio ? 0x00 :
+                        (headsetOnlyAudio ?
+                            DualSenseOutputFlag0HeadphoneVolumeEnable :
                             DualSenseOutputFlag0SpeakerVolumeEnable) : 0x00));
 
                 // 0x01 Toggling microphone LED, 0x02 Toggling Audio/Mic Mute
@@ -3048,7 +3052,7 @@ namespace DS4Windows.InputDevices
                 // path alone uses the controller's 0x00-0x7F gain range.
                 outputReport[6] = headsetOnlyAudio ?
                     MapDualSenseHeadphoneVolume(headphoneVolume) :
-                    headphoneVolume; // Left and Right
+                    (byte)0; // Left and Right; speaker mode keeps AUX muted.
                 // Internal speaker volume
                 outputReport[7] = headsetOnlyAudio ? (byte)0 :
                     MapDualSenseSpeakerVolume(speakerVolume);
@@ -4245,12 +4249,14 @@ namespace DS4Windows.InputDevices
             combined[BluetoothCombinedStateHeadphoneVolumeOffset] =
                 headsetOnlyAudio ?
                     MapDualSenseHeadphoneVolume(headphoneVolume) :
-                    headphoneVolume;
+                    (byte)0;
             combined[BluetoothCombinedStateSpeakerVolumeOffset] =
                 headsetOnlyAudio ? (byte)0 :
                     MapDualSenseSpeakerVolume(profileVolume);
             if (headsetOnlyAudio)
             {
+                combined[BluetoothCombinedStateFlag0Offset] |=
+                    DualSenseOutputFlag0HeadphoneVolumeEnable;
                 combined[BluetoothCombinedStateFlag0Offset] &=
                     unchecked((byte)~DualSenseOutputFlag0SpeakerVolumeEnable);
                 // A 0x96 headset frame is the same fixed-cadence audio lane as
@@ -4266,6 +4272,8 @@ namespace DS4Windows.InputDevices
             }
             else
             {
+                combined[BluetoothCombinedStateFlag0Offset] &=
+                    unchecked((byte)~DualSenseOutputFlag0HeadphoneVolumeEnable);
                 combined[BluetoothCombinedStateFlag0Offset] |=
                     DualSenseOutputFlag0SpeakerVolumeEnable;
                 combined[BluetoothCombinedStateFlag1Offset] |=

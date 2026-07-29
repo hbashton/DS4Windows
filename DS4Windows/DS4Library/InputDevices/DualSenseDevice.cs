@@ -467,7 +467,6 @@ namespace DS4Windows.InputDevices
         private byte bluetoothCombinedSpeakerReportSequence;
         private byte bluetoothCombinedSpeakerPacketSequence;
         private byte bluetoothAudioRouteReportSequence;
-        private bool bluetoothHeadsetOutputRouteArmed;
         private bool bluetoothCombinedSpeakerSequenceInitialized;
         private readonly object bluetoothRealtimeWriterLock = new object();
         private DualSenseBluetoothRealtimeWriter bluetoothRealtimeWriter;
@@ -994,15 +993,11 @@ namespace DS4Windows.InputDevices
             // this firmware transition.
             lock (bluetoothCombinedTransportWriteLock)
             {
-                // The standard speaker startup path was already stable before
-                // AUX support. Only issue a speaker-route transition when this
-                // device instance was actually armed for headphones.
-                if (!headsetOnlyAudio &&
-                    !bluetoothHeadsetOutputRouteArmed)
-                {
-                    return true;
-                }
-
+                // Route state lives in controller firmware, not in this
+                // process. After DS4Windows restarts, the new device instance
+                // cannot know whether a prior process left AUX armed. Always
+                // reassert the speaker baseline before selecting the final
+                // route so speaker and native-haptics decoding are restored.
                 StopBluetoothAudioPacerLocked();
                 if (!DisposeBluetoothRealtimeWriter(
                         BluetoothWriterOwnershipHandoffTimeoutMilliseconds))
@@ -1021,17 +1016,11 @@ namespace DS4Windows.InputDevices
 
                 if (!headsetOnlyAudio)
                 {
-                    bluetoothHeadsetOutputRouteArmed = false;
                     return true;
                 }
 
-                bool armed = TryWriteBluetoothAudioRouteState(
+                return TryWriteBluetoothAudioRouteState(
                     headsetRoute: true, "AUX headphone-route rearm");
-                if (armed)
-                {
-                    bluetoothHeadsetOutputRouteArmed = true;
-                }
-                return armed;
             }
         }
 

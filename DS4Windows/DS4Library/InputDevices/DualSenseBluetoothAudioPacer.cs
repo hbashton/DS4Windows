@@ -3298,7 +3298,15 @@ namespace DS4Windows.InputDevices
             ValidateSource(first, nameof(first));
             ValidateSource(second, nameof(second));
             EnsureInitialized(first);
-            preparedMediaPacketSequence = second[10];
+            // Sony's 0x39 counter is end-exclusive: it names the next media
+            // frame after the two frames carried by this physical report.
+            // DS5Dongle owns this counter on the physical lane and advances it
+            // by two per accepted packet. Do not inherit the second staging
+            // frame's last-inclusive counter (0,1 -> 1), which shifts every
+            // on-wire packet to odd parity and can confuse burst recovery in
+            // the controller's playout FIFO.
+            preparedMediaPacketSequence = unchecked(
+                (byte)(mediaPacketSequence + 2));
 
             DualSenseBluetoothPairedAudioReportBuilder.Build(first, second,
                 nextReportSequence, preparedMediaPacketSequence, destination);

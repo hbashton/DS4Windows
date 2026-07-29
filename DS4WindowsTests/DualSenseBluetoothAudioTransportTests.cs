@@ -335,6 +335,49 @@ namespace DS4WindowsTests
                 report.Skip(79).Take(200).ToArray());
         }
 
+        [DataTestMethod]
+        [DataRow(false, (byte)0xFE)]
+        [DataRow(true, (byte)0xFF)]
+        public void CompactAudioReportsPreserveMicrophoneSectionMask(
+            bool microphoneEnabled, byte expectedMask)
+        {
+            byte[] source = CreateSpeakerReport(0, 0, 0, 0x42);
+            source[4] = (byte)(0xFE | (microphoneEnabled ? 1 : 0));
+            byte[] speaker = new byte[
+                DualSenseBluetoothPadForgeAudioReportBuilder.ReportLength];
+            byte[] combined = new byte[
+                DualSenseBluetoothPadForgeCombinedAudioReportBuilder.
+                    ReportLength];
+
+            DualSenseBluetoothPadForgeAudioReportBuilder.Build(source,
+                reportSequence: 9, packetSequence: 0x42, speaker);
+            DualSenseBluetoothPadForgeCombinedAudioReportBuilder.Build(source,
+                reportSequence: 9, packetSequence: 0x42, combined);
+
+            Assert.AreEqual(expectedMask, speaker[4],
+                "The compact speaker carrier changed the requested microphone state.");
+            Assert.AreEqual(expectedMask, combined[4],
+                "The compact speaker/haptics carrier changed the requested microphone state.");
+            for (int index = 5; index <= 8; index++)
+            {
+                Assert.AreEqual(microphoneEnabled ? (byte)64 : (byte)0,
+                    speaker[index]);
+                Assert.AreEqual(microphoneEnabled ? (byte)64 : (byte)0,
+                    combined[index]);
+            }
+            Assert.AreEqual(microphoneEnabled ? (byte)64 : (byte)0xFF,
+                speaker[9]);
+            Assert.AreEqual(microphoneEnabled ? (byte)64 : (byte)0xFF,
+                combined[9]);
+            if (microphoneEnabled)
+            {
+                Assert.AreEqual((byte)0x93, combined[11]);
+                Assert.AreEqual((byte)200, combined[12]);
+                Assert.AreEqual((byte)0x92, combined[213]);
+                Assert.AreEqual((byte)64, combined[214]);
+            }
+        }
+
         [TestMethod]
         public void CompactTransportToggleRequiresExact35Value()
         {

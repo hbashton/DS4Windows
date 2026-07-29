@@ -251,10 +251,64 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void CompactCombinedReportCarriesHapticsAndSpeakerAtomically()
+        {
+            byte[] source = CreateSpeakerReport(0, 0, 0x50, 0x42);
+            for (int index = 0; index < 64; index++)
+            {
+                source[78 + index] = (byte)(index ^ 0x5A);
+            }
+            for (int index = 0; index < 200; index++)
+            {
+                source[144 + index] = (byte)(index ^ 0xA5);
+            }
+            byte[] report = new byte[
+                DualSenseBluetoothPadForgeCombinedAudioReportBuilder.
+                    ReportLength];
+
+            DualSenseBluetoothPadForgeCombinedAudioReportBuilder.Build(source,
+                reportSequence: 9, packetSequence: 0x42, report);
+
+            Assert.AreEqual(334, report.Length);
+            Assert.AreEqual((byte)0x35, report[0]);
+            Assert.AreEqual((byte)0x90, report[1]);
+            Assert.AreEqual((byte)0x91, report[2]);
+            Assert.AreEqual((byte)7, report[3]);
+            Assert.AreEqual((byte)0xFE, report[4]);
+            AssertRangeIsZero(report, 5, 4,
+                "The combined session header contained unexpected bytes.");
+            Assert.AreEqual((byte)0xFF, report[9]);
+            Assert.AreEqual((byte)0x42, report[10]);
+            Assert.AreEqual((byte)0x92, report[11]);
+            Assert.AreEqual((byte)64, report[12]);
+            CollectionAssert.AreEqual(source.Skip(78).Take(64).ToArray(),
+                report.Skip(13).Take(64).ToArray());
+            Assert.AreEqual((byte)0x93, report[77]);
+            Assert.AreEqual((byte)200, report[78]);
+            CollectionAssert.AreEqual(source.Skip(144).Take(200).ToArray(),
+                report.Skip(79).Take(200).ToArray());
+            AssertRangeIsZero(report, 279,
+                report.Length - sizeof(uint) - 279,
+                "The combined report tail contained unexpected data.");
+            uint expectedCrc =
+                DualSenseBluetoothAudioReportPatcher.ComputeSonyCrc(report,
+                    report.Length - sizeof(uint));
+            Assert.AreEqual(expectedCrc,
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    report.AsSpan(report.Length - sizeof(uint))));
+        }
+
+        [TestMethod]
         public void CompactTransportToggleRequiresExact35Value()
         {
             Assert.IsTrue(DualSenseBluetoothAudioPacer.
                 UsePadForgeAudioTransport("35"));
+            Assert.IsTrue(DualSenseBluetoothAudioPacer.
+                UsePadForgeAudioTransport("35combined"));
+            Assert.IsTrue(DualSenseBluetoothAudioPacer.
+                UseCompactCombinedHapticsTransport("35combined"));
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.
+                UseCompactCombinedHapticsTransport("35"));
             Assert.IsFalse(DualSenseBluetoothAudioPacer.
                 UsePadForgeAudioTransport(null));
             Assert.IsFalse(DualSenseBluetoothAudioPacer.

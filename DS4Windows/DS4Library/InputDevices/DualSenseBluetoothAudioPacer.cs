@@ -23,6 +23,8 @@ namespace DS4Windows.InputDevices
         internal const int ReportLength = 398;
         internal const string AudioTransportEnvironmentVariable =
             "DS4WINDOWS_DUALSENSE_AUDIO_TRANSPORT";
+        internal const string TestHapticsEnvironmentVariable =
+            "DS4WINDOWS_DUALSENSE_TEST_HAPTICS";
         // Match DS5 Bridge's physical audio cadence: one complete 398-byte
         // 0x36 generation every 10.667 ms. Pairing two logical generations
         // into a 547-byte 0x39 halves the host's opportunities to observe HID
@@ -59,7 +61,14 @@ namespace DS4Windows.InputDevices
 
         internal static bool UsePadForgeAudioTransport(string value)
         {
-            return string.Equals(value, "35", StringComparison.Ordinal);
+            return string.Equals(value, "35", StringComparison.Ordinal) ||
+                UseCompactCombinedHapticsTransport(value);
+        }
+
+        internal static bool UseCompactCombinedHapticsTransport(string value)
+        {
+            return string.Equals(value, "35combined",
+                StringComparison.Ordinal);
         }
 
         private const string HelperArgument = "--dualsense-bt-audio-pacer-helper";
@@ -1667,6 +1676,9 @@ namespace DS4Windows.InputDevices
             private readonly byte[] padForgeAudioReport = new byte[
                 DualSenseBluetoothPadForgeAudioReportBuilder.ReportLength];
             private readonly bool usePadForgeAudioTransport;
+            private readonly bool useCompactCombinedHapticsTransport;
+            private readonly bool injectTestHaptics;
+            private int testHapticsSampleIndex;
             private long latestTemplateHapticsExpiryQpc;
             private long previousTemplateHapticsExpiryQpc;
             private bool latestTemplateAvailable;
@@ -1707,6 +1719,14 @@ namespace DS4Windows.InputDevices
                 usePadForgeAudioTransport = UsePadForgeAudioTransport(
                     Environment.GetEnvironmentVariable(
                         AudioTransportEnvironmentVariable));
+                useCompactCombinedHapticsTransport =
+                    UseCompactCombinedHapticsTransport(
+                        Environment.GetEnvironmentVariable(
+                            AudioTransportEnvironmentVariable));
+                injectTestHaptics = string.Equals(
+                    Environment.GetEnvironmentVariable(
+                        TestHapticsEnvironmentVariable), "1",
+                    StringComparison.Ordinal);
                 string traceDirectory = Environment.GetEnvironmentVariable(
                     "DS4WINDOWS_DUALSENSE_PCM_TRACE_DIRECTORY");
                 if (!string.IsNullOrWhiteSpace(traceDirectory))
@@ -2065,7 +2085,8 @@ namespace DS4Windows.InputDevices
                                 BitConverter.Int64BitsToDouble(
                                     Interlocked.Read(ref cadenceRatioBits)));
                             scheduler.SetInputPhaseReference(
-                                Interlocked.Read(ref inputArrivalQpc));
+                                useCompactCombinedHapticsTransport ? 0 :
+                                    Interlocked.Read(ref inputArrivalQpc));
                             WaitUntil(timer,
                                 scheduler.PresentationDeadlineQpc,
                                 stopRequested);
@@ -2215,9 +2236,26 @@ namespace DS4Windows.InputDevices
                                     {
                                         if (usePadForgeAudioTransport)
                                         {
-                                            physicalOutputSequence.
-                                                PreparePadForgeAudio(item.Report,
-                                                    padForgeAudioReport);
+                                            if (useCompactCombinedHapticsTransport)
+                                            {
+                                                if (injectTestHaptics)
+                                                {
+                                                    ApplyTestHaptics(
+                                                        item.Report);
+                                                }
+
+                                                physicalOutputSequence.
+                                                    PreparePadForgeCombinedAudio(
+                                                        item.Report,
+                                                        padForgeAudioReport);
+                                            }
+                                            else
+                                            {
+                                                physicalOutputSequence.
+                                                    PreparePadForgeAudio(
+                                                        item.Report,
+                                                        padForgeAudioReport);
+                                            }
                                         }
                                         else
                                         {
@@ -2272,7 +2310,8 @@ namespace DS4Windows.InputDevices
                                     !controlOnly && pairedItem == null &&
                                     !accepted && !transportFault;
 
-                                if (accepted || padForgeSkippedSaturatedAudio)
+                                if (accepted ||
+                                    padForgeSkippedSaturatedAudio)
                                 {
                                     physicalOutputSequence.Commit(
                                         pairedItem != null || !controlOnly);
@@ -2405,6 +2444,25 @@ namespace DS4Windows.InputDevices
                 previousTemplateHapticsExpiryQpc =
                     latestTemplateHapticsExpiryQpc;
                 previousTemplateAvailable = true;
+            }
+
+            private void ApplyTestHaptics(byte[] report)
+            {
+                const int sampleRate = 3000;
+                const int framesPerPacket = 32;
+                const double frequency = 85.0;
+                const double amplitude = 18.0;
+                report[76] = 0x92;
+                report[77] = 64;
+                for (int frame = 0; frame < framesPerPacket; frame++)
+                {
+                    double phase = 2.0 * Math.PI * frequency *
+                        testHapticsSampleIndex++ / sampleRate;
+                    sbyte value = (sbyte)Math.Round(
+                        Math.Sin(phase) * amplitude);
+                    report[78 + frame * 2] = unchecked((byte)value);
+                    report[79 + frame * 2] = unchecked((byte)value);
+                }
             }
 
             private void QueueAcknowledgement(long reportId,
@@ -2594,14 +2652,32 @@ namespace DS4Windows.InputDevices
                     reservoirCount, 0, byte.MaxValue);
                 if (report[0] == 0x35)
                 {
-                    presentationTracePacketType[index] = report[11];
+                    bool combinedHaptics =
+                        (report[11] & 0x3F) == 0x12 &&
+                        report[12] == 64 &&
+                        (report[77] & 0x3F) == 0x13 &&
+                        report[78] == 200;
+                    presentationTracePacketType[index] = combinedHaptics ?
+                        report[77] : report[11];
                     presentationTraceAudioFlags0[index] = 0;
                     presentationTraceAudioFlags1[index] = 0;
                     presentationTraceHeadphoneVolume[index] = 0;
                     presentationTraceSpeakerVolume[index] = 0;
                     presentationTraceAudioRoute[index] = 0;
                     presentationTraceAudioGain[index] = 0;
-                    presentationTraceHapticsHash[index] = 0;
+                    if (combinedHaptics)
+                    {
+                        uint hash = 2166136261u;
+                        for (int offset = 13; offset < 77; offset++)
+                        {
+                            hash = (hash ^ report[offset]) * 16777619u;
+                        }
+                        presentationTraceHapticsHash[index] = hash;
+                    }
+                    else
+                    {
+                        presentationTraceHapticsHash[index] = 0;
+                    }
                 }
                 else
                 {
@@ -3505,6 +3581,23 @@ namespace DS4Windows.InputDevices
                 nextReportSequence, preparedMediaPacketSequence, destination);
         }
 
+        internal void PreparePadForgeCombinedAudio(byte[] source,
+            byte[] destination)
+        {
+            ValidateSource(source, nameof(source));
+            if (!DualSenseBluetoothAudioPacer.IsSpeakerAudioReport(source))
+            {
+                throw new ArgumentException(
+                    "Source must be a complete 398-byte 0x36 speaker report.",
+                    nameof(source));
+            }
+
+            EnsureInitialized(source);
+            preparedMediaPacketSequence = source[10];
+            DualSenseBluetoothPadForgeCombinedAudioReportBuilder.Build(source,
+                nextReportSequence, preparedMediaPacketSequence, destination);
+        }
+
         internal void Commit(bool audio)
         {
             if (!initialized)
@@ -3606,6 +3699,77 @@ namespace DS4Windows.InputDevices
             {
                 throw new ArgumentException(
                     "Source must be a complete 398-byte 0x36 speaker report.",
+                    nameof(source));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Carries one native haptics block and one Opus speaker frame in the same
+    /// compact Sony subpacket container. This preserves PadForge's proven
+    /// 334-byte, one-write-per-generation cadence while keeping haptics and
+    /// audio atomic instead of competing for separate Bluetooth transactions.
+    /// </summary>
+    internal static class DualSenseBluetoothPadForgeCombinedAudioReportBuilder
+    {
+        internal const int ReportLength =
+            DualSenseBluetoothPadForgeAudioReportBuilder.ReportLength;
+        private const int SourceReportLength =
+            DualSenseBluetoothAudioPacer.ReportLength;
+        private const int CrcLength = sizeof(uint);
+        private const int SourceHapticsOffset = 78;
+        private const int HapticsOffset = 13;
+        private const int HapticsLength = 64;
+        private const int SourceSpeakerDataOffset = 144;
+        private const int SpeakerHeaderOffset = HapticsOffset + HapticsLength;
+        private const int SpeakerDataOffset = SpeakerHeaderOffset + 2;
+        private const int SpeakerFrameLength = 200;
+
+        internal static void Build(byte[] source, byte reportSequence,
+            byte packetSequence, byte[] destination)
+        {
+            ValidateSource(source);
+            if (destination == null || destination.Length != ReportLength)
+            {
+                throw new ArgumentException(
+                    $"Destination report must be exactly {ReportLength} bytes.",
+                    nameof(destination));
+            }
+
+            Array.Clear(destination, 0, destination.Length);
+            destination[0] = 0x35;
+            destination[1] = (byte)((reportSequence & 0x0F) << 4);
+            destination[2] = 0x91;
+            destination[3] = 7;
+            destination[4] = 0xFE;
+            destination[9] = 0xFF;
+            destination[10] = packetSequence;
+            destination[11] = 0x92;
+            destination[12] = HapticsLength;
+            Buffer.BlockCopy(source, SourceHapticsOffset, destination,
+                HapticsOffset, HapticsLength);
+            destination[SpeakerHeaderOffset] = 0x93;
+            destination[SpeakerHeaderOffset + 1] = SpeakerFrameLength;
+            Buffer.BlockCopy(source, SourceSpeakerDataOffset, destination,
+                SpeakerDataOffset, SpeakerFrameLength);
+
+            uint crc = DualSenseBluetoothAudioReportPatcher.ComputeSonyCrc(
+                destination, ReportLength - CrcLength);
+            BinaryPrimitives.WriteUInt32LittleEndian(destination.AsSpan(
+                ReportLength - CrcLength, CrcLength), crc);
+        }
+
+        private static void ValidateSource(byte[] source)
+        {
+            if (source == null || source.Length != SourceReportLength ||
+                source[0] != 0x36 ||
+                (source[76] & 0x3F) != 0x12 ||
+                source[77] != HapticsLength ||
+                (source[142] & 0x3F) != 0x13 ||
+                source[143] != SpeakerFrameLength)
+            {
+                throw new ArgumentException(
+                    "Source must be a complete 398-byte 0x36 haptics and speaker report.",
                     nameof(source));
             }
         }

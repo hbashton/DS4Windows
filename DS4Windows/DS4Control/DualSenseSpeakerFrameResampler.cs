@@ -166,6 +166,242 @@ namespace DS4Windows
     }
 
     /// <summary>
+    /// DualSense direct-PCM route matching DS5 Bridge's signal stages while
+    /// retaining DS4Windows' long-window source/controller clock correction.
+    ///
+    /// Stage one applies only the small dynamic clock ratio and always emits
+    /// exactly 512 intermediate frames. Stage two is the reference feed-driven
+    /// linear conversion: a fixed 512-frame block at 51.2 kHz becomes one
+    /// 480-frame/10 ms Opus input block at 48 kHz. Keeping correction out of
+    /// the feed-driven stage prevents its historical 479-frame fractional-rate
+    /// result without allowing long-run endpoint/controller drift to drain the
+    /// source ring.
+    /// </summary>
+    internal sealed class DualSenseReferenceSpeakerFrameResampler
+    {
+        internal const int Channels = 2;
+        internal const int ReferenceInputFrames = 512;
+        internal const int OutputFrames = 480;
+        internal const double SourceRate = 48000.0;
+        internal const double ReferenceInputRate = 51200.0;
+        internal const double OutputRate = 48000.0;
+        internal const double MinimumInputRateRatio = 0.99;
+        internal const double MaximumInputRateRatio = 1.01;
+        internal const int MaximumInputFrames = 522;
+
+        // NAudio's WDL wrapper calls Array.Resize whenever the integer source
+        // request changes. A clock servo hovering around unity therefore
+        // allocated about 4 KB each time it crossed the 511/512 boundary. Keep
+        // the same streaming linear-interpolation state in a fixed buffer so a
+        // clock correction can never trigger GC on the audio producer.
+        private readonly float[] clockInput = new float[
+            MaximumInputFrames * Channels];
+        private readonly float[] correctedBlock = new float[
+            ReferenceInputFrames * Channels];
+        private readonly float[] referenceInput = new float[
+            MaximumInputFrames * Channels];
+        private double inputRateRatio = 1.0;
+        private double preparedInputRateRatio = 1.0;
+        private double clockFractionalPosition;
+        private double referenceFractionalPosition;
+        private int clockBufferedFrames;
+        private int referenceBufferedFrames;
+        private int preparedSourceFrames;
+
+        internal DualSenseReferenceSpeakerFrameResampler()
+        {
+        }
+
+        internal double InputRateRatio => inputRateRatio;
+
+        internal void SetInputRateRatio(double ratio)
+        {
+            if (!double.IsFinite(ratio) ||
+                ratio < MinimumInputRateRatio ||
+                ratio > MaximumInputRateRatio)
+            {
+                throw new ArgumentOutOfRangeException(nameof(ratio));
+            }
+
+            if (ratio == inputRateRatio)
+            {
+                return;
+            }
+
+            // A prepared packet freezes its own ratio. Any newer servo value
+            // becomes the desired ratio for the following packet.
+            inputRateRatio = ratio;
+        }
+
+        /// <summary>
+        /// Returns the exact number of source-ring frames needed to create the
+        /// next corrected 512-frame reference block.
+        /// </summary>
+        internal int PrepareOutputFrame()
+        {
+            if (preparedSourceFrames != 0)
+            {
+                return preparedSourceFrames;
+            }
+
+            // This is WDL's output-driven linear request rule with its four
+            // look-ahead frames, but backed by a fixed-capacity buffer.
+            int targetBufferedFrames =
+                (int)(inputRateRatio * ReferenceInputFrames) + 4;
+            int requested = targetBufferedFrames - clockBufferedFrames;
+            if (requested < 0 || requested > MaximumInputFrames)
+            {
+                throw new InvalidOperationException(
+                    $"WDL requested {requested} source frames for the " +
+                    "DualSense reference block.");
+            }
+
+            preparedSourceFrames = requested;
+            preparedInputRateRatio = inputRateRatio;
+            return requested;
+        }
+
+        internal int ConvertPreparedOutput(float[] source,
+            int sourceSampleOffset, int sourceFrames, float[] destination,
+            int destinationSampleOffset)
+        {
+            if (preparedSourceFrames == 0 ||
+                sourceFrames != preparedSourceFrames)
+            {
+                throw new InvalidOperationException(
+                    "PrepareOutputFrame must immediately precede conversion " +
+                    "with its exact source-frame request.");
+            }
+
+            ValidateFloatRange(source, sourceSampleOffset, sourceFrames,
+                nameof(source));
+            ValidateFloatRange(destination, destinationSampleOffset,
+                OutputFrames, nameof(destination));
+
+            int availableFrames = clockBufferedFrames + sourceFrames;
+            if (availableFrames > MaximumInputFrames)
+            {
+                throw new InvalidOperationException(
+                    $"The clock-correction buffer requires {availableFrames} " +
+                    $"frames but is bounded to {MaximumInputFrames}.");
+            }
+
+            Array.Copy(source, sourceSampleOffset, clockInput,
+                clockBufferedFrames * Channels, sourceFrames * Channels);
+            double sourcePosition = clockFractionalPosition;
+            for (int outputFrame = 0;
+                outputFrame < ReferenceInputFrames; outputFrame++)
+            {
+                int sourceFrame = (int)sourcePosition;
+                if (sourceFrame >= availableFrames - 1)
+                {
+                    throw new InvalidOperationException(
+                        "The prepared clock-correction block did not contain " +
+                        "enough interpolation look-ahead.");
+                }
+
+                double fraction = sourcePosition - sourceFrame;
+                double inverseFraction = 1.0 - fraction;
+                int sourceIndex = sourceFrame * Channels;
+                int outputIndex = outputFrame * Channels;
+                correctedBlock[outputIndex] = (float)(
+                    clockInput[sourceIndex] * inverseFraction +
+                    clockInput[sourceIndex + Channels] * fraction);
+                correctedBlock[outputIndex + 1] = (float)(
+                    clockInput[sourceIndex + 1] * inverseFraction +
+                    clockInput[sourceIndex + Channels + 1] * fraction);
+                sourcePosition += preparedInputRateRatio;
+            }
+
+            int consumedFrames = (int)sourcePosition;
+            clockFractionalPosition = sourcePosition - consumedFrames;
+            clockBufferedFrames = availableFrames - consumedFrames;
+            if (clockBufferedFrames > 0)
+            {
+                Array.Copy(clockInput, consumedFrames * Channels,
+                    clockInput, 0, clockBufferedFrames * Channels);
+            }
+
+            preparedSourceFrames = 0;
+            // Match DS5 Bridge's feed-driven WDL stage with fixed storage. Its
+            // nominal ratio is exactly 16:15, but retaining WDL's fractional
+            // position and boundary frame also preserves its floating-point
+            // continuity indefinitely without any Array.Resize calls.
+            int referenceAvailableFrames = referenceBufferedFrames +
+                ReferenceInputFrames;
+            if (referenceAvailableFrames > MaximumInputFrames)
+            {
+                throw new InvalidOperationException(
+                    "The fixed 512-to-480 reference buffer overflowed.");
+            }
+
+            Array.Copy(correctedBlock, 0, referenceInput,
+                referenceBufferedFrames * Channels, correctedBlock.Length);
+            double referencePosition = referenceFractionalPosition;
+            double referenceRatio = ReferenceInputRate / OutputRate;
+            for (int outputFrame = 0; outputFrame < OutputFrames; outputFrame++)
+            {
+                int sourceFrame = (int)referencePosition;
+                if (sourceFrame >= referenceAvailableFrames - 1)
+                {
+                    throw new InvalidOperationException(
+                        "The fixed 512-to-480 reference block did not contain " +
+                        "enough interpolation look-ahead.");
+                }
+
+                double fraction = referencePosition - sourceFrame;
+                double inverseFraction = 1.0 - fraction;
+                int sourceIndex = sourceFrame * Channels;
+                int destinationIndex = destinationSampleOffset +
+                    outputFrame * Channels;
+                destination[destinationIndex] = (float)(
+                    referenceInput[sourceIndex] * inverseFraction +
+                    referenceInput[sourceIndex + Channels] * fraction);
+                destination[destinationIndex + 1] = (float)(
+                    referenceInput[sourceIndex + 1] * inverseFraction +
+                    referenceInput[sourceIndex + Channels + 1] * fraction);
+                referencePosition += referenceRatio;
+            }
+
+            int referenceConsumedFrames = (int)referencePosition;
+            referenceFractionalPosition = referencePosition -
+                referenceConsumedFrames;
+            referenceBufferedFrames = referenceAvailableFrames -
+                referenceConsumedFrames;
+            if (referenceBufferedFrames > 0)
+            {
+                Array.Copy(referenceInput,
+                    referenceConsumedFrames * Channels, referenceInput, 0,
+                    referenceBufferedFrames * Channels);
+            }
+
+            return OutputFrames;
+        }
+
+        internal void Reset()
+        {
+            clockFractionalPosition = 0.0;
+            referenceFractionalPosition = 0.0;
+            clockBufferedFrames = 0;
+            referenceBufferedFrames = 0;
+            preparedSourceFrames = 0;
+            preparedInputRateRatio = inputRateRatio;
+        }
+
+        private static void ValidateFloatRange(float[] buffer,
+            int sampleOffset, int frames, string parameterName)
+        {
+            ArgumentNullException.ThrowIfNull(buffer, parameterName);
+            if (sampleOffset < 0 || frames < 0 ||
+                sampleOffset > buffer.Length ||
+                frames > (buffer.Length - sampleOffset) / Channels)
+            {
+                throw new ArgumentOutOfRangeException(parameterName);
+            }
+        }
+    }
+
+    /// <summary>
     /// High-quality streaming converter for interleaved stereo PCM16 supplied
     /// by a VIIPER audio endpoint (notably 32 kHz virtual DS4 audio) before it
     /// enters the 48 kHz DualSense speaker pipeline.

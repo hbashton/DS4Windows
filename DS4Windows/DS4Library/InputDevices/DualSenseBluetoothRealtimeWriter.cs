@@ -9,8 +9,8 @@ namespace DS4Windows.InputDevices
 {
     /// <summary>
     /// Sends time-sensitive Bluetooth audio reports without blocking the
-    /// controller input thread. A bounded in-flight pool drops a late frame
-    /// rather than allowing a backlog to become audible.
+    /// controller input thread. A bounded in-flight pool exposes completion
+    /// backpressure so its caller can retain the oldest logical audio frame.
     /// </summary>
     internal sealed class DualSenseBluetoothRealtimeWriter : IDisposable
     {
@@ -287,6 +287,72 @@ namespace DS4Windows.InputDevices
             {
                 error = Marshal.GetLastWin32Error();
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// Waits for the strict next OVERLAPPED slot to become reusable without
+        /// consuming it. Windows does not expose HidBth/L2CAP send credits, so
+        /// completion of the oldest slot is the closest lossless credit proxy.
+        /// The pacer calls this before removing a logical audio report from its
+        /// FIFO; a temporary service drought therefore delays that report
+        /// instead of dropping it.
+        /// </summary>
+        public bool WaitForNextWriteSlot(uint timeoutMilliseconds,
+            out bool transportFault)
+        {
+            transportFault = false;
+            lock (syncRoot)
+            {
+                if (disposed)
+                {
+                    transportFault = true;
+                    return false;
+                }
+
+                ObserveCompletedWrites();
+                WriteSlot slot = slots[nextSlot];
+                uint waitResult = WaitForSingleObject(slot.EventHandle, 0);
+                if (waitResult == WAIT_TIMEOUT && timeoutMilliseconds != 0)
+                {
+                    long waitStarted = Stopwatch.GetTimestamp();
+                    waitResult = WaitForSingleObject(slot.EventHandle,
+                        timeoutMilliseconds);
+                    long waitedTicks = Stopwatch.GetTimestamp() - waitStarted;
+                    Interlocked.Increment(ref inFlightLimitWaitCount);
+                    UpdateMaximum(ref maximumInFlightLimitWaitTicks,
+                        waitedTicks);
+                }
+
+                if (waitResult == WAIT_TIMEOUT)
+                {
+                    Interlocked.Increment(ref inFlightLimitEscapeCount);
+                    return false;
+                }
+
+                if (waitResult != WAIT_OBJECT_0)
+                {
+                    transportFault = true;
+                    return false;
+                }
+
+                if (!slot.Pending)
+                {
+                    return true;
+                }
+
+                if (!GetOverlappedResult(deviceHandle, slot.Overlapped,
+                    out _, false))
+                {
+                    transportFault = true;
+                    return false;
+                }
+
+                RecordCompletion(Stopwatch.GetTimestamp() -
+                    slot.SubmittedTimestamp);
+                slot.Pending = false;
+                slot.SubmittedTimestamp = 0;
+                return true;
             }
         }
 

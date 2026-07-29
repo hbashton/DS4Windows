@@ -4080,9 +4080,10 @@ namespace DS4Windows.InputDevices
             // OVERLAPPED retirement waits. Speaker-session traffic performs
             // this transition on its dedicated lifecycle worker; this control
             // path is never the real-time speaker producer.
-            bool microphonePrewarmed = enabled &&
-                !IsBluetoothSpeakerClockActive() &&
+            if (enabled && !IsBluetoothSpeakerClockActive())
+            {
                 PrepareBluetoothSpeakerClockTransport();
+            }
 
             lock (bluetoothCombinedTransportWriteLock)
             {
@@ -4120,8 +4121,12 @@ namespace DS4Windows.InputDevices
                         latestBluetoothCombinedSpeakerReport, enabled);
                 }
 
-                if (enableSpeakerOutput && IsBluetoothSpeakerClockActive() &&
-                    !microphonePrewarmed)
+                // Re-evaluate ownership under the transport lock. The speaker
+                // producer can claim the clock after the prewarm check above;
+                // in that race a completion-aware control write would drain
+                // active audio IRPs and create an audible mic-toggle gap.
+                if (ShouldPublishMicrophoneStateThroughSpeakerClock(
+                    enableSpeakerOutput, IsBluetoothSpeakerClockActive()))
                 {
                     bool published =
                         RefreshBluetoothAudioPacerTemplateFromCache();
@@ -4142,6 +4147,12 @@ namespace DS4Windows.InputDevices
                     LastBluetoothHapticsWriteStatus;
                 return written;
             }
+        }
+
+        internal static bool ShouldPublishMicrophoneStateThroughSpeakerClock(
+            bool speakerOutputEnabled, bool speakerClockActive)
+        {
+            return speakerOutputEnabled && speakerClockActive;
         }
 
         private void ApplyBluetoothMicrophoneStreamingRequest(byte[] report)

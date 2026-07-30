@@ -305,6 +305,43 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
+        public void NativeLatticePrimesTwoFramesWithoutLongWindowUnderflow()
+        {
+            // Model one produced frame each 32/3 ms and the native writer
+            // consuming fourteen slots at 10 ms followed by one at 20 ms.
+            const double producerIntervalMilliseconds = 32.0 / 3.0;
+            double nextProductionMilliseconds = producerIntervalMilliseconds;
+            double presentationMilliseconds = 0.0;
+            int queuedFrames = DualSenseBluetoothAudioPacer.PrimeReportCount;
+
+            for (int presentation = 1; presentation <= 1500;
+                presentation++)
+            {
+                Assert.IsTrue(queuedFrames > 0,
+                    $"Native lattice underflowed before report {presentation}.");
+                queuedFrames--;
+                presentationMilliseconds += presentation % 15 == 0 ?
+                    20.0 : 10.0;
+                while (nextProductionMilliseconds <=
+                    presentationMilliseconds + 1.0e-9)
+                {
+                    queuedFrames++;
+                    nextProductionMilliseconds +=
+                        producerIntervalMilliseconds;
+                }
+            }
+
+            Assert.IsTrue(queuedFrames >= 1,
+                "The native PadSense lattice drained its startup reserve.");
+            Assert.AreEqual(1,
+                DualSenseBluetoothAudioPacer.GetPrimeReportCount(
+                    usePadForgeAudioTransport: true));
+            Assert.AreEqual(2,
+                DualSenseBluetoothAudioPacer.GetPrimeReportCount(
+                    usePadForgeAudioTransport: false));
+        }
+
+        [TestMethod]
         public void SchedulerTracksFractionalControllerClockWithoutDrift()
         {
             const long qpcFrequency = 10_000_000;
@@ -682,25 +719,19 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
-        public void NativeSingleFramePrimeAllowsControlThenNextSpeaker()
+        public void NativeControlBypassesPrimeThenTwoSpeakersStartLattice()
         {
             var ring = new DualSenseBluetoothAudioPacerRing<byte[]>(9);
-            for (int index = 0;
-                index < DualSenseBluetoothAudioPacer.PrimeReportCount - 1;
-                index++)
-            {
-                Assert.IsTrue(ring.TryEnqueue(CreateReport((byte)index)));
-            }
             byte[] control = CreateReport(0x60);
             control[142] = 0;
             control[143] = 0;
             Assert.IsTrue(ring.TryEnqueue(control));
             Assert.IsTrue(ring.TryEnqueue(CreateReport(0x61)));
+            Assert.IsTrue(ring.TryEnqueue(CreateReport(0x62)));
 
             int leadingSpeakers = ring.CountLeading(
                 DualSenseBluetoothAudioPacer.IsSpeakerAudioReport);
-            Assert.AreEqual(DualSenseBluetoothAudioPacer.PrimeReportCount - 1,
-                leadingSpeakers);
+            Assert.AreEqual(0, leadingSpeakers);
             Assert.IsTrue(ring.TryPeek(out byte[] first));
             Assert.IsTrue(
                 DualSenseBluetoothAudioPacer.CanPresentFromPrimeGate(
@@ -711,14 +742,14 @@ namespace DS4Windows.Tests
             Assert.IsTrue(ring.TryDequeue(out _));
             leadingSpeakers = ring.CountLeading(
                 DualSenseBluetoothAudioPacer.IsSpeakerAudioReport);
-            Assert.AreEqual(1, leadingSpeakers);
+            Assert.AreEqual(2, leadingSpeakers);
             Assert.IsTrue(ring.TryPeek(out first));
             Assert.IsTrue(
                 DualSenseBluetoothAudioPacer.CanPresentFromTransportGate(
                     primeRequired: true,
                     speakerReportCount: leadingSpeakers,
                     nextReport: first),
-                "One complete 0x36 must satisfy the native audio prime.");
+                "Two queued 0x36 frames must satisfy the native lattice prime.");
         }
 
         [TestMethod]

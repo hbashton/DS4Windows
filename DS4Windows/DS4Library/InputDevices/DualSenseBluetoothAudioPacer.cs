@@ -36,7 +36,12 @@ namespace DS4Windows.InputDevices
         // Sony's 0x39 report is complete as soon as one two-frame pair exists.
         // DS5Dongle does not wait for an additional host-side prime before it
         // hands that indivisible report to L2CAP.
-        internal const int PrimeReportCount = UsePairedAudioReports ? 2 : 1;
+        // Native 0x36 consumes fourteen reports at 10 ms before its 20 ms
+        // refill interval. Two queued frames are therefore the minimum safe
+        // starting depth for a 10.667 ms producer. Compact PadForge 0x35 uses
+        // its uniform source cadence and needs only one; paired 0x39 needs one
+        // complete two-frame carrier.
+        internal const int PrimeReportCount = 2;
         internal const int PairedAudioInFlightLimit =
             PairedAudioTransportSlotCount;
         // PadForge's Windows transport uses eight pinned OVERLAPPED slots in a
@@ -752,18 +757,20 @@ namespace DS4Windows.InputDevices
         }
 
         internal static bool CanPresentFromPrimeGate(bool primeRequired,
-            int speakerReportCount, byte[] nextReport)
+            int speakerReportCount, byte[] nextReport,
+            int requiredPrimeReportCount = PrimeReportCount)
         {
             return !primeRequired ||
                 (nextReport != null && !IsSpeakerAudioReport(nextReport)) ||
-                speakerReportCount >= PrimeReportCount;
+                speakerReportCount >= requiredPrimeReportCount;
         }
 
         internal static bool CanPresentFromTransportGate(bool primeRequired,
-            int speakerReportCount, byte[] nextReport)
+            int speakerReportCount, byte[] nextReport,
+            int requiredPrimeReportCount = PrimeReportCount)
         {
             if (!CanPresentFromPrimeGate(primeRequired, speakerReportCount,
-                nextReport))
+                nextReport, requiredPrimeReportCount))
             {
                 return false;
             }
@@ -774,6 +781,13 @@ namespace DS4Windows.InputDevices
             return !UsePairedAudioReports ||
                 !IsSpeakerAudioReport(nextReport) ||
                 speakerReportCount >= 2;
+        }
+
+        internal static int GetPrimeReportCount(
+            bool usePadForgeAudioTransport)
+        {
+            return !UsePairedAudioReports && usePadForgeAudioTransport ? 1 :
+                PrimeReportCount;
         }
 
         internal static bool ShouldRequireAudioPrimeAfterPresentation(
@@ -2518,7 +2532,13 @@ namespace DS4Windows.InputDevices
                     // logical frame. Preserve only complete physical pairs
                     // ahead of 0x32; an odd old-mode half stays behind the
                     // transition and pairs with the next new-mode frame.
-                    int reportsAhead =
+                    // PadSense inserts native 0x32 beside the current audio
+                    // deadline rather than draining the host reservoir first.
+                    // Queued 0x36 frames are patched to the committed mode at
+                    // presentation, so no stale native header has to remain
+                    // ahead of this transition. Compact/paired formats retain
+                    // their complete physical-carrier boundary.
+                    int reportsAhead = usePadSenseNativeLattice ? 0 :
                         CompletePairedReportBoundary(
                             reservoir.CountLeading(
                                 IsQueuedSpeakerReport));
@@ -2624,7 +2644,9 @@ namespace DS4Windows.InputDevices
                                 controllerStateReady ||
                                 CanPresentFromTransportGate(
                                     primeRequired, speakerReportCount,
-                                    nextReport?.Report);
+                                    nextReport?.Report,
+                                    GetPrimeReportCount(
+                                        usePadForgeAudioTransport));
                             if (canPresent && primeRequired &&
                                 !controlPrimeBypass &&
                                 !microphoneStatusReady &&

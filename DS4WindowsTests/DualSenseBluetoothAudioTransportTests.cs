@@ -1201,6 +1201,23 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void IdleNativeCarrierKeepsPadSenseHapticsMode()
+        {
+            DualSenseDevice device = CreateBluetoothDevice();
+            byte[] report = BuildCombinedControlReport(0, 0, false);
+            report[13] = 0x02;
+            report[15] = 0x00;
+            report[16] = 0x00;
+
+            device.WriteBluetoothCombinedHapticsAudioOutputReport(report, 0,
+                report.Length, hasNativeGameState: true);
+
+            byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
+                device);
+            AssertPadSenseAudioContract(cached, expectedFlag0: 0xFD);
+        }
+
+        [TestMethod]
         public void UsbStateMergePreservesPadSenseAudioContractAndDynamicControls()
         {
             DualSenseDevice device = CreateBluetoothDevice();

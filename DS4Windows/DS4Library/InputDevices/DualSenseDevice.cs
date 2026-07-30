@@ -3783,9 +3783,12 @@ namespace DS4Windows.InputDevices
             // Bluetooth control-report equivalents.
             Array.Copy(source, sourceOffset + 2, destination,
                 destinationOffset + 2, 2);       // rumble motors
+            // PadSense keeps UseRumbleNotHaptics clear on an idle carrier.
+            // A virtual report may leave its validity bit asserted while both
+            // motors are zero; forwarding that bit alone switches firmware
+            // out of the native tactile/audio mode on every media report.
             destination[destinationOffset] &= 0xFD;
-            if ((source[sourceOffset] & 0x02) != 0 ||
-                source[sourceOffset + 2] != 0 ||
+            if (source[sourceOffset + 2] != 0 ||
                 source[sourceOffset + 3] != 0)
             {
                 destination[destinationOffset] |= 0x02;

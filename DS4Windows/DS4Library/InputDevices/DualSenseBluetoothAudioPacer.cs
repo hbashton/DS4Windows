@@ -4579,7 +4579,7 @@ namespace DS4Windows.InputDevices
         // even though our 10.667 ms submissions remain perfectly sequential.
         // Keep enough controller-side playout cushion for the measured tail;
         // this does not enlarge the host reservoir or permit catch-up bursts.
-        private const byte DuplexBufferLength = 96;
+        private const byte ControllerBufferLength = 96;
 
         public static void Build(byte[] source, byte reportSequence,
             byte packetSequence, byte[] destination)
@@ -4599,16 +4599,15 @@ namespace DS4Windows.InputDevices
             destination[3] = 7;
             bool microphoneEnabled = (source[4] & 0x01) != 0;
             destination[4] = microphoneEnabled ? (byte)0xFF : (byte)0xFE;
-            if (microphoneEnabled)
+            // DS5Dongle's compact 0x35 carrier writes the same finite
+            // controller-side runway across all five reference length bytes. Leaving
+            // the mic-off form at 00 00 00 00 FF made ordinary HidBth service
+            // droughts audible even though every host frame was sequential.
+            // Keep the depth stable across microphone transitions so enabling
+            // capture cannot reset or shrink the speaker playout reservoir.
+            for (int index = 5; index <= 9; index++)
             {
-                for (int index = 5; index <= 9; index++)
-                {
-                    destination[index] = DuplexBufferLength;
-                }
-            }
-            else
-            {
-                destination[9] = 0xFF;
+                destination[index] = ControllerBufferLength;
             }
             destination[10] = packetSequence;
             // Preserve the logical media destination. 0x93 targets the
@@ -4669,7 +4668,7 @@ namespace DS4Windows.InputDevices
         // Match the duplex reserve used by the speaker-only compact builder.
         // The controller reports the resulting live reserve in BT input byte
         // 65, allowing hardware validation instead of timing speculation.
-        private const byte DuplexBufferLength = 96;
+        private const byte ControllerBufferLength = 96;
 
         internal static void Build(byte[] source, byte reportSequence,
             byte packetSequence, byte[] destination)
@@ -4689,20 +4688,11 @@ namespace DS4Windows.InputDevices
             destination[3] = 7;
             bool microphoneEnabled = (source[4] & 0x01) != 0;
             destination[4] = microphoneEnabled ? (byte)0xFF : (byte)0xFE;
-            if (microphoneEnabled)
+            // Keep one reference-form controller runway for speaker-only and
+            // duplex operation. Only the microphone-enable mask changes.
+            for (int index = 5; index <= 9; index++)
             {
-                // Every mic-capable reference reasserts the inbound audio
-                // section and real lane depths on each steady carrier. Keep
-                // that header rule while preserving the golden haptics-first
-                // TLV order byte-for-byte below.
-                for (int index = 5; index <= 9; index++)
-                {
-                    destination[index] = DuplexBufferLength;
-                }
-            }
-            else
-            {
-                destination[9] = 0xFF;
+                destination[index] = ControllerBufferLength;
             }
             destination[10] = packetSequence;
             destination[GoldenHapticsHeaderOffset] = 0x92;

@@ -470,9 +470,10 @@ namespace DS4WindowsTests
             Assert.AreEqual((byte)0x91, report[2]);
             Assert.AreEqual((byte)7, report[3]);
             Assert.AreEqual((byte)0xFE, report[4]);
-            AssertRangeIsZero(report, 5, 4,
-                "The compact session header contained unexpected bytes.");
-            Assert.AreEqual((byte)0xFF, report[9]);
+            for (int index = 5; index <= 9; index++)
+            {
+                Assert.AreEqual((byte)96, report[index]);
+            }
             Assert.AreEqual((byte)0x42, report[10]);
             Assert.AreEqual((byte)0x93, report[11]);
             Assert.AreEqual((byte)200, report[12]);
@@ -564,9 +565,10 @@ namespace DS4WindowsTests
             Assert.AreEqual((byte)0x91, report[2]);
             Assert.AreEqual((byte)7, report[3]);
             Assert.AreEqual((byte)0xFE, report[4]);
-            AssertRangeIsZero(report, 5, 4,
-                "The combined session header contained unexpected bytes.");
-            Assert.AreEqual((byte)0xFF, report[9]);
+            for (int index = 5; index <= 9; index++)
+            {
+                Assert.AreEqual((byte)96, report[index]);
+            }
             Assert.AreEqual((byte)0x42, report[10]);
             Assert.AreEqual((byte)0x92, report[11]);
             Assert.AreEqual((byte)64, report[12]);
@@ -629,15 +631,11 @@ namespace DS4WindowsTests
             byte expectedMask = microphoneEnabled ? (byte)0xFF : (byte)0xFE;
             Assert.AreEqual(expectedMask, speaker[4]);
             Assert.AreEqual(expectedMask, combined[4]);
-            for (int index = 5; index <= 8; index++)
+            for (int index = 5; index <= 9; index++)
             {
-                byte expectedDepth = microphoneEnabled ? (byte)96 : (byte)0;
-                Assert.AreEqual(expectedDepth, speaker[index]);
-                Assert.AreEqual(expectedDepth, combined[index]);
+                Assert.AreEqual((byte)96, speaker[index]);
+                Assert.AreEqual((byte)96, combined[index]);
             }
-            byte expectedLastDepth = microphoneEnabled ? (byte)96 : (byte)0xFF;
-            Assert.AreEqual(expectedLastDepth, speaker[9]);
-            Assert.AreEqual(expectedLastDepth, combined[9]);
             Assert.AreEqual((byte)0x92, combined[11]);
             Assert.AreEqual((byte)64, combined[12]);
             Assert.AreEqual((byte)0x93, combined[77]);
@@ -660,9 +658,10 @@ namespace DS4WindowsTests
             DualSenseBluetoothPadForgeCombinedAudioReportBuilder.Build(source,
                 reportSequence: 9, packetSequence: 0x42, physical);
             Assert.AreEqual((byte)0xFE, physical[4]);
-            AssertRangeIsZero(physical, 5, 4,
-                "A pending microphone request leaked duplex lane depths.");
-            Assert.AreEqual((byte)0xFF, physical[9]);
+            for (int index = 5; index <= 9; index++)
+            {
+                Assert.AreEqual((byte)96, physical[index]);
+            }
             CollectionAssert.AreEqual(expectedHaptics,
                 physical.Skip(13).Take(64).ToArray());
             CollectionAssert.AreEqual(expectedSpeaker,

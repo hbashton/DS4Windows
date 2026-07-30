@@ -517,7 +517,7 @@ namespace DS4WindowsTests
             Assert.AreEqual(0,
                 DualSenseBluetoothAudioPacer.ControllerReserveTransferIntervals,
                 "The 0x36 route must not replay the paired 5 ms startup burst.");
-            Assert.AreEqual(10,
+            Assert.AreEqual(32,
                 DualSenseBluetoothAudioPacer.SingleAudioTransportSlotCount);
         }
 
@@ -884,6 +884,10 @@ namespace DS4WindowsTests
             typeof(DualSenseDevice).GetMethod(
                 "BuildBluetoothCombinedControlReport",
                 BindingFlags.Static | BindingFlags.NonPublic);
+        private static readonly MethodInfo UpdateCachedCombinedStateMethod =
+            typeof(DualSenseDevice).GetMethod(
+                "UpdateCachedBluetoothCombinedState",
+                BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly MethodInfo DrainQueuedInputEventsMethod =
             typeof(DualSenseDevice).GetMethod(
                 "DrainQueuedInputEvents",
@@ -1137,6 +1141,7 @@ namespace DS4WindowsTests
 
             byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
                 device);
+            AssertPadSenseAudioContract(cached);
             Assert.AreEqual((byte)12, cached[13 + 44]);
             Assert.AreEqual((byte)34, cached[13 + 45]);
             Assert.AreEqual((byte)56, cached[13 + 46]);
@@ -1147,11 +1152,26 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void NativeGameCombinedCarrierRemainsAuthoritative()
+        public void NativeGameCarrierPreservesDynamicStateWithoutReplacingPadSenseAudioContract()
         {
             DualSenseDevice device = CreateBluetoothDevice();
             device.LightBarColor = new DS4Color(12, 34, 56);
             byte[] report = BuildCombinedControlReport(0, 0, false);
+            report[13] = 0x02;
+            report[14] = 0x08;
+            report[15] = 0x41;
+            report[16] = 0x52;
+            report[17] = 0x13;
+            report[18] = 0x24;
+            report[19] = 0x35;
+            report[20] = 0x46;
+            report[22] = 0xA0;
+            for (int index = 23; index <= 49; index++)
+            {
+                report[index] = (byte)(0x60 + index - 23);
+            }
+            report[50] = 0x57;
+            report[56] = 0x1B;
             report[13 + 44] = 90;
             report[13 + 45] = 91;
             report[13 + 46] = 92;
@@ -1161,11 +1181,75 @@ namespace DS4WindowsTests
 
             byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
                 device);
+            AssertPadSenseAudioContract(cached, expectedFlag0: 0xFF);
+            Assert.AreEqual((byte)0x41, cached[15]);
+            Assert.AreEqual((byte)0x52, cached[16]);
+            for (int index = 23; index <= 49; index++)
+            {
+                Assert.AreEqual(report[index], cached[index],
+                    $"Native trigger/effect state changed at byte {index}.");
+            }
+            Assert.AreEqual((byte)0x1B, cached[56]);
             Assert.AreEqual((byte)90, cached[13 + 44]);
             Assert.AreEqual((byte)91, cached[13 + 45]);
             Assert.AreEqual((byte)92, cached[13 + 46]);
             Assert.IsTrue(GetFieldValue<long>(NativeStateTimestampField,
                 device) > 0);
+        }
+
+        [TestMethod]
+        public void UsbStateMergePreservesPadSenseAudioContractAndDynamicControls()
+        {
+            DualSenseDevice device = CreateBluetoothDevice();
+            byte[] initial = BuildCombinedControlReport(0, 0, false);
+            device.WriteBluetoothCombinedHapticsAudioOutputReport(initial, 0,
+                initial.Length, hasNativeGameState: false);
+
+            byte[] usb = new byte[48];
+            usb[0] = 0x02;
+            usb[1] = 0x00;
+            usb[2] = 0x08;
+            usb[3] = 0x00;
+            usb[4] = 0x00;
+            usb[5] = 0x13;
+            usb[6] = 0x24;
+            usb[7] = 0x35;
+            usb[8] = 0x46;
+            usb[9] = 0x01;
+            usb[10] = 0xA0;
+            for (int relativeIndex = 10; relativeIndex <= 36;
+                relativeIndex++)
+            {
+                usb[1 + relativeIndex] =
+                    (byte)(0x70 + relativeIndex - 10);
+            }
+            usb[38] = 0x57;
+            usb[44] = 0x1C;
+            usb[45] = 0x81;
+            usb[46] = 0x82;
+            usb[47] = 0x83;
+
+            Assert.IsNotNull(UpdateCachedCombinedStateMethod);
+            Assert.IsTrue((bool)UpdateCachedCombinedStateMethod.Invoke(device,
+                new object[] { usb, 0 }));
+
+            byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
+                device);
+            AssertPadSenseAudioContract(cached);
+            Assert.AreEqual((byte)0x00, cached[15]);
+            Assert.AreEqual((byte)0x00, cached[16]);
+            Assert.AreEqual((byte)0x00, cached[21]);
+            for (int relativeIndex = 10; relativeIndex <= 36;
+                relativeIndex++)
+            {
+                int combinedIndex = 13 + relativeIndex;
+                Assert.AreEqual(usb[1 + relativeIndex], cached[combinedIndex],
+                    $"USB trigger/effect state changed at relative byte {relativeIndex}.");
+            }
+            Assert.AreEqual((byte)0x1C, cached[56]);
+            Assert.AreEqual((byte)0x81, cached[57]);
+            Assert.AreEqual((byte)0x82, cached[58]);
+            Assert.AreEqual((byte)0x83, cached[59]);
         }
 
         [TestMethod]
@@ -1271,8 +1355,8 @@ namespace DS4WindowsTests
                 "The physical microphone stream-enable bit was not set.");
             Assert.AreNotEqual(0, report[13] & 0x40,
                 "The controller was not told that microphone volume is valid.");
-            Assert.AreEqual((byte)0x40, report[19],
-                "The combined transport must not overdrive the physical DualSense ADC.");
+            Assert.AreEqual((byte)0xFF, report[19],
+                "The combined transport must retain PadSense's full-scale microphone gain.");
         }
 
         [TestMethod]
@@ -1319,7 +1403,7 @@ namespace DS4WindowsTests
             {
                 // VIIPER's canonical control/state baseline requests the
                 // minimum documented queue. A report carrying a real speaker
-                // frame separately raises these fields to 0x40.
+                // frame separately raises these fields to 0x80.
                 Assert.AreEqual((byte)0x10, report[index],
                     $"Unexpected packet 0x11 buffer depth at byte {index}.");
             }
@@ -1354,7 +1438,7 @@ namespace DS4WindowsTests
             byte[] state = new byte[63];
             byte[] knownState =
             {
-                0xFD, 0xF7, 0x00, 0x00, 0x7F, 0x64, 0xFF, 0x09,
+                0xFD, 0xF7, 0x00, 0x00, 0x64, 0x64, 0xFF, 0x09,
                 0x00, 0x0F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -1363,6 +1447,19 @@ namespace DS4WindowsTests
             };
             Array.Copy(knownState, state, knownState.Length);
             return state;
+        }
+
+        private static void AssertPadSenseAudioContract(byte[] report,
+            byte expectedFlag0 = 0xFD)
+        {
+            Assert.AreEqual(expectedFlag0, report[13]);
+            Assert.AreEqual((byte)0xF7, report[14]);
+            Assert.AreEqual((byte)0x64, report[17]);
+            Assert.AreEqual((byte)0x64, report[18]);
+            Assert.AreEqual((byte)0xFF, report[19]);
+            Assert.AreEqual((byte)0x09, report[20]);
+            Assert.AreEqual((byte)0x0F, report[22]);
+            Assert.AreEqual((byte)0x0A, report[50]);
         }
 
         private static byte[] CopyRange(byte[] source, int offset, int length)

@@ -114,17 +114,20 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void StartupWarmupIsSixAcceptedCadenceReports()
+        public void StartupWarmupIsEightAcceptedCadenceReports()
         {
-            Assert.AreEqual(6,
+            Assert.AreEqual(8,
                 DualSenseBluetoothSpeakerPassthrough.StartupWarmupReportCount);
-            Assert.AreEqual(64.0,
+            Assert.AreEqual(256.0 / 3.0,
                 DualSenseBluetoothSpeakerPassthrough.
                     StartupWarmupLatencyMilliseconds, 0.0001);
 
             int remaining =
                 DualSenseBluetoothSpeakerPassthrough.StartupWarmupReportCount;
-            for (int report = 0; report < 6; report++)
+            for (int report = 0;
+                report < DualSenseBluetoothSpeakerPassthrough.
+                    StartupWarmupReportCount;
+                report++)
             {
                 Assert.IsTrue(
                     DualSenseBluetoothSpeakerPassthrough.
@@ -138,13 +141,13 @@ namespace DS4WindowsTests
                 DualSenseBluetoothSpeakerPassthrough.ShouldEmitStartupWarmup(
                     remaining, lifecycleGateActive: false,
                     recoveryRequired: false),
-                "Content remained gated after all six warmup reports were accepted.");
+                "Content remained gated after all eight warmup reports were accepted.");
         }
 
         [TestMethod]
         public void FreshActiveCaptureShortageUsesReservoirBackpressure()
         {
-            Assert.AreEqual(50,
+            Assert.AreEqual(100,
                 DualSenseBluetoothSpeakerPassthrough.
                     TransientCaptureShortageLeaseMs);
             Assert.IsTrue(DualSenseBluetoothSpeakerPassthrough.
@@ -252,8 +255,8 @@ namespace DS4WindowsTests
         }
 
         [DataTestMethod]
-        [DataRow(6, true, false)]
-        [DataRow(6, false, true)]
+        [DataRow(8, true, false)]
+        [DataRow(8, false, true)]
         [DataRow(0, false, false)]
         public void WarmupNeverRunsAcrossLifecycleGateOrAfterCompletion(
             int remaining, bool lifecycleGate, bool recovery)
@@ -268,7 +271,7 @@ namespace DS4WindowsTests
         {
             Assert.IsTrue(
                 DualSenseBluetoothSpeakerPassthrough.ShouldEmitStartupWarmup(
-                    reportsRemaining: 6, lifecycleGateActive: false,
+                    reportsRemaining: 8, lifecycleGateActive: false,
                     recoveryRequired: false));
         }
 
@@ -289,7 +292,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void SixWarmupPacketsAreValidFixedSizeCbrOpus()
+        public void EightWarmupPacketsAreValidFixedSizeCbrOpus()
         {
             var encoder = DualSenseBluetoothSpeakerPassthrough.
                 CreateSpeakerOpusEncoder();

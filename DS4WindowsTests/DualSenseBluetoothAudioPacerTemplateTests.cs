@@ -122,59 +122,98 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
-        public void SpeakerMicrophoneSnapshotSurvivesControlTemplateOverlay()
+        public void LatestPadSenseSnapshotReplacesQueuedAudioStateAtomically()
         {
             const long nowQpc = 50_000_000;
             byte[] queued = CreateReport(0x28);
             byte[] latestTemplate = CreateReport(0x63);
 
-            // The ordinary speaker snapshot has already stripped these
-            // one-shot controller-state fields. The periodically refreshed
-            // template still contains them.
-            queued[13] &= unchecked((byte)~0x40);
-            queued[14] &= unchecked((byte)~0x01);
-            queued[19] = 0;
-            queued[21] = 0;
-            latestTemplate[13] |= 0x40;
-            latestTemplate[14] |= 0x01;
-            latestTemplate[19] = 0x40;
+            // The native reference repeats one complete state snapshot on
+            // every 0x36. Presentation must never retain a stale subset from
+            // the queued audio frame.
+            queued[13] = 0x12;
+            queued[14] = 0x34;
+            queued[17] = 0x56;
+            queued[18] = 0x78;
+            queued[19] = 0x9A;
+            queued[20] = 0xBC;
+            queued[22] = 0xDE;
+            queued[50] = 0xF0;
+            SetPadSenseAudioContract(latestTemplate);
+            latestTemplate[15] = 0xA1;
+            latestTemplate[16] = 0xB2;
             latestTemplate[21] = 0x01;
+            for (int index = 23; index <= 49; index++)
+            {
+                latestTemplate[index] = (byte)(0x30 + index - 23);
+            }
+            latestTemplate[56] = 0x1D;
             latestTemplate[57] = 0xA5;
+            latestTemplate[58] = 0xB6;
+            latestTemplate[59] = 0xC7;
+
+            byte expectedSequence = queued[1];
+            byte[] expectedDepths = CopyRange(queued, 5, 5);
+            byte expectedPacketCounter = queued[10];
+            byte[] expectedSpeaker = CopyRange(queued, 142, 202);
 
             DualSenseBluetoothAudioReportPatcher.PatchForPresentation(
                 queued, latestTemplate, nowQpc + 1, nowQpc);
 
-            Assert.AreEqual((byte)0, (byte)(queued[13] & 0x40));
-            Assert.AreEqual((byte)0, (byte)(queued[14] & 0x01));
-            Assert.AreEqual((byte)0, queued[19]);
-            Assert.AreEqual((byte)0, queued[21]);
-            Assert.AreEqual((byte)0xA5, queued[57],
-                "Unrelated current controller state must still be overlaid.");
+            AssertPadSenseAudioContract(queued);
+            CollectionAssert.AreEqual(CopyRange(latestTemplate, 15, 2),
+                CopyRange(queued, 15, 2),
+                "Presentation lost the latest rumble motors.");
+            CollectionAssert.AreEqual(CopyRange(latestTemplate, 23, 27),
+                CopyRange(queued, 23, 27),
+                "Presentation lost the latest trigger/effect state.");
+            Assert.AreEqual((byte)0x01, queued[21]);
+            CollectionAssert.AreEqual(CopyRange(latestTemplate, 56, 4),
+                CopyRange(queued, 56, 4),
+                "Presentation lost the latest player LED/lightbar state.");
+            Assert.AreEqual(expectedSequence, queued[1]);
+            CollectionAssert.AreEqual(expectedDepths,
+                CopyRange(queued, 5, 5));
+            Assert.AreEqual(expectedPacketCounter, queued[10]);
+            CollectionAssert.AreEqual(expectedSpeaker,
+                CopyRange(queued, 142, 202));
             AssertCrcIsValid(queued);
         }
 
         [TestMethod]
-        public void PendingMicrophoneControlSurvivesControlTemplateOverlay()
+        public void LatestTemplateWinsOverStalePendingMicrophoneSnapshot()
         {
             const long nowQpc = 50_000_000;
             byte[] queued = CreateReport(0x28);
             byte[] latestTemplate = CreateReport(0x63);
-            queued[13] |= 0x40;
-            queued[14] |= 0x01;
+            queued[13] = 0xFF;
+            queued[14] = 0xFF;
+            queued[17] = 0x11;
+            queued[18] = 0x22;
             queued[19] = 0x2F;
+            queued[20] = 0x44;
             queued[21] = 0x01;
-            latestTemplate[13] &= unchecked((byte)~0x40);
-            latestTemplate[14] &= unchecked((byte)~0x01);
-            latestTemplate[19] = 0;
+            queued[22] = 0x55;
+            queued[50] = 0x66;
+            SetPadSenseAudioContract(latestTemplate);
             latestTemplate[21] = 0;
+
+            byte expectedSequence = queued[1];
+            byte[] expectedDepths = CopyRange(queued, 5, 5);
+            byte expectedPacketCounter = queued[10];
+            byte[] expectedSpeaker = CopyRange(queued, 142, 202);
 
             DualSenseBluetoothAudioReportPatcher.PatchForPresentation(
                 queued, latestTemplate, nowQpc + 1, nowQpc);
 
-            Assert.AreEqual((byte)0x40, (byte)(queued[13] & 0x40));
-            Assert.AreEqual((byte)0x01, (byte)(queued[14] & 0x01));
-            Assert.AreEqual((byte)0x2F, queued[19]);
-            Assert.AreEqual((byte)0x01, queued[21]);
+            AssertPadSenseAudioContract(queued);
+            Assert.AreEqual((byte)0, queued[21]);
+            Assert.AreEqual(expectedSequence, queued[1]);
+            CollectionAssert.AreEqual(expectedDepths,
+                CopyRange(queued, 5, 5));
+            Assert.AreEqual(expectedPacketCounter, queued[10]);
+            CollectionAssert.AreEqual(expectedSpeaker,
+                CopyRange(queued, 142, 202));
             AssertCrcIsValid(queued);
         }
 
@@ -258,12 +297,12 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
-        public void NativeSchedulerMatchesPadSenseFifteenFrameLattice()
+        public void NativeSchedulerMatchesPadSenseUniformHostDeadline()
         {
             const long qpcFrequency = 1_000_000;
             const long startQpc = 3_000_000;
             var scheduler = new DualSenseBluetoothAudioPacerScheduler(
-                qpcFrequency, usePadSenseNativeLattice: true);
+                qpcFrequency);
             scheduler.Start(startQpc);
 
             long previous = scheduler.NextDeadlineQpc;
@@ -271,25 +310,25 @@ namespace DS4Windows.Tests
             {
                 scheduler.AdvanceAfterSend(previous);
                 long next = scheduler.NextDeadlineQpc;
-                long expected = interval % 15 == 0 ? 20_000 : 10_000;
+                long expected = interval % 3 == 1 ? 10_666 : 10_667;
                 Assert.AreEqual(expected, next - previous,
-                    $"PadSense lattice interval {interval} was incorrect.");
+                    $"PadSense host interval {interval} was incorrect.");
                 previous = next;
             }
 
             Assert.AreEqual(startQpc + 320_000,
                 scheduler.NextDeadlineQpc,
-                "Thirty native reports must span exactly 320 ms.");
+                "Thirty uniform native reports must span exactly 320 ms.");
         }
 
         [TestMethod]
-        public void NativeSchedulerAppliesClockRatioAcrossWholeLattice()
+        public void NativeSchedulerAppliesClockRatioAcrossUniformDeadlines()
         {
             const long qpcFrequency = 10_000_000;
             const double controllerClockRatio = 0.999800;
             const int intervals = 3000;
             var scheduler = new DualSenseBluetoothAudioPacerScheduler(
-                qpcFrequency, usePadSenseNativeLattice: true);
+                qpcFrequency);
             scheduler.SetRateRatio(controllerClockRatio);
             scheduler.Start(0);
 
@@ -301,18 +340,18 @@ namespace DS4Windows.Tests
             double expected = qpcFrequency * 32.0 /
                 controllerClockRatio;
             Assert.AreEqual(expected, scheduler.NextDeadlineQpc, 1.0,
-                "Fractional correction drifted across the native PadSense lattice.");
+                "Fractional correction drifted across PadSense host deadlines.");
         }
 
         [TestMethod]
-        public void NativeLatticePrimesTwoFramesWithoutLongWindowUnderflow()
+        public void NativeUniformCadencePrimeDoesNotDrain()
         {
-            // Model one produced frame each 32/3 ms and the native writer
-            // consuming fourteen slots at 10 ms followed by one at 20 ms.
+            // Model PadSense's one produced and consumed frame each 32/3 ms.
             const double producerIntervalMilliseconds = 32.0 / 3.0;
             double nextProductionMilliseconds = producerIntervalMilliseconds;
             double presentationMilliseconds = 0.0;
-            int queuedFrames = DualSenseBluetoothAudioPacer.PrimeReportCount;
+            int queuedFrames =
+                DualSenseBluetoothAudioPacer.NativePrimeReportCount;
 
             for (int presentation = 1; presentation <= 1500;
                 presentation++)
@@ -320,8 +359,7 @@ namespace DS4Windows.Tests
                 Assert.IsTrue(queuedFrames > 0,
                     $"Native lattice underflowed before report {presentation}.");
                 queuedFrames--;
-                presentationMilliseconds += presentation % 15 == 0 ?
-                    20.0 : 10.0;
+                presentationMilliseconds += producerIntervalMilliseconds;
                 while (nextProductionMilliseconds <=
                     presentationMilliseconds + 1.0e-9)
                 {
@@ -332,13 +370,17 @@ namespace DS4Windows.Tests
             }
 
             Assert.IsTrue(queuedFrames >= 1,
-                "The native PadSense lattice drained its startup reserve.");
+                "The uniform PadSense host cadence drained its startup reserve.");
             Assert.AreEqual(1,
                 DualSenseBluetoothAudioPacer.GetPrimeReportCount(
                     usePadForgeAudioTransport: true));
-            Assert.AreEqual(2,
+            Assert.AreEqual(8,
                 DualSenseBluetoothAudioPacer.GetPrimeReportCount(
                     usePadForgeAudioTransport: false));
+            Assert.AreEqual(8,
+                DualSenseBluetoothAudioPacer.NativePrimeReportCount);
+            Assert.AreEqual(2,
+                DualSenseBluetoothAudioPacer.PairedPrimeReportCount);
         }
 
         [TestMethod]
@@ -535,7 +577,27 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
-        public void SpeakerAudioRequiresExactlyOneCompletePairedReport()
+        public void SourceDrivenPresentationIsExclusiveToNativeSpeakerFrames()
+        {
+            byte[] speaker = CreateReport(0x52);
+            byte[] control = CreateReport(0x25);
+            control[142] = 0;
+            control[143] = 0;
+
+            Assert.IsTrue(DualSenseBluetoothAudioPacer.
+                UsesSourceDrivenNativePresentation(
+                    useNativeAudioTransport: true, nextReport: speaker));
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.
+                UsesSourceDrivenNativePresentation(
+                    useNativeAudioTransport: true, nextReport: control));
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.
+                UsesSourceDrivenNativePresentation(
+                    useNativeAudioTransport: false, nextReport: speaker),
+                "Compact transport must remain helper-clocked.");
+        }
+
+        [TestMethod]
+        public void NativeSpeakerAudioRequiresEightCompleteReports()
         {
             byte[] speaker = CreateReport(0x52);
 
@@ -545,13 +607,13 @@ namespace DS4Windows.Tests
                 DualSenseBluetoothAudioPacer.CanPresentFromPrimeGate(
                     primeRequired: true,
                     speakerReportCount:
-                        DualSenseBluetoothAudioPacer.PrimeReportCount - 1,
+                        DualSenseBluetoothAudioPacer.NativePrimeReportCount - 1,
                     nextReport: speaker));
             Assert.IsTrue(
                 DualSenseBluetoothAudioPacer.CanPresentFromPrimeGate(
                     primeRequired: true,
                     speakerReportCount:
-                        DualSenseBluetoothAudioPacer.PrimeReportCount,
+                        DualSenseBluetoothAudioPacer.NativePrimeReportCount,
                     nextReport: speaker));
         }
 
@@ -630,13 +692,13 @@ namespace DS4Windows.Tests
                 DualSenseBluetoothAudioPacer.CanPresentFromPrimeGate(
                     primeRequired: true,
                     speakerReportCount:
-                        DualSenseBluetoothAudioPacer.PrimeReportCount - 1,
+                        DualSenseBluetoothAudioPacer.NativePrimeReportCount - 1,
                     nextReport: headset));
             Assert.IsTrue(
                 DualSenseBluetoothAudioPacer.CanPresentFromPrimeGate(
                     primeRequired: true,
                     speakerReportCount:
-                        DualSenseBluetoothAudioPacer.PrimeReportCount,
+                        DualSenseBluetoothAudioPacer.NativePrimeReportCount,
                     nextReport: headset));
         }
 
@@ -668,7 +730,7 @@ namespace DS4Windows.Tests
             Assert.IsTrue(
                 DualSenseBluetoothSpeakerPassthrough
                     .PacerReservoirTargetFrames >
-                DualSenseBluetoothAudioPacer.PrimeReportCount,
+                DualSenseBluetoothAudioPacer.NativePrimeReportCount,
                 "The steady-state reserve must survive a stall without " +
                 "falling through the helper's empty-reservoir re-prime gate.");
         }
@@ -682,9 +744,9 @@ namespace DS4Windows.Tests
                 DualSenseBluetoothAudioPacer.CanPresentFromPrimeGate(
                     primeRequired: true,
                     speakerReportCount:
-                        DualSenseBluetoothAudioPacer.PrimeReportCount - 1,
+                        DualSenseBluetoothAudioPacer.NativePrimeReportCount - 1,
                     nextReport: speaker),
-                "One speaker frame plus a control report must not satisfy the two-frame pair gate.");
+                "A control report must not count toward the eight-frame native prime.");
         }
 
         [TestMethod]
@@ -703,7 +765,7 @@ namespace DS4Windows.Tests
                     ShouldRequireAudioPrimeAfterPresentation(
                         presentedControlReport: true,
                         remainingReportCount:
-                            DualSenseBluetoothAudioPacer.PrimeReportCount),
+                            DualSenseBluetoothAudioPacer.NativePrimeReportCount),
                 "A control commit must not restart the native 0x36 cadence.");
         }
 
@@ -719,15 +781,20 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
-        public void NativeControlBypassesPrimeThenTwoSpeakersStartLattice()
+        public void NativeControlBypassesPrimeThenEightSpeakersStartPresentation()
         {
             var ring = new DualSenseBluetoothAudioPacerRing<byte[]>(9);
             byte[] control = CreateReport(0x60);
             control[142] = 0;
             control[143] = 0;
             Assert.IsTrue(ring.TryEnqueue(control));
-            Assert.IsTrue(ring.TryEnqueue(CreateReport(0x61)));
-            Assert.IsTrue(ring.TryEnqueue(CreateReport(0x62)));
+            for (int index = 0;
+                index < DualSenseBluetoothAudioPacer.NativePrimeReportCount;
+                index++)
+            {
+                Assert.IsTrue(ring.TryEnqueue(
+                    CreateReport((byte)(0x61 + index))));
+            }
 
             int leadingSpeakers = ring.CountLeading(
                 DualSenseBluetoothAudioPacer.IsSpeakerAudioReport);
@@ -742,14 +809,16 @@ namespace DS4Windows.Tests
             Assert.IsTrue(ring.TryDequeue(out _));
             leadingSpeakers = ring.CountLeading(
                 DualSenseBluetoothAudioPacer.IsSpeakerAudioReport);
-            Assert.AreEqual(2, leadingSpeakers);
+            Assert.AreEqual(
+                DualSenseBluetoothAudioPacer.NativePrimeReportCount,
+                leadingSpeakers);
             Assert.IsTrue(ring.TryPeek(out first));
             Assert.IsTrue(
                 DualSenseBluetoothAudioPacer.CanPresentFromTransportGate(
                     primeRequired: true,
                     speakerReportCount: leadingSpeakers,
                     nextReport: first),
-                "Two queued 0x36 frames must satisfy the native lattice prime.");
+                "Eight queued 0x36 frames must satisfy the native presentation prime.");
         }
 
         [TestMethod]
@@ -825,6 +894,30 @@ namespace DS4Windows.Tests
             {
                 report[HapticsOffset + index] = (byte)(seed + index);
             }
+        }
+
+        private static void SetPadSenseAudioContract(byte[] report)
+        {
+            report[13] = 0xFD;
+            report[14] = 0xF7;
+            report[17] = 0x64;
+            report[18] = 0x64;
+            report[19] = 0xFF;
+            report[20] = 0x09;
+            report[22] = 0x0F;
+            report[50] = 0x0A;
+        }
+
+        private static void AssertPadSenseAudioContract(byte[] report)
+        {
+            Assert.AreEqual((byte)0xFD, report[13]);
+            Assert.AreEqual((byte)0xF7, report[14]);
+            Assert.AreEqual((byte)0x64, report[17]);
+            Assert.AreEqual((byte)0x64, report[18]);
+            Assert.AreEqual((byte)0xFF, report[19]);
+            Assert.AreEqual((byte)0x09, report[20]);
+            Assert.AreEqual((byte)0x0F, report[22]);
+            Assert.AreEqual((byte)0x0A, report[50]);
         }
 
         private static byte[] CopyRange(byte[] source, int offset, int count)

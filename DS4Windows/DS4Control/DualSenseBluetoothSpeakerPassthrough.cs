@@ -436,14 +436,16 @@ namespace DS4Windows
         // 86.7 ms callback stall measured in a live trace, without the former
         // ~235 ms steady-state presentation delay.
         internal const int PacerReservoirTargetFrames = 10;
-        internal const int StartupWarmupReportCount = 6;
+        internal const int StartupWarmupReportCount = 8;
         private const int CaptureRingFrames = (SampleRate * CaptureBufferMs) / 1000;
         private const int CapturePumpBufferFrames = 2048;
         private const int DirectPcmChunkBytes = 4096;
         private const int DirectPcmMaximumOutputFrames =
             (DirectPcmChunkBytes / (sizeof(short) * Channels) * 3 / 2) + 2;
         private const int IdleKeepAliveMs = 2000;
-        internal const int TransientCaptureShortageLeaseMs = 50;
+        // PadSense waits 100 ms after the last produced PCM before replacing
+        // a temporarily incomplete source block with timed silence.
+        internal const int TransientCaptureShortageLeaseMs = 100;
         private const int PacerPrewarmRetryMs = 2000;
         private const double BluetoothSpeakerCadenceMs = 10.0 + (2.0 / 3.0);
         // The render and Bluetooth clocks are independent. Correct their
@@ -568,6 +570,7 @@ namespace DS4Windows
         private int pacerPrewarmAttemptedForSegment;
         private long pacerPrewarmRetryAfterTimestamp;
         private long lastRawAudibleTimestamp;
+        private long lastSourcePcmTimestamp;
         private long pacerPrewarmAttempts;
         private long pacerPrewarmSuccesses;
         private long pacerPrewarmFailures;
@@ -1136,6 +1139,7 @@ namespace DS4Windows
             RequestGenerationEnd(Interlocked.Read(ref speakerGeneration));
             Volatile.Write(ref pacerPrewarmAttemptedForSegment, 0);
             Interlocked.Exchange(ref lastRawAudibleTimestamp, 0);
+            Interlocked.Exchange(ref lastSourcePcmTimestamp, 0);
             if (!stopping && e.Exception != null)
             {
                 AppLogger.LogToGui($"DualSense Bluetooth speaker capture stopped: {e.Exception.Message}", true);
@@ -1173,6 +1177,12 @@ namespace DS4Windows
             {
                 return;
             }
+
+            // Source presence is defined by produced PCM, not amplitude.
+            // Quiet USB/VIIPER blocks are still media and must not be replaced
+            // by a separately clocked idle carrier.
+            Interlocked.Exchange(ref lastSourcePcmTimestamp,
+                Stopwatch.GetTimestamp());
 
             if (HasAudibleSamples(samples, sampleCount))
             {
@@ -1764,6 +1774,15 @@ namespace DS4Windows
                 Stopwatch.Frequency * maximumAgeMilliseconds / 1000;
         }
 
+        private bool HasRecentSourcePcm(long now,
+            int maximumAgeMilliseconds = TransientCaptureShortageLeaseMs)
+        {
+            long sourcePcm = Interlocked.Read(ref lastSourcePcmTimestamp);
+            long age = now - sourcePcm;
+            return sourcePcm != 0 && age >= 0 && age <=
+                Stopwatch.Frequency * maximumAgeMilliseconds / 1000;
+        }
+
         internal static bool ShouldDeferTransientCaptureShortage(
             bool captureUnderrun, bool wasAudioSegmentActive,
             bool rawAudioIsFresh)
@@ -2052,13 +2071,17 @@ namespace DS4Windows
 
                     bool captureReady =
                         HasEnoughBufferedCaptureForNextFrame();
-                    bool sourceRecentlyActive = audioSegmentActive ||
-                        HasRecentRawAudible(Stopwatch.GetTimestamp(),
-                            TransientCaptureShortageLeaseMs);
-                    if (device.BluetoothAudioPacerActive &&
-                        device.PendingBluetoothSpeakerFrames > 1 &&
-                        !captureReady && sourceRecentlyActive)
+                    bool sourceRecentlyActive = HasRecentSourcePcm(
+                        Stopwatch.GetTimestamp(),
+                        TransientCaptureShortageLeaseMs);
+                    if (!pendingEncodedFrame && !captureReady &&
+                        sourceRecentlyActive)
                     {
+                        // PadSense does not advance an independent producer
+                        // deadline while a real source block is incomplete.
+                        // The source callback wakes this worker as soon as the
+                        // stateful 512-ish -> 480 conversion can complete.
+                        nextTick = Stopwatch.GetTimestamp();
                         captureFramesAvailable.WaitOne(2);
                         continue;
                     }
@@ -2147,8 +2170,16 @@ namespace DS4Windows
                                 gateSource: true);
                         }
 
-                        ScheduleNextStreamTick(submittedPending, ref nextTick,
-                            highResolutionTimer);
+                        // A retained source frame is retried without consuming
+                        // more PCM and without inventing a 10.667 ms media
+                        // deadline. Successful submission immediately drains
+                        // the next complete source block; rejection polls the
+                        // bounded helper queue briefly.
+                        nextTick = Stopwatch.GetTimestamp();
+                        if (!submittedPending)
+                        {
+                            captureFramesAvailable.WaitOne(1);
+                        }
                         continue;
                     }
 
@@ -2167,7 +2198,7 @@ namespace DS4Windows
                     }
 
                     long frameTimestamp = Stopwatch.GetTimestamp();
-                    bool rawAudioIsFresh = HasRecentRawAudible(frameTimestamp,
+                    bool rawAudioIsFresh = HasRecentSourcePcm(frameTimestamp,
                         TransientCaptureShortageLeaseMs);
                     if (ShouldDeferTransientCaptureShortage(captureUnderrun,
                             wasAudioSegmentActive, rawAudioIsFresh))
@@ -2228,16 +2259,12 @@ namespace DS4Windows
                     previousOutputLeft = frame[tailOffset];
                     previousOutputRight = frame[tailOffset + 1];
 
-                    long audibleTimestamp = Interlocked.Read(
-                        ref lastAudibleTimestamp);
-                    long audibleAgeTicks = Stopwatch.GetTimestamp() -
-                        audibleTimestamp;
-                    bool recentlyAudible = audibleTimestamp != 0 &&
-                        audibleAgeTicks >= 0 && audibleAgeTicks <=
-                            Stopwatch.Frequency * IdleKeepAliveMs / 1000;
                     bool submittedFrameThisTick = false;
-                    if (audioSegmentActive && recentlyAudible)
+                    if (captured)
                     {
+                        // Every complete source block is media, including
+                        // digital silence. PadSense drains it without an
+                        // amplitude gate or a second presentation clock.
                         preOpusPcmTrace?.Write(frame, frame.Length);
                         if (EncodeCurrentFrame())
                         {
@@ -2292,12 +2319,30 @@ namespace DS4Windows
                             ref pacerPrewarmAttemptedForSegment, 0);
                         Interlocked.Exchange(
                             ref lastRawAudibleTimestamp, 0);
+                        Interlocked.Exchange(
+                            ref lastSourcePcmTimestamp, 0);
                         ResetCapturePipelineAtSegmentBoundary();
                         Interlocked.Increment(ref audioSegmentStops);
                     }
 
-                    ScheduleNextStreamTick(submittedFrameThisTick,
-                        ref nextTick, highResolutionTimer);
+                    if (captured &&
+                        (submittedFrameThisTick || pendingEncodedFrame))
+                    {
+                        // Real PCM follows source completion exactly as in
+                        // PadSense. Drain every complete resampler block now;
+                        // only no-source/warmup silence uses the host timer.
+                        nextTick = Stopwatch.GetTimestamp();
+                        if (pendingEncodedFrame)
+                        {
+                            captureFramesAvailable.WaitOne(1);
+                        }
+                        LogStreamDiagnosticsIfVerbose();
+                    }
+                    else
+                    {
+                        ScheduleNextStreamTick(submittedFrameThisTick,
+                            ref nextTick, highResolutionTimer);
+                    }
                 }
             }
             finally
@@ -2323,24 +2368,6 @@ namespace DS4Windows
         private void ScheduleNextStreamTick(bool submittedFrameThisTick,
             ref long nextTick, IntPtr highResolutionTimer)
         {
-            if (submittedFrameThisTick &&
-                !audioSegmentActive &&
-                device.BluetoothAudioPacerActive &&
-                device.PendingBluetoothSpeakerFrames <
-                    PacerReservoirTargetFrames)
-            {
-                // The producer may fill the host reservoir immediately. Only
-                // the isolated helper presents reports to hardware, at exactly
-                // one report per 10.667 ms and never in catch-up bursts.
-                // During audible playback, keep this parent producer paced too:
-                // burst-refilling the DS5-style FIFO can steal time from the
-                // render callback and then turns its own burst into a 10 ms
-                // active schedule miss on the following tick.
-                nextTick = Stopwatch.GetTimestamp();
-                LogStreamDiagnosticsIfVerbose();
-                return;
-            }
-
             long cadenceTicks = CalculateBluetoothSpeakerCadenceTicks(
                 Stopwatch.Frequency,
                 device.DualSenseBluetoothPresentationClockRatio);

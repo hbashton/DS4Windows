@@ -14,7 +14,6 @@ namespace DS4Windows.InputDevices
     /// </summary>
     internal sealed class DualSenseBluetoothRealtimeWriter : IDisposable
     {
-        private const uint GENERIC_READ = 0x80000000;
         private const uint GENERIC_WRITE = 0x40000000;
         private const uint FILE_SHARE_READ = 0x00000001;
         private const uint FILE_SHARE_WRITE = 0x00000002;
@@ -235,6 +234,14 @@ namespace DS4Windows.InputDevices
         public static bool TryCreate(string devicePath, int reportLength,
             out DualSenseBluetoothRealtimeWriter writer, out int error)
         {
+            return TryCreate(devicePath, reportLength, out writer, out error,
+                slotCount: 8, audioInFlightLimit: NormalAudioInFlightLimit);
+        }
+
+        public static bool TryCreate(string devicePath, int reportLength,
+            out DualSenseBluetoothRealtimeWriter writer, out int error,
+            int slotCount, int audioInFlightLimit)
+        {
             writer = null;
             error = 0;
             if (string.IsNullOrWhiteSpace(devicePath))
@@ -242,7 +249,7 @@ namespace DS4Windows.InputDevices
                 return false;
             }
 
-            IntPtr handle = CreateFileW(devicePath, GENERIC_READ | GENERIC_WRITE,
+            IntPtr handle = CreateFileW(devicePath, GENERIC_WRITE,
                 FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING,
                 FILE_FLAG_OVERLAPPED, IntPtr.Zero);
             if (handle == new IntPtr(-1))
@@ -254,8 +261,8 @@ namespace DS4Windows.InputDevices
             try
             {
                 writer = new DualSenseBluetoothRealtimeWriter(handle,
-                    reportLength, slotCount: 8,
-                    audioInFlightLimit: NormalAudioInFlightLimit);
+                    reportLength, Math.Max(1, slotCount),
+                    Math.Max(1, audioInFlightLimit));
                 return true;
             }
             catch

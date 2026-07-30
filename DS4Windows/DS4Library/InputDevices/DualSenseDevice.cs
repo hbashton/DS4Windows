@@ -428,9 +428,9 @@ namespace DS4Windows.InputDevices
             1000;
         private const byte DualSenseSpeakerVolumeMinimum = 0x3D;
         private const byte DualSenseSpeakerVolumeMaximum = 0x64;
-        private const byte DualSenseHeadphoneVolumeMaximum = 0x7F;
-        private const byte DualSenseMicrophoneVolumeMaximum = 0x40;
-        private const byte DualSenseSpeakerPreGain = 0x03;
+        private const byte DualSenseHeadphoneVolumeMaximum = 0x64;
+        private const byte DualSenseMicrophoneVolumeMaximum = 0xFF;
+        private const byte DualSenseSpeakerPreGain = 0x0A;
         private const byte DualSenseOutputFlag0HeadphoneVolumeEnable = 0x10;
         private const byte DualSenseOutputFlag0SpeakerVolumeEnable = 0x20;
         private const byte DualSenseOutputFlag0MicrophoneVolumeEnable = 0x40;
@@ -445,16 +445,16 @@ namespace DS4Windows.InputDevices
         private const byte BluetoothNormalInputBit = 0x01;
         private const byte BluetoothMicrophoneInputBit = 0x02;
         private const byte BluetoothMicrophoneControlEnable = 0x01;
-        // Keep the established DS4Windows speaker route byte intact. AUX is a
-        // separate route; changing the normal path to DS5 Bridge's combined
-        // 0x30 value regressed otherwise healthy speaker playback here.
-        private const byte DualSenseAudioControlOutputSpeaker = 0x20;
+        // PadSense repeats Sony's native wired-DualSense audio snapshot on
+        // every 0x36 media report. Byte 0x09 selects the internal speaker
+        // contract while retaining the controller's microphone clock.
+        private const byte DualSenseAudioControlOutputSpeaker = 0x09;
         private const byte DualSenseAudioControlOutputHeadphones = 0x00;
         private const byte BluetoothCombinedSpeakerPacketType = 0x93;
         private const byte BluetoothCombinedHeadsetPacketType = 0x96;
         private static readonly byte[] DefaultBluetoothCombinedState =
         {
-            0xFD, 0xF7, 0x00, 0x00, 0x7F, 0x64, 0xFF, 0x09,
+            0xFD, 0xF7, 0x00, 0x00, 0x64, 0x64, 0xFF, 0x09,
             0x00, 0x0F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -1324,8 +1324,9 @@ namespace DS4Windows.InputDevices
                         speakerVolume, headsetOnlyAudio, headphoneVolume);
                     ApplyBluetoothMicrophoneStreamingRequest(initialTemplate);
                     if (!DualSenseBluetoothAudioPacer.TryStart(
-                        hDevice?.SafeReadHandle, initialTemplate,
-                        initialHapticsExpiry, out candidate, out string error))
+                        hDevice?.DevicePath, initialTemplate,
+                        initialHapticsExpiry, out candidate,
+                        out string error))
                     {
                         bluetoothAudioPacerLastError = error ?? string.Empty;
                         Volatile.Write(ref bluetoothAudioPacerRetryAfterTimestamp,
@@ -1470,7 +1471,7 @@ namespace DS4Windows.InputDevices
                 }
                 long initialHapticsExpiry = GetBluetoothHapticsExpiryQpc();
                 if (!DualSenseBluetoothAudioPacer.TryStart(
-                    hDevice?.SafeReadHandle, initialTemplate,
+                    hDevice?.DevicePath, initialTemplate,
                     initialHapticsExpiry,
                     out DualSenseBluetoothAudioPacer pacer,
                     out string error))
@@ -3553,10 +3554,10 @@ namespace DS4Windows.InputDevices
                 // profile/custom lightbar and audio routing in that case.
                 if (hasNativeGameState)
                 {
-                    Array.Copy(report, offset + BluetoothCombinedStateOffset,
+                    MergeProfileStateIntoPadSenseAudioSnapshot(report,
+                        offset + BluetoothCombinedStateOffset,
                         latestBluetoothCombinedSpeakerReport,
-                        BluetoothCombinedStateOffset,
-                        BluetoothCombinedStateLength);
+                        BluetoothCombinedStateOffset);
                     latestBluetoothCombinedNativeStateTimestamp =
                         Stopwatch.GetTimestamp();
                 }
@@ -3565,10 +3566,9 @@ namespace DS4Windows.InputDevices
                         BluetoothCombinedNativeStateLength &&
                     outputReport[0] == OUTPUT_REPORT_ID_BT)
                 {
-                    Array.Copy(outputReport, 2,
-                        latestBluetoothCombinedSpeakerReport,
-                        BluetoothCombinedStateOffset,
-                        BluetoothCombinedNativeStateLength);
+                    MergeProfileStateIntoPadSenseAudioSnapshot(outputReport,
+                        2, latestBluetoothCombinedSpeakerReport,
+                        BluetoothCombinedStateOffset);
                     latestBluetoothCombinedNativeStateTimestamp = 0;
                 }
                 else
@@ -3667,8 +3667,9 @@ namespace DS4Windows.InputDevices
                     return false;
                 }
 
-                Array.Copy(report, offset + 1, latestBluetoothCombinedSpeakerReport,
-                    BluetoothCombinedStateOffset, BluetoothCombinedNativeStateLength);
+                MergeProfileStateIntoPadSenseAudioSnapshot(report,
+                    offset + 1, latestBluetoothCombinedSpeakerReport,
+                    BluetoothCombinedStateOffset);
                 latestBluetoothCombinedNativeStateTimestamp =
                     Stopwatch.GetTimestamp();
                 return true;
@@ -3765,18 +3766,45 @@ namespace DS4Windows.InputDevices
                     return true;
                 }
 
-                Array.Copy(report, 2, latestBluetoothCombinedSpeakerReport,
-                    BluetoothCombinedStateOffset,
-                    BluetoothCombinedNativeStateLength);
+                MergeProfileStateIntoPadSenseAudioSnapshot(report, 2,
+                    latestBluetoothCombinedSpeakerReport,
+                    BluetoothCombinedStateOffset);
                 return true;
             }
+        }
+
+        private static void MergeProfileStateIntoPadSenseAudioSnapshot(
+            byte[] source, int sourceOffset, byte[] destination,
+            int destinationOffset)
+        {
+            // PadSense keeps the native audio contract stable on every media
+            // frame and overlays only mutable controller state. In particular,
+            // generic DS4Windows output reports must not replace FD/F7, the
+            // three audio gains, route 0x09, or audio-control2 0x0A with their
+            // Bluetooth control-report equivalents.
+            Array.Copy(source, sourceOffset + 2, destination,
+                destinationOffset + 2, 2);       // rumble motors
+            destination[destinationOffset] &= 0xFD;
+            if ((source[sourceOffset] & 0x02) != 0 ||
+                source[sourceOffset + 2] != 0 ||
+                source[sourceOffset + 3] != 0)
+            {
+                destination[destinationOffset] |= 0x02;
+            }
+            // PadSense keeps mute LED and power-save/mute state in its fixed
+            // media snapshot. Microphone transitions travel through the
+            // ordered 0x32 control report instead of mutating each 0x36.
+            Array.Copy(source, sourceOffset + 10, destination,
+                destinationOffset + 10, 27);     // triggers and effect power
+            Array.Copy(source, sourceOffset + 43, destination,
+                destinationOffset + 43, 4);      // player LEDs and lightbar
         }
 
         private bool BluetoothAudioPacerOwnsTransport()
         {
             lock (bluetoothAudioPacerLock)
             {
-                // A faulted or stopping helper still owns the duplicated HID
+                // A faulted or stopping helper still owns its dedicated HID
                 // handle until its process/writer retirement barrier completes.
                 // Test the owner reference, not IsRunning.
                 return PacerReferenceRetainsBluetoothTransportOwnership(
@@ -4046,7 +4074,6 @@ namespace DS4Windows.InputDevices
                 GetBluetoothCombinedSpeakerPacketType(headsetOnlyAudio);
             combined[BluetoothCombinedSpeakerOffset + 1] =
                 BluetoothCombinedSpeakerFrameLength;
-            SanitizeBluetoothSpeakerAudioSnapshot(combined);
             ApplyBluetoothSpeakerVolumeAndRoutingCore(combined, speakerVolume,
                 headsetOnlyAudio, headphoneVolume);
             ApplyBluetoothMicrophoneStreamingRequest(combined);
@@ -4341,24 +4368,31 @@ namespace DS4Windows.InputDevices
             byte[] combined, byte profileVolume, bool headsetOnlyAudio,
             byte headphoneVolume)
         {
-            // Speaker loudness is gated by both validity flags. The effective
-            // firmware range used by the PS5 is 0x3D-0x64; values above it do
-            // not add volume, while zero is the explicit mute value.
-            combined[BluetoothCombinedStateFlag0Offset] |=
-                DualSenseOutputFlag0AudioControlEnable;
+            // PadSense keeps the complete native audio snapshot armed on every
+            // 0x36, independent of the header's FE/FF microphone mode. Keep
+            // both volume fields valid and preserve the microphone volume and
+            // audio-clock fields instead of alternating state shapes.
+            combined[BluetoothCombinedStateFlag0Offset] |= (byte)(
+                DualSenseOutputFlag0HeadphoneVolumeEnable |
+                DualSenseOutputFlag0SpeakerVolumeEnable |
+                DualSenseOutputFlag0MicrophoneVolumeEnable |
+                DualSenseOutputFlag0AudioControlEnable);
+            combined[BluetoothCombinedStateFlag1Offset] |= (byte)(
+                DualSenseOutputFlag1MicrophoneMuteLedControlEnable |
+                DualSenseOutputFlag1PowerSaveControlEnable |
+                DualSenseOutputFlag1AudioControl2Enable);
+            byte mappedSpeakerVolume = MapDualSenseSpeakerVolume(
+                profileVolume);
             combined[BluetoothCombinedStateHeadphoneVolumeOffset] =
                 headsetOnlyAudio ?
                     MapDualSenseHeadphoneVolume(headphoneVolume) :
-                    (byte)0;
+                    mappedSpeakerVolume;
             combined[BluetoothCombinedStateSpeakerVolumeOffset] =
-                headsetOnlyAudio ? (byte)0 :
-                    MapDualSenseSpeakerVolume(profileVolume);
+                headsetOnlyAudio ? (byte)0 : mappedSpeakerVolume;
+            combined[BluetoothCombinedStateMicrophoneVolumeOffset] =
+                DualSenseMicrophoneVolumeMaximum;
             if (headsetOnlyAudio)
             {
-                combined[BluetoothCombinedStateFlag0Offset] |=
-                    DualSenseOutputFlag0HeadphoneVolumeEnable;
-                combined[BluetoothCombinedStateFlag0Offset] &=
-                    unchecked((byte)~DualSenseOutputFlag0SpeakerVolumeEnable);
                 // A 0x96 headset frame is the same fixed-cadence audio lane as
                 // 0x93. Keep a valid gain snapshot just as the DS5 Bridge
                 // combined transport does; clearing it can leave the AUX DAC
@@ -4372,12 +4406,6 @@ namespace DS4Windows.InputDevices
             }
             else
             {
-                combined[BluetoothCombinedStateFlag0Offset] &=
-                    unchecked((byte)~DualSenseOutputFlag0HeadphoneVolumeEnable);
-                combined[BluetoothCombinedStateFlag0Offset] |=
-                    DualSenseOutputFlag0SpeakerVolumeEnable;
-                combined[BluetoothCombinedStateFlag1Offset] |=
-                    DualSenseOutputFlag1AudioControl2Enable;
                 combined[BluetoothCombinedStateAudioControlOffset] =
                     DualSenseAudioControlOutputSpeaker;
                 combined[BluetoothCombinedStateAudioControl2Offset] =
@@ -4407,37 +4435,6 @@ namespace DS4Windows.InputDevices
                 DualSenseOutputFlag0MicrophoneVolumeEnable;
             combined[BluetoothCombinedStateMicrophoneVolumeOffset] =
                 MapDualSenseMicrophoneVolume(profileVolume);
-        }
-
-        private static void SanitizeBluetoothSpeakerAudioSnapshot(
-            byte[] combined)
-        {
-            // A 0x36 speaker report is an audio snapshot, not a microphone
-            // control transaction. Replaying the virtual controller's mic
-            // volume, mute-LED, internal-mic, and DSP bits on every 10.667 ms
-            // frame leaves the physical speaker on a different firmware path
-            // than both PadForge and DS5 Bridge. One control report still
-            // applies microphone settings; subsequent speaker snapshots omit
-            // their validity bits so the controller retains that state.
-            combined[BluetoothCombinedStateFlag0Offset] &=
-                unchecked((byte)~DualSenseOutputFlag0MicrophoneVolumeEnable);
-            combined[BluetoothCombinedStateFlag1Offset] &=
-                unchecked((byte)~
-                    DualSenseOutputFlag1MicrophoneMuteLedControlEnable);
-            combined[BluetoothCombinedStateMicrophoneVolumeOffset] = 0;
-            combined[BluetoothCombinedStateMuteLedOffset] = 0;
-
-            byte powerSaveControl = (byte)(
-                combined[BluetoothCombinedStatePowerSaveControlOffset] &
-                ~DualSensePowerSaveControlMicrophoneMute);
-            combined[BluetoothCombinedStatePowerSaveControlOffset] =
-                powerSaveControl;
-            if (powerSaveControl == 0)
-            {
-                combined[BluetoothCombinedStateFlag1Offset] &=
-                    unchecked((byte)~
-                        DualSenseOutputFlag1PowerSaveControlEnable);
-            }
         }
 
         private bool TryWriteBluetoothCombinedSpeakerReport(byte[] report,

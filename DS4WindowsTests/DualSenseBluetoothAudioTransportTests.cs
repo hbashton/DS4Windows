@@ -57,7 +57,7 @@ namespace DS4WindowsTests
                     ShouldApplyInputPhaseCorrection(
                         compactCombinedTransport: true,
                         pairedAudioReports: false));
-            Assert.IsTrue(
+            Assert.IsFalse(
                 DualSenseBluetoothAudioPacer.
                     ShouldApplyInputPhaseCorrection(
                         compactCombinedTransport: false,
@@ -394,6 +394,37 @@ namespace DS4WindowsTests
             byte[] playback = CreateSpeakerReport(0, 0, 0);
             Assert.IsFalse(DualSenseBluetoothAudioPacer.
                 RequiresFullDuplexAudioReport(playback));
+        }
+
+        [TestMethod]
+        public void NativeAudioPreparationNormalizesOnlyFullDuplexHeader()
+        {
+            var sequence = new DualSenseBluetoothPhysicalOutputSequence();
+            byte[] duplex = CreateSpeakerReport(0x31, 0x41, 0x90, 1);
+            duplex[4] = 0xFF;
+            for (int index = 5; index <= 9; index++)
+            {
+                duplex[index] = 80;
+            }
+
+            sequence.PrepareNativeAudio(duplex);
+            for (int index = 5; index <= 9; index++)
+            {
+                Assert.AreEqual((byte)64, duplex[index]);
+            }
+
+            byte[] speakerOnly = CreateSpeakerReport(0x32, 0x42, 0xA0, 2);
+            speakerOnly[4] = 0xFE;
+            for (int index = 5; index <= 9; index++)
+            {
+                speakerOnly[index] = 80;
+            }
+
+            sequence.PrepareNativeAudio(speakerOnly);
+            for (int index = 5; index <= 9; index++)
+            {
+                Assert.AreEqual((byte)80, speakerOnly[index]);
+            }
         }
 
         [TestMethod]

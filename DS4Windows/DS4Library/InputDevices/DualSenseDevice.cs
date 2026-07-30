@@ -2482,9 +2482,9 @@ namespace DS4Windows.InputDevices
                                     previousMediaBufferPublish)
                         {
                             // CRC validation and the normal-frame discriminator
-                            // above make byte 65 safe to treat as Sony's live
-                            // controller-side media playout level. Mic frames do
-                            // not carry this byte and never reach this path.
+                            // make the vendor-tail byte stable enough for trace
+                            // correlation. Its semantics are undocumented, so
+                            // it remains diagnostic and cannot steer cadence.
                             TryUpdateBluetoothAudioPacerMediaBuffer(
                                 inputReport[65], inputArrivalQpc);
                         }

@@ -88,7 +88,11 @@ namespace DS4Windows.InputDevices
         internal static bool ShouldApplyInputPhaseCorrection(
             bool compactCombinedTransport, bool pairedAudioReports)
         {
-            return !compactCombinedTransport && !pairedAudioReports;
+            // Audio owns a rational 10.667 ms media clock. Biasing native
+            // 0x36 deadlines toward asynchronous HID input made the measured
+            // duplex median 10.889 ms, continuously draining the controller
+            // runway before the repeatable microphone service epoch.
+            return false;
         }
 
         internal static bool ShouldDropSaturatedAudio(
@@ -2917,7 +2921,7 @@ namespace DS4Windows.InputDevices
                                         else
                                         {
                                             physicalOutputSequence.
-                                                PrepareSingleAudio(item.Report);
+                                                PrepareNativeAudio(item.Report);
                                         }
                                     }
                                     accepted = controlOnly ?
@@ -4390,6 +4394,18 @@ namespace DS4Windows.InputDevices
             WriteSonyCrc(report);
         }
 
+        internal void PrepareNativeAudio(byte[] report)
+        {
+            if (DualSenseBluetoothAudioPacer.
+                    RequiresFullDuplexAudioReport(report))
+            {
+                PrepareFullDuplexAudio(report);
+                return;
+            }
+
+            PrepareSingleAudio(report);
+        }
+
         internal void PrepareFullDuplexAudio(byte[] report)
         {
             ValidateSource(report, nameof(report));
@@ -4401,9 +4417,10 @@ namespace DS4Windows.InputDevices
                     nameof(report));
             }
 
-            // vDS and DS5 Bridge both use five equal 64-byte lane depths for
-            // true duplex. This is deliberately confined to FF reports; the
-            // proven FE compact speaker/AUX carrier is not changed.
+            // DS5 Bridge's true-duplex 0x36 reference uses five equal 64-byte
+            // lane depths with the FF section mask. This is deliberately
+            // confined to microphone-enabled reports; the proven FE compact
+            // speaker/AUX carrier is unchanged.
             for (int index = 5; index <= 9; index++)
             {
                 report[index] = 64;

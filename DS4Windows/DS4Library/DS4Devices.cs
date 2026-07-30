@@ -121,7 +121,6 @@ namespace DS4Windows
         private static HashSet<string> DevicePaths = new HashSet<string>();
         // Keep instance of opened exclusive mode devices not in use (Charging while using BT connection)
         private static List<HidDevice> DisabledDevices = new List<HidDevice>();
-        private static Stopwatch sw = new Stopwatch();
         public static event RequestElevationDelegate RequestElevation;
         public static PrepareInitDelegate PrepareDS4Init = null;
         public static PrepareInitDelegate PostDS4Init = null;
@@ -734,77 +733,108 @@ namespace DS4Windows
 
         public static void reEnableDevice(string deviceInstanceId)
         {
-            bool success;
             Guid hidGuid = new Guid();
             NativeMethods.HidD_GetHidGuid(ref hidGuid);
             IntPtr deviceInfoSet = NativeMethods.SetupDiGetClassDevs(ref hidGuid, deviceInstanceId, 0, NativeMethods.DIGCF_PRESENT | NativeMethods.DIGCF_DEVICEINTERFACE);
-            NativeMethods.SP_DEVINFO_DATA deviceInfoData = new NativeMethods.SP_DEVINFO_DATA();
-            deviceInfoData.cbSize = Marshal.SizeOf(deviceInfoData);
-            success = NativeMethods.SetupDiEnumDeviceInfo(deviceInfoSet, 0, ref deviceInfoData);
-            if (!success)
+            if (deviceInfoSet.ToInt64() == NativeMethods.INVALID_HANDLE_VALUE)
             {
-                throw new Exception("Error getting device info data, error code = " + Marshal.GetLastWin32Error());
-            }
-            success = NativeMethods.SetupDiEnumDeviceInfo(deviceInfoSet, 1, ref deviceInfoData); // Checks that we have a unique device
-            if (success)
-            {
-                throw new Exception("Can't find unique device");
+                throw new Exception("Error opening HID device information, error code = " + Marshal.GetLastWin32Error());
             }
 
-            NativeMethods.SP_PROPCHANGE_PARAMS propChangeParams = new NativeMethods.SP_PROPCHANGE_PARAMS();
-            propChangeParams.classInstallHeader.cbSize = Marshal.SizeOf(propChangeParams.classInstallHeader);
-            propChangeParams.classInstallHeader.installFunction = NativeMethods.DIF_PROPERTYCHANGE;
-            propChangeParams.stateChange = NativeMethods.DICS_DISABLE;
-            propChangeParams.scope = NativeMethods.DICS_FLAG_GLOBAL;
-            propChangeParams.hwProfile = 0;
-            success = NativeMethods.SetupDiSetClassInstallParams(deviceInfoSet, ref deviceInfoData, ref propChangeParams, Marshal.SizeOf(propChangeParams));
-            if (!success)
+            NativeMethods.SP_DEVINFO_DATA deviceInfoData = new NativeMethods.SP_DEVINFO_DATA
             {
-                throw new Exception("Error setting class install params, error code = " + Marshal.GetLastWin32Error());
-            }
-            success = NativeMethods.SetupDiCallClassInstaller(NativeMethods.DIF_PROPERTYCHANGE, deviceInfoSet, ref deviceInfoData);
-            // TEST: If previous SetupDiCallClassInstaller fails, just continue
-            // otherwise device will likely get permanently disabled.
-            /*if (!success)
+                cbSize = Marshal.SizeOf<NativeMethods.SP_DEVINFO_DATA>(),
+            };
+            NativeMethods.SP_PROPCHANGE_PARAMS propChangeParams = new NativeMethods.SP_PROPCHANGE_PARAMS
             {
-                throw new Exception("Error disabling device, error code = " + Marshal.GetLastWin32Error());
-            }
-            */
+                classInstallHeader = new NativeMethods.SP_CLASSINSTALL_HEADER
+                {
+                    cbSize = Marshal.SizeOf<NativeMethods.SP_CLASSINSTALL_HEADER>(),
+                    installFunction = NativeMethods.DIF_PROPERTYCHANGE,
+                },
+                scope = NativeMethods.DICS_FLAG_GLOBAL,
+                hwProfile = 0,
+            };
 
-            //System.Threading.Thread.Sleep(50);
-            sw.Restart();
-            while (sw.ElapsedMilliseconds < 500)
+            bool disableAttempted = false;
+            Exception operationFailure = null;
+            try
             {
-                // Use SpinWait to keep control of current thread. Using Sleep could potentially
-                // cause other events to get run out of order
-                System.Threading.Thread.SpinWait(250);
-            }
-            sw.Stop();
+                bool success = NativeMethods.SetupDiEnumDeviceInfo(deviceInfoSet, 0, ref deviceInfoData);
+                if (!success)
+                {
+                    throw new Exception("Error getting device info data, error code = " + Marshal.GetLastWin32Error());
+                }
+                success = NativeMethods.SetupDiEnumDeviceInfo(deviceInfoSet, 1, ref deviceInfoData);
+                if (success)
+                {
+                    throw new Exception("Can't find unique device");
+                }
 
-            propChangeParams.stateChange = NativeMethods.DICS_ENABLE;
-            success = NativeMethods.SetupDiSetClassInstallParams(deviceInfoSet, ref deviceInfoData, ref propChangeParams, Marshal.SizeOf(propChangeParams));
-            if (!success)
-            {
-                throw new Exception("Error setting class install params, error code = " + Marshal.GetLastWin32Error());
+                propChangeParams.stateChange = NativeMethods.DICS_DISABLE;
+                disableAttempted = true;
+                success = NativeMethods.SetupDiSetClassInstallParams(deviceInfoSet, ref deviceInfoData,
+                    ref propChangeParams, Marshal.SizeOf(propChangeParams));
+                if (!success)
+                {
+                    throw new Exception("Error setting disable parameters, error code = " + Marshal.GetLastWin32Error());
+                }
+
+                // Even if Windows reports that disabling failed, always execute
+                // the enable recovery below. A partially applied property change
+                // must never leave the user's HID disabled.
+                NativeMethods.SetupDiCallClassInstaller(NativeMethods.DIF_PROPERTYCHANGE,
+                    deviceInfoSet, ref deviceInfoData);
+                System.Threading.Thread.Sleep(500);
             }
-            success = NativeMethods.SetupDiCallClassInstaller(NativeMethods.DIF_PROPERTYCHANGE, deviceInfoSet, ref deviceInfoData);
-            if (!success)
+            catch (Exception ex)
             {
-                throw new Exception("Error enabling device, error code = " + Marshal.GetLastWin32Error());
+                operationFailure = ex;
+            }
+            finally
+            {
+                if (disableAttempted)
+                {
+                    bool enabled = false;
+                    int enableError = 0;
+                    propChangeParams.stateChange = NativeMethods.DICS_ENABLE;
+                    for (int attempt = 1; attempt <= 5 && !enabled; attempt++)
+                    {
+                        bool paramsSet = NativeMethods.SetupDiSetClassInstallParams(
+                            deviceInfoSet, ref deviceInfoData, ref propChangeParams,
+                            Marshal.SizeOf(propChangeParams));
+                        if (paramsSet)
+                        {
+                            enabled = NativeMethods.SetupDiCallClassInstaller(
+                                NativeMethods.DIF_PROPERTYCHANGE, deviceInfoSet,
+                                ref deviceInfoData);
+                        }
+                        enableError = Marshal.GetLastWin32Error();
+                        if (!enabled)
+                        {
+                            System.Threading.Thread.Sleep(attempt * 100);
+                        }
+                    }
+
+                    if (!enabled)
+                    {
+                        Exception enableFailure = new Exception(
+                            "Critical: Windows could not re-enable the HID device after five attempts, error code = " +
+                            enableError);
+                        operationFailure = operationFailure == null
+                            ? enableFailure
+                            : new AggregateException(operationFailure,
+                                enableFailure);
+                    }
+                }
+
+                NativeMethods.SetupDiDestroyDeviceInfoList(deviceInfoSet);
             }
 
-            //System.Threading.Thread.Sleep(50);
-            /*sw.Restart();
-            while (sw.ElapsedMilliseconds < 50)
+            if (operationFailure != null)
             {
-                // Use SpinWait to keep control of current thread. Using Sleep could potentially
-                // cause other events to get run out of order
-                System.Threading.Thread.SpinWait(100);
+                throw operationFailure;
             }
-            sw.Stop();
-            */
-
-            NativeMethods.SetupDiDestroyDeviceInfoList(deviceInfoSet);
         }
     }
 }

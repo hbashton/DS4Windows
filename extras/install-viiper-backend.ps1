@@ -1,5 +1,6 @@
 param(
-    [switch]$NoPause
+    [switch]$NoPause,
+    [switch]$Yes
 )
 
 $ErrorActionPreference = "Stop"
@@ -9,6 +10,7 @@ $script:RebootRecommended = $false
 $script:UsbipRuntimeReady = $false
 $script:UsbipRuntimeProbeState = "not-run"
 $script:Ds4WindowsRestartPath = $null
+$script:UserCanceled = $false
 $script:RequiredUsbipVersion = [Version]"0.9.7.7"
 $script:UsbipInstallerUrl =
     "https://github.com/vadimgrn/usbip-win2/releases/download/v.0.9.7.7/USBip-0.9.7.7-x64.exe"
@@ -17,7 +19,7 @@ $script:UsbipInstallerSha256 =
 $script:BundledViiperPath = Join-Path $PSScriptRoot `
     "VIIPER-0.0.6-x64.exe"
 $script:BundledViiperSha256 =
-    "c53ce3a6fbe1dfd7b283cdf5518de1b397c16223216ccfa93aa91ce713da52c3"
+    "a32c0a4098577c0565649420923fef9d8bec5464a13ce3ef096f6a922c16b4f2"
 $script:BundledUsbipInstallerPath = Join-Path $PSScriptRoot `
     "USBip-0.9.7.7-x64.exe"
 $programFilesRoot = if ($env:ProgramW6432) {
@@ -177,9 +179,16 @@ function Remove-MismatchedUsbipPackage($entry, [Version]$installedVersion,
         try { & taskkill.exe /PID $uninstall.Id /T /F 2>&1 | Out-Null }
         catch { }
         $script:RebootRecommended = $true
-        throw "usbip-win2 could not unload its active kernel driver within " +
-            "30 seconds. Restart Windows, then run Install / Repair again; " +
-            "the installer will resume with packaged $requiredVersion."
+        Write-SetupLog (
+            "The old USBIP kernel driver requires a reboot to unload. " +
+            "Windows will restart automatically in 15 seconds; setup will " +
+            "offer to resume on the next DS4Windows launch."
+        ) Yellow
+        & shutdown.exe /r /t 15 /c `
+            "Completing safe usbip-win2 $requiredVersion replacement" |
+            Out-Null
+        throw "usbip-win2 requires a restart before packaged " +
+            "$requiredVersion can be installed. Automatic restart scheduled."
     }
     $uninstall.Refresh()
     if ($uninstall.ExitCode -notin @(0, 1641, 3010)) {
@@ -191,6 +200,23 @@ function Remove-MismatchedUsbipPackage($entry, [Version]$installedVersion,
     # Never report Ready until a reboot has cleared the previous driver image.
     $script:RebootRecommended = $true
     return $true
+}
+
+function Disable-ViiperStartup {
+    try {
+        Unregister-ScheduledTask -TaskName "RunVIIPER" -Confirm:$false `
+            -ErrorAction SilentlyContinue
+    }
+    catch { }
+    try {
+        Remove-ItemProperty `
+            -LiteralPath "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" `
+            -Name "VIIPER" -ErrorAction SilentlyContinue
+    }
+    catch { }
+    Write-SetupLog (
+        "Disabled existing VIIPER startup until setup verifies the driver ABI."
+    ) Green
 }
 
 function Assert-FileSha256([string]$path, [string]$expectedHash) {
@@ -679,9 +705,25 @@ try {
     New-Item -ItemType Directory -Path $script:TempDir -Force | Out-Null
     Write-SetupLog ""
     Write-SetupLog "DS4Windows VIIPER virtual controller setup" Green
-    Write-SetupLog "Installing VIIPER first, then checking usbip-win2."
+    Write-SetupLog "Planned order:" Cyan
+    Write-SetupLog "  1. Install packaged VIIPER 0.0.6 x64." Cyan
+    Write-SetupLog "  2. Verify or install packaged usbip-win2 0.9.7.7." Cyan
+    Write-SetupLog "  3. Register VIIPER only after the driver ABI is ready." Cyan
+    Write-SetupLog "  4. Start and verify the local VIIPER API." Cyan
+    Write-SetupLog (
+        "USB hub devices may restart during driver replacement, and Windows " +
+        "may require a reboot."
+    ) Yellow
+    if (-not $Yes) {
+        Write-Host "Save work before continuing; replacing an incompatible driver can require an automatic restart." -ForegroundColor Yellow
+        $answer = Read-Host "Continue with VIIPER setup? [Y/N]"
+        if ($answer -notmatch '^(?i:y|yes)$') {
+            $script:UserCanceled = $true
+            throw "Setup canceled by the user before any changes were made."
+        }
+    }
 
-    Write-Step "Installing VIIPER"
+    Write-Step "Step 1 of 4 - Installing VIIPER 0.0.6"
     $viiperPath = Join-Path $script:InstallDir "viiper.exe"
     $candidatePath = Join-Path $script:TempDir "viiper.exe"
     if (Test-Path -LiteralPath $script:BundledViiperPath -PathType Leaf) {
@@ -701,25 +743,14 @@ try {
     if (-not (Stop-Ds4WindowsProcesses "VIIPER backend replacement")) {
         throw "Unable to quiesce DS4Windows before replacing VIIPER."
     }
+    if (-not (Stop-ViiperProcesses "VIIPER backend replacement")) {
+        throw "Unable to stop the existing VIIPER backend before replacement."
+    }
+    Disable-ViiperStartup
     Install-ViiperAtomically $candidatePath $viiperPath
     Write-SetupLog "VIIPER installed to $viiperPath" Green
 
-    Write-Step "Registering VIIPER"
-    if (-not (Stop-ViiperProcesses "install registration")) {
-        throw "VIIPER registration could not proceed because a VIIPER process could not be closed automatically. Please close viiper.exe manually, then run Install / Repair again."
-    }
-
-    Invoke-ViiperInstallRegistration $viiperPath
-
-    $taskName = "RunVIIPER"
-    if (Register-ViiperRunTask $viiperPath $taskName) {
-        Write-SetupLog "Registered hidden logon task '$taskName'." Green
-    }
-    else {
-        Write-SetupLog "Could not create hidden logon task. Setup will continue; VIIPER can still be started by DS4Windows when needed." Yellow
-    }
-
-    Write-Step "Checking usbip-win2"
+    Write-Step "Step 2 of 4 - Checking usbip-win2 0.9.7.7"
     $requiredUsbipVersion = $script:RequiredUsbipVersion
     try {
         $usbipVersion = Get-UsbipInstalledVersion
@@ -804,7 +835,8 @@ try {
 
         Write-SetupLog "Windows may briefly restart USB hub devices." Yellow
         $installer = Start-Process -FilePath $usbipInstaller `
-            -ArgumentList "/S" -PassThru -Wait
+            -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" `
+            -PassThru -Wait
         if ($installer.ExitCode -notin @(0, 1641, 3010)) {
             throw "usbip-win2 setup failed with exit code $($installer.ExitCode)."
         }
@@ -834,7 +866,31 @@ try {
         }
     }
 
-    Write-Step "Verification"
+    Write-Step "Step 3 of 4 - Registering VIIPER"
+    if ($script:UsbipRuntimeReady -and -not $script:RebootRecommended) {
+        if (-not (Stop-ViiperProcesses "install registration")) {
+            throw "VIIPER registration could not proceed because a VIIPER process could not be closed automatically. Please close viiper.exe manually, then run Install / Repair again."
+        }
+
+        Invoke-ViiperInstallRegistration $viiperPath
+
+        $taskName = "RunVIIPER"
+        if (Register-ViiperRunTask $viiperPath $taskName) {
+            Write-SetupLog "Registered hidden logon task '$taskName'." Green
+        }
+        else {
+            Write-SetupLog "Could not create hidden logon task. Setup will continue; VIIPER can still be started by DS4Windows when needed." Yellow
+        }
+    }
+    else {
+        [void](Stop-ViiperProcesses "pending usbip-win2 reboot")
+        Write-SetupLog (
+            "VIIPER registration and startup are deferred until usbip-win2 " +
+            "passes its runtime ABI check."
+        ) Yellow
+    }
+
+    Write-Step "Step 4 of 4 - Verifying runtime readiness"
     if ($script:UsbipRuntimeReady -and -not $script:RebootRecommended -and
             (Start-AndVerifyViiper $viiperPath)) {
         Write-SetupLog "VIIPER API is ready." Green
@@ -874,10 +930,16 @@ try {
     }
 }
 catch {
-    $script:ExitCode = 1
     Write-Host ""
-    Write-SetupLog "Setup could not finish: $($_.Exception.Message)" Red
-    Write-SetupLog "Details were saved to $script:LogPath" Yellow
+    if ($script:UserCanceled) {
+        $script:ExitCode = 1223
+        Write-SetupLog "Setup canceled. No changes were made." Yellow
+    }
+    else {
+        $script:ExitCode = 1
+        Write-SetupLog "Setup could not finish: $($_.Exception.Message)" Red
+        Write-SetupLog "Details were saved to $script:LogPath" Yellow
+    }
 }
 finally {
     if (Test-Path -LiteralPath $script:TempDir) {

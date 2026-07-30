@@ -149,7 +149,6 @@ namespace DS4Windows.InputDevices
         private const int HelperStopTimeoutMilliseconds = 3000;
         private const int HelperProcessExitTimeoutMilliseconds = 3000;
         private const uint HelperWriterReleaseTimeoutMilliseconds = 3000;
-        private const uint HelperControlWriteTimeoutMilliseconds = 750;
         private const uint HelperAudioCreditPollMilliseconds = 1;
         // Inbound microphone reports are observations, not output credits or
         // speaker presentation deadlines. Every working reference keeps the
@@ -791,6 +790,15 @@ namespace DS4Windows.InputDevices
             // after state. Only the dormant paired transport requires a new
             // complete pair.
             return UsePairedAudioReports && presentedControlReport;
+        }
+
+        internal static bool ShouldReprimeAfterEmptyReservoir(
+            bool useNativeAudioTransport)
+        {
+            // PadSense's eight-block gate is a one-time session prime. Once
+            // that latch opens, an ordinary source boundary waits for the next
+            // complete block; it never rebuilds and bursts another eight.
+            return !useNativeAudioTransport;
         }
 
         internal static bool ShouldRetainSaturatedWrite(bool accepted,
@@ -2973,8 +2981,12 @@ namespace DS4Windows.InputDevices
                             }
                             else if (!reservoir.TryDequeue(out item))
                             {
-                                primeRequired = true;
-                                scheduler.Reset();
+                                if (ShouldReprimeAfterEmptyReservoir(
+                                        useNativeAudioTransport))
+                                {
+                                    primeRequired = true;
+                                    scheduler.Reset();
+                                }
                                 continue;
                             }
 
@@ -3083,12 +3095,13 @@ namespace DS4Windows.InputDevices
                                                 PrepareNativeAudio(item.Report);
                                         }
                                     }
-                                    accepted = controlOnly ?
-                                        writer.TryWriteAndWait(item.Report,
-                                            HelperControlWriteTimeoutMilliseconds,
-                                            out transportFault) :
-                                        writer.TryWrite(physicalReport,
-                                            out transportFault);
+                                    // PadSense serializes 0x32 through the same
+                                    // strict writer slot as media and commits
+                                    // once WriteFile accepts/PENDING. Draining
+                                    // every outstanding 0x36 and then waiting
+                                    // for 0x32 completion breaks that FIFO.
+                                    accepted = writer.TryWrite(physicalReport,
+                                        out transportFault);
                                     if (accepted)
                                     {
                                         RecordPresentationTrace(physicalReport,

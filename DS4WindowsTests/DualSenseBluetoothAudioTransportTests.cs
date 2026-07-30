@@ -519,6 +519,9 @@ namespace DS4WindowsTests
                 "The 0x36 route must not replay the paired 5 ms startup burst.");
             Assert.AreEqual(32,
                 DualSenseBluetoothAudioPacer.SingleAudioTransportSlotCount);
+            Assert.AreEqual(32,
+                DualSenseBluetoothAudioPacer.SingleAudioInFlightLimit,
+                "PadSense advances a 32-slot OVERLAPPED ownership ring.");
         }
 
         [TestMethod]

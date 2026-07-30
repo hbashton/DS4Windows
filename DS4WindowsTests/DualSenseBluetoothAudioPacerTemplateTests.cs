@@ -703,23 +703,12 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
-        public void LowLatencyProducerReservoirCoversMeasuredWindowsCallbackStall()
+        public void ProducerUsesOneTimePrimeAndSingleFrameSteadyLead()
         {
-            double presentationReserveMilliseconds =
+            Assert.AreEqual(1,
                 DualSenseBluetoothSpeakerPassthrough
-                    .PacerReservoirTargetFrames * 1000.0 *
-                DualSenseBluetoothAudioPacerScheduler.CadenceNumerator /
-                DualSenseBluetoothAudioPacerScheduler.CadenceDenominator;
-            double protectedMilliseconds = presentationReserveMilliseconds +
-                DualSenseBluetoothSpeakerPassthrough.TargetBufferMs;
-
-            Assert.IsTrue(protectedMilliseconds >= 100.0,
-                $"The combined reserve covers only " +
-                $"{protectedMilliseconds:F1} ms; the measured callback stall " +
-                "was 86.7 ms and requires scheduling margin.");
-            Assert.IsTrue(protectedMilliseconds <= 130.0,
-                $"The low-latency path still buffers " +
-                $"{protectedMilliseconds:F1} ms before presentation.");
+                    .PacerReservoirTargetFrames,
+                "Steady source production must not preserve a burstable lead.");
             Assert.IsTrue(
                 DualSenseBluetoothSpeakerPassthrough.InitialBufferMs <= 32,
                 "Startup must not add a second long media-style prebuffer.");
@@ -728,11 +717,11 @@ namespace DS4Windows.Tests
                     .LowLatencyCaptureBufferMs <= 5,
                 "Loopback capture should request a sub-10 ms period.");
             Assert.IsTrue(
+                DualSenseBluetoothAudioPacer.NativePrimeReportCount >
                 DualSenseBluetoothSpeakerPassthrough
-                    .PacerReservoirTargetFrames >
-                DualSenseBluetoothAudioPacer.NativePrimeReportCount,
-                "The steady-state reserve must survive a stall without " +
-                "falling through the helper's empty-reservoir re-prime gate.");
+                    .PacerReservoirTargetFrames,
+                "The eight-report requirement is a one-time source prime, " +
+                "not the steady-state media lead.");
         }
 
         [TestMethod]
@@ -767,6 +756,21 @@ namespace DS4Windows.Tests
                         remainingReportCount:
                             DualSenseBluetoothAudioPacer.NativePrimeReportCount),
                 "A control commit must not restart the native 0x36 cadence.");
+        }
+
+        [TestMethod]
+        public void NativeSourceBoundaryDoesNotReplayStartupPrime()
+        {
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.
+                    ShouldReprimeAfterEmptyReservoir(
+                        useNativeAudioTransport: true),
+                "PadSense primes eight blocks once and waits for one next " +
+                "source block at an ordinary empty boundary.");
+            Assert.IsTrue(
+                DualSenseBluetoothAudioPacer.
+                    ShouldReprimeAfterEmptyReservoir(
+                        useNativeAudioTransport: false));
         }
 
         [TestMethod]

@@ -282,13 +282,25 @@ namespace DS4WindowsTests
                 PacerReservoirTargetFrames;
 
             Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
-                ShouldBackpressurePacerProducer(true, target - 1));
+                ShouldBackpressurePacerProducer(true, target - 1,
+                    presentedReports: 1));
             Assert.IsTrue(DualSenseBluetoothSpeakerPassthrough.
-                ShouldBackpressurePacerProducer(true, target));
+                ShouldBackpressurePacerProducer(true, target,
+                    presentedReports: 1));
             Assert.IsTrue(DualSenseBluetoothSpeakerPassthrough.
-                ShouldBackpressurePacerProducer(true, target + 40));
+                ShouldBackpressurePacerProducer(true, target + 40,
+                    presentedReports: 1));
             Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
-                ShouldBackpressurePacerProducer(false, target));
+                ShouldBackpressurePacerProducer(false, target,
+                    presentedReports: 1));
+
+            int prime = DualSenseBluetoothAudioPacer.NativePrimeReportCount;
+            Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
+                ShouldBackpressurePacerProducer(true, prime - 1,
+                    presentedReports: 0));
+            Assert.IsTrue(DualSenseBluetoothSpeakerPassthrough.
+                ShouldBackpressurePacerProducer(true, prime,
+                    presentedReports: 0));
         }
 
         [TestMethod]

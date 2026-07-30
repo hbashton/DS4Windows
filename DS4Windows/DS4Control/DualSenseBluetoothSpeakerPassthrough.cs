@@ -431,11 +431,11 @@ namespace DS4Windows
         // prebuffer duplicated that protection and made game audio feel late.
         internal const int InitialBufferMs = 20;
         internal const int TargetBufferMs = 20;
-        // Keep two reports beyond the helper's eight-report prime. Together
-        // with the causal source target this protects roughly 123 ms, above the
-        // 86.7 ms callback stall measured in a live trace, without the former
-        // ~235 ms steady-state presentation delay.
-        internal const int PacerReservoirTargetFrames = 10;
+        // PadSense primes eight source-complete reports once, then produces the
+        // next report only after the preceding report has entered its writer.
+        // A permanent multi-report lead is converted by HidBth into recurring
+        // radio bursts, so steady state retains exactly one pending report.
+        internal const int PacerReservoirTargetFrames = 1;
         internal const int StartupWarmupReportCount = 8;
         private const int CaptureRingFrames = (SampleRate * CaptureBufferMs) / 1000;
         private const int CapturePumpBufferFrames = 2048;
@@ -1675,10 +1675,18 @@ namespace DS4Windows
         }
 
         internal static bool ShouldBackpressurePacerProducer(
-            bool helperActive, int pendingFrames)
+            bool helperActive, int pendingFrames,
+            long presentedReports = 1)
         {
-            return helperActive && pendingFrames >=
+            if (!helperActive)
+            {
+                return false;
+            }
+
+            int target = presentedReports <= 0 ?
+                DualSenseBluetoothAudioPacer.NativePrimeReportCount :
                 PacerReservoirTargetFrames;
+            return pendingFrames >= target;
         }
 
         internal static double StartupWarmupLatencyMilliseconds =>
@@ -2055,14 +2063,14 @@ namespace DS4Windows
                     directPcmRecoveryWindowInvalidated = false;
 
                     // The helper owns presentation cadence. Never let a
-                    // transient helper/startup stall turn the bounded safety
-                    // reservoir into permanent stale audio. Production resumes
-                    // immediately when one presentation credit is returned,
-                    // retaining the intended ten-report reserve without the
-                    // previously observed 51-53 report steady-state backlog.
+                    // transient helper/startup stall turn the one-time prime
+                    // into a permanent media lead. After the first presentation
+                    // keep at most one source-complete report pending, matching
+                    // PadSense's source-driven FIFO.
                     if (ShouldBackpressurePacerProducer(
                         device.BluetoothAudioPacerActive,
-                        device.PendingBluetoothSpeakerFrames))
+                        device.PendingBluetoothSpeakerFrames,
+                        device.BluetoothAudioPacerPresentedReports))
                     {
                         nextTick = Stopwatch.GetTimestamp();
                         captureFramesAvailable.WaitOne(1);

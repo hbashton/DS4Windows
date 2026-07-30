@@ -4895,8 +4895,6 @@ namespace DS4Windows.InputDevices
         private const int SourceSpeakerDataOffset = 144;
         private const int PlaybackSpeakerHeaderOffset = 11;
         private const int PlaybackSpeakerDataOffset = 13;
-        private const int DuplexSpeakerHeaderOffset = 10;
-        private const int DuplexSpeakerDataOffset = 12;
         private const int SpeakerFrameLength = 200;
         // DS5Dongle exposes this Sony media-reserve field over the documented
         // 16..127 range. Live controller feedback (BT input byte 65) showed
@@ -4926,19 +4924,19 @@ namespace DS4Windows.InputDevices
             int speakerDataOffset;
             if (microphoneEnabled)
             {
-                // Current DS5Dongle removes the unused eighth audio-control
-                // field, advertises length six / mask 7F, and places the media
-                // counter at byte 9. Retain PadForge's compact 0x35 carrier,
-                // but use that exact microphone-capable header shape.
-                destination[3] = 6;
-                destination[4] = 0x7F;
-                for (int index = 5; index <= 8; index++)
+                // Length-six/7F is the paired 0x39 contract. Compact 0x35
+                // keeps its seventh audio-control field and media offsets;
+                // enable microphone input by setting only bit zero of the
+                // proven FE playback mask.
+                destination[3] = 7;
+                destination[4] = 0xFF;
+                for (int index = 5; index <= 9; index++)
                 {
                     destination[index] = ControllerBufferLength;
                 }
-                destination[9] = packetSequence;
-                speakerHeaderOffset = DuplexSpeakerHeaderOffset;
-                speakerDataOffset = DuplexSpeakerDataOffset;
+                destination[10] = packetSequence;
+                speakerHeaderOffset = PlaybackSpeakerHeaderOffset;
+                speakerDataOffset = PlaybackSpeakerDataOffset;
             }
             else
             {
@@ -5006,10 +5004,6 @@ namespace DS4Windows.InputDevices
         private const int GoldenHapticsDataOffset = 13;
         private const int GoldenSpeakerHeaderOffset = 77;
         private const int GoldenSpeakerDataOffset = 79;
-        private const int DuplexHapticsHeaderOffset = 10;
-        private const int DuplexHapticsDataOffset = 12;
-        private const int DuplexSpeakerHeaderOffset = 76;
-        private const int DuplexSpeakerDataOffset = 78;
         private const int SpeakerFrameLength = 200;
         // Match the duplex reserve used by the speaker-only compact builder.
         // The controller reports the resulting live reserve in BT input byte
@@ -5038,17 +5032,17 @@ namespace DS4Windows.InputDevices
             int speakerDataOffset;
             if (microphoneEnabled)
             {
-                destination[3] = 6;
-                destination[4] = 0x7F;
-                for (int index = 5; index <= 8; index++)
+                destination[3] = 7;
+                destination[4] = 0xFF;
+                for (int index = 5; index <= 9; index++)
                 {
                     destination[index] = ControllerBufferLength;
                 }
-                destination[9] = packetSequence;
-                hapticsHeaderOffset = DuplexHapticsHeaderOffset;
-                hapticsDataOffset = DuplexHapticsDataOffset;
-                speakerHeaderOffset = DuplexSpeakerHeaderOffset;
-                speakerDataOffset = DuplexSpeakerDataOffset;
+                destination[10] = packetSequence;
+                hapticsHeaderOffset = GoldenHapticsHeaderOffset;
+                hapticsDataOffset = GoldenHapticsDataOffset;
+                speakerHeaderOffset = GoldenSpeakerHeaderOffset;
+                speakerDataOffset = GoldenSpeakerDataOffset;
             }
             else
             {

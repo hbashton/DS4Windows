@@ -661,23 +661,23 @@ namespace DS4WindowsTests
 
             if (microphoneEnabled)
             {
-                Assert.AreEqual((byte)6, speaker[3]);
-                Assert.AreEqual((byte)6, combined[3]);
-                Assert.AreEqual((byte)0x7F, speaker[4]);
-                Assert.AreEqual((byte)0x7F, combined[4]);
-                for (int index = 5; index <= 8; index++)
+                Assert.AreEqual((byte)7, speaker[3]);
+                Assert.AreEqual((byte)7, combined[3]);
+                Assert.AreEqual((byte)0xFF, speaker[4]);
+                Assert.AreEqual((byte)0xFF, combined[4]);
+                for (int index = 5; index <= 9; index++)
                 {
                     Assert.AreEqual((byte)96, speaker[index]);
                     Assert.AreEqual((byte)96, combined[index]);
                 }
-                Assert.AreEqual((byte)0x42, speaker[9]);
-                Assert.AreEqual((byte)0x42, combined[9]);
-                Assert.AreEqual((byte)0x93, speaker[10]);
-                Assert.AreEqual((byte)200, speaker[11]);
-                Assert.AreEqual((byte)0x92, combined[10]);
-                Assert.AreEqual((byte)64, combined[11]);
-                Assert.AreEqual((byte)0x93, combined[76]);
-                Assert.AreEqual((byte)200, combined[77]);
+                Assert.AreEqual((byte)0x42, speaker[10]);
+                Assert.AreEqual((byte)0x42, combined[10]);
+                Assert.AreEqual((byte)0x93, speaker[11]);
+                Assert.AreEqual((byte)200, speaker[12]);
+                Assert.AreEqual((byte)0x92, combined[11]);
+                Assert.AreEqual((byte)64, combined[12]);
+                Assert.AreEqual((byte)0x93, combined[77]);
+                Assert.AreEqual((byte)200, combined[78]);
             }
             else
             {
@@ -730,17 +730,17 @@ namespace DS4WindowsTests
                 microphoneEnabled: true);
             DualSenseBluetoothPadForgeCombinedAudioReportBuilder.Build(source,
                 reportSequence: 10, packetSequence: 0x43, physical);
-            Assert.AreEqual((byte)6, physical[3]);
-            Assert.AreEqual((byte)0x7F, physical[4]);
-            for (int index = 5; index <= 8; index++)
+            Assert.AreEqual((byte)7, physical[3]);
+            Assert.AreEqual((byte)0xFF, physical[4]);
+            for (int index = 5; index <= 9; index++)
             {
                 Assert.AreEqual((byte)96, physical[index]);
             }
-            Assert.AreEqual((byte)0x43, physical[9]);
+            Assert.AreEqual((byte)0x43, physical[10]);
             CollectionAssert.AreEqual(expectedHaptics,
-                physical.Skip(12).Take(64).ToArray());
+                physical.Skip(13).Take(64).ToArray());
             CollectionAssert.AreEqual(expectedSpeaker,
-                physical.Skip(78).Take(200).ToArray());
+                physical.Skip(79).Take(200).ToArray());
         }
 
         [TestMethod]

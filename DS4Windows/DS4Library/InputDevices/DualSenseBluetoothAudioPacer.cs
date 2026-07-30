@@ -3615,8 +3615,9 @@ namespace DS4Windows.InputDevices
                 presentationTraceReportId[index] = report[0];
                 presentationTraceReportSequence[index] =
                     (byte)(report[1] >> 4);
-                presentationTracePacketSequence[index] =
-                    report[0] == 0x31 ? (byte)0 : report[10];
+                presentationTracePacketSequence[index] = report[0] == 0x31 ?
+                    (byte)0 : report[0] == 0x35 && report[3] == 6 ?
+                        report[9] : report[10];
                 presentationTraceReservoirCount[index] = (byte)Math.Clamp(
                     reservoirCount, 0, byte.MaxValue);
                 presentationTraceMediaBufferLevel[index] = (byte)Math.Clamp(
@@ -3643,26 +3644,35 @@ namespace DS4Windows.InputDevices
                 }
                 else if (report[0] == 0x35)
                 {
-                    int firstCompactType = report[11] & 0x3F;
-                    int secondCompactType = report[77] & 0x3F;
+                    bool shortenedDuplexHeader = report[3] == 6;
+                    int firstHeaderOffset = shortenedDuplexHeader ? 10 : 11;
+                    int hapticsAfterSpeakerOffset =
+                        firstHeaderOffset + 2 + 200;
+                    int speakerAfterHapticsOffset =
+                        firstHeaderOffset + 2 + 64;
+                    int firstCompactType = report[firstHeaderOffset] & 0x3F;
+                    int secondCompactType =
+                        report[speakerAfterHapticsOffset] & 0x3F;
                     bool speakerFirst =
                         (firstCompactType == 0x13 ||
                             firstCompactType == 0x16) &&
-                        report[12] == 200 &&
-                        (report[213] & 0x3F) == 0x12 &&
-                        report[214] == 64;
+                        report[firstHeaderOffset + 1] == 200 &&
+                        (report[hapticsAfterSpeakerOffset] & 0x3F) == 0x12 &&
+                        report[hapticsAfterSpeakerOffset + 1] == 64;
                     bool hapticsFirst = firstCompactType == 0x12 &&
-                        report[12] == 64 &&
+                        report[firstHeaderOffset + 1] == 64 &&
                         (secondCompactType == 0x13 ||
                             secondCompactType == 0x16) &&
-                        report[78] == 200;
+                        report[speakerAfterHapticsOffset + 1] == 200;
                     bool combinedHaptics = speakerFirst || hapticsFirst;
                     presentationTracePacketType[index] = speakerFirst ?
-                        report[11] : hapticsFirst ? report[77] : report[11];
+                        report[firstHeaderOffset] : hapticsFirst ?
+                            report[speakerAfterHapticsOffset] :
+                            report[firstHeaderOffset];
                     // Compact 0x35 has no state snapshot, but byte 4 still
-                    // carries the audio-section mask (FE playback / FF
-                    // duplex). Record it so a trace can prove the microphone
-                    // request reached the physical carrier.
+                    // carries the audio-section mask (FE playback / shortened
+                    // 7F duplex). Record it so a trace can prove which Sony
+                    // header shape reached the physical carrier.
                     presentationTraceAudioFlags0[index] = report[4];
                     presentationTraceAudioFlags1[index] = 0;
                     presentationTraceHeadphoneVolume[index] = 0;
@@ -3672,7 +3682,9 @@ namespace DS4Windows.InputDevices
                     if (combinedHaptics)
                     {
                         uint hash = 2166136261u;
-                        int hapticsOffset = speakerFirst ? 215 : 13;
+                        int hapticsOffset = speakerFirst ?
+                            hapticsAfterSpeakerOffset + 2 :
+                            firstHeaderOffset + 2;
                         for (int offset = hapticsOffset;
                             offset < hapticsOffset + 64; offset++)
                         {
@@ -4881,7 +4893,10 @@ namespace DS4Windows.InputDevices
             DualSenseBluetoothAudioPacer.ReportLength;
         private const int CrcLength = sizeof(uint);
         private const int SourceSpeakerDataOffset = 144;
-        private const int SpeakerDataOffset = 13;
+        private const int PlaybackSpeakerHeaderOffset = 11;
+        private const int PlaybackSpeakerDataOffset = 13;
+        private const int DuplexSpeakerHeaderOffset = 10;
+        private const int DuplexSpeakerDataOffset = 12;
         private const int SpeakerFrameLength = 200;
         // DS5Dongle exposes this Sony media-reserve field over the documented
         // 16..127 range. Live controller feedback (BT input byte 65) showed
@@ -4906,27 +4921,44 @@ namespace DS4Windows.InputDevices
             destination[0] = 0x35;
             destination[1] = (byte)((reportSequence & 0x0F) << 4);
             destination[2] = 0x91;
-            destination[3] = 7;
             bool microphoneEnabled = (source[4] & 0x01) != 0;
-            destination[4] = microphoneEnabled ? (byte)0xFF : (byte)0xFE;
-            // DS5Dongle's compact 0x35 carrier writes the same finite
-            // controller-side runway across all five reference length bytes. Leaving
-            // the mic-off form at 00 00 00 00 FF made ordinary HidBth service
-            // droughts audible even though every host frame was sequential.
-            // Keep the depth stable across microphone transitions so enabling
-            // capture cannot reset or shrink the speaker playout reservoir.
-            for (int index = 5; index <= 9; index++)
+            int speakerHeaderOffset;
+            int speakerDataOffset;
+            if (microphoneEnabled)
             {
-                destination[index] = ControllerBufferLength;
+                // Current DS5Dongle removes the unused eighth audio-control
+                // field, advertises length six / mask 7F, and places the media
+                // counter at byte 9. Retain PadForge's compact 0x35 carrier,
+                // but use that exact microphone-capable header shape.
+                destination[3] = 6;
+                destination[4] = 0x7F;
+                for (int index = 5; index <= 8; index++)
+                {
+                    destination[index] = ControllerBufferLength;
+                }
+                destination[9] = packetSequence;
+                speakerHeaderOffset = DuplexSpeakerHeaderOffset;
+                speakerDataOffset = DuplexSpeakerDataOffset;
             }
-            destination[10] = packetSequence;
+            else
+            {
+                destination[3] = 7;
+                destination[4] = 0xFE;
+                for (int index = 5; index <= 9; index++)
+                {
+                    destination[index] = ControllerBufferLength;
+                }
+                destination[10] = packetSequence;
+                speakerHeaderOffset = PlaybackSpeakerHeaderOffset;
+                speakerDataOffset = PlaybackSpeakerDataOffset;
+            }
             // Preserve the logical media destination. 0x93 targets the
             // controller speaker; 0x96 targets the headset/AUX DAC. Rewriting
             // both as 0x93 makes Headset Only silently fall back to speaker.
-            destination[11] = source[142];
-            destination[12] = SpeakerFrameLength;
+            destination[speakerHeaderOffset] = source[142];
+            destination[speakerHeaderOffset + 1] = SpeakerFrameLength;
             Buffer.BlockCopy(source, SourceSpeakerDataOffset, destination,
-                SpeakerDataOffset, SpeakerFrameLength);
+                speakerDataOffset, SpeakerFrameLength);
 
             uint crc = DualSenseBluetoothAudioReportPatcher.ComputeSonyCrc(
                 destination, ReportLength - CrcLength);
@@ -4974,6 +5006,10 @@ namespace DS4Windows.InputDevices
         private const int GoldenHapticsDataOffset = 13;
         private const int GoldenSpeakerHeaderOffset = 77;
         private const int GoldenSpeakerDataOffset = 79;
+        private const int DuplexHapticsHeaderOffset = 10;
+        private const int DuplexHapticsDataOffset = 12;
+        private const int DuplexSpeakerHeaderOffset = 76;
+        private const int DuplexSpeakerDataOffset = 78;
         private const int SpeakerFrameLength = 200;
         // Match the duplex reserve used by the speaker-only compact builder.
         // The controller reports the resulting live reserve in BT input byte
@@ -4995,24 +5031,47 @@ namespace DS4Windows.InputDevices
             destination[0] = 0x35;
             destination[1] = (byte)((reportSequence & 0x0F) << 4);
             destination[2] = 0x91;
-            destination[3] = 7;
             bool microphoneEnabled = (source[4] & 0x01) != 0;
-            destination[4] = microphoneEnabled ? (byte)0xFF : (byte)0xFE;
-            // Keep one reference-form controller runway for speaker-only and
-            // duplex operation. Only the microphone-enable mask changes.
-            for (int index = 5; index <= 9; index++)
+            int hapticsHeaderOffset;
+            int hapticsDataOffset;
+            int speakerHeaderOffset;
+            int speakerDataOffset;
+            if (microphoneEnabled)
             {
-                destination[index] = ControllerBufferLength;
+                destination[3] = 6;
+                destination[4] = 0x7F;
+                for (int index = 5; index <= 8; index++)
+                {
+                    destination[index] = ControllerBufferLength;
+                }
+                destination[9] = packetSequence;
+                hapticsHeaderOffset = DuplexHapticsHeaderOffset;
+                hapticsDataOffset = DuplexHapticsDataOffset;
+                speakerHeaderOffset = DuplexSpeakerHeaderOffset;
+                speakerDataOffset = DuplexSpeakerDataOffset;
             }
-            destination[10] = packetSequence;
-            destination[GoldenHapticsHeaderOffset] = 0x92;
-            destination[GoldenHapticsHeaderOffset + 1] = HapticsLength;
+            else
+            {
+                destination[3] = 7;
+                destination[4] = 0xFE;
+                for (int index = 5; index <= 9; index++)
+                {
+                    destination[index] = ControllerBufferLength;
+                }
+                destination[10] = packetSequence;
+                hapticsHeaderOffset = GoldenHapticsHeaderOffset;
+                hapticsDataOffset = GoldenHapticsDataOffset;
+                speakerHeaderOffset = GoldenSpeakerHeaderOffset;
+                speakerDataOffset = GoldenSpeakerDataOffset;
+            }
+            destination[hapticsHeaderOffset] = 0x92;
+            destination[hapticsHeaderOffset + 1] = HapticsLength;
             Buffer.BlockCopy(source, SourceHapticsOffset, destination,
-                GoldenHapticsDataOffset, HapticsLength);
-            destination[GoldenSpeakerHeaderOffset] = source[142];
-            destination[GoldenSpeakerHeaderOffset + 1] = SpeakerFrameLength;
+                hapticsDataOffset, HapticsLength);
+            destination[speakerHeaderOffset] = source[142];
+            destination[speakerHeaderOffset + 1] = SpeakerFrameLength;
             Buffer.BlockCopy(source, SourceSpeakerDataOffset, destination,
-                GoldenSpeakerDataOffset, SpeakerFrameLength);
+                speakerDataOffset, SpeakerFrameLength);
 
             uint crc = DualSenseBluetoothAudioReportPatcher.ComputeSonyCrc(
                 destination, ReportLength - CrcLength);

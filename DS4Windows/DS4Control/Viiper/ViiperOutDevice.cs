@@ -162,14 +162,15 @@ namespace DS4Windows
         private const int MaximumStreamRecoveryBackoffMilliseconds = 1000;
         private const int MicrophoneDisableRetryMilliseconds = 250;
         // Virtual speaker formats have different proven buffering contracts.
-        // DualSense's atomic 10 ms carriers feed a physical transport with its
-        // own reservoir and must stay inside an 80 ms live window. DualShock 4
-        // packets feed the historical SBC production lane, whose validated
-        // 160 ms handoff reserve must not inherit the DualSense expiry policy.
-        // A 4 KiB slot covers either virtual format without allocations.
+        // PadSense bounds DualSense latency with an eight-carrier newest-wins
+        // FIFO and never rejects a carrier based on wall-clock age. A paused
+        // consumer therefore resumes from the live eight-frame window instead
+        // of turning a scheduling pause into an artificial silence interval.
+        // DualShock 4 keeps its separate historical reserve. A 4 KiB slot
+        // covers either virtual format without allocations.
         private const int FeedbackSpeakerSlotLength = 4096;
         internal const int DualSenseFeedbackSpeakerQueueCapacity = 8;
-        internal const int DualSenseFeedbackSpeakerMaximumAgeMilliseconds = 80;
+        internal const int DualSenseFeedbackSpeakerMaximumAgeMilliseconds = 0;
         internal const int DualShock4FeedbackSpeakerQueueCapacity = 16;
         internal const int DualShock4FeedbackSpeakerMaximumAgeMilliseconds = 0;
         // Native DualSense feedback arrives at roughly 150 Hz and is valid for

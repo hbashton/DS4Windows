@@ -2240,12 +2240,11 @@ namespace DS4Windows.InputDevices
                                     inputReport[2]);
                                 inputReportErrorCount = 0;
                                 RecordBluetoothMicrophoneFrame(inputReport);
-                                DrainQueuedInputEvents();
-                                if (outputDirty)
-                                {
-                                    PrepareOutReport();
-                                    FlushPreparedOutputReport();
-                                }
+                                // PadSense treats 0x31 microphone packets as a
+                                // media-only input lane. Do not let their 100 Hz
+                                // cadence pump pending state or publish a
+                                // competing output report; continuous 0x36
+                                // media carries the latest controller state.
                                 readWaitEv.Reset();
                                 continue;
                             }

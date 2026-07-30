@@ -474,6 +474,7 @@ namespace DS4Windows
         private readonly DualSenseSpeakerProcessor speakerProcessor;
         private readonly ViiperOutDevice directSpeakerSource;
         private readonly int directSpeakerSampleRate;
+        private readonly bool directSpeakerUsesPadSenseSource;
         private readonly DualSensePcm16SourceRateConverter directPcmRateConverter;
         private readonly DualSenseSourceClockEstimator directSourceClockEstimator;
         private readonly DualSenseDirectPcmBalanceClockServo
@@ -482,6 +483,8 @@ namespace DS4Windows
             new DualSenseSpeakerFrameResampler();
         private readonly DualSenseReferenceSpeakerFrameResampler
             directSpeakerFrameResampler;
+        private readonly DualSensePadSenseSpeakerClockResampler
+            directPadSenseFrameResampler;
         private Pcm16WaveTraceWriter rawDirectPcmTrace;
         private Pcm16WaveTraceWriter preOpusPcmTrace;
         private Pcm16WaveTraceWriter postOpusPcmTrace;
@@ -605,6 +608,8 @@ namespace DS4Windows
             this.sourceEndpointKind = sourceEndpointKind;
             this.directSpeakerSource = directSpeakerSource;
             directSpeakerSampleRate = directSpeakerSource?.DirectSpeakerPcmSampleRate ?? 0;
+            directSpeakerUsesPadSenseSource =
+                directSpeakerSource?.UsesPadSenseAudioSource == true;
             if (directSpeakerSampleRate > 0)
             {
                 directPcmRateConverter = new DualSensePcm16SourceRateConverter(
@@ -613,11 +618,28 @@ namespace DS4Windows
                     directSpeakerSampleRate);
                 directPcmBalanceClockServo =
                     new DualSenseDirectPcmBalanceClockServo();
-                directSpeakerFrameResampler =
-                    new DualSenseReferenceSpeakerFrameResampler();
+                if (directSpeakerUsesPadSenseSource)
+                {
+                    directPadSenseFrameResampler =
+                        new DualSensePadSenseSpeakerClockResampler();
+                }
+                else
+                {
+                    directSpeakerFrameResampler =
+                        new DualSenseReferenceSpeakerFrameResampler();
+                }
                 TryCreateDirectPcmTraces();
             }
         }
+
+        private int InitialSourceBufferFrames =>
+            directSpeakerUsesPadSenseSource ?
+                StartupWarmupReportCount * FrameSamples :
+                (SampleRate * InitialBufferMs) / 1000;
+
+        private int StartupWarmupReportsForCurrentSource =>
+            directSpeakerUsesPadSenseSource ? 0 :
+                StartupWarmupReportCount;
 
         private void TryCreateDirectPcmTraces()
         {
@@ -733,7 +755,7 @@ namespace DS4Windows
                 // idle, so the first real frame replaces silence instead of
                 // paying the adapter's measured startup stall.
                 Volatile.Write(ref startupWarmupFramesRemaining,
-                    StartupWarmupReportCount);
+                    StartupWarmupReportsForCurrentSource);
                 StartPacerLifecycleWorker();
                 RequestPacerLifecyclePreparation(recovery: false,
                     gateSource: true);
@@ -997,7 +1019,10 @@ namespace DS4Windows
                         feedbackLength != atomicFeedback.Length ||
                         feedbackOffset < 0 || speakerPcmOffset < 0 ||
                         feedbackOffset + feedbackLength > payload.Length ||
-                        speakerPcmOffset + speakerPcmLength > payload.Length)
+                        speakerPcmOffset + speakerPcmLength > payload.Length ||
+                        (directSpeakerUsesPadSenseSource &&
+                            speakerPcmLength != FrameSamples * Channels *
+                                sizeof(short)))
                     {
                         return;
                     }
@@ -1217,7 +1242,7 @@ namespace DS4Windows
                         device.BluetoothAudioLifecycleTransitioning)
                     {
                         Volatile.Write(ref startupWarmupFramesRemaining,
-                            StartupWarmupReportCount);
+                            StartupWarmupReportsForCurrentSource);
                         // Request during cooldown without consuming the attempt
                         // latch. The lifecycle worker waits until retryAfter
                         // while the stream gate preserves source history.
@@ -1291,7 +1316,7 @@ namespace DS4Windows
         private bool TryFillOutputFrameLocked(out int consumedSourceFrames)
         {
             consumedSourceFrames = 0;
-            int initialFrames = (SampleRate * InitialBufferMs) / 1000;
+            int initialFrames = InitialSourceBufferFrames;
             if (!capturePrimed)
             {
                 if (captureRingBufferedFrames < initialFrames)
@@ -1303,7 +1328,21 @@ namespace DS4Windows
             }
 
             int requestedSourceFrames;
-            if (directSpeakerFrameResampler != null)
+            if (directPadSenseFrameResampler != null)
+            {
+                requestedSourceFrames = preparedDirectSpeakerSourceFrames;
+                if (requestedSourceFrames == 0)
+                {
+                    UpdateCaptureClockRatioLocked();
+                    directPadSenseFrameResampler.SetInputRateRatio(
+                        captureCurrentClockRatio);
+                    requestedSourceFrames =
+                        directPadSenseFrameResampler.PrepareOutputFrame();
+                    preparedDirectSpeakerSourceFrames =
+                        requestedSourceFrames;
+                }
+            }
+            else if (directSpeakerFrameResampler != null)
             {
                 requestedSourceFrames = preparedDirectSpeakerSourceFrames;
                 if (requestedSourceFrames == 0)
@@ -1337,14 +1376,19 @@ namespace DS4Windows
 
             CopyCaptureFramesToSpeakerResamplerLocked(
                 requestedSourceFrames);
-            int producedFrames = directSpeakerFrameResampler != null ?
-                directSpeakerFrameResampler.ConvertPreparedOutput(
+            int producedFrames = directPadSenseFrameResampler != null ?
+                directPadSenseFrameResampler.ConvertPreparedOutput(
                     speakerResampleInput, 0, requestedSourceFrames,
                     frame, 0) :
+                directSpeakerFrameResampler != null ?
+                    directSpeakerFrameResampler.ConvertPreparedOutput(
+                        speakerResampleInput, 0, requestedSourceFrames,
+                        frame, 0) :
                     speakerFrameResampler.ConvertPreparedOutput(
                         speakerResampleInput, 0, requestedSourceFrames,
                         frame, 0);
-            if (directSpeakerFrameResampler != null)
+            if (directPadSenseFrameResampler != null ||
+                directSpeakerFrameResampler != null)
             {
                 preparedDirectSpeakerSourceFrames = 0;
             }
@@ -1395,6 +1439,7 @@ namespace DS4Windows
         {
             speakerFrameResampler.Reset();
             directSpeakerFrameResampler?.Reset();
+            directPadSenseFrameResampler?.Reset();
             preparedDirectSpeakerSourceFrames = 0;
         }
 
@@ -1583,7 +1628,7 @@ namespace DS4Windows
 
         private void WaitForInitialCaptureBuffer()
         {
-            int minimumFrames = (SampleRate * InitialBufferMs) / 1000;
+            int minimumFrames = InitialSourceBufferFrames;
             long deadline = Stopwatch.GetTimestamp() + (Stopwatch.Frequency / 2);
             while (!stopping && Stopwatch.GetTimestamp() < deadline)
             {
@@ -1622,8 +1667,22 @@ namespace DS4Windows
         {
             if (!capturePrimed)
             {
+                return captureRingBufferedFrames >= InitialSourceBufferFrames;
+            }
+
+            if (directPadSenseFrameResampler != null)
+            {
+                if (preparedDirectSpeakerSourceFrames == 0)
+                {
+                    UpdateCaptureClockRatioLocked();
+                    directPadSenseFrameResampler.SetInputRateRatio(
+                        captureCurrentClockRatio);
+                    preparedDirectSpeakerSourceFrames =
+                        directPadSenseFrameResampler.PrepareOutputFrame();
+                }
+
                 return captureRingBufferedFrames >=
-                    (SampleRate * InitialBufferMs) / 1000;
+                    preparedDirectSpeakerSourceFrames;
             }
 
             if (directSpeakerFrameResampler != null)
@@ -2040,7 +2099,7 @@ namespace DS4Windows
                         // source gate below keeps both the ring and any already
                         // encoded content intact throughout ownership recovery.
                         Volatile.Write(ref startupWarmupFramesRemaining,
-                            StartupWarmupReportCount);
+                            StartupWarmupReportsForCurrentSource);
                         RequestPacerLifecyclePreparation(recovery: true,
                             gateSource: true);
                     }
@@ -2168,7 +2227,7 @@ namespace DS4Windows
                             device.BluetoothAudioLifecycleTransitioning)
                         {
                             Volatile.Write(ref startupWarmupFramesRemaining,
-                                StartupWarmupReportCount);
+                                StartupWarmupReportsForCurrentSource);
                             RequestPacerLifecyclePreparation(recovery: true,
                                 gateSource: true);
                         }
@@ -2194,7 +2253,7 @@ namespace DS4Windows
                             device.BluetoothAudioLifecycleTransitioning)
                         {
                             Volatile.Write(ref startupWarmupFramesRemaining,
-                                StartupWarmupReportCount);
+                                StartupWarmupReportsForCurrentSource);
                             RequestPacerLifecyclePreparation(recovery: true,
                                 gateSource: true);
                         }
@@ -2321,7 +2380,7 @@ namespace DS4Windows
                                 {
                                     Volatile.Write(
                                         ref startupWarmupFramesRemaining,
-                                        StartupWarmupReportCount);
+                                        StartupWarmupReportsForCurrentSource);
                                     RequestPacerLifecyclePreparation(
                                         recovery: true, gateSource: true);
                                 }

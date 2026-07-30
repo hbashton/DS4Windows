@@ -291,6 +291,75 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void NativeMicrophoneTransitionsMatchPadSenseWireOrdering()
+        {
+            Assert.AreEqual(0,
+                DualSenseBluetoothAudioPacer.
+                    GetNativeMicrophoneTransitionReportsAhead(
+                        committedMicrophoneEnabled: false,
+                        requestedMicrophoneEnabled: true),
+                "Enable must send 0x32 before its first duplex 0x36.");
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.
+                    GetNativeMicrophonePresentationMode(
+                        committedMicrophoneEnabled: false,
+                        requestedMicrophoneEnabled: true));
+
+            Assert.AreEqual(2,
+                DualSenseBluetoothAudioPacer.
+                    GetNativeMicrophoneTransitionReportsAhead(
+                        committedMicrophoneEnabled: true,
+                        requestedMicrophoneEnabled: false),
+                "Disable must send two speaker-only 0x36 reports before 0x32.");
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.
+                    GetNativeMicrophonePresentationMode(
+                        committedMicrophoneEnabled: true,
+                        requestedMicrophoneEnabled: false));
+        }
+
+        [TestMethod]
+        public void NativeMicrophoneDisableConsumesSharedMediaCounterInOrder()
+        {
+            var sequence = new DualSenseBluetoothPhysicalOutputSequence();
+            byte[] lastDuplex = CreateSpeakerReport(
+                0x00, 0x00, 0x50, 0x5B);
+            lastDuplex[4] = 0xFF;
+            byte[] firstSpeakerOnly = CreateSpeakerReport(
+                0x00, 0x00, 0x50, 0x5C);
+            byte[] secondSpeakerOnly = CreateSpeakerReport(
+                0x00, 0x00, 0x50, 0x5D);
+            byte[] microphoneStatus = new byte[
+                DualSenseBluetoothPhysicalOutputSequence.
+                    MicrophoneStatusReportLength];
+
+            sequence.PrepareFullDuplexAudio(lastDuplex);
+            Assert.AreEqual((byte)0x5B, lastDuplex[10]);
+            sequence.Commit(audio: true);
+            sequence.PrepareNativeAudio(firstSpeakerOnly);
+            Assert.AreEqual((byte)0x5C, firstSpeakerOnly[10]);
+            sequence.Commit(audio: true);
+            sequence.PrepareNativeAudio(secondSpeakerOnly);
+            Assert.AreEqual((byte)0x5D, secondSpeakerOnly[10]);
+            sequence.Commit(audio: true);
+            byte nextReportSequence = sequence.NextReportSequence;
+            sequence.PrepareMicrophoneStatus(enabled: false, secondSpeakerOnly,
+                microphoneStatus);
+
+            Assert.AreEqual((byte)0x5E, microphoneStatus[10],
+                "0x32 overtook one of the two speaker-only media intervals.");
+            Assert.AreEqual((byte)0xFE, microphoneStatus[4]);
+            sequence.CommitMicrophoneStatus();
+            Assert.AreEqual(nextReportSequence, sequence.NextReportSequence,
+                "The independent 0x32 sequence disturbed 0x36 ordering.");
+
+            byte[] nextSpeakerOnly = CreateSpeakerReport(
+                0x00, 0x00, 0x50, 0x00);
+            sequence.PrepareNativeAudio(nextSpeakerOnly);
+            Assert.AreEqual((byte)0x5F, nextSpeakerOnly[10]);
+        }
+
+        [TestMethod]
         public void RejectedNativeMicrophoneTransitionIsExactlyRetriable()
         {
             var sequence = new DualSenseBluetoothPhysicalOutputSequence();

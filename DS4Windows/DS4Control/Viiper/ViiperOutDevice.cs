@@ -154,6 +154,7 @@ namespace DS4Windows
         private const byte ViiperStreamFrameVersionV2 = 0x02;
         private const byte ViiperStreamFrameVersionV3 = 0x03;
         private const byte ViiperStreamFrameVersionV4 = 0x04;
+        private const byte ViiperStreamFrameVersionV5 = 0x05;
         private const byte FeedbackSpeakerKindPcm = 0;
         private const byte FeedbackSpeakerKindAtomicAudioHaptics = 1;
         private const int AtomicAudioHapticsFeedbackLengthPrefix = 2;
@@ -268,6 +269,7 @@ namespace DS4Windows
         private bool activeStreamSupportsMicrophone;
         private bool activeStreamSupportsDirectSpeaker;
         private bool activeStreamSupportsAtomicAudioHaptics;
+        private bool activeStreamUsesPadSenseAudioSource;
         private bool activeStreamUsesAudioOnlyDescriptor;
         private byte activeStreamFrameVersion;
         private int microphoneVolume = 128;
@@ -537,6 +539,15 @@ namespace DS4Windows
         internal bool SupportsAtomicAudioHaptics =>
             connected && activeStreamSupportsAtomicAudioHaptics;
 
+        /// <summary>
+        /// V5 carries the PadSense-style continuous 48-to-45 kHz source: each
+        /// atomic generation already contains exactly 480 stereo frames. The
+        /// physical bridge must preserve that source clock instead of applying
+        /// the legacy fixed 512-to-480 conversion a second time.
+        /// </summary>
+        internal bool UsesPadSenseAudioSource =>
+            connected && activeStreamUsesPadSenseAudioSource;
+
         internal void ApplyAtomicAudioHapticsFeedback(byte[] feedback,
             int feedbackLength, int expectedDeviceIndex)
         {
@@ -702,6 +713,7 @@ namespace DS4Windows
             activeStreamSupportsMicrophone = false;
             activeStreamSupportsDirectSpeaker = false;
             activeStreamSupportsAtomicAudioHaptics = false;
+            activeStreamUsesPadSenseAudioSource = false;
             activeStreamUsesAudioOnlyDescriptor = false;
             activeStreamFrameVersion = 0;
             Volatile.Write(ref virtualMicrophoneInterfaceActive, 0);
@@ -711,6 +723,27 @@ namespace DS4Windows
             {
                 if (audioOnlySidecar)
                 {
+                    try
+                    {
+                        ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
+                            "dualsenseaudioonlyduplexv5");
+                        activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
+                        activeStreamUsesFramedProtocol = true;
+                        activeStreamSupportsMicrophone = true;
+                        activeStreamSupportsDirectSpeaker = true;
+                        activeStreamSupportsAtomicAudioHaptics = true;
+                        activeStreamUsesPadSenseAudioSource = true;
+                        activeStreamUsesAudioOnlyDescriptor = true;
+                        activeStreamFrameVersion = ViiperStreamFrameVersionV5;
+                        return stream;
+                    }
+                    catch (IOException ex)
+                    {
+                        AppLogger.LogToGui(
+                            $"VIIPER DualSense PadSense audio source unavailable, trying V4: {ex.Message}",
+                            false);
+                    }
+
                     try
                     {
                         ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
@@ -752,6 +785,26 @@ namespace DS4Windows
                             "The installed VIIPER build does not support the DualSense audio-only interface. Update VIIPER from Settings before using PlayStation audio with an Xbox or Switch output.",
                             ex);
                     }
+                }
+
+                try
+                {
+                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
+                        "dualsensecombinedaudioduplexv5");
+                    activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
+                    activeStreamUsesFramedProtocol = true;
+                    activeStreamSupportsMicrophone = true;
+                    activeStreamSupportsDirectSpeaker = true;
+                    activeStreamSupportsAtomicAudioHaptics = true;
+                    activeStreamUsesPadSenseAudioSource = true;
+                    activeStreamFrameVersion = ViiperStreamFrameVersionV5;
+                    return stream;
+                }
+                catch (IOException ex)
+                {
+                    AppLogger.LogToGui(
+                        $"VIIPER DualSense PadSense audio source unavailable, trying V4: {ex.Message}",
+                        false);
                 }
 
                 try
@@ -831,6 +884,26 @@ namespace DS4Windows
 
             if (viiperType == ViiperVirtualDeviceType.DualSenseEdge)
             {
+                try
+                {
+                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
+                        "dualsenseedgecombinedaudioduplexv5");
+                    activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
+                    activeStreamUsesFramedProtocol = true;
+                    activeStreamSupportsMicrophone = true;
+                    activeStreamSupportsDirectSpeaker = true;
+                    activeStreamSupportsAtomicAudioHaptics = true;
+                    activeStreamUsesPadSenseAudioSource = true;
+                    activeStreamFrameVersion = ViiperStreamFrameVersionV5;
+                    return stream;
+                }
+                catch (IOException ex)
+                {
+                    AppLogger.LogToGui(
+                        $"VIIPER DualSense Edge PadSense audio source unavailable, trying V4: {ex.Message}",
+                        false);
+                }
+
                 try
                 {
                     ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
@@ -5421,6 +5494,7 @@ namespace DS4Windows
         private const byte FrameVersionV2 = 0x02;
         private const byte FrameVersionV3 = 0x03;
         private const byte FrameVersionV4 = 0x04;
+        private const byte FrameVersionV5 = 0x05;
 
         public ViiperDeviceStream(TcpClient tcp, Stream stream,
             ViiperVirtualDeviceLifetime deviceLifetime)
@@ -5477,7 +5551,7 @@ namespace DS4Windows
                 throw new ArgumentOutOfRangeException(nameof(data));
             }
             if (version != FrameVersionV2 && version != FrameVersionV3 &&
-                version != FrameVersionV4)
+                version != FrameVersionV4 && version != FrameVersionV5)
             {
                 throw new ArgumentOutOfRangeException(nameof(version));
             }

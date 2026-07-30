@@ -136,6 +136,23 @@ namespace DS4Windows.InputDevices
             }
         }
 
+        internal static int GetNativeMicrophoneTransitionReportsAhead(
+            bool committedMicrophoneEnabled, bool requestedMicrophoneEnabled)
+        {
+            // PadSense disables the microphone/audio-clock lane only after two
+            // speaker-only media generations. Enabling is the inverse: 0x32
+            // precedes the first duplex media generation.
+            return committedMicrophoneEnabled &&
+                !requestedMicrophoneEnabled ? 2 : 0;
+        }
+
+        internal static bool GetNativeMicrophonePresentationMode(
+            bool committedMicrophoneEnabled, bool requestedMicrophoneEnabled)
+        {
+            return requestedMicrophoneEnabled ?
+                committedMicrophoneEnabled : false;
+        }
+
         internal static int CompletePairedReportBoundary(
             int leadingSpeakerReports)
         {
@@ -2007,6 +2024,7 @@ namespace DS4Windows.InputDevices
             private int pendingMicrophoneStatus = -1;
             private int microphoneStatusReportsAhead;
             private bool committedMicrophoneEnabled;
+            private bool presentationMicrophoneEnabled;
             private bool pendingControllerStateAvailable;
             private int controllerStateReportsAhead;
             private long lastControllerStateSubmissionQpc;
@@ -2357,7 +2375,8 @@ namespace DS4Windows.InputDevices
                         }
                     }
 
-                    if (pendingMicrophoneStatus >= 0)
+                    if (pendingMicrophoneStatus >= 0 &&
+                        !useNativeAudioTransport)
                     {
                         microphoneStatusReportsAhead = 0;
                     }
@@ -2445,13 +2464,33 @@ namespace DS4Windows.InputDevices
                 lock (stateLock)
                 {
                     int status = payload[0];
-                    if (pendingMicrophoneStatus == status ||
-                        (pendingMicrophoneStatus < 0 &&
-                            committedMicrophoneEnabled == (status != 0)))
+                    bool microphoneEnabled = status != 0;
+                    if (pendingMicrophoneStatus == status)
                     {
                         // Coalesce an identical request without extending the
                         // accepted-report boundary or replaying the ordered
                         // state/template/native-status transition.
+                        return;
+                    }
+
+                    if (pendingMicrophoneStatus >= 0 &&
+                        committedMicrophoneEnabled == microphoneEnabled)
+                    {
+                        // The requested state returned to the last accepted
+                        // 0x32 before the opposite pending transition reached
+                        // the wire. Cancel it without emitting a redundant
+                        // mode command or leaving presentation headers staged
+                        // in the abandoned mode.
+                        pendingMicrophoneStatus = -1;
+                        microphoneStatusReportsAhead = 0;
+                        presentationMicrophoneEnabled =
+                            committedMicrophoneEnabled;
+                        return;
+                    }
+
+                    if (pendingMicrophoneStatus < 0 &&
+                        committedMicrophoneEnabled == microphoneEnabled)
+                    {
                         return;
                     }
 
@@ -2466,10 +2505,29 @@ namespace DS4Windows.InputDevices
                     // presentation, so no stale native header has to remain
                     // ahead of this transition. Compact/paired formats retain
                     // their complete physical-carrier boundary.
-                    int reportsAhead = useNativeAudioTransport ? 0 :
-                        CompletePairedReportBoundary(
+                    int reportsAhead;
+                    if (useNativeAudioTransport)
+                    {
+                        // The observed PadSense wire contract enables capture
+                        // with 0x32 FF before the first 0x36 FF, but disables it
+                        // with two 0x36 FE media generations before 0x32 FE.
+                        // Stage only the presentation header here; the accepted
+                        // native status remains the committed controller mode.
+                        presentationMicrophoneEnabled =
+                            GetNativeMicrophonePresentationMode(
+                                committedMicrophoneEnabled,
+                                microphoneEnabled);
+                        reportsAhead =
+                            GetNativeMicrophoneTransitionReportsAhead(
+                                committedMicrophoneEnabled,
+                                microphoneEnabled);
+                    }
+                    else
+                    {
+                        reportsAhead = CompletePairedReportBoundary(
                             reservoir.CountLeading(
                                 IsQueuedSpeakerReport));
+                    }
                     if (pendingControllerStateAvailable)
                     {
                         controllerStateReportsAhead = Math.Max(
@@ -2739,6 +2797,8 @@ namespace DS4Windows.InputDevices
                                         {
                                             committedMicrophoneEnabled =
                                                 status != 0;
+                                            presentationMicrophoneEnabled =
+                                                committedMicrophoneEnabled;
                                             // A mode transition can stop the
                                             // controller's 100 Hz input clock.
                                             // Require fresh post-transition
@@ -2766,11 +2826,15 @@ namespace DS4Windows.InputDevices
                                 {
                                     lock (stateLock)
                                     {
-                                        if (pendingMicrophoneStatus >= 0)
+                                        if (pendingMicrophoneStatus >= 0 &&
+                                            !useNativeAudioTransport)
                                         {
-                                            // Keep 0x32 ordered after state,
-                                            // but never let a busy control slot
-                                            // starve the continuous media lane.
+                                            // Compact and paired fallbacks may
+                                            // let one media carrier pass before
+                                            // retrying. PadSense-native mode
+                                            // keeps the exact 0x32 at the strict
+                                            // FIFO head until the oldest writer
+                                            // slot accepts it.
                                             microphoneStatusReportsAhead =
                                                 Math.Max(
                                                     microphoneStatusReportsAhead,
@@ -3047,7 +3111,7 @@ namespace DS4Windows.InputDevices
                                     // header from the last accepted native 0x32
                                     // transition rather than stale producer state.
                                     ApplyCommittedMicrophoneMode(item.Report,
-                                        committedMicrophoneEnabled);
+                                        presentationMicrophoneEnabled);
                                 }
 
                                 bool transportFault;
@@ -3174,13 +3238,16 @@ namespace DS4Windows.InputDevices
                             }
 
                             if (!retainedForRetry &&
+                                disposition ==
+                                    AcknowledgementDisposition.Presented &&
+                                !controlOnly &&
                                 pendingMicrophoneStatus >= 0 &&
                                 microphoneStatusReportsAhead > 0)
                             {
-                                // Spend the ordering boundary only when these
-                                // logical generations actually leave the FIFO.
-                                // A saturated 0x39 retry must not make 0x32
-                                // overtake the same restored audio pair.
+                                // Spend the boundary only for speaker media
+                                // that the physical writer accepted. Control,
+                                // stale, rejected, and saturated/dropped items
+                                // do not exist on the controller's wire FIFO.
                                 microphoneStatusReportsAhead = Math.Max(0,
                                     microphoneStatusReportsAhead -
                                     (pairedItem == null ? 1 : 2));

@@ -9,6 +9,88 @@ namespace DS4Windows.Tests
     public class DualSenseSpeakerFrameResamplerTests
     {
         [TestMethod]
+        public void PadSenseSourceDoesNotReceiveASecond512To480Conversion()
+        {
+            const int packetCount = 4096;
+            var converter = new DualSensePadSenseSpeakerClockResampler();
+            float[] source = new float[
+                DualSensePadSenseSpeakerClockResampler.MaximumInputFrames * 2];
+            float[] output = new float[
+                DualSensePadSenseSpeakerClockResampler.OutputFrames * 2];
+            long consumed = 0;
+            for (int packet = 0; packet < packetCount; packet++)
+            {
+                int requested = converter.PrepareOutputFrame();
+                Assert.IsTrue(requested > 0 && requested <=
+                    DualSensePadSenseSpeakerClockResampler.MaximumInputFrames);
+                FillStereoFloat(source, requested, consumed,
+                    DualSensePadSenseSpeakerClockResampler.NominalInputRate,
+                    523.0, 997.0, 0.65);
+                Assert.AreEqual(
+                    DualSensePadSenseSpeakerClockResampler.OutputFrames,
+                    converter.ConvertPreparedOutput(source, 0, requested,
+                        output, 0));
+                consumed += requested;
+            }
+
+            long nominal = packetCount *
+                DualSensePadSenseSpeakerClockResampler.OutputFrames;
+            Assert.IsTrue(Math.Abs(consumed - nominal) <=
+                DualSensePadSenseSpeakerClockResampler.MaximumInputFrames,
+                $"PadSense source consumed {consumed} frames instead of " +
+                $"approximately {nominal}; the fixed 16:15 conversion was " +
+                "applied twice.");
+        }
+
+        [TestMethod]
+        public void PadSenseSourceClockCorrectionIsContinuousAndBounded()
+        {
+            const int packetCount = 10000;
+            var converter = new DualSensePadSenseSpeakerClockResampler();
+            float[] source = new float[
+                DualSensePadSenseSpeakerClockResampler.MaximumInputFrames * 2];
+            float[] output = new float[
+                DualSensePadSenseSpeakerClockResampler.OutputFrames * 2];
+            long sourceFrame = 0;
+            double expected = 0.0;
+            float previous = 0.0f;
+            bool hasPrevious = false;
+            float maximumStep = 0.0f;
+            for (int packet = 0; packet < packetCount; packet++)
+            {
+                double ratio = 1.0 + Math.Sin(packet * 0.003) * 0.001;
+                expected += ratio *
+                    DualSensePadSenseSpeakerClockResampler.OutputFrames;
+                converter.SetInputRateRatio(ratio);
+                int requested = converter.PrepareOutputFrame();
+                FillStereoFloat(source, requested, sourceFrame,
+                    DualSensePadSenseSpeakerClockResampler.NominalInputRate,
+                    523.0, 997.0, 0.65);
+                converter.ConvertPreparedOutput(source, 0, requested,
+                    output, 0);
+                for (int frame = 0;
+                    frame < DualSensePadSenseSpeakerClockResampler.OutputFrames;
+                    frame++)
+                {
+                    float current = output[frame * 2];
+                    if (hasPrevious)
+                    {
+                        maximumStep = Math.Max(maximumStep,
+                            Math.Abs(current - previous));
+                    }
+                    previous = current;
+                    hasPrevious = true;
+                }
+                sourceFrame += requested;
+            }
+
+            Assert.IsTrue(Math.Abs(sourceFrame - expected) < 6.0);
+            Assert.IsTrue(maximumStep < 0.12f,
+                $"PadSense clock correction introduced a waveform jump of " +
+                $"{maximumStep:F6}.");
+        }
+
+        [TestMethod]
         public void ReferenceRouteAlwaysFeeds512AndEmits480WithClockCorrection()
         {
             const int packetCount = 10000;

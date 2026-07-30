@@ -166,6 +166,139 @@ namespace DS4Windows
     }
 
     /// <summary>
+    /// Applies only the small physical-controller clock correction to the
+    /// PadSense-compatible source produced by VIIPER V5. That source has
+    /// already undergone the continuous 48-to-45 kHz conversion and arrives
+    /// as 480-frame media generations, so the legacy fixed 512-to-480 stage
+    /// must not run again.
+    /// </summary>
+    internal sealed class DualSensePadSenseSpeakerClockResampler
+    {
+        internal const int Channels = 2;
+        internal const int OutputFrames = 480;
+        internal const double NominalInputRate = 48000.0;
+        internal const double OutputRate = 48000.0;
+        internal const double MinimumInputRateRatio = 0.99;
+        internal const double MaximumInputRateRatio = 1.01;
+        internal const int MaximumInputFrames = 490;
+
+        private readonly WdlResampler resampler;
+        private double inputRateRatio = 1.0;
+        private float[] preparedInputBuffer;
+        private int preparedInputBufferOffset;
+        private int preparedInputFrames;
+        private int preparedOutputFrames;
+
+        internal DualSensePadSenseSpeakerClockResampler()
+        {
+            resampler = new WdlResampler();
+            resampler.SetMode(true, 0, false);
+            resampler.SetFeedMode(false);
+            resampler.SetRates(NominalInputRate, OutputRate);
+        }
+
+        internal double InputRateRatio => inputRateRatio;
+
+        internal void SetInputRateRatio(double ratio)
+        {
+            if (!double.IsFinite(ratio) ||
+                ratio < MinimumInputRateRatio ||
+                ratio > MaximumInputRateRatio)
+            {
+                throw new ArgumentOutOfRangeException(nameof(ratio));
+            }
+
+            if (ratio == inputRateRatio)
+            {
+                return;
+            }
+
+            inputRateRatio = ratio;
+            resampler.SetRates(NominalInputRate * ratio, OutputRate);
+        }
+
+        internal int PrepareOutputFrame(int outputFrames = OutputFrames)
+        {
+            if (outputFrames <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(outputFrames));
+            }
+
+            int requested = resampler.ResamplePrepare(outputFrames, Channels,
+                out preparedInputBuffer, out preparedInputBufferOffset);
+            if (requested < 0 || requested > MaximumInputFrames)
+            {
+                throw new InvalidOperationException(
+                    $"WDL requested {requested} PadSense source frames for " +
+                    $"{outputFrames} DualSense output frames.");
+            }
+
+            preparedInputFrames = requested;
+            preparedOutputFrames = outputFrames;
+            return requested;
+        }
+
+        internal int ConvertPreparedOutput(float[] source,
+            int sourceSampleOffset, int sourceFrames, float[] destination,
+            int destinationSampleOffset)
+        {
+            if (preparedInputBuffer == null ||
+                sourceFrames != preparedInputFrames ||
+                preparedOutputFrames <= 0)
+            {
+                throw new InvalidOperationException(
+                    "PrepareOutputFrame must immediately precede conversion " +
+                    "with its exact source-frame request.");
+            }
+
+            ValidateFloatRange(source, sourceSampleOffset, sourceFrames,
+                nameof(source));
+            ValidateFloatRange(destination, destinationSampleOffset,
+                preparedOutputFrames, nameof(destination));
+
+            Array.Copy(source, sourceSampleOffset, preparedInputBuffer,
+                preparedInputBufferOffset, sourceFrames * Channels);
+            int expectedOutputFrames = preparedOutputFrames;
+            int produced = resampler.ResampleOut(destination,
+                destinationSampleOffset, sourceFrames,
+                expectedOutputFrames, Channels);
+            preparedInputBuffer = null;
+            preparedInputBufferOffset = 0;
+            preparedInputFrames = 0;
+            preparedOutputFrames = 0;
+            if (produced != expectedOutputFrames)
+            {
+                throw new InvalidOperationException(
+                    $"WDL produced {produced} PadSense frames instead of " +
+                    $"the prepared {expectedOutputFrames} frames.");
+            }
+
+            return produced;
+        }
+
+        internal void Reset()
+        {
+            resampler.Reset();
+            preparedInputBuffer = null;
+            preparedInputBufferOffset = 0;
+            preparedInputFrames = 0;
+            preparedOutputFrames = 0;
+        }
+
+        private static void ValidateFloatRange(float[] buffer,
+            int sampleOffset, int frames, string parameterName)
+        {
+            ArgumentNullException.ThrowIfNull(buffer, parameterName);
+            if (sampleOffset < 0 || frames < 0 ||
+                sampleOffset > buffer.Length ||
+                frames > (buffer.Length - sampleOffset) / Channels)
+            {
+                throw new ArgumentOutOfRangeException(parameterName);
+            }
+        }
+    }
+
+    /// <summary>
     /// DualSense direct-PCM route matching DS5 Bridge's signal stages while
     /// retaining DS4Windows' long-window source/controller clock correction.
     ///

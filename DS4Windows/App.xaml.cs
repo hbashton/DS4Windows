@@ -70,7 +70,6 @@ namespace DS4WinWPF
         private bool exitComThread = false;
         private const string SingleAppComEventName = "{a52b5b20-d9ee-4f32-8518-307fa14aa0c6}";
         private EventWaitHandle threadComEvent = null;
-        private Timer collectTimer;
         private static LoggerHolder logHolder;
 
         private MemoryMappedFile ipcClassNameMMF = null; // MemoryMappedFile for inter-process communication used to hold className of DS4Form window
@@ -608,8 +607,6 @@ namespace DS4WinWPF
                 DS4Windows.Program.rootHub = rootHub;
                 requestClient = new HttpClient();
                 requestClient.DefaultRequestHeaders.Add("User-Agent", "DS4Windows");
-                collectTimer = new Timer(GarbageTask, null, 30000, 30000);
-
             });
             controlThread.Priority = ThreadPriority.Normal;
             controlThread.IsBackground = true;
@@ -625,18 +622,12 @@ namespace DS4WinWPF
                 DS4Windows.Program.rootHub = rootHub;
                 requestClient = new HttpClient();
                 requestClient.DefaultRequestHeaders.Add("User-Agent", "DS4Windows");
-                collectTimer = new Timer(GarbageTask, null, 30000, 30000);
             });
             controlThread.Priority = ThreadPriority.Normal;
             controlThread.IsBackground = true;
             controlThread.Start();
             while (controlThread.IsAlive)
                 Thread.SpinWait(500);
-        }
-
-        private void GarbageTask(object state)
-        {
-            GC.Collect(0, GCCollectionMode.Forced, false);
         }
 
         private void CreateTempWorkerThread()

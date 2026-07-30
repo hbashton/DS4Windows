@@ -408,6 +408,63 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void PadSenseReturningCallbackResetsOnlyAfterHardGenerationGap()
+        {
+            const long timestampFrequency = 10_000_000;
+            const long previousCallback = timestampFrequency;
+            long transientReturn = previousCallback +
+                timestampFrequency *
+                DualSenseBluetoothSpeakerPassthrough.
+                    TransientCaptureShortageLeaseMs / 1000;
+            long lastContinuousReturn = previousCallback +
+                timestampFrequency *
+                DualSenseBluetoothSpeakerPassthrough.
+                    PadSenseHardSourceDiscontinuityMs / 1000 - 1;
+            long hardGenerationReturn = previousCallback +
+                timestampFrequency *
+                DualSenseBluetoothSpeakerPassthrough.
+                    PadSenseHardSourceDiscontinuityMs / 1000;
+
+            Assert.IsTrue(
+                DualSenseBluetoothSpeakerPassthrough.
+                    PadSenseHardSourceDiscontinuityMs >
+                DualSenseBluetoothSpeakerPassthrough.
+                    TransientCaptureShortageLeaseMs,
+                "The hard generation boundary must not reinterpret a normal " +
+                "100 ms source shortage as a reset.");
+            Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
+                ShouldResetPadSenseSourceBeforeAppendingCallback(
+                    usesPadSenseSource: true, previousCallback,
+                    transientReturn, timestampFrequency),
+                "A 100 ms V5 callback drought must preserve the existing " +
+                "ring and fractional resampler history.");
+            Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
+                ShouldResetPadSenseSourceBeforeAppendingCallback(
+                    usesPadSenseSource: true, previousCallback,
+                    lastContinuousReturn, timestampFrequency),
+                "V5 state must remain continuous until the hard generation " +
+                "boundary is reached.");
+            Assert.IsTrue(DualSenseBluetoothSpeakerPassthrough.
+                ShouldResetPadSenseSourceBeforeAppendingCallback(
+                    usesPadSenseSource: true, previousCallback,
+                    hardGenerationReturn, timestampFrequency),
+                "The first callback after a hard V5 gap must clear stale " +
+                "source state before its new PCM is appended.");
+            Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
+                ShouldResetPadSenseSourceBeforeAppendingCallback(
+                    usesPadSenseSource: false, previousCallback,
+                    hardGenerationReturn, timestampFrequency),
+                "Legacy and non-V5 routes must not inherit the new reset " +
+                "policy.");
+            Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
+                ShouldResetPadSenseSourceBeforeAppendingCallback(
+                    usesPadSenseSource: true, previousCallbackTimestamp: 0,
+                    callbackTimestamp: hardGenerationReturn,
+                    timestampFrequency),
+                "The first callback has no prior generation to discard.");
+        }
+
+        [TestMethod]
         public void EightWarmupPacketsAreValidFixedSizeCbrOpus()
         {
             var encoder = DualSenseBluetoothSpeakerPassthrough.

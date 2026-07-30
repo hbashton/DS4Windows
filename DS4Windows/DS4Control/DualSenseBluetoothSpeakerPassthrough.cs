@@ -453,6 +453,12 @@ namespace DS4Windows
         // PadSense waits 100 ms after the last produced PCM before replacing
         // a temporarily incomplete source block with timed silence.
         internal const int TransientCaptureShortageLeaseMs = 100;
+        // Reuse the existing audible-generation boundary for V5 callbacks. A
+        // scheduler pause just beyond the 100 ms shortage lease must preserve
+        // the live resampler, while a producer returning after this boundary
+        // starts a new source generation.
+        internal const int PadSenseHardSourceDiscontinuityMs =
+            IdleKeepAliveMs;
         private const int PacerPrewarmRetryMs = 2000;
         private const double BluetoothSpeakerCadenceMs = 10.0 + (2.0 / 3.0);
         // The render and Bluetooth clocks are independent. Correct their
@@ -1085,6 +1091,30 @@ namespace DS4Windows
                     callbackEntered - previousCallback);
             }
 
+            if (ShouldResetPadSenseSourceBeforeAppendingCallback(
+                    directSpeakerUsesPadSenseSource, previousCallback,
+                    callbackEntered, Stopwatch.Frequency))
+            {
+                // This is the first PCM callback of a genuinely new V5 source
+                // generation. Discard the old ring tail and both fractional
+                // resampler stages before observing or appending new samples.
+                // The physical idle carrier remains armed.
+                lock (syncRoot)
+                {
+                    ResetCapturePipelineAtSegmentBoundaryLocked();
+                }
+
+                if (audioSegmentActive)
+                {
+                    audioSegmentActive = false;
+                    Interlocked.Increment(ref audioSegmentStops);
+                }
+
+                Interlocked.Exchange(ref lastRawAudibleTimestamp, 0);
+                Interlocked.Exchange(ref lastSourcePcmTimestamp, 0);
+                Volatile.Write(ref pacerPrewarmAttemptedForSegment, 0);
+            }
+
             Interlocked.Increment(ref directPcmCallbacks);
             long totalInputFrames = Interlocked.Add(ref directPcmInputFrames,
                 alignedLength / (sizeof(short) * Channels));
@@ -1373,9 +1403,9 @@ namespace DS4Windows
             }
             if (captureRingBufferedFrames < requestedSourceFrames)
             {
-                // A continuous VIIPER stream arrives in 320-frame source
+                // A V5 VIIPER stream arrives in exact 480-frame source
                 // callbacks while this lane consumes about 512 frames per
-                // radio tick. Seeing the ring briefly below WDL's exact
+                // physical report. Seeing the ring briefly below the exact
                 // fractional request is normal callback phase, not a new
                 // audio generation. Preserve all source and resampler state.
                 return false;
@@ -1520,11 +1550,12 @@ namespace DS4Windows
             int targetFrames = (SampleRate * TargetBufferMs) / 1000;
             if (directSpeakerSource != null)
             {
-                // VIIPER publishes exact 512-frame source blocks, but Windows
-                // may batch those callbacks by tens of milliseconds before the
-                // passthrough sees them. Instantaneous occupancy is therefore
-                // a callback sawtooth, not a clock signal. Follow the
-                // controller's long-window clock plus the independent exact
+                // VIIPER V5 publishes untouched 48 kHz PCM in exact 480-frame
+                // callbacks; its independent rear-haptics assembler still uses
+                // 512-frame blocks. Windows may batch speaker callbacks by tens
+                // of milliseconds, so instantaneous occupancy is a callback
+                // sawtooth, not a clock signal. Follow the controller's
+                // long-window clock plus the independent exact
                 // produced-minus-consumed balance trim.
                 double directControllerLockedRatio =
                     CalculateControllerLockedInputRateRatio(
@@ -1777,6 +1808,24 @@ namespace DS4Windows
             return usesPadSenseSource && !sourceRecentlyActive;
         }
 
+        internal static bool ShouldResetPadSenseSourceBeforeAppendingCallback(
+            bool usesPadSenseSource, long previousCallbackTimestamp,
+            long callbackTimestamp, long timestampFrequency)
+        {
+            if (!usesPadSenseSource || previousCallbackTimestamp <= 0 ||
+                callbackTimestamp < previousCallbackTimestamp ||
+                timestampFrequency <= 0)
+            {
+                return false;
+            }
+
+            double callbackGapMilliseconds =
+                (callbackTimestamp - previousCallbackTimestamp) * 1000.0 /
+                timestampFrequency;
+            return callbackGapMilliseconds >=
+                PadSenseHardSourceDiscontinuityMs;
+        }
+
         // PadSense transfers its eight complete source blocks into the strict
         // OVERLAPPED FIFO as one startup burst. HidBth still owns their radio
         // cadence; spacing the WriteFile admissions here prevents the
@@ -1923,8 +1972,9 @@ namespace DS4Windows
                 // while the same endpoint generation remains active. Emit a
                 // paced idle carrier, but preserve the ring, fractional
                 // resampler history, prime, and segment state so the next
-                // callback resumes immediately. Only an explicit lifecycle
-                // transition may reset those fields.
+                // callback resumes immediately. An explicit lifecycle change,
+                // or the first callback after the conservative hard-gap
+                // boundary, resets those fields before new PCM is appended.
                 return ShouldEmitPadSenseIdleCarrier(
                     usesPadSenseSource: true,
                     sourceRecentlyActive: false);

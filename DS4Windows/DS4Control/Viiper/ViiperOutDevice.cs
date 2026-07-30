@@ -540,10 +540,10 @@ namespace DS4Windows
             connected && activeStreamSupportsAtomicAudioHaptics;
 
         /// <summary>
-        /// V5 carries the PadSense-style continuous 48-to-45 kHz source: each
-        /// atomic generation already contains exactly 480 stereo frames. The
-        /// physical bridge must preserve that source clock instead of applying
-        /// the legacy fixed 512-to-480 conversion a second time.
+        /// V5 carries untouched 48 kHz front-channel PCM in exact 480-frame
+        /// callbacks, independently from VIIPER's 512-frame rear-haptics
+        /// assembler. The physical bridge owns the single continuous
+        /// 512-to-480 speaker-clock conversion.
         /// </summary>
         internal bool UsesPadSenseAudioSource =>
             connected && activeStreamUsesPadSenseAudioSource;

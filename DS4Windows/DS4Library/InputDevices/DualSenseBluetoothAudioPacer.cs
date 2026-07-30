@@ -25,12 +25,11 @@ namespace DS4Windows.InputDevices
             "DS4WINDOWS_DUALSENSE_AUDIO_TRANSPORT";
         internal const string TestHapticsEnvironmentVariable =
             "DS4WINDOWS_DUALSENSE_TEST_HAPTICS";
-        // Match DS5 Bridge's physical audio cadence: one complete 398-byte
-        // 0x36 generation every 10.667 ms. Pairing two logical generations
-        // into a 547-byte 0x39 halves the host's opportunities to observe HID
-        // completion/backpressure and makes each missed service turn audible
-        // as a two-frame discontinuity.
-        internal const bool UsePairedAudioReports = false;
+        // DS5Dongle's duplex carrier presents two consecutive Opus/haptics
+        // generations in one 547-byte 0x39 transaction. This halves the HID
+        // transaction rate while a separate, change-driven 0x31 report owns
+        // rumble, trigger, lightbar, and audio-routing state.
+        internal const bool UsePairedAudioReports = true;
         // Sony's 0x39 report is complete as soon as one two-frame pair exists.
         // DS5Dongle does not wait for an additional host-side prime before it
         // hands that indivisible report to L2CAP.
@@ -77,7 +76,7 @@ namespace DS4Windows.InputDevices
         }
 
         private const string HelperArgument = "--dualsense-bt-audio-pacer-helper";
-        private const int ProtocolVersion = 7;
+        private const int ProtocolVersion = 8;
         private const int PipeConnectTimeoutMilliseconds = 5000;
         private const int HelperReadyTimeoutMilliseconds = 5000;
         private const int HelperStopTimeoutMilliseconds = 3000;
@@ -98,6 +97,7 @@ namespace DS4Windows.InputDevices
             Stop = 5,
             UpdateCadence = 6,
             UpdateMicrophoneStatus = 7,
+            UpdateControllerState = 8,
             Ready = 0x80,
             ReportAcknowledged = 0x81,
             Stopped = 0x82,
@@ -154,6 +154,10 @@ namespace DS4Windows.InputDevices
         private readonly Thread receiverThread;
 
         private byte[] latestTemplate;
+        private readonly byte[] latestControllerState = new byte[
+            DualSenseBluetoothPhysicalOutputSequence.
+                ControllerStatePayloadLength];
+        private bool latestControllerStateAvailable;
         private long latestTemplateHapticsExpiryQpc;
         private long nextReportId;
         private long acknowledgedReports;
@@ -438,6 +442,13 @@ namespace DS4Windows.InputDevices
                 candidate.SendFrame(MessageKind.UpdateTemplate,
                     BuildTemplatePayload(candidate.latestTemplate,
                         candidate.latestTemplateHapticsExpiryQpc));
+                if (!candidate.UpdateControllerState(
+                    candidate.latestTemplate))
+                {
+                    error = "Could not queue the initial DualSense controller state.";
+                    candidate.Dispose();
+                    return false;
+                }
                 candidate.senderThread.Start();
                 pacer = candidate;
                 return true;
@@ -744,6 +755,51 @@ namespace DS4Windows.InputDevices
                 {
                     return false;
                 }
+            }
+
+            outboundAvailable.Set();
+            return true;
+        }
+
+        /// <summary>
+        /// Publishes PadForge's complete 47-byte common effect snapshot for a
+        /// discrete Bluetooth 0x31 state write. Audio and haptics remain on
+        /// the ordered 0x39 carrier; repeated state snapshots are suppressed
+        /// before they reach the helper.
+        /// </summary>
+        public bool UpdateControllerState(byte[] latestCombinedReport)
+        {
+            if (latestCombinedReport == null ||
+                latestCombinedReport.Length != ReportLength || !IsRunning)
+            {
+                return false;
+            }
+
+            byte[] payload = new byte[
+                DualSenseBluetoothPhysicalOutputSequence.
+                    ControllerStatePayloadLength];
+            Buffer.BlockCopy(latestCombinedReport,
+                DualSenseBluetoothPhysicalOutputSequence.
+                    ControllerStateSourceOffset,
+                payload, 0, payload.Length);
+
+            lock (stateLock)
+            {
+                if (latestControllerStateAvailable &&
+                    payload.AsSpan().SequenceEqual(latestControllerState))
+                {
+                    return true;
+                }
+
+                if (!outboundCommands.TryEnqueue(new OutboundCommand(
+                    MessageKind.UpdateControllerState, payload)))
+                {
+                    return false;
+                }
+
+                Buffer.BlockCopy(payload, 0, latestControllerState, 0,
+                    payload.Length);
+                latestControllerStateAvailable = true;
             }
 
             outboundAvailable.Set();
@@ -1645,6 +1701,8 @@ namespace DS4Windows.InputDevices
             private const int AcknowledgementCapacity =
                 HostReservoirCapacity * 2;
             private const int PresentationTraceCapacity = 65536;
+            private static readonly long ControllerStateIntervalQpc =
+                Math.Max(1, Stopwatch.Frequency / 30);
 
             private sealed class QueuedReport
             {
@@ -1719,6 +1777,12 @@ namespace DS4Windows.InputDevices
             private readonly byte[] microphoneStatusReport = new byte[
                 DualSenseBluetoothPhysicalOutputSequence.
                     MicrophoneStatusReportLength];
+            private readonly byte[] controllerStateReport = new byte[
+                DualSenseBluetoothPhysicalOutputSequence.
+                    ControllerStateReportLength];
+            private readonly byte[] pendingControllerState = new byte[
+                DualSenseBluetoothPhysicalOutputSequence.
+                    ControllerStatePayloadLength];
             private readonly bool usePadForgeAudioTransport;
             private readonly bool useCompactCombinedHapticsTransport;
             private readonly bool injectTestHaptics;
@@ -1736,6 +1800,8 @@ namespace DS4Windows.InputDevices
             private bool primeRequired = true;
             private int pendingMicrophoneStatus = -1;
             private int microphoneStatusReportsAhead;
+            private bool pendingControllerStateAvailable;
+            private long lastControllerStateSubmissionQpc;
             private int disposed;
             private readonly string presentationTraceDirectory;
             private readonly long[] presentationTraceQpc;
@@ -1762,10 +1828,12 @@ namespace DS4Windows.InputDevices
                 this.writer = writer;
                 this.duplicatedDeviceHandle = duplicatedDeviceHandle;
                 this.parentProcessId = parentProcessId;
-                usePadForgeAudioTransport = UsePadForgeAudioTransport(
-                    Environment.GetEnvironmentVariable(
-                        AudioTransportEnvironmentVariable));
+                usePadForgeAudioTransport = !UsePairedAudioReports &&
+                    UsePadForgeAudioTransport(
+                        Environment.GetEnvironmentVariable(
+                            AudioTransportEnvironmentVariable));
                 useCompactCombinedHapticsTransport =
+                    usePadForgeAudioTransport &&
                     UseCompactCombinedHapticsTransport(
                         Environment.GetEnvironmentVariable(
                             AudioTransportEnvironmentVariable));
@@ -1865,6 +1933,10 @@ namespace DS4Windows.InputDevices
                                 break;
                             case MessageKind.UpdateMicrophoneStatus:
                                 ReceiveMicrophoneStatus(commandPayload,
+                                    payloadLength);
+                                break;
+                            case MessageKind.UpdateControllerState:
+                                ReceiveControllerState(commandPayload,
                                     payloadLength);
                                 break;
                             case MessageKind.Stop:
@@ -2107,6 +2179,30 @@ namespace DS4Windows.InputDevices
                 reservoirChanged.Set();
             }
 
+            private void ReceiveControllerState(byte[] payload,
+                int payloadLength)
+            {
+                if (payloadLength !=
+                    DualSenseBluetoothPhysicalOutputSequence.
+                        ControllerStatePayloadLength)
+                {
+                    throw new InvalidDataException(
+                        "Invalid DualSense controller-state payload.");
+                }
+
+                lock (stateLock)
+                {
+                    // PadForge treats 0x31 as a latest-value state latch.
+                    // Keep no more than one unsent snapshot; audio itself is
+                    // never coalesced or displaced.
+                    Buffer.BlockCopy(payload, 0, pendingControllerState, 0,
+                        payloadLength);
+                    pendingControllerStateAvailable = true;
+                }
+
+                reservoirChanged.Set();
+            }
+
             private void PacerLoop()
             {
                 timeBeginPeriod(1);
@@ -2122,12 +2218,32 @@ namespace DS4Windows.InputDevices
                         bool canPresent;
                         bool controlPrimeBypass;
                         bool microphoneStatusReady;
+                        bool controllerStateReady;
+                        int idleWaitMilliseconds = 1000;
                         lock (stateLock)
                         {
                             microphoneStatusReady =
                                 pendingMicrophoneStatus >= 0 &&
                                 microphoneStatusReportsAhead <= 0;
                             reservoir.TryPeek(out QueuedReport nextReport);
+                            long nowQpc = Stopwatch.GetTimestamp();
+                            controllerStateReady =
+                                pendingControllerStateAvailable &&
+                                (lastControllerStateSubmissionQpc == 0 ||
+                                    nowQpc -
+                                        lastControllerStateSubmissionQpc >=
+                                            ControllerStateIntervalQpc);
+                            if (pendingControllerStateAvailable &&
+                                !controllerStateReady)
+                            {
+                                long remainingQpc =
+                                    ControllerStateIntervalQpc -
+                                    (nowQpc -
+                                        lastControllerStateSubmissionQpc);
+                                idleWaitMilliseconds = Math.Clamp(
+                                    (int)Math.Ceiling(remainingQpc * 1000.0 /
+                                        Stopwatch.Frequency), 1, 1000);
+                            }
                             int speakerReportCount = nextReport != null &&
                                 IsSpeakerAudioReport(nextReport.Report) ?
                                     reservoir.CountLeading(
@@ -2136,11 +2252,14 @@ namespace DS4Windows.InputDevices
                                 nextReport != null &&
                                 !IsSpeakerAudioReport(nextReport.Report);
                             canPresent = microphoneStatusReady ||
+                                controllerStateReady ||
                                 CanPresentFromTransportGate(
                                     primeRequired, speakerReportCount,
                                     nextReport?.Report);
                             if (canPresent && primeRequired &&
-                                !controlPrimeBypass)
+                                !controlPrimeBypass &&
+                                !microphoneStatusReady &&
+                                !controllerStateReady)
                             {
                                 primeRequired = false;
                                 scheduler.Start(Stopwatch.GetTimestamp(),
@@ -2151,10 +2270,78 @@ namespace DS4Windows.InputDevices
 
                         if (!canPresent)
                         {
-                            reservoirChanged.WaitOne(1000);
+                            reservoirChanged.WaitOne(idleWaitMilliseconds);
                             if (!IsExpectedParentAlive(parentProcessId))
                             {
                                 stopRequested.Set();
+                            }
+
+                            continue;
+                        }
+
+                        if (controllerStateReady && !microphoneStatusReady)
+                        {
+                            bool transportFault;
+                            bool accepted;
+                            lock (stateLock)
+                            {
+                                long nowQpc = Stopwatch.GetTimestamp();
+                                bool stillReady =
+                                    pendingControllerStateAvailable &&
+                                    (lastControllerStateSubmissionQpc == 0 ||
+                                        nowQpc -
+                                            lastControllerStateSubmissionQpc >=
+                                                ControllerStateIntervalQpc);
+                                if (!stillReady)
+                                {
+                                    continue;
+                                }
+
+                                byte[] initializationTemplate =
+                                    latestTemplateAvailable ? latestTemplate :
+                                    previousTemplateAvailable ?
+                                        previousTemplate : null;
+                                if (initializationTemplate == null)
+                                {
+                                    accepted = false;
+                                    transportFault = false;
+                                }
+                                else
+                                {
+                                    physicalOutputSequence.
+                                        PrepareControllerState(
+                                            pendingControllerState,
+                                            initializationTemplate,
+                                            controllerStateReport);
+                                    accepted = writer.TryWrite(
+                                        controllerStateReport,
+                                        out transportFault);
+                                    if (accepted)
+                                    {
+                                        physicalOutputSequence.
+                                            CommitControllerState();
+                                        pendingControllerStateAvailable =
+                                            false;
+                                        lastControllerStateSubmissionQpc =
+                                            nowQpc;
+                                        RecordPresentationTrace(
+                                            controllerStateReport, nowQpc,
+                                            reservoir.Count);
+                                    }
+                                }
+                            }
+
+                            if (transportFault)
+                            {
+                                stopRequested.Set();
+                                reservoirChanged.Set();
+                                acknowledgementAvailable.Set();
+                                break;
+                            }
+
+                            if (!accepted)
+                            {
+                                reservoirChanged.WaitOne(1);
                             }
 
                             continue;
@@ -2331,14 +2518,6 @@ namespace DS4Windows.InputDevices
                                 pairedItemId = pairedItem.Id;
                             }
 
-                            if (pendingMicrophoneStatus >= 0 &&
-                                microphoneStatusReportsAhead > 0)
-                            {
-                                microphoneStatusReportsAhead = Math.Max(0,
-                                    microphoneStatusReportsAhead -
-                                        (pairedItem == null ? 1 : 2));
-                            }
-
                             if (item.Epoch != currentEpoch ||
                                 (pairedItem != null &&
                                     pairedItem.Epoch != currentEpoch))
@@ -2443,6 +2622,11 @@ namespace DS4Windows.InputDevices
                                 }
                                 else
                                 {
+                                    if (injectTestHaptics)
+                                    {
+                                        ApplyTestHaptics(item.Report);
+                                        ApplyTestHaptics(pairedItem.Report);
+                                    }
                                     physicalOutputSequence.PreparePairedAudio(
                                         item.Report, pairedItem.Report,
                                         pairedAudioReport);
@@ -2498,6 +2682,19 @@ namespace DS4Windows.InputDevices
                                             "The pacer could not restore a saturated report to the FIFO head.");
                                     }
                                 }
+                            }
+
+                            if (!retainedForRetry &&
+                                pendingMicrophoneStatus >= 0 &&
+                                microphoneStatusReportsAhead > 0)
+                            {
+                                // Spend the ordering boundary only when these
+                                // logical generations actually leave the FIFO.
+                                // A saturated 0x39 retry must not make 0x32
+                                // overtake the same restored audio pair.
+                                microphoneStatusReportsAhead = Math.Max(0,
+                                    microphoneStatusReportsAhead -
+                                        (pairedItem == null ? 1 : 2));
                             }
 
                             if (!retainedForRetry &&
@@ -2807,10 +3004,27 @@ namespace DS4Windows.InputDevices
                 presentationTraceReportId[index] = report[0];
                 presentationTraceReportSequence[index] =
                     (byte)(report[1] >> 4);
-                presentationTracePacketSequence[index] = report[10];
+                presentationTracePacketSequence[index] =
+                    report[0] == 0x31 ? (byte)0 : report[10];
                 presentationTraceReservoirCount[index] = (byte)Math.Clamp(
                     reservoirCount, 0, byte.MaxValue);
-                if (report[0] == 0x35)
+                if (report[0] == 0x31)
+                {
+                    presentationTracePacketType[index] = report[2];
+                    presentationTraceAudioFlags0[index] = report[3];
+                    presentationTraceAudioFlags1[index] = report[4];
+                    presentationTraceHeadphoneVolume[index] = report[7];
+                    presentationTraceSpeakerVolume[index] = report[8];
+                    presentationTraceAudioRoute[index] = report[10];
+                    presentationTraceAudioGain[index] = report[40];
+                    uint hash = 2166136261u;
+                    for (int offset = 3; offset < 50; offset++)
+                    {
+                        hash = (hash ^ report[offset]) * 16777619u;
+                    }
+                    presentationTraceHapticsHash[index] = hash;
+                }
+                else if (report[0] == 0x35)
                 {
                     int firstCompactType = report[11] & 0x3F;
                     int secondCompactType = report[77] & 0x3F;
@@ -3685,22 +3899,28 @@ namespace DS4Windows.InputDevices
 
     /// <summary>
     /// Owns the sequence numbers that the controller observes on the physical
-    /// Bluetooth output lane. Sony's report sequence advances once per accepted
-    /// physical report, while its media packet counter advances only when the
-    /// two Opus frames in a 0x39 report are accepted. Keeping both counters here
-    /// prevents logical 0x36 staging frames or control-only reports from
-    /// consuming counters that never appear on the wire.
+    /// Bluetooth output lane. Audio-family and 0x31 state-family tags advance
+    /// independently, as they do in PadForge, while the media packet counter
+    /// advances only when the two Opus frames in a 0x39 are accepted. Keeping
+    /// these counters here prevents logical 0x36 staging frames from consuming
+    /// counters that never appear on the wire.
     /// </summary>
     internal sealed class DualSenseBluetoothPhysicalOutputSequence
     {
         private const int CrcLength = sizeof(uint);
         internal const int MicrophoneStatusReportLength = 142;
+        internal const int ControllerStateReportLength = 78;
+        internal const int ControllerStatePayloadLength = 47;
+        internal const int ControllerStateSourceOffset = 13;
         private bool initialized;
         private byte nextReportSequence;
+        private byte nextControllerStateSequence;
         private byte mediaPacketSequence;
         private byte preparedMediaPacketSequence;
 
         internal byte NextReportSequence => nextReportSequence;
+        internal byte NextControllerStateSequence =>
+            nextControllerStateSequence;
         internal byte MediaPacketSequence => mediaPacketSequence;
 
         internal void PrepareControl(byte[] report)
@@ -3819,6 +4039,38 @@ namespace DS4Windows.InputDevices
             WriteSonyCrc(destination);
         }
 
+        internal void PrepareControllerState(byte[] statePayload,
+            byte[] initializationReport, byte[] destination)
+        {
+            ValidateSource(initializationReport,
+                nameof(initializationReport));
+            if (statePayload == null ||
+                statePayload.Length != ControllerStatePayloadLength)
+            {
+                throw new ArgumentException(
+                    $"Controller state payload must be exactly {ControllerStatePayloadLength} bytes.",
+                    nameof(statePayload));
+            }
+
+            if (destination == null ||
+                destination.Length != ControllerStateReportLength)
+            {
+                throw new ArgumentException(
+                    $"Controller state report must be exactly {ControllerStateReportLength} bytes.",
+                    nameof(destination));
+            }
+
+            EnsureInitialized(initializationReport);
+            Array.Clear(destination, 0, destination.Length);
+            destination[0] = 0x31;
+            destination[1] = (byte)(
+                (nextControllerStateSequence & 0x0F) << 4);
+            destination[2] = 0x10;
+            Buffer.BlockCopy(statePayload, 0, destination, 3,
+                statePayload.Length);
+            WriteSonyCrc(destination);
+        }
+
         internal void Commit(bool audio)
         {
             if (!initialized)
@@ -3834,6 +4086,18 @@ namespace DS4Windows.InputDevices
             }
         }
 
+        internal void CommitControllerState()
+        {
+            if (!initialized)
+            {
+                throw new InvalidOperationException(
+                    "A DualSense controller state cannot be committed before it is prepared.");
+            }
+
+            nextControllerStateSequence = (byte)(
+                (nextControllerStateSequence + 1) & 0x0F);
+        }
+
         private void EnsureInitialized(byte[] report)
         {
             if (initialized)
@@ -3842,6 +4106,7 @@ namespace DS4Windows.InputDevices
             }
 
             nextReportSequence = (byte)(report[1] >> 4);
+            nextControllerStateSequence = nextReportSequence;
             mediaPacketSequence = report[10];
             initialized = true;
         }

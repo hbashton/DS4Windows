@@ -1563,8 +1563,11 @@ namespace DS4Windows.InputDevices
                     return false;
                 }
 
-                return bluetoothAudioPacer.UpdateTemplate(template,
-                    hapticsExpiryQpc);
+                bool templateUpdated = bluetoothAudioPacer.UpdateTemplate(
+                    template, hapticsExpiryQpc);
+                bool stateUpdated = templateUpdated &&
+                    bluetoothAudioPacer.UpdateControllerState(template);
+                return templateUpdated && stateUpdated;
             }
         }
 

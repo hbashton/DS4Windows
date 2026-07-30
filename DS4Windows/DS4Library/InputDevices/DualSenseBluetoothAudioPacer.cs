@@ -84,6 +84,12 @@ namespace DS4Windows.InputDevices
             return !padForgeAudioTransport && !pairedAudioReports;
         }
 
+        internal static bool ShouldApplyInputPhaseCorrection(
+            bool compactCombinedTransport, bool pairedAudioReports)
+        {
+            return !compactCombinedTransport && !pairedAudioReports;
+        }
+
         internal static bool ShouldDropSaturatedAudio(
             bool padForgeAudioTransport, bool pairedAudioReport,
             bool controlOnly, bool accepted, bool transportFault)
@@ -2455,9 +2461,18 @@ namespace DS4Windows.InputDevices
                             scheduler.SetRateRatio(
                                 BitConverter.Int64BitsToDouble(
                                     Interlocked.Read(ref cadenceRatioBits)));
+                            // PadForge owns one continuous media clock and does
+                            // not phase-snap it to asynchronous HID input. The
+                            // paired 21.333 ms clock has the same requirement:
+                            // a bounded per-report HID nudge still wraps every
+                            // few reports and becomes presentation jitter. Keep
+                            // only the fractional long-window rate correction.
                             scheduler.SetInputPhaseReference(
-                                useCompactCombinedHapticsTransport ? 0 :
-                                    Interlocked.Read(ref inputArrivalQpc));
+                                ShouldApplyInputPhaseCorrection(
+                                    useCompactCombinedHapticsTransport,
+                                    UsePairedAudioReports) ?
+                                        Interlocked.Read(ref inputArrivalQpc) :
+                                        0);
                             // PadForge's Windows path owns one absolute media
                             // deadline and never catch-up bursts. Our logical
                             // reports can also be refreshed by high-rate HID

@@ -47,6 +47,21 @@ namespace DS4WindowsTests
                     ShouldWaitForPhysicalWriteCredit(
                         padForgeAudioTransport: false,
                         pairedAudioReports: false));
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.
+                    ShouldApplyInputPhaseCorrection(
+                        compactCombinedTransport: false,
+                        pairedAudioReports: true));
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.
+                    ShouldApplyInputPhaseCorrection(
+                        compactCombinedTransport: true,
+                        pairedAudioReports: false));
+            Assert.IsTrue(
+                DualSenseBluetoothAudioPacer.
+                    ShouldApplyInputPhaseCorrection(
+                        compactCombinedTransport: false,
+                        pairedAudioReports: false));
         }
 
         [TestMethod]

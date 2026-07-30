@@ -258,6 +258,53 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
+        public void NativeSchedulerMatchesPadSenseFifteenFrameLattice()
+        {
+            const long qpcFrequency = 1_000_000;
+            const long startQpc = 3_000_000;
+            var scheduler = new DualSenseBluetoothAudioPacerScheduler(
+                qpcFrequency, usePadSenseNativeLattice: true);
+            scheduler.Start(startQpc);
+
+            long previous = scheduler.NextDeadlineQpc;
+            for (int interval = 1; interval <= 30; interval++)
+            {
+                scheduler.AdvanceAfterSend(previous);
+                long next = scheduler.NextDeadlineQpc;
+                long expected = interval % 15 == 0 ? 20_000 : 10_000;
+                Assert.AreEqual(expected, next - previous,
+                    $"PadSense lattice interval {interval} was incorrect.");
+                previous = next;
+            }
+
+            Assert.AreEqual(startQpc + 320_000,
+                scheduler.NextDeadlineQpc,
+                "Thirty native reports must span exactly 320 ms.");
+        }
+
+        [TestMethod]
+        public void NativeSchedulerAppliesClockRatioAcrossWholeLattice()
+        {
+            const long qpcFrequency = 10_000_000;
+            const double controllerClockRatio = 0.999800;
+            const int intervals = 3000;
+            var scheduler = new DualSenseBluetoothAudioPacerScheduler(
+                qpcFrequency, usePadSenseNativeLattice: true);
+            scheduler.SetRateRatio(controllerClockRatio);
+            scheduler.Start(0);
+
+            for (int index = 0; index < intervals; index++)
+            {
+                scheduler.AdvanceAfterSend(scheduler.NextDeadlineQpc);
+            }
+
+            double expected = qpcFrequency * 32.0 /
+                controllerClockRatio;
+            Assert.AreEqual(expected, scheduler.NextDeadlineQpc, 1.0,
+                "Fractional correction drifted across the native PadSense lattice.");
+        }
+
+        [TestMethod]
         public void SchedulerTracksFractionalControllerClockWithoutDrift()
         {
             const long qpcFrequency = 10_000_000;

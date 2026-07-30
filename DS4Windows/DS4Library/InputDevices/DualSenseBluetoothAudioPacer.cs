@@ -75,6 +75,19 @@ namespace DS4Windows.InputDevices
                 StringComparison.Ordinal);
         }
 
+        internal static bool RequiresSeparateControllerStateTransport()
+        {
+            return RequiresSeparateControllerStateTransport(
+                Environment.GetEnvironmentVariable(
+                    AudioTransportEnvironmentVariable));
+        }
+
+        internal static bool RequiresSeparateControllerStateTransport(
+            string value)
+        {
+            return UsePairedAudioReports || UsePadForgeAudioTransport(value);
+        }
+
         internal static bool RequiresFullDuplexAudioReport(byte[] report)
         {
             return IsSpeakerAudioReport(report) && (report[4] & 0x01) != 0;
@@ -593,8 +606,9 @@ namespace DS4Windows.InputDevices
                 candidate.SendFrame(MessageKind.UpdateTemplate,
                     BuildTemplatePayload(candidate.latestTemplate,
                         candidate.latestTemplateHapticsExpiryQpc));
-                if (!candidate.UpdateControllerState(
-                    candidate.latestTemplate))
+                if (RequiresSeparateControllerStateTransport() &&
+                    !candidate.UpdateControllerState(
+                        candidate.latestTemplate))
                 {
                     error = "Could not queue the initial DualSense controller state.";
                     candidate.Dispose();
@@ -957,8 +971,8 @@ namespace DS4Windows.InputDevices
 
                 // Intent is deliberately first: the helper freezes the
                 // physical media header in its committed mode before the new
-                // template can reach presentation. State still commits before
-                // 0x32 after the ordered audio boundary.
+                // template can reach presentation. Native 0x32 then consumes
+                // one ordered media interval at the reserved boundary.
                 latestTemplate = template;
                 latestTemplateHapticsExpiryQpc = hapticsExpiryQpc;
             }
@@ -2014,6 +2028,7 @@ namespace DS4Windows.InputDevices
                     ControllerStatePayloadLength];
             private readonly bool usePadForgeAudioTransport;
             private readonly bool useCompactCombinedHapticsTransport;
+            private readonly bool usePadSenseNativeLattice;
             private readonly bool injectTestHaptics;
             private int testHapticsSampleIndex;
             private long latestTemplateHapticsExpiryQpc;
@@ -2080,6 +2095,14 @@ namespace DS4Windows.InputDevices
                     UseCompactCombinedHapticsTransport(
                         Environment.GetEnvironmentVariable(
                             AudioTransportEnvironmentVariable));
+                // PadSense's native Windows 0x36 stream is scheduled on a
+                // 10 ms lattice with every sixteenth slot omitted. Fifteen
+                // media frames therefore span exactly 160 ms (93.75 Hz),
+                // while the controller's 0x80 lane depth bridges the single
+                // intentional 20 ms interval. Compact and paired carriers
+                // retain their own cadence contracts.
+                usePadSenseNativeLattice = !UsePairedAudioReports &&
+                    !usePadForgeAudioTransport;
                 injectTestHaptics = string.Equals(
                     Environment.GetEnvironmentVariable(
                         TestHapticsEnvironmentVariable), "1",
@@ -2555,7 +2578,7 @@ namespace DS4Windows.InputDevices
                 IntPtr multimediaHandle = RegisterMultimediaScheduler();
                 IntPtr timer = CreateHighResolutionTimer();
                 var scheduler = new DualSenseBluetoothAudioPacerScheduler(
-                    Stopwatch.Frequency);
+                    Stopwatch.Frequency, usePadSenseNativeLattice);
                 try
                 {
                     while (!stopRequested.WaitOne(0))
@@ -4239,8 +4262,10 @@ namespace DS4Windows.InputDevices
         internal const double MaximumRateRatio = 1.005;
 
         private readonly long clockFrequency;
+        private readonly bool usePadSenseNativeLattice;
         private long wholeTicks;
         private long remainderTicks;
+        private long cadenceDenominator;
         private readonly long maximumCatchUpTicks;
         private long remainderAccumulator;
         private double fractionalRemainderTicks;
@@ -4249,17 +4274,20 @@ namespace DS4Windows.InputDevices
         private double rateRatio;
         private int controllerLinkWarmupIntervalsRemaining;
         private int controllerReserveTransferIntervalsRemaining;
+        private int nativeLatticeIntervalIndex;
         private long nextDeadlineQpc;
         private long inputPhaseReferenceQpc;
         private bool started;
 
-        public DualSenseBluetoothAudioPacerScheduler(long clockFrequency)
+        public DualSenseBluetoothAudioPacerScheduler(long clockFrequency,
+            bool usePadSenseNativeLattice = false)
         {
             if (clockFrequency <= 0)
             {
                 throw new ArgumentOutOfRangeException(nameof(clockFrequency));
             }
             this.clockFrequency = clockFrequency;
+            this.usePadSenseNativeLattice = usePadSenseNativeLattice;
             maximumCatchUpTicks = Math.Max(1, clockFrequency / 1000);
             SetRateRatio(1.0);
         }
@@ -4294,18 +4322,23 @@ namespace DS4Windows.InputDevices
             nominalRatio = Math.Abs(controllerClockRatio - 1.0) < 1.0e-12;
             if (nominalRatio)
             {
-                long scaled = checked(clockFrequency * CadenceNumerator);
-                wholeTicks = scaled / CadenceDenominator;
-                remainderTicks = scaled % CadenceDenominator;
+                long scaled = usePadSenseNativeLattice ? clockFrequency :
+                    checked(clockFrequency * CadenceNumerator);
+                cadenceDenominator = usePadSenseNativeLattice ? 100 :
+                    CadenceDenominator;
+                wholeTicks = scaled / cadenceDenominator;
+                remainderTicks = scaled % cadenceDenominator;
                 fractionalRemainderTicks = 0.0;
             }
             else
             {
-                double exactTicks = clockFrequency *
-                    (double)CadenceNumerator /
-                    (CadenceDenominator * controllerClockRatio);
+                double exactTicks = usePadSenseNativeLattice ?
+                    clockFrequency / (100.0 * controllerClockRatio) :
+                    clockFrequency * (double)CadenceNumerator /
+                        (CadenceDenominator * controllerClockRatio);
                 wholeTicks = (long)Math.Floor(exactTicks);
                 remainderTicks = 0;
+                cadenceDenominator = 1;
                 fractionalRemainderTicks = exactTicks - wholeTicks;
             }
 
@@ -4345,6 +4378,7 @@ namespace DS4Windows.InputDevices
                 controllerLinkWarmupIntervals;
             controllerReserveTransferIntervalsRemaining =
                 controllerReserveTransferIntervals;
+            nativeLatticeIntervalIndex = 0;
             nextDeadlineQpc = nowQpc;
             started = true;
         }
@@ -4355,6 +4389,7 @@ namespace DS4Windows.InputDevices
             fractionalRemainderAccumulator = 0.0;
             controllerLinkWarmupIntervalsRemaining = 0;
             controllerReserveTransferIntervalsRemaining = 0;
+            nativeLatticeIntervalIndex = 0;
             nextDeadlineQpc = 0;
             started = false;
         }
@@ -4441,22 +4476,34 @@ namespace DS4Windows.InputDevices
 
         private long NextNominalIntervalTicks()
         {
-            long interval = wholeTicks;
+            int intervalUnits = 1;
+            if (usePadSenseNativeLattice)
+            {
+                nativeLatticeIntervalIndex++;
+                if (nativeLatticeIntervalIndex >= 15)
+                {
+                    nativeLatticeIntervalIndex = 0;
+                    intervalUnits = 2;
+                }
+            }
+
+            long interval = checked(wholeTicks * intervalUnits);
             if (nominalRatio)
             {
-                remainderAccumulator += remainderTicks;
-                if (remainderAccumulator >= CadenceDenominator)
+                remainderAccumulator += remainderTicks * intervalUnits;
+                if (remainderAccumulator >= cadenceDenominator)
                 {
                     long extraTicks = remainderAccumulator /
-                        CadenceDenominator;
+                        cadenceDenominator;
                     interval += extraTicks;
                     remainderAccumulator -= extraTicks *
-                        CadenceDenominator;
+                        cadenceDenominator;
                 }
             }
             else
             {
-                fractionalRemainderAccumulator += fractionalRemainderTicks;
+                fractionalRemainderAccumulator +=
+                    fractionalRemainderTicks * intervalUnits;
                 if (fractionalRemainderAccumulator >= 1.0)
                 {
                     long extraTicks = (long)fractionalRemainderAccumulator;

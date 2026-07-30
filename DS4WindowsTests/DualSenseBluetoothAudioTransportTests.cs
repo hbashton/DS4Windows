@@ -291,6 +291,40 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void RejectedNativeMicrophoneTransitionIsExactlyRetriable()
+        {
+            var sequence = new DualSenseBluetoothPhysicalOutputSequence();
+            byte[] initialization = CreateSpeakerReport(
+                0x00, 0x00, 0x50, 0x22);
+            byte[] firstAttempt = new byte[
+                DualSenseBluetoothPhysicalOutputSequence.
+                    MicrophoneStatusReportLength];
+            byte[] retry = new byte[firstAttempt.Length];
+
+            sequence.PrepareMicrophoneStatus(enabled: true, initialization,
+                firstAttempt);
+            sequence.PrepareMicrophoneStatus(enabled: true, initialization,
+                retry);
+
+            CollectionAssert.AreEqual(firstAttempt, retry,
+                "A rejected 0x32 changed before the HID writer accepted it.");
+            Assert.AreEqual((byte)5,
+                sequence.NextMicrophoneStatusSequence);
+            Assert.AreEqual((byte)0x22, sequence.MediaPacketSequence,
+                "Preparing an unaccepted 0x32 consumed the media counter.");
+            Assert.AreEqual((byte)5, sequence.NextReportSequence,
+                "Preparing an unaccepted 0x32 disturbed the audio sequence.");
+
+            sequence.CommitMicrophoneStatus();
+
+            Assert.AreEqual((byte)6,
+                sequence.NextMicrophoneStatusSequence);
+            Assert.AreEqual((byte)0x23, sequence.MediaPacketSequence);
+            Assert.AreEqual((byte)5, sequence.NextReportSequence,
+                "Committing 0x32 disturbed the independent audio sequence.");
+        }
+
+        [TestMethod]
         public void Ds5DongleControllerStateUsesGlobalOutputSequence()
         {
             var sequence = new DualSenseBluetoothPhysicalOutputSequence();
@@ -768,6 +802,19 @@ namespace DS4WindowsTests
                 UsePadForgeAudioTransport("36"));
             Assert.IsFalse(DualSenseBluetoothAudioPacer.
                 UsePadForgeAudioTransport("0x35"));
+        }
+
+        [TestMethod]
+        public void NativeAudioCarriesControllerStateAtomically()
+        {
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.
+                RequiresSeparateControllerStateTransport(null));
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.
+                RequiresSeparateControllerStateTransport("36"));
+            Assert.IsTrue(DualSenseBluetoothAudioPacer.
+                RequiresSeparateControllerStateTransport("35"));
+            Assert.IsTrue(DualSenseBluetoothAudioPacer.
+                RequiresSeparateControllerStateTransport("35combined"));
         }
 
         private static byte[] CreateSpeakerReport(byte haptics,

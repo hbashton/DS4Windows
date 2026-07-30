@@ -4124,14 +4124,23 @@ namespace DS4Windows.InputDevices
                 if (ShouldPublishMicrophoneStateThroughSpeakerClock(
                     enableSpeakerOutput, IsBluetoothSpeakerClockActive()))
                 {
-                    bool statusQueued;
-                    lock (bluetoothAudioPacerLock)
-                    {
-                        statusQueued = bluetoothAudioPacer?.
-                            UpdateMicrophoneStatus(enabled) == true;
-                    }
-                    bool published = statusQueued &&
+                    // Publish the complete mic/controller state first, then
+                    // enqueue Sony's native 0x32 transition. Both operations
+                    // share the helper's physical sequence/FIFO. The steady
+                    // compact speaker+haptics carrier remains byte-identical
+                    // before and after this boundary.
+                    bool stateQueued =
                         RefreshBluetoothAudioPacerTemplateFromCache();
+                    bool statusQueued = false;
+                    if (stateQueued)
+                    {
+                        lock (bluetoothAudioPacerLock)
+                        {
+                            statusQueued = bluetoothAudioPacer?.
+                                UpdateMicrophoneStatus(enabled) == true;
+                        }
+                    }
+                    bool published = stateQueued && statusQueued;
                     LastBluetoothMicrophoneWriteStatus = published ?
                         (enabled ?
                             "Microphone enable is pending physical commit on the combined speaker stream." :

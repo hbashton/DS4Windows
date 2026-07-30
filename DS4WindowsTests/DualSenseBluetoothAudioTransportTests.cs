@@ -570,10 +570,10 @@ namespace DS4WindowsTests
         }
 
         [DataTestMethod]
-        [DataRow(false, (byte)0xFE)]
-        [DataRow(true, (byte)0xFF)]
-        public void CompactAudioReportsPreserveMicrophoneSectionMask(
-            bool microphoneEnabled, byte expectedMask)
+        [DataRow(false)]
+        [DataRow(true)]
+        public void CompactAudioReportsDoNotRewriteMicrophoneSection(
+            bool microphoneEnabled)
         {
             byte[] source = CreateSpeakerReport(0, 0, 0, 0x42);
             source[4] = (byte)(0xFE | (microphoneEnabled ? 1 : 0));
@@ -588,28 +588,21 @@ namespace DS4WindowsTests
             DualSenseBluetoothPadForgeCombinedAudioReportBuilder.Build(source,
                 reportSequence: 9, packetSequence: 0x42, combined);
 
-            Assert.AreEqual(expectedMask, speaker[4],
-                "The compact speaker carrier changed the requested microphone state.");
-            Assert.AreEqual(expectedMask, combined[4],
-                "The compact speaker/haptics carrier changed the requested microphone state.");
+            Assert.AreEqual((byte)0xFE, speaker[4],
+                "The compact speaker carrier tried to rewrite the microphone lane.");
+            Assert.AreEqual((byte)0xFE, combined[4],
+                "The compact speaker/haptics carrier tried to rewrite the microphone lane.");
             for (int index = 5; index <= 8; index++)
             {
-                Assert.AreEqual(microphoneEnabled ? (byte)64 : (byte)0,
-                    speaker[index]);
-                Assert.AreEqual(microphoneEnabled ? (byte)64 : (byte)0,
-                    combined[index]);
+                Assert.AreEqual((byte)0, speaker[index]);
+                Assert.AreEqual((byte)0, combined[index]);
             }
-            Assert.AreEqual(microphoneEnabled ? (byte)64 : (byte)0xFF,
-                speaker[9]);
-            Assert.AreEqual(microphoneEnabled ? (byte)64 : (byte)0xFF,
-                combined[9]);
-            if (microphoneEnabled)
-            {
-                Assert.AreEqual((byte)0x93, combined[11]);
-                Assert.AreEqual((byte)200, combined[12]);
-                Assert.AreEqual((byte)0x92, combined[213]);
-                Assert.AreEqual((byte)64, combined[214]);
-            }
+            Assert.AreEqual((byte)0xFF, speaker[9]);
+            Assert.AreEqual((byte)0xFF, combined[9]);
+            Assert.AreEqual((byte)0x92, combined[11]);
+            Assert.AreEqual((byte)64, combined[12]);
+            Assert.AreEqual((byte)0x93, combined[77]);
+            Assert.AreEqual((byte)200, combined[78]);
         }
 
         [TestMethod]

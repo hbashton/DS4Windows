@@ -125,6 +125,85 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void PhysicalSequenceMatchesNativeMicrophoneTransition()
+        {
+            var sequence = new DualSenseBluetoothPhysicalOutputSequence();
+            byte[] initialization = CreateSpeakerReport(
+                0x00, 0x00, 0x50, 0x22);
+            byte[] microphoneStatus = new byte[
+                DualSenseBluetoothPhysicalOutputSequence.
+                    MicrophoneStatusReportLength];
+
+            sequence.PrepareMicrophoneStatus(enabled: true, initialization,
+                microphoneStatus);
+
+            Assert.AreEqual((byte)0x32, microphoneStatus[0]);
+            Assert.AreEqual((byte)0x50, microphoneStatus[1]);
+            Assert.AreEqual((byte)0x91, microphoneStatus[2]);
+            Assert.AreEqual((byte)0x01, microphoneStatus[3]);
+            Assert.AreEqual((byte)0x03, microphoneStatus[4]);
+            uint expectedCrc =
+                DualSenseBluetoothAudioReportPatcher.ComputeSonyCrc(
+                    microphoneStatus,
+                    microphoneStatus.Length - sizeof(uint));
+            Assert.AreEqual(expectedCrc,
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    microphoneStatus.AsSpan(
+                        microphoneStatus.Length - sizeof(uint))));
+
+            sequence.Commit(audio: false);
+            byte[] duplex = CreateSpeakerReport(
+                0x11, 0x21, 0xA0, 0x23);
+            duplex[4] = 0xFF;
+            sequence.PrepareFullDuplexAudio(duplex);
+            Assert.AreEqual((byte)0x60, duplex[1],
+                "The duplex report did not follow the accepted 0x32 transition.");
+            Assert.AreEqual((byte)0x23, duplex[10],
+                "The 0x32 transition consumed the media packet counter.");
+        }
+
+        [TestMethod]
+        public void MicrophoneEnabledAudioUsesFullStateCarrierAnd64ByteDepths()
+        {
+            var sequence = new DualSenseBluetoothPhysicalOutputSequence();
+            byte[] duplex = CreateSpeakerReport(
+                0x11, 0x21, 0x20, 0x33);
+            duplex[4] = 0xFF;
+            for (int index = 5; index <= 9; index++)
+            {
+                duplex[index] = 80;
+            }
+            duplex[11] = 0x90;
+            duplex[12] = 63;
+
+            Assert.IsTrue(DualSenseBluetoothAudioPacer.
+                RequiresFullDuplexAudioReport(duplex));
+            sequence.PrepareFullDuplexAudio(duplex);
+
+            Assert.AreEqual((byte)0x36, duplex[0]);
+            Assert.AreEqual((byte)0xFF, duplex[4]);
+            for (int index = 5; index <= 9; index++)
+            {
+                Assert.AreEqual((byte)64, duplex[index]);
+            }
+            Assert.AreEqual((byte)0x90, duplex[11]);
+            Assert.AreEqual((byte)63, duplex[12]);
+            Assert.AreEqual((byte)0xD2, duplex[76]);
+            Assert.AreEqual((byte)0x93, duplex[142]);
+
+            uint expectedCrc =
+                DualSenseBluetoothAudioReportPatcher.ComputeSonyCrc(duplex,
+                    duplex.Length - sizeof(uint));
+            Assert.AreEqual(expectedCrc,
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    duplex.AsSpan(duplex.Length - sizeof(uint))));
+
+            byte[] playback = CreateSpeakerReport(0, 0, 0);
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.
+                RequiresFullDuplexAudioReport(playback));
+        }
+
+        [TestMethod]
         public void PhysicalSequenceAdvancesOnlyAfterAcceptedPairedReport()
         {
             var sequence = new DualSenseBluetoothPhysicalOutputSequence();

@@ -4,6 +4,7 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.IO.MemoryMappedFiles;
 using System.IO.Pipes;
 using System.Runtime;
 using System.Runtime.InteropServices;
@@ -131,7 +132,7 @@ namespace DS4Windows.InputDevices
         }
 
         private const string HelperArgument = "--dualsense-bt-audio-pacer-helper";
-        private const int ProtocolVersion = 9;
+        private const int ProtocolVersion = 11;
         private const int PipeConnectTimeoutMilliseconds = 5000;
         private const int HelperReadyTimeoutMilliseconds = 5000;
         private const int HelperStopTimeoutMilliseconds = 3000;
@@ -139,6 +140,17 @@ namespace DS4Windows.InputDevices
         private const uint HelperWriterReleaseTimeoutMilliseconds = 3000;
         private const uint HelperControlWriteTimeoutMilliseconds = 750;
         private const uint HelperAudioCreditPollMilliseconds = 1;
+        // Native duplex exposes a 100 Hz controller microphone clock while one
+        // speaker frame carries 10.667 ms. Fifteen speaker generations per
+        // sixteen microphone ticks is exact and avoids the measured 640 ms
+        // BR/EDR service collision instead of chasing it with a host timer.
+        private const int MicrophoneFrameWaitTimeoutMilliseconds = 20;
+        private const int MicrophoneFramePostArrivalDelayMicroseconds = 550;
+        private const int MicrophoneFrameMaximumSendAgeMicroseconds = 1_250;
+        private const int InputClockMapLength = 24;
+        private const long InputClockVersionOffset = 0;
+        private const long InputClockTimestampOffset = 8;
+        private const long InputClockSequenceOffset = 16;
         private const int OutboundCommandCapacity = HostReservoirCapacity + 16;
         private const int InitialEpoch = 1;
         private const uint DuplicateSameAccess = 0x00000002;
@@ -195,6 +207,9 @@ namespace DS4Windows.InputDevices
         private readonly object pipeWriteLock = new object();
         private readonly NamedPipeServerStream pipe;
         private readonly Process helperProcess;
+        private readonly EventWaitHandle inputArrivalSignal;
+        private readonly MemoryMappedFile inputClockMap;
+        private readonly MemoryMappedViewAccessor inputClockView;
         private readonly DualSenseBluetoothAudioPacerRing<OutboundCommand>
             outboundCommands = new DualSenseBluetoothAudioPacerRing<OutboundCommand>(
                 OutboundCommandCapacity);
@@ -240,14 +255,20 @@ namespace DS4Windows.InputDevices
         private int currentEpoch = InitialEpoch;
         private int stopping;
         private int disposed;
+        private long inputClockVersion;
         private int cleanStopAcknowledged;
         private string lastError = string.Empty;
 
         private DualSenseBluetoothAudioPacer(NamedPipeServerStream pipe,
-            Process helperProcess)
+            Process helperProcess, EventWaitHandle inputArrivalSignal,
+            MemoryMappedFile inputClockMap,
+            MemoryMappedViewAccessor inputClockView)
         {
             this.pipe = pipe;
             this.helperProcess = helperProcess;
+            this.inputArrivalSignal = inputArrivalSignal;
+            this.inputClockMap = inputClockMap;
+            this.inputClockView = inputClockView;
             senderThread = new Thread(SenderLoop)
             {
                 IsBackground = true,
@@ -318,6 +339,45 @@ namespace DS4Windows.InputDevices
         public bool IsRunning => Volatile.Read(ref stopping) == 0 &&
             Volatile.Read(ref disposed) == 0 && !IsFaulted;
 
+        /// <summary>
+        /// Publishes one actual physical microphone frame to the isolated
+        /// writer. A small seqlock preserves its controller sequence and QPC
+        /// timestamp without pipe traffic or allocation on the HID thread.
+        /// </summary>
+        public void SignalMicrophoneFrame(byte sequence)
+        {
+            // Do not consult LastError/IsRunning here: LastError owns the
+            // pacer state lock and this method runs on the physical HID input
+            // thread for every completed Bluetooth report.
+            if (Volatile.Read(ref stopping) != 0 ||
+                Volatile.Read(ref disposed) != 0)
+            {
+                return;
+            }
+
+            try
+            {
+                long completedVersion = Interlocked.Add(
+                    ref inputClockVersion, 2);
+                inputClockView.Write(InputClockVersionOffset,
+                    completedVersion - 1);
+                inputClockView.Write(InputClockTimestampOffset,
+                    Stopwatch.GetTimestamp());
+                inputClockView.Write(InputClockSequenceOffset,
+                    (int)sequence);
+                Thread.MemoryBarrier();
+                inputClockView.Write(InputClockVersionOffset,
+                    completedVersion);
+                inputArrivalSignal.Set();
+            }
+            catch (Exception ex) when (ex is ObjectDisposedException ||
+                ex is InvalidOperationException)
+            {
+                // A disconnect may race the final completed read. The pacer
+                // disposal barrier still owns helper shutdown.
+            }
+        }
+
         internal static bool IsFatalAcknowledgementDisposition(
             AcknowledgementDisposition disposition)
         {
@@ -357,12 +417,15 @@ namespace DS4Windows.InputDevices
         public static bool TryRunHelper(string[] args)
         {
             if (!TryParseHelperArguments(args, out string pipeName,
-                out Guid authenticationToken, out int parentProcessId))
+                out Guid authenticationToken, out int parentProcessId,
+                out string inputArrivalSignalName,
+                out string inputClockMapName))
             {
                 return false;
             }
 
-            RunHelper(pipeName, authenticationToken, parentProcessId);
+            RunHelper(pipeName, authenticationToken, parentProcessId,
+                inputArrivalSignalName, inputClockMapName);
             return true;
         }
 
@@ -418,10 +481,15 @@ namespace DS4Windows.InputDevices
 
             string pipeName = "DS4Windows.DualSenseAudioPacer." +
                 Process.GetCurrentProcess().Id + "." + Guid.NewGuid().ToString("N");
+            string inputArrivalSignalName = pipeName + ".InputArrival";
+            string inputClockMapName = pipeName + ".InputClock";
             Guid authenticationToken = Guid.NewGuid();
             NamedPipeServerStream server = null;
             Process child = null;
             DualSenseBluetoothAudioPacer candidate = null;
+            EventWaitHandle inputSignal = null;
+            MemoryMappedFile inputMap = null;
+            MemoryMappedViewAccessor inputView = null;
 
             try
             {
@@ -430,6 +498,12 @@ namespace DS4Windows.InputDevices
                     PipeOptions.Asynchronous | PipeOptions.WriteThrough |
                     PipeOptions.CurrentUserOnly,
                     4096, 4096);
+                inputSignal = new EventWaitHandle(false,
+                    EventResetMode.AutoReset, inputArrivalSignalName);
+                inputMap = MemoryMappedFile.CreateNew(inputClockMapName,
+                    InputClockMapLength, MemoryMappedFileAccess.ReadWrite);
+                inputView = inputMap.CreateViewAccessor(0,
+                    InputClockMapLength, MemoryMappedFileAccess.ReadWrite);
 
                 ProcessStartInfo startInfo = new ProcessStartInfo
                 {
@@ -444,12 +518,17 @@ namespace DS4Windows.InputDevices
                 startInfo.ArgumentList.Add(pipeName);
                 startInfo.ArgumentList.Add(authenticationToken.ToString("N"));
                 startInfo.ArgumentList.Add(Process.GetCurrentProcess().Id.ToString());
+                startInfo.ArgumentList.Add(inputArrivalSignalName);
+                startInfo.ArgumentList.Add(inputClockMapName);
 
                 child = Process.Start(startInfo);
                 if (child == null)
                 {
                     error = "Windows did not create the DualSense audio pacer process.";
                     server.Dispose();
+                    inputSignal.Dispose();
+                    inputView.Dispose();
+                    inputMap.Dispose();
                     return false;
                 }
 
@@ -458,6 +537,9 @@ namespace DS4Windows.InputDevices
                 {
                     error = "Timed out waiting for the DualSense audio pacer pipe.";
                     server.Dispose();
+                    inputSignal.Dispose();
+                    inputView.Dispose();
+                    inputMap.Dispose();
                     TryTerminateUninitializedHelper(child);
                     return false;
                 }
@@ -469,11 +551,18 @@ namespace DS4Windows.InputDevices
                     error = "Could not duplicate the active DualSense HID handle " +
                         $"into the pacer. Win32Error={duplicateError}.";
                     server.Dispose();
+                    inputSignal.Dispose();
+                    inputView.Dispose();
+                    inputMap.Dispose();
                     TryTerminateUninitializedHelper(child);
                     return false;
                 }
 
-                candidate = new DualSenseBluetoothAudioPacer(server, child);
+                candidate = new DualSenseBluetoothAudioPacer(server, child,
+                    inputSignal, inputMap, inputView);
+                inputSignal = null;
+                inputMap = null;
+                inputView = null;
                 candidate.latestTemplate = (byte[])initialTemplate.Clone();
                 candidate.latestTemplateHapticsExpiryQpc = hapticsExpiryQpc;
                 candidate.receiverThread.Start();
@@ -519,6 +608,9 @@ namespace DS4Windows.InputDevices
                 else
                 {
                     server?.Dispose();
+                    inputSignal?.Dispose();
+                    inputView?.Dispose();
+                    inputMap?.Dispose();
                     if (child != null)
                     {
                         TryTerminateUninitializedHelper(child);
@@ -1404,18 +1496,23 @@ namespace DS4Windows.InputDevices
 
         private static bool TryParseHelperArguments(string[] args,
             out string pipeName, out Guid authenticationToken,
-            out int parentProcessId)
+            out int parentProcessId, out string inputArrivalSignalName,
+            out string inputClockMapName)
         {
             pipeName = string.Empty;
             authenticationToken = Guid.Empty;
             parentProcessId = 0;
-            return args != null && args.Length >= 4 &&
+            inputArrivalSignalName = string.Empty;
+            inputClockMapName = string.Empty;
+            return args != null && args.Length >= 6 &&
                 string.Equals(args[0], HelperArgument,
                     StringComparison.OrdinalIgnoreCase) &&
                 !string.IsNullOrWhiteSpace(pipeName = args[1]) &&
                 Guid.TryParseExact(args[2], "N", out authenticationToken) &&
                 int.TryParse(args[3], out parentProcessId) &&
-                parentProcessId > 0;
+                parentProcessId > 0 &&
+                !string.IsNullOrWhiteSpace(inputArrivalSignalName = args[4]) &&
+                !string.IsNullOrWhiteSpace(inputClockMapName = args[5]);
         }
 
         private static string GetExactCurrentExecutablePath()
@@ -1542,6 +1639,9 @@ namespace DS4Windows.InputDevices
             }
 
             helperProcess.Dispose();
+            inputArrivalSignal.Dispose();
+            inputClockView.Dispose();
+            inputClockMap.Dispose();
             outboundAvailable.Dispose();
             readyEvent.Dispose();
             stoppedEvent.Dispose();
@@ -1598,7 +1698,8 @@ namespace DS4Windows.InputDevices
         }
 
         private static void RunHelper(string pipeName, Guid authenticationToken,
-            int parentProcessId)
+            int parentProcessId, string inputArrivalSignalName,
+            string inputClockMapName)
         {
             using var helperPipe = new NamedPipeClientStream(".", pipeName,
                 PipeDirection.InOut, PipeOptions.Asynchronous |
@@ -1607,6 +1708,14 @@ namespace DS4Windows.InputDevices
             try
             {
                 helperPipe.Connect(PipeConnectTimeoutMilliseconds);
+                using EventWaitHandle inputSignal =
+                    EventWaitHandle.OpenExisting(inputArrivalSignalName);
+                using MemoryMappedFile inputMap =
+                    MemoryMappedFile.OpenExisting(inputClockMapName,
+                        MemoryMappedFileRights.Read);
+                using MemoryMappedViewAccessor inputView =
+                    inputMap.CreateViewAccessor(0, InputClockMapLength,
+                        MemoryMappedFileAccess.Read);
                 ReadFrame(helperPipe, out MessageKind kind, out byte[] payload);
                 long duplicatedHandleValue = 0;
                 string helloError = string.Empty;
@@ -1651,7 +1760,8 @@ namespace DS4Windows.InputDevices
 
                 using (writer)
                 using (var host = new HelperHost(helperPipe, writer,
-                    duplicatedHandle, parentProcessId))
+                    duplicatedHandle, parentProcessId, inputSignal,
+                    inputView))
                 {
                     WriteFrame(helperPipe, MessageKind.Ready, Array.Empty<byte>());
                     host.Run();
@@ -1865,6 +1975,8 @@ namespace DS4Windows.InputDevices
             private readonly DualSenseBluetoothRealtimeWriter writer;
             private readonly SafeFileHandle duplicatedDeviceHandle;
             private readonly int parentProcessId;
+            private readonly EventWaitHandle inputArrivalSignal;
+            private readonly MemoryMappedViewAccessor inputClockView;
             private readonly DualSenseBluetoothAudioPacerRing<QueuedReport>
                 reservoir = new DualSenseBluetoothAudioPacerRing<QueuedReport>(
                     HostReservoirCapacity);
@@ -1918,6 +2030,7 @@ namespace DS4Windows.InputDevices
             private long cadenceRatioBits =
                 BitConverter.DoubleToInt64Bits(1.0);
             private long inputArrivalQpc;
+            private long lastMicrophoneFrameVersion;
             private long controllerMediaBufferObservationQpc;
             private int controllerMediaBufferLevel = -1;
             private long mediaBufferCadenceRatioBits =
@@ -1953,12 +2066,17 @@ namespace DS4Windows.InputDevices
             public HelperHost(Stream pipe,
                 DualSenseBluetoothRealtimeWriter writer,
                 SafeFileHandle duplicatedDeviceHandle,
-                int parentProcessId)
+                int parentProcessId, EventWaitHandle inputArrivalSignal,
+                MemoryMappedViewAccessor inputClockView)
             {
                 this.pipe = pipe;
                 this.writer = writer;
                 this.duplicatedDeviceHandle = duplicatedDeviceHandle;
                 this.parentProcessId = parentProcessId;
+                this.inputArrivalSignal = inputArrivalSignal ??
+                    throw new ArgumentNullException(nameof(inputArrivalSignal));
+                this.inputClockView = inputClockView ??
+                    throw new ArgumentNullException(nameof(inputClockView));
                 usePadForgeAudioTransport = !UsePairedAudioReports &&
                     UsePadForgeAudioTransport(
                         Environment.GetEnvironmentVariable(
@@ -2694,6 +2812,8 @@ namespace DS4Windows.InputDevices
                             continue;
                         }
 
+                        bool microphoneClockedPresentation = false;
+                        long microphoneFrameArrivalQpc = 0;
                         if (!controlPrimeBypass)
                         {
                             double controllerClockRatio =
@@ -2731,9 +2851,46 @@ namespace DS4Windows.InputDevices
                             // 10.667 ms generations and the long-window clock
                             // correction without relying on IRP completion as
                             // an L2CAP credit.
-                            WaitUntil(timer,
-                                scheduler.PresentationDeadlineQpc,
-                                stopRequested);
+                            bool useMicrophoneClock;
+                            lock (stateLock)
+                            {
+                                useMicrophoneClock =
+                                    !usePadForgeAudioTransport &&
+                                    !UsePairedAudioReports &&
+                                    committedMicrophoneEnabled &&
+                                    reservoir.TryPeek(
+                                        out QueuedReport dueReport) &&
+                                    IsSpeakerAudioReport(dueReport.Report);
+                            }
+
+                            if (useMicrophoneClock)
+                            {
+                                if (!TryWaitForNextMicrophoneFrame(
+                                        out microphoneFrameArrivalQpc,
+                                        out byte microphoneFrameSequence))
+                                {
+                                    continue;
+                                }
+
+                                // 100 Hz / 16 = 6.25 Hz; omitting sequence
+                                // phase zero leaves exactly fifteen 512-sample
+                                // speaker frames per 160 ms. ETW also locates
+                                // the recurring completion drought at this
+                                // controller phase, so the planned 20 ms gap
+                                // supplies runway instead of queue pressure.
+                                if ((microphoneFrameSequence & 0x0F) == 0)
+                                {
+                                    continue;
+                                }
+
+                                microphoneClockedPresentation = true;
+                            }
+                            else
+                            {
+                                WaitUntil(timer,
+                                    scheduler.PresentationDeadlineQpc,
+                                    stopRequested);
+                            }
                         }
                         if (stopRequested.WaitOne(0))
                         {
@@ -2763,6 +2920,34 @@ namespace DS4Windows.InputDevices
                             !creditTransportFault)
                         {
                             continue;
+                        }
+
+                        if (microphoneClockedPresentation)
+                        {
+                            long nowQpc = Stopwatch.GetTimestamp();
+                            long maximumAgeTicks = Math.Max(1, checked(
+                                Stopwatch.Frequency *
+                                MicrophoneFrameMaximumSendAgeMicroseconds /
+                                1_000_000));
+                            if (nowQpc - microphoneFrameArrivalQpc >
+                                maximumAgeTicks)
+                            {
+                                // Never catch up a missed controller tick. The
+                                // encoded FIFO remains lossless and the next
+                                // physical mic frame supplies a fresh slot.
+                                continue;
+                            }
+
+                            long targetQpc = microphoneFrameArrivalQpc +
+                                Math.Max(1, checked(Stopwatch.Frequency *
+                                    MicrophoneFramePostArrivalDelayMicroseconds /
+                                    1_000_000));
+                            WaitUntil(timer, targetQpc, stopRequested);
+                        }
+
+                        if (stopRequested.WaitOne(0))
+                        {
+                            break;
                         }
 
                         QueuedReport item;
@@ -3293,6 +3478,53 @@ namespace DS4Windows.InputDevices
                     Thread.Sleep(Math.Max(1,
                         (int)Math.Floor(remainingMilliseconds - 0.5)));
                 }
+            }
+
+            private bool TryWaitForNextMicrophoneFrame(
+                out long arrivalQpc, out byte sequence)
+            {
+                arrivalQpc = 0;
+                sequence = 0;
+                if (!inputArrivalSignal.WaitOne(
+                        MicrophoneFrameWaitTimeoutMilliseconds))
+                {
+                    return false;
+                }
+
+                // The parent is the only writer. Its odd/even version protects
+                // this three-field snapshot if another 10 ms microphone frame
+                // arrives while the helper is reading the shared page.
+                for (int attempt = 0; attempt < 4; attempt++)
+                {
+                    long begin = inputClockView.ReadInt64(
+                        InputClockVersionOffset);
+                    if (begin <= 0 || (begin & 1) != 0 ||
+                        begin == lastMicrophoneFrameVersion)
+                    {
+                        Thread.SpinWait(32);
+                        continue;
+                    }
+
+                    Thread.MemoryBarrier();
+                    long candidateQpc = inputClockView.ReadInt64(
+                        InputClockTimestampOffset);
+                    int candidateSequence = inputClockView.ReadInt32(
+                        InputClockSequenceOffset);
+                    Thread.MemoryBarrier();
+                    long end = inputClockView.ReadInt64(
+                        InputClockVersionOffset);
+                    if (begin == end && (end & 1) == 0)
+                    {
+                        lastMicrophoneFrameVersion = end;
+                        arrivalQpc = candidateQpc;
+                        sequence = unchecked((byte)candidateSequence);
+                        return arrivalQpc > 0;
+                    }
+
+                    Thread.SpinWait(32);
+                }
+
+                return false;
             }
 
             private static IntPtr RegisterMultimediaScheduler()

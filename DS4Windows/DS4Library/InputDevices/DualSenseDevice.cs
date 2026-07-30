@@ -1607,6 +1607,15 @@ namespace DS4Windows.InputDevices
             }
         }
 
+        private void SignalBluetoothAudioPacerMicrophoneFrame(byte sequence)
+        {
+            // Do not take the transport lock on the physical input thread.
+            // Disconnect may retire this reference concurrently; the pacer's
+            // signal method treats that final race as a harmless no-op.
+            Volatile.Read(ref bluetoothAudioPacer)?.SignalMicrophoneFrame(
+                sequence);
+        }
+
         private bool TryUpdateBluetoothAudioPacerCadenceRatio(double ratio)
         {
             lock (bluetoothAudioPacerLock)
@@ -2225,6 +2234,8 @@ namespace DS4Windows.InputDevices
                         {
                             if (IsBluetoothMicrophoneFrame(inputReport))
                             {
+                                SignalBluetoothAudioPacerMicrophoneFrame(
+                                    inputReport[2]);
                                 inputReportErrorCount = 0;
                                 RecordBluetoothMicrophoneFrame(inputReport);
                                 DrainQueuedInputEvents();

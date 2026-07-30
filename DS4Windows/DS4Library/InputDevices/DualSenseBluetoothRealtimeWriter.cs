@@ -91,6 +91,8 @@ namespace DS4Windows.InputDevices
         private readonly bool ownsDeviceHandle;
         private bool sharedHandleReferenceAdded;
         private readonly WriteSlot[] slots;
+        private readonly int maximumLogicalReportLength;
+        private readonly int physicalWriteLength;
         private readonly int audioInFlightLimit;
         private int nextSlot;
         private bool disposed;
@@ -111,6 +113,8 @@ namespace DS4Windows.InputDevices
         private long maximumAudioPendingBeforeSubmission;
         private long shallowAudioSubmissionCount;
         private long fullAudioSubmissionCount;
+        private long shortCompletionCount;
+        private long lastCompletionBytes;
         private readonly TaskCompletionSource<bool> disposalCompletion =
             new TaskCompletionSource<bool>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
@@ -144,6 +148,11 @@ namespace DS4Windows.InputDevices
             Interlocked.Read(ref shallowAudioSubmissionCount);
         public long FullAudioSubmissionCount =>
             Interlocked.Read(ref fullAudioSubmissionCount);
+        public long ShortCompletionCount =>
+            Interlocked.Read(ref shortCompletionCount);
+        public long LastCompletionBytes =>
+            Interlocked.Read(ref lastCompletionBytes);
+        public int PhysicalWriteLength => physicalWriteLength;
         public bool NativeResourcesReleased =>
             disposalCompletion.Task.IsCompletedSuccessfully;
 
@@ -157,13 +166,16 @@ namespace DS4Windows.InputDevices
         {
             this.deviceHandle = deviceHandle;
             ownsDeviceHandle = true;
+            maximumLogicalReportLength = reportLength;
+            physicalWriteLength = ResolvePhysicalWriteLength(deviceHandle,
+                reportLength);
             this.audioInFlightLimit = Math.Max(1, audioInFlightLimit);
             slots = new WriteSlot[slotCount];
             try
             {
                 for (int index = 0; index < slots.Length; index++)
                 {
-                    slots[index] = new WriteSlot(reportLength);
+                    slots[index] = new WriteSlot(physicalWriteLength);
                 }
             }
             catch
@@ -193,12 +205,15 @@ namespace DS4Windows.InputDevices
                 sharedDeviceHandle = deviceHandle;
                 sharedHandleReferenceAdded = addedReference;
                 this.deviceHandle = deviceHandle.DangerousGetHandle();
+                maximumLogicalReportLength = reportLength;
+                physicalWriteLength = ResolvePhysicalWriteLength(
+                    this.deviceHandle, reportLength);
                 this.audioInFlightLimit = Math.Max(1, audioInFlightLimit);
                 createdSlots = new WriteSlot[slotCount];
                 slots = createdSlots;
                 for (int index = 0; index < slots.Length; index++)
                 {
-                    slots[index] = new WriteSlot(reportLength);
+                    slots[index] = new WriteSlot(physicalWriteLength);
                 }
             }
             catch
@@ -310,7 +325,11 @@ namespace DS4Windows.InputDevices
                     return false;
                 }
 
-                ObserveCompletedWrites();
+                if (!ObserveCompletedWrites())
+                {
+                    transportFault = true;
+                    return false;
+                }
                 WriteSlot slot = slots[nextSlot];
                 uint waitResult = WaitForSingleObject(slot.EventHandle, 0);
                 if (waitResult == WAIT_TIMEOUT && timeoutMilliseconds != 0)
@@ -341,17 +360,11 @@ namespace DS4Windows.InputDevices
                     return true;
                 }
 
-                if (!GetOverlappedResult(deviceHandle, slot.Overlapped,
-                    out _, false))
+                if (!CompletePendingSlot(slot, Stopwatch.GetTimestamp()))
                 {
                     transportFault = true;
                     return false;
                 }
-
-                RecordCompletion(Stopwatch.GetTimestamp() -
-                    slot.SubmittedTimestamp);
-                slot.Pending = false;
-                slot.SubmittedTimestamp = 0;
                 return true;
             }
         }
@@ -364,7 +377,7 @@ namespace DS4Windows.InputDevices
         {
             transportFault = false;
             if (report == null || report.Length == 0 ||
-                report.Length > slots[0].Buffer.Length)
+                report.Length > maximumLogicalReportLength)
             {
                 transportFault = true;
                 return false;
@@ -378,7 +391,11 @@ namespace DS4Windows.InputDevices
                     return false;
                 }
 
-                ObserveCompletedWrites();
+                if (!ObserveCompletedWrites())
+                {
+                    transportFault = true;
+                    return false;
+                }
                 long now = Stopwatch.GetTimestamp();
                 int slotIndex = nextSlot;
                 WriteSlot slot = slots[slotIndex];
@@ -401,18 +418,15 @@ namespace DS4Windows.InputDevices
 
                 if (slot.Pending)
                 {
-                    if (!GetOverlappedResult(deviceHandle, slot.Overlapped, out _, false))
+                    if (!CompletePendingSlot(slot, now))
                     {
                         transportFault = true;
                         return false;
                     }
-
-                    RecordCompletion(now - slot.SubmittedTimestamp);
-                    slot.Pending = false;
-                    slot.SubmittedTimestamp = 0;
                 }
 
                 RecordAudioPendingBeforeSubmission(CountPendingSlots());
+                Array.Clear(slot.Buffer, 0, slot.Buffer.Length);
                 Buffer.BlockCopy(report, 0, slot.Buffer, 0, report.Length);
                 ResetEvent(slot.EventHandle);
                 var overlapped = new NativeOverlappedData { EventHandle = slot.EventHandle };
@@ -420,7 +434,7 @@ namespace DS4Windows.InputDevices
 
                 long nativeSubmissionStarted = Stopwatch.GetTimestamp();
                 bool completed = WriteFile(deviceHandle, slot.BufferHandle.AddrOfPinnedObject(),
-                    (uint)report.Length, IntPtr.Zero, slot.Overlapped);
+                    (uint)physicalWriteLength, IntPtr.Zero, slot.Overlapped);
                 RecordNativeSubmission(Stopwatch.GetTimestamp() -
                     nativeSubmissionStarted);
                 if (!completed)
@@ -438,6 +452,13 @@ namespace DS4Windows.InputDevices
                 }
                 else
                 {
+                    if (!ValidateSynchronousCompletion(slot))
+                    {
+                        SetEvent(slot.EventHandle);
+                        transportFault = true;
+                        return false;
+                    }
+
                     SetEvent(slot.EventHandle);
                     slot.Pending = false;
                     slot.SubmittedTimestamp = 0;
@@ -489,7 +510,7 @@ namespace DS4Windows.InputDevices
         {
             transportFault = false;
             if (report == null || report.Length == 0 ||
-                report.Length > slots[0].Buffer.Length)
+                report.Length > maximumLogicalReportLength)
             {
                 transportFault = true;
                 return false;
@@ -504,7 +525,11 @@ namespace DS4Windows.InputDevices
                 }
 
                 long waitStarted = Stopwatch.GetTimestamp();
-                ObserveCompletedWrites();
+                if (!ObserveCompletedWrites())
+                {
+                    transportFault = true;
+                    return false;
+                }
                 // A completion acknowledgement for a control report is also a
                 // physical ordering barrier. Do not submit it into any free
                 // slot while an older audio IRP can still complete afterwards
@@ -529,17 +554,12 @@ namespace DS4Windows.InputDevices
 
                     if (candidate.Pending)
                     {
-                        if (!GetOverlappedResult(deviceHandle,
-                            candidate.Overlapped, out _, false))
+                        if (!CompletePendingSlot(candidate,
+                            Stopwatch.GetTimestamp()))
                         {
                             transportFault = true;
                             return false;
                         }
-
-                        RecordCompletion(Stopwatch.GetTimestamp() -
-                            candidate.SubmittedTimestamp);
-                        candidate.Pending = false;
-                        candidate.SubmittedTimestamp = 0;
                     }
 
                     slot = candidate;
@@ -570,20 +590,16 @@ namespace DS4Windows.InputDevices
                     slot = slots[slotIndex];
                     if (slot.Pending)
                     {
-                        if (!GetOverlappedResult(deviceHandle,
-                            slot.Overlapped, out _, false))
+                        if (!CompletePendingSlot(slot,
+                            Stopwatch.GetTimestamp()))
                         {
                             transportFault = true;
                             return false;
                         }
-
-                        RecordCompletion(Stopwatch.GetTimestamp() -
-                            slot.SubmittedTimestamp);
-                        slot.Pending = false;
-                        slot.SubmittedTimestamp = 0;
                     }
                 }
 
+                Array.Clear(slot.Buffer, 0, slot.Buffer.Length);
                 Buffer.BlockCopy(report, 0, slot.Buffer, 0, report.Length);
                 ResetEvent(slot.EventHandle);
                 Marshal.StructureToPtr(new NativeOverlappedData
@@ -594,7 +610,8 @@ namespace DS4Windows.InputDevices
                 long submitted = Stopwatch.GetTimestamp();
                 long nativeSubmissionStarted = Stopwatch.GetTimestamp();
                 bool completed = WriteFile(deviceHandle,
-                    slot.BufferHandle.AddrOfPinnedObject(), (uint)report.Length,
+                    slot.BufferHandle.AddrOfPinnedObject(),
+                    (uint)physicalWriteLength,
                     IntPtr.Zero, slot.Overlapped);
                 RecordNativeSubmission(Stopwatch.GetTimestamp() -
                     nativeSubmissionStarted);
@@ -637,21 +654,22 @@ namespace DS4Windows.InputDevices
                         return false;
                     }
 
-                    if (!GetOverlappedResult(deviceHandle, slot.Overlapped,
-                        out _, false))
+                    if (!CompletePendingSlot(slot,
+                        Stopwatch.GetTimestamp()))
                     {
-                        slot.Pending = false;
-                        slot.SubmittedTimestamp = 0;
+                        transportFault = true;
+                        return false;
+                    }
+                }
+                else
+                {
+                    if (!ValidateSynchronousCompletion(slot))
+                    {
+                        SetEvent(slot.EventHandle);
                         transportFault = true;
                         return false;
                     }
 
-                    RecordCompletion(Stopwatch.GetTimestamp() - submitted);
-                    slot.Pending = false;
-                    slot.SubmittedTimestamp = 0;
-                }
-                else
-                {
                     SetEvent(slot.EventHandle);
                     Interlocked.Increment(ref completedWrites);
                 }
@@ -682,17 +700,11 @@ namespace DS4Windows.InputDevices
                     return false;
                 }
 
-                if (!GetOverlappedResult(deviceHandle, slot.Overlapped,
-                    out _, false))
+                if (!CompletePendingSlot(slot, Stopwatch.GetTimestamp()))
                 {
                     transportFault = true;
                     return false;
                 }
-
-                RecordCompletion(Stopwatch.GetTimestamp() -
-                    slot.SubmittedTimestamp);
-                slot.Pending = false;
-                slot.SubmittedTimestamp = 0;
             }
 
             return true;
@@ -714,7 +726,7 @@ namespace DS4Windows.InputDevices
                 timeoutMilliseconds - (uint)elapsedMilliseconds;
         }
 
-        private void ObserveCompletedWrites()
+        private bool ObserveCompletedWrites()
         {
             long now = Stopwatch.GetTimestamp();
             foreach (WriteSlot slot in slots)
@@ -724,15 +736,88 @@ namespace DS4Windows.InputDevices
                     continue;
                 }
 
-                if (!GetOverlappedResult(deviceHandle, slot.Overlapped, out _, false))
+                if (!CompletePendingSlot(slot, now))
                 {
-                    continue;
+                    return false;
                 }
-
-                RecordCompletion(now - slot.SubmittedTimestamp);
-                slot.Pending = false;
-                slot.SubmittedTimestamp = 0;
             }
+
+            return true;
+        }
+
+        private bool CompletePendingSlot(WriteSlot slot,
+            long completedTimestamp)
+        {
+            if (!GetOverlappedResult(deviceHandle, slot.Overlapped,
+                out uint bytesTransferred, false))
+            {
+                return false;
+            }
+
+            long submittedTimestamp = slot.SubmittedTimestamp;
+            slot.Pending = false;
+            slot.SubmittedTimestamp = 0;
+            if (!ValidateCompletionLength(bytesTransferred))
+            {
+                return false;
+            }
+
+            RecordCompletion(completedTimestamp - submittedTimestamp);
+            return true;
+        }
+
+        private bool ValidateSynchronousCompletion(WriteSlot slot)
+        {
+            return GetOverlappedResult(deviceHandle, slot.Overlapped,
+                       out uint bytesTransferred, false) &&
+                ValidateCompletionLength(bytesTransferred);
+        }
+
+        private bool ValidateCompletionLength(uint bytesTransferred)
+        {
+            Interlocked.Exchange(ref lastCompletionBytes,
+                bytesTransferred);
+            if (bytesTransferred == (uint)physicalWriteLength)
+            {
+                return true;
+            }
+
+            Interlocked.Increment(ref shortCompletionCount);
+            return false;
+        }
+
+        private static int ResolvePhysicalWriteLength(IntPtr handle,
+            int logicalReportLength)
+        {
+            IntPtr preparsedData = IntPtr.Zero;
+            try
+            {
+                if (handle != IntPtr.Zero &&
+                    handle != new IntPtr(-1) &&
+                    DS4Windows.NativeMethods.HidD_GetPreparsedData(handle,
+                        ref preparsedData))
+                {
+                    var capabilities =
+                        default(DS4Windows.NativeMethods.HIDP_CAPS);
+                    DS4Windows.NativeMethods.HidP_GetCaps(preparsedData,
+                        ref capabilities);
+                    if (capabilities.OutputReportByteLength > 0)
+                    {
+                        return Math.Max(logicalReportLength,
+                            capabilities.OutputReportByteLength);
+                    }
+                }
+            }
+            finally
+            {
+                if (preparsedData != IntPtr.Zero)
+                {
+                    DS4Windows.NativeMethods.HidD_FreePreparsedData(
+                        preparsedData);
+                }
+            }
+
+            return logicalReportLength;
         }
 
         private void RecordSubmissionGap(long now)

@@ -25,6 +25,8 @@ namespace DS4Windows.InputDevices
             "DS4WINDOWS_DUALSENSE_AUDIO_TRANSPORT";
         internal const string TestHapticsEnvironmentVariable =
             "DS4WINDOWS_DUALSENSE_TEST_HAPTICS";
+        internal const string DedicatedAudioHandleEnvironmentVariable =
+            "DS4WINDOWS_DUALSENSE_DEDICATED_AUDIO_HANDLE";
         // Keep media on the hardware-validated PadForge-sized carrier: one
         // complete speaker/haptics generation per 10.667 ms. The 547-byte
         // paired carrier is valid on DS5Dongle's raw L2CAP stack, but Windows
@@ -72,6 +74,19 @@ namespace DS4Windows.InputDevices
         {
             return string.Equals(value, "35combined",
                 StringComparison.Ordinal);
+        }
+
+        internal static bool UseDedicatedAudioHandle(string value)
+        {
+            return string.Equals(value, "1", StringComparison.Ordinal) ||
+                string.Equals(value, "strict",
+                    StringComparison.OrdinalIgnoreCase);
+        }
+
+        internal static bool RequireDedicatedAudioHandle(string value)
+        {
+            return string.Equals(value, "strict",
+                StringComparison.OrdinalIgnoreCase);
         }
 
         internal static bool RequiresFullDuplexAudioReport(byte[] report)
@@ -353,12 +368,14 @@ namespace DS4Windows.InputDevices
         public static bool TryRunHelper(string[] args)
         {
             if (!TryParseHelperArguments(args, out string pipeName,
-                out Guid authenticationToken, out int parentProcessId))
+                out Guid authenticationToken, out int parentProcessId,
+                out string devicePath))
             {
                 return false;
             }
 
-            RunHelper(pipeName, authenticationToken, parentProcessId);
+            RunHelper(pipeName, authenticationToken, parentProcessId,
+                devicePath);
             return true;
         }
 
@@ -383,6 +400,16 @@ namespace DS4Windows.InputDevices
         /// template, not to any older queued audio report.
         /// </summary>
         public static bool TryStart(SafeFileHandle activeOverlappedHidHandle,
+            byte[] initialTemplate, long hapticsExpiryQpc,
+            out DualSenseBluetoothAudioPacer pacer,
+            out string error)
+        {
+            return TryStart(activeOverlappedHidHandle, devicePath: null,
+                initialTemplate, hapticsExpiryQpc, out pacer, out error);
+        }
+
+        internal static bool TryStart(
+            SafeFileHandle activeOverlappedHidHandle, string devicePath,
             byte[] initialTemplate, long hapticsExpiryQpc,
             out DualSenseBluetoothAudioPacer pacer,
             out string error)
@@ -440,6 +467,7 @@ namespace DS4Windows.InputDevices
                 startInfo.ArgumentList.Add(pipeName);
                 startInfo.ArgumentList.Add(authenticationToken.ToString("N"));
                 startInfo.ArgumentList.Add(Process.GetCurrentProcess().Id.ToString());
+                startInfo.ArgumentList.Add(devicePath ?? string.Empty);
 
                 child = Process.Start(startInfo);
                 if (child == null)
@@ -1400,11 +1428,13 @@ namespace DS4Windows.InputDevices
 
         private static bool TryParseHelperArguments(string[] args,
             out string pipeName, out Guid authenticationToken,
-            out int parentProcessId)
+            out int parentProcessId, out string devicePath)
         {
             pipeName = string.Empty;
             authenticationToken = Guid.Empty;
             parentProcessId = 0;
+            devicePath = args != null && args.Length >= 5 ? args[4] :
+                string.Empty;
             return args != null && args.Length >= 4 &&
                 string.Equals(args[0], HelperArgument,
                     StringComparison.OrdinalIgnoreCase) &&
@@ -1594,7 +1624,7 @@ namespace DS4Windows.InputDevices
         }
 
         private static void RunHelper(string pipeName, Guid authenticationToken,
-            int parentProcessId)
+            int parentProcessId, string devicePath)
         {
             using var helperPipe = new NamedPipeClientStream(".", pipeName,
                 PipeDirection.InOut, PipeOptions.Asynchronous |
@@ -1625,19 +1655,40 @@ namespace DS4Windows.InputDevices
                 using var duplicatedHandle = new SafeFileHandle(
                     new IntPtr(duplicatedHandleValue), true);
                 int writerError = 6;
-                if (duplicatedHandle.IsInvalid ||
+                int reportLength = UsePairedAudioReports ?
+                    DualSenseBluetoothPairedAudioReportBuilder.ReportLength :
+                    ReportLength;
+                string dedicatedMode = Environment.GetEnvironmentVariable(
+                    DedicatedAudioHandleEnvironmentVariable);
+                bool requestDedicated = UseDedicatedAudioHandle(dedicatedMode);
+                bool requireDedicated = RequireDedicatedAudioHandle(
+                    dedicatedMode);
+                DualSenseBluetoothRealtimeWriter writer = null;
+                int writerSlotCount = UsePairedAudioReports ?
+                    PairedAudioTransportSlotCount :
+                    SingleAudioTransportSlotCount;
+                int writerInFlightLimit = UsePairedAudioReports ?
+                    PairedAudioInFlightLimit : SingleAudioInFlightLimit;
+                bool dedicatedOpened = requestDedicated &&
+                    !string.IsNullOrWhiteSpace(devicePath) &&
+                    DualSenseBluetoothRealtimeWriter.TryCreate(devicePath,
+                        reportLength, out writer, out writerError,
+                        writerSlotCount, writerInFlightLimit);
+                if (!dedicatedOpened && requireDedicated)
+                {
+                    writer?.Dispose();
+                    TryWriteError(helperPipe,
+                        "Could not initialize the dedicated DualSense audio HID handle. " +
+                        $"Win32Error={writerError}.");
+                    return;
+                }
+
+                if (!dedicatedOpened &&
+                    (duplicatedHandle.IsInvalid ||
                     !DualSenseBluetoothRealtimeWriter.TryCreate(duplicatedHandle,
-                        UsePairedAudioReports ?
-                            DualSenseBluetoothPairedAudioReportBuilder.ReportLength :
-                            ReportLength,
-                        out DualSenseBluetoothRealtimeWriter writer,
-                        out writerError,
-                        slotCount: UsePairedAudioReports ?
-                            PairedAudioTransportSlotCount :
-                            SingleAudioTransportSlotCount,
-                        audioInFlightLimit: UsePairedAudioReports ?
-                            PairedAudioInFlightLimit :
-                            SingleAudioInFlightLimit))
+                        reportLength, out writer, out writerError,
+                        slotCount: writerSlotCount,
+                        audioInFlightLimit: writerInFlightLimit)))
                 {
                     TryWriteError(helperPipe,
                         "Could not initialize the duplicated DualSense HID handle. " +

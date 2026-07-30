@@ -1324,7 +1324,8 @@ namespace DS4Windows.InputDevices
                         speakerVolume, headsetOnlyAudio, headphoneVolume);
                     ApplyBluetoothMicrophoneStreamingRequest(initialTemplate);
                     if (!DualSenseBluetoothAudioPacer.TryStart(
-                        hDevice?.SafeReadHandle, initialTemplate,
+                        hDevice?.SafeReadHandle, hDevice?.DevicePath,
+                        initialTemplate,
                         initialHapticsExpiry, out candidate, out string error))
                     {
                         bluetoothAudioPacerLastError = error ?? string.Empty;
@@ -1470,7 +1471,8 @@ namespace DS4Windows.InputDevices
                 }
                 long initialHapticsExpiry = GetBluetoothHapticsExpiryQpc();
                 if (!DualSenseBluetoothAudioPacer.TryStart(
-                    hDevice?.SafeReadHandle, initialTemplate,
+                    hDevice?.SafeReadHandle, hDevice?.DevicePath,
+                    initialTemplate,
                     initialHapticsExpiry,
                     out DualSenseBluetoothAudioPacer pacer,
                     out string error))

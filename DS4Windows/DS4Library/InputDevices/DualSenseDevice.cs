@@ -1224,20 +1224,25 @@ namespace DS4Windows.InputDevices
         /// speaker source consumption while this method runs on the dedicated
         /// lifecycle thread.
         /// </summary>
-        internal bool PrepareBluetoothSpeakerClockTransport()
+        internal bool PrepareBluetoothSpeakerClockTransport(
+            bool usePadSensePresentationCadence = false)
         {
             return TransitionBluetoothSpeakerClockTransport(
-                ignoreRetryCooldown: false);
+                ignoreRetryCooldown: false,
+                usePadSensePresentationCadence);
         }
 
-        internal bool RecoverBluetoothSpeakerClockTransport()
+        internal bool RecoverBluetoothSpeakerClockTransport(
+            bool usePadSensePresentationCadence = false)
         {
             return TransitionBluetoothSpeakerClockTransport(
-                ignoreRetryCooldown: true);
+                ignoreRetryCooldown: true,
+                usePadSensePresentationCadence);
         }
 
         private bool TransitionBluetoothSpeakerClockTransport(
-            bool ignoreRetryCooldown)
+            bool ignoreRetryCooldown,
+            bool usePadSensePresentationCadence)
         {
             if (conType != ConnectionType.BT ||
                 Volatile.Read(ref bluetoothOutputTransportStopping) != 0)
@@ -1261,7 +1266,10 @@ namespace DS4Windows.InputDevices
 
                     lock (bluetoothAudioPacerLock)
                     {
-                        if (bluetoothAudioPacer?.IsRunning == true)
+                        if (bluetoothAudioPacer?.IsRunning == true &&
+                            (!usePadSensePresentationCadence ||
+                                bluetoothAudioPacer.
+                                    UsesPadSensePresentationCadence))
                         {
                             return true;
                         }
@@ -1325,7 +1333,8 @@ namespace DS4Windows.InputDevices
                     ApplyBluetoothMicrophoneStreamingRequest(initialTemplate);
                     if (!DualSenseBluetoothAudioPacer.TryStart(
                         hDevice?.DevicePath, initialTemplate,
-                        initialHapticsExpiry, out candidate,
+                        initialHapticsExpiry,
+                        usePadSensePresentationCadence, out candidate,
                         out string error))
                     {
                         bluetoothAudioPacerLastError = error ?? string.Empty;

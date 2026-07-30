@@ -343,26 +343,25 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void PadSensePrimeKeepsExistingIdleCarrierUntilEightRealBlocks()
+        public void PadSensePrimeKeepsIdleCarrierUntilEightReportsCanBeBuilt()
         {
             const int sourceFramesPerBlock = 480;
             int bufferedFrames = 0;
             int requiredFrames =
                 DualSenseBluetoothSpeakerPassthrough.
-                    StartupWarmupReportCount * sourceFramesPerBlock;
+                    PadSenseInitialSourceBufferFrames;
+            int sourceBlocks = (requiredFrames + sourceFramesPerBlock - 1) /
+                sourceFramesPerBlock;
 
             for (int block = 1;
-                block <= DualSenseBluetoothSpeakerPassthrough.
-                    StartupWarmupReportCount;
+                block <= sourceBlocks;
                 block++)
             {
                 bufferedFrames += sourceFramesPerBlock;
                 bool captureReady = bufferedFrames >= requiredFrames;
                 bool sourcePrimePending = !captureReady;
 
-                Assert.AreEqual(block <
-                        DualSenseBluetoothSpeakerPassthrough.
-                            StartupWarmupReportCount,
+                Assert.AreEqual(block < sourceBlocks,
                     DualSenseBluetoothSpeakerPassthrough.
                         ShouldMaintainIdleCarrierDuringPadSensePrime(
                             usesPadSenseSource: true, sourcePrimePending,
@@ -387,22 +386,23 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void SilentPadSenseSourceCannotLeakPrimeAcrossIdleBoundary()
+        public void PadSenseCallbackDroughtUsesIdleCarrierWithoutEndingGeneration()
         {
             Assert.IsTrue(DualSenseBluetoothSpeakerPassthrough.
-                ShouldResetPadSenseSourcePrime(
-                    usesPadSenseSource: true, sourceWasObserved: true,
+                ShouldEmitPadSenseIdleCarrier(
+                    usesPadSenseSource: true,
                     sourceRecentlyActive: false),
-                "A silent source generation must reset its prime even when " +
-                "no audible segment was opened.");
+                "A transient callback drought should use the armed idle " +
+                "carrier without declaring the source generation ended.");
             Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
-                ShouldResetPadSenseSourcePrime(
-                    usesPadSenseSource: true, sourceWasObserved: true,
+                ShouldEmitPadSenseIdleCarrier(
+                    usesPadSenseSource: true,
                     sourceRecentlyActive: true),
-                "A live source generation must not be reset at the handoff.");
+                "A callback that wins the freshness recheck must be retried " +
+                "instead of being replaced by an idle carrier.");
             Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
-                ShouldResetPadSenseSourcePrime(
-                    usesPadSenseSource: false, sourceWasObserved: true,
+                ShouldEmitPadSenseIdleCarrier(
+                    usesPadSenseSource: false,
                     sourceRecentlyActive: false),
                 "Legacy capture transports must keep their existing policy.");
         }

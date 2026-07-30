@@ -322,6 +322,102 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
+        public void PadSenseNativeLatticeMatchesObservedTenTwentyPattern()
+        {
+            const long qpcFrequency = 10_000_000;
+            const long startQpc = 3_000_000;
+            long[] expectedOffsetsMilliseconds =
+            {
+                0, 10, 20, 30, 40, 50, 60, 70,
+                80, 90, 100, 110, 120, 130, 140, 160,
+            };
+            var scheduler =
+                new DualSensePadSenseNativePresentationScheduler(
+                    qpcFrequency);
+            scheduler.Start(startQpc);
+
+            foreach (long expectedOffsetMilliseconds in
+                expectedOffsetsMilliseconds)
+            {
+                Assert.AreEqual(startQpc + expectedOffsetMilliseconds *
+                    qpcFrequency / 1000, scheduler.NextDeadlineQpc);
+                scheduler.AdvanceAfterSend(scheduler.NextDeadlineQpc);
+            }
+        }
+
+        [TestMethod]
+        public void PadSenseNativeLatticePreservesExactLongWindowCadence()
+        {
+            const long qpcFrequency = 10_000_000;
+            var scheduler =
+                new DualSensePadSenseNativePresentationScheduler(
+                    qpcFrequency);
+            scheduler.Start(0);
+
+            for (int report = 0; report < 150; report++)
+            {
+                scheduler.AdvanceAfterSend(scheduler.NextDeadlineQpc);
+            }
+
+            Assert.AreEqual(qpcFrequency * 16L / 10,
+                scheduler.NextDeadlineQpc,
+                "One hundred fifty reports must consume exactly ten " +
+                "PadSense 160 ms host cycles.");
+        }
+
+        [TestMethod]
+        public void PadSenseNativeLatticeAppliesClockRatioWithoutPhaseReset()
+        {
+            const long qpcFrequency = 10_000_000;
+            const double controllerClockRatio = 0.999800;
+            var scheduler =
+                new DualSensePadSenseNativePresentationScheduler(
+                    qpcFrequency);
+            scheduler.Start(0);
+            for (int report = 0; report < 75; report++)
+            {
+                scheduler.AdvanceAfterSend(scheduler.NextDeadlineQpc);
+            }
+
+            long boundaryBeforeRatioUpdate = scheduler.NextDeadlineQpc;
+            scheduler.SetRateRatio(controllerClockRatio);
+            Assert.AreEqual(boundaryBeforeRatioUpdate,
+                scheduler.NextDeadlineQpc,
+                "A clock-ratio update must not move the already-published " +
+                "PadSense deadline.");
+            for (int report = 0; report < 1500; report++)
+            {
+                scheduler.AdvanceAfterSend(scheduler.NextDeadlineQpc);
+            }
+
+            double expected = boundaryBeforeRatioUpdate +
+                qpcFrequency * 16.0 / controllerClockRatio;
+            Assert.AreEqual(expected, scheduler.NextDeadlineQpc, 1.0,
+                "Fractional clock correction drifted across the PadSense " +
+                "10/20 ms lattice.");
+        }
+
+        [TestMethod]
+        public void PadSenseNativeLatticeReanchorsAfterLongHostStall()
+        {
+            const long qpcFrequency = 10_000_000;
+            var scheduler =
+                new DualSensePadSenseNativePresentationScheduler(
+                    qpcFrequency);
+            scheduler.Start(qpcFrequency);
+            scheduler.AdvanceAfterSend(scheduler.NextDeadlineQpc);
+
+            long stalledPresentation = scheduler.NextDeadlineQpc +
+                qpcFrequency * 97 / 1000;
+            scheduler.AdvanceAfterSend(stalledPresentation);
+
+            Assert.AreEqual(stalledPresentation + qpcFrequency / 100,
+                scheduler.NextDeadlineQpc,
+                "A long host stall must schedule one future 10 ms interval, " +
+                "not replay missed PadSense ticks in a catch-up burst.");
+        }
+
+        [TestMethod]
         public void NativeSchedulerAppliesClockRatioAcrossUniformDeadlines()
         {
             const long qpcFrequency = 10_000_000;
@@ -594,6 +690,20 @@ namespace DS4Windows.Tests
                 UsesSourceDrivenNativePresentation(
                     useNativeAudioTransport: false, nextReport: speaker),
                 "Compact transport must remain helper-clocked.");
+        }
+
+        [DataTestMethod]
+        [DataRow(true, true, true)]
+        [DataRow(true, false, false)]
+        [DataRow(false, true, false)]
+        [DataRow(false, false, false)]
+        public void PadSensePresentationCadenceIsExplicitAndNativeOnly(
+            bool requested, bool nativeTransport, bool expected)
+        {
+            Assert.AreEqual(expected,
+                DualSenseBluetoothAudioPacer.
+                    ShouldUsePadSensePresentationCadence(requested,
+                        nativeTransport));
         }
 
         [TestMethod]

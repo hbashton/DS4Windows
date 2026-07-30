@@ -439,6 +439,11 @@ namespace DS4Windows
         internal const int StartupWarmupReportCount = 8;
         internal const int PadSenseSourceReservoirTargetFrames =
             StartupWarmupReportCount;
+        internal const int PadSenseInitialSourceBufferFrames =
+            StartupWarmupReportCount *
+                DualSensePadSenseSpeakerClockResampler.ReferenceInputFrames +
+            DualSenseReferenceSpeakerFrameResampler.
+                InterpolationLookaheadFrames;
         private const int CaptureRingFrames = (SampleRate * CaptureBufferMs) / 1000;
         private const int CapturePumpBufferFrames = 2048;
         private const int DirectPcmChunkBytes = 4096;
@@ -636,7 +641,7 @@ namespace DS4Windows
 
         private int InitialSourceBufferFrames =>
             directSpeakerUsesPadSenseSource ?
-                StartupWarmupReportCount * FrameSamples :
+                PadSenseInitialSourceBufferFrames :
                 (SampleRate * InitialBufferMs) / 1000;
 
         private int StartupWarmupReportsForCurrentSource =>
@@ -1766,12 +1771,10 @@ namespace DS4Windows
                 !captureReady && sourceRecentlyActive;
         }
 
-        internal static bool ShouldResetPadSenseSourcePrime(
-            bool usesPadSenseSource, bool sourceWasObserved,
-            bool sourceRecentlyActive)
+        internal static bool ShouldEmitPadSenseIdleCarrier(
+            bool usesPadSenseSource, bool sourceRecentlyActive)
         {
-            return usesPadSenseSource && sourceWasObserved &&
-                !sourceRecentlyActive;
+            return usesPadSenseSource && !sourceRecentlyActive;
         }
 
         // PadSense transfers its eight complete source blocks into the strict
@@ -1896,7 +1899,7 @@ namespace DS4Windows
             }
         }
 
-        private bool TryResetInactivePadSenseSourcePrime()
+        private bool TryConfirmInactivePadSenseSource()
         {
             if (!directSpeakerUsesPadSenseSource)
             {
@@ -1908,8 +1911,6 @@ namespace DS4Windows
             // never erase that callback or replace it with an idle carrier.
             lock (directPcmSync)
             {
-                long sourceTimestamp = Interlocked.Read(
-                    ref lastSourcePcmTimestamp);
                 bool sourceRecentlyActive = HasRecentSourcePcm(
                     Stopwatch.GetTimestamp());
                 if (sourceRecentlyActive)
@@ -1917,28 +1918,16 @@ namespace DS4Windows
                     return false;
                 }
 
-                if (!ShouldResetPadSenseSourcePrime(
+                // A missing callback is not a source-generation boundary.
+                // PadSense/VIIPER can pause longer than the freshness lease
+                // while the same endpoint generation remains active. Emit a
+                // paced idle carrier, but preserve the ring, fractional
+                // resampler history, prime, and segment state so the next
+                // callback resumes immediately. Only an explicit lifecycle
+                // transition may reset those fields.
+                return ShouldEmitPadSenseIdleCarrier(
                     usesPadSenseSource: true,
-                    sourceWasObserved: sourceTimestamp != 0,
-                    sourceRecentlyActive: false))
-                {
-                    return true;
-                }
-
-                Interlocked.Exchange(ref lastSourcePcmTimestamp, 0);
-                Interlocked.Exchange(ref lastRawAudibleTimestamp, 0);
-                lock (syncRoot)
-                {
-                    ResetCapturePipelineAtSegmentBoundaryLocked();
-                }
-
-                if (audioSegmentActive)
-                {
-                    audioSegmentActive = false;
-                    Interlocked.Increment(ref audioSegmentStops);
-                }
-                Volatile.Write(ref pacerPrewarmAttemptedForSegment, 0);
-                return true;
+                    sourceRecentlyActive: false);
             }
         }
 
@@ -2048,8 +2037,10 @@ namespace DS4Windows
                         try
                         {
                             prepared = recovery ?
-                                device.RecoverBluetoothSpeakerClockTransport() :
-                                device.PrepareBluetoothSpeakerClockTransport();
+                                device.RecoverBluetoothSpeakerClockTransport(
+                                    directSpeakerUsesPadSenseSource) :
+                                device.PrepareBluetoothSpeakerClockTransport(
+                                    directSpeakerUsesPadSenseSource);
                             // The session boundary clears stale queued audio and
                             // physically commits any pending microphone transition
                             // before speaker traffic is released again.
@@ -2333,7 +2324,7 @@ namespace DS4Windows
 
                     if (!captureReady && !sourceRecentlyActive)
                     {
-                        if (!TryResetInactivePadSenseSourcePrime())
+                        if (!TryConfirmInactivePadSenseSource())
                         {
                             // A producer callback won the idle-boundary race.
                             // Re-evaluate readiness without sending an unrelated

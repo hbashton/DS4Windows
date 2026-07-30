@@ -25,6 +25,8 @@ namespace DS4Windows.InputDevices
             "DS4WINDOWS_DUALSENSE_AUDIO_TRANSPORT";
         internal const string TestHapticsEnvironmentVariable =
             "DS4WINDOWS_DUALSENSE_TEST_HAPTICS";
+        internal const string PadSensePresentationEnvironmentVariable =
+            "DS4WINDOWS_DUALSENSE_PADSENSE_PRESENTATION";
         // Keep media on the hardware-validated PadForge-sized carrier: one
         // complete speaker/haptics generation per 10.667 ms. The 547-byte
         // paired carrier is valid on DS5Dongle's raw L2CAP stack, but Windows
@@ -32,10 +34,10 @@ namespace DS4Windows.InputDevices
         // discontinuities after otherwise-clean encoding. Microphone and
         // controller-state transitions are serialized separately below.
         internal const bool UsePairedAudioReports = false;
-        // PadSense does not start its native media writer until eight complete
-        // 480-frame USB-audio blocks are available. Once primed, it submits
-        // every complete block immediately into its OVERLAPPED ring; HidBth,
-        // rather than a second user-mode timer, owns the radio cadence.
+        // PadSense arms its native media writer with eight complete reports.
+        // After that one-time burst it presents fifteen 480-frame reports on
+        // sixteen 10 ms host ticks, leaving one deliberate 20 ms boundary per
+        // 160 ms while its controller-side reserve remains continuous.
         internal const int NativePrimeReportCount = 8;
         // Sony's 0x39 report is complete as soon as one two-frame pair exists.
         internal const int PairedPrimeReportCount = 2;
@@ -237,6 +239,7 @@ namespace DS4Windows.InputDevices
         private readonly EventWaitHandle inputArrivalSignal;
         private readonly MemoryMappedFile inputClockMap;
         private readonly MemoryMappedViewAccessor inputClockView;
+        private readonly bool usesPadSensePresentationCadence;
         private readonly DualSenseBluetoothAudioPacerRing<OutboundCommand>
             outboundCommands = new DualSenseBluetoothAudioPacerRing<OutboundCommand>(
                 OutboundCommandCapacity);
@@ -289,13 +292,16 @@ namespace DS4Windows.InputDevices
         private DualSenseBluetoothAudioPacer(NamedPipeServerStream pipe,
             Process helperProcess, EventWaitHandle inputArrivalSignal,
             MemoryMappedFile inputClockMap,
-            MemoryMappedViewAccessor inputClockView)
+            MemoryMappedViewAccessor inputClockView,
+            bool usesPadSensePresentationCadence)
         {
             this.pipe = pipe;
             this.helperProcess = helperProcess;
             this.inputArrivalSignal = inputArrivalSignal;
             this.inputClockMap = inputClockMap;
             this.inputClockView = inputClockView;
+            this.usesPadSensePresentationCadence =
+                usesPadSensePresentationCadence;
             senderThread = new Thread(SenderLoop)
             {
                 IsBackground = true,
@@ -486,6 +492,16 @@ namespace DS4Windows.InputDevices
             out DualSenseBluetoothAudioPacer pacer,
             out string error)
         {
+            return TryStart(devicePath, initialTemplate, hapticsExpiryQpc,
+                usePadSensePresentationCadence: false, out pacer, out error);
+        }
+
+        public static bool TryStart(string devicePath,
+            byte[] initialTemplate, long hapticsExpiryQpc,
+            bool usePadSensePresentationCadence,
+            out DualSenseBluetoothAudioPacer pacer,
+            out string error)
+        {
             pacer = null;
             error = string.Empty;
 
@@ -551,6 +567,9 @@ namespace DS4Windows.InputDevices
                 startInfo.ArgumentList.Add(inputArrivalSignalName);
                 startInfo.ArgumentList.Add(inputClockMapName);
                 startInfo.ArgumentList.Add(devicePath);
+                startInfo.Environment[
+                    PadSensePresentationEnvironmentVariable] =
+                    usePadSensePresentationCadence ? "1" : "0";
 
                 child = Process.Start(startInfo);
                 if (child == null)
@@ -577,7 +596,8 @@ namespace DS4Windows.InputDevices
 
                 connection.GetAwaiter().GetResult();
                 candidate = new DualSenseBluetoothAudioPacer(server, child,
-                    inputSignal, inputMap, inputView);
+                    inputSignal, inputMap, inputView,
+                    usePadSensePresentationCadence);
                 inputSignal = null;
                 inputMap = null;
                 inputView = null;
@@ -759,6 +779,9 @@ namespace DS4Windows.InputDevices
                 speakerReportCount >= requiredPrimeReportCount;
         }
 
+        internal bool UsesPadSensePresentationCadence =>
+            usesPadSensePresentationCadence;
+
         internal static bool CanPresentFromTransportGate(bool primeRequired,
             int speakerReportCount, byte[] nextReport,
             int requiredPrimeReportCount = NativePrimeReportCount)
@@ -792,6 +815,12 @@ namespace DS4Windows.InputDevices
             bool useNativeAudioTransport, byte[] nextReport)
         {
             return useNativeAudioTransport && IsSpeakerAudioReport(nextReport);
+        }
+
+        internal static bool ShouldUsePadSensePresentationCadence(
+            bool requested, bool useNativeAudioTransport)
+        {
+            return requested && useNativeAudioTransport;
         }
 
         internal static bool ShouldRequireAudioPrimeAfterPresentation(
@@ -2003,6 +2032,7 @@ namespace DS4Windows.InputDevices
             private readonly bool usePadForgeAudioTransport;
             private readonly bool useCompactCombinedHapticsTransport;
             private readonly bool useNativeAudioTransport;
+            private readonly bool usePadSensePresentationCadence;
             private readonly bool injectTestHaptics;
             private int testHapticsSampleIndex;
             private long latestTemplateHapticsExpiryQpc;
@@ -2070,6 +2100,12 @@ namespace DS4Windows.InputDevices
                             AudioTransportEnvironmentVariable));
                 useNativeAudioTransport = !UsePairedAudioReports &&
                     !usePadForgeAudioTransport;
+                usePadSensePresentationCadence =
+                    ShouldUsePadSensePresentationCadence(string.Equals(
+                        Environment.GetEnvironmentVariable(
+                            PadSensePresentationEnvironmentVariable),
+                        "1", StringComparison.Ordinal),
+                        useNativeAudioTransport);
                 injectTestHaptics = string.Equals(
                     Environment.GetEnvironmentVariable(
                         TestHapticsEnvironmentVariable), "1",
@@ -2583,12 +2619,16 @@ namespace DS4Windows.InputDevices
                 timeBeginPeriod(1);
                 IntPtr multimediaHandle = RegisterMultimediaScheduler();
                 IntPtr timer = CreateHighResolutionTimer();
-                // This clock remains for compact/paired fallbacks. Native
-                // PadSense-compatible media bypasses it: source completion
-                // submits directly into the 32-slot writer and HidBth owns the
-                // radio cadence.
+                // Compact/paired fallbacks retain the rational clock. The V5
+                // source opts into PadSense's separately observed 10/20 ms
+                // host lattice below; other native sources keep their existing
+                // source-completion behavior.
                 var scheduler = new DualSenseBluetoothAudioPacerScheduler(
                     Stopwatch.Frequency);
+                var padSenseScheduler =
+                    new DualSensePadSenseNativePresentationScheduler(
+                        Stopwatch.Frequency);
+                int padSenseStartupBurstReportsRemaining = 0;
                 try
                 {
                     while (!stopRequested.WaitOne(0))
@@ -2598,6 +2638,7 @@ namespace DS4Windows.InputDevices
                         bool microphoneStatusReady;
                         bool controllerStateReady;
                         bool sourceDrivenNativePresentation;
+                        bool padSenseStartupBurstPresentation;
                         int idleWaitMilliseconds = 1000;
                         lock (stateLock)
                         {
@@ -2628,7 +2669,12 @@ namespace DS4Windows.InputDevices
                                 IsSpeakerAudioReport(nextReport.Report) ?
                                     reservoir.CountLeading(
                                         IsQueuedSpeakerReport) : 0;
+                            padSenseStartupBurstPresentation =
+                                usePadSensePresentationCadence &&
+                                padSenseStartupBurstReportsRemaining > 0 &&
+                                IsSpeakerAudioReport(nextReport?.Report);
                             sourceDrivenNativePresentation =
+                                !usePadSensePresentationCadence &&
                                 UsesSourceDrivenNativePresentation(
                                     useNativeAudioTransport,
                                     nextReport?.Report);
@@ -2648,9 +2694,22 @@ namespace DS4Windows.InputDevices
                                 !controllerStateReady)
                             {
                                 primeRequired = false;
-                                scheduler.Start(Stopwatch.GetTimestamp(),
-                                    ControllerLinkWarmupIntervals,
-                                    ControllerReserveTransferIntervals);
+                                if (usePadSensePresentationCadence)
+                                {
+                                    padSenseStartupBurstReportsRemaining =
+                                        GetPrimeReportCount(
+                                            usePadForgeAudioTransport);
+                                    padSenseStartupBurstPresentation =
+                                        IsSpeakerAudioReport(
+                                            nextReport?.Report);
+                                    padSenseScheduler.Reset();
+                                }
+                                else
+                                {
+                                    scheduler.Start(Stopwatch.GetTimestamp(),
+                                        ControllerLinkWarmupIntervals,
+                                        ControllerReserveTransferIntervals);
+                                }
                             }
 
                         }
@@ -2853,11 +2912,37 @@ namespace DS4Windows.InputDevices
                         long microphoneSlotDeadlineQpc = 0;
                         int microphoneClockGeneration = 0;
                         if (!controlPrimeBypass &&
-                            !sourceDrivenNativePresentation)
+                            !sourceDrivenNativePresentation &&
+                            !padSenseStartupBurstPresentation)
                         {
                             double controllerClockRatio =
                                 BitConverter.Int64BitsToDouble(
                                     Interlocked.Read(ref cadenceRatioBits));
+                            if (usePadSensePresentationCadence)
+                            {
+                                padSenseScheduler.SetRateRatio(Math.Clamp(
+                                    controllerClockRatio,
+                                    DualSensePadSenseNativePresentationScheduler.
+                                        MinimumRateRatio,
+                                    DualSensePadSenseNativePresentationScheduler.
+                                        MaximumRateRatio));
+                                if (!padSenseScheduler.IsStarted)
+                                {
+                                    // Defensive recovery for a source that
+                                    // resumes after an explicit clear without
+                                    // replaying a stale deadline. The normal
+                                    // path starts this clock when the eighth
+                                    // startup report is accepted below.
+                                    long nowQpc = Stopwatch.GetTimestamp();
+                                    padSenseScheduler.Start(nowQpc);
+                                    padSenseScheduler.AdvanceAfterSend(nowQpc);
+                                }
+                                WaitUntil(timer,
+                                    padSenseScheduler.NextDeadlineQpc,
+                                    stopRequested);
+                            }
+                            else
+                            {
                             // Byte 65 remains diagnostic telemetry. Feeding it
                             // into steady cadence resampled audible media and
                             // still failed to raise the measured equilibrium.
@@ -2949,6 +3034,7 @@ namespace DS4Windows.InputDevices
                                     scheduler.PresentationDeadlineQpc,
                                     stopRequested);
                             }
+                            }
                         }
                         if (stopRequested.WaitOne(0))
                         {
@@ -2995,6 +3081,7 @@ namespace DS4Windows.InputDevices
                         long presentedAt;
                         long pairedPresentedAt = 0;
                         bool advanceScheduler;
+                        bool advancePadSenseScheduler;
                         bool controlOnly;
                         bool retainedForRetry = false;
                         lock (stateLock)
@@ -3240,6 +3327,29 @@ namespace DS4Windows.InputDevices
                             if (!retainedForRetry &&
                                 disposition ==
                                     AcknowledgementDisposition.Presented &&
+                                padSenseStartupBurstPresentation &&
+                                !controlOnly)
+                            {
+                                padSenseStartupBurstReportsRemaining =
+                                    Math.Max(0,
+                                        padSenseStartupBurstReportsRemaining -
+                                            1);
+                                if (padSenseStartupBurstReportsRemaining == 0)
+                                {
+                                    // The eighth accepted report is position
+                                    // zero on PadSense's 16-tick lattice. The
+                                    // first steady report is therefore due one
+                                    // 10 ms host tick later, while the initial
+                                    // eight reports remain an immediate burst.
+                                    padSenseScheduler.Start(presentedAt);
+                                    padSenseScheduler.AdvanceAfterSend(
+                                        presentedAt);
+                                }
+                            }
+
+                            if (!retainedForRetry &&
+                                disposition ==
+                                    AcknowledgementDisposition.Presented &&
                                 !controlOnly &&
                                 pendingMicrophoneStatus >= 0 &&
                                 microphoneStatusReportsAhead > 0)
@@ -3290,7 +3400,16 @@ namespace DS4Windows.InputDevices
                             advanceScheduler = !retainedForRetry &&
                                 !controlPrimeBypass &&
                                 !primeRequired &&
-                                !sourceDrivenNativePresentation;
+                                !sourceDrivenNativePresentation &&
+                                !usePadSensePresentationCadence;
+                            advancePadSenseScheduler = !retainedForRetry &&
+                                disposition ==
+                                    AcknowledgementDisposition.Presented &&
+                                !controlOnly &&
+                                !controlPrimeBypass &&
+                                !primeRequired &&
+                                usePadSensePresentationCadence &&
+                                !padSenseStartupBurstPresentation;
                         }
 
                         if (retainedForRetry)
@@ -3310,6 +3429,11 @@ namespace DS4Windows.InputDevices
                             {
                                 scheduler.AdvanceAfterSend(presentedAt);
                             }
+                        }
+
+                        if (advancePadSenseScheduler)
+                        {
+                            padSenseScheduler.AdvanceAfterSend(presentedAt);
                         }
 
                         if (microphoneClockedPresentation)
@@ -4262,6 +4386,136 @@ namespace DS4Windows.InputDevices
 
                 return matches;
             }
+        }
+    }
+
+    /// <summary>
+    /// Pure scheduler for PadSense's observed native Windows presentation
+    /// lattice. The reference presents fifteen 10 ms Opus generations across
+    /// sixteen 10 ms host ticks: fourteen 10 ms intervals followed by one
+    /// 20 ms interval. A late host wake re-anchors the next interval instead of
+    /// replaying missed deadlines as a catch-up burst.
+    /// </summary>
+    internal sealed class DualSensePadSenseNativePresentationScheduler
+    {
+        internal const int HostTickNumerator = 1;
+        internal const int HostTickDenominator = 100;
+        internal const int HostTicksPerCycle = 16;
+        internal const int ReportsPerCycle = 15;
+        internal const double MinimumRateRatio = 0.995;
+        internal const double MaximumRateRatio = 1.005;
+
+        private readonly long clockFrequency;
+        private long wholeTickTicks;
+        private double fractionalTickTicks;
+        private double fractionalTickAccumulator;
+        private double rateRatio;
+        private long nextDeadlineQpc;
+        private int reportsIntoCycle;
+        private bool started;
+
+        public DualSensePadSenseNativePresentationScheduler(
+            long clockFrequency)
+        {
+            if (clockFrequency <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(clockFrequency));
+            }
+
+            this.clockFrequency = clockFrequency;
+            SetRateRatio(1.0);
+        }
+
+        public bool IsStarted => started;
+
+        public double RateRatio => rateRatio;
+
+        public long NextDeadlineQpc => started ? nextDeadlineQpc :
+            throw new InvalidOperationException(
+                "The PadSense presentation clock has not started.");
+
+        public void Start(long nowQpc)
+        {
+            fractionalTickAccumulator = 0.0;
+            reportsIntoCycle = 0;
+            nextDeadlineQpc = nowQpc;
+            started = true;
+        }
+
+        public void Reset()
+        {
+            fractionalTickAccumulator = 0.0;
+            reportsIntoCycle = 0;
+            nextDeadlineQpc = 0;
+            started = false;
+        }
+
+        public void SetRateRatio(double controllerClockRatio)
+        {
+            if (!double.IsFinite(controllerClockRatio) ||
+                controllerClockRatio < MinimumRateRatio ||
+                controllerClockRatio > MaximumRateRatio)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(controllerClockRatio));
+            }
+
+            if (controllerClockRatio == rateRatio && wholeTickTicks != 0)
+            {
+                return;
+            }
+
+            double exactTickTicks = clockFrequency *
+                (double)HostTickNumerator /
+                (HostTickDenominator * controllerClockRatio);
+            wholeTickTicks = (long)Math.Floor(exactTickTicks);
+            fractionalTickTicks = exactTickTicks - wholeTickTicks;
+            rateRatio = controllerClockRatio;
+            // Keep the accumulated sub-QPC phase when a long-window clock
+            // estimate changes. Resetting it would insert a tiny discontinuity
+            // into an otherwise continuous PadSense host lattice.
+        }
+
+        public long AdvanceAfterSend(long presentationQpc)
+        {
+            if (!started)
+            {
+                throw new InvalidOperationException(
+                    "The PadSense presentation clock has not started.");
+            }
+
+            reportsIntoCycle++;
+            int hostTicks = 1;
+            if (reportsIntoCycle == ReportsPerCycle)
+            {
+                reportsIntoCycle = 0;
+                hostTicks = HostTicksPerCycle - ReportsPerCycle + 1;
+            }
+
+            long interval = 0;
+            for (int tick = 0; tick < hostTicks; tick++)
+            {
+                interval = checked(interval + NextHostTickTicks());
+            }
+
+            long phaseDeadline = checked(nextDeadlineQpc + interval);
+            nextDeadlineQpc = phaseDeadline > presentationQpc ?
+                phaseDeadline : checked(presentationQpc + interval);
+            return nextDeadlineQpc;
+        }
+
+        private long NextHostTickTicks()
+        {
+            long interval = wholeTickTicks;
+            fractionalTickAccumulator += fractionalTickTicks;
+            if (fractionalTickAccumulator >= 1.0)
+            {
+                long extraTicks = (long)fractionalTickAccumulator;
+                interval += extraTicks;
+                fractionalTickAccumulator -= extraTicks;
+            }
+
+            return Math.Max(1, interval);
         }
     }
 

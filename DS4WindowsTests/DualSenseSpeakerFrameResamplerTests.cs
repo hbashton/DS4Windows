@@ -9,7 +9,7 @@ namespace DS4Windows.Tests
     public class DualSenseSpeakerFrameResamplerTests
     {
         [TestMethod]
-        public void PadSenseSourceDoesNotReceiveASecond512To480Conversion()
+        public void PadSenseRawSourceReceivesOneContinuous512To480Conversion()
         {
             const int packetCount = 4096;
             var converter = new DualSensePadSenseSpeakerClockResampler();
@@ -34,12 +34,94 @@ namespace DS4Windows.Tests
             }
 
             long nominal = packetCount *
-                DualSensePadSenseSpeakerClockResampler.OutputFrames;
+                DualSensePadSenseSpeakerClockResampler.ReferenceInputFrames;
             Assert.IsTrue(Math.Abs(consumed - nominal) <=
                 DualSensePadSenseSpeakerClockResampler.MaximumInputFrames,
                 $"PadSense source consumed {consumed} frames instead of " +
-                $"approximately {nominal}; the fixed 16:15 conversion was " +
-                "applied twice.");
+                $"approximately {nominal}; the single fixed 16:15 stage " +
+                "lost its continuous phase.");
+        }
+
+        [TestMethod]
+        public void PadSenseInitialSourceGateCanProduceEightPhysicalReports()
+        {
+            var converter = new DualSensePadSenseSpeakerClockResampler();
+            float[] source = new float[
+                DualSensePadSenseSpeakerClockResampler.MaximumInputFrames * 2];
+            float[] output = new float[
+                DualSensePadSenseSpeakerClockResampler.OutputFrames * 2];
+            int requestedTotal = 0;
+
+            for (int report = 0;
+                report < DualSenseBluetoothSpeakerPassthrough.
+                    StartupWarmupReportCount;
+                report++)
+            {
+                int requested = converter.PrepareOutputFrame();
+                requestedTotal += requested;
+                Assert.AreEqual(
+                    DualSensePadSenseSpeakerClockResampler.OutputFrames,
+                    converter.ConvertPreparedOutput(source, 0, requested,
+                        output, 0));
+            }
+
+            Assert.AreEqual(
+                DualSenseBluetoothSpeakerPassthrough.
+                    PadSenseInitialSourceBufferFrames,
+                requestedTotal,
+                "The V5 source gate must contain every frame and the four " +
+                "look-ahead samples required by its eight-report handoff.");
+        }
+
+        [TestMethod]
+        public void PadSenseHundredHertzSourceBalancesNinetyThreePointSevenFiveHertzWire()
+        {
+            const int sourceFramesPerTenMilliseconds = 480;
+            const int sourceBlocksPerCycle = 16;
+            const int physicalReportsPerCycle = 15;
+            const int cycles = 100;
+            var converter = new DualSensePadSenseSpeakerClockResampler();
+            float[] source = new float[
+                DualSensePadSenseSpeakerClockResampler.MaximumInputFrames * 2];
+            float[] output = new float[
+                DualSensePadSenseSpeakerClockResampler.OutputFrames * 2];
+            int bufferedFrames = sourceFramesPerTenMilliseconds * 9;
+
+            for (int report = 0;
+                report < DualSenseBluetoothSpeakerPassthrough.
+                    StartupWarmupReportCount;
+                report++)
+            {
+                int requested = converter.PrepareOutputFrame();
+                Assert.IsTrue(bufferedFrames >= requested);
+                bufferedFrames -= requested;
+                converter.ConvertPreparedOutput(source, 0, requested,
+                    output, 0);
+            }
+
+            for (int cycle = 0; cycle < cycles; cycle++)
+            {
+                bufferedFrames += sourceBlocksPerCycle *
+                    sourceFramesPerTenMilliseconds;
+                for (int report = 0;
+                    report < physicalReportsPerCycle;
+                    report++)
+                {
+                    int requested = converter.PrepareOutputFrame();
+                    Assert.IsTrue(bufferedFrames >= requested,
+                        $"The V5 source starved in cycle {cycle}, report " +
+                        $"{report}: buffered={bufferedFrames}, " +
+                        $"requested={requested}.");
+                    bufferedFrames -= requested;
+                    converter.ConvertPreparedOutput(source, 0, requested,
+                        output, 0);
+                }
+
+                Assert.IsTrue(bufferedFrames >= 0 &&
+                    bufferedFrames < sourceFramesPerTenMilliseconds,
+                    $"The raw V5 source drifted after cycle {cycle}: " +
+                    $"residual={bufferedFrames} frames.");
+            }
         }
 
         [TestMethod]
@@ -60,7 +142,8 @@ namespace DS4Windows.Tests
             {
                 double ratio = 1.0 + Math.Sin(packet * 0.003) * 0.001;
                 expected += ratio *
-                    DualSensePadSenseSpeakerClockResampler.OutputFrames;
+                    DualSensePadSenseSpeakerClockResampler.
+                        ReferenceInputFrames;
                 converter.SetInputRateRatio(ratio);
                 int requested = converter.PrepareOutputFrame();
                 FillStereoFloat(source, requested, sourceFrame,

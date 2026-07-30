@@ -702,30 +702,6 @@ namespace DS4WindowsTests
                 UsePadForgeAudioTransport("0x35"));
         }
 
-        [TestMethod]
-        public void DedicatedAudioHandleToggleDistinguishesFallbackAndStrict()
-        {
-            Assert.IsTrue(DualSenseBluetoothAudioPacer.
-                UseDedicatedAudioHandle("1"));
-            Assert.IsTrue(DualSenseBluetoothAudioPacer.
-                UseDedicatedAudioHandle("strict"));
-            Assert.IsTrue(DualSenseBluetoothAudioPacer.
-                UseDedicatedAudioHandle("STRICT"));
-            Assert.IsFalse(DualSenseBluetoothAudioPacer.
-                UseDedicatedAudioHandle(null));
-            Assert.IsFalse(DualSenseBluetoothAudioPacer.
-                UseDedicatedAudioHandle("0"));
-
-            Assert.IsTrue(DualSenseBluetoothAudioPacer.
-                RequireDedicatedAudioHandle("strict"));
-            Assert.IsTrue(DualSenseBluetoothAudioPacer.
-                RequireDedicatedAudioHandle("STRICT"));
-            Assert.IsFalse(DualSenseBluetoothAudioPacer.
-                RequireDedicatedAudioHandle("1"));
-            Assert.IsFalse(DualSenseBluetoothAudioPacer.
-                RequireDedicatedAudioHandle(null));
-        }
-
         private static byte[] CreateSpeakerReport(byte haptics,
             byte audio, byte sequence, byte packetSequence = 0)
         {

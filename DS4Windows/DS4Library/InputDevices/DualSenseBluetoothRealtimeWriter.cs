@@ -220,14 +220,6 @@ namespace DS4Windows.InputDevices
         public static bool TryCreate(string devicePath, int reportLength,
             out DualSenseBluetoothRealtimeWriter writer, out int error)
         {
-            return TryCreate(devicePath, reportLength, out writer, out error,
-                slotCount: 8, audioInFlightLimit: NormalAudioInFlightLimit);
-        }
-
-        public static bool TryCreate(string devicePath, int reportLength,
-            out DualSenseBluetoothRealtimeWriter writer, out int error,
-            int slotCount, int audioInFlightLimit)
-        {
             writer = null;
             error = 0;
             if (string.IsNullOrWhiteSpace(devicePath))
@@ -247,8 +239,8 @@ namespace DS4Windows.InputDevices
             try
             {
                 writer = new DualSenseBluetoothRealtimeWriter(handle,
-                    reportLength, Math.Max(1, slotCount),
-                    Math.Max(1, audioInFlightLimit));
+                    reportLength, slotCount: 8,
+                    audioInFlightLimit: NormalAudioInFlightLimit);
                 return true;
             }
             catch

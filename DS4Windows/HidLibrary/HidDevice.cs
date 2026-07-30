@@ -92,17 +92,8 @@ namespace DS4Windows
                         // handle shareable inside this HidHide-protected process
                         // so the dedicated audio session can coexist with input.
                         bool shareForDs4Audio = IsSonyBluetoothDualShock4();
-                        bool shareForDedicatedDs5Audio =
-                            IsSonyBluetoothDualSense() &&
-                            InputDevices.DualSenseBluetoothAudioPacer.
-                                UseDedicatedAudioHandle(
-                                    Environment.GetEnvironmentVariable(
-                                        InputDevices.
-                                            DualSenseBluetoothAudioPacer.
-                                            DedicatedAudioHandleEnvironmentVariable));
                         safeReadHandle = OpenHandle(_devicePath,
-                            exclusive && !shareForDs4Audio &&
-                                !shareForDedicatedDs5Audio,
+                            exclusive && !shareForDs4Audio,
                             enumerate: false);
                     }
                 }
@@ -157,22 +148,6 @@ namespace DS4Windows
 
             return _devicePath.IndexOf("00001124-0000-1000-8000-00805f9b34fb",
                 StringComparison.OrdinalIgnoreCase) >= 0 ||
-                _devicePath.IndexOf("_VID&0002054c_",
-                    StringComparison.OrdinalIgnoreCase) >= 0;
-        }
-
-        private bool IsSonyBluetoothDualSense()
-        {
-            if (_deviceAttributes?.VendorId != 0x054C ||
-                (_deviceAttributes.ProductId != 0x0CE6 &&
-                 _deviceAttributes.ProductId != 0x0DF2))
-            {
-                return false;
-            }
-
-            return _devicePath.IndexOf(
-                    "00001124-0000-1000-8000-00805f9b34fb",
-                    StringComparison.OrdinalIgnoreCase) >= 0 ||
                 _devicePath.IndexOf("_VID&0002054c_",
                     StringComparison.OrdinalIgnoreCase) >= 0;
         }

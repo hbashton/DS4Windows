@@ -140,13 +140,13 @@ namespace DS4Windows.InputDevices
         private const uint HelperWriterReleaseTimeoutMilliseconds = 3000;
         private const uint HelperControlWriteTimeoutMilliseconds = 750;
         private const uint HelperAudioCreditPollMilliseconds = 1;
-        // Native duplex exposes a 100 Hz controller microphone clock while one
-        // speaker frame carries 10.667 ms. Fifteen speaker generations per
-        // sixteen microphone ticks is exact and avoids the measured 640 ms
-        // BR/EDR service collision instead of chasing it with a host timer.
-        private const int MicrophoneFrameWaitTimeoutMilliseconds = 20;
-        private const int MicrophoneFramePostArrivalDelayMicroseconds = 550;
-        private const int MicrophoneFrameMaximumSendAgeMicroseconds = 1_250;
+        // Duplex input exposes the controller's logical 100 Hz media clock.
+        // HidBth may deliver those frames in batches, so raw arrival times are
+        // observations only: a lower-envelope model reconstructs the original
+        // clock and places output in the measured quiet service phase. Fifteen
+        // speaker generations per sixteen microphone ticks remains exactly
+        // 93.75 Hz without copying host batching into audible presentation.
+        private const bool UseMicrophoneSequencePresentationClock = true;
         private const int InputClockMapLength = 24;
         private const long InputClockVersionOffset = 0;
         private const long InputClockTimestampOffset = 8;
@@ -1994,7 +1994,10 @@ namespace DS4Windows.InputDevices
                 new AutoResetEvent(false);
             private readonly ManualResetEvent stopRequested =
                 new ManualResetEvent(false);
+            private readonly DualSenseMicrophonePresentationClock
+                microphonePresentationClock = new();
             private readonly Thread pacerThread;
+            private readonly Thread inputClockThread;
             private readonly Thread acknowledgementThread;
             private readonly byte[] commandHeader =
                 new byte[sizeof(byte) + sizeof(int)];
@@ -2149,6 +2152,12 @@ namespace DS4Windows.InputDevices
                     Name = "DualSense BT isolated audio pacer",
                     Priority = ThreadPriority.Highest,
                 };
+                inputClockThread = new Thread(InputClockLoop)
+                {
+                    IsBackground = true,
+                    Name = "DualSense BT microphone clock observer",
+                    Priority = ThreadPriority.Highest,
+                };
                 acknowledgementThread = new Thread(AcknowledgementLoop)
                 {
                     IsBackground = true,
@@ -2161,6 +2170,7 @@ namespace DS4Windows.InputDevices
                 TryRaiseHelperProcessPriority();
                 TrySetSustainedLowLatencyGc();
                 acknowledgementThread.Start();
+                inputClockThread.Start();
                 pacerThread.Start();
 
                 try
@@ -2224,6 +2234,8 @@ namespace DS4Windows.InputDevices
                     acknowledgementAvailable.Set();
                     bool pacerStopped = !pacerThread.IsAlive ||
                         pacerThread.Join(2000);
+                    bool inputClockStopped = !inputClockThread.IsAlive ||
+                        inputClockThread.Join(2000);
                     bool acknowledgementsStopped =
                         !acknowledgementThread.IsAlive ||
                         acknowledgementThread.Join(2000);
@@ -2234,7 +2246,8 @@ namespace DS4Windows.InputDevices
                     // the duplicated HID handle plus every OVERLAPPED buffer
                     // have been definitively retired.
                     bool transportReleased = false;
-                    if (pacerStopped && acknowledgementsStopped)
+                    if (pacerStopped && inputClockStopped &&
+                        acknowledgementsStopped)
                     {
                         writer.Dispose();
                         if (writer.WaitForDisposal(
@@ -2769,6 +2782,12 @@ namespace DS4Windows.InputDevices
                                         {
                                             committedMicrophoneEnabled =
                                                 status != 0;
+                                            // A mode transition can stop the
+                                            // controller's 100 Hz input clock.
+                                            // Require fresh post-transition
+                                            // anchors before phase-locking the
+                                            // speaker again.
+                                            microphonePresentationClock.Reset();
                                             pendingMicrophoneStatus = -1;
                                             microphoneStatusReportsAhead = 0;
                                             microphoneControllerStateRequired =
@@ -2813,7 +2832,9 @@ namespace DS4Windows.InputDevices
                         }
 
                         bool microphoneClockedPresentation = false;
-                        long microphoneFrameArrivalQpc = 0;
+                        long microphoneSlotSequence = 0;
+                        long microphoneSlotDeadlineQpc = 0;
+                        int microphoneClockGeneration = 0;
                         if (!controlPrimeBypass)
                         {
                             double controllerClockRatio =
@@ -2855,7 +2876,8 @@ namespace DS4Windows.InputDevices
                             lock (stateLock)
                             {
                                 useMicrophoneClock =
-                                    !usePadForgeAudioTransport &&
+                                    UseMicrophoneSequencePresentationClock &&
+                                    useCompactCombinedHapticsTransport &&
                                     !UsePairedAudioReports &&
                                     committedMicrophoneEnabled &&
                                     reservoir.TryPeek(
@@ -2865,28 +2887,46 @@ namespace DS4Windows.InputDevices
 
                             if (useMicrophoneClock)
                             {
-                                if (!TryWaitForNextMicrophoneFrame(
-                                        out microphoneFrameArrivalQpc,
-                                        out byte microphoneFrameSequence))
+                                int candidateGeneration =
+                                    microphonePresentationClock.Generation;
+                                // The microphone model is the sole owner of
+                                // duplex wire cadence once it is locked. Do
+                                // not gate its rational lattice with the
+                                // fallback scheduler: two independently
+                                // corrected clocks can manufacture a late
+                                // slot followed by a catch-up write.
+                                long earliestTransitionDeadline =
+                                    Stopwatch.GetTimestamp();
+                                if (microphonePresentationClock.TryGetNextSlot(
+                                        earliestTransitionDeadline,
+                                        out long candidateSequence,
+                                        out long candidateDeadline) &&
+                                    candidateGeneration ==
+                                        microphonePresentationClock.Generation)
                                 {
-                                    continue;
+                                    microphoneClockedPresentation = true;
+                                    microphoneClockGeneration =
+                                        candidateGeneration;
+                                    microphoneSlotSequence = candidateSequence;
+                                    microphoneSlotDeadlineQpc =
+                                        candidateDeadline;
                                 }
+                            }
 
-                                // 100 Hz / 16 = 6.25 Hz; omitting sequence
-                                // phase zero leaves exactly fifteen 512-sample
-                                // speaker frames per 160 ms. ETW also locates
-                                // the recurring completion drought at this
-                                // controller phase, so the planned 20 ms gap
-                                // supplies runway instead of queue pressure.
-                                if ((microphoneFrameSequence & 0x0F) == 0)
-                                {
-                                    continue;
-                                }
-
-                                microphoneClockedPresentation = true;
+                            if (microphoneClockedPresentation)
+                            {
+                                // Interpolate fifteen speaker generations
+                                // uniformly across every sixteen fitted 10 ms
+                                // microphone ticks. This preserves the
+                                // controller's long-window clock while never
+                                // creating a deliberate 20 ms media hole.
+                                WaitUntil(timer, microphoneSlotDeadlineQpc,
+                                    stopRequested);
                             }
                             else
                             {
+                                // Acquisition and stale-model fallback retain
+                                // the proven absolute 93.75 Hz media cadence.
                                 WaitUntil(timer,
                                     scheduler.PresentationDeadlineQpc,
                                     stopRequested);
@@ -2922,29 +2962,6 @@ namespace DS4Windows.InputDevices
                             continue;
                         }
 
-                        if (microphoneClockedPresentation)
-                        {
-                            long nowQpc = Stopwatch.GetTimestamp();
-                            long maximumAgeTicks = Math.Max(1, checked(
-                                Stopwatch.Frequency *
-                                MicrophoneFrameMaximumSendAgeMicroseconds /
-                                1_000_000));
-                            if (nowQpc - microphoneFrameArrivalQpc >
-                                maximumAgeTicks)
-                            {
-                                // Never catch up a missed controller tick. The
-                                // encoded FIFO remains lossless and the next
-                                // physical mic frame supplies a fresh slot.
-                                continue;
-                            }
-
-                            long targetQpc = microphoneFrameArrivalQpc +
-                                Math.Max(1, checked(Stopwatch.Frequency *
-                                    MicrophoneFramePostArrivalDelayMicroseconds /
-                                    1_000_000));
-                            WaitUntil(timer, targetQpc, stopRequested);
-                        }
-
                         if (stopRequested.WaitOne(0))
                         {
                             break;
@@ -2964,6 +2981,17 @@ namespace DS4Windows.InputDevices
                         bool retainedForRetry = false;
                         lock (stateLock)
                         {
+                            // A profile clear or microphone transition can
+                            // invalidate a token while this thread is waiting.
+                            // Never let an old-clock deadline cross that state
+                            // boundary.
+                            if (microphoneClockedPresentation &&
+                                microphoneClockGeneration !=
+                                    microphonePresentationClock.Generation)
+                            {
+                                continue;
+                            }
+
                             if (controlPrimeBypass)
                             {
                                 if (!primeRequired ||
@@ -3257,6 +3285,12 @@ namespace DS4Windows.InputDevices
                             }
                         }
 
+                        if (microphoneClockedPresentation)
+                        {
+                            microphonePresentationClock.Advance(
+                                microphoneSlotSequence);
+                        }
+
                         QueueAcknowledgement(itemId, disposition,
                             controlOnly ? 0 : presentedAt);
                         if (pairedItem != null)
@@ -3480,17 +3514,37 @@ namespace DS4Windows.InputDevices
                 }
             }
 
-            private bool TryWaitForNextMicrophoneFrame(
+            private void InputClockLoop()
+            {
+                WaitHandle[] waits = { stopRequested, inputArrivalSignal };
+                try
+                {
+                    while (WaitHandle.WaitAny(waits) == 1)
+                    {
+                        if (TryReadLatestMicrophoneFrame(
+                            out long arrivalQpc, out byte sequence))
+                        {
+                            microphonePresentationClock.Observe(sequence,
+                                arrivalQpc);
+                        }
+                    }
+                }
+                catch (Exception ex) when (ex is ObjectDisposedException ||
+                    ex is InvalidOperationException ||
+                    ex is IOException)
+                {
+                    // The model is optional pacing telemetry. If its shared
+                    // page disappears during teardown, invalidate it and let
+                    // the absolute media clock remain the fail-open path.
+                    microphonePresentationClock.Reset();
+                }
+            }
+
+            private bool TryReadLatestMicrophoneFrame(
                 out long arrivalQpc, out byte sequence)
             {
                 arrivalQpc = 0;
                 sequence = 0;
-                if (!inputArrivalSignal.WaitOne(
-                        MicrophoneFrameWaitTimeoutMilliseconds))
-                {
-                    return false;
-                }
-
                 // The parent is the only writer. Its odd/even version protects
                 // this three-field snapshot if another 10 ms microphone frame
                 // arrives while the helper is reading the shared page.
@@ -3762,6 +3816,13 @@ namespace DS4Windows.InputDevices
                     pacerStopped = pacerThread.Join(2000);
                 }
 
+                bool inputClockStopped = !inputClockThread.IsAlive;
+                if (!inputClockStopped &&
+                    Thread.CurrentThread != inputClockThread)
+                {
+                    inputClockStopped = inputClockThread.Join(2000);
+                }
+
                 bool acknowledgementStopped = !acknowledgementThread.IsAlive;
                 if (!acknowledgementStopped &&
                     Thread.CurrentThread != acknowledgementThread)
@@ -3773,7 +3834,8 @@ namespace DS4Windows.InputDevices
                 // not observe shutdown in time. The helper process is about to
                 // exit, and leaking these three tiny handles is safer than an
                 // ObjectDisposedException on a live high-priority thread.
-                if (pacerStopped && acknowledgementStopped)
+                if (pacerStopped && inputClockStopped &&
+                    acknowledgementStopped)
                 {
                     reservoirChanged.Dispose();
                     acknowledgementAvailable.Dispose();

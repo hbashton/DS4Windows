@@ -356,7 +356,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void MicrophoneEnabledAudioUsesFullStateCarrierAnd64ByteDepths()
+        public void MicrophoneEnabledAudioUsesFullStateCarrierAnd96ByteDepths()
         {
             var sequence = new DualSenseBluetoothPhysicalOutputSequence();
             byte[] duplex = CreateSpeakerReport(
@@ -377,7 +377,7 @@ namespace DS4WindowsTests
             Assert.AreEqual((byte)0xFF, duplex[4]);
             for (int index = 5; index <= 9; index++)
             {
-                Assert.AreEqual((byte)64, duplex[index]);
+                Assert.AreEqual((byte)96, duplex[index]);
             }
             Assert.AreEqual((byte)0x90, duplex[11]);
             Assert.AreEqual((byte)63, duplex[12]);
@@ -410,7 +410,7 @@ namespace DS4WindowsTests
             sequence.PrepareNativeAudio(duplex);
             for (int index = 5; index <= 9; index++)
             {
-                Assert.AreEqual((byte)64, duplex[index]);
+                Assert.AreEqual((byte)96, duplex[index]);
             }
 
             byte[] speakerOnly = CreateSpeakerReport(0x32, 0x42, 0xA0, 2);

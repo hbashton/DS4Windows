@@ -4417,13 +4417,12 @@ namespace DS4Windows.InputDevices
                     nameof(report));
             }
 
-            // DS5 Bridge's true-duplex 0x36 reference uses five equal 64-byte
-            // lane depths with the FF section mask. This is deliberately
-            // confined to microphone-enabled reports; the proven FE compact
-            // speaker/AUX carrier is unchanged.
+            // Controlled transport probe: keep the reference FF mask and use
+            // the empirically strongest finite lane depth from the verified
+            // 64/96/127 wire matrix. Compact speaker/AUX remains unchanged.
             for (int index = 5; index <= 9; index++)
             {
-                report[index] = 64;
+                report[index] = 96;
             }
 
             PrepareSingleAudio(report);

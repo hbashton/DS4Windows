@@ -1689,8 +1689,12 @@ namespace DS4Windows
             return pendingFrames >= target;
         }
 
-        internal static double StartupWarmupLatencyMilliseconds =>
-            StartupWarmupReportCount * BluetoothSpeakerCadenceMs;
+        // PadSense transfers its eight complete source blocks into the strict
+        // OVERLAPPED FIFO as one startup burst. HidBth still owns their radio
+        // cadence; spacing the WriteFile admissions here prevents the
+        // controller-side reserve from ever reaching PadSense's operating
+        // level and leaves ordinary completion droughts audible.
+        internal static double StartupWarmupLatencyMilliseconds => 0.0;
 
         internal static bool ShouldDeferDisposeCleanup(bool workerAlive,
             bool capturePumpAlive, bool lifecycleWorkerAlive)
@@ -2101,8 +2105,12 @@ namespace DS4Windows
                     {
                         // Encode real fixed-size CBR Opus silence with the same
                         // encoder and 0x36 combined report path as content. No
-                        // source frame is removed until all six reports have
-                        // been accepted by the transport.
+                        // source frame is removed until all eight reports have
+                        // been accepted by the transport. PadSense submits this
+                        // one-time prime into its OVERLAPPED FIFO without a
+                        // user-mode cadence wait; HidBth schedules the radio and
+                        // the controller starts with roughly eight reports of
+                        // media reserve.
                         Array.Clear(frame, 0, frame.Length);
                         bool submittedWarmup = EncodeCurrentFrame() &&
                             SendEncodedFrame();
@@ -2122,8 +2130,21 @@ namespace DS4Windows
                                 gateSource: true);
                         }
 
-                        ScheduleNextStreamTick(submittedWarmup, ref nextTick,
-                            highResolutionTimer);
+                        if (submittedWarmup)
+                        {
+                            // Continue immediately so the helper receives the
+                            // whole one-time prime. The helper's eight-report
+                            // gate then admits it to the strict writer exactly
+                            // as PadSense does.
+                            nextTick = Stopwatch.GetTimestamp();
+                        }
+                        else
+                        {
+                            // A rejected prime report remains the current
+                            // generation. Avoid a retry spin while ownership or
+                            // a writer slot is recovering.
+                            captureFramesAvailable.WaitOne(1);
+                        }
                         continue;
                     }
 

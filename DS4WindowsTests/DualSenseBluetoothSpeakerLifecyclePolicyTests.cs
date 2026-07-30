@@ -114,11 +114,11 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void StartupWarmupIsEightAcceptedCadenceReports()
+        public void StartupWarmupIsOneEightReportFifoTransfer()
         {
             Assert.AreEqual(8,
                 DualSenseBluetoothSpeakerPassthrough.StartupWarmupReportCount);
-            Assert.AreEqual(256.0 / 3.0,
+            Assert.AreEqual(0.0,
                 DualSenseBluetoothSpeakerPassthrough.
                     StartupWarmupLatencyMilliseconds, 0.0001);
 
@@ -142,6 +142,10 @@ namespace DS4WindowsTests
                     remaining, lifecycleGateActive: false,
                     recoveryRequired: false),
                 "Content remained gated after all eight warmup reports were accepted.");
+            Assert.IsTrue(
+                DualSenseBluetoothAudioPacer.NativePrimeReportCount <=
+                DualSenseBluetoothAudioPacer.SingleAudioTransportSlotCount,
+                "The one-time prime must fit atomically in PadSense's strict FIFO.");
         }
 
         [TestMethod]

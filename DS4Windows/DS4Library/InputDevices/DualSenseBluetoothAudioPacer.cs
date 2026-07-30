@@ -36,11 +36,13 @@ namespace DS4Windows.InputDevices
         internal const int PrimeReportCount = UsePairedAudioReports ? 2 : 1;
         internal const int PairedAudioInFlightLimit =
             PairedAudioTransportSlotCount;
-        // DS5Dongle keeps a 10-packet interrupt FIFO behind that two-frame
-        // report boundary. Keep the same transport cushion separate from the
-        // audio-prime rule so a delayed Windows HID completion does not reject
-        // an otherwise on-time 0x39 report.
-        internal const int PairedAudioTransportSlotCount = 10;
+        // DS5Dongle may queue ten packets in application memory, but submits
+        // exactly one packet for each L2CAP CAN_SEND_NOW credit. HidBth does
+        // not expose that credit, so one outstanding OVERLAPPED write is the
+        // closest observable equivalent: its completion releases the next
+        // physical 0x39. A multi-slot kernel queue hides the credit boundary
+        // and lets a host timer get ahead of the controller.
+        internal const int PairedAudioTransportSlotCount = 1;
         // Windows does not expose BTstack's CAN_SEND_NOW credit. A strict
         // ten-slot OVERLAPPED FIFO covers the measured 39-82 ms HidBth service
         // drought while its oldest completion event remains our credit proxy.
@@ -73,6 +75,12 @@ namespace DS4Windows.InputDevices
         internal static bool RequiresFullDuplexAudioReport(byte[] report)
         {
             return IsSpeakerAudioReport(report) && (report[4] & 0x01) != 0;
+        }
+
+        internal static bool ShouldWaitForHostPresentationDeadline(
+            bool pairedAudioReports)
+        {
+            return !pairedAudioReports;
         }
 
         private const string HelperArgument = "--dualsense-bt-audio-pacer-helper";
@@ -2415,9 +2423,22 @@ namespace DS4Windows.InputDevices
                             scheduler.SetInputPhaseReference(
                                 useCompactCombinedHapticsTransport ? 0 :
                                     Interlocked.Read(ref inputArrivalQpc));
-                            WaitUntil(timer,
-                                scheduler.PresentationDeadlineQpc,
-                                stopRequested);
+                            // A complete 0x39 pair is already source-paced by
+                            // the two 10.667 ms logical generations that feed
+                            // the reservoir. DS5Dongle queues that pair at once
+                            // and lets CAN_SEND_NOW provide the only physical
+                            // send clock. Do the same here: the single oldest
+                            // OVERLAPPED completion below is our Windows credit
+                            // proxy. Applying another host deadline creates two
+                            // unsynchronised clocks and periodically misses the
+                            // controller's receive window.
+                            if (ShouldWaitForHostPresentationDeadline(
+                                    UsePairedAudioReports))
+                            {
+                                WaitUntil(timer,
+                                    scheduler.PresentationDeadlineQpc,
+                                    stopRequested);
+                            }
                         }
                         if (stopRequested.WaitOne(0))
                         {
@@ -3899,11 +3920,12 @@ namespace DS4Windows.InputDevices
 
     /// <summary>
     /// Owns the sequence numbers that the controller observes on the physical
-    /// Bluetooth output lane. Audio-family and 0x31 state-family tags advance
-    /// independently, as they do in PadForge, while the media packet counter
-    /// advances only when the two Opus frames in a 0x39 are accepted. Keeping
-    /// these counters here prevents logical 0x36 staging frames from consuming
-    /// counters that never appear on the wire.
+    /// Bluetooth output lane. DS5Dongle consumes one global four-bit report
+    /// sequence across 0x31 state, 0x32 microphone status, and 0x39 audio.
+    /// The media packet counter remains independent and advances only when the
+    /// two Opus frames in a 0x39 are accepted. Keeping the counters here keeps
+    /// logical 0x36 staging frames from consuming values that never appear on
+    /// the wire.
     /// </summary>
     internal sealed class DualSenseBluetoothPhysicalOutputSequence
     {
@@ -3914,13 +3936,12 @@ namespace DS4Windows.InputDevices
         internal const int ControllerStateSourceOffset = 13;
         private bool initialized;
         private byte nextReportSequence;
-        private byte nextControllerStateSequence;
         private byte mediaPacketSequence;
         private byte preparedMediaPacketSequence;
 
         internal byte NextReportSequence => nextReportSequence;
         internal byte NextControllerStateSequence =>
-            nextControllerStateSequence;
+            nextReportSequence;
         internal byte MediaPacketSequence => mediaPacketSequence;
 
         internal void PrepareControl(byte[] report)
@@ -4063,8 +4084,7 @@ namespace DS4Windows.InputDevices
             EnsureInitialized(initializationReport);
             Array.Clear(destination, 0, destination.Length);
             destination[0] = 0x31;
-            destination[1] = (byte)(
-                (nextControllerStateSequence & 0x0F) << 4);
+            destination[1] = (byte)((nextReportSequence & 0x0F) << 4);
             destination[2] = 0x10;
             Buffer.BlockCopy(statePayload, 0, destination, 3,
                 statePayload.Length);
@@ -4094,8 +4114,7 @@ namespace DS4Windows.InputDevices
                     "A DualSense controller state cannot be committed before it is prepared.");
             }
 
-            nextControllerStateSequence = (byte)(
-                (nextControllerStateSequence + 1) & 0x0F);
+            nextReportSequence = (byte)((nextReportSequence + 1) & 0x0F);
         }
 
         private void EnsureInitialized(byte[] report)
@@ -4106,7 +4125,6 @@ namespace DS4Windows.InputDevices
             }
 
             nextReportSequence = (byte)(report[1] >> 4);
-            nextControllerStateSequence = nextReportSequence;
             mediaPacketSequence = report[10];
             initialized = true;
         }

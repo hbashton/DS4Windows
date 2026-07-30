@@ -26,6 +26,23 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void PairedTransportUsesOneCompletionAsPhysicalSendCredit()
+        {
+            Assert.AreEqual(1,
+                DualSenseBluetoothAudioPacer.PairedAudioTransportSlotCount);
+            Assert.AreEqual(1,
+                DualSenseBluetoothAudioPacer.PairedAudioInFlightLimit);
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.
+                    ShouldWaitForHostPresentationDeadline(
+                        pairedAudioReports: true));
+            Assert.IsTrue(
+                DualSenseBluetoothAudioPacer.
+                    ShouldWaitForHostPresentationDeadline(
+                        pairedAudioReports: false));
+        }
+
+        [TestMethod]
         public void SaturatedReportsReturnToExactFifoHead()
         {
             var ring = new DualSenseBluetoothAudioPacerRing<int>(4);
@@ -163,7 +180,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void PadForgeControllerStateUsesIndependentSequenceFamily()
+        public void Ds5DongleControllerStateUsesGlobalOutputSequence()
         {
             var sequence = new DualSenseBluetoothPhysicalOutputSequence();
             byte[] initialization = CreateSpeakerReport(
@@ -200,8 +217,8 @@ namespace DS4WindowsTests
             sequence.CommitControllerState();
             Assert.AreEqual((byte)6,
                 sequence.NextControllerStateSequence);
-            Assert.AreEqual((byte)5, sequence.NextReportSequence,
-                "A 0x31 latch update consumed the audio-family sequence.");
+            Assert.AreEqual((byte)6, sequence.NextReportSequence,
+                "The 0x31 latch did not consume the shared output sequence.");
             Assert.AreEqual((byte)0x22, sequence.MediaPacketSequence,
                 "A 0x31 latch update consumed the media counter.");
 
@@ -210,8 +227,8 @@ namespace DS4WindowsTests
             byte[] paired = new byte[
                 DualSenseBluetoothPairedAudioReportBuilder.ReportLength];
             sequence.PreparePairedAudio(first, second, paired);
-            Assert.AreEqual((byte)0x50, paired[1],
-                "The independent 0x31 sequence displaced 0x39 audio ordering.");
+            Assert.AreEqual((byte)0x60, paired[1],
+                "The 0x39 report did not follow the ordered 0x31 state latch.");
         }
 
         [TestMethod]

@@ -2386,7 +2386,12 @@ namespace DS4Windows
 
         private void LogStreamDiagnosticsIfVerbose()
         {
-            if (!Global.VerboseStartupLogging)
+            // This snapshot is intentionally large. Building it while the
+            // controller owns a live media segment can force a managed GC and
+            // starve the 10.667 ms source/presentation chain long enough to be
+            // audible. Keep collecting the lock-free counters, but defer their
+            // formatted GUI snapshot until the media segment is idle.
+            if (!Global.VerboseStartupLogging || audioSegmentActive)
             {
                 return;
             }
@@ -2412,6 +2417,14 @@ namespace DS4Windows
             {
                 try
                 {
+                    // Playback can resume between queuing this work item and
+                    // its execution. Never let delayed diagnostics become a
+                    // live-stream observer effect.
+                    if (audioSegmentActive)
+                    {
+                        return;
+                    }
+
                     double directBalanceErrorPpm = 0.0;
                     double directBalanceTargetPpm = 0.0;
                     double directBalanceAppliedPpm = 0.0;

@@ -2664,7 +2664,12 @@ namespace DS4Windows
 
         private void LogWriterHealthIfNeeded()
         {
-            if (!Global.VerboseStartupLogging)
+            // Formatting the full transport snapshot allocates heavily and
+            // publishes through the WPF logger. A live speaker stream has a
+            // 10.667 ms deadline, so defer diagnostics instead of allowing a
+            // telemetry-induced GC pause to interrupt its source callback.
+            if (!Global.VerboseStartupLogging ||
+                IsFeedbackSpeakerDispatchRecentlyActive())
             {
                 return;
             }
@@ -3499,6 +3504,7 @@ namespace DS4Windows
             long lastCompressedRx, long lastProcessed, long lastSubmitted)
         {
             if (!Global.VerboseStartupLogging ||
+                IsFeedbackSpeakerDispatchRecentlyActive() ||
                 DateTime.UtcNow - lastMicrophoneHealthLogUtc < TimeSpan.FromSeconds(5))
             {
                 return;
@@ -3569,6 +3575,19 @@ namespace DS4Windows
                 $"{virtualBuffer.ToLogFields()} " +
                 $"armStatus=\"{armStatus}\"",
                 false);
+        }
+
+        private bool IsFeedbackSpeakerDispatchRecentlyActive()
+        {
+            long lastDispatch = Interlocked.Read(
+                ref lastFeedbackSpeakerDispatchTimestamp);
+            if (lastDispatch <= 0)
+            {
+                return false;
+            }
+
+            long age = Stopwatch.GetTimestamp() - lastDispatch;
+            return age >= 0 && age <= Stopwatch.Frequency;
         }
 
         private static string FormatMicrophoneLivenessAge(long now,

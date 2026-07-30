@@ -14,6 +14,10 @@ $script:UsbipInstallerUrl =
     "https://github.com/vadimgrn/usbip-win2/releases/download/v.0.9.7.7/USBip-0.9.7.7-x64.exe"
 $script:UsbipInstallerSha256 =
     "51620fa5f9f8be5932bc9d786deee557ce06d5407a99cab490dcfac71f185fea"
+$script:BundledViiperPath = Join-Path $PSScriptRoot `
+    "VIIPER-0.0.6-x64.exe"
+$script:BundledViiperSha256 =
+    "c53ce3a6fbe1dfd7b283cdf5518de1b397c16223216ccfa93aa91ce713da52c3"
 $script:BundledUsbipInstallerPath = Join-Path $PSScriptRoot `
     "USBip-0.9.7.7-x64.exe"
 $programFilesRoot = if ($env:ProgramW6432) {
@@ -198,6 +202,17 @@ function Assert-FileSha256([string]$path, [string]$expectedHash) {
     }
 
     Write-SetupLog "Verified usbip-win2 installer SHA256: $actualHash" Green
+}
+
+function Assert-ViiperFileSha256([string]$path, [string]$expectedHash) {
+    $actualHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+    if (-not [string]::Equals($actualHash, $expectedHash,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Packaged VIIPER failed SHA256 verification. Expected " +
+            "$expectedHash; received $actualHash."
+    }
+
+    Write-SetupLog "Verified packaged VIIPER SHA256: $actualHash" Green
 }
 
 function Test-UsbipRuntime([string]$usbipPath) {
@@ -669,7 +684,20 @@ try {
     Write-Step "Installing VIIPER"
     $viiperPath = Join-Path $script:InstallDir "viiper.exe"
     $candidatePath = Join-Path $script:TempDir "viiper.exe"
-    Expand-ViiperAsset (Get-ViiperAssetUrl) $candidatePath
+    if (Test-Path -LiteralPath $script:BundledViiperPath -PathType Leaf) {
+        Write-SetupLog "Using packaged VIIPER 0.0.6 x64 binary." Green
+        Assert-ViiperFileSha256 $script:BundledViiperPath `
+            $script:BundledViiperSha256
+        Copy-Item -LiteralPath $script:BundledViiperPath `
+            -Destination $candidatePath -Force
+    }
+    else {
+        Write-SetupLog (
+            "Packaged VIIPER is unavailable; using the GitHub recovery " +
+            "download."
+        ) Yellow
+        Expand-ViiperAsset (Get-ViiperAssetUrl) $candidatePath
+    }
     if (-not (Stop-Ds4WindowsProcesses "VIIPER backend replacement")) {
         throw "Unable to quiesce DS4Windows before replacing VIIPER."
     }

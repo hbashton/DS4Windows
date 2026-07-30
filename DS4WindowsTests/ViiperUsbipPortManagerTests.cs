@@ -116,7 +116,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void UntaggedAndPadSensePortsAreNeverDs4WindowsOwned()
+        public void Pinned0977UntaggedPortsUseExactViiperEndpointOwnership()
         {
             ViiperUsbipPortManager.UsbipPortBlock untagged = CreatePort(
                 "localhost", "1-1", null);
@@ -125,7 +125,7 @@ namespace DS4WindowsTests
             ViiperUsbipPortManager.UsbipPortBlock remoteDs4w = CreatePort(
                 "192.0.2.20", "1-1", "DS4W0123456789A");
 
-            Assert.IsFalse(ViiperUsbipPortManager.
+            Assert.IsTrue(ViiperUsbipPortManager.
                 IsDs4WindowsOwnedLocalPort(untagged, "1-1"));
             Assert.IsFalse(ViiperUsbipPortManager.
                 IsDs4WindowsOwnedLocalPort(padSense, "1-1"));
@@ -153,7 +153,7 @@ namespace DS4WindowsTests
         [DataRow(255, "DS4WABCDEF01234", true)]
         [DataRow(0, "DS4W0123456789A", false)]
         [DataRow(-1, "DS4W0123456789A", false)]
-        [DataRow(1, null, false)]
+        [DataRow(1, null, true)]
         [DataRow(1, "PADSENSE1234567", false)]
         public void CreateTrustRequiresPositiveNativePortAndDs4wToken(
             int port, string serial, bool expected)

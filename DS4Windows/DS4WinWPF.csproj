@@ -78,13 +78,13 @@
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
 		</Content>
-		<Content Include="..\extras\USBip-0.9.7.8-x64.exe">
-			<Link>extras\USBip-0.9.7.8-x64.exe</Link>
+		<Content Include="..\extras\USBip-0.9.7.7-x64.exe">
+			<Link>extras\USBip-0.9.7.7-x64.exe</Link>
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
 		</Content>
-		<Content Include="..\extras\USBip-0.9.7.8-LICENSE.txt">
-			<Link>extras\USBip-0.9.7.8-LICENSE.txt</Link>
+		<Content Include="..\extras\USBip-0.9.7.7-LICENSE.txt">
+			<Link>extras\USBip-0.9.7.7-LICENSE.txt</Link>
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
 		</Content>

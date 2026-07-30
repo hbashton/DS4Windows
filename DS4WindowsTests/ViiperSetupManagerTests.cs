@@ -7,14 +7,16 @@ namespace DS4Windows.Tests
     public class ViiperSetupManagerTests
     {
         [TestMethod]
-        public void UsbipVersionRequires0978OrNewer()
+        public void UsbipVersionRequiresPinnedSafe0977()
         {
             Assert.IsFalse(ViiperSetupManager.IsSupportedUsbipVersion(null));
             Assert.IsFalse(ViiperSetupManager.IsSupportedUsbipVersion(
+                new Version(0, 9, 7, 6)));
+            Assert.IsTrue(ViiperSetupManager.IsSupportedUsbipVersion(
                 new Version(0, 9, 7, 7)));
-            Assert.IsTrue(ViiperSetupManager.IsSupportedUsbipVersion(
+            Assert.IsFalse(ViiperSetupManager.IsSupportedUsbipVersion(
                 new Version(0, 9, 7, 8)));
-            Assert.IsTrue(ViiperSetupManager.IsSupportedUsbipVersion(
+            Assert.IsFalse(ViiperSetupManager.IsSupportedUsbipVersion(
                 new Version(0, 9, 8, 0)));
         }
 

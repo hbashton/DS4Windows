@@ -9,13 +9,13 @@ $script:RebootRecommended = $false
 $script:UsbipRuntimeReady = $false
 $script:UsbipRuntimeProbeState = "not-run"
 $script:Ds4WindowsRestartPath = $null
-$script:RequiredUsbipVersion = [Version]"0.9.7.8"
+$script:RequiredUsbipVersion = [Version]"0.9.7.7"
 $script:UsbipInstallerUrl =
-    "https://github.com/vadimgrn/usbip-win2/releases/download/v.0.9.7.8/USBip-0.9.7.8-x64.exe"
+    "https://github.com/vadimgrn/usbip-win2/releases/download/v.0.9.7.7/USBip-0.9.7.7-x64.exe"
 $script:UsbipInstallerSha256 =
-    "44451fe06f4186125c2a5ecd25b099c5560a61a60b1e56f5a0758e77a60afa44"
+    "51620fa5f9f8be5932bc9d786deee557ce06d5407a99cab490dcfac71f185fea"
 $script:BundledUsbipInstallerPath = Join-Path $PSScriptRoot `
-    "USBip-0.9.7.8-x64.exe"
+    "USBip-0.9.7.7-x64.exe"
 $programFilesRoot = if ($env:ProgramW6432) {
     $env:ProgramW6432
 }
@@ -95,6 +95,100 @@ function Get-UsbipInstalledVersion {
     return $null
 }
 
+function Get-UsbipUninstallEntry {
+    foreach ($root in @(
+        "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
+        "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
+    )) {
+        $entry = Get-ItemProperty $root -ErrorAction SilentlyContinue |
+            Where-Object {
+                $displayName = $_.DisplayName -as [string]
+                $displayName -match "USB/IP|USBip"
+            } |
+            Select-Object -First 1
+        if ($entry) { return $entry }
+    }
+
+    return $null
+}
+
+function Disconnect-UsbipImports([string]$usbipPath) {
+    if (-not (Test-Path -LiteralPath $usbipPath -PathType Leaf)) { return }
+
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $portOutput = @(& $usbipPath port 2>&1)
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    $portText = ($portOutput | ForEach-Object { [string]$_ }) -join `
+        [Environment]::NewLine
+    $matches = [regex]::Matches($portText, '(?im)^\s*Port\s+(\d+):')
+    foreach ($match in $matches) {
+        $port = [int]$match.Groups[1].Value
+        Write-SetupLog "Detaching stopped USBIP import on port $port." Yellow
+        $previousErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try { & $usbipPath detach -p $port 2>&1 | Out-Null }
+        finally { $ErrorActionPreference = $previousErrorActionPreference }
+    }
+}
+
+function Remove-MismatchedUsbipPackage($entry, [Version]$installedVersion,
+        [Version]$requiredVersion) {
+    if (-not $entry -or -not $installedVersion -or
+            $installedVersion -eq $requiredVersion) {
+        return $false
+    }
+
+    $uninstallCommand = $entry.QuietUninstallString -as [string]
+    if (-not $uninstallCommand) {
+        $uninstallCommand = $entry.UninstallString -as [string]
+    }
+    if (-not $uninstallCommand) {
+        throw "usbip-win2 $installedVersion must be replaced with " +
+            "$requiredVersion, but its uninstall command is unavailable."
+    }
+
+    $match = [regex]::Match($uninstallCommand,
+        '^\s*(?:"(?<exe>[^"]+)"|(?<exe>\S+))(?:\s+(?<args>.*))?$')
+    if (-not $match.Success) {
+        throw "Could not parse the installed usbip-win2 uninstall command."
+    }
+    $uninstaller = $match.Groups['exe'].Value
+    if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) {
+        throw "The installed usbip-win2 uninstaller is missing: $uninstaller"
+    }
+
+    Write-SetupLog (
+        "Removing unsupported usbip-win2 $installedVersion before " +
+        "installing pinned safe $requiredVersion."
+    ) Yellow
+    $uninstall = Start-Process -FilePath $uninstaller `
+        -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" `
+        -PassThru
+    if (-not $uninstall.WaitForExit(30000)) {
+        try { & taskkill.exe /PID $uninstall.Id /T /F 2>&1 | Out-Null }
+        catch { }
+        $script:RebootRecommended = $true
+        throw "usbip-win2 could not unload its active kernel driver within " +
+            "30 seconds. Restart Windows, then run Install / Repair again; " +
+            "the installer will resume with packaged $requiredVersion."
+    }
+    $uninstall.Refresh()
+    if ($uninstall.ExitCode -notin @(0, 1641, 3010)) {
+        throw "usbip-win2 uninstall failed with exit code " +
+            "$($uninstall.ExitCode)."
+    }
+
+    # A mismatched kernel driver can remain loaded after files are replaced.
+    # Never report Ready until a reboot has cleared the previous driver image.
+    $script:RebootRecommended = $true
+    return $true
+}
+
 function Assert-FileSha256([string]$path, [string]$expectedHash) {
     $actualHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
     if (-not [string]::Equals($actualHash, $expectedHash,
@@ -134,7 +228,7 @@ function Test-UsbipRuntime([string]$usbipPath) {
         if ($abiMismatch) {
             $script:UsbipRuntimeProbeState = "abi-mismatch"
             Write-SetupLog (
-                "usbip-win2 0.9.7.8 is installed, but Windows still has a " +
+                "usbip-win2 0.9.7.7 is installed, but Windows still has a " +
                 "different driver ABI loaded. A reboot is required."
             ) Yellow
             return $false
@@ -608,7 +702,7 @@ try {
     }
 
     $canonicalUsbipPresent = Test-Path -LiteralPath $script:CanonicalUsbipPath
-    $usbipVersionReady = $canonicalUsbipPresent -and $usbipVersion -and $usbipVersion -ge $requiredUsbipVersion
+    $usbipVersionReady = $canonicalUsbipPresent -and $usbipVersion -and $usbipVersion -eq $requiredUsbipVersion
     if ($usbipVersionReady) {
         $script:UsbipRuntimeReady = Test-UsbipRuntime $script:CanonicalUsbipPath
     }
@@ -635,8 +729,8 @@ try {
         elseif (-not $usbipVersion) {
             "present with an unreadable version"
         }
-        elseif ($usbipVersion -lt $requiredUsbipVersion) {
-            "old ($usbipVersion)"
+        elseif ($usbipVersion -ne $requiredUsbipVersion) {
+            "unsupported ($usbipVersion)"
         }
         else {
             "installed but its userspace/driver ABI probe failed"
@@ -647,10 +741,10 @@ try {
         ) Yellow
         Assert-PadSenseNotRunning "usbip-win2 driver transition"
 
-        $usbipInstaller = Join-Path $script:TempDir "USBip-0.9.7.8-x64.exe"
+        $usbipInstaller = Join-Path $script:TempDir "USBip-0.9.7.7-x64.exe"
         if (Test-Path -LiteralPath $script:BundledUsbipInstallerPath) {
             Write-SetupLog (
-                "Using the bundled usbip-win2 0.9.7.8 installer."
+                "Using the bundled usbip-win2 0.9.7.7 installer."
             ) Green
             Assert-FileSha256 $script:BundledUsbipInstallerPath `
                 $script:UsbipInstallerSha256
@@ -675,6 +769,11 @@ try {
         }
         Assert-PadSenseNotRunning "usbip-win2 driver transition"
 
+        Disconnect-UsbipImports $script:CanonicalUsbipPath
+        $uninstallEntry = Get-UsbipUninstallEntry
+        [void](Remove-MismatchedUsbipPackage $uninstallEntry $usbipVersion `
+            $requiredUsbipVersion)
+
         Write-SetupLog "Windows may briefly restart USB hub devices." Yellow
         $installer = Start-Process -FilePath $usbipInstaller `
             -ArgumentList "/S" -PassThru -Wait
@@ -687,7 +786,7 @@ try {
 
         $usbipVersion = Get-UsbipInstalledVersion
         $canonicalUsbipPresent = Test-Path -LiteralPath $script:CanonicalUsbipPath
-        $usbipVersionReady = $canonicalUsbipPresent -and $usbipVersion -and $usbipVersion -ge $requiredUsbipVersion
+        $usbipVersionReady = $canonicalUsbipPresent -and $usbipVersion -and $usbipVersion -eq $requiredUsbipVersion
         if (-not $usbipVersionReady) {
             $script:RebootRecommended = $true
             Write-SetupLog (

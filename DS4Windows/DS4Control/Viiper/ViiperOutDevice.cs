@@ -4482,7 +4482,7 @@ namespace DS4Windows
                     usbipPort, device.UsbipOwnerSerial))
                 {
                     throw new IOException(
-                        $"VIIPER created {bus.BusId}-{device.DevId}, but its native usbip-win2 attach response did not contain a positive port and valid DS4Windows ownership token.");
+                        $"VIIPER created {bus.BusId}-{device.DevId}, but its native usbip-win2 attach response did not contain a positive port and supported ownership metadata.");
                 }
 
                 ViiperUsbipPortManager.DetachDuplicateLocalViiperPorts(bus.BusId, device.DevId, usbipPort);
@@ -4765,6 +4765,7 @@ namespace DS4Windows
     {
         private const string OwnershipSerialPrefix = "DS4W";
         private const int OwnershipSerialLength = 15;
+        private const int ViiperUsbipServerPort = 3241;
         private static readonly object ActivePortsLock = new object();
         private static readonly Dictionary<int, string> ActivePorts =
             new Dictionary<int, string>();
@@ -5026,7 +5027,8 @@ namespace DS4Windows
             UsbipPortBlock port, string remoteBusId)
         {
             if (!TryParseRemoteLocation(port.Block, out string host,
-                out string parsedBusId) || !IsLocalHost(host))
+                out int serverPort, out string parsedBusId) ||
+                !IsLocalHost(host) || serverPort != ViiperUsbipServerPort)
             {
                 return false;
             }
@@ -5038,7 +5040,11 @@ namespace DS4Windows
                 return false;
             }
 
-            return TryParseSerial(port.Block, out string serial) &&
+            // usbip-win2 0.9.7.7 has no attach-time serial override. Its
+            // safe ownership identity is the exact VIIPER-only localhost
+            // server port plus the remote bus/device tuple. If a newer port
+            // listing does expose a serial, reject every foreign token.
+            return !TryParseSerial(port.Block, out string serial) ||
                 IsDs4WindowsOwnershipSerial(serial);
         }
 
@@ -5070,13 +5076,15 @@ namespace DS4Windows
         internal static bool IsTrustedCreateResponse(int port,
             string ownerSerial)
         {
-            return port > 0 && IsDs4WindowsOwnershipSerial(ownerSerial);
+            return port > 0 && (string.IsNullOrEmpty(ownerSerial) ||
+                IsDs4WindowsOwnershipSerial(ownerSerial));
         }
 
         private static bool TryParseRemoteLocation(string block,
-            out string host, out string remoteBusId)
+            out string host, out int serverPort, out string remoteBusId)
         {
             host = null;
+            serverPort = -1;
             remoteBusId = null;
             foreach (string rawLine in SplitLines(block))
             {
@@ -5097,6 +5105,7 @@ namespace DS4Windows
                 }
 
                 host = uri.Host;
+                serverPort = uri.Port;
                 remoteBusId = uri.AbsolutePath.Trim('/');
                 return !string.IsNullOrEmpty(host) &&
                     !string.IsNullOrEmpty(remoteBusId);

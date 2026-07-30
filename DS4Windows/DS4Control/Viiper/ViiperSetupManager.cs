@@ -53,8 +53,8 @@ namespace DS4Windows
                 if (!UsbipInstalled)
                 {
                     return string.IsNullOrWhiteSpace(UsbipVersion)
-                        ? "usbip-win2 0.9.7.8 is missing"
-                        : $"usbip-win2 {UsbipVersion} must be upgraded to 0.9.7.8";
+                        ? "usbip-win2 0.9.7.7 is missing"
+                        : $"usbip-win2 {UsbipVersion} must be replaced with supported 0.9.7.7";
                 }
 
                 if (!UsbipRuntimeReady || UsbipRebootOrRepairRequired)
@@ -78,7 +78,7 @@ namespace DS4Windows
         public const int ApiPort = 3242;
         public const string UsbipWin2ReleasesUrl = "https://github.com/vadimgrn/usbip-win2/releases";
         public const string ViiperReleasesUrl = "https://github.com/hbashton/VIIPER/releases";
-        internal static readonly Version RequiredUsbipVersion = new Version(0, 9, 7, 8);
+        internal static readonly Version RequiredUsbipVersion = new Version(0, 9, 7, 7);
 
         private const string InstallerScriptName = "install-viiper-backend.ps1";
         private const string UsbipRelativePath = @"USBip\usbip.exe";
@@ -114,7 +114,7 @@ namespace DS4Windows
             {
                 usbipProbeMessage = usbipVersion == null
                     ? "The canonical usbip.exe version could not be read."
-                    : $"usbip.exe {usbipVersion} is older than the required {RequiredUsbipVersion}.";
+                    : $"usbip.exe {usbipVersion} does not match the supported {RequiredUsbipVersion}.";
             }
 
             ViiperPrerequisiteStatus status = new ViiperPrerequisiteStatus
@@ -405,7 +405,7 @@ namespace DS4Windows
 
         internal static bool IsSupportedUsbipVersion(Version version)
         {
-            return version != null && version >= RequiredUsbipVersion;
+            return version != null && version == RequiredUsbipVersion;
         }
 
         internal static bool IsSuccessfulUsbipPortProbe(int exitCode,

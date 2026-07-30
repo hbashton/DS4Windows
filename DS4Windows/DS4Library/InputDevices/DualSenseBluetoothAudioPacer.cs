@@ -62,25 +62,6 @@ namespace DS4Windows.InputDevices
         // paired path used a short 5 ms reserve-transfer phase; applying that
         // phase to 0x36 would burst reports at twice the firmware cadence.
         internal const int ControllerReserveTransferIntervals = 0;
-        // Before the microphone clock is armed, redistribute 38.3 ms of the
-        // existing ten-report host runway into the controller. Twenty-four
-        // sequential reports contain twenty-three shortened gaps; at 9 ms the
-        // producer supplies about 19.4 reports while the helper presents 24,
-        // so a full ten-report host FIFO remains above five. Unlike a continuous rate
-        // servo, this finite transfer never resamples audible media or changes
-        // the steady playout clock.
-        internal const int MicrophoneReserveTransferReports = 24;
-        internal const int MicrophoneReserveTransferIntervals =
-            MicrophoneReserveTransferReports - 1;
-        // Only transfer reserve from a completely full ten-report host FIFO.
-        // If that state is not observed, the bounded fail-open preserves the
-        // ordinary nominal-cadence microphone transition.
-        internal const int MicrophoneReserveTransferMinimumHostReports =
-            SingleAudioTransportSlotCount;
-        internal const int MicrophoneReserveTransferIntervalMicroseconds =
-            9_000;
-        internal const int MicrophoneReserveTransferTimeoutMilliseconds = 500;
-
         internal static bool UsePadForgeAudioTransport(string value)
         {
             return string.Equals(value, "35", StringComparison.Ordinal) ||
@@ -112,11 +93,9 @@ namespace DS4Windows.InputDevices
 
         internal static bool ShouldDropSaturatedAudio(
             bool padForgeAudioTransport, bool pairedAudioReport,
-            bool controlOnly, bool accepted, bool transportFault,
-            bool preserveForMicrophoneReserve = false)
+            bool controlOnly, bool accepted, bool transportFault)
         {
-            return !preserveForMicrophoneReserve &&
-                !controlOnly && !accepted && !transportFault &&
+            return !controlOnly && !accepted && !transportFault &&
                 (padForgeAudioTransport || pairedAudioReport);
         }
 
@@ -839,41 +818,6 @@ namespace DS4Windows.InputDevices
         }
 
         /// <summary>
-        /// Serializes Sony's native 0x32 microphone-state transition through
-        /// the same physical FIFO and report-sequence owner as speaker audio.
-        /// The controller must observe this transition before the steady audio
-        /// header changes between playback and duplex; a template update alone
-        /// can start microphone packets without coherently arming its audio
-        /// clock.
-        /// </summary>
-        public bool UpdateMicrophoneStatus(bool enabled)
-        {
-            if (!IsRunning)
-            {
-                return false;
-            }
-
-            byte[] payload = { enabled ? (byte)1 : (byte)0 };
-            lock (stateLock)
-            {
-                foreach (OutboundCommand removed in
-                    outboundCommands.RemoveWhere(command =>
-                        command.Kind == MessageKind.UpdateMicrophoneStatus))
-                {
-                }
-
-                if (!outboundCommands.TryEnqueue(new OutboundCommand(
-                    MessageKind.UpdateMicrophoneStatus, payload)))
-                {
-                    return false;
-                }
-            }
-
-            outboundAvailable.Set();
-            return true;
-        }
-
-        /// <summary>
         /// Atomically queues microphone intent, its matching live template,
         /// and the controller-state snapshot required before native 0x32.
         /// Reserving all three queue entries before publishing the first one
@@ -901,18 +845,20 @@ namespace DS4Windows.InputDevices
 
             lock (stateLock)
             {
-                foreach (OutboundCommand removed in
-                    outboundCommands.RemoveWhere(command =>
+                var transition = new[]
+                {
+                    new OutboundCommand(MessageKind.UpdateMicrophoneStatus,
+                        status),
+                    new OutboundCommand(MessageKind.UpdateTemplate,
+                        BuildTemplatePayload(template, hapticsExpiryQpc)),
+                    new OutboundCommand(MessageKind.UpdateControllerState,
+                        controllerState),
+                };
+                if (!outboundCommands.TryReplaceWhereWithGroup(command =>
                         command.Kind == MessageKind.UpdateMicrophoneStatus ||
                         command.Kind == MessageKind.UpdateTemplate ||
-                        command.Kind == MessageKind.UpdateControllerState))
-                {
-                    // Transition commands never consume report credits.
-                }
-
-                const int transitionCommandCount = 3;
-                if (outboundCommands.Capacity - outboundCommands.Count <
-                    transitionCommandCount)
+                        command.Kind == MessageKind.UpdateControllerState,
+                    transition))
                 {
                     return false;
                 }
@@ -920,19 +866,7 @@ namespace DS4Windows.InputDevices
                 // Intent is deliberately first: the helper freezes the
                 // physical media header in its committed mode before the new
                 // template can reach presentation. State still commits before
-                // 0x32 after the finite audio boundary.
-                if (!outboundCommands.TryEnqueue(new OutboundCommand(
-                        MessageKind.UpdateMicrophoneStatus, status)) ||
-                    !outboundCommands.TryEnqueue(new OutboundCommand(
-                        MessageKind.UpdateTemplate,
-                        BuildTemplatePayload(template, hapticsExpiryQpc))) ||
-                    !outboundCommands.TryEnqueue(new OutboundCommand(
-                        MessageKind.UpdateControllerState, controllerState)))
-                {
-                    throw new InvalidOperationException(
-                        "The reserved microphone transition command group could not be queued atomically.");
-                }
-
+                // 0x32 after the ordered audio boundary.
                 latestTemplate = template;
                 latestTemplateHapticsExpiryQpc = hapticsExpiryQpc;
                 Buffer.BlockCopy(controllerState, 0, latestControllerState, 0,
@@ -1989,11 +1923,7 @@ namespace DS4Windows.InputDevices
             private int microphoneStatusReportsAhead;
             private bool committedMicrophoneEnabled;
             private bool microphoneControllerStateRequired;
-            private bool microphoneReserveTransferActive;
-            private bool microphoneReserveTransferStarted;
-            private bool microphoneReserveTransferCancelRequested;
-            private int microphoneReserveTransferRequest;
-            private long microphoneReserveTransferDeadlineQpc;
+            private bool microphoneTransitionStateReceived;
             private bool pendingControllerStateAvailable;
             private int controllerStateReportsAhead;
             private long lastControllerStateSubmissionQpc;
@@ -2334,31 +2264,11 @@ namespace DS4Windows.InputDevices
 
                     if (pendingMicrophoneStatus >= 0)
                     {
-                        bool restartEnableTransfer =
-                            pendingMicrophoneStatus > 0 &&
-                            !committedMicrophoneEnabled;
-                        microphoneReserveTransferActive =
-                            restartEnableTransfer;
-                        microphoneReserveTransferStarted = false;
-                        microphoneReserveTransferCancelRequested = true;
-                        microphoneReserveTransferRequest =
-                            restartEnableTransfer ?
-                                MicrophoneReserveTransferIntervals : 0;
-                        microphoneReserveTransferDeadlineQpc =
-                            restartEnableTransfer ?
-                                Stopwatch.GetTimestamp() +
-                                    Stopwatch.Frequency *
-                                        MicrophoneReserveTransferTimeoutMilliseconds /
-                                        1000 : 0;
-                        microphoneStatusReportsAhead =
-                            restartEnableTransfer ?
-                                MicrophoneReserveTransferReports : 0;
+                        microphoneStatusReportsAhead = 0;
                     }
                     if (pendingControllerStateAvailable)
                     {
-                        controllerStateReportsAhead =
-                            microphoneReserveTransferActive ?
-                                microphoneStatusReportsAhead : 0;
+                        controllerStateReportsAhead = 0;
                     }
                 }
 
@@ -2445,14 +2355,14 @@ namespace DS4Windows.InputDevices
                             committedMicrophoneEnabled == (status != 0)))
                     {
                         // Coalesce an identical request without extending the
-                        // accepted-report boundary or replaying the finite
-                        // transfer. A duplicate enable used to reset the gate
-                        // to 24 after some of those reports had already moved.
+                        // accepted-report boundary or replaying the ordered
+                        // state/template/native-status transition.
                         return;
                     }
 
                     pendingMicrophoneStatus = status;
                     microphoneControllerStateRequired = true;
+                    microphoneTransitionStateReceived = false;
                     // 0x39 takes its mic/audio-clock header from the second
                     // logical frame. Preserve only complete physical pairs
                     // ahead of 0x32; an odd old-mode half stays behind the
@@ -2461,37 +2371,10 @@ namespace DS4Windows.InputDevices
                         CompletePairedReportBoundary(
                             reservoir.CountLeading(
                                 IsQueuedSpeakerReport));
-                    if (status != 0 && !committedMicrophoneEnabled)
+                    if (pendingControllerStateAvailable)
                     {
-                        microphoneReserveTransferActive = true;
-                        microphoneReserveTransferStarted = false;
-                        microphoneReserveTransferCancelRequested = false;
-                        microphoneReserveTransferRequest =
-                            MicrophoneReserveTransferIntervals;
-                        // Bound both the wait for a complete host
-                        // runway and the transfer itself. The deadline is
-                        // renewed when the first shortened gap is armed.
-                        microphoneReserveTransferDeadlineQpc =
-                            Stopwatch.GetTimestamp() +
-                            Stopwatch.Frequency *
-                                MicrophoneReserveTransferTimeoutMilliseconds /
-                                1000;
-
-                        reportsAhead = Math.Max(reportsAhead,
-                            MicrophoneReserveTransferReports);
-                        if (pendingControllerStateAvailable)
-                        {
-                            controllerStateReportsAhead = Math.Max(
-                                controllerStateReportsAhead, reportsAhead);
-                        }
-                    }
-                    else
-                    {
-                        microphoneReserveTransferActive = false;
-                        microphoneReserveTransferStarted = false;
-                        microphoneReserveTransferCancelRequested = true;
-                        microphoneReserveTransferRequest = 0;
-                        microphoneReserveTransferDeadlineQpc = 0;
+                        controllerStateReportsAhead = Math.Max(
+                            controllerStateReportsAhead, reportsAhead);
                     }
 
                     microphoneStatusReportsAhead = reportsAhead;
@@ -2523,7 +2406,7 @@ namespace DS4Windows.InputDevices
                             CompletePairedReportBoundary(
                                 reservoir.CountLeading(
                                     IsQueuedSpeakerReport));
-                        if (microphoneReserveTransferActive)
+                        if (pendingMicrophoneStatus >= 0)
                         {
                             controllerStateReportsAhead = Math.Max(
                                 controllerStateReportsAhead,
@@ -2533,6 +2416,14 @@ namespace DS4Windows.InputDevices
                     Buffer.BlockCopy(payload, 0, pendingControllerState, 0,
                         payloadLength);
                     pendingControllerStateAvailable = true;
+                    if (pendingMicrophoneStatus >= 0)
+                    {
+                        // The parent publishes status -> template -> state as
+                        // one reserved command group. Only this post-status
+                        // snapshot may satisfy the microphone state barrier;
+                        // a stale state already pending in the helper cannot.
+                        microphoneTransitionStateReceived = true;
+                    }
                 }
 
                 reservoirChanged.Set();
@@ -2557,40 +2448,6 @@ namespace DS4Windows.InputDevices
                         lock (stateLock)
                         {
                             long nowQpc = Stopwatch.GetTimestamp();
-                            if (microphoneReserveTransferCancelRequested)
-                            {
-                                if (scheduler.IsStarted)
-                                {
-                                    scheduler.CancelControllerReserveTransfer();
-                                }
-                                microphoneReserveTransferCancelRequested =
-                                    false;
-                            }
-                            if (microphoneReserveTransferActive &&
-                                microphoneReserveTransferDeadlineQpc > 0 &&
-                                nowQpc >=
-                                    microphoneReserveTransferDeadlineQpc)
-                            {
-                                // Never leave microphone activation waiting on
-                                // a producer or writer that has stopped making
-                                // progress. The ordinary ordered transition is
-                                // the bounded fallback.
-                                microphoneReserveTransferActive = false;
-                                microphoneReserveTransferStarted = false;
-                                microphoneReserveTransferRequest = 0;
-                                microphoneReserveTransferDeadlineQpc = 0;
-                                microphoneStatusReportsAhead = 0;
-                                microphoneControllerStateRequired = false;
-                                if (pendingControllerStateAvailable)
-                                {
-                                    controllerStateReportsAhead = 0;
-                                }
-                                if (scheduler.IsStarted)
-                                {
-                                    scheduler.CancelControllerReserveTransfer();
-                                }
-                            }
-
                             microphoneStatusReady =
                                 pendingMicrophoneStatus >= 0 &&
                                 microphoneStatusReportsAhead <= 0 &&
@@ -2637,22 +2494,6 @@ namespace DS4Windows.InputDevices
                                     ControllerReserveTransferIntervals);
                             }
 
-                            if (scheduler.IsStarted &&
-                                microphoneReserveTransferRequest > 0 &&
-                                speakerReportCount >=
-                                    MicrophoneReserveTransferMinimumHostReports)
-                            {
-                                scheduler.BeginControllerReserveTransfer(
-                                    microphoneReserveTransferRequest,
-                                    MicrophoneReserveTransferIntervalMicroseconds);
-                                microphoneReserveTransferRequest = 0;
-                                microphoneReserveTransferStarted = true;
-                                microphoneReserveTransferDeadlineQpc =
-                                    Stopwatch.GetTimestamp() +
-                                    Stopwatch.Frequency *
-                                        MicrophoneReserveTransferTimeoutMilliseconds /
-                                        1000;
-                            }
                         }
 
                         if (!canPresent)
@@ -2716,9 +2557,12 @@ namespace DS4Windows.InputDevices
                                         pendingControllerStateAvailable =
                                             false;
                                         controllerStateReportsAhead = 0;
-                                        if (pendingMicrophoneStatus >= 0)
+                                        if (pendingMicrophoneStatus >= 0 &&
+                                            microphoneTransitionStateReceived)
                                         {
                                             microphoneControllerStateRequired =
+                                                false;
+                                            microphoneTransitionStateReceived =
                                                 false;
                                         }
                                         lastControllerStateSubmissionQpc =
@@ -2740,6 +2584,24 @@ namespace DS4Windows.InputDevices
 
                             if (!accepted)
                             {
+                                if (!transportFault)
+                                {
+                                    lock (stateLock)
+                                    {
+                                        if (pendingControllerStateAvailable)
+                                        {
+                                            // A saturated control must not
+                                            // monopolize the oldest physical
+                                            // credit. Give one due media frame
+                                            // the next attempt, then retry the
+                                            // same uncommitted state write.
+                                            controllerStateReportsAhead =
+                                                Math.Max(
+                                                    controllerStateReportsAhead,
+                                                    1);
+                                        }
+                                    }
+                                }
                                 reservoirChanged.WaitOne(1);
                             }
 
@@ -2789,18 +2651,8 @@ namespace DS4Windows.InputDevices
                                             microphoneStatusReportsAhead = 0;
                                             microphoneControllerStateRequired =
                                                 false;
-                                            microphoneReserveTransferActive =
+                                            microphoneTransitionStateReceived =
                                                 false;
-                                            microphoneReserveTransferStarted =
-                                                false;
-                                            microphoneReserveTransferCancelRequested =
-                                                false;
-                                            microphoneReserveTransferRequest =
-                                                0;
-                                            microphoneReserveTransferDeadlineQpc =
-                                                0;
-                                            scheduler.
-                                                CancelControllerReserveTransfer();
                                         }
                                     }
                                 }
@@ -2816,6 +2668,22 @@ namespace DS4Windows.InputDevices
 
                             if (!accepted)
                             {
+                                if (!transportFault)
+                                {
+                                    lock (stateLock)
+                                    {
+                                        if (pendingMicrophoneStatus >= 0)
+                                        {
+                                            // Keep 0x32 ordered after state,
+                                            // but never let a busy control slot
+                                            // starve the continuous media lane.
+                                            microphoneStatusReportsAhead =
+                                                Math.Max(
+                                                    microphoneStatusReportsAhead,
+                                                    1);
+                                        }
+                                    }
+                                }
                                 reservoirChanged.WaitOne(1);
                             }
 
@@ -2831,8 +2699,7 @@ namespace DS4Windows.InputDevices
                             // into steady cadence resampled audible media and
                             // still failed to raise the measured equilibrium.
                             // Keep the wire clock locked solely to the
-                            // controller's long-window clock estimator; reserve
-                            // is moved only by the bounded pre-mic transfer.
+                            // controller's long-window clock estimator.
                             scheduler.SetRateRatio(Math.Clamp(
                                 controllerClockRatio,
                                 DualSenseBluetoothAudioPacerScheduler.
@@ -2997,21 +2864,13 @@ namespace DS4Windows.InputDevices
                                         presentedAt);
                                 }
 
-                                bool protectMicrophoneReserveTransfer =
-                                    microphoneReserveTransferActive &&
-                                    microphoneReserveTransferStarted &&
-                                    pendingMicrophoneStatus > 0 &&
-                                    pairedItem == null && !controlOnly;
-                                if (usePadForgeAudioTransport &&
-                                    pendingMicrophoneStatus >= 0 &&
-                                    pairedItem == null && !controlOnly)
+                                if (pairedItem == null && !controlOnly)
                                 {
-                                    // Reports queued after the UI request may
-                                    // already carry the desired FF header. Keep
-                                    // the physical stream in its last committed
-                                    // mode until the finite reserve transfer,
-                                    // state write, and native 0x32 boundary have
-                                    // all completed in FIFO order.
+                                    // The helper owns the physical microphone
+                                    // mode. Reports may have been encoded before
+                                    // or after a UI request, so derive every wire
+                                    // header from the last accepted native 0x32
+                                    // transition rather than stale producer state.
                                     ApplyCommittedMicrophoneMode(item.Report,
                                         committedMicrophoneEnabled);
                                 }
@@ -3106,8 +2965,7 @@ namespace DS4Windows.InputDevices
                                     ShouldDropSaturatedAudio(
                                         usePadForgeAudioTransport,
                                         pairedItem != null, controlOnly,
-                                        accepted, transportFault,
-                                        protectMicrophoneReserveTransfer);
+                                        accepted, transportFault);
 
                                 if (accepted ||
                                     skippedSaturatedAudio)
@@ -3139,11 +2997,7 @@ namespace DS4Windows.InputDevices
                                 }
                             }
 
-                            bool microphoneBoundaryCanAdvance =
-                                !microphoneReserveTransferActive ||
-                                microphoneReserveTransferStarted;
                             if (!retainedForRetry &&
-                                microphoneBoundaryCanAdvance &&
                                 pendingMicrophoneStatus >= 0 &&
                                 microphoneStatusReportsAhead > 0)
                             {
@@ -3156,7 +3010,6 @@ namespace DS4Windows.InputDevices
                                     (pairedItem == null ? 1 : 2));
                             }
                             if (!retainedForRetry &&
-                                microphoneBoundaryCanAdvance &&
                                 pendingControllerStateAvailable &&
                                 controllerStateReportsAhead > 0)
                             {
@@ -4000,6 +3853,65 @@ namespace DS4Windows.InputDevices
             }
         }
 
+        /// <summary>
+        /// Replaces every matching item with one ordered group as a single
+        /// capacity transaction. If the group cannot fit after the prospective
+        /// removals, the FIFO is left byte-for-byte and order-for-order intact.
+        /// </summary>
+        public bool TryReplaceWhereWithGroup(Predicate<T> predicate,
+            IReadOnlyList<T> replacements)
+        {
+            if (predicate == null)
+            {
+                throw new ArgumentNullException(nameof(predicate));
+            }
+            if (replacements == null)
+            {
+                throw new ArgumentNullException(nameof(replacements));
+            }
+
+            lock (syncRoot)
+            {
+                int removable = 0;
+                for (int index = 0; index < count; index++)
+                {
+                    if (predicate(entries[(head + index) % entries.Length]))
+                    {
+                        removable++;
+                    }
+                }
+
+                if (count - removable + replacements.Count > entries.Length)
+                {
+                    return false;
+                }
+
+                var retained = new List<T>(count - removable);
+                for (int index = 0; index < count; index++)
+                {
+                    T item = entries[(head + index) % entries.Length];
+                    if (!predicate(item))
+                    {
+                        retained.Add(item);
+                    }
+                }
+
+                Array.Clear(entries, 0, entries.Length);
+                head = 0;
+                count = retained.Count + replacements.Count;
+                for (int index = 0; index < retained.Count; index++)
+                {
+                    entries[index] = retained[index];
+                }
+                for (int index = 0; index < replacements.Count; index++)
+                {
+                    entries[retained.Count + index] = replacements[index];
+                }
+
+                return true;
+            }
+        }
+
         public int CountLeading(Predicate<T> predicate)
         {
             if (predicate == null)
@@ -4055,8 +3967,6 @@ namespace DS4Windows.InputDevices
         private double rateRatio;
         private int controllerLinkWarmupIntervalsRemaining;
         private int controllerReserveTransferIntervalsRemaining;
-        private int controllerReserveTransferIntervalMicroseconds =
-            ControllerReserveTransferIntervalMicroseconds;
         private long nextDeadlineQpc;
         private long inputPhaseReferenceQpc;
         private bool started;
@@ -4153,8 +4063,6 @@ namespace DS4Windows.InputDevices
                 controllerLinkWarmupIntervals;
             controllerReserveTransferIntervalsRemaining =
                 controllerReserveTransferIntervals;
-            controllerReserveTransferIntervalMicroseconds =
-                ControllerReserveTransferIntervalMicroseconds;
             nextDeadlineQpc = nowQpc;
             started = true;
         }
@@ -4165,47 +4073,8 @@ namespace DS4Windows.InputDevices
             fractionalRemainderAccumulator = 0.0;
             controllerLinkWarmupIntervalsRemaining = 0;
             controllerReserveTransferIntervalsRemaining = 0;
-            controllerReserveTransferIntervalMicroseconds =
-                ControllerReserveTransferIntervalMicroseconds;
             nextDeadlineQpc = 0;
             started = false;
-        }
-
-        public void BeginControllerReserveTransfer(int transferIntervals,
-            int intervalMicroseconds)
-        {
-            if (transferIntervals < 0)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(transferIntervals));
-            }
-            if (intervalMicroseconds <= 0 ||
-                intervalMicroseconds >= 10_667)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(intervalMicroseconds));
-            }
-            if (!started)
-            {
-                throw new InvalidOperationException(
-                    "The pacer clock has not started.");
-            }
-
-            // This moves already-buffered, sequential reports from the host
-            // FIFO to the controller. It deliberately leaves the rational
-            // phase, media counters, producer cadence, and PCM untouched.
-            controllerReserveTransferIntervalsRemaining = Math.Max(
-                controllerReserveTransferIntervalsRemaining,
-                transferIntervals);
-            controllerReserveTransferIntervalMicroseconds =
-                intervalMicroseconds;
-        }
-
-        public void CancelControllerReserveTransfer()
-        {
-            controllerReserveTransferIntervalsRemaining = 0;
-            controllerReserveTransferIntervalMicroseconds =
-                ControllerReserveTransferIntervalMicroseconds;
         }
 
         public long AdvanceAfterSend(long presentationQpc)
@@ -4281,7 +4150,7 @@ namespace DS4Windows.InputDevices
             {
                 controllerReserveTransferIntervalsRemaining--;
                 return checked(clockFrequency *
-                    controllerReserveTransferIntervalMicroseconds /
+                    ControllerReserveTransferIntervalMicroseconds /
                     1_000_000);
             }
 

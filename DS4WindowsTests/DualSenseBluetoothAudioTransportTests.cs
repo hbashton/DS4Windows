@@ -88,15 +88,6 @@ namespace DS4WindowsTests
                     controlOnly: false,
                     accepted: false,
                     transportFault: false));
-            Assert.IsFalse(DualSenseBluetoothAudioPacer.
-                ShouldDropSaturatedAudio(
-                    padForgeAudioTransport: true,
-                    pairedAudioReport: false,
-                    controlOnly: false,
-                    accepted: false,
-                    transportFault: false,
-                    preserveForMicrophoneReserve: true),
-                "A busy writer must not spend a report that is charging the microphone reserve.");
         }
 
         [TestMethod]
@@ -146,6 +137,44 @@ namespace DS4WindowsTests
             Assert.IsTrue(ring.TryEnqueuePairFront(10, 20));
 
             foreach (int expected in new[] { 10, 20, 30, 40, 50 })
+            {
+                Assert.IsTrue(ring.TryDequeue(out int actual));
+                Assert.AreEqual(expected, actual);
+            }
+        }
+
+        [TestMethod]
+        public void OrderedGroupReplacementKeepsRetainedFifoOrder()
+        {
+            var ring = new DualSenseBluetoothAudioPacerRing<int>(6);
+            foreach (int value in new[] { 1, 2, 3, 4 })
+            {
+                Assert.IsTrue(ring.TryEnqueue(value));
+            }
+
+            Assert.IsTrue(ring.TryReplaceWhereWithGroup(
+                value => (value & 1) == 0, new[] { 7, 8, 9 }));
+
+            foreach (int expected in new[] { 1, 3, 7, 8, 9 })
+            {
+                Assert.IsTrue(ring.TryDequeue(out int actual));
+                Assert.AreEqual(expected, actual);
+            }
+        }
+
+        [TestMethod]
+        public void FailedOrderedGroupReplacementLeavesFifoUntouched()
+        {
+            var ring = new DualSenseBluetoothAudioPacerRing<int>(5);
+            foreach (int value in new[] { 1, 2, 3, 4, 5 })
+            {
+                Assert.IsTrue(ring.TryEnqueue(value));
+            }
+
+            Assert.IsFalse(ring.TryReplaceWhereWithGroup(
+                value => value == 2, new[] { 7, 8 }));
+
+            foreach (int expected in new[] { 1, 2, 3, 4, 5 })
             {
                 Assert.IsTrue(ring.TryDequeue(out int actual));
                 Assert.AreEqual(expected, actual);

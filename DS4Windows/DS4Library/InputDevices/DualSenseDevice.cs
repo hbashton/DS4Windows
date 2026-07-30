@@ -1733,7 +1733,11 @@ namespace DS4Windows.InputDevices
 
                 ApplyBluetoothSpeakerVolumeAndRoutingCore(template,
                     speakerVolume, headsetOnlyAudio, headphoneVolume);
-                ApplyBluetoothMicrophoneStreamingRequest(template, enabled);
+                // The requested flag was published before entering this path.
+                // Use the instance policy so the forced pre-0x32 state also
+                // restores the pending physical ADC gain validity/value that
+                // speaker snapshots intentionally sanitize.
+                ApplyBluetoothMicrophoneStreamingRequest(template);
                 lock (bluetoothAudioPacerLock)
                 {
                     return bluetoothAudioPacer?.IsRunning == true &&

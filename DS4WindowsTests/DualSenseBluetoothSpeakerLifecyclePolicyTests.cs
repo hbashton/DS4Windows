@@ -233,6 +233,24 @@ namespace DS4WindowsTests
                         controllerClockRatio, false), 1.0e-12);
         }
 
+        [TestMethod]
+        public void ProducerCadenceTracksThePhysicalPresentationClock()
+        {
+            const long frequency = 10_000_000;
+            long nominal = DualSenseBluetoothSpeakerPassthrough.
+                CalculateBluetoothSpeakerCadenceTicks(frequency, 1.0);
+            long faster = DualSenseBluetoothSpeakerPassthrough.
+                CalculateBluetoothSpeakerCadenceTicks(frequency, 1.001);
+            long slower = DualSenseBluetoothSpeakerPassthrough.
+                CalculateBluetoothSpeakerCadenceTicks(frequency, 0.999);
+
+            Assert.IsTrue(faster < nominal);
+            Assert.IsTrue(slower > nominal);
+            Assert.AreEqual(106_667, nominal);
+            Assert.AreEqual(106_560, faster);
+            Assert.AreEqual(106_773, slower);
+        }
+
         [DataTestMethod]
         [DataRow(6, true, false)]
         [DataRow(6, false, true)]

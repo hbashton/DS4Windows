@@ -701,6 +701,30 @@ namespace DS4Windows.Tests
             Assert.AreSame(secondControl, retainedSecond);
         }
 
+        [TestMethod]
+        public void CoalescedTelemetryReplacesNewestMatchWithoutReordering()
+        {
+            var ring = new DualSenseBluetoothAudioPacerRing<int>(4);
+            Assert.IsTrue(ring.TryEnqueue(1));
+            Assert.IsTrue(ring.TryEnqueue(20));
+            Assert.IsTrue(ring.TryEnqueue(3));
+
+            Assert.IsTrue(ring.TryReplaceNewestOrEnqueue(
+                value => value == 20, 21));
+            Assert.AreEqual(3, ring.Count);
+            Assert.IsTrue(ring.TryDequeue(out int first));
+            Assert.IsTrue(ring.TryDequeue(out int replacement));
+            Assert.IsTrue(ring.TryDequeue(out int last));
+            Assert.AreEqual(1, first);
+            Assert.AreEqual(21, replacement);
+            Assert.AreEqual(3, last);
+
+            Assert.IsTrue(ring.TryReplaceNewestOrEnqueue(
+                value => value == 99, 4));
+            Assert.IsTrue(ring.TryDequeue(out int appended));
+            Assert.AreEqual(4, appended);
+        }
+
         private static byte[] CreateReport(byte seed)
         {
             byte[] report = new byte[ReportLength];

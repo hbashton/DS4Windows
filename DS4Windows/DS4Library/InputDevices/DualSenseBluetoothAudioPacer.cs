@@ -107,7 +107,7 @@ namespace DS4Windows.InputDevices
         }
 
         private const string HelperArgument = "--dualsense-bt-audio-pacer-helper";
-        private const int ProtocolVersion = 8;
+        private const int ProtocolVersion = 9;
         private const int PipeConnectTimeoutMilliseconds = 5000;
         private const int HelperReadyTimeoutMilliseconds = 5000;
         private const int HelperStopTimeoutMilliseconds = 3000;
@@ -129,6 +129,7 @@ namespace DS4Windows.InputDevices
             UpdateCadence = 6,
             UpdateMicrophoneStatus = 7,
             UpdateControllerState = 8,
+            UpdateControllerMediaBuffer = 9,
             Ready = 0x80,
             ReportAcknowledged = 0x81,
             Stopped = 0x82,
@@ -748,6 +749,45 @@ namespace DS4Windows.InputDevices
 
                 if (!outboundCommands.TryEnqueue(new OutboundCommand(
                     MessageKind.UpdateCadence, payload)))
+                {
+                    return false;
+                }
+            }
+
+            outboundAvailable.Set();
+            return true;
+        }
+
+        /// <summary>
+        /// Publishes Sony's controller-side media playout level returned in a
+        /// CRC-valid normal Bluetooth input report at byte 65. Updates are
+        /// coalesced so the HID input thread never waits for pacer IPC.
+        /// </summary>
+        public bool UpdateControllerMediaBuffer(byte level,
+            long observationQpc, double cadenceRatio)
+        {
+            if (!IsRunning || observationQpc <= 0 ||
+                !double.IsFinite(cadenceRatio) ||
+                cadenceRatio < DualSenseControllerMediaBufferServo.MinimumRatio ||
+                cadenceRatio > DualSenseControllerMediaBufferServo.MaximumRatio)
+            {
+                return false;
+            }
+
+            byte[] payload = new byte[sizeof(long) * 2 + sizeof(byte)];
+            BinaryPrimitives.WriteInt64LittleEndian(payload,
+                observationQpc);
+            payload[sizeof(long)] = level;
+            BinaryPrimitives.WriteInt64LittleEndian(
+                payload.AsSpan(sizeof(long) + sizeof(byte), sizeof(long)),
+                BitConverter.DoubleToInt64Bits(cadenceRatio));
+            lock (stateLock)
+            {
+                if (!outboundCommands.TryReplaceNewestOrEnqueue(
+                    command => command.Kind ==
+                        MessageKind.UpdateControllerMediaBuffer,
+                    new OutboundCommand(
+                        MessageKind.UpdateControllerMediaBuffer, payload)))
                 {
                     return false;
                 }
@@ -1828,6 +1868,10 @@ namespace DS4Windows.InputDevices
             private long cadenceRatioBits =
                 BitConverter.DoubleToInt64Bits(1.0);
             private long inputArrivalQpc;
+            private long controllerMediaBufferObservationQpc;
+            private int controllerMediaBufferLevel = -1;
+            private long mediaBufferCadenceRatioBits =
+                BitConverter.DoubleToInt64Bits(1.0);
             private bool primeRequired = true;
             private int pendingMicrophoneStatus = -1;
             private int microphoneStatusReportsAhead;
@@ -1849,6 +1893,8 @@ namespace DS4Windows.InputDevices
             private readonly byte[] presentationTraceAudioRoute;
             private readonly byte[] presentationTraceAudioGain;
             private readonly uint[] presentationTraceHapticsHash;
+            private readonly byte[] presentationTraceMediaBufferLevel;
+            private readonly double[] presentationTraceMediaBufferRatio;
             private int presentationTraceCount;
 
             public HelperHost(Stream pipe,
@@ -1906,6 +1952,10 @@ namespace DS4Windows.InputDevices
                         presentationTraceAudioGain = new byte[
                             PresentationTraceCapacity];
                         presentationTraceHapticsHash = new uint[
+                            PresentationTraceCapacity];
+                        presentationTraceMediaBufferLevel = new byte[
+                            PresentationTraceCapacity];
+                        presentationTraceMediaBufferRatio = new double[
                             PresentationTraceCapacity];
                     }
                     catch
@@ -1969,6 +2019,10 @@ namespace DS4Windows.InputDevices
                                 break;
                             case MessageKind.UpdateControllerState:
                                 ReceiveControllerState(commandPayload,
+                                    payloadLength);
+                                break;
+                            case MessageKind.UpdateControllerMediaBuffer:
+                                ReceiveControllerMediaBuffer(commandPayload,
                                     payloadLength);
                                 break;
                             case MessageKind.Stop:
@@ -2142,6 +2196,11 @@ namespace DS4Windows.InputDevices
                 {
                     currentEpoch = epoch;
                     primeRequired = true;
+                    Volatile.Write(ref controllerMediaBufferLevel, -1);
+                    Interlocked.Exchange(
+                        ref controllerMediaBufferObservationQpc, 0);
+                    Interlocked.Exchange(ref mediaBufferCadenceRatioBits,
+                        BitConverter.DoubleToInt64Bits(1.0));
                     writer.ResetSubmissionClock();
                     while (reservoir.TryDequeue(out QueuedReport report))
                     {
@@ -2192,6 +2251,42 @@ namespace DS4Windows.InputDevices
                 Interlocked.Exchange(ref inputArrivalQpc,
                     BinaryPrimitives.ReadInt64LittleEndian(
                         payload.AsSpan(sizeof(long), sizeof(long))));
+            }
+
+            private void ReceiveControllerMediaBuffer(byte[] payload,
+                int payloadLength)
+            {
+                if (payloadLength != sizeof(long) * 2 + sizeof(byte))
+                {
+                    throw new InvalidDataException(
+                        "Invalid DualSense controller-media-buffer payload.");
+                }
+
+                long observationQpc = BinaryPrimitives.ReadInt64LittleEndian(
+                    payload.AsSpan(0, sizeof(long)));
+                if (observationQpc <= 0)
+                {
+                    throw new InvalidDataException(
+                        "Invalid DualSense controller-media-buffer timestamp.");
+                }
+
+                double cadenceRatio = BitConverter.Int64BitsToDouble(
+                    BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
+                        sizeof(long) + sizeof(byte), sizeof(long))));
+                if (!double.IsFinite(cadenceRatio) ||
+                    cadenceRatio < DualSenseControllerMediaBufferServo.MinimumRatio ||
+                    cadenceRatio > DualSenseControllerMediaBufferServo.MaximumRatio)
+                {
+                    throw new InvalidDataException(
+                        "Invalid DualSense controller-media-buffer cadence ratio.");
+                }
+
+                Volatile.Write(ref controllerMediaBufferLevel,
+                    payload[sizeof(long)]);
+                Interlocked.Exchange(ref controllerMediaBufferObservationQpc,
+                    observationQpc);
+                Interlocked.Exchange(ref mediaBufferCadenceRatioBits,
+                    BitConverter.DoubleToInt64Bits(cadenceRatio));
             }
 
             private void ReceiveMicrophoneStatus(byte[] payload,
@@ -2258,7 +2353,6 @@ namespace DS4Windows.InputDevices
                 IntPtr timer = CreateHighResolutionTimer();
                 var scheduler = new DualSenseBluetoothAudioPacerScheduler(
                     Stopwatch.Frequency);
-
                 try
                 {
                     while (!stopRequested.WaitOne(0))
@@ -2465,9 +2559,18 @@ namespace DS4Windows.InputDevices
 
                         if (!controlPrimeBypass)
                         {
-                            scheduler.SetRateRatio(
+                            double controllerClockRatio =
                                 BitConverter.Int64BitsToDouble(
-                                    Interlocked.Read(ref cadenceRatioBits)));
+                                    Interlocked.Read(ref cadenceRatioBits));
+                            double mediaBufferRatio = usePadForgeAudioTransport ?
+                                BitConverter.Int64BitsToDouble(Interlocked.Read(
+                                    ref mediaBufferCadenceRatioBits)) : 1.0;
+                            scheduler.SetRateRatio(Math.Clamp(
+                                controllerClockRatio * mediaBufferRatio,
+                                DualSenseBluetoothAudioPacerScheduler.
+                                    MinimumRateRatio,
+                                DualSenseBluetoothAudioPacerScheduler.
+                                    MaximumRateRatio));
                             // PadForge owns one continuous media clock and does
                             // not phase-snap it to asynchronous HID input. The
                             // paired 21.333 ms clock has the same requirement:
@@ -3080,6 +3183,12 @@ namespace DS4Windows.InputDevices
                     report[0] == 0x31 ? (byte)0 : report[10];
                 presentationTraceReservoirCount[index] = (byte)Math.Clamp(
                     reservoirCount, 0, byte.MaxValue);
+                presentationTraceMediaBufferLevel[index] = (byte)Math.Clamp(
+                    Volatile.Read(ref controllerMediaBufferLevel), 0,
+                    byte.MaxValue);
+                presentationTraceMediaBufferRatio[index] =
+                    BitConverter.Int64BitsToDouble(Interlocked.Read(
+                        ref mediaBufferCadenceRatioBits));
                 if (report[0] == 0x31)
                 {
                     presentationTracePacketType[index] = report[2];
@@ -3177,7 +3286,7 @@ namespace DS4Windows.InputDevices
                         new UTF8Encoding(false));
                     output.WriteLine($"qpcFrequency,{Stopwatch.Frequency}");
                     output.WriteLine(
-                        "index,qpc,reportId,reportSequence,packetSequence,packetType,reservoirCount,audioFlags0,audioFlags1,headphoneVolume,speakerVolume,audioRoute,audioGain,hapticsHash");
+                        "index,qpc,reportId,reportSequence,packetSequence,packetType,reservoirCount,audioFlags0,audioFlags1,headphoneVolume,speakerVolume,audioRoute,audioGain,hapticsHash,controllerMediaBufferLevel,mediaBufferCadenceRatio");
                     for (int index = 0; index < presentationTraceCount;
                         index++)
                     {
@@ -3207,7 +3316,15 @@ namespace DS4Windows.InputDevices
                         output.Write(',');
                         output.Write(presentationTraceAudioGain[index]);
                         output.Write(',');
-                        output.WriteLine(presentationTraceHapticsHash[index]);
+                        output.Write(presentationTraceHapticsHash[index]);
+                        output.Write(',');
+                        output.Write(
+                            presentationTraceMediaBufferLevel[index]);
+                        output.Write(',');
+                        output.WriteLine(
+                            presentationTraceMediaBufferRatio[index].ToString(
+                                "R", System.Globalization.CultureInfo.
+                                    InvariantCulture));
                     }
                 }
                 catch
@@ -3383,6 +3500,41 @@ namespace DS4Windows.InputDevices
         {
             lock (syncRoot)
             {
+                if (count == entries.Length)
+                {
+                    return false;
+                }
+
+                entries[(head + count) % entries.Length] = item;
+                count++;
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Replaces the newest matching coalescible item in place, or appends
+        /// when none exists. Unlike RemoveWhere followed by TryEnqueue this
+        /// performs no temporary-list allocation on high-rate telemetry paths.
+        /// </summary>
+        public bool TryReplaceNewestOrEnqueue(Predicate<T> predicate, T item)
+        {
+            if (predicate == null)
+            {
+                throw new ArgumentNullException(nameof(predicate));
+            }
+
+            lock (syncRoot)
+            {
+                for (int offset = count - 1; offset >= 0; offset--)
+                {
+                    int index = (head + offset) % entries.Length;
+                    if (predicate(entries[index]))
+                    {
+                        entries[index] = item;
+                        return true;
+                    }
+                }
+
                 if (count == entries.Length)
                 {
                     return false;
@@ -4216,7 +4368,13 @@ namespace DS4Windows.InputDevices
         private const int SourceSpeakerDataOffset = 144;
         private const int SpeakerDataOffset = 13;
         private const int SpeakerFrameLength = 200;
-        private const byte DuplexBufferLength = 64;
+        // DS5Dongle exposes this Sony media-reserve field over the documented
+        // 16..127 range. Live controller feedback (BT input byte 65) showed
+        // that 64 ms is exhausted by real 63..88 ms HidBth delivery droughts
+        // even though our 10.667 ms submissions remain perfectly sequential.
+        // Keep enough controller-side playout cushion for the measured tail;
+        // this does not enlarge the host reservoir or permit catch-up bursts.
+        private const byte DuplexBufferLength = 96;
 
         public static void Build(byte[] source, byte reportSequence,
             byte packetSequence, byte[] destination)
@@ -4303,7 +4461,10 @@ namespace DS4Windows.InputDevices
         private const int GoldenSpeakerHeaderOffset = 77;
         private const int GoldenSpeakerDataOffset = 79;
         private const int SpeakerFrameLength = 200;
-        private const byte DuplexBufferLength = 64;
+        // Match the duplex reserve used by the speaker-only compact builder.
+        // The controller reports the resulting live reserve in BT input byte
+        // 65, allowing hardware validation instead of timing speculation.
+        private const byte DuplexBufferLength = 96;
 
         internal static void Build(byte[] source, byte reportSequence,
             byte packetSequence, byte[] destination)

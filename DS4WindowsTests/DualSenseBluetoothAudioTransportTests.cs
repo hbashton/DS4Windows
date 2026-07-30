@@ -593,11 +593,11 @@ namespace DS4WindowsTests
             Assert.AreEqual(expectedMask, combined[4]);
             for (int index = 5; index <= 8; index++)
             {
-                byte expectedDepth = microphoneEnabled ? (byte)64 : (byte)0;
+                byte expectedDepth = microphoneEnabled ? (byte)96 : (byte)0;
                 Assert.AreEqual(expectedDepth, speaker[index]);
                 Assert.AreEqual(expectedDepth, combined[index]);
             }
-            byte expectedLastDepth = microphoneEnabled ? (byte)64 : (byte)0xFF;
+            byte expectedLastDepth = microphoneEnabled ? (byte)96 : (byte)0xFF;
             Assert.AreEqual(expectedLastDepth, speaker[9]);
             Assert.AreEqual(expectedLastDepth, combined[9]);
             Assert.AreEqual((byte)0x92, combined[11]);

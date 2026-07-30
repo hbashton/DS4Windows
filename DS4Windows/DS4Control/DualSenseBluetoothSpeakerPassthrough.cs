@@ -457,8 +457,8 @@ namespace DS4Windows
         internal const double CaptureClockRatioSlewPerPacket = 0.000002;
         private const double CaptureClockSmoothingAlpha = 0.005319148936170213;
         internal const double CaptureClockErrorDeadbandFrames = 2.0;
-        private const double DirectCaptureClockMaximumCorrection = 0.00035;
-        private const double DirectCaptureClockRatioSlewPerPacket = 0.0000005;
+        private const double DirectCaptureClockMaximumCorrection = 0.001;
+        private const double DirectCaptureClockRatioSlewPerPacket = 0.000002;
 
         private readonly object syncRoot = new object();
         private readonly object directPcmSync = new object();
@@ -1358,7 +1358,8 @@ namespace DS4Windows
             // Advance only for a successfully produced radio packet. Callback
             // batching and retry loops therefore cannot accelerate the slew.
             directPcmBalanceClockServo.AdvanceAppliedTrim(
-                BluetoothSpeakerCadenceMs / 1000.0);
+                BluetoothSpeakerCadenceMs / (1000.0 *
+                    device.DualSenseBluetoothPresentationClockRatio));
         }
 
         private void CopyCaptureFramesToSpeakerResamplerLocked(
@@ -1465,8 +1466,8 @@ namespace DS4Windows
                 // produced-minus-consumed balance trim.
                 double directControllerLockedRatio =
                     CalculateControllerLockedInputRateRatio(
-                        device.DualSenseControllerClockRatio,
-                        device.DualSenseControllerClockStable);
+                        device.DualSenseBluetoothPresentationClockRatio,
+                        clockStable: true);
                 double directBalanceTrimRatio =
                     directPcmBalanceClockServo?.AppliedTrimRatio ?? 1.0;
                 captureTargetClockRatio = Math.Clamp(
@@ -1500,8 +1501,8 @@ namespace DS4Windows
                 CaptureClockSmoothingAlpha;
             double controllerLockedRatio =
                 CalculateControllerLockedInputRateRatio(
-                    device.DualSenseControllerClockRatio,
-                    device.DualSenseControllerClockStable);
+                    device.DualSenseBluetoothPresentationClockRatio,
+                    clockStable: true);
             captureTargetClockRatio = Math.Clamp(
                 controllerLockedRatio * CalculateCaptureClockTargetRatio(
                     captureSmoothedBufferedFrames, targetFrames),
@@ -1989,8 +1990,6 @@ namespace DS4Windows
             IntPtr mmcssHandle = RegisterMultimediaScheduler();
             IntPtr highResolutionTimer = CreateHighResolutionTimer();
             long nextTick = Stopwatch.GetTimestamp();
-            long cadenceTicks = Math.Max(1, (long)Math.Round(
-                BluetoothSpeakerCadenceMs * Stopwatch.Frequency / 1000.0));
             try
             {
                 nextTick = Stopwatch.GetTimestamp();
@@ -2093,7 +2092,7 @@ namespace DS4Windows
                         }
 
                         ScheduleNextStreamTick(submittedWarmup, ref nextTick,
-                            cadenceTicks, highResolutionTimer);
+                            highResolutionTimer);
                         continue;
                     }
 
@@ -2123,7 +2122,7 @@ namespace DS4Windows
                         }
 
                         ScheduleNextStreamTick(submittedIdleCarrier,
-                            ref nextTick, cadenceTicks, highResolutionTimer);
+                            ref nextTick, highResolutionTimer);
                         continue;
                     }
 
@@ -2149,7 +2148,7 @@ namespace DS4Windows
                         }
 
                         ScheduleNextStreamTick(submittedPending, ref nextTick,
-                            cadenceTicks, highResolutionTimer);
+                            highResolutionTimer);
                         continue;
                     }
 
@@ -2298,7 +2297,7 @@ namespace DS4Windows
                     }
 
                     ScheduleNextStreamTick(submittedFrameThisTick,
-                        ref nextTick, cadenceTicks, highResolutionTimer);
+                        ref nextTick, highResolutionTimer);
                 }
             }
             finally
@@ -2322,7 +2321,7 @@ namespace DS4Windows
         }
 
         private void ScheduleNextStreamTick(bool submittedFrameThisTick,
-            ref long nextTick, long cadenceTicks, IntPtr highResolutionTimer)
+            ref long nextTick, IntPtr highResolutionTimer)
         {
             if (submittedFrameThisTick &&
                 !audioSegmentActive &&
@@ -2342,6 +2341,9 @@ namespace DS4Windows
                 return;
             }
 
+            long cadenceTicks = CalculateBluetoothSpeakerCadenceTicks(
+                Stopwatch.Frequency,
+                device.DualSenseBluetoothPresentationClockRatio);
             nextTick += cadenceTicks;
             long nowTicks = Stopwatch.GetTimestamp();
             if (nextTick <= nowTicks)
@@ -2362,6 +2364,24 @@ namespace DS4Windows
 
             LogStreamDiagnosticsIfVerbose();
             WaitUntil(highResolutionTimer, nextTick);
+        }
+
+        internal static long CalculateBluetoothSpeakerCadenceTicks(
+            long clockFrequency, double presentationClockRatio)
+        {
+            if (clockFrequency <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(clockFrequency));
+            }
+
+            double ratio = double.IsFinite(presentationClockRatio) ?
+                Math.Clamp(presentationClockRatio,
+                    DualSenseBluetoothAudioPacerScheduler.MinimumRateRatio,
+                    DualSenseBluetoothAudioPacerScheduler.MaximumRateRatio) :
+                1.0;
+            return Math.Max(1, (long)Math.Round(
+                BluetoothSpeakerCadenceMs * clockFrequency /
+                (1000.0 * ratio)));
         }
 
         private void LogStreamDiagnosticsIfVerbose()
@@ -2442,6 +2462,8 @@ namespace DS4Windows
                          $"controllerClock={device.DualSenseControllerClockRatio:F7} " +
                          $"controllerClockWindows={device.DualSenseControllerClockCompletedWindows} " +
                          $"controllerClockStable={device.DualSenseControllerClockStable} " +
+                         $"mediaClock={device.DualSenseMediaBufferCadenceRatio:F7} " +
+                         $"presentationClock={device.DualSenseBluetoothPresentationClockRatio:F7} " +
                          $"sourceClock={directSourceClockEstimator?.Ratio ?? 1.0:F7} " +
                          $"sourceClockWindows={directSourceClockEstimator?.CompletedWindows ?? 0} " +
                          $"sourceClockStable={directSourceClockEstimator?.IsStable ?? false} " +

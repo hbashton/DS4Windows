@@ -282,14 +282,28 @@ namespace DS4Windows.InputDevices
         private uint deltaTimeCurrent = 0;
         private readonly DualSenseControllerClockEstimator
             bluetoothControllerClock = new();
+        private readonly DualSenseControllerMediaBufferServo
+            bluetoothMediaBufferServo = new(Stopwatch.Frequency);
         private long bluetoothLastInputArrivalQpc;
         private long bluetoothLastInputPhasePublishQpc;
+        private long bluetoothLastMediaBufferPublishQpc;
+        private long bluetoothMediaBufferCadenceRatioBits =
+            BitConverter.DoubleToInt64Bits(1.0);
         public double DualSenseControllerClockRatio =>
             bluetoothControllerClock.Ratio;
         public int DualSenseControllerClockCompletedWindows =>
             bluetoothControllerClock.CompletedWindows;
         public bool DualSenseControllerClockStable =>
             bluetoothControllerClock.IsStable;
+        internal double DualSenseMediaBufferCadenceRatio =>
+            BitConverter.Int64BitsToDouble(Interlocked.Read(
+                ref bluetoothMediaBufferCadenceRatioBits));
+        internal double DualSenseBluetoothPresentationClockRatio =>
+            Math.Clamp((DualSenseControllerClockStable ?
+                DualSenseControllerClockRatio : 1.0) *
+                DualSenseMediaBufferCadenceRatio,
+                DualSenseBluetoothAudioPacerScheduler.MinimumRateRatio,
+                DualSenseBluetoothAudioPacerScheduler.MaximumRateRatio);
         private bool outputDirty = false;
         private DS4HapticState previousHapticState = new DS4HapticState();
         private byte[] outputBTCrc32Head = new byte[] { 0xA2 };
@@ -409,6 +423,7 @@ namespace DS4Windows.InputDevices
             3000;
         private const int BluetoothAudioPacerStartupRetryMilliseconds = 2000;
         private const int BluetoothInputPhasePublishMilliseconds = 100;
+        private const int BluetoothMediaBufferPublishMilliseconds = 50;
         private const uint BluetoothFinalControlWriteTimeoutMilliseconds = 1000;
         private const uint BluetoothWriterOwnershipHandoffTimeoutMilliseconds =
             1000;
@@ -1603,6 +1618,29 @@ namespace DS4Windows.InputDevices
             }
         }
 
+        private bool TryUpdateBluetoothAudioPacerMediaBuffer(byte level,
+            long observationQpc)
+        {
+            lock (bluetoothAudioPacerLock)
+            {
+                if (bluetoothAudioPacer?.IsRunning != true)
+                {
+                    bluetoothMediaBufferServo.Reset();
+                    Interlocked.Exchange(
+                        ref bluetoothMediaBufferCadenceRatioBits,
+                        BitConverter.DoubleToInt64Bits(1.0));
+                    return false;
+                }
+
+                double cadenceRatio = bluetoothMediaBufferServo.Update(level,
+                    observationQpc, observationQpc);
+                Interlocked.Exchange(ref bluetoothMediaBufferCadenceRatioBits,
+                    BitConverter.DoubleToInt64Bits(cadenceRatio));
+                return bluetoothAudioPacer.UpdateControllerMediaBuffer(level,
+                    observationQpc, cadenceRatio);
+            }
+        }
+
         private bool TryCommitBluetoothControlThroughAudioPacer(byte[] report,
             long hapticsExpiryQpc, bool waitForCompletion,
             out bool pacerOwnsTransport)
@@ -2397,6 +2435,25 @@ namespace DS4Windows.InputDevices
                         long inputArrivalQpc = Stopwatch.GetTimestamp();
                         Volatile.Write(ref bluetoothLastInputArrivalQpc,
                             inputArrivalQpc);
+                        long previousMediaBufferPublish = Volatile.Read(
+                            ref bluetoothLastMediaBufferPublishQpc);
+                        bool mediaBufferPublishDue = inputArrivalQpc -
+                            previousMediaBufferPublish >= Stopwatch.Frequency *
+                                BluetoothMediaBufferPublishMilliseconds / 1000;
+                        if (mediaBufferPublishDue &&
+                            Interlocked.CompareExchange(
+                                ref bluetoothLastMediaBufferPublishQpc,
+                                inputArrivalQpc,
+                                previousMediaBufferPublish) ==
+                                    previousMediaBufferPublish)
+                        {
+                            // CRC validation and the normal-frame discriminator
+                            // above make byte 65 safe to treat as Sony's live
+                            // controller-side media playout level. Mic frames do
+                            // not carry this byte and never reach this path.
+                            TryUpdateBluetoothAudioPacerMediaBuffer(
+                                inputReport[65], inputArrivalQpc);
+                        }
                         bool clockRatioUpdated =
                             bluetoothControllerClock.Observe(tempStamp,
                                 inputArrivalQpc);

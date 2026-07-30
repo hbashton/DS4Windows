@@ -1,4 +1,5 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using NAudio.Dsp;
 using System;
 using System.Collections.Generic;
 
@@ -7,6 +8,335 @@ namespace DS4Windows.Tests
     [TestClass]
     public class DualSenseSpeakerFrameResamplerTests
     {
+        [TestMethod]
+        public void PadSenseRawSourceReceivesOneContinuous512To480Conversion()
+        {
+            const int packetCount = 4096;
+            var converter = new DualSensePadSenseSpeakerClockResampler();
+            float[] source = new float[
+                DualSensePadSenseSpeakerClockResampler.MaximumInputFrames * 2];
+            float[] output = new float[
+                DualSensePadSenseSpeakerClockResampler.OutputFrames * 2];
+            long consumed = 0;
+            for (int packet = 0; packet < packetCount; packet++)
+            {
+                int requested = converter.PrepareOutputFrame();
+                Assert.IsTrue(requested > 0 && requested <=
+                    DualSensePadSenseSpeakerClockResampler.MaximumInputFrames);
+                FillStereoFloat(source, requested, consumed,
+                    DualSensePadSenseSpeakerClockResampler.NominalInputRate,
+                    523.0, 997.0, 0.65);
+                Assert.AreEqual(
+                    DualSensePadSenseSpeakerClockResampler.OutputFrames,
+                    converter.ConvertPreparedOutput(source, 0, requested,
+                        output, 0));
+                consumed += requested;
+            }
+
+            long nominal = packetCount *
+                DualSensePadSenseSpeakerClockResampler.ReferenceInputFrames;
+            Assert.IsTrue(Math.Abs(consumed - nominal) <=
+                DualSensePadSenseSpeakerClockResampler.MaximumInputFrames,
+                $"PadSense source consumed {consumed} frames instead of " +
+                $"approximately {nominal}; the single fixed 16:15 stage " +
+                "lost its continuous phase.");
+        }
+
+        [TestMethod]
+        public void PadSenseInitialSourceGateCanProduceEightPhysicalReports()
+        {
+            var converter = new DualSensePadSenseSpeakerClockResampler();
+            float[] source = new float[
+                DualSensePadSenseSpeakerClockResampler.MaximumInputFrames * 2];
+            float[] output = new float[
+                DualSensePadSenseSpeakerClockResampler.OutputFrames * 2];
+            int requestedTotal = 0;
+
+            for (int report = 0;
+                report < DualSenseBluetoothSpeakerPassthrough.
+                    StartupWarmupReportCount;
+                report++)
+            {
+                int requested = converter.PrepareOutputFrame();
+                requestedTotal += requested;
+                Assert.AreEqual(
+                    DualSensePadSenseSpeakerClockResampler.OutputFrames,
+                    converter.ConvertPreparedOutput(source, 0, requested,
+                        output, 0));
+            }
+
+            Assert.AreEqual(
+                DualSenseBluetoothSpeakerPassthrough.
+                    PadSenseInitialSourceBufferFrames,
+                requestedTotal,
+                "The V5 source gate must contain every frame and the four " +
+                "look-ahead samples required by its eight-report handoff.");
+        }
+
+        [TestMethod]
+        public void PadSenseHundredHertzSourceBalancesNinetyThreePointSevenFiveHertzWire()
+        {
+            const int sourceFramesPerTenMilliseconds = 480;
+            const int sourceBlocksPerCycle = 16;
+            const int physicalReportsPerCycle = 15;
+            const int cycles = 100;
+            var converter = new DualSensePadSenseSpeakerClockResampler();
+            float[] source = new float[
+                DualSensePadSenseSpeakerClockResampler.MaximumInputFrames * 2];
+            float[] output = new float[
+                DualSensePadSenseSpeakerClockResampler.OutputFrames * 2];
+            int bufferedFrames = sourceFramesPerTenMilliseconds * 9;
+
+            for (int report = 0;
+                report < DualSenseBluetoothSpeakerPassthrough.
+                    StartupWarmupReportCount;
+                report++)
+            {
+                int requested = converter.PrepareOutputFrame();
+                Assert.IsTrue(bufferedFrames >= requested);
+                bufferedFrames -= requested;
+                converter.ConvertPreparedOutput(source, 0, requested,
+                    output, 0);
+            }
+
+            for (int cycle = 0; cycle < cycles; cycle++)
+            {
+                bufferedFrames += sourceBlocksPerCycle *
+                    sourceFramesPerTenMilliseconds;
+                for (int report = 0;
+                    report < physicalReportsPerCycle;
+                    report++)
+                {
+                    int requested = converter.PrepareOutputFrame();
+                    Assert.IsTrue(bufferedFrames >= requested,
+                        $"The V5 source starved in cycle {cycle}, report " +
+                        $"{report}: buffered={bufferedFrames}, " +
+                        $"requested={requested}.");
+                    bufferedFrames -= requested;
+                    converter.ConvertPreparedOutput(source, 0, requested,
+                        output, 0);
+                }
+
+                Assert.IsTrue(bufferedFrames >= 0 &&
+                    bufferedFrames < sourceFramesPerTenMilliseconds,
+                    $"The raw V5 source drifted after cycle {cycle}: " +
+                    $"residual={bufferedFrames} frames.");
+            }
+        }
+
+        [TestMethod]
+        public void PadSenseSourceClockCorrectionIsContinuousAndBounded()
+        {
+            const int packetCount = 10000;
+            var converter = new DualSensePadSenseSpeakerClockResampler();
+            float[] source = new float[
+                DualSensePadSenseSpeakerClockResampler.MaximumInputFrames * 2];
+            float[] output = new float[
+                DualSensePadSenseSpeakerClockResampler.OutputFrames * 2];
+            long sourceFrame = 0;
+            double expected = 0.0;
+            float previous = 0.0f;
+            bool hasPrevious = false;
+            float maximumStep = 0.0f;
+            for (int packet = 0; packet < packetCount; packet++)
+            {
+                double ratio = 1.0 + Math.Sin(packet * 0.003) * 0.001;
+                expected += ratio *
+                    DualSensePadSenseSpeakerClockResampler.
+                        ReferenceInputFrames;
+                converter.SetInputRateRatio(ratio);
+                int requested = converter.PrepareOutputFrame();
+                FillStereoFloat(source, requested, sourceFrame,
+                    DualSensePadSenseSpeakerClockResampler.NominalInputRate,
+                    523.0, 997.0, 0.65);
+                converter.ConvertPreparedOutput(source, 0, requested,
+                    output, 0);
+                for (int frame = 0;
+                    frame < DualSensePadSenseSpeakerClockResampler.OutputFrames;
+                    frame++)
+                {
+                    float current = output[frame * 2];
+                    if (hasPrevious)
+                    {
+                        maximumStep = Math.Max(maximumStep,
+                            Math.Abs(current - previous));
+                    }
+                    previous = current;
+                    hasPrevious = true;
+                }
+                sourceFrame += requested;
+            }
+
+            Assert.IsTrue(Math.Abs(sourceFrame - expected) < 6.0);
+            Assert.IsTrue(maximumStep < 0.12f,
+                $"PadSense clock correction introduced a waveform jump of " +
+                $"{maximumStep:F6}.");
+        }
+
+        [TestMethod]
+        public void ReferenceRouteAlwaysFeeds512AndEmits480WithClockCorrection()
+        {
+            const int packetCount = 10000;
+            var converter = new DualSenseReferenceSpeakerFrameResampler();
+            float[] source = new float[
+                DualSenseReferenceSpeakerFrameResampler.MaximumInputFrames * 2];
+            float[] output = new float[
+                DualSenseReferenceSpeakerFrameResampler.OutputFrames * 2];
+            long sourceFrame = 0;
+            double expectedConsumedFrames = 0.0;
+            int minimumRequest = int.MaxValue;
+            int maximumRequest = 0;
+            float previousLeft = 0.0f;
+            bool hasPreviousLeft = false;
+            float maximumStep = 0.0f;
+            for (int packet = 0; packet < packetCount; packet++)
+            {
+                // Exercise more correction than the direct production servo's
+                // +/-350 ppm bound while slewing continuously across zero.
+                double ratio = 1.0 + Math.Sin(packet * 0.003) * 0.001;
+                expectedConsumedFrames += ratio *
+                    DualSenseReferenceSpeakerFrameResampler.
+                        ReferenceInputFrames;
+                converter.SetInputRateRatio(ratio);
+                int requested = converter.PrepareOutputFrame();
+                minimumRequest = Math.Min(minimumRequest, requested);
+                maximumRequest = Math.Max(maximumRequest, requested);
+                Assert.IsTrue(requested > 0 && requested <=
+                    DualSenseReferenceSpeakerFrameResampler.MaximumInputFrames);
+                FillStereoFloat(source, requested, sourceFrame,
+                    DualSenseReferenceSpeakerFrameResampler.SourceRate,
+                    523.0, 997.0, 0.65);
+                Assert.AreEqual(
+                    DualSenseReferenceSpeakerFrameResampler.OutputFrames,
+                    converter.ConvertPreparedOutput(source, 0, requested,
+                        output, 0));
+                for (int frame = 0;
+                    frame < DualSenseReferenceSpeakerFrameResampler.OutputFrames;
+                    frame++)
+                {
+                    float left = output[frame * 2];
+                    Assert.IsTrue(float.IsFinite(left));
+                    if (hasPreviousLeft)
+                    {
+                        maximumStep = Math.Max(maximumStep,
+                            Math.Abs(left - previousLeft));
+                    }
+
+                    previousLeft = left;
+                    hasPreviousLeft = true;
+                }
+                sourceFrame += requested;
+            }
+
+            Assert.IsTrue(maximumRequest > minimumRequest,
+                "Dynamic clock correction did not advance source phase.");
+            Assert.IsTrue(Math.Abs(sourceFrame - expectedConsumedFrames) < 6.0,
+                "The dynamic stage accumulated or drained a hidden frame reserve.");
+            Assert.IsTrue(maximumStep < 0.12f,
+                $"The corrected reference stages introduced a waveform " +
+                $"jump of {maximumStep:F6}.");
+        }
+
+        [TestMethod]
+        public void ReferenceRouteDoesNotAllocateAfterWarmup()
+        {
+            var converter = new DualSenseReferenceSpeakerFrameResampler();
+            float[] source = new float[
+                DualSenseReferenceSpeakerFrameResampler.MaximumInputFrames * 2];
+            float[] output = new float[
+                DualSenseReferenceSpeakerFrameResampler.OutputFrames * 2];
+
+            for (int warmup = 0; warmup < 4; warmup++)
+            {
+                converter.SetInputRateRatio(warmup % 2 == 0 ?
+                    0.99965 : 1.00035);
+                int requested = converter.PrepareOutputFrame();
+                converter.ConvertPreparedOutput(source, 0, requested,
+                    output, 0);
+            }
+
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int iteration = 0; iteration < 1000; iteration++)
+            {
+                converter.SetInputRateRatio(iteration % 2 == 0 ?
+                    0.99965 : 1.00035);
+                int requested = converter.PrepareOutputFrame();
+                converter.ConvertPreparedOutput(source, 0, requested,
+                    output, 0);
+            }
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.AreEqual(0L, allocated,
+                "The corrected reference hot path allocated after warmup.");
+        }
+
+        [TestMethod]
+        public void AllocationFreeReferenceRouteMatchesWdlLinearStages()
+        {
+            const int packetCount = 64;
+            var converter = new DualSenseReferenceSpeakerFrameResampler();
+            var dynamicReference = new WdlResampler();
+            dynamicReference.SetMode(true, 0, false);
+            dynamicReference.SetFeedMode(false);
+            dynamicReference.SetRates(48000.0, 48000.0);
+            var fixedReference = new WdlResampler();
+            fixedReference.SetMode(true, 0, false);
+            fixedReference.SetFeedMode(true);
+            fixedReference.SetRates(51200.0, 48000.0);
+
+            float[] source = new float[
+                DualSenseReferenceSpeakerFrameResampler.MaximumInputFrames * 2];
+            float[] actual = new float[
+                DualSenseReferenceSpeakerFrameResampler.OutputFrames * 2];
+            float[] correctedReference = new float[
+                DualSenseReferenceSpeakerFrameResampler.ReferenceInputFrames * 2];
+            float[] expected = new float[
+                DualSenseReferenceSpeakerFrameResampler.OutputFrames * 2];
+            long sourceFrame = 0;
+            for (int packet = 0; packet < packetCount; packet++)
+            {
+                double ratio = (packet % 4) switch
+                {
+                    0 => 0.99965,
+                    1 => 1.00035,
+                    2 => 1.00010,
+                    _ => 0.99990,
+                };
+                converter.SetInputRateRatio(ratio);
+                int requested = converter.PrepareOutputFrame();
+                dynamicReference.SetRates(48000.0 * ratio, 48000.0);
+                int referenceRequested = dynamicReference.ResamplePrepare(
+                    DualSenseReferenceSpeakerFrameResampler.ReferenceInputFrames,
+                    2, out float[] dynamicInput, out int dynamicOffset);
+                Assert.AreEqual(referenceRequested, requested);
+
+                FillStereoFloat(source, requested, sourceFrame, 48000.0,
+                    523.0, 997.0, 0.65);
+                Array.Copy(source, 0, dynamicInput, dynamicOffset,
+                    requested * 2);
+                Assert.AreEqual(512, dynamicReference.ResampleOut(
+                    correctedReference, 0, requested, 512, 2));
+
+                int fixedRequested = fixedReference.ResamplePrepare(512, 2,
+                    out float[] fixedInput, out int fixedOffset);
+                Assert.AreEqual(512, fixedRequested);
+                Array.Copy(correctedReference, 0, fixedInput, fixedOffset,
+                    correctedReference.Length);
+                Assert.AreEqual(480, fixedReference.ResampleOut(expected, 0,
+                    fixedRequested, 480, 2));
+                Assert.AreEqual(480, converter.ConvertPreparedOutput(source, 0,
+                    requested, actual, 0));
+
+                for (int sample = 0; sample < actual.Length; sample++)
+                {
+                    Assert.AreEqual(expected[sample], actual[sample], 1.0e-6,
+                        $"Packet {packet}, sample {sample} diverged from WDL.");
+                }
+
+                sourceFrame += requested;
+            }
+        }
+
         [TestMethod]
         public void OutputDrivenNominalPacketsAreExactAndBounded()
         {

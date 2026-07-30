@@ -8,12 +8,10 @@ the Free Software Foundation, either version 3 of the License, or
 (at your option) any later version.
 */
 
-using Microsoft.Win32;
 using System;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
@@ -26,11 +24,17 @@ namespace DS4Windows
         public bool ViiperInstalled { get; set; }
         public bool ServerRunning { get; set; }
         public bool UsbipInstalled { get; set; }
+        public bool UsbipRuntimeReady { get; set; }
+        public bool UsbipRebootOrRepairRequired { get; set; }
         public bool SetupScriptFound { get; set; }
         public string ViiperPath { get; set; }
         public string SetupScriptPath { get; set; }
+        public string UsbipPath { get; set; }
+        public string UsbipVersion { get; set; }
+        public string UsbipProbeMessage { get; set; }
 
-        public bool Ready => ServerRunning && UsbipInstalled;
+        public bool Ready => ViiperInstalled && ServerRunning &&
+            UsbipInstalled && UsbipRuntimeReady;
 
         public string DisplayText
         {
@@ -48,7 +52,14 @@ namespace DS4Windows
 
                 if (!UsbipInstalled)
                 {
-                    return "usbip-win2 driver missing";
+                    return string.IsNullOrWhiteSpace(UsbipVersion)
+                        ? "usbip-win2 0.9.7.8 is missing"
+                        : $"usbip-win2 {UsbipVersion} must be upgraded to 0.9.7.8";
+                }
+
+                if (!UsbipRuntimeReady || UsbipRebootOrRepairRequired)
+                {
+                    return "usbip-win2 reboot or repair required";
                 }
 
                 if (!ViiperInstalled)
@@ -67,8 +78,11 @@ namespace DS4Windows
         public const int ApiPort = 3242;
         public const string UsbipWin2ReleasesUrl = "https://github.com/vadimgrn/usbip-win2/releases";
         public const string ViiperReleasesUrl = "https://github.com/hbashton/VIIPER/releases";
+        internal static readonly Version RequiredUsbipVersion = new Version(0, 9, 7, 8);
 
         private const string InstallerScriptName = "install-viiper-backend.ps1";
+        private const string UsbipRelativePath = @"USBip\usbip.exe";
+        private const int UsbipProbeTimeoutMilliseconds = 3000;
         private static readonly object serverStartLock = new object();
         private static DateTime lastServerStartAttemptUtc = DateTime.MinValue;
         private static int promptShownThisSession;
@@ -80,17 +94,47 @@ namespace DS4Windows
         {
             string viiperPath = GetViiperExePath();
             string setupScriptPath = GetSetupScriptPath();
+            string usbipPath = GetCanonicalUsbipPath();
+            Version usbipVersion = TryGetUsbipVersion(usbipPath);
+            bool usbipInstalled = IsSupportedUsbipVersion(usbipVersion);
+            bool usbipRuntimeReady = false;
+            string usbipProbeMessage;
+
+            if (usbipInstalled)
+            {
+                usbipRuntimeReady = TryProbeUsbipRuntime(usbipPath,
+                    out usbipProbeMessage);
+            }
+            else if (!File.Exists(usbipPath))
+            {
+                usbipProbeMessage =
+                    $"usbip.exe was not found at {usbipPath}.";
+            }
+            else
+            {
+                usbipProbeMessage = usbipVersion == null
+                    ? "The canonical usbip.exe version could not be read."
+                    : $"usbip.exe {usbipVersion} is older than the required {RequiredUsbipVersion}.";
+            }
+
             ViiperPrerequisiteStatus status = new ViiperPrerequisiteStatus
             {
                 ViiperPath = viiperPath,
                 SetupScriptPath = setupScriptPath,
                 ViiperInstalled = File.Exists(viiperPath),
                 SetupScriptFound = File.Exists(setupScriptPath),
-                UsbipInstalled = IsUsbipWin2Installed(),
+                UsbipInstalled = usbipInstalled,
+                UsbipRuntimeReady = usbipRuntimeReady,
+                UsbipRebootOrRepairRequired = usbipInstalled &&
+                    !usbipRuntimeReady,
+                UsbipPath = usbipPath,
+                UsbipVersion = usbipVersion?.ToString(),
+                UsbipProbeMessage = usbipProbeMessage,
                 ServerRunning = CanPingServer(),
             };
 
-            if (tryStartServer && !status.ServerRunning && status.ViiperInstalled)
+            if (tryStartServer && !status.ServerRunning &&
+                status.ViiperInstalled && status.UsbipRuntimeReady)
             {
                 TryStartServerOnce(viiperPath);
                 status.ServerRunning = CanPingServer();
@@ -318,6 +362,124 @@ namespace DS4Windows
             return Path.Combine(Global.exedirpath, "extras", InstallerScriptName);
         }
 
+        private static string GetCanonicalUsbipPath()
+        {
+            // ProgramW6432 resolves the native 64-bit Program Files directory
+            // even when the x86 DS4Windows build performs this check.
+            string programFiles = Environment.GetEnvironmentVariable(
+                "ProgramW6432");
+            if (string.IsNullOrWhiteSpace(programFiles))
+            {
+                programFiles = Environment.GetFolderPath(
+                    Environment.SpecialFolder.ProgramFiles);
+            }
+
+            return Path.Combine(programFiles, UsbipRelativePath);
+        }
+
+        private static Version TryGetUsbipVersion(string usbipPath)
+        {
+            if (!File.Exists(usbipPath))
+            {
+                return null;
+            }
+
+            try
+            {
+                FileVersionInfo info = FileVersionInfo.GetVersionInfo(
+                    usbipPath);
+                if (info.FileMajorPart < 0 || info.FileMinorPart < 0 ||
+                    info.FileBuildPart < 0 || info.FilePrivatePart < 0)
+                {
+                    return null;
+                }
+
+                return new Version(info.FileMajorPart, info.FileMinorPart,
+                    info.FileBuildPart, info.FilePrivatePart);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        internal static bool IsSupportedUsbipVersion(Version version)
+        {
+            return version != null && version >= RequiredUsbipVersion;
+        }
+
+        internal static bool IsSuccessfulUsbipPortProbe(int exitCode,
+            string output)
+        {
+            if (exitCode != 0)
+            {
+                return false;
+            }
+
+            string diagnostic = output ?? string.Empty;
+            return diagnostic.IndexOf("ABI mismatch",
+                       StringComparison.OrdinalIgnoreCase) < 0 &&
+                   diagnostic.IndexOf("unexpected size",
+                       StringComparison.OrdinalIgnoreCase) < 0;
+        }
+
+        private static bool TryProbeUsbipRuntime(string usbipPath,
+            out string message)
+        {
+            try
+            {
+                ProcessStartInfo startInfo = new ProcessStartInfo
+                {
+                    FileName = usbipPath,
+                    Arguments = "port",
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                };
+
+                using Process process = Process.Start(startInfo);
+                if (process == null)
+                {
+                    message = "Windows did not start usbip.exe port.";
+                    return false;
+                }
+
+                System.Threading.Tasks.Task<string> stdout =
+                    process.StandardOutput.ReadToEndAsync();
+                System.Threading.Tasks.Task<string> stderr =
+                    process.StandardError.ReadToEndAsync();
+                if (!process.WaitForExit(UsbipProbeTimeoutMilliseconds))
+                {
+                    try { process.Kill(entireProcessTree: true); } catch { }
+                    message = "usbip.exe port timed out; reboot or repair usbip-win2.";
+                    return false;
+                }
+
+                System.Threading.Tasks.Task.WhenAll(stdout, stderr)
+                    .GetAwaiter().GetResult();
+                string output = string.Join(Environment.NewLine,
+                    stdout.Result, stderr.Result).Trim();
+                if (!IsSuccessfulUsbipPortProbe(process.ExitCode, output))
+                {
+                    string detail = string.IsNullOrWhiteSpace(output)
+                        ? "no diagnostic output"
+                        : output;
+                    message = $"usbip.exe port failed (exit {process.ExitCode}): {detail}";
+                    return false;
+                }
+
+                message = "usbip.exe port confirmed a compatible userspace/driver ABI.";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                message = $"usbip.exe port could not run: {ex.Message}";
+                return false;
+            }
+        }
+
         private static bool TryStartServerOnce(string viiperPath)
         {
             lock (serverStartLock)
@@ -398,66 +560,5 @@ namespace DS4Windows
             }
         }
 
-        private static bool IsUsbipWin2Installed()
-        {
-            string driverPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "drivers", "usbip2_ude.sys");
-            if (File.Exists(driverPath))
-            {
-                return true;
-            }
-
-            return RegistryUninstallContains("USB/IP") ||
-                RegistryUninstallContains("USBip") ||
-                RegistryServiceExists("usbip2_ude") ||
-                RegistryServiceExists("usbip2_filter");
-        }
-
-        private static bool RegistryServiceExists(string serviceName)
-        {
-            try
-            {
-                using RegistryKey key = Registry.LocalMachine.OpenSubKey($@"SYSTEM\CurrentControlSet\Services\{serviceName}");
-                return key != null;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private static bool RegistryUninstallContains(string displayName)
-        {
-            return RegistryHiveUninstallContains(RegistryView.Registry64, displayName) ||
-                RegistryHiveUninstallContains(RegistryView.Registry32, displayName);
-        }
-
-        private static bool RegistryHiveUninstallContains(RegistryView view, string displayName)
-        {
-            try
-            {
-                using RegistryKey baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view);
-                using RegistryKey uninstallKey = baseKey.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall");
-                if (uninstallKey == null)
-                {
-                    return false;
-                }
-
-                return uninstallKey.GetSubKeyNames()
-                    .Select(name => uninstallKey.OpenSubKey(name))
-                    .Where(key => key != null)
-                    .Any(key =>
-                    {
-                        using (key)
-                        {
-                            string value = key.GetValue("DisplayName") as string;
-                            return value?.IndexOf(displayName, StringComparison.OrdinalIgnoreCase) >= 0;
-                        }
-                    });
-            }
-            catch
-            {
-                return false;
-            }
-        }
     }
 }

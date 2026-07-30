@@ -725,15 +725,12 @@
                             </WrapPanel>
                         </GroupBox>
 
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="{StaticResource spaceMargin}">
-                            <Button x:Name="deviceOptionSettingsBtn" MaxWidth="140" Content="{lex:Loc DeviceOptions}" Click="DeviceOptionSettingsBtn_Click" />
-                            <Button x:Name="viiperDebuggerBtn"
-                                    MaxWidth="140"
-                                    Content="Debugger"
-                                    Margin="8,0,0,0"
-                                    Visibility="{Binding IsChecked, ElementName=verboseLoggingCheck, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                    Click="ViiperDebuggerBtn_Click" />
-                        </StackPanel>
+                        <Button x:Name="deviceOptionSettingsBtn"
+                                HorizontalAlignment="Center"
+                                Margin="{StaticResource spaceMargin}"
+                                MaxWidth="140"
+                                Content="{lex:Loc DeviceOptions}"
+                                Click="DeviceOptionSettingsBtn_Click" />
                         <Border Margin="0,16,0,4" Padding="14,12" CornerRadius="6"
                                 Background="{DynamicResource RaisedBackgroundColor}"
                                 BorderBrush="{DynamicResource BorderColor}" BorderThickness="1">

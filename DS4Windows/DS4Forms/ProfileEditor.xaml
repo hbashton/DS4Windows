@@ -2351,7 +2351,7 @@
                                                 <StackPanel Grid.Row="0" Grid.ColumnSpan="2">
                                                     <CheckBox Content="Stream audio to controller" IsChecked="{Binding DualSenseEnableSpeakerOutput}"
                                                               Margin="{StaticResource spaceMargin}"
-                                                              ToolTip="Streams the selected audio to the controller speaker and to a headset connected to its AUX port." />
+                                                              ToolTip="Streams the selected audio to the controller. Uses its built-in speaker unless Headset only routes it exclusively to the AUX port." />
                                                     <CheckBox Content="Headset only (mute controller speaker)"
                                                               IsChecked="{Binding DualSenseHeadsetOnlyAudio}"
                                                               IsEnabled="{Binding DualSenseEnableSpeakerOutput}"

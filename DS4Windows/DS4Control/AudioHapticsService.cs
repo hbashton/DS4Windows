@@ -894,6 +894,8 @@ namespace DS4Windows
 
             private void WriterLoop()
             {
+                using MultimediaThreadRegistration mmcss =
+                    MultimediaThreadRegistration.EnterProAudio();
                 Stopwatch clock = Stopwatch.StartNew();
                 long nextPacketTicks = clock.ElapsedTicks;
                 long packetIntervalTicks = Stopwatch.Frequency *

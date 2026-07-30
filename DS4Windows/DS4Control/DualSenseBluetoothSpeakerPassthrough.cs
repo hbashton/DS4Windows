@@ -404,196 +404,6 @@ namespace DS4Windows
     }
 
     /// <summary>
-    /// Learns the small residual rate error between VIIPER's direct PCM
-    /// producer and the physical DualSense audio consumer. The estimator uses
-    /// only exact frame accounting: frames appended to the capture ring and
-    /// frames actually accepted by WDL for successful output packets. A
-    /// least-squares fit of their balance over a non-overlapping thirty-second
-    /// window rejects the 320/512-frame callback sawtooth without depending on
-    /// Windows callback timestamps.
-    /// </summary>
-    internal sealed class DualSenseDirectPcmBalanceClockServo
-    {
-        internal const double MeasurementWindowSeconds = 30.0;
-        internal const double ErrorDeadbandPpm = 3.0;
-        internal const double CorrectionGain = 0.5;
-        internal const double MaximumAcceptedErrorPpm = 500.0;
-        internal const double MaximumTrimPpm = 250.0;
-        internal const double TrimSlewPpmPerSecond = 5.0;
-        private const int MinimumSamples = 100;
-        private const double NominalFramesPerSecond = 48000.0;
-        private const long MinimumWindowFrames =
-            (long)(NominalFramesPerSecond * MeasurementWindowSeconds);
-
-        private bool initialized;
-        private long producedEpoch;
-        private long consumedEpoch;
-        private long hostEpoch;
-        private long previousProducedPosition;
-        private long previousConsumedPosition;
-        private long previousHostTimestamp;
-        private int sampleCount;
-        private double sumX;
-        private double sumY;
-        private double sumXX;
-        private double sumXY;
-        private double targetTrimPpm;
-        private double appliedTrimPpm;
-        private double lastMeasuredErrorPpm;
-        private int completedWindows;
-        private int rejectedWindows;
-        private int resetWindows;
-
-        internal double TargetTrimRatio => 1.0 + targetTrimPpm / 1_000_000.0;
-        internal double AppliedTrimRatio => 1.0 + appliedTrimPpm / 1_000_000.0;
-        internal double TargetTrimPpm => targetTrimPpm;
-        internal double AppliedTrimPpm => appliedTrimPpm;
-        internal double LastMeasuredErrorPpm => lastMeasuredErrorPpm;
-        internal int CompletedWindows => completedWindows;
-        internal int RejectedWindows => rejectedWindows;
-        internal int ResetWindows => resetWindows;
-
-        internal bool Observe(long producedFramePosition,
-            long consumedFramePosition, long hostTimestamp)
-        {
-            if (!initialized)
-            {
-                BeginWindow(producedFramePosition, consumedFramePosition,
-                    hostTimestamp);
-                return false;
-            }
-
-            long producedStep = producedFramePosition -
-                previousProducedPosition;
-            long consumedStep = consumedFramePosition -
-                previousConsumedPosition;
-            long hostStep = hostTimestamp - previousHostTimestamp;
-            if (producedStep < 0 || consumedStep <= 0 || hostStep <= 0)
-            {
-                ResetWindow();
-                BeginWindow(producedFramePosition, consumedFramePosition,
-                    hostTimestamp);
-                return false;
-            }
-
-            previousProducedPosition = producedFramePosition;
-            previousConsumedPosition = consumedFramePosition;
-            previousHostTimestamp = hostTimestamp;
-
-            long consumedFrames = consumedFramePosition - consumedEpoch;
-            long producedFrames = producedFramePosition - producedEpoch;
-            if (consumedFrames <= 0 || producedFrames < 0)
-            {
-                return false;
-            }
-
-            // Regress balance against exact consumed audio time. Host time is
-            // used only to guarantee a long enough observation window, never
-            // as the rate signal, so callback batching cannot bias the trim.
-            double x = consumedFrames / NominalFramesPerSecond;
-            double y = producedFrames - (double)consumedFrames;
-            sampleCount++;
-            sumX += x;
-            sumY += y;
-            sumXX += x * x;
-            sumXY += x * y;
-
-            double elapsedSeconds = (hostTimestamp - hostEpoch) /
-                (double)Stopwatch.Frequency;
-            if (elapsedSeconds < MeasurementWindowSeconds ||
-                consumedFrames < MinimumWindowFrames ||
-                sampleCount < MinimumSamples)
-            {
-                return false;
-            }
-
-            bool accepted = false;
-            double denominator = sampleCount * sumXX - sumX * sumX;
-            if (denominator > 0.0)
-            {
-                double balanceFramesPerSecond =
-                    (sampleCount * sumXY - sumX * sumY) / denominator;
-                double errorPpm = balanceFramesPerSecond /
-                    NominalFramesPerSecond * 1_000_000.0;
-                if (double.IsFinite(errorPpm) &&
-                    Math.Abs(errorPpm) <= MaximumAcceptedErrorPpm)
-                {
-                    lastMeasuredErrorPpm = errorPpm;
-                    if (Math.Abs(errorPpm) > ErrorDeadbandPpm)
-                    {
-                        targetTrimPpm = Math.Clamp(targetTrimPpm +
-                            errorPpm * CorrectionGain,
-                            -MaximumTrimPpm, MaximumTrimPpm);
-                    }
-
-                    completedWindows++;
-                    accepted = true;
-                }
-            }
-
-            if (!accepted)
-            {
-                rejectedWindows++;
-            }
-
-            // Windows never overlap: the terminal sample becomes the epoch of
-            // the next fit, while the learned trim survives the boundary.
-            BeginWindow(producedFramePosition, consumedFramePosition,
-                hostTimestamp);
-            return accepted;
-        }
-
-        internal double AdvanceAppliedTrim(double elapsedSeconds)
-        {
-            if (!double.IsFinite(elapsedSeconds) || elapsedSeconds <= 0.0)
-            {
-                return AppliedTrimRatio;
-            }
-
-            double maximumStepPpm = TrimSlewPpmPerSecond * elapsedSeconds;
-            appliedTrimPpm += Math.Clamp(targetTrimPpm - appliedTrimPpm,
-                -maximumStepPpm, maximumStepPpm);
-            return AppliedTrimRatio;
-        }
-
-        internal void ResetWindow()
-        {
-            initialized = false;
-            sampleCount = 0;
-            sumX = 0.0;
-            sumY = 0.0;
-            sumXX = 0.0;
-            sumXY = 0.0;
-            resetWindows++;
-        }
-
-        internal void ResetLifecycle()
-        {
-            ResetWindow();
-            targetTrimPpm = 0.0;
-            appliedTrimPpm = 0.0;
-            lastMeasuredErrorPpm = 0.0;
-        }
-
-        private void BeginWindow(long producedFramePosition,
-            long consumedFramePosition, long hostTimestamp)
-        {
-            initialized = true;
-            producedEpoch = producedFramePosition;
-            consumedEpoch = consumedFramePosition;
-            hostEpoch = hostTimestamp;
-            previousProducedPosition = producedFramePosition;
-            previousConsumedPosition = consumedFramePosition;
-            previousHostTimestamp = hostTimestamp;
-            sampleCount = 0;
-            sumX = 0.0;
-            sumY = 0.0;
-            sumXX = 0.0;
-            sumXY = 0.0;
-        }
-    }
-
-    /// <summary>
     /// Mirrors a Windows render endpoint to a physical Bluetooth DualSense
     /// speaker. Every frame uses the vDS-style 0x36 combined transport so
     /// speaker audio, microphone state, haptics, and controller output never
@@ -621,19 +431,34 @@ namespace DS4Windows
         // prebuffer duplicated that protection and made game audio feel late.
         internal const int InitialBufferMs = 20;
         internal const int TargetBufferMs = 20;
-        // Keep two reports beyond the helper's eight-report prime. Together
-        // with the causal source target this protects roughly 123 ms, above the
-        // 86.7 ms callback stall measured in a live trace, without the former
-        // ~235 ms steady-state presentation delay.
-        internal const int PacerReservoirTargetFrames = 10;
-        internal const int StartupWarmupReportCount = 6;
+        // Legacy capture sources retain the existing stop-and-wait policy.
+        // PadSense-native V5 source owns a bounded eight-generation FIFO and
+        // drains every complete retained generation into its strict writer
+        // after a host stall, so it uses the separate target below.
+        internal const int PacerReservoirTargetFrames = 1;
+        internal const int StartupWarmupReportCount = 8;
+        internal const int PadSenseSourceReservoirTargetFrames =
+            StartupWarmupReportCount;
+        internal const int PadSenseInitialSourceBufferFrames =
+            StartupWarmupReportCount *
+                DualSensePadSenseSpeakerClockResampler.ReferenceInputFrames +
+            DualSenseReferenceSpeakerFrameResampler.
+                InterpolationLookaheadFrames;
         private const int CaptureRingFrames = (SampleRate * CaptureBufferMs) / 1000;
         private const int CapturePumpBufferFrames = 2048;
         private const int DirectPcmChunkBytes = 4096;
         private const int DirectPcmMaximumOutputFrames =
             (DirectPcmChunkBytes / (sizeof(short) * Channels) * 3 / 2) + 2;
         private const int IdleKeepAliveMs = 2000;
-        internal const int TransientCaptureShortageLeaseMs = 50;
+        // PadSense waits 100 ms after the last produced PCM before replacing
+        // a temporarily incomplete source block with timed silence.
+        internal const int TransientCaptureShortageLeaseMs = 100;
+        // Reuse the existing audible-generation boundary for V5 callbacks. A
+        // scheduler pause just beyond the 100 ms shortage lease must preserve
+        // the live resampler, while a producer returning after this boundary
+        // starts a new source generation.
+        internal const int PadSenseHardSourceDiscontinuityMs =
+            IdleKeepAliveMs;
         private const int PacerPrewarmRetryMs = 2000;
         private const double BluetoothSpeakerCadenceMs = 10.0 + (2.0 / 3.0);
         // The render and Bluetooth clocks are independent. Correct their
@@ -647,8 +472,8 @@ namespace DS4Windows
         internal const double CaptureClockRatioSlewPerPacket = 0.000002;
         private const double CaptureClockSmoothingAlpha = 0.005319148936170213;
         internal const double CaptureClockErrorDeadbandFrames = 2.0;
-        private const double DirectCaptureClockMaximumCorrection = 0.00035;
-        private const double DirectCaptureClockRatioSlewPerPacket = 0.0000005;
+        private const double DirectCaptureClockMaximumCorrection = 0.001;
+        private const double DirectCaptureClockRatioSlewPerPacket = 0.000002;
 
         private readonly object syncRoot = new object();
         private readonly object directPcmSync = new object();
@@ -662,12 +487,17 @@ namespace DS4Windows
         private readonly DualSenseSpeakerProcessor speakerProcessor;
         private readonly ViiperOutDevice directSpeakerSource;
         private readonly int directSpeakerSampleRate;
+        private readonly bool directSpeakerUsesPadSenseSource;
         private readonly DualSensePcm16SourceRateConverter directPcmRateConverter;
         private readonly DualSenseSourceClockEstimator directSourceClockEstimator;
         private readonly DualSenseDirectPcmBalanceClockServo
             directPcmBalanceClockServo;
         private readonly DualSenseSpeakerFrameResampler speakerFrameResampler =
             new DualSenseSpeakerFrameResampler();
+        private readonly DualSenseReferenceSpeakerFrameResampler
+            directSpeakerFrameResampler;
+        private readonly DualSensePadSenseSpeakerClockResampler
+            directPadSenseFrameResampler;
         private Pcm16WaveTraceWriter rawDirectPcmTrace;
         private Pcm16WaveTraceWriter preOpusPcmTrace;
         private Pcm16WaveTraceWriter postOpusPcmTrace;
@@ -703,6 +533,11 @@ namespace DS4Windows
         private double captureCurrentClockRatio = 1.0;
         private double captureTargetClockRatio = 1.0;
         private bool captureClockInitialized;
+        // A WDL output-driven prepare reserves its interpolation state. Cache
+        // that exact request until the source ring can satisfy it; otherwise
+        // the readiness check can wake on 512 frames while this packet really
+        // needs 513 and unnecessarily defer an entire controller interval.
+        private int preparedDirectSpeakerSourceFrames;
         private bool fadeInAfterCaptureUnderrun;
         private float previousOutputLeft;
         private float previousOutputRight;
@@ -751,6 +586,7 @@ namespace DS4Windows
         private int pacerPrewarmAttemptedForSegment;
         private long pacerPrewarmRetryAfterTimestamp;
         private long lastRawAudibleTimestamp;
+        private long lastSourcePcmTimestamp;
         private long pacerPrewarmAttempts;
         private long pacerPrewarmSuccesses;
         private long pacerPrewarmFailures;
@@ -785,6 +621,8 @@ namespace DS4Windows
             this.sourceEndpointKind = sourceEndpointKind;
             this.directSpeakerSource = directSpeakerSource;
             directSpeakerSampleRate = directSpeakerSource?.DirectSpeakerPcmSampleRate ?? 0;
+            directSpeakerUsesPadSenseSource =
+                directSpeakerSource?.UsesPadSenseAudioSource == true;
             if (directSpeakerSampleRate > 0)
             {
                 directPcmRateConverter = new DualSensePcm16SourceRateConverter(
@@ -793,9 +631,28 @@ namespace DS4Windows
                     directSpeakerSampleRate);
                 directPcmBalanceClockServo =
                     new DualSenseDirectPcmBalanceClockServo();
+                if (directSpeakerUsesPadSenseSource)
+                {
+                    directPadSenseFrameResampler =
+                        new DualSensePadSenseSpeakerClockResampler();
+                }
+                else
+                {
+                    directSpeakerFrameResampler =
+                        new DualSenseReferenceSpeakerFrameResampler();
+                }
                 TryCreateDirectPcmTraces();
             }
         }
+
+        private int InitialSourceBufferFrames =>
+            directSpeakerUsesPadSenseSource ?
+                PadSenseInitialSourceBufferFrames :
+                (SampleRate * InitialBufferMs) / 1000;
+
+        private int StartupWarmupReportsForCurrentSource =>
+            directSpeakerUsesPadSenseSource ? 0 :
+                StartupWarmupReportCount;
 
         private void TryCreateDirectPcmTraces()
         {
@@ -892,13 +749,14 @@ namespace DS4Windows
                     "Could not activate the DualSense Bluetooth speaker session.");
             }
 
-            // Preserve RC3's proven internal-speaker startup byte-for-byte.
-            // The ordinary 0x31 route preamble exists only to arm the separate
-            // 0x96 AUX decoder and must never touch the 0x93 speaker path.
-            if (headsetOnlyAudio && !device.RearmBluetoothHeadsetOutputRoute())
+            // Serialize the selected physical output before the media lane
+            // starts. A fresh speaker session is a no-op; an AUX session gets
+            // Sony's speaker-then-headset primer, and the first speaker session
+            // after AUX explicitly restores the internal-speaker route.
+            if (!device.RearmBluetoothHeadsetOutputRoute())
             {
                 throw new InvalidOperationException(
-                    $"Could not arm the DualSense AUX output route: {device.LastBluetoothHapticsWriteStatus}");
+                    $"Could not arm the selected DualSense audio output route: {device.LastBluetoothHapticsWriteStatus}");
             }
 
             try
@@ -910,7 +768,7 @@ namespace DS4Windows
                 // idle, so the first real frame replaces silence instead of
                 // paying the adapter's measured startup stall.
                 Volatile.Write(ref startupWarmupFramesRemaining,
-                    StartupWarmupReportCount);
+                    StartupWarmupReportsForCurrentSource);
                 StartPacerLifecycleWorker();
                 RequestPacerLifecyclePreparation(recovery: false,
                     gateSource: true);
@@ -975,7 +833,7 @@ namespace DS4Windows
                 {
                     IsBackground = true,
                     Name = "DualSense Bluetooth speaker capture",
-                    Priority = ThreadPriority.AboveNormal,
+                    Priority = ThreadPriority.Highest,
                 };
                 worker = new Thread(StreamLoop)
                 {
@@ -1174,7 +1032,10 @@ namespace DS4Windows
                         feedbackLength != atomicFeedback.Length ||
                         feedbackOffset < 0 || speakerPcmOffset < 0 ||
                         feedbackOffset + feedbackLength > payload.Length ||
-                        speakerPcmOffset + speakerPcmLength > payload.Length)
+                        speakerPcmOffset + speakerPcmLength > payload.Length ||
+                        (directSpeakerUsesPadSenseSource &&
+                            speakerPcmLength != FrameSamples * Channels *
+                                sizeof(short)))
                     {
                         return;
                     }
@@ -1228,6 +1089,30 @@ namespace DS4Windows
             {
                 UpdateMaximum(ref directPcmMaximumCallbackGapTicks,
                     callbackEntered - previousCallback);
+            }
+
+            if (ShouldResetPadSenseSourceBeforeAppendingCallback(
+                    directSpeakerUsesPadSenseSource, previousCallback,
+                    callbackEntered, Stopwatch.Frequency))
+            {
+                // This is the first PCM callback of a genuinely new V5 source
+                // generation. Discard the old ring tail and both fractional
+                // resampler stages before observing or appending new samples.
+                // The physical idle carrier remains armed.
+                lock (syncRoot)
+                {
+                    ResetCapturePipelineAtSegmentBoundaryLocked();
+                }
+
+                if (audioSegmentActive)
+                {
+                    audioSegmentActive = false;
+                    Interlocked.Increment(ref audioSegmentStops);
+                }
+
+                Interlocked.Exchange(ref lastRawAudibleTimestamp, 0);
+                Interlocked.Exchange(ref lastSourcePcmTimestamp, 0);
+                Volatile.Write(ref pacerPrewarmAttemptedForSegment, 0);
             }
 
             Interlocked.Increment(ref directPcmCallbacks);
@@ -1316,6 +1201,7 @@ namespace DS4Windows
             RequestGenerationEnd(Interlocked.Read(ref speakerGeneration));
             Volatile.Write(ref pacerPrewarmAttemptedForSegment, 0);
             Interlocked.Exchange(ref lastRawAudibleTimestamp, 0);
+            Interlocked.Exchange(ref lastSourcePcmTimestamp, 0);
             if (!stopping && e.Exception != null)
             {
                 AppLogger.LogToGui($"DualSense Bluetooth speaker capture stopped: {e.Exception.Message}", true);
@@ -1324,6 +1210,8 @@ namespace DS4Windows
 
         private void CapturePumpLoop(ISampleProvider source)
         {
+            using MultimediaThreadRegistration mmcss =
+                MultimediaThreadRegistration.EnterProAudio();
             float[] buffer = new float[CapturePumpBufferFrames * Channels];
             while (!stopping)
             {
@@ -1353,6 +1241,12 @@ namespace DS4Windows
             {
                 return;
             }
+
+            // Source presence is defined by produced PCM, not amplitude.
+            // Quiet USB/VIIPER blocks are still media and must not be replaced
+            // by a separately clocked idle carrier.
+            Interlocked.Exchange(ref lastSourcePcmTimestamp,
+                Stopwatch.GetTimestamp());
 
             if (HasAudibleSamples(samples, sampleCount))
             {
@@ -1387,7 +1281,7 @@ namespace DS4Windows
                         device.BluetoothAudioLifecycleTransitioning)
                     {
                         Volatile.Write(ref startupWarmupFramesRemaining,
-                            StartupWarmupReportCount);
+                            StartupWarmupReportsForCurrentSource);
                         // Request during cooldown without consuming the attempt
                         // latch. The lifecycle worker waits until retryAfter
                         // while the stream gate preserves source history.
@@ -1461,7 +1355,7 @@ namespace DS4Windows
         private bool TryFillOutputFrameLocked(out int consumedSourceFrames)
         {
             consumedSourceFrames = 0;
-            int initialFrames = (SampleRate * InitialBufferMs) / 1000;
+            int initialFrames = InitialSourceBufferFrames;
             if (!capturePrimed)
             {
                 if (captureRingBufferedFrames < initialFrames)
@@ -1472,16 +1366,48 @@ namespace DS4Windows
                 capturePrimed = true;
             }
 
-            UpdateCaptureClockRatioLocked();
-            speakerFrameResampler.SetInputRateRatio(
-                captureCurrentClockRatio);
-            int requestedSourceFrames =
-                speakerFrameResampler.PrepareOutputFrame(FrameSamples);
+            int requestedSourceFrames;
+            if (directPadSenseFrameResampler != null)
+            {
+                requestedSourceFrames = preparedDirectSpeakerSourceFrames;
+                if (requestedSourceFrames == 0)
+                {
+                    UpdateCaptureClockRatioLocked();
+                    directPadSenseFrameResampler.SetInputRateRatio(
+                        captureCurrentClockRatio);
+                    requestedSourceFrames =
+                        directPadSenseFrameResampler.PrepareOutputFrame();
+                    preparedDirectSpeakerSourceFrames =
+                        requestedSourceFrames;
+                }
+            }
+            else if (directSpeakerFrameResampler != null)
+            {
+                requestedSourceFrames = preparedDirectSpeakerSourceFrames;
+                if (requestedSourceFrames == 0)
+                {
+                    UpdateCaptureClockRatioLocked();
+                    directSpeakerFrameResampler.SetInputRateRatio(
+                        captureCurrentClockRatio);
+                    requestedSourceFrames =
+                        directSpeakerFrameResampler.PrepareOutputFrame();
+                    preparedDirectSpeakerSourceFrames =
+                        requestedSourceFrames;
+                }
+            }
+            else
+            {
+                UpdateCaptureClockRatioLocked();
+                speakerFrameResampler.SetInputRateRatio(
+                    captureCurrentClockRatio);
+                requestedSourceFrames =
+                    speakerFrameResampler.PrepareOutputFrame(FrameSamples);
+            }
             if (captureRingBufferedFrames < requestedSourceFrames)
             {
-                // A continuous VIIPER stream arrives in 320-frame source
+                // A V5 VIIPER stream arrives in exact 480-frame source
                 // callbacks while this lane consumes about 512 frames per
-                // radio tick. Seeing the ring briefly below WDL's exact
+                // physical report. Seeing the ring briefly below the exact
                 // fractional request is normal callback phase, not a new
                 // audio generation. Preserve all source and resampler state.
                 return false;
@@ -1489,10 +1415,22 @@ namespace DS4Windows
 
             CopyCaptureFramesToSpeakerResamplerLocked(
                 requestedSourceFrames);
-            int producedFrames =
-                speakerFrameResampler.ConvertPreparedOutput(
+            int producedFrames = directPadSenseFrameResampler != null ?
+                directPadSenseFrameResampler.ConvertPreparedOutput(
                     speakerResampleInput, 0, requestedSourceFrames,
-                    frame, 0);
+                    frame, 0) :
+                directSpeakerFrameResampler != null ?
+                    directSpeakerFrameResampler.ConvertPreparedOutput(
+                        speakerResampleInput, 0, requestedSourceFrames,
+                        frame, 0) :
+                    speakerFrameResampler.ConvertPreparedOutput(
+                        speakerResampleInput, 0, requestedSourceFrames,
+                        frame, 0);
+            if (directPadSenseFrameResampler != null ||
+                directSpeakerFrameResampler != null)
+            {
+                preparedDirectSpeakerSourceFrames = 0;
+            }
             consumedSourceFrames = requestedSourceFrames;
             return producedFrames == FrameSamples;
         }
@@ -1510,11 +1448,11 @@ namespace DS4Windows
             directPcmBalanceClockServo.Observe(
                 Interlocked.Read(ref captureInputFrames),
                 totalConsumedFrames, Stopwatch.GetTimestamp());
-            // Advance only for a successfully produced radio packet. Retry
-            // loops and callback batching therefore cannot make a nominal
-            // five-ppm/second correction slew faster than audio time.
+            // Advance only for a successfully produced radio packet. Callback
+            // batching and retry loops therefore cannot accelerate the slew.
             directPcmBalanceClockServo.AdvanceAppliedTrim(
-                BluetoothSpeakerCadenceMs / 1000.0);
+                BluetoothSpeakerCadenceMs / (1000.0 *
+                    device.DualSenseBluetoothPresentationClockRatio));
         }
 
         private void CopyCaptureFramesToSpeakerResamplerLocked(
@@ -1539,19 +1477,9 @@ namespace DS4Windows
         private void ResetSpeakerResamplingLocked()
         {
             speakerFrameResampler.Reset();
-        }
-
-        private void ResetCaptureClockLocked(bool resetSourceClock)
-        {
-            captureClockInitialized = false;
-            captureSmoothedBufferedFrames =
-                (SampleRate * TargetBufferMs) / 1000;
-            captureTargetClockRatio = 1.0;
-            captureCurrentClockRatio = 1.0;
-            if (resetSourceClock)
-            {
-                directSourceClockEstimator?.Reset();
-            }
+            directSpeakerFrameResampler?.Reset();
+            directPadSenseFrameResampler?.Reset();
+            preparedDirectSpeakerSourceFrames = 0;
         }
 
         private void ResetDirectPcmBalanceWindow()
@@ -1573,6 +1501,19 @@ namespace DS4Windows
         private void ResetDirectPcmBalanceWindowLocked()
         {
             directPcmBalanceClockServo?.ResetWindow();
+        }
+
+        private void ResetCaptureClockLocked(bool resetSourceClock)
+        {
+            captureClockInitialized = false;
+            captureSmoothedBufferedFrames =
+                (SampleRate * TargetBufferMs) / 1000;
+            captureTargetClockRatio = 1.0;
+            captureCurrentClockRatio = 1.0;
+            if (resetSourceClock)
+            {
+                directSourceClockEstimator?.Reset();
+            }
         }
 
         private void ResetCapturePipelineAtSegmentBoundary()
@@ -1611,15 +1552,17 @@ namespace DS4Windows
             int targetFrames = (SampleRate * TargetBufferMs) / 1000;
             if (directSpeakerSource != null)
             {
-                // VIIPER publishes exact 512-frame source blocks, but Windows
-                // may batch them by tens of milliseconds. Instantaneous ring
-                // occupancy therefore contains a large callback sawtooth and
-                // is not a clock signal. Follow the controller feed-forward
-                // plus the independent thirty-second exact-balance trim.
+                // VIIPER V5 publishes untouched 48 kHz PCM in exact 480-frame
+                // callbacks; its independent rear-haptics assembler still uses
+                // 512-frame blocks. Windows may batch speaker callbacks by tens
+                // of milliseconds, so instantaneous occupancy is a callback
+                // sawtooth, not a clock signal. Follow the controller's
+                // long-window clock plus the independent exact
+                // produced-minus-consumed balance trim.
                 double directControllerLockedRatio =
                     CalculateControllerLockedInputRateRatio(
-                        device.DualSenseControllerClockRatio,
-                        device.DualSenseControllerClockStable);
+                        device.DualSenseBluetoothPresentationClockRatio,
+                        clockStable: true);
                 double directBalanceTrimRatio =
                     directPcmBalanceClockServo?.AppliedTrimRatio ?? 1.0;
                 captureTargetClockRatio = Math.Clamp(
@@ -1653,8 +1596,8 @@ namespace DS4Windows
                 CaptureClockSmoothingAlpha;
             double controllerLockedRatio =
                 CalculateControllerLockedInputRateRatio(
-                    device.DualSenseControllerClockRatio,
-                    device.DualSenseControllerClockStable);
+                    device.DualSenseBluetoothPresentationClockRatio,
+                    clockStable: true);
             captureTargetClockRatio = Math.Clamp(
                 controllerLockedRatio * CalculateCaptureClockTargetRatio(
                     captureSmoothedBufferedFrames, targetFrames),
@@ -1725,7 +1668,7 @@ namespace DS4Windows
 
         private void WaitForInitialCaptureBuffer()
         {
-            int minimumFrames = (SampleRate * InitialBufferMs) / 1000;
+            int minimumFrames = InitialSourceBufferFrames;
             long deadline = Stopwatch.GetTimestamp() + (Stopwatch.Frequency / 2);
             while (!stopping && Stopwatch.GetTimestamp() < deadline)
             {
@@ -1764,14 +1707,40 @@ namespace DS4Windows
         {
             if (!capturePrimed)
             {
-                return captureRingBufferedFrames >=
-                    (SampleRate * InitialBufferMs) / 1000;
+                return captureRingBufferedFrames >= InitialSourceBufferFrames;
             }
 
-            // The exact output-driven request is normally 512 or 513 frames.
-            // At 512 this method can report ready one callback fraction early;
-            // TryFillOutputFrame then defers without consuming anything until
-            // the final fractional source frame arrives.
+            if (directPadSenseFrameResampler != null)
+            {
+                if (preparedDirectSpeakerSourceFrames == 0)
+                {
+                    UpdateCaptureClockRatioLocked();
+                    directPadSenseFrameResampler.SetInputRateRatio(
+                        captureCurrentClockRatio);
+                    preparedDirectSpeakerSourceFrames =
+                        directPadSenseFrameResampler.PrepareOutputFrame();
+                }
+
+                return captureRingBufferedFrames >=
+                    preparedDirectSpeakerSourceFrames;
+            }
+
+            if (directSpeakerFrameResampler != null)
+            {
+                if (preparedDirectSpeakerSourceFrames == 0)
+                {
+                    UpdateCaptureClockRatioLocked();
+                    directSpeakerFrameResampler.SetInputRateRatio(
+                        captureCurrentClockRatio);
+                    preparedDirectSpeakerSourceFrames =
+                        directSpeakerFrameResampler.PrepareOutputFrame();
+                }
+
+                return captureRingBufferedFrames >=
+                    preparedDirectSpeakerSourceFrames;
+            }
+
+            // The WASAPI fallback retains its original output-driven route.
             return captureRingBufferedFrames >= SourcePullFrames;
         }
 
@@ -1805,14 +1774,66 @@ namespace DS4Windows
         }
 
         internal static bool ShouldBackpressurePacerProducer(
-            bool helperActive, int pendingFrames)
+            bool helperActive, int pendingFrames,
+            bool usesPadSenseSource, long presentedReports = 1)
         {
-            return helperActive && pendingFrames >=
-                PacerReservoirTargetFrames;
+            if (!helperActive)
+            {
+                return false;
+            }
+
+            int target;
+            if (presentedReports <= 0)
+            {
+                target = DualSenseBluetoothAudioPacer.NativePrimeReportCount;
+            }
+            else
+            {
+                target = usesPadSenseSource ?
+                    PadSenseSourceReservoirTargetFrames :
+                    PacerReservoirTargetFrames;
+            }
+            return pendingFrames >= target;
         }
 
-        internal static double StartupWarmupLatencyMilliseconds =>
-            StartupWarmupReportCount * BluetoothSpeakerCadenceMs;
+        internal static bool ShouldMaintainIdleCarrierDuringPadSensePrime(
+            bool usesPadSenseSource, bool sourcePrimePending,
+            bool captureReady, bool sourceRecentlyActive)
+        {
+            return usesPadSenseSource && sourcePrimePending &&
+                !captureReady && sourceRecentlyActive;
+        }
+
+        internal static bool ShouldEmitPadSenseIdleCarrier(
+            bool usesPadSenseSource, bool sourceRecentlyActive)
+        {
+            return usesPadSenseSource && !sourceRecentlyActive;
+        }
+
+        internal static bool ShouldResetPadSenseSourceBeforeAppendingCallback(
+            bool usesPadSenseSource, long previousCallbackTimestamp,
+            long callbackTimestamp, long timestampFrequency)
+        {
+            if (!usesPadSenseSource || previousCallbackTimestamp <= 0 ||
+                callbackTimestamp < previousCallbackTimestamp ||
+                timestampFrequency <= 0)
+            {
+                return false;
+            }
+
+            double callbackGapMilliseconds =
+                (callbackTimestamp - previousCallbackTimestamp) * 1000.0 /
+                timestampFrequency;
+            return callbackGapMilliseconds >=
+                PadSenseHardSourceDiscontinuityMs;
+        }
+
+        // PadSense transfers its eight complete source blocks into the strict
+        // OVERLAPPED FIFO as one startup burst. HidBth still owns their radio
+        // cadence; spacing the WriteFile admissions here prevents the
+        // controller-side reserve from ever reaching PadSense's operating
+        // level and leaves ordinary completion droughts audible.
+        internal static double StartupWarmupLatencyMilliseconds => 0.0;
 
         internal static bool ShouldDeferDisposeCleanup(bool workerAlive,
             bool capturePumpAlive, bool lifecycleWorkerAlive)
@@ -1902,6 +1923,64 @@ namespace DS4Windows
             long age = now - rawAudible;
             return rawAudible != 0 && age >= 0 && age <=
                 Stopwatch.Frequency * maximumAgeMilliseconds / 1000;
+        }
+
+        private bool HasRecentSourcePcm(long now,
+            int maximumAgeMilliseconds = TransientCaptureShortageLeaseMs)
+        {
+            long sourcePcm = Interlocked.Read(ref lastSourcePcmTimestamp);
+            long age = now - sourcePcm;
+            return sourcePcm != 0 && age >= 0 && age <=
+                Stopwatch.Frequency * maximumAgeMilliseconds / 1000;
+        }
+
+        private bool IsPadSenseSourcePrimePending()
+        {
+            if (!directSpeakerUsesPadSenseSource)
+            {
+                return false;
+            }
+
+            lock (directPcmSync)
+            {
+                lock (syncRoot)
+                {
+                    return !capturePrimed;
+                }
+            }
+        }
+
+        private bool TryConfirmInactivePadSenseSource()
+        {
+            if (!directSpeakerUsesPadSenseSource)
+            {
+                return true;
+            }
+
+            // Recheck source freshness under the producer lock. A new VIIPER
+            // callback can arrive after StreamLoop's optimistic idle check;
+            // never erase that callback or replace it with an idle carrier.
+            lock (directPcmSync)
+            {
+                bool sourceRecentlyActive = HasRecentSourcePcm(
+                    Stopwatch.GetTimestamp());
+                if (sourceRecentlyActive)
+                {
+                    return false;
+                }
+
+                // A missing callback is not a source-generation boundary.
+                // PadSense/VIIPER can pause longer than the freshness lease
+                // while the same endpoint generation remains active. Emit a
+                // paced idle carrier, but preserve the ring, fractional
+                // resampler history, prime, and segment state so the next
+                // callback resumes immediately. An explicit lifecycle change,
+                // or the first callback after the conservative hard-gap
+                // boundary, resets those fields before new PCM is appended.
+                return ShouldEmitPadSenseIdleCarrier(
+                    usesPadSenseSource: true,
+                    sourceRecentlyActive: false);
+            }
         }
 
         internal static bool ShouldDeferTransientCaptureShortage(
@@ -2010,8 +2089,10 @@ namespace DS4Windows
                         try
                         {
                             prepared = recovery ?
-                                device.RecoverBluetoothSpeakerClockTransport() :
-                                device.PrepareBluetoothSpeakerClockTransport();
+                                device.RecoverBluetoothSpeakerClockTransport(
+                                    directSpeakerUsesPadSenseSource) :
+                                device.PrepareBluetoothSpeakerClockTransport(
+                                    directSpeakerUsesPadSenseSource);
                             // The session boundary clears stale queued audio and
                             // physically commits any pending microphone transition
                             // before speaker traffic is released again.
@@ -2127,11 +2208,14 @@ namespace DS4Windows
         private void StreamLoop()
         {
             timeBeginPeriod(1);
-            IntPtr mmcssHandle = RegisterMultimediaScheduler();
+            using MultimediaThreadRegistration mmcss =
+                MultimediaThreadRegistration.EnterProAudio();
+            Volatile.Write(ref mmcssRegistered, mmcss.IsActive ? 1 : 0);
+            Volatile.Write(ref mmcssHighPriority,
+                mmcss.IsActive && mmcss.Error == 0 ? 1 : 0);
+            Volatile.Write(ref mmcssRegistrationError, mmcss.Error);
             IntPtr highResolutionTimer = CreateHighResolutionTimer();
             long nextTick = Stopwatch.GetTimestamp();
-            long cadenceTicks = Math.Max(1, (long)Math.Round(
-                BluetoothSpeakerCadenceMs * Stopwatch.Frequency / 1000.0));
             try
             {
                 nextTick = Stopwatch.GetTimestamp();
@@ -2151,7 +2235,7 @@ namespace DS4Windows
                         // source gate below keeps both the ring and any already
                         // encoded content intact throughout ownership recovery.
                         Volatile.Write(ref startupWarmupFramesRemaining,
-                            StartupWarmupReportCount);
+                            StartupWarmupReportsForCurrentSource);
                         RequestPacerLifecyclePreparation(recovery: true,
                             gateSource: true);
                     }
@@ -2177,16 +2261,17 @@ namespace DS4Windows
 
                     directPcmRecoveryWindowInvalidated = false;
 
-
-                    // The helper owns presentation cadence. Never let a
-                    // transient helper/startup stall turn the bounded safety
-                    // reservoir into permanent stale audio. Production resumes
-                    // immediately when one presentation credit is returned,
-                    // retaining the intended ten-report reserve without the
-                    // previously observed 51-53 report steady-state backlog.
+                    // The helper owns physical presentation. PadSense-native
+                    // V5 retains its newest eight complete source generations
+                    // independently; after a host stall, admit that bounded
+                    // backlog immediately into the strict writer just as the
+                    // reference does. Legacy capture sources preserve their
+                    // existing one-report stop-and-wait policy.
                     if (ShouldBackpressurePacerProducer(
                         device.BluetoothAudioPacerActive,
-                        device.PendingBluetoothSpeakerFrames))
+                        device.PendingBluetoothSpeakerFrames,
+                        directSpeakerUsesPadSenseSource,
+                        device.BluetoothAudioPacerPresentedReports))
                     {
                         nextTick = Stopwatch.GetTimestamp();
                         captureFramesAvailable.WaitOne(1);
@@ -2195,13 +2280,51 @@ namespace DS4Windows
 
                     bool captureReady =
                         HasEnoughBufferedCaptureForNextFrame();
-                    bool sourceRecentlyActive = audioSegmentActive ||
-                        HasRecentRawAudible(Stopwatch.GetTimestamp(),
-                            TransientCaptureShortageLeaseMs);
-                    if (device.BluetoothAudioPacerActive &&
-                        device.PendingBluetoothSpeakerFrames > 1 &&
-                        !captureReady && sourceRecentlyActive)
+                    bool sourceRecentlyActive = HasRecentSourcePcm(
+                        Stopwatch.GetTimestamp(),
+                        TransientCaptureShortageLeaseMs);
+                    if (!pendingEncodedFrame && !captureReady &&
+                        sourceRecentlyActive)
                     {
+                        bool sourcePrimePending =
+                            IsPadSenseSourcePrimePending();
+                        if (ShouldMaintainIdleCarrierDuringPadSensePrime(
+                            directSpeakerUsesPadSenseSource,
+                            sourcePrimePending, captureReady,
+                            sourceRecentlyActive))
+                        {
+                            // The physical lane is already armed with valid
+                            // timer-paced Opus silence. Keep that carrier
+                            // continuous while the first eight real PadSense
+                            // blocks accumulate; the first complete source
+                            // frame replaces it atomically on the next pass.
+                            // Stopping here previously opened a seven-interval
+                            // host hole and drained the controller reserve.
+                            Array.Clear(frame, 0, frame.Length);
+                            bool submittedPrimeCarrier = EncodeCurrentFrame() &&
+                                SendEncodedFrame();
+                            if (submittedPrimeCarrier)
+                            {
+                                Interlocked.Increment(ref framesSent);
+                                Interlocked.Increment(ref silentFramesSent);
+                            }
+                            else if (device.BluetoothAudioPacerRecoveryRequired ||
+                                device.BluetoothAudioLifecycleTransitioning)
+                            {
+                                RequestPacerLifecyclePreparation(
+                                    recovery: true, gateSource: true);
+                            }
+
+                            ScheduleNextStreamTick(submittedPrimeCarrier,
+                                ref nextTick, highResolutionTimer);
+                            continue;
+                        }
+
+                        // PadSense does not advance an independent producer
+                        // deadline while a real source block is incomplete.
+                        // The source callback wakes this worker as soon as the
+                        // stateful 512-ish -> 480 conversion can complete.
+                        nextTick = Stopwatch.GetTimestamp();
                         captureFramesAvailable.WaitOne(2);
                         continue;
                     }
@@ -2213,8 +2336,12 @@ namespace DS4Windows
                     {
                         // Encode real fixed-size CBR Opus silence with the same
                         // encoder and 0x36 combined report path as content. No
-                        // source frame is removed until all six reports have
-                        // been accepted by the transport.
+                        // source frame is removed until all eight reports have
+                        // been accepted by the transport. PadSense submits this
+                        // one-time prime into its OVERLAPPED FIFO without a
+                        // user-mode cadence wait; HidBth schedules the radio and
+                        // the controller starts with roughly eight reports of
+                        // media reserve.
                         Array.Clear(frame, 0, frame.Length);
                         bool submittedWarmup = EncodeCurrentFrame() &&
                             SendEncodedFrame();
@@ -2234,13 +2361,35 @@ namespace DS4Windows
                                 gateSource: true);
                         }
 
-                        ScheduleNextStreamTick(submittedWarmup, ref nextTick,
-                            cadenceTicks, highResolutionTimer);
+                        if (submittedWarmup)
+                        {
+                            // Continue immediately so the helper receives the
+                            // whole one-time prime. The helper's eight-report
+                            // gate then admits it to the strict writer exactly
+                            // as PadSense does.
+                            nextTick = Stopwatch.GetTimestamp();
+                        }
+                        else
+                        {
+                            // A rejected prime report remains the current
+                            // generation. Avoid a retry spin while ownership or
+                            // a writer slot is recovering.
+                            captureFramesAvailable.WaitOne(1);
+                        }
                         continue;
                     }
 
                     if (!captureReady && !sourceRecentlyActive)
                     {
+                        if (!TryConfirmInactivePadSenseSource())
+                        {
+                            // A producer callback won the idle-boundary race.
+                            // Re-evaluate readiness without sending an unrelated
+                            // carrier or discarding the new source generation.
+                            nextTick = Stopwatch.GetTimestamp();
+                            continue;
+                        }
+
                         // Preserve a fully armed controller-side stream while
                         // Windows is silent. This is real fixed-size CBR Opus
                         // silence over the same atomic 0x36 path; no source
@@ -2259,13 +2408,13 @@ namespace DS4Windows
                             device.BluetoothAudioLifecycleTransitioning)
                         {
                             Volatile.Write(ref startupWarmupFramesRemaining,
-                                StartupWarmupReportCount);
+                                StartupWarmupReportsForCurrentSource);
                             RequestPacerLifecyclePreparation(recovery: true,
                                 gateSource: true);
                         }
 
                         ScheduleNextStreamTick(submittedIdleCarrier,
-                            ref nextTick, cadenceTicks, highResolutionTimer);
+                            ref nextTick, highResolutionTimer);
                         continue;
                     }
 
@@ -2285,13 +2434,21 @@ namespace DS4Windows
                             device.BluetoothAudioLifecycleTransitioning)
                         {
                             Volatile.Write(ref startupWarmupFramesRemaining,
-                                StartupWarmupReportCount);
+                                StartupWarmupReportsForCurrentSource);
                             RequestPacerLifecyclePreparation(recovery: true,
                                 gateSource: true);
                         }
 
-                        ScheduleNextStreamTick(submittedPending, ref nextTick,
-                            cadenceTicks, highResolutionTimer);
+                        // A retained source frame is retried without consuming
+                        // more PCM and without inventing a 10.667 ms media
+                        // deadline. Successful submission immediately drains
+                        // the next complete source block; rejection polls the
+                        // bounded helper queue briefly.
+                        nextTick = Stopwatch.GetTimestamp();
+                        if (!submittedPending)
+                        {
+                            captureFramesAvailable.WaitOne(1);
+                        }
                         continue;
                     }
 
@@ -2310,7 +2467,7 @@ namespace DS4Windows
                     }
 
                     long frameTimestamp = Stopwatch.GetTimestamp();
-                    bool rawAudioIsFresh = HasRecentRawAudible(frameTimestamp,
+                    bool rawAudioIsFresh = HasRecentSourcePcm(frameTimestamp,
                         TransientCaptureShortageLeaseMs);
                     if (ShouldDeferTransientCaptureShortage(captureUnderrun,
                             wasAudioSegmentActive, rawAudioIsFresh))
@@ -2371,16 +2528,12 @@ namespace DS4Windows
                     previousOutputLeft = frame[tailOffset];
                     previousOutputRight = frame[tailOffset + 1];
 
-                    long audibleTimestamp = Interlocked.Read(
-                        ref lastAudibleTimestamp);
-                    long audibleAgeTicks = Stopwatch.GetTimestamp() -
-                        audibleTimestamp;
-                    bool recentlyAudible = audibleTimestamp != 0 &&
-                        audibleAgeTicks >= 0 && audibleAgeTicks <=
-                            Stopwatch.Frequency * IdleKeepAliveMs / 1000;
                     bool submittedFrameThisTick = false;
-                    if (audioSegmentActive && recentlyAudible)
+                    if (captured)
                     {
+                        // Every complete source block is media, including
+                        // digital silence. PadSense drains it without an
+                        // amplitude gate or a second presentation clock.
                         preOpusPcmTrace?.Write(frame, frame.Length);
                         if (EncodeCurrentFrame())
                         {
@@ -2408,7 +2561,7 @@ namespace DS4Windows
                                 {
                                     Volatile.Write(
                                         ref startupWarmupFramesRemaining,
-                                        StartupWarmupReportCount);
+                                        StartupWarmupReportsForCurrentSource);
                                     RequestPacerLifecyclePreparation(
                                         recovery: true, gateSource: true);
                                 }
@@ -2435,12 +2588,30 @@ namespace DS4Windows
                             ref pacerPrewarmAttemptedForSegment, 0);
                         Interlocked.Exchange(
                             ref lastRawAudibleTimestamp, 0);
+                        Interlocked.Exchange(
+                            ref lastSourcePcmTimestamp, 0);
                         ResetCapturePipelineAtSegmentBoundary();
                         Interlocked.Increment(ref audioSegmentStops);
                     }
 
-                    ScheduleNextStreamTick(submittedFrameThisTick,
-                        ref nextTick, cadenceTicks, highResolutionTimer);
+                    if (captured &&
+                        (submittedFrameThisTick || pendingEncodedFrame))
+                    {
+                        // Real PCM follows source completion exactly as in
+                        // PadSense. Drain every complete resampler block now;
+                        // only no-source/warmup silence uses the host timer.
+                        nextTick = Stopwatch.GetTimestamp();
+                        if (pendingEncodedFrame)
+                        {
+                            captureFramesAvailable.WaitOne(1);
+                        }
+                        LogStreamDiagnosticsIfVerbose();
+                    }
+                    else
+                    {
+                        ScheduleNextStreamTick(submittedFrameThisTick,
+                            ref nextTick, highResolutionTimer);
+                    }
                 }
             }
             finally
@@ -2449,11 +2620,6 @@ namespace DS4Windows
                 // commit boundary. Never perform it on this sole real-time
                 // speaker thread.
                 RequestGenerationEnd(Interlocked.Read(ref speakerGeneration));
-                if (mmcssHandle != IntPtr.Zero)
-                {
-                    AvRevertMmThreadCharacteristics(mmcssHandle);
-                }
-
                 if (highResolutionTimer != IntPtr.Zero)
                 {
                     CloseHandle(highResolutionTimer);
@@ -2464,26 +2630,11 @@ namespace DS4Windows
         }
 
         private void ScheduleNextStreamTick(bool submittedFrameThisTick,
-            ref long nextTick, long cadenceTicks, IntPtr highResolutionTimer)
+            ref long nextTick, IntPtr highResolutionTimer)
         {
-            if (submittedFrameThisTick &&
-                !audioSegmentActive &&
-                device.BluetoothAudioPacerActive &&
-                device.PendingBluetoothSpeakerFrames <
-                    PacerReservoirTargetFrames)
-            {
-                // The producer may fill the host reservoir immediately. Only
-                // the isolated helper presents reports to hardware, at exactly
-                // one report per 10.667 ms and never in catch-up bursts.
-                // During audible playback, keep this parent producer paced too:
-                // burst-refilling the DS5-style FIFO can steal time from the
-                // render callback and then turns its own burst into a 10 ms
-                // active schedule miss on the following tick.
-                nextTick = Stopwatch.GetTimestamp();
-                LogStreamDiagnosticsIfVerbose();
-                return;
-            }
-
+            long cadenceTicks = CalculateBluetoothSpeakerCadenceTicks(
+                Stopwatch.Frequency,
+                device.DualSenseBluetoothPresentationClockRatio);
             nextTick += cadenceTicks;
             long nowTicks = Stopwatch.GetTimestamp();
             if (nextTick <= nowTicks)
@@ -2506,9 +2657,32 @@ namespace DS4Windows
             WaitUntil(highResolutionTimer, nextTick);
         }
 
+        internal static long CalculateBluetoothSpeakerCadenceTicks(
+            long clockFrequency, double presentationClockRatio)
+        {
+            if (clockFrequency <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(clockFrequency));
+            }
+
+            double ratio = double.IsFinite(presentationClockRatio) ?
+                Math.Clamp(presentationClockRatio,
+                    DualSenseBluetoothAudioPacerScheduler.MinimumRateRatio,
+                    DualSenseBluetoothAudioPacerScheduler.MaximumRateRatio) :
+                1.0;
+            return Math.Max(1, (long)Math.Round(
+                BluetoothSpeakerCadenceMs * clockFrequency /
+                (1000.0 * ratio)));
+        }
+
         private void LogStreamDiagnosticsIfVerbose()
         {
-            if (!Global.VerboseStartupLogging)
+            // This snapshot is intentionally large. Building it while the
+            // controller owns a live media segment can force a managed GC and
+            // starve the 10.667 ms source/presentation chain long enough to be
+            // audible. Keep collecting the lock-free counters, but defer their
+            // formatted GUI snapshot until the media segment is idle.
+            if (!Global.VerboseStartupLogging || audioSegmentActive)
             {
                 return;
             }
@@ -2534,6 +2708,14 @@ namespace DS4Windows
             {
                 try
                 {
+                    // Playback can resume between queuing this work item and
+                    // its execution. Never let delayed diagnostics become a
+                    // live-stream observer effect.
+                    if (audioSegmentActive)
+                    {
+                        return;
+                    }
+
                     double directBalanceErrorPpm = 0.0;
                     double directBalanceTargetPpm = 0.0;
                     double directBalanceAppliedPpm = 0.0;
@@ -2584,6 +2766,8 @@ namespace DS4Windows
                          $"controllerClock={device.DualSenseControllerClockRatio:F7} " +
                          $"controllerClockWindows={device.DualSenseControllerClockCompletedWindows} " +
                          $"controllerClockStable={device.DualSenseControllerClockStable} " +
+                         $"mediaClock={device.DualSenseMediaBufferCadenceRatio:F7} " +
+                         $"presentationClock={device.DualSenseBluetoothPresentationClockRatio:F7} " +
                          $"sourceClock={directSourceClockEstimator?.Ratio ?? 1.0:F7} " +
                          $"sourceClockWindows={directSourceClockEstimator?.CompletedWindows ?? 0} " +
                          $"sourceClockStable={directSourceClockEstimator?.IsStable ?? false} " +
@@ -2769,45 +2953,6 @@ namespace DS4Windows
             return timer;
         }
 
-        private IntPtr RegisterMultimediaScheduler()
-        {
-            try
-            {
-                uint taskIndex = 0;
-                IntPtr handle = AvSetMmThreadCharacteristicsW("Pro Audio",
-                    ref taskIndex);
-                if (handle == IntPtr.Zero)
-                {
-                    Volatile.Write(ref mmcssRegistrationError,
-                        Marshal.GetLastWin32Error());
-                    return IntPtr.Zero;
-                }
-
-                Volatile.Write(ref mmcssRegistered, 1);
-                if (AvSetMmThreadPriority(handle, AvrtPriority.High))
-                {
-                    Volatile.Write(ref mmcssHighPriority, 1);
-                }
-                else
-                {
-                    Volatile.Write(ref mmcssRegistrationError,
-                        Marshal.GetLastWin32Error());
-                }
-
-                return handle;
-            }
-            catch (DllNotFoundException)
-            {
-                Volatile.Write(ref mmcssRegistrationError, -1);
-                return IntPtr.Zero;
-            }
-            catch (EntryPointNotFoundException)
-            {
-                Volatile.Write(ref mmcssRegistrationError, -2);
-                return IntPtr.Zero;
-            }
-        }
-
         private sealed class LowLatencyWasapiLoopbackCapture : WasapiCapture
         {
             public LowLatencyWasapiLoopbackCapture(MMDevice captureDevice, int audioBufferMilliseconds)
@@ -2825,30 +2970,11 @@ namespace DS4Windows
         private const uint TimerAccess = 0x00000002 | 0x00100000;
         private const uint Infinite = 0xFFFFFFFF;
 
-        private enum AvrtPriority
-        {
-            Normal = 0,
-            High = 1,
-        }
-
         [DllImport("winmm.dll")]
         private static extern uint timeBeginPeriod(uint uMilliseconds);
 
         [DllImport("winmm.dll")]
         private static extern uint timeEndPeriod(uint uMilliseconds);
-
-        [DllImport("avrt.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        private static extern IntPtr AvSetMmThreadCharacteristicsW(string taskName,
-            ref uint taskIndex);
-
-        [DllImport("avrt.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool AvSetMmThreadPriority(IntPtr avrtHandle,
-            AvrtPriority priority);
-
-        [DllImport("avrt.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool AvRevertMmThreadCharacteristics(IntPtr avrtHandle);
 
         [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         private static extern IntPtr CreateWaitableTimerExW(IntPtr lpTimerAttributes, string lpTimerName,

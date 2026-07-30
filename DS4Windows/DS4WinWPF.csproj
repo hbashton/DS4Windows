@@ -15,10 +15,10 @@
 		<RunAnalyzersDuringBuild>true</RunAnalyzersDuringBuild>
 		<EnableNETAnalyzers>false</EnableNETAnalyzers>
 		<ServerGarbageCollection>true</ServerGarbageCollection>
-		<AssemblyVersion>4.0.2.1</AssemblyVersion>
-		<FileVersion>4.0.2.1</FileVersion>
-		<Version>4.0.2.1-dualsense-beta</Version>
-		<InformationalVersion>4.0.2.1 DualSense Beta</InformationalVersion>
+		<AssemblyVersion>5.0.0.0</AssemblyVersion>
+		<FileVersion>5.0.0.0</FileVersion>
+		<Version>5.0.0.0-dualsense-beta</Version>
+		<InformationalVersion>5.0.0.0 DualSense Beta</InformationalVersion>
 		<IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 		<Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
 		<Platform Condition=" '$(Platform)' == '' ">x64</Platform>
@@ -76,6 +76,17 @@
 		<Content Include="..\extras\install-viiper-backend.ps1">
 			<Link>extras\install-viiper-backend.ps1</Link>
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+		</Content>
+		<Content Include="..\extras\USBip-0.9.7.8-x64.exe">
+			<Link>extras\USBip-0.9.7.8-x64.exe</Link>
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+		</Content>
+		<Content Include="..\extras\USBip-0.9.7.8-LICENSE.txt">
+			<Link>extras\USBip-0.9.7.8-LICENSE.txt</Link>
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
 		</Content>
 		<Content Include="Resources\ControllerArtwork.NOTICE.txt">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

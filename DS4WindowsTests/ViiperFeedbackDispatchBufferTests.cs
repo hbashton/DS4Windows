@@ -161,9 +161,9 @@ namespace DS4Windows.Tests
                 ViiperOutDevice.FeedbackOrderedControlMaximumAgeMilliseconds <=
                     20,
                 "A paused haptics frame can outlive the presentation budget.");
-            Assert.IsTrue(
-                ViiperOutDevice.DualSenseFeedbackSpeakerMaximumAgeMilliseconds <= 80,
-                "A paused direct-speaker frame can outlive the handoff budget.");
+            Assert.AreEqual(0,
+                ViiperOutDevice.DualSenseFeedbackSpeakerMaximumAgeMilliseconds,
+                "DualSense source carriers must be bounded by FIFO capacity, not wall-clock expiry.");
         }
 
         [TestMethod]
@@ -178,7 +178,7 @@ namespace DS4Windows.Tests
             Assert.AreEqual(8,
                 ViiperOutDevice.GetFeedbackSpeakerQueueCapacity(
                     ViiperVirtualDeviceType.DualSense));
-            Assert.AreEqual(80,
+            Assert.AreEqual(0,
                 ViiperOutDevice.GetFeedbackSpeakerMaximumAgeMilliseconds(
                     ViiperVirtualDeviceType.DualSense));
             Assert.AreEqual(0,
@@ -245,6 +245,35 @@ namespace DS4Windows.Tests
 
             Assert.AreEqual(0L, buffer.SpeakerExpired);
             Assert.AreEqual(0L, buffer.SpeakerDropped);
+        }
+
+        [TestMethod]
+        public void DualSenseNewestWindowSurvivesConsumerPauseWithoutExpiry()
+        {
+            int capacity = ViiperOutDevice.DualSenseFeedbackSpeakerQueueCapacity;
+            var buffer = new ViiperFeedbackDispatchBuffer(capacity, 8, 8,
+                speakerMaximumAgeMilliseconds:
+                    ViiperOutDevice.DualSenseFeedbackSpeakerMaximumAgeMilliseconds);
+            byte[] destination = new byte[8];
+
+            for (int index = 0; index < capacity + 3; index++)
+            {
+                Assert.IsTrue(buffer.TryEnqueueSpeaker(
+                    new byte[] { (byte)index }, 1, index));
+            }
+
+            Thread.Sleep(100);
+            for (int index = 3; index < capacity + 3; index++)
+            {
+                Assert.IsTrue(buffer.TryDequeueSpeaker(destination,
+                    out int length, out long generation));
+                Assert.AreEqual(1, length);
+                Assert.AreEqual(index, generation);
+                Assert.AreEqual((byte)index, destination[0]);
+            }
+
+            Assert.AreEqual(0L, buffer.SpeakerExpired);
+            Assert.AreEqual(3L, buffer.SpeakerDropped);
         }
 
         [TestMethod]

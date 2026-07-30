@@ -87,12 +87,13 @@ namespace DS4Windows
                     if (safeReadHandle == null || safeReadHandle.IsClosed || safeReadHandle.IsInvalid)
                     {
                         safeReadHandle?.Dispose();
-                        // Sony Bluetooth audio is a distinct HID file session in
-                        // the working Windows references. Keep the primary
+                        // Sony Bluetooth audio is a distinct HID file session
+                        // in the working Windows references. Keep the primary
                         // handle shareable inside this HidHide-protected process
-                        // so the dedicated audio session can coexist with input.
+                        // so a dedicated media writer can coexist with input.
                         bool shareForSonyAudio =
-                            IsSonyBluetoothAudioController();
+                            IsSonyBluetoothDualShock4() ||
+                            IsSonyBluetoothDualSense();
                         safeReadHandle = OpenHandle(_devicePath,
                             exclusive && !shareForSonyAudio,
                             enumerate: false);
@@ -113,7 +114,7 @@ namespace DS4Windows
         internal bool TryOpenDedicatedAudioHandle(out SafeFileHandle handle)
         {
             handle = null;
-            if (!IsSonyBluetoothAudioController())
+            if (!IsSonyBluetoothDualShock4())
             {
                 return false;
             }
@@ -138,19 +139,33 @@ namespace DS4Windows
             }
         }
 
-        private bool IsSonyBluetoothAudioController()
+        private bool IsSonyBluetoothDualShock4()
         {
             if (_deviceAttributes?.VendorId != 0x054C ||
                 (_deviceAttributes.ProductId != 0x05C4 &&
-                 _deviceAttributes.ProductId != 0x09CC &&
-                 _deviceAttributes.ProductId != 0x0CE6 &&
-                 _deviceAttributes.ProductId != 0x0DF2))
+                 _deviceAttributes.ProductId != 0x09CC))
             {
                 return false;
             }
 
             return _devicePath.IndexOf("00001124-0000-1000-8000-00805f9b34fb",
                 StringComparison.OrdinalIgnoreCase) >= 0 ||
+                _devicePath.IndexOf("_VID&0002054c_",
+                    StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private bool IsSonyBluetoothDualSense()
+        {
+            if (_deviceAttributes?.VendorId != 0x054C ||
+                (_deviceAttributes.ProductId != 0x0CE6 &&
+                 _deviceAttributes.ProductId != 0x0DF2))
+            {
+                return false;
+            }
+
+            return _devicePath.IndexOf(
+                    "00001124-0000-1000-8000-00805f9b34fb",
+                    StringComparison.OrdinalIgnoreCase) >= 0 ||
                 _devicePath.IndexOf("_VID&0002054c_",
                     StringComparison.OrdinalIgnoreCase) >= 0;
         }

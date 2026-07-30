@@ -153,7 +153,7 @@ namespace DS4Windows
         private const byte ViiperStreamFrameAtomicAudioHaptics = 0x83;
         private const byte ViiperStreamFrameVersionV2 = 0x02;
         private const byte ViiperStreamFrameVersionV3 = 0x03;
-        private const byte ViiperStreamFrameVersionV4 = 0x04;
+        private const byte ViiperStreamFrameVersionV5 = 0x05;
         private const byte FeedbackSpeakerKindPcm = 0;
         private const byte FeedbackSpeakerKindAtomicAudioHaptics = 1;
         private const int AtomicAudioHapticsFeedbackLengthPrefix = 2;
@@ -162,14 +162,15 @@ namespace DS4Windows
         private const int MaximumStreamRecoveryBackoffMilliseconds = 1000;
         private const int MicrophoneDisableRetryMilliseconds = 250;
         // Virtual speaker formats have different proven buffering contracts.
-        // DualSense's atomic 10 ms carriers feed a physical transport with its
-        // own reservoir and must stay inside an 80 ms live window. DualShock 4
-        // packets feed the historical SBC production lane, whose validated
-        // 160 ms handoff reserve must not inherit the DualSense expiry policy.
-        // A 4 KiB slot covers either virtual format without allocations.
+        // PadSense bounds DualSense latency with an eight-carrier newest-wins
+        // FIFO and never rejects a carrier based on wall-clock age. A paused
+        // consumer therefore resumes from the live eight-frame window instead
+        // of turning a scheduling pause into an artificial silence interval.
+        // DualShock 4 keeps its separate historical reserve. A 4 KiB slot
+        // covers either virtual format without allocations.
         private const int FeedbackSpeakerSlotLength = 4096;
         internal const int DualSenseFeedbackSpeakerQueueCapacity = 8;
-        internal const int DualSenseFeedbackSpeakerMaximumAgeMilliseconds = 80;
+        internal const int DualSenseFeedbackSpeakerMaximumAgeMilliseconds = 0;
         internal const int DualShock4FeedbackSpeakerQueueCapacity = 16;
         internal const int DualShock4FeedbackSpeakerMaximumAgeMilliseconds = 0;
         // Native DualSense feedback arrives at roughly 150 Hz and is valid for
@@ -267,6 +268,7 @@ namespace DS4Windows
         private bool activeStreamSupportsMicrophone;
         private bool activeStreamSupportsDirectSpeaker;
         private bool activeStreamSupportsAtomicAudioHaptics;
+        private bool activeStreamUsesPadSenseAudioSource;
         private bool activeStreamUsesAudioOnlyDescriptor;
         private byte activeStreamFrameVersion;
         private int microphoneVolume = 128;
@@ -536,6 +538,15 @@ namespace DS4Windows
         internal bool SupportsAtomicAudioHaptics =>
             connected && activeStreamSupportsAtomicAudioHaptics;
 
+        /// <summary>
+        /// V5 carries untouched 48 kHz front-channel PCM in exact 480-frame
+        /// callbacks, independently from VIIPER's 512-frame rear-haptics
+        /// assembler. The physical bridge owns the single continuous
+        /// 512-to-480 speaker-clock conversion.
+        /// </summary>
+        internal bool UsesPadSenseAudioSource =>
+            connected && activeStreamUsesPadSenseAudioSource;
+
         internal void ApplyAtomicAudioHapticsFeedback(byte[] feedback,
             int feedbackLength, int expectedDeviceIndex)
         {
@@ -701,6 +712,7 @@ namespace DS4Windows
             activeStreamSupportsMicrophone = false;
             activeStreamSupportsDirectSpeaker = false;
             activeStreamSupportsAtomicAudioHaptics = false;
+            activeStreamUsesPadSenseAudioSource = false;
             activeStreamUsesAudioOnlyDescriptor = false;
             activeStreamFrameVersion = 0;
             Volatile.Write(ref virtualMicrophoneInterfaceActive, 0);
@@ -708,201 +720,32 @@ namespace DS4Windows
 
             if (viiperType == ViiperVirtualDeviceType.DualSense)
             {
-                if (audioOnlySidecar)
-                {
-                    try
-                    {
-                        ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
-                            "dualsenseaudioonlyduplexv4");
-                        activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
-                        activeStreamUsesFramedProtocol = true;
-                        activeStreamSupportsMicrophone = true;
-                        activeStreamSupportsDirectSpeaker = true;
-                        activeStreamSupportsAtomicAudioHaptics = true;
-                        activeStreamUsesAudioOnlyDescriptor = true;
-                        activeStreamFrameVersion = ViiperStreamFrameVersionV4;
-                        return stream;
-                    }
-                    catch (IOException ex)
-                    {
-                        AppLogger.LogToGui(
-                            $"VIIPER DualSense audio-only sidecar V4 unavailable, trying V3: {ex.Message}",
-                            false);
-                    }
-
-                    try
-                    {
-                        ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
-                            "dualsenseaudioonlyduplexv3");
-                        activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
-                        activeStreamUsesFramedProtocol = true;
-                        activeStreamSupportsMicrophone = true;
-                        activeStreamSupportsDirectSpeaker = true;
-                        activeStreamUsesAudioOnlyDescriptor = true;
-                        activeStreamFrameVersion = ViiperStreamFrameVersionV3;
-                        return stream;
-                    }
-                    catch (IOException ex)
-                    {
-                        AppLogger.LogToGui(
-                            $"VIIPER DualSense audio-only sidecar unavailable: {ex.Message}",
-                            true);
-                        throw new IOException(
-                            "The installed VIIPER build does not support the DualSense audio-only interface. Update VIIPER from Settings before using PlayStation audio with an Xbox or Switch output.",
-                            ex);
-                    }
-                }
-
-                try
-                {
-                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
-                        "dualsensecombinedaudioduplexv4");
-                    activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
-                    activeStreamUsesFramedProtocol = true;
-                    activeStreamSupportsMicrophone = true;
-                    activeStreamSupportsDirectSpeaker = true;
-                    activeStreamSupportsAtomicAudioHaptics = true;
-                    activeStreamFrameVersion = ViiperStreamFrameVersionV4;
-                    return stream;
-                }
-                catch (IOException ex)
-                {
-                    AppLogger.LogToGui(
-                        $"VIIPER DualSense atomic audio/haptics stream unavailable, trying V3: {ex.Message}",
-                        false);
-                }
-
-                try
-                {
-                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
-                        "dualsensecombinedaudioduplexv3");
-                    activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
-                    activeStreamUsesFramedProtocol = true;
-                    activeStreamSupportsMicrophone = true;
-                    activeStreamSupportsDirectSpeaker = true;
-                    activeStreamFrameVersion = ViiperStreamFrameVersionV3;
-                    return stream;
-                }
-                catch (IOException ex)
-                {
-                    AppLogger.LogToGui(
-                        $"VIIPER DualSense direct speaker stream unavailable, trying microphone V2: {ex.Message}",
-                        false);
-                }
-
-                try
-                {
-                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream("dualsensecombinedmicv2");
-                    activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
-                    activeStreamUsesFramedProtocol = true;
-                    activeStreamSupportsMicrophone = true;
-                    activeStreamFrameVersion = ViiperStreamFrameVersionV2;
-                    return stream;
-                }
-                catch (IOException ex)
-                {
-                    AppLogger.LogToGui($"VIIPER DualSense microphone input unavailable, continuing without mic-in: {ex.Message}", false);
-                }
-
-                try
-                {
-                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream("dualsensecombinedext");
-                    activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
-                    return stream;
-                }
-                catch (IOException ex)
-                {
-                    try
-                    {
-                        AppLogger.LogToGui($"VIIPER DualSense combined haptics feedback unavailable, using legacy extended feedback: {ex.Message}", false);
-                        ViiperDeviceStream stream = client.CreateDeviceAndOpenStream("dualsenseext");
-                        activeFeedbackLength = DualSenseExtendedFeedbackLength;
-                        return stream;
-                    }
-                    catch (IOException legacyEx)
-                    {
-                        AppLogger.LogToGui($"VIIPER DualSense adaptive trigger feedback unavailable, falling back to base DualSense output: {legacyEx.Message}", false);
-                        activeFeedbackLength = DualSenseBaseFeedbackLength;
-                        return client.CreateDeviceAndOpenStream("dualsense");
-                    }
-                }
+                ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
+                    audioOnlySidecar ? "dualsenseaudioonlyduplexv5" :
+                        "dualsensecombinedaudioduplexv5");
+                activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
+                activeStreamUsesFramedProtocol = true;
+                activeStreamSupportsMicrophone = true;
+                activeStreamSupportsDirectSpeaker = true;
+                activeStreamSupportsAtomicAudioHaptics = true;
+                activeStreamUsesPadSenseAudioSource = true;
+                activeStreamUsesAudioOnlyDescriptor = audioOnlySidecar;
+                activeStreamFrameVersion = ViiperStreamFrameVersionV5;
+                return stream;
             }
 
             if (viiperType == ViiperVirtualDeviceType.DualSenseEdge)
             {
-                try
-                {
-                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
-                        "dualsenseedgecombinedaudioduplexv4");
-                    activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
-                    activeStreamUsesFramedProtocol = true;
-                    activeStreamSupportsMicrophone = true;
-                    activeStreamSupportsDirectSpeaker = true;
-                    activeStreamSupportsAtomicAudioHaptics = true;
-                    activeStreamFrameVersion = ViiperStreamFrameVersionV4;
-                    return stream;
-                }
-                catch (IOException ex)
-                {
-                    AppLogger.LogToGui(
-                        $"VIIPER DualSense Edge atomic audio/haptics stream unavailable, trying V3: {ex.Message}",
-                        false);
-                }
-
-                try
-                {
-                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
-                        "dualsenseedgecombinedaudioduplexv3");
-                    activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
-                    activeStreamUsesFramedProtocol = true;
-                    activeStreamSupportsMicrophone = true;
-                    activeStreamSupportsDirectSpeaker = true;
-                    activeStreamFrameVersion = ViiperStreamFrameVersionV3;
-                    return stream;
-                }
-                catch (IOException ex)
-                {
-                    AppLogger.LogToGui(
-                        $"VIIPER DualSense Edge direct speaker stream unavailable, trying microphone V2: {ex.Message}",
-                        false);
-                }
-
-                try
-                {
-                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream("dualsenseedgecombinedmicv2");
-                    activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
-                    activeStreamUsesFramedProtocol = true;
-                    activeStreamSupportsMicrophone = true;
-                    activeStreamFrameVersion = ViiperStreamFrameVersionV2;
-                    return stream;
-                }
-                catch (IOException ex)
-                {
-                    AppLogger.LogToGui($"VIIPER DualSense Edge microphone input unavailable, continuing without mic-in: {ex.Message}", false);
-                }
-
-                try
-                {
-                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream("dualsenseedgecombinedext");
-                    activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
-                    return stream;
-                }
-                catch (IOException ex)
-                {
-                    try
-                    {
-                        AppLogger.LogToGui($"VIIPER DualSense Edge combined haptics feedback unavailable, using legacy extended feedback: {ex.Message}", false);
-                        ViiperDeviceStream stream = client.CreateDeviceAndOpenStream("dualsenseedgeext");
-                        activeFeedbackLength = DualSenseExtendedFeedbackLength;
-                        return stream;
-                    }
-                    catch (IOException legacyEx)
-                    {
-                        AppLogger.LogToGui($"VIIPER DualSense Edge adaptive trigger feedback unavailable, falling back to base DualSense Edge output: {legacyEx.Message}", false);
-                        activeFeedbackLength = DualSenseBaseFeedbackLength;
-                        return client.CreateDeviceAndOpenStream("dualsenseedge");
-                    }
-                }
+                ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
+                    "dualsenseedgecombinedaudioduplexv5");
+                activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
+                activeStreamUsesFramedProtocol = true;
+                activeStreamSupportsMicrophone = true;
+                activeStreamSupportsDirectSpeaker = true;
+                activeStreamSupportsAtomicAudioHaptics = true;
+                activeStreamUsesPadSenseAudioSource = true;
+                activeStreamFrameVersion = ViiperStreamFrameVersionV5;
+                return stream;
             }
 
             if (viiperType == ViiperVirtualDeviceType.DualShock4)
@@ -1459,6 +1302,8 @@ namespace DS4Windows
 
         private void FeedbackSpeakerDispatchLoop(long generation)
         {
+            using MultimediaThreadRegistration mmcss =
+                MultimediaThreadRegistration.EnterProAudio();
             byte[] payload = new byte[FeedbackSpeakerSlotLength];
             byte[] atomicFeedbackScratch =
                 new byte[DualSenseCombinedExtendedFeedbackLength];
@@ -1610,6 +1455,8 @@ namespace DS4Windows
 
         private void FeedbackControlDispatchLoop(long generation)
         {
+            using MultimediaThreadRegistration mmcss =
+                MultimediaThreadRegistration.EnterProAudio();
             byte[] payload = new byte[DualSenseCombinedExtendedFeedbackLength];
             try
             {
@@ -1713,7 +1560,7 @@ namespace DS4Windows
                 {
                     IsBackground = true,
                     Name = $"VIIPER {viiperType} writer",
-                    Priority = ThreadPriority.AboveNormal,
+                    Priority = ThreadPriority.Highest,
                 };
                 stateWriterThread = writerThread;
                 Interlocked.Exchange(ref stateWriterThreadGeneration,
@@ -1730,6 +1577,8 @@ namespace DS4Windows
 
         private void StateWriteLoop(long writerGeneration)
         {
+            using MultimediaThreadRegistration mmcss =
+                MultimediaThreadRegistration.EnterGames();
             try
             {
                 while (IsStateWriterCurrent(writerGeneration))
@@ -1959,6 +1808,8 @@ namespace DS4Windows
 
         private void MicrophoneWriteLoop(long workerGeneration)
         {
+            using MultimediaThreadRegistration mmcss =
+                MultimediaThreadRegistration.EnterProAudio();
             while (!writerStopRequested && workerGeneration ==
                 Interlocked.Read(ref microphoneWorkerGeneration))
             {
@@ -2664,7 +2515,12 @@ namespace DS4Windows
 
         private void LogWriterHealthIfNeeded()
         {
-            if (!Global.VerboseStartupLogging)
+            // Formatting the full transport snapshot allocates heavily and
+            // publishes through the WPF logger. A live speaker stream has a
+            // 10.667 ms deadline, so defer diagnostics instead of allowing a
+            // telemetry-induced GC pause to interrupt its source callback.
+            if (!Global.VerboseStartupLogging ||
+                IsFeedbackSpeakerDispatchRecentlyActive())
             {
                 return;
             }
@@ -2827,6 +2683,10 @@ namespace DS4Windows
         private void FeedbackReadLoop(int feedbackLength,
             ViiperDeviceStream stream, long readStreamGeneration)
         {
+            using MultimediaThreadRegistration mmcss =
+                activeStreamSupportsDirectSpeaker ?
+                    MultimediaThreadRegistration.EnterProAudio() :
+                    MultimediaThreadRegistration.EnterGames();
             int bufferLength = IsDualSenseType() ? Math.Max(feedbackLength, DualSenseCombinedExtendedFeedbackLength) : feedbackLength;
             byte[] buffer = new byte[bufferLength];
             byte[] framedPayload = new byte[ushort.MaxValue];
@@ -3499,6 +3359,7 @@ namespace DS4Windows
             long lastCompressedRx, long lastProcessed, long lastSubmitted)
         {
             if (!Global.VerboseStartupLogging ||
+                IsFeedbackSpeakerDispatchRecentlyActive() ||
                 DateTime.UtcNow - lastMicrophoneHealthLogUtc < TimeSpan.FromSeconds(5))
             {
                 return;
@@ -3569,6 +3430,19 @@ namespace DS4Windows
                 $"{virtualBuffer.ToLogFields()} " +
                 $"armStatus=\"{armStatus}\"",
                 false);
+        }
+
+        private bool IsFeedbackSpeakerDispatchRecentlyActive()
+        {
+            long lastDispatch = Interlocked.Read(
+                ref lastFeedbackSpeakerDispatchTimestamp);
+            if (lastDispatch <= 0)
+            {
+                return false;
+            }
+
+            long age = Stopwatch.GetTimestamp() - lastDispatch;
+            return age >= 0 && age <= Stopwatch.Frequency;
         }
 
         private static string FormatMicrophoneLivenessAge(long now,
@@ -4167,58 +4041,6 @@ namespace DS4Windows
                 (productId == 0x05C4 || productId == 0x09CC);
         }
 
-        public static bool ApplySyntheticDualSenseTriggerFeedback(int deviceIndex, bool rightTrigger, byte mode,
-            byte startResistance, byte effectForce, byte rangeForce, byte nearReleaseStrength,
-            byte nearMiddleStrength, byte pressedStrength, byte frequency)
-        {
-            if (Program.rootHub == null ||
-                deviceIndex < 0 ||
-                deviceIndex >= Program.rootHub.DS4Controllers.Length ||
-                Program.rootHub.DS4Controllers[deviceIndex] is not DualSenseDevice dualSenseDevice ||
-                !IsGenuineSonyDualSense(dualSenseDevice))
-            {
-                return false;
-            }
-
-            byte[] feedback = new byte[DualSenseExtendedFeedbackLength];
-            int offset = DualSenseTriggerFeedbackOffset +
-                (rightTrigger ? 0 : DualSenseTriggerEffectLength);
-            feedback[offset] = mode;
-            feedback[offset + 1] = startResistance;
-            feedback[offset + 2] = effectForce;
-            feedback[offset + 3] = rangeForce;
-            feedback[offset + 4] = nearReleaseStrength;
-            feedback[offset + 5] = nearMiddleStrength;
-            feedback[offset + 6] = pressedStrength;
-            feedback[offset + 9] = frequency;
-
-            ApplyRawTriggerEffect(dualSenseDevice,
-                rightTrigger ? TriggerId.RightTrigger : TriggerId.LeftTrigger,
-                feedback,
-                offset);
-            return true;
-        }
-
-        public static bool ResetSyntheticDualSenseTriggerFeedback(int deviceIndex, bool rightTrigger)
-        {
-            return ApplySyntheticDualSenseTriggerFeedback(deviceIndex, rightTrigger,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00);
-        }
-
-        public static bool PlaySyntheticDualSenseHapticsTone(int deviceIndex)
-        {
-            if (Program.rootHub == null ||
-                deviceIndex < 0 ||
-                deviceIndex >= Program.rootHub.DS4Controllers.Length ||
-                Program.rootHub.DS4Controllers[deviceIndex] is not DualSenseDevice dualSenseDevice ||
-                !IsGenuineSonyDualSense(dualSenseDevice))
-            {
-                return false;
-            }
-
-            return dualSenseDevice.PlayBluetoothHapticsTestTone();
-        }
-
         private static bool TriggerFeedbackEquals(byte[] source, int sourceOffset, byte[] previous)
         {
             for (int i = 0; i < DualSenseTriggerEffectLength; i++)
@@ -4655,9 +4477,17 @@ namespace DS4Windows
                 }, JsonOptions);
 
                 device = SendRequest<ViiperDeviceResponse>($"bus/{bus.BusId}/add", payload);
-                usbipPort = ViiperUsbipPortManager.FindLocalViiperPort(bus.BusId, device.DevId);
-                ViiperUsbipPortManager.RegisterActivePort(usbipPort);
+                usbipPort = device.UsbipPort;
+                if (!ViiperUsbipPortManager.IsTrustedCreateResponse(
+                    usbipPort, device.UsbipOwnerSerial))
+                {
+                    throw new IOException(
+                        $"VIIPER created {bus.BusId}-{device.DevId}, but its native usbip-win2 attach response did not contain a positive port and valid DS4Windows ownership token.");
+                }
+
                 ViiperUsbipPortManager.DetachDuplicateLocalViiperPorts(bus.BusId, device.DevId, usbipPort);
+                ViiperUsbipPortManager.RegisterActivePort(usbipPort,
+                    $"{bus.BusId}-{device.DevId}");
                 return OpenStream(bus.BusId, device.DevId, usbipPort);
             }
             catch
@@ -4672,26 +4502,6 @@ namespace DS4Windows
                 TryRemoveBus(bus.BusId);
                 throw;
             }
-        }
-
-        public string SetDualSenseTrafficCapture(bool enabled, bool clear)
-        {
-            string payload = JsonSerializer.Serialize(new ViiperDualSenseTrafficSetRequest
-            {
-                Enabled = enabled,
-                Clear = clear,
-            }, JsonOptions);
-            return SendRequestRaw("debug/dualsense-traffic/set", payload);
-        }
-
-        public string GetDualSenseTrafficCapture()
-        {
-            return SendRequestRaw("debug/dualsense-traffic/get");
-        }
-
-        public string ClearDualSenseTrafficCapture()
-        {
-            return SendRequestRaw("debug/dualsense-traffic/clear");
         }
 
         public bool GetMicrophoneInterfaceActive(uint busId, string devId)
@@ -4905,6 +4715,12 @@ namespace DS4Windows
         {
             [JsonPropertyName("devId")]
             public string DevId { get; set; }
+
+            [JsonPropertyName("usbipPort")]
+            public int UsbipPort { get; set; }
+
+            [JsonPropertyName("usbipOwnerSerial")]
+            public string UsbipOwnerSerial { get; set; }
         }
 
         private sealed class ViiperDeviceCreateRequest
@@ -4932,15 +4748,6 @@ namespace DS4Windows
             public JsonElement DeviceSpecific { get; set; }
         }
 
-        private sealed class ViiperDualSenseTrafficSetRequest
-        {
-            [JsonPropertyName("enabled")]
-            public bool Enabled { get; set; }
-
-            [JsonPropertyName("clear")]
-            public bool Clear { get; set; }
-        }
-
         private sealed class ViiperApiError
         {
             [JsonPropertyName("status")]
@@ -4956,25 +4763,21 @@ namespace DS4Windows
 
     internal static class ViiperUsbipPortManager
     {
-        private static readonly string[] KnownViiperDeviceIds =
-        {
-            "054c:05c4", // DualShock 4 (VIIPER CUH-ZCT1x identity)
-            "054c:09cc", // DualShock 4
-            "054c:0ce6", // DualSense
-            "054c:0df2", // DualSense Edge
-            "045e:028e", // Xbox 360
-            "057e:2069", // Switch 2 Pro
-        };
-
+        private const string OwnershipSerialPrefix = "DS4W";
+        private const int OwnershipSerialLength = 15;
         private static readonly object ActivePortsLock = new object();
-        private static readonly HashSet<int> ActivePorts = new HashSet<int>();
+        private static readonly Dictionary<int, string> ActivePorts =
+            new Dictionary<int, string>();
+
+        internal delegate bool UsbipCommandRunner(string[] arguments,
+            out string output, out string error);
 
         public static void DetachStaleLocalViiperPorts()
         {
             HashSet<int> activePorts;
             lock (ActivePortsLock)
             {
-                activePorts = new HashSet<int>(ActivePorts);
+                activePorts = new HashSet<int>(ActivePorts.Keys);
             }
 
             // USB/IP and PnP update asynchronously. A second stale import can
@@ -4989,11 +4792,18 @@ namespace DS4Windows
             int requiredCleanSnapshots = activePorts.Count > 0 ? 1 : 10;
             for (int attempt = 0; attempt < 32 && cleanSnapshots < requiredCleanSnapshots; attempt++)
             {
+                if (!TryGetImportedPorts(out IReadOnlyList<UsbipPortBlock> ports,
+                    out string queryError))
+                {
+                    throw CreatePortQueryException("clean stale VIIPER imports",
+                        queryError);
+                }
+
                 bool detachedAny = false;
-                foreach (UsbipPortBlock port in GetImportedPorts())
+                foreach (UsbipPortBlock port in ports)
                 {
                     if (!activePorts.Contains(port.Port) &&
-                        IsLocalViiperPort(port, null))
+                        IsDs4WindowsOwnedLocalPort(port, null))
                     {
                         DetachPort(port.Port,
                             "stale local VIIPER controller import");
@@ -5009,28 +4819,6 @@ namespace DS4Windows
             }
         }
 
-        public static int FindLocalViiperPort(uint busId, string devId)
-        {
-            string remoteBusId = $"{busId}-{devId}";
-            for (int attempt = 0; attempt < 15; attempt++)
-            {
-                foreach (UsbipPortBlock port in GetImportedPorts())
-                {
-                    if (IsLocalViiperPort(port, remoteBusId))
-                    {
-                        return port.Port;
-                    }
-                }
-
-                if (attempt < 14)
-                {
-                    Thread.Sleep(100);
-                }
-            }
-
-            return -1;
-        }
-
         public static void DetachDuplicateLocalViiperPorts(uint busId, string devId, int keepPort)
         {
             if (keepPort < 0)
@@ -5039,9 +4827,23 @@ namespace DS4Windows
             }
 
             string remoteBusId = $"{busId}-{devId}";
-            foreach (UsbipPortBlock port in GetImportedPorts())
+            if (!TryGetImportedPorts(out IReadOnlyList<UsbipPortBlock> ports,
+                out string queryError))
             {
-                if (port.Port != keepPort && IsLocalViiperPort(port, remoteBusId))
+                throw CreatePortQueryException(
+                    $"remove duplicate VIIPER import {remoteBusId}", queryError);
+            }
+
+            HashSet<int> activePorts;
+            lock (ActivePortsLock)
+            {
+                activePorts = new HashSet<int>(ActivePorts.Keys);
+            }
+
+            foreach (UsbipPortBlock port in ports)
+            {
+                if (port.Port != keepPort && !activePorts.Contains(port.Port) &&
+                    IsDs4WindowsOwnedLocalPort(port, remoteBusId))
                 {
                     DetachPort(port.Port, $"duplicate local VIIPER import for {remoteBusId}");
                 }
@@ -5050,6 +4852,11 @@ namespace DS4Windows
 
         public static void RegisterActivePort(int port)
         {
+            RegisterActivePort(port, null);
+        }
+
+        internal static void RegisterActivePort(int port, string remoteBusId)
+        {
             if (port < 0)
             {
                 return;
@@ -5057,7 +4864,7 @@ namespace DS4Windows
 
             lock (ActivePortsLock)
             {
-                ActivePorts.Add(port);
+                ActivePorts[port] = remoteBusId;
             }
         }
 
@@ -5083,11 +4890,58 @@ namespace DS4Windows
 
             lock (ActivePortsLock)
             {
-                return ActivePorts.Contains(port);
+                return ActivePorts.ContainsKey(port);
             }
         }
 
-        public static void DetachPort(int port, string reason)
+        internal static void DetachRegisteredPort(int port, string reason)
+        {
+            string remoteBusId;
+            lock (ActivePortsLock)
+            {
+                if (!ActivePorts.TryGetValue(port, out remoteBusId))
+                {
+                    return;
+                }
+            }
+
+            if (!TryGetImportedPorts(out IReadOnlyList<UsbipPortBlock> ports,
+                out string queryError))
+            {
+                throw CreatePortQueryException(
+                    $"verify registered VIIPER port {port} before detaching it",
+                    queryError);
+            }
+
+            UsbipPortBlock ownedPort = default;
+            bool found = false;
+            foreach (UsbipPortBlock candidate in ports)
+            {
+                if (candidate.Port == port)
+                {
+                    ownedPort = candidate;
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found)
+            {
+                return;
+            }
+
+            if (!IsDs4WindowsOwnedLocalPort(ownedPort, remoteBusId))
+            {
+                AppLogger.LogToGui(
+                    $"VIIPER refused to detach usbip port {port} ({reason}) because its DS4Windows ownership token or device identity no longer matches.",
+                    true);
+                return;
+            }
+
+            DetachPort(port, reason);
+        }
+
+        private static void DetachPort(int port, string reason)
         {
             if (port < 0)
             {
@@ -5103,20 +4957,41 @@ namespace DS4Windows
             AppLogger.LogToGui($"VIIPER detached usbip port {port} ({reason}).", false);
         }
 
-        private static IReadOnlyList<UsbipPortBlock> GetImportedPorts()
+        private static bool TryGetImportedPorts(
+            out IReadOnlyList<UsbipPortBlock> ports, out string error)
         {
-            if (!TryRunUsbip(new[] { "port" }, out string output, out string error))
-            {
-                if (!string.IsNullOrWhiteSpace(error))
-                {
-                    AppLogger.LogToGui($"VIIPER could not query usbip ports: {error}", true);
-                }
+            return TryGetImportedPorts(TryRunUsbip, out ports, out error);
+        }
 
-                return Array.Empty<UsbipPortBlock>();
+        internal static bool TryGetImportedPorts(UsbipCommandRunner runner,
+            out IReadOnlyList<UsbipPortBlock> ports, out string error)
+        {
+            if (runner == null)
+            {
+                throw new ArgumentNullException(nameof(runner));
             }
 
+            ports = Array.Empty<UsbipPortBlock>();
+            if (!runner(new[] { "port" }, out string output,
+                out string commandError))
+            {
+                error = string.IsNullOrWhiteSpace(commandError) ?
+                    "usbip.exe port failed without an error message." :
+                    commandError.Trim();
+                return false;
+            }
+
+            ports = ParseImportedPorts(output);
+            error = string.Empty;
+            return true;
+        }
+
+        internal static IReadOnlyList<UsbipPortBlock> ParseImportedPorts(
+            string output)
+        {
             List<UsbipPortBlock> ports = new List<UsbipPortBlock>();
-            string[] lines = output.Replace("\r\n", "\n").Split('\n');
+            string[] lines = (output ?? string.Empty).Replace("\r\n", "\n").
+                Split('\n');
             int currentPort = -1;
             StringBuilder currentBlock = new StringBuilder();
 
@@ -5147,30 +5022,141 @@ namespace DS4Windows
             }
         }
 
-        private static bool IsLocalViiperPort(UsbipPortBlock port, string remoteBusId)
+        internal static bool IsDs4WindowsOwnedLocalPort(
+            UsbipPortBlock port, string remoteBusId)
         {
-            string block = port.Block.ToLowerInvariant();
-            bool localHost = block.Contains("usbip://localhost:") ||
-                block.Contains("usbip://127.0.0.1:") ||
-                block.Contains("usbip://[::1]:") ||
-                block.Contains("usbip://::1:");
-            bool busMatches = string.IsNullOrEmpty(remoteBusId) ||
-                block.Contains("/" + remoteBusId.ToLowerInvariant());
+            if (!TryParseRemoteLocation(port.Block, out string host,
+                out string parsedBusId) || !IsLocalHost(host))
+            {
+                return false;
+            }
 
-            return localHost && busMatches && (IsKnownViiperDevice(block) || !string.IsNullOrEmpty(remoteBusId));
+            if (!string.IsNullOrEmpty(remoteBusId) &&
+                !string.Equals(parsedBusId, remoteBusId,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return TryParseSerial(port.Block, out string serial) &&
+                IsDs4WindowsOwnershipSerial(serial);
         }
 
-        private static bool IsKnownViiperDevice(string block)
+        internal static bool IsDs4WindowsOwnershipSerial(string serial)
         {
-            foreach (string deviceId in KnownViiperDeviceIds)
+            if (string.IsNullOrEmpty(serial) ||
+                serial.Length != OwnershipSerialLength ||
+                !serial.StartsWith(OwnershipSerialPrefix,
+                    StringComparison.Ordinal))
             {
-                if (block.Contains(deviceId))
+                return false;
+            }
+
+            for (int index = OwnershipSerialPrefix.Length;
+                index < serial.Length; index++)
+            {
+                char value = serial[index];
+                if (!((value >= 'A' && value <= 'F') ||
+                    (value >= 'a' && value <= 'f') ||
+                    (value >= '0' && value <= '9')))
                 {
-                    return true;
+                    return false;
                 }
             }
 
+            return true;
+        }
+
+        internal static bool IsTrustedCreateResponse(int port,
+            string ownerSerial)
+        {
+            return port > 0 && IsDs4WindowsOwnershipSerial(ownerSerial);
+        }
+
+        private static bool TryParseRemoteLocation(string block,
+            out string host, out string remoteBusId)
+        {
+            host = null;
+            remoteBusId = null;
+            foreach (string rawLine in SplitLines(block))
+            {
+                string line = rawLine.Trim();
+                const string marker = "-> usbip://";
+                if (!line.StartsWith(marker,
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string location = line.Substring("-> ".Length);
+                if (!Uri.TryCreate(location, UriKind.Absolute, out Uri uri) ||
+                    !string.Equals(uri.Scheme, "usbip",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+
+                host = uri.Host;
+                remoteBusId = uri.AbsolutePath.Trim('/');
+                return !string.IsNullOrEmpty(host) &&
+                    !string.IsNullOrEmpty(remoteBusId);
+            }
+
             return false;
+        }
+
+        private static bool TryParseSerial(string block, out string serial)
+        {
+            serial = null;
+            foreach (string rawLine in SplitLines(block))
+            {
+                string line = rawLine.Trim();
+                if (!line.StartsWith("-> serial",
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                int openingQuote = line.IndexOf('\'');
+                int closingQuote = openingQuote >= 0 ?
+                    line.IndexOf('\'', openingQuote + 1) : -1;
+                if (openingQuote < 0 || closingQuote <= openingQuote + 1)
+                {
+                    return false;
+                }
+
+                serial = line.Substring(openingQuote + 1,
+                    closingQuote - openingQuote - 1);
+                return true;
+            }
+
+            return false;
+        }
+
+        private static IEnumerable<string> SplitLines(string value)
+        {
+            return (value ?? string.Empty).Replace("\r\n", "\n").Split('\n');
+        }
+
+        private static bool IsLocalHost(string host)
+        {
+            return string.Equals(host, "localhost",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(host, "127.0.0.1",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(host, "::1", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(host, "[::1]", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static IOException CreatePortQueryException(string operation,
+            string error)
+        {
+            string detail = string.IsNullOrWhiteSpace(error) ?
+                "unknown usbip.exe failure" : error.Trim();
+            AppLogger.LogToGui(
+                $"VIIPER could not {operation}: {detail}", true);
+            return new IOException(
+                $"VIIPER could not {operation}: {detail}");
         }
 
         private static bool TryParsePortHeader(string line, out int port)
@@ -5251,30 +5237,55 @@ namespace DS4Windows
 
         private static string FindUsbipPath()
         {
-            string pathValue = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
-            foreach (string folder in pathValue.Split(Path.PathSeparator))
+            return FindUsbipPath(
+                Environment.GetEnvironmentVariable("ProgramW6432"),
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+                Environment.GetEnvironmentVariable("PATH"), File.Exists);
+        }
+
+        internal static string FindUsbipPath(string programW6432,
+            string programFiles, string programFilesX86, string pathValue,
+            Func<string, bool> fileExists)
+        {
+            if (fileExists == null)
+            {
+                throw new ArgumentNullException(nameof(fileExists));
+            }
+
+            HashSet<string> visited = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase);
+            foreach (string root in new[]
+            {
+                programW6432,
+                programFiles,
+                programFilesX86,
+            })
+            {
+                if (string.IsNullOrWhiteSpace(root))
+                {
+                    continue;
+                }
+
+                string candidate = Path.Combine(root.Trim().Trim('"'), "USBip",
+                    "usbip.exe");
+                if (visited.Add(candidate) && fileExists(candidate))
+                {
+                    return candidate;
+                }
+            }
+
+            foreach (string folder in (pathValue ?? string.Empty).
+                Split(Path.PathSeparator))
             {
                 if (string.IsNullOrWhiteSpace(folder))
                 {
                     continue;
                 }
 
-                string candidate = Path.Combine(folder.Trim(), "usbip.exe");
-                if (File.Exists(candidate))
-                {
-                    return candidate;
-                }
-            }
-
-            string[] candidates =
-            {
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "USBip", "usbip.exe"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "USBip", "usbip.exe"),
-            };
-
-            foreach (string candidate in candidates)
-            {
-                if (File.Exists(candidate))
+                string candidate = Path.Combine(folder.Trim().Trim('"'),
+                    "usbip.exe");
+                if (visited.Add(candidate) && fileExists(candidate))
                 {
                     return candidate;
                 }
@@ -5283,7 +5294,7 @@ namespace DS4Windows
             return null;
         }
 
-        private readonly struct UsbipPortBlock
+        internal readonly struct UsbipPortBlock
         {
             public UsbipPortBlock(int port, string block)
             {
@@ -5317,7 +5328,8 @@ namespace DS4Windows
             this.devId = devId ?? throw new ArgumentNullException(nameof(devId));
             this.usbipPort = usbipPort;
             this.removeDevice = removeDevice;
-            this.detachPort = detachPort ?? ViiperUsbipPortManager.DetachPort;
+            this.detachPort = detachPort ??
+                ViiperUsbipPortManager.DetachRegisteredPort;
             this.unregisterPort = unregisterPort ??
                 ViiperUsbipPortManager.UnregisterActivePort;
             this.detachStalePorts = detachStalePorts ??
@@ -5400,7 +5412,7 @@ namespace DS4Windows
         private const byte FrameMagic3 = (byte)'M';
         private const byte FrameVersionV2 = 0x02;
         private const byte FrameVersionV3 = 0x03;
-        private const byte FrameVersionV4 = 0x04;
+        private const byte FrameVersionV5 = 0x05;
 
         public ViiperDeviceStream(TcpClient tcp, Stream stream,
             ViiperVirtualDeviceLifetime deviceLifetime)
@@ -5457,7 +5469,7 @@ namespace DS4Windows
                 throw new ArgumentOutOfRangeException(nameof(data));
             }
             if (version != FrameVersionV2 && version != FrameVersionV3 &&
-                version != FrameVersionV4)
+                version != FrameVersionV5)
             {
                 throw new ArgumentOutOfRangeException(nameof(version));
             }
@@ -5707,8 +5719,10 @@ namespace DS4Windows
             {
                 ViiperVirtualDeviceType.Xbox360 => "xbox360",
                 ViiperVirtualDeviceType.DualShock4 => "dualshock4",
-                ViiperVirtualDeviceType.DualSense => "dualsenseext",
-                ViiperVirtualDeviceType.DualSenseEdge => "dualsenseedgeext",
+                ViiperVirtualDeviceType.DualSense =>
+                    "dualsensecombinedaudioduplexv5",
+                ViiperVirtualDeviceType.DualSenseEdge =>
+                    "dualsenseedgecombinedaudioduplexv5",
                 ViiperVirtualDeviceType.Switch2Pro => "ns2pro",
                 _ => "xbox360",
             };

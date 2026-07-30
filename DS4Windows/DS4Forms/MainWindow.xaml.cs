@@ -2518,25 +2518,6 @@ Suspend support not enabled.", true);
             optsWindow.Show();
         }
 
-        private void ViiperDebuggerBtn_Click(object sender, RoutedEventArgs e)
-        {
-            if (!Global.VerboseStartupLogging)
-            {
-                MessageBox.Show(this,
-                    "Turn on Verbose logging before opening the VIIPER debugger.",
-                    "VIIPER debugger",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information);
-                return;
-            }
-
-            ViiperDebuggerWindow debuggerWindow = new ViiperDebuggerWindow
-            {
-                Owner = this,
-            };
-            debuggerWindow.Show();
-        }
-
         private void RenameProfBtn_Click(object sender, RoutedEventArgs e)
         {
             if (profilesListBox.SelectedItem is ProfileEntity entity)

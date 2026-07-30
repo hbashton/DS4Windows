@@ -12,6 +12,176 @@ namespace DS4WindowsTests
     public class DualSenseBluetoothAudioTransportTests
     {
         [TestMethod]
+        public void SaturatedWriterRetainsLogicalReportUnlessTransportFailed()
+        {
+            Assert.IsTrue(
+                DualSenseBluetoothAudioPacer.ShouldRetainSaturatedWrite(
+                    accepted: false, transportFault: false));
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.ShouldRetainSaturatedWrite(
+                    accepted: true, transportFault: false));
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.ShouldRetainSaturatedWrite(
+                    accepted: false, transportFault: true));
+        }
+
+        [TestMethod]
+        public void PairedTransportUsesPadForgeWindowsWritePoolAndHostClock()
+        {
+            Assert.AreEqual(8,
+                DualSenseBluetoothAudioPacer.PairedAudioTransportSlotCount);
+            Assert.AreEqual(8,
+                DualSenseBluetoothAudioPacer.PairedAudioInFlightLimit);
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.
+                    ShouldWaitForPhysicalWriteCredit(
+                        padForgeAudioTransport: false,
+                        pairedAudioReports: true));
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.
+                    ShouldWaitForPhysicalWriteCredit(
+                        padForgeAudioTransport: true,
+                        pairedAudioReports: false));
+            Assert.IsTrue(
+                DualSenseBluetoothAudioPacer.
+                    ShouldWaitForPhysicalWriteCredit(
+                        padForgeAudioTransport: false,
+                        pairedAudioReports: false));
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.
+                    ShouldApplyInputPhaseCorrection(
+                        compactCombinedTransport: false,
+                        pairedAudioReports: true));
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.
+                    ShouldApplyInputPhaseCorrection(
+                        compactCombinedTransport: true,
+                        pairedAudioReports: false));
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.
+                    ShouldApplyInputPhaseCorrection(
+                        compactCombinedTransport: false,
+                        pairedAudioReports: false));
+        }
+
+        [TestMethod]
+        public void PairedTransportDropsWholeSaturatedAudioGeneration()
+        {
+            Assert.IsTrue(DualSenseBluetoothAudioPacer.
+                ShouldDropSaturatedAudio(
+                    padForgeAudioTransport: false,
+                    pairedAudioReport: true,
+                    controlOnly: false,
+                    accepted: false,
+                    transportFault: false));
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.
+                ShouldDropSaturatedAudio(
+                    padForgeAudioTransport: false,
+                    pairedAudioReport: true,
+                    controlOnly: false,
+                    accepted: false,
+                    transportFault: true));
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.
+                ShouldDropSaturatedAudio(
+                    padForgeAudioTransport: false,
+                    pairedAudioReport: false,
+                    controlOnly: false,
+                    accepted: false,
+                    transportFault: false));
+        }
+
+        [TestMethod]
+        public void MicrophoneAndStateBarrierLeavesOddFrameForNewMode()
+        {
+            Assert.AreEqual(0,
+                DualSenseBluetoothAudioPacer.
+                    CompletePairedReportBoundary(0));
+            Assert.AreEqual(0,
+                DualSenseBluetoothAudioPacer.
+                    CompletePairedReportBoundary(1));
+            Assert.AreEqual(2,
+                DualSenseBluetoothAudioPacer.
+                    CompletePairedReportBoundary(3));
+            Assert.AreEqual(6,
+                DualSenseBluetoothAudioPacer.
+                    CompletePairedReportBoundary(6));
+        }
+
+        [TestMethod]
+        public void SaturatedReportsReturnToExactFifoHead()
+        {
+            var ring = new DualSenseBluetoothAudioPacerRing<int>(4);
+            Assert.IsTrue(ring.TryEnqueue(30));
+            Assert.IsTrue(ring.TryEnqueue(40));
+            Assert.IsTrue(ring.TryEnqueueFront(20));
+            Assert.IsTrue(ring.TryEnqueueFront(10));
+
+            foreach (int expected in new[] { 10, 20, 30, 40 })
+            {
+                Assert.IsTrue(ring.TryDequeue(out int actual));
+                Assert.AreEqual(expected, actual);
+            }
+        }
+
+        [TestMethod]
+        public void SaturatedPairedReportReturnsAtomicallyToFifoHead()
+        {
+            var ring = new DualSenseBluetoothAudioPacerRing<int>(5);
+            Assert.IsTrue(ring.TryEnqueue(1));
+            Assert.IsTrue(ring.TryEnqueue(2));
+            Assert.IsTrue(ring.TryEnqueue(30));
+            Assert.IsTrue(ring.TryDequeue(out _));
+            Assert.IsTrue(ring.TryDequeue(out _));
+            Assert.IsTrue(ring.TryEnqueue(40));
+            Assert.IsTrue(ring.TryEnqueue(50));
+            Assert.IsTrue(ring.TryEnqueuePairFront(10, 20));
+
+            foreach (int expected in new[] { 10, 20, 30, 40, 50 })
+            {
+                Assert.IsTrue(ring.TryDequeue(out int actual));
+                Assert.AreEqual(expected, actual);
+            }
+        }
+
+        [TestMethod]
+        public void OrderedGroupReplacementKeepsRetainedFifoOrder()
+        {
+            var ring = new DualSenseBluetoothAudioPacerRing<int>(6);
+            foreach (int value in new[] { 1, 2, 3, 4 })
+            {
+                Assert.IsTrue(ring.TryEnqueue(value));
+            }
+
+            Assert.IsTrue(ring.TryReplaceWhereWithGroup(
+                value => (value & 1) == 0, new[] { 7, 8, 9 }));
+
+            foreach (int expected in new[] { 1, 3, 7, 8, 9 })
+            {
+                Assert.IsTrue(ring.TryDequeue(out int actual));
+                Assert.AreEqual(expected, actual);
+            }
+        }
+
+        [TestMethod]
+        public void FailedOrderedGroupReplacementLeavesFifoUntouched()
+        {
+            var ring = new DualSenseBluetoothAudioPacerRing<int>(5);
+            foreach (int value in new[] { 1, 2, 3, 4, 5 })
+            {
+                Assert.IsTrue(ring.TryEnqueue(value));
+            }
+
+            Assert.IsFalse(ring.TryReplaceWhereWithGroup(
+                value => value == 2, new[] { 7, 8 }));
+
+            foreach (int expected in new[] { 1, 2, 3, 4, 5 })
+            {
+                Assert.IsTrue(ring.TryDequeue(out int actual));
+                Assert.AreEqual(expected, actual);
+            }
+        }
+
+        [TestMethod]
         public void PairedReportPreservesBothSequentialAudioFrames()
         {
             byte[] first = CreateSpeakerReport(0x11, 0x21, 0x31);
@@ -54,7 +224,7 @@ namespace DS4WindowsTests
 
             Assert.AreEqual((byte)0x00, control[1]);
             Assert.AreEqual((byte)0x00, control[10]);
-            sequence.Commit(mediaReport: false);
+            sequence.Commit(audio: false);
             Assert.AreEqual((byte)1, sequence.NextReportSequence);
             Assert.AreEqual((byte)0, sequence.MediaPacketSequence,
                 "A control-only report consumed the media packet counter.");
@@ -69,13 +239,13 @@ namespace DS4WindowsTests
                 "The first 0x39 did not follow the accepted control report.");
             Assert.AreEqual((byte)2, paired[9],
                 "The first 0x39 did not publish DS5Dongle's first two-frame media counter.");
-            sequence.Commit(mediaReport: true);
+            sequence.Commit(audio: true);
             Assert.AreEqual((byte)2, sequence.NextReportSequence);
             Assert.AreEqual((byte)2, sequence.MediaPacketSequence);
         }
 
         [TestMethod]
-        public void PhysicalSequenceMatchesDs5DongleMicrophoneTransition()
+        public void PhysicalSequenceMatchesPadSenseNativeMicrophoneTransition()
         {
             var sequence = new DualSenseBluetoothPhysicalOutputSequence();
             byte[] initialization = CreateSpeakerReport(
@@ -90,8 +260,14 @@ namespace DS4WindowsTests
             Assert.AreEqual((byte)0x32, microphoneStatus[0]);
             Assert.AreEqual((byte)0x50, microphoneStatus[1]);
             Assert.AreEqual((byte)0x91, microphoneStatus[2]);
-            Assert.AreEqual((byte)0x01, microphoneStatus[3]);
-            Assert.AreEqual((byte)0x03, microphoneStatus[4]);
+            Assert.AreEqual((byte)0x07, microphoneStatus[3]);
+            Assert.AreEqual((byte)0xFF, microphoneStatus[4]);
+            for (int index = 5; index <= 9; index++)
+            {
+                Assert.AreEqual((byte)0x80, microphoneStatus[index]);
+            }
+            Assert.AreEqual((byte)0x23, microphoneStatus[10],
+                "The native 0x32 did not consume one media interval.");
             uint expectedCrc =
                 DualSenseBluetoothAudioReportPatcher.ComputeSonyCrc(
                     microphoneStatus,
@@ -101,96 +277,265 @@ namespace DS4WindowsTests
                     microphoneStatus.AsSpan(
                         microphoneStatus.Length - sizeof(uint))));
 
-            sequence.Commit(mediaReport: false);
-            byte[] first = CreateSpeakerReport(0x11, 0x21, 0xA0, 0x23);
-            byte[] second = CreateSpeakerReport(0x12, 0x22, 0xB0, 0x24);
-            byte[] paired = new byte[
-                DualSenseBluetoothPairedAudioReportBuilder.ReportLength];
-            sequence.PreparePairedAudio(first, second, paired);
-            Assert.AreEqual((byte)0x60, paired[1]);
-            Assert.AreEqual((byte)0x24, paired[9]);
+            sequence.CommitMicrophoneStatus();
+            byte[] duplex = CreateSpeakerReport(
+                0x11, 0x21, 0xA0, 0x23);
+            duplex[4] = 0xFF;
+            sequence.PrepareFullDuplexAudio(duplex);
+            Assert.AreEqual((byte)0x50, duplex[1],
+                "The dedicated 0x32 sequence disturbed the audio sequence.");
+            Assert.AreEqual((byte)0x24, duplex[10],
+                "The first audio frame did not follow the 0x32 media interval.");
+            Assert.AreEqual((byte)6,
+                sequence.NextMicrophoneStatusSequence);
         }
 
         [TestMethod]
-        public void PhysicalSequencePublishesDs5DongleStateBeforeAudio()
+        public void NativeMicrophoneTransitionsMatchPadSenseWireOrdering()
+        {
+            Assert.AreEqual(0,
+                DualSenseBluetoothAudioPacer.
+                    GetNativeMicrophoneTransitionReportsAhead(
+                        committedMicrophoneEnabled: false,
+                        requestedMicrophoneEnabled: true),
+                "Enable must send 0x32 before its first duplex 0x36.");
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.
+                    GetNativeMicrophonePresentationMode(
+                        committedMicrophoneEnabled: false,
+                        requestedMicrophoneEnabled: true));
+
+            Assert.AreEqual(2,
+                DualSenseBluetoothAudioPacer.
+                    GetNativeMicrophoneTransitionReportsAhead(
+                        committedMicrophoneEnabled: true,
+                        requestedMicrophoneEnabled: false),
+                "Disable must send two speaker-only 0x36 reports before 0x32.");
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.
+                    GetNativeMicrophonePresentationMode(
+                        committedMicrophoneEnabled: true,
+                        requestedMicrophoneEnabled: false));
+        }
+
+        [TestMethod]
+        public void NativeMicrophoneDisableConsumesSharedMediaCounterInOrder()
+        {
+            var sequence = new DualSenseBluetoothPhysicalOutputSequence();
+            byte[] lastDuplex = CreateSpeakerReport(
+                0x00, 0x00, 0x50, 0x5B);
+            lastDuplex[4] = 0xFF;
+            byte[] firstSpeakerOnly = CreateSpeakerReport(
+                0x00, 0x00, 0x50, 0x5C);
+            byte[] secondSpeakerOnly = CreateSpeakerReport(
+                0x00, 0x00, 0x50, 0x5D);
+            byte[] microphoneStatus = new byte[
+                DualSenseBluetoothPhysicalOutputSequence.
+                    MicrophoneStatusReportLength];
+
+            sequence.PrepareFullDuplexAudio(lastDuplex);
+            Assert.AreEqual((byte)0x5B, lastDuplex[10]);
+            sequence.Commit(audio: true);
+            sequence.PrepareNativeAudio(firstSpeakerOnly);
+            Assert.AreEqual((byte)0x5C, firstSpeakerOnly[10]);
+            sequence.Commit(audio: true);
+            sequence.PrepareNativeAudio(secondSpeakerOnly);
+            Assert.AreEqual((byte)0x5D, secondSpeakerOnly[10]);
+            sequence.Commit(audio: true);
+            byte nextReportSequence = sequence.NextReportSequence;
+            sequence.PrepareMicrophoneStatus(enabled: false, secondSpeakerOnly,
+                microphoneStatus);
+
+            Assert.AreEqual((byte)0x5E, microphoneStatus[10],
+                "0x32 overtook one of the two speaker-only media intervals.");
+            Assert.AreEqual((byte)0xFE, microphoneStatus[4]);
+            sequence.CommitMicrophoneStatus();
+            Assert.AreEqual(nextReportSequence, sequence.NextReportSequence,
+                "The independent 0x32 sequence disturbed 0x36 ordering.");
+
+            byte[] nextSpeakerOnly = CreateSpeakerReport(
+                0x00, 0x00, 0x50, 0x00);
+            sequence.PrepareNativeAudio(nextSpeakerOnly);
+            Assert.AreEqual((byte)0x5F, nextSpeakerOnly[10]);
+        }
+
+        [TestMethod]
+        public void RejectedNativeMicrophoneTransitionIsExactlyRetriable()
         {
             var sequence = new DualSenseBluetoothPhysicalOutputSequence();
             byte[] initialization = CreateSpeakerReport(
-                0x00, 0x00, 0xA0, 0x22);
-            initialization[13] = 0xFD;
-            initialization[14] = 0xF7;
-            initialization[17] = 0x7F;
-            initialization[18] = 0x64;
-            initialization[57] = 0x12;
-            initialization[58] = 0x34;
-            initialization[59] = 0x56;
-            byte[] state = new byte[
-                DualSenseBluetoothStateReportBuilder.ReportLength];
+                0x00, 0x00, 0x50, 0x22);
+            byte[] firstAttempt = new byte[
+                DualSenseBluetoothPhysicalOutputSequence.
+                    MicrophoneStatusReportLength];
+            byte[] retry = new byte[firstAttempt.Length];
 
-            sequence.PrepareState(initialization, state);
+            sequence.PrepareMicrophoneStatus(enabled: true, initialization,
+                firstAttempt);
+            sequence.PrepareMicrophoneStatus(enabled: true, initialization,
+                retry);
 
-            Assert.AreEqual((byte)0x32, state[0]);
-            Assert.AreEqual((byte)0xA0, state[1]);
-            Assert.AreEqual((byte)0x90, state[2]);
-            Assert.AreEqual((byte)63, state[3]);
-            CollectionAssert.AreEqual(
-                initialization.AsSpan(13, 63).ToArray(),
-                state.AsSpan(4, 63).ToArray());
-            uint expectedCrc =
-                DualSenseBluetoothAudioReportPatcher.ComputeSonyCrc(state,
-                    state.Length - sizeof(uint));
-            Assert.AreEqual(expectedCrc,
-                BinaryPrimitives.ReadUInt32LittleEndian(
-                    state.AsSpan(state.Length - sizeof(uint))));
-
-            sequence.Commit(mediaReport: false);
-            Assert.AreEqual((byte)11, sequence.NextReportSequence);
+            CollectionAssert.AreEqual(firstAttempt, retry,
+                "A rejected 0x32 changed before the HID writer accepted it.");
+            Assert.AreEqual((byte)5,
+                sequence.NextMicrophoneStatusSequence);
             Assert.AreEqual((byte)0x22, sequence.MediaPacketSequence,
-                "A controller-state report consumed the media counter.");
+                "Preparing an unaccepted 0x32 consumed the media counter.");
+            Assert.AreEqual((byte)5, sequence.NextReportSequence,
+                "Preparing an unaccepted 0x32 disturbed the audio sequence.");
+
+            sequence.CommitMicrophoneStatus();
+
+            Assert.AreEqual((byte)6,
+                sequence.NextMicrophoneStatusSequence);
+            Assert.AreEqual((byte)0x23, sequence.MediaPacketSequence);
+            Assert.AreEqual((byte)5, sequence.NextReportSequence,
+                "Committing 0x32 disturbed the independent audio sequence.");
         }
 
         [TestMethod]
-        public void StateCoalescingIgnoresHostTimestampButDetectsLightbar()
+        public void Ds5DongleControllerStateUsesGlobalOutputSequence()
         {
-            byte[] report = CreateSpeakerReport(0, 0, 0);
-            byte[] comparable = new byte[
-                DualSenseBluetoothStateReportBuilder.ComparableStateLength];
+            var sequence = new DualSenseBluetoothPhysicalOutputSequence();
+            byte[] initialization = CreateSpeakerReport(
+                0, 0, 0x50, 0x22);
+            byte[] state = new byte[
+                DualSenseBluetoothPhysicalOutputSequence.
+                    ControllerStatePayloadLength];
+            for (int index = 0; index < state.Length; index++)
+            {
+                state[index] = (byte)(index + 1);
+            }
+            byte[] report = new byte[
+                DualSenseBluetoothPhysicalOutputSequence.
+                    ControllerStateReportLength];
 
-            Assert.IsTrue(DualSenseBluetoothStateReportBuilder.
-                HasMeaningfulStateChanged(report, comparable,
-                    comparableStateAvailable: false));
-            DualSenseBluetoothStateReportBuilder.CaptureComparableState(
-                report, comparable);
-            Assert.IsFalse(DualSenseBluetoothStateReportBuilder.
-                HasMeaningfulStateChanged(report, comparable,
-                    comparableStateAvailable: true));
+            sequence.PrepareControllerState(state, initialization, report);
 
-            // The speaker producer strips these one-shot microphone fields,
-            // while an ordered microphone-control snapshot carries them.
-            // Alternating between those templates must not consume audio
-            // report slots on the physical Bluetooth lane.
-            report[13] ^= 0x40;
-            report[14] ^= 0x01;
-            report[13 + 6] = 0x40;
-            Assert.IsFalse(DualSenseBluetoothStateReportBuilder.
-                HasMeaningfulStateChanged(report, comparable,
-                    comparableStateAvailable: true));
+            Assert.AreEqual((byte)0x31, report[0]);
+            Assert.AreEqual((byte)0x50, report[1]);
+            Assert.AreEqual((byte)0x10, report[2]);
+            CollectionAssert.AreEqual(state,
+                report.AsSpan(3, state.Length).ToArray());
+            for (int index = 50; index < 74; index++)
+            {
+                Assert.AreEqual((byte)0, report[index]);
+            }
+            uint expectedCrc =
+                DualSenseBluetoothAudioReportPatcher.ComputeSonyCrc(report,
+                    report.Length - sizeof(uint));
+            Assert.AreEqual(expectedCrc,
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    report.AsSpan(report.Length - sizeof(uint))));
 
-            // SetStateData.HostTimestamp is state bytes 32-35. It changes on
-            // every normal output update and must not flood the 0x32 lane.
-            report[13 + 32] = 0x11;
-            report[13 + 33] = 0x22;
-            report[13 + 34] = 0x33;
-            report[13 + 35] = 0x44;
-            Assert.IsFalse(DualSenseBluetoothStateReportBuilder.
-                HasMeaningfulStateChanged(report, comparable,
-                    comparableStateAvailable: true));
+            sequence.CommitControllerState();
+            Assert.AreEqual((byte)6,
+                sequence.NextControllerStateSequence);
+            Assert.AreEqual((byte)6, sequence.NextReportSequence,
+                "The 0x31 latch did not consume the shared output sequence.");
+            Assert.AreEqual((byte)0x22, sequence.MediaPacketSequence,
+                "A 0x31 latch update consumed the media counter.");
 
-            report[13 + 44] = 0x80;
-            Assert.IsTrue(DualSenseBluetoothStateReportBuilder.
-                HasMeaningfulStateChanged(report, comparable,
-                    comparableStateAvailable: true),
-                "A lightbar change was coalesced out of the physical state lane.");
+            byte[] first = CreateSpeakerReport(1, 2, 0, 0x23);
+            byte[] second = CreateSpeakerReport(3, 4, 0, 0x24);
+            byte[] paired = new byte[
+                DualSenseBluetoothPairedAudioReportBuilder.ReportLength];
+            sequence.PreparePairedAudio(first, second, paired);
+            Assert.AreEqual((byte)0x60, paired[1],
+                "The 0x39 report did not follow the ordered 0x31 state latch.");
+        }
+
+        [TestMethod]
+        public void PairedDuplexCarriesMicrophoneHapticsAndSpeakerTogether()
+        {
+            byte[] first = CreateSpeakerReport(0x31, 0x41, 0, 1);
+            byte[] second = CreateSpeakerReport(0x32, 0x42, 0, 2);
+            first[4] = second[4] = 0xFF;
+            byte[] paired = new byte[
+                DualSenseBluetoothPairedAudioReportBuilder.ReportLength];
+
+            DualSenseBluetoothPairedAudioReportBuilder.Build(first, second,
+                reportSequence: 4, packetSequence: 2, paired);
+
+            Assert.AreEqual((byte)0x39, paired[0]);
+            Assert.AreEqual((byte)0x7F, paired[4],
+                "The paired carrier did not arm the microphone lane.");
+            Assert.AreEqual((byte)0x31, paired[12]);
+            Assert.AreEqual((byte)0x32, paired[76]);
+            Assert.AreEqual((byte)0x41, paired[142]);
+            Assert.AreEqual((byte)0x42, paired[342]);
+        }
+
+        [TestMethod]
+        public void MicrophoneEnabledAudioUsesPadSense128ByteDepths()
+        {
+            var sequence = new DualSenseBluetoothPhysicalOutputSequence();
+            byte[] duplex = CreateSpeakerReport(
+                0x11, 0x21, 0x20, 0x33);
+            duplex[4] = 0xFF;
+            for (int index = 5; index <= 9; index++)
+            {
+                duplex[index] = 80;
+            }
+            duplex[11] = 0x90;
+            duplex[12] = 63;
+
+            Assert.IsTrue(DualSenseBluetoothAudioPacer.
+                RequiresFullDuplexAudioReport(duplex));
+            sequence.PrepareFullDuplexAudio(duplex);
+
+            Assert.AreEqual((byte)0x36, duplex[0]);
+            Assert.AreEqual((byte)0xFF, duplex[4]);
+            for (int index = 5; index <= 9; index++)
+            {
+                Assert.AreEqual((byte)0x80, duplex[index]);
+            }
+            Assert.AreEqual((byte)0x90, duplex[11]);
+            Assert.AreEqual((byte)63, duplex[12]);
+            Assert.AreEqual((byte)0xD2, duplex[76]);
+            Assert.AreEqual((byte)0x93, duplex[142]);
+
+            uint expectedCrc =
+                DualSenseBluetoothAudioReportPatcher.ComputeSonyCrc(duplex,
+                    duplex.Length - sizeof(uint));
+            Assert.AreEqual(expectedCrc,
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    duplex.AsSpan(duplex.Length - sizeof(uint))));
+
+            byte[] playback = CreateSpeakerReport(0, 0, 0);
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.
+                RequiresFullDuplexAudioReport(playback));
+        }
+
+        [TestMethod]
+        public void NativeAudioPreparationNormalizesEveryMediaLaneDepth()
+        {
+            var sequence = new DualSenseBluetoothPhysicalOutputSequence();
+            byte[] duplex = CreateSpeakerReport(0x31, 0x41, 0x90, 1);
+            duplex[4] = 0xFF;
+            for (int index = 5; index <= 9; index++)
+            {
+                duplex[index] = 80;
+            }
+
+            sequence.PrepareNativeAudio(duplex);
+            for (int index = 5; index <= 9; index++)
+            {
+                Assert.AreEqual((byte)0x80, duplex[index]);
+            }
+
+            byte[] speakerOnly = CreateSpeakerReport(0x32, 0x42, 0xA0, 2);
+            speakerOnly[4] = 0xFE;
+            for (int index = 5; index <= 9; index++)
+            {
+                speakerOnly[index] = 80;
+            }
+
+            sequence.PrepareNativeAudio(speakerOnly);
+            for (int index = 5; index <= 9; index++)
+            {
+                Assert.AreEqual((byte)0x80, speakerOnly[index]);
+            }
         }
 
         [TestMethod]
@@ -209,7 +554,7 @@ namespace DS4WindowsTests
             CollectionAssert.AreEqual(initial, retried,
                 "A rejected/uncommitted physical write spent sequence numbers.");
 
-            sequence.Commit(mediaReport: true);
+            sequence.Commit(audio: true);
             first[10] = 3;
             second[10] = 4;
             sequence.PreparePairedAudio(first, second, following);
@@ -218,33 +563,330 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void SingleAudioReportCarriesStateWithoutSpendingMedia()
+        public void PhysicalSequencePresentsSingleAudioAtNativeCadenceShape()
         {
             var sequence = new DualSenseBluetoothPhysicalOutputSequence();
-            byte[] report = CreateSpeakerReport(0x11, 0x21, 0xA0, 0x37);
-            report[13 + 44] = 0x12;
-            report[13 + 45] = 0x34;
-            report[13 + 46] = 0x56;
+            byte[] first = CreateSpeakerReport(0x11, 0x21, 0xA0, 1);
+            byte[] second = CreateSpeakerReport(0x12, 0x22, 0xB0, 2);
 
-            sequence.PrepareSingleAudio(report);
+            sequence.PrepareSingleAudio(first);
+            Assert.AreEqual((byte)0xA0, first[1]);
+            Assert.AreEqual((byte)1, first[10]);
+            Assert.AreEqual((byte)0x36, first[0]);
+            sequence.Commit(audio: true);
 
-            Assert.AreEqual((byte)0x36, report[0]);
-            Assert.AreEqual((byte)0xA0, report[1]);
-            Assert.AreEqual((byte)0x37, report[10]);
-            Assert.AreEqual((byte)0x12, report[13 + 44]);
-            Assert.AreEqual((byte)0x34, report[13 + 45]);
-            Assert.AreEqual((byte)0x56, report[13 + 46]);
+            sequence.PrepareSingleAudio(second);
+            Assert.AreEqual((byte)0xB0, second[1]);
+            Assert.AreEqual((byte)2, second[10]);
+            Assert.AreEqual((byte)0x36, second[0]);
+            sequence.Commit(audio: true);
+
+            Assert.AreEqual((byte)12, sequence.NextReportSequence);
+            Assert.AreEqual((byte)2, sequence.MediaPacketSequence);
+            Assert.AreEqual(0,
+                DualSenseBluetoothAudioPacer.ControllerReserveTransferIntervals,
+                "The 0x36 route must not replay the paired 5 ms startup burst.");
+            Assert.AreEqual(32,
+                DualSenseBluetoothAudioPacer.SingleAudioTransportSlotCount);
+            Assert.AreEqual(32,
+                DualSenseBluetoothAudioPacer.SingleAudioInFlightLimit,
+                "PadSense advances a 32-slot OVERLAPPED ownership ring.");
+        }
+
+        [TestMethod]
+        public void PadForgeReportBuildsExactCompactSpeakerPacket()
+        {
+            byte[] source = CreateSpeakerReport(0x5A, 0x21, 0x70, 0x42);
+            byte[] original = (byte[])source.Clone();
+            for (int index = 0; index < 200; index++)
+            {
+                source[144 + index] = (byte)(index ^ 0xA5);
+                original[144 + index] = source[144 + index];
+            }
+            byte[] report = new byte[
+                DualSenseBluetoothPadForgeAudioReportBuilder.ReportLength];
+
+            DualSenseBluetoothPadForgeAudioReportBuilder.Build(source,
+                reportSequence: 9, packetSequence: 0x42, report);
+
+            Assert.AreEqual(334, report.Length);
+            Assert.AreEqual((byte)0x35, report[0]);
+            Assert.AreEqual((byte)0x90, report[1]);
+            Assert.AreEqual((byte)0x91, report[2]);
+            Assert.AreEqual((byte)7, report[3]);
+            Assert.AreEqual((byte)0xFE, report[4]);
+            for (int index = 5; index <= 9; index++)
+            {
+                Assert.AreEqual((byte)96, report[index]);
+            }
+            Assert.AreEqual((byte)0x42, report[10]);
+            Assert.AreEqual((byte)0x93, report[11]);
+            Assert.AreEqual((byte)200, report[12]);
+            CollectionAssert.AreEqual(source.Skip(144).Take(200).ToArray(),
+                report.Skip(13).Take(200).ToArray());
+            AssertRangeIsZero(report, 213, report.Length - sizeof(uint) - 213,
+                "The compact report tail contained unexpected data.");
             uint expectedCrc =
                 DualSenseBluetoothAudioReportPatcher.ComputeSonyCrc(report,
                     report.Length - sizeof(uint));
             Assert.AreEqual(expectedCrc,
                 BinaryPrimitives.ReadUInt32LittleEndian(
                     report.AsSpan(report.Length - sizeof(uint))));
+            CollectionAssert.AreEqual(original, source,
+                "The pure compact-report builder mutated its logical source.");
+        }
 
-            sequence.Commit(mediaReport: true);
+        [TestMethod]
+        public void PadForgeReportPreservesAuxDestination()
+        {
+            byte[] source = CreateSpeakerReport(0, 0, 0, 0x42);
+            source[142] = 0x96;
+            byte[] report = new byte[
+                DualSenseBluetoothPadForgeAudioReportBuilder.ReportLength];
+
+            DualSenseBluetoothPadForgeAudioReportBuilder.Build(source,
+                reportSequence: 9, packetSequence: 0x42, report);
+
+            Assert.AreEqual((byte)0x96, report[11]);
+            Assert.AreEqual((byte)200, report[12]);
+            CollectionAssert.AreEqual(source.Skip(144).Take(200).ToArray(),
+                report.Skip(13).Take(200).ToArray());
+        }
+
+        [TestMethod]
+        public void PadForgePhysicalSequenceAdvancesOnlyAfterAcceptedWrites()
+        {
+            var sequence = new DualSenseBluetoothPhysicalOutputSequence();
+            byte[] first = CreateSpeakerReport(0x11, 0x21, 0xA0, 7);
+            byte[] initial = new byte[
+                DualSenseBluetoothPadForgeAudioReportBuilder.ReportLength];
+            byte[] retry = new byte[initial.Length];
+
+            sequence.PreparePadForgeAudio(first, initial);
+            sequence.PreparePadForgeAudio(first, retry);
+            CollectionAssert.AreEqual(initial, retry,
+                "An uncommitted compact write spent a physical sequence.");
+            Assert.AreEqual((byte)0xA0, initial[1]);
+            Assert.AreEqual((byte)7, initial[10]);
+
+            sequence.Commit(audio: true);
             Assert.AreEqual((byte)11, sequence.NextReportSequence);
-            Assert.AreEqual((byte)0x37, sequence.MediaPacketSequence,
-                "A state-bearing 0x36 did not advance the media stream.");
+            Assert.AreEqual((byte)7, sequence.MediaPacketSequence);
+
+            byte[] control = CreateSpeakerReport(0, 0, 0);
+            sequence.PrepareControl(control);
+            Assert.AreEqual((byte)0xB0, control[1]);
+            Assert.AreEqual((byte)7, control[10]);
+            sequence.Commit(audio: false);
+
+            byte[] second = CreateSpeakerReport(0x12, 0x22, 0, 8);
+            sequence.PreparePadForgeAudio(second, retry);
+            Assert.AreEqual((byte)0xC0, retry[1]);
+            Assert.AreEqual((byte)8, retry[10]);
+        }
+
+        [TestMethod]
+        public void CompactCombinedReportCarriesHapticsAndSpeakerAtomically()
+        {
+            byte[] source = CreateSpeakerReport(0, 0, 0x50, 0x42);
+            for (int index = 0; index < 64; index++)
+            {
+                source[78 + index] = (byte)(index ^ 0x5A);
+            }
+            for (int index = 0; index < 200; index++)
+            {
+                source[144 + index] = (byte)(index ^ 0xA5);
+            }
+            byte[] report = new byte[
+                DualSenseBluetoothPadForgeCombinedAudioReportBuilder.
+                    ReportLength];
+
+            DualSenseBluetoothPadForgeCombinedAudioReportBuilder.Build(source,
+                reportSequence: 9, packetSequence: 0x42, report);
+
+            Assert.AreEqual(334, report.Length);
+            Assert.AreEqual((byte)0x35, report[0]);
+            Assert.AreEqual((byte)0x90, report[1]);
+            Assert.AreEqual((byte)0x91, report[2]);
+            Assert.AreEqual((byte)7, report[3]);
+            Assert.AreEqual((byte)0xFE, report[4]);
+            for (int index = 5; index <= 9; index++)
+            {
+                Assert.AreEqual((byte)96, report[index]);
+            }
+            Assert.AreEqual((byte)0x42, report[10]);
+            Assert.AreEqual((byte)0x92, report[11]);
+            Assert.AreEqual((byte)64, report[12]);
+            CollectionAssert.AreEqual(source.Skip(78).Take(64).ToArray(),
+                report.Skip(13).Take(64).ToArray());
+            Assert.AreEqual((byte)0x93, report[77]);
+            Assert.AreEqual((byte)200, report[78]);
+            CollectionAssert.AreEqual(source.Skip(144).Take(200).ToArray(),
+                report.Skip(79).Take(200).ToArray());
+            AssertRangeIsZero(report, 279,
+                report.Length - sizeof(uint) - 279,
+                "The combined report tail contained unexpected data.");
+            uint expectedCrc =
+                DualSenseBluetoothAudioReportPatcher.ComputeSonyCrc(report,
+                    report.Length - sizeof(uint));
+            Assert.AreEqual(expectedCrc,
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    report.AsSpan(report.Length - sizeof(uint))));
+        }
+
+        [TestMethod]
+        public void CompactCombinedReportPreservesAuxDestination()
+        {
+            byte[] source = CreateSpeakerReport(0, 0, 0, 0x42);
+            source[142] = 0x96;
+            byte[] report = new byte[
+                DualSenseBluetoothPadForgeCombinedAudioReportBuilder.
+                    ReportLength];
+
+            DualSenseBluetoothPadForgeCombinedAudioReportBuilder.Build(source,
+                reportSequence: 9, packetSequence: 0x42, report);
+
+            Assert.AreEqual((byte)0x92, report[11]);
+            Assert.AreEqual((byte)64, report[12]);
+            Assert.AreEqual((byte)0x96, report[77]);
+            Assert.AreEqual((byte)200, report[78]);
+            CollectionAssert.AreEqual(source.Skip(144).Take(200).ToArray(),
+                report.Skip(79).Take(200).ToArray());
+        }
+
+        [DataTestMethod]
+        [DataRow(false)]
+        [DataRow(true)]
+        public void CompactAudioReportsUseReferenceHeaderForEachMicrophoneMode(
+            bool microphoneEnabled)
+        {
+            byte[] source = CreateSpeakerReport(0, 0, 0, 0x42);
+            source[4] = (byte)(0xFE | (microphoneEnabled ? 1 : 0));
+            byte[] speaker = new byte[
+                DualSenseBluetoothPadForgeAudioReportBuilder.ReportLength];
+            byte[] combined = new byte[
+                DualSenseBluetoothPadForgeCombinedAudioReportBuilder.
+                    ReportLength];
+
+            DualSenseBluetoothPadForgeAudioReportBuilder.Build(source,
+                reportSequence: 9, packetSequence: 0x42, speaker);
+            DualSenseBluetoothPadForgeCombinedAudioReportBuilder.Build(source,
+                reportSequence: 9, packetSequence: 0x42, combined);
+
+            if (microphoneEnabled)
+            {
+                Assert.AreEqual((byte)7, speaker[3]);
+                Assert.AreEqual((byte)7, combined[3]);
+                Assert.AreEqual((byte)0xFF, speaker[4]);
+                Assert.AreEqual((byte)0xFF, combined[4]);
+                for (int index = 5; index <= 9; index++)
+                {
+                    Assert.AreEqual((byte)96, speaker[index]);
+                    Assert.AreEqual((byte)96, combined[index]);
+                }
+                Assert.AreEqual((byte)0x42, speaker[10]);
+                Assert.AreEqual((byte)0x42, combined[10]);
+                Assert.AreEqual((byte)0x93, speaker[11]);
+                Assert.AreEqual((byte)200, speaker[12]);
+                Assert.AreEqual((byte)0x92, combined[11]);
+                Assert.AreEqual((byte)64, combined[12]);
+                Assert.AreEqual((byte)0x93, combined[77]);
+                Assert.AreEqual((byte)200, combined[78]);
+            }
+            else
+            {
+                Assert.AreEqual((byte)7, speaker[3]);
+                Assert.AreEqual((byte)7, combined[3]);
+                Assert.AreEqual((byte)0xFE, speaker[4]);
+                Assert.AreEqual((byte)0xFE, combined[4]);
+                for (int index = 5; index <= 9; index++)
+                {
+                    Assert.AreEqual((byte)96, speaker[index]);
+                    Assert.AreEqual((byte)96, combined[index]);
+                }
+                Assert.AreEqual((byte)0x42, speaker[10]);
+                Assert.AreEqual((byte)0x42, combined[10]);
+                Assert.AreEqual((byte)0x93, speaker[11]);
+                Assert.AreEqual((byte)200, speaker[12]);
+                Assert.AreEqual((byte)0x92, combined[11]);
+                Assert.AreEqual((byte)64, combined[12]);
+                Assert.AreEqual((byte)0x93, combined[77]);
+                Assert.AreEqual((byte)200, combined[78]);
+            }
+        }
+
+        [TestMethod]
+        public void PendingMicrophoneModeCannotOvertakePhysicalCommitBoundary()
+        {
+            byte[] source = CreateSpeakerReport(0x34, 0x56, 0x70, 0x42);
+            source[4] = 0xFF;
+            byte[] expectedHaptics = source.Skip(78).Take(64).ToArray();
+            byte[] expectedSpeaker = source.Skip(144).Take(200).ToArray();
+            byte[] physical = new byte[
+                DualSenseBluetoothPadForgeCombinedAudioReportBuilder.
+                    ReportLength];
+
+            DualSenseBluetoothAudioPacer.ApplyCommittedMicrophoneMode(source,
+                microphoneEnabled: false);
+            DualSenseBluetoothPadForgeCombinedAudioReportBuilder.Build(source,
+                reportSequence: 9, packetSequence: 0x42, physical);
+            Assert.AreEqual((byte)0xFE, physical[4]);
+            for (int index = 5; index <= 9; index++)
+            {
+                Assert.AreEqual((byte)96, physical[index]);
+            }
+            CollectionAssert.AreEqual(expectedHaptics,
+                physical.Skip(13).Take(64).ToArray());
+            CollectionAssert.AreEqual(expectedSpeaker,
+                physical.Skip(79).Take(200).ToArray());
+
+            DualSenseBluetoothAudioPacer.ApplyCommittedMicrophoneMode(source,
+                microphoneEnabled: true);
+            DualSenseBluetoothPadForgeCombinedAudioReportBuilder.Build(source,
+                reportSequence: 10, packetSequence: 0x43, physical);
+            Assert.AreEqual((byte)7, physical[3]);
+            Assert.AreEqual((byte)0xFF, physical[4]);
+            for (int index = 5; index <= 9; index++)
+            {
+                Assert.AreEqual((byte)96, physical[index]);
+            }
+            Assert.AreEqual((byte)0x43, physical[10]);
+            CollectionAssert.AreEqual(expectedHaptics,
+                physical.Skip(13).Take(64).ToArray());
+            CollectionAssert.AreEqual(expectedSpeaker,
+                physical.Skip(79).Take(200).ToArray());
+        }
+
+        [TestMethod]
+        public void LegacyCompactTransportSelectorsAreIgnored()
+        {
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.
+                UsePadForgeAudioTransport("35"));
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.
+                UsePadForgeAudioTransport("35combined"));
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.
+                UseCompactCombinedHapticsTransport("35combined"));
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.
+                UseCompactCombinedHapticsTransport("35"));
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.
+                UsePadForgeAudioTransport(null));
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.
+                UsePadForgeAudioTransport("36"));
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.
+                UsePadForgeAudioTransport("0x35"));
+        }
+
+        [TestMethod]
+        public void NativeAudioCarriesControllerStateAtomically()
+        {
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.
+                RequiresSeparateControllerStateTransport(null));
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.
+                RequiresSeparateControllerStateTransport("36"));
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.
+                RequiresSeparateControllerStateTransport("35"));
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.
+                RequiresSeparateControllerStateTransport("35combined"));
         }
 
         private static byte[] CreateSpeakerReport(byte haptics,
@@ -259,7 +901,7 @@ namespace DS4WindowsTests
             report[76] = 0xD2;
             report[77] = 64;
             Array.Fill(report, haptics, 78, 64);
-            report[142] = 0xD3;
+            report[142] = 0x93;
             report[143] = 200;
             Array.Fill(report, audio, 144, 200);
             return report;
@@ -314,6 +956,10 @@ namespace DS4WindowsTests
             typeof(DualSenseDevice).GetMethod(
                 "BuildBluetoothCombinedControlReport",
                 BindingFlags.Static | BindingFlags.NonPublic);
+        private static readonly MethodInfo UpdateCachedCombinedStateMethod =
+            typeof(DualSenseDevice).GetMethod(
+                "UpdateCachedBluetoothCombinedState",
+                BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly MethodInfo DrainQueuedInputEventsMethod =
             typeof(DualSenseDevice).GetMethod(
                 "DrainQueuedInputEvents",
@@ -554,7 +1200,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void AudioOnlyCombinedCarrierPreservesProfileLightbar()
+        public void AudioOnlyCombinedCarrierPreservesProfileLightbarAndHaptics()
         {
             DualSenseDevice device = CreateBluetoothDevice();
             device.LightBarColor = new DS4Color(12, 34, 56);
@@ -567,21 +1213,39 @@ namespace DS4WindowsTests
 
             byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
                 device);
+            AssertPadSenseAudioContract(cached);
             Assert.AreEqual((byte)12, cached[13 + 44]);
             Assert.AreEqual((byte)34, cached[13 + 45]);
             Assert.AreEqual((byte)56, cached[13 + 46]);
-            AssertRangeIsZero(cached, 78, 64,
-                "Audio-only carriers must not refresh stale native haptics.");
+            Assert.AreEqual((byte)0x44, cached[78]);
+            Assert.AreEqual((byte)0x55, cached[79]);
+            AssertRangeIsZero(cached, 80, 62,
+                "Audio-only carrier haptics were not copied atomically.");
             Assert.AreEqual(0L, GetFieldValue<long>(
                 NativeStateTimestampField, device));
         }
 
         [TestMethod]
-        public void NativeGameCombinedCarrierRemainsAuthoritative()
+        public void NativeGameCarrierPreservesDynamicStateWithoutReplacingPadSenseAudioContract()
         {
             DualSenseDevice device = CreateBluetoothDevice();
             device.LightBarColor = new DS4Color(12, 34, 56);
             byte[] report = BuildCombinedControlReport(0, 0, false);
+            report[13] = 0x02;
+            report[14] = 0x08;
+            report[15] = 0x41;
+            report[16] = 0x52;
+            report[17] = 0x13;
+            report[18] = 0x24;
+            report[19] = 0x35;
+            report[20] = 0x46;
+            report[22] = 0xA0;
+            for (int index = 23; index <= 49; index++)
+            {
+                report[index] = (byte)(0x60 + index - 23);
+            }
+            report[50] = 0x57;
+            report[56] = 0x1B;
             report[13 + 44] = 90;
             report[13 + 45] = 91;
             report[13 + 46] = 92;
@@ -591,11 +1255,98 @@ namespace DS4WindowsTests
 
             byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
                 device);
+            AssertPadSenseAudioContract(cached, expectedFlag0: 0xFF);
+            Assert.AreEqual((byte)0x41, cached[15]);
+            Assert.AreEqual((byte)0x52, cached[16]);
+            for (int index = 23; index <= 49; index++)
+            {
+                Assert.AreEqual(report[index], cached[index],
+                    $"Native trigger/effect state changed at byte {index}.");
+            }
+            Assert.AreEqual((byte)0x1B, cached[56]);
             Assert.AreEqual((byte)90, cached[13 + 44]);
             Assert.AreEqual((byte)91, cached[13 + 45]);
             Assert.AreEqual((byte)92, cached[13 + 46]);
             Assert.IsTrue(GetFieldValue<long>(NativeStateTimestampField,
                 device) > 0);
+        }
+
+        [TestMethod]
+        public void IdleNativeCarrierKeepsPadSenseHapticsMode()
+        {
+            DualSenseDevice device = CreateBluetoothDevice();
+            byte[] report = BuildCombinedControlReport(0, 0, false);
+            report[13] = 0x02;
+            report[15] = 0x00;
+            report[16] = 0x00;
+
+            device.WriteBluetoothCombinedHapticsAudioOutputReport(report, 0,
+                report.Length, hasNativeGameState: true);
+
+            byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
+                device);
+            AssertPadSenseAudioContract(cached, expectedFlag0: 0xFD);
+        }
+
+        [TestMethod]
+        public void UsbStateMergePreservesPadSenseAudioContractAndDynamicControls()
+        {
+            DualSenseDevice device = CreateBluetoothDevice();
+            byte[] initial = BuildCombinedControlReport(0, 0, false);
+            initial[78] = 0x21;
+            initial[79] = 0x43;
+            device.WriteBluetoothCombinedHapticsAudioOutputReport(initial, 0,
+                initial.Length, hasNativeGameState: false);
+
+            byte[] usb = new byte[48];
+            usb[0] = 0x02;
+            usb[1] = 0x00;
+            usb[2] = 0x08;
+            usb[3] = 0x00;
+            usb[4] = 0x00;
+            usb[5] = 0x13;
+            usb[6] = 0x24;
+            usb[7] = 0x35;
+            usb[8] = 0x46;
+            usb[9] = 0x01;
+            usb[10] = 0xA0;
+            for (int relativeIndex = 10; relativeIndex <= 36;
+                relativeIndex++)
+            {
+                usb[1 + relativeIndex] =
+                    (byte)(0x70 + relativeIndex - 10);
+            }
+            usb[38] = 0x57;
+            usb[44] = 0x1C;
+            usb[45] = 0x81;
+            usb[46] = 0x82;
+            usb[47] = 0x83;
+
+            Assert.IsNotNull(UpdateCachedCombinedStateMethod);
+            Assert.IsTrue((bool)UpdateCachedCombinedStateMethod.Invoke(device,
+                new object[] { usb, 0 }));
+
+            byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
+                device);
+            AssertPadSenseAudioContract(cached);
+            Assert.AreEqual((byte)0x00, cached[15]);
+            Assert.AreEqual((byte)0x00, cached[16]);
+            Assert.AreEqual((byte)0x00, cached[21]);
+            for (int relativeIndex = 10; relativeIndex <= 36;
+                relativeIndex++)
+            {
+                int combinedIndex = 13 + relativeIndex;
+                Assert.AreEqual(usb[1 + relativeIndex], cached[combinedIndex],
+                    $"USB trigger/effect state changed at relative byte {relativeIndex}.");
+            }
+            Assert.AreEqual((byte)0x1C, cached[56]);
+            Assert.AreEqual((byte)0x81, cached[57]);
+            Assert.AreEqual((byte)0x82, cached[58]);
+            Assert.AreEqual((byte)0x83, cached[59]);
+            Assert.AreEqual((byte)0x21, cached[78],
+                "A profile/lightbar state merge cleared active haptics.");
+            Assert.AreEqual((byte)0x43, cached[79],
+                "A profile/lightbar state merge cleared active haptics.");
         }
 
         [TestMethod]
@@ -701,8 +1452,8 @@ namespace DS4WindowsTests
                 "The physical microphone stream-enable bit was not set.");
             Assert.AreNotEqual(0, report[13] & 0x40,
                 "The controller was not told that microphone volume is valid.");
-            Assert.AreEqual((byte)0x40, report[19],
-                "The combined transport must not overdrive the physical DualSense ADC.");
+            Assert.AreEqual((byte)0xFF, report[19],
+                "The combined transport must retain PadSense's full-scale microphone gain.");
         }
 
         [TestMethod]
@@ -749,7 +1500,7 @@ namespace DS4WindowsTests
             {
                 // VIIPER's canonical control/state baseline requests the
                 // minimum documented queue. A report carrying a real speaker
-                // frame separately raises these fields to 0x40.
+                // frame separately raises these fields to 0x80.
                 Assert.AreEqual((byte)0x10, report[index],
                     $"Unexpected packet 0x11 buffer depth at byte {index}.");
             }
@@ -784,7 +1535,7 @@ namespace DS4WindowsTests
             byte[] state = new byte[63];
             byte[] knownState =
             {
-                0xFD, 0xF7, 0x00, 0x00, 0x7F, 0x64, 0xFF, 0x09,
+                0xFD, 0xF7, 0x00, 0x00, 0x64, 0x64, 0xFF, 0x09,
                 0x00, 0x0F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -793,6 +1544,19 @@ namespace DS4WindowsTests
             };
             Array.Copy(knownState, state, knownState.Length);
             return state;
+        }
+
+        private static void AssertPadSenseAudioContract(byte[] report,
+            byte expectedFlag0 = 0xFD)
+        {
+            Assert.AreEqual(expectedFlag0, report[13]);
+            Assert.AreEqual((byte)0xF7, report[14]);
+            Assert.AreEqual((byte)0x64, report[17]);
+            Assert.AreEqual((byte)0x64, report[18]);
+            Assert.AreEqual((byte)0xFF, report[19]);
+            Assert.AreEqual((byte)0x09, report[20]);
+            Assert.AreEqual((byte)0x0F, report[22]);
+            Assert.AreEqual((byte)0x0A, report[50]);
         }
 
         private static byte[] CopyRange(byte[] source, int offset, int length)

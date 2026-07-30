@@ -282,14 +282,27 @@ namespace DS4Windows.InputDevices
         private uint deltaTimeCurrent = 0;
         private readonly DualSenseControllerClockEstimator
             bluetoothControllerClock = new();
+        private readonly DualSenseControllerMediaBufferServo
+            bluetoothMediaBufferServo = new(Stopwatch.Frequency);
         private long bluetoothLastInputArrivalQpc;
         private long bluetoothLastInputPhasePublishQpc;
+        private long bluetoothLastMediaBufferPublishQpc;
+        private long bluetoothMediaBufferCadenceRatioBits =
+            BitConverter.DoubleToInt64Bits(1.0);
         public double DualSenseControllerClockRatio =>
             bluetoothControllerClock.Ratio;
         public int DualSenseControllerClockCompletedWindows =>
             bluetoothControllerClock.CompletedWindows;
         public bool DualSenseControllerClockStable =>
             bluetoothControllerClock.IsStable;
+        internal double DualSenseMediaBufferCadenceRatio =>
+            BitConverter.Int64BitsToDouble(Interlocked.Read(
+                ref bluetoothMediaBufferCadenceRatioBits));
+        internal double DualSenseBluetoothPresentationClockRatio =>
+            Math.Clamp(DualSenseControllerClockStable ?
+                DualSenseControllerClockRatio : 1.0,
+                DualSenseBluetoothAudioPacerScheduler.MinimumRateRatio,
+                DualSenseBluetoothAudioPacerScheduler.MaximumRateRatio);
         private bool outputDirty = false;
         private DS4HapticState previousHapticState = new DS4HapticState();
         private byte[] outputBTCrc32Head = new byte[] { 0xA2 };
@@ -391,10 +404,10 @@ namespace DS4Windows.InputDevices
         private const int BluetoothCombinedStateLength = 63;
         private const int BluetoothCombinedNativeStateLength = USB_OUTPUT_CHANGE_LENGTH - 1;
         private const byte BluetoothCombinedLowLatencyBufferLength = 16;
-        // Sony's 0x36 transport uses the same 64-byte depth for every lane.
-        // Dropout prevention belongs to clock discipline and packet delivery,
-        // not a larger device-side buffer field.
-        private const byte BluetoothCombinedSpeakerBufferLength = 80;
+        // PadSense's clean Windows speaker and duplex traces keep every 0x36
+        // media-lane depth at 0x80. Use the same native contract for both FE
+        // and FF reports; cadence remains one frame per 10.667 ms.
+        private const byte BluetoothCombinedSpeakerBufferLength = 0x80;
         // The game, not a wall-clock timeout in DS4Windows, owns the end of a
         // native DualSense effect by publishing an explicit silent haptics
         // block. Expiring the newest block between otherwise valid virtual-
@@ -409,14 +422,14 @@ namespace DS4Windows.InputDevices
             3000;
         private const int BluetoothAudioPacerStartupRetryMilliseconds = 2000;
         private const int BluetoothInputPhasePublishMilliseconds = 100;
+        private const int BluetoothMediaBufferPublishMilliseconds = 50;
         private const uint BluetoothFinalControlWriteTimeoutMilliseconds = 1000;
-        private const uint BluetoothWriterOwnershipHandoffTimeoutMilliseconds =
-            1000;
         private const byte DualSenseSpeakerVolumeMinimum = 0x3D;
         private const byte DualSenseSpeakerVolumeMaximum = 0x64;
-        private const byte DualSenseHeadphoneVolumeMaximum = 0x7F;
-        private const byte DualSenseMicrophoneVolumeMaximum = 0x40;
-        private const byte DualSenseSpeakerPreGain = 0x03;
+        private const byte DualSenseHeadphoneVolumeMaximum = 0x64;
+        private const byte DualSenseMicrophoneVolumeMaximum = 0xFF;
+        private const byte DualSenseSpeakerPreGain = 0x0A;
+        private const byte DualSenseOutputFlag0HeadphoneVolumeEnable = 0x10;
         private const byte DualSenseOutputFlag0SpeakerVolumeEnable = 0x20;
         private const byte DualSenseOutputFlag0MicrophoneVolumeEnable = 0x40;
         private const byte DualSenseOutputFlag0AudioControlEnable = 0x80;
@@ -430,16 +443,16 @@ namespace DS4Windows.InputDevices
         private const byte BluetoothNormalInputBit = 0x01;
         private const byte BluetoothMicrophoneInputBit = 0x02;
         private const byte BluetoothMicrophoneControlEnable = 0x01;
-        // Keep the established DS4Windows speaker route byte intact. AUX is a
-        // separate route; changing the normal path to DS5 Bridge's combined
-        // 0x30 value regressed otherwise healthy speaker playback here.
-        private const byte DualSenseAudioControlOutputSpeaker = 0x20;
+        // PadSense repeats Sony's native wired-DualSense audio snapshot on
+        // every 0x36 media report. Byte 0x09 selects the internal speaker
+        // contract while retaining the controller's microphone clock.
+        private const byte DualSenseAudioControlOutputSpeaker = 0x09;
         private const byte DualSenseAudioControlOutputHeadphones = 0x00;
         private const byte BluetoothCombinedSpeakerPacketType = 0x93;
         private const byte BluetoothCombinedHeadsetPacketType = 0x96;
         private static readonly byte[] DefaultBluetoothCombinedState =
         {
-            0xFD, 0xF7, 0x00, 0x00, 0x7F, 0x64, 0xFF, 0x09,
+            0xFD, 0xF7, 0x00, 0x00, 0x64, 0x64, 0xFF, 0x09,
             0x00, 0x0F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -465,25 +478,20 @@ namespace DS4Windows.InputDevices
         private long bluetoothCombinedSubmittedHapticsGeneration;
         private byte bluetoothCombinedSpeakerReportSequence;
         private byte bluetoothCombinedSpeakerPacketSequence;
-        private byte bluetoothAudioRouteReportSequence;
-        private bool bluetoothHeadsetOutputRouteArmed;
         private bool bluetoothCombinedSpeakerSequenceInitialized;
-        private readonly object bluetoothRealtimeWriterLock = new object();
-        private DualSenseBluetoothRealtimeWriter bluetoothRealtimeWriter;
-        private DualSenseBluetoothRealtimeWriter retiringBluetoothRealtimeWriter;
         private readonly object bluetoothAudioPacerLock = new object();
         private readonly object bluetoothAudioLifecycleLock = new object();
         private DualSenseBluetoothAudioPacer bluetoothAudioPacer;
         private string bluetoothAudioPacerLastError = string.Empty;
         private long bluetoothAudioPacerRetryAfterTimestamp;
         private int bluetoothAudioLifecycleTransitioning;
+        private int bluetoothAudioRecoveryWorkerScheduled;
         private long bluetoothSpeakerSessionCounter;
         private long bluetoothActiveSpeakerSession;
         private long bluetoothActiveSpeakerGeneration;
         private long bluetoothSpeakerFramesDropped;
         private long bluetoothCombinedSpeakerReportsWritten;
         private long bluetoothCombinedSpeakerWriteFailures;
-        private long bluetoothRealtimeWriterDroppedReports;
         private long bluetoothCombinedSpeakerStaleHapticsSilenced;
         private readonly object bluetoothSpeakerClockClaimLock = new object();
         private long bluetoothSpeakerClockLeaseExpiryTimestamp;
@@ -520,8 +528,16 @@ namespace DS4Windows.InputDevices
             Interlocked.Read(ref bluetoothCombinedSpeakerReportsWritten);
         public long BluetoothCombinedSpeakerWriteFailures =>
             Interlocked.Read(ref bluetoothCombinedSpeakerWriteFailures);
-        public long BluetoothRealtimeWriterDroppedReports =>
-            Interlocked.Read(ref bluetoothRealtimeWriterDroppedReports);
+        public long BluetoothRealtimeWriterDroppedReports
+        {
+            get
+            {
+                lock (bluetoothAudioPacerLock)
+                {
+                    return bluetoothAudioPacer?.RejectedReports ?? 0;
+                }
+            }
+        }
         public long BluetoothCombinedSpeakerStaleHapticsSilenced =>
             Interlocked.Read(ref bluetoothCombinedSpeakerStaleHapticsSilenced);
         public long BluetoothCombinedHapticsPairedWrites =>
@@ -767,9 +783,9 @@ namespace DS4Windows.InputDevices
         {
             get
             {
-                lock (bluetoothRealtimeWriterLock)
+                lock (bluetoothAudioPacerLock)
                 {
-                    return bluetoothRealtimeWriter?.CompletedWrites ?? 0;
+                    return bluetoothAudioPacer?.HelperCompletedWriteCount ?? 0;
                 }
             }
         }
@@ -777,9 +793,9 @@ namespace DS4Windows.InputDevices
         {
             get
             {
-                lock (bluetoothRealtimeWriterLock)
+                lock (bluetoothAudioPacerLock)
                 {
-                    return bluetoothRealtimeWriter?.SlowCompletionCount ?? 0;
+                    return bluetoothAudioPacer?.HelperSlowCompletionCount ?? 0;
                 }
             }
         }
@@ -787,9 +803,9 @@ namespace DS4Windows.InputDevices
         {
             get
             {
-                lock (bluetoothRealtimeWriterLock)
+                lock (bluetoothAudioPacerLock)
                 {
-                    return bluetoothRealtimeWriter?.LateSubmissionCount ?? 0;
+                    return bluetoothAudioPacer?.HelperLateSubmissionCount ?? 0;
                 }
             }
         }
@@ -797,9 +813,9 @@ namespace DS4Windows.InputDevices
         {
             get
             {
-                lock (bluetoothRealtimeWriterLock)
+                lock (bluetoothAudioPacerLock)
                 {
-                    return bluetoothRealtimeWriter?.MaximumCompletionMilliseconds ?? 0.0;
+                    return bluetoothAudioPacer?.HelperMaximumCompletionMilliseconds ?? 0.0;
                 }
             }
         }
@@ -807,9 +823,9 @@ namespace DS4Windows.InputDevices
         {
             get
             {
-                lock (bluetoothRealtimeWriterLock)
+                lock (bluetoothAudioPacerLock)
                 {
-                    return bluetoothRealtimeWriter?.MaximumSubmissionGapMilliseconds ?? 0.0;
+                    return bluetoothAudioPacer?.HelperMaximumSubmissionGapMilliseconds ?? 0.0;
                 }
             }
         }
@@ -823,6 +839,12 @@ namespace DS4Windows.InputDevices
         /// </summary>
         public bool BluetoothCombinedOutputTransportEnabled =>
             Volatile.Read(ref bluetoothCombinedOutputTransportEnabled) != 0;
+
+        internal static bool RequiresUnifiedBluetoothOutputTransport(
+            ConnectionType connectionType)
+        {
+            return connectionType == ConnectionType.BT;
+        }
 
         public bool EnsureBluetoothCombinedOutputTransport()
         {
@@ -854,6 +876,34 @@ namespace DS4Windows.InputDevices
 
             Interlocked.Exchange(ref bluetoothCombinedOutputTransportEnabled, 1);
             return true;
+        }
+
+        private bool InitializeUnifiedBluetoothOutputTransport(
+            string reportDescription)
+        {
+            if (!RequiresUnifiedBluetoothOutputTransport(conType) ||
+                !EnsureBluetoothCombinedOutputTransport())
+            {
+                return false;
+            }
+
+            if (!PrepareBluetoothSpeakerClockTransport(
+                    usePadSensePresentationCadence: true))
+            {
+                RequestUnifiedBluetoothOutputTransportRecovery();
+                return false;
+            }
+
+            bool committed = TryWriteCachedBluetoothCombinedControlReport(
+                includeNativeHaptics: false,
+                reportDescription: reportDescription,
+                waitForCompletion: true);
+            if (!committed)
+            {
+                RequestUnifiedBluetoothOutputTransportRecovery();
+            }
+
+            return committed;
         }
 
         /// <summary>
@@ -985,106 +1035,45 @@ namespace DS4Windows.InputDevices
                 return true;
             }
 
-            // DualSense firmware does not reliably arm the AUX DAC when its
-            // first state already requests the headphone route. The working
-            // controller sequence uses two ordinary tagged 0x31 states before
-            // the 0x96 stream: speaker first, then headphones. Do this before
-            // the 0x36 pacer starts; a control-only 0x36 is not equivalent for
-            // this firmware transition.
             lock (bluetoothCombinedTransportWriteLock)
             {
-                // The standard speaker startup path was already stable before
-                // AUX support. Only issue a speaker-route transition when this
-                // device instance was actually armed for headphones.
-                if (!headsetOnlyAudio &&
-                    !bluetoothHeadsetOutputRouteArmed)
-                {
-                    return true;
-                }
-
-                StopBluetoothAudioPacerLocked();
-                if (!DisposeBluetoothRealtimeWriter(
-                        BluetoothWriterOwnershipHandoffTimeoutMilliseconds))
-                {
-                    LastBluetoothHapticsWriteStatus =
-                        "Could not arm AUX: prior Bluetooth HID ownership is still retiring.";
-                    return false;
-                }
-
-                if (!TryWriteBluetoothAudioRouteState(headsetRoute: false,
-                        headsetOnlyAudio ? "AUX speaker-route rearm" :
-                            "speaker-route restore"))
+                if (!EnsureBluetoothCombinedOutputTransport())
                 {
                     return false;
                 }
 
-                if (!headsetOnlyAudio)
+                // Route changes are state updates on the one long-lived
+                // PadSense transport. Never retire the helper or inject a
+                // legacy 0x31 report between media generations.
+                lock (bluetoothCombinedSpeakerReportLock)
                 {
-                    bluetoothHeadsetOutputRouteArmed = false;
-                    return true;
+                    ApplyBluetoothSpeakerVolumeAndRoutingCore(
+                        latestBluetoothCombinedSpeakerReport, speakerVolume,
+                        headsetOnlyAudio, headphoneVolume);
                 }
 
-                bool armed = TryWriteBluetoothAudioRouteState(
-                    headsetRoute: true, "AUX headphone-route rearm");
-                if (armed)
+                bool published;
+                if (IsBluetoothSpeakerClockActive())
                 {
-                    bluetoothHeadsetOutputRouteArmed = true;
+                    // The next already-clocked media generation applies the
+                    // route atomically without inserting a control report.
+                    published = RefreshBluetoothAudioPacerTemplateFromCache();
                 }
-                return armed;
+                else
+                {
+                    published = TryWriteCachedBluetoothCombinedControlReport(
+                        includeNativeHaptics: true,
+                        reportDescription: headsetOnlyAudio ?
+                            "AUX route" : "speaker route",
+                        waitForCompletion: true);
+                }
+                if (!published)
+                {
+                    RequestUnifiedBluetoothOutputTransportRecovery();
+                }
+
+                return published;
             }
-        }
-
-        private bool TryWriteBluetoothAudioRouteState(bool headsetRoute,
-            string description)
-        {
-            byte[] report = BuildBluetoothAudioRouteStateReport(
-                bluetoothAudioRouteReportSequence++, headsetRoute);
-            bool written = hDevice.WriteOutputReportViaInterrupt(report,
-                READ_STREAM_TIMEOUT);
-            LastBluetoothHapticsWriteStatus = written ?
-                $"Direct Bluetooth {description} write completed." :
-                $"Direct Bluetooth {description} write failed.";
-            return written;
-        }
-
-        private static byte[] BuildBluetoothAudioRouteStateReport(
-            byte sequence, bool headsetRoute)
-        {
-            byte[] report = new byte[BT_OUTPUT_REPORT_LENGTH];
-            report[0] = OUTPUT_REPORT_ID_BT;
-            report[1] = (byte)((sequence & 0x0F) << 4);
-            report[2] = 0x10;
-
-            const int payloadOffset = 3;
-            report[payloadOffset] = DualSenseOutputFlag0AudioControlEnable;
-            if (headsetRoute)
-            {
-                report[payloadOffset + 4] =
-                    DualSenseHeadphoneVolumeMaximum;
-                report[payloadOffset + 7] =
-                    DualSenseAudioControlOutputHeadphones;
-            }
-            else
-            {
-                report[payloadOffset] |=
-                    DualSenseOutputFlag0SpeakerVolumeEnable;
-                report[payloadOffset + 1] =
-                    DualSenseOutputFlag1AudioControl2Enable;
-                report[payloadOffset + 5] =
-                    DualSenseSpeakerVolumeMaximum;
-                report[payloadOffset + 7] =
-                    DualSenseAudioControlOutputSpeaker;
-                report[payloadOffset + 37] = DualSenseSpeakerPreGain;
-            }
-
-            uint crc = ~Crc32Algorithm.Compute(new byte[] { 0xA2 });
-            crc = ~Crc32Algorithm.CalculateBasicHash(ref crc, ref report, 0,
-                BT_OUTPUT_REPORT_LENGTH - sizeof(uint));
-            report[74] = (byte)crc;
-            report[75] = (byte)(crc >> 8);
-            report[76] = (byte)(crc >> 16);
-            report[77] = (byte)(crc >> 24);
-            return report;
         }
 
         internal bool BeginBluetoothAtomicSpeakerFrame(long speakerSession)
@@ -1162,14 +1151,6 @@ namespace DS4Windows.InputDevices
                     bluetoothSpeakerClockActiveClaim = 0;
                     bluetoothSpeakerClockLeaseExpiryTimestamp = 0;
                 }
-                // Once the controller has entered the unified 0x36 transport,
-                // keep its state, sequence, writer, and helper for the physical
-                // connection. Clear only the presentation clock/reservoir.
-                lock (bluetoothRealtimeWriterLock)
-                {
-                    bluetoothRealtimeWriter?.ResetSubmissionClock();
-                }
-
                 // Clear -> pending mic control is one atomic boundary. A new
                 // speaker generation cannot slip reports between the helper
                 // Clear and this completion-aware control commit.
@@ -1179,7 +1160,7 @@ namespace DS4Windows.InputDevices
                     Volatile.Read(ref bluetoothOutputTransportStopping) == 0)
                 {
                     TryWriteCachedBluetoothCombinedControlReport(
-                        includeNativeHaptics: false,
+                        includeNativeHaptics: true,
                         reportDescription:
                             "speaker-boundary microphone control",
                         waitForCompletion: true);
@@ -1219,23 +1200,40 @@ namespace DS4Windows.InputDevices
         /// speaker source consumption while this method runs on the dedicated
         /// lifecycle thread.
         /// </summary>
-        internal bool PrepareBluetoothSpeakerClockTransport()
+        internal bool PrepareBluetoothSpeakerClockTransport(
+            bool usePadSensePresentationCadence = false)
         {
             return TransitionBluetoothSpeakerClockTransport(
-                ignoreRetryCooldown: false);
+                ignoreRetryCooldown: false,
+                usePadSensePresentationCadence,
+                allowDuringStopping: false);
         }
 
-        internal bool RecoverBluetoothSpeakerClockTransport()
+        internal bool RecoverBluetoothSpeakerClockTransport(
+            bool usePadSensePresentationCadence = false)
         {
             return TransitionBluetoothSpeakerClockTransport(
-                ignoreRetryCooldown: true);
+                ignoreRetryCooldown: true,
+                usePadSensePresentationCadence,
+                allowDuringStopping: false);
+        }
+
+        private bool RecoverBluetoothOutputTransportForShutdown()
+        {
+            return TransitionBluetoothSpeakerClockTransport(
+                ignoreRetryCooldown: true,
+                usePadSensePresentationCadence: true,
+                allowDuringStopping: true);
         }
 
         private bool TransitionBluetoothSpeakerClockTransport(
-            bool ignoreRetryCooldown)
+            bool ignoreRetryCooldown,
+            bool usePadSensePresentationCadence,
+            bool allowDuringStopping)
         {
             if (conType != ConnectionType.BT ||
-                Volatile.Read(ref bluetoothOutputTransportStopping) != 0)
+                (!allowDuringStopping && Volatile.Read(
+                    ref bluetoothOutputTransportStopping) != 0))
             {
                 return false;
             }
@@ -1248,7 +1246,8 @@ namespace DS4Windows.InputDevices
                 DualSenseBluetoothAudioPacer retiringPacer;
                 lock (bluetoothCombinedTransportWriteLock)
                 {
-                    if (Volatile.Read(ref bluetoothOutputTransportStopping) != 0 ||
+                    if ((!allowDuringStopping && Volatile.Read(
+                            ref bluetoothOutputTransportStopping) != 0) ||
                         !EnsureBluetoothCombinedOutputTransport())
                     {
                         return false;
@@ -1256,7 +1255,10 @@ namespace DS4Windows.InputDevices
 
                     lock (bluetoothAudioPacerLock)
                     {
-                        if (bluetoothAudioPacer?.IsRunning == true)
+                        if (bluetoothAudioPacer?.IsRunning == true &&
+                            (!usePadSensePresentationCadence ||
+                                bluetoothAudioPacer.
+                                    UsesPadSensePresentationCadence))
                         {
                             return true;
                         }
@@ -1302,13 +1304,6 @@ namespace DS4Windows.InputDevices
                         retiringPacer.Dispose();
                     }
 
-                    if (!RetireBluetoothRealtimeWriterForLifecycle())
-                    {
-                        bluetoothAudioPacerLastError =
-                            "The previous realtime writer has not released HID ownership.";
-                        return false;
-                    }
-
                     // A stale cached speaker lane must not survive into the
                     // helper template. Speaker reports provide their own lane.
                     Array.Clear(initialTemplate,
@@ -1318,9 +1313,11 @@ namespace DS4Windows.InputDevices
                     ApplyBluetoothSpeakerVolumeAndRoutingCore(initialTemplate,
                         speakerVolume, headsetOnlyAudio, headphoneVolume);
                     ApplyBluetoothMicrophoneStreamingRequest(initialTemplate);
-                    if (!TryStartBluetoothAudioPacer(
-                        initialTemplate,
-                        initialHapticsExpiry, out candidate, out string error))
+                    if (!DualSenseBluetoothAudioPacer.TryStart(
+                        hDevice?.DevicePath, initialTemplate,
+                        initialHapticsExpiry,
+                        usePadSensePresentationCadence, out candidate,
+                        out string error))
                     {
                         bluetoothAudioPacerLastError = error ?? string.Empty;
                         Volatile.Write(ref bluetoothAudioPacerRetryAfterTimestamp,
@@ -1331,7 +1328,8 @@ namespace DS4Windows.InputDevices
 
                     lock (bluetoothCombinedTransportWriteLock)
                     {
-                        if (Volatile.Read(ref bluetoothOutputTransportStopping) != 0)
+                        if (!allowDuringStopping && Volatile.Read(
+                                ref bluetoothOutputTransportStopping) != 0)
                         {
                             return false;
                         }
@@ -1367,161 +1365,49 @@ namespace DS4Windows.InputDevices
             }
         }
 
-        private bool RetireBluetoothRealtimeWriterForLifecycle()
+        private void RequestUnifiedBluetoothOutputTransportRecovery()
         {
-            DualSenseBluetoothRealtimeWriter writer;
-            lock (bluetoothRealtimeWriterLock)
+            if (!RequiresUnifiedBluetoothOutputTransport(conType) ||
+                Volatile.Read(ref bluetoothOutputTransportStopping) != 0 ||
+                Interlocked.CompareExchange(
+                    ref bluetoothAudioRecoveryWorkerScheduled, 1, 0) != 0)
             {
-                if (retiringBluetoothRealtimeWriter == null &&
-                    bluetoothRealtimeWriter != null)
-                {
-                    retiringBluetoothRealtimeWriter = bluetoothRealtimeWriter;
-                    bluetoothRealtimeWriter = null;
-                }
-
-                writer = retiringBluetoothRealtimeWriter;
+                return;
             }
 
-            if (writer == null)
+            ThreadPool.QueueUserWorkItem(_ =>
             {
-                return true;
-            }
-
-            writer.Dispose();
-            // Dispose performs its bounded synchronous cancellation attempt and
-            // transfers a wedged IRP to deferred ownership. Do not park the sole
-            // lifecycle worker behind that native wait: retaining the retiring
-            // reference still blocks every replacement owner, and the lifecycle
-            // retry will observe completion later.
-            if (!writer.WaitForDisposal(0))
-            {
-                return false;
-            }
-
-            lock (bluetoothRealtimeWriterLock)
-            {
-                if (ReferenceEquals(retiringBluetoothRealtimeWriter, writer))
+                try
                 {
-                    retiringBluetoothRealtimeWriter = null;
+                    while (Volatile.Read(
+                        ref bluetoothOutputTransportStopping) == 0)
+                    {
+                        if (RecoverBluetoothSpeakerClockTransport(
+                            usePadSensePresentationCadence: true))
+                        {
+                            // Recovery starts a fresh physical FIFO. Commit the
+                            // latest coalesced state once before returning so a
+                            // stale speaker lease cannot leave lightbar,
+                            // trigger, rumble, or haptics changes template-only.
+                            if (TryWriteCachedBluetoothCombinedControlReport(
+                                    includeNativeHaptics: true,
+                                    reportDescription:
+                                        "recovered controller state",
+                                    waitForCompletion: true))
+                            {
+                                return;
+                            }
+                        }
+
+                        Thread.Sleep(BluetoothAudioPacerStartupRetryMilliseconds);
+                    }
                 }
-            }
-
-            return true;
-        }
-
-        private bool TryEnsureBluetoothAudioPacer(byte[] initialTemplate)
-        {
-            if (Volatile.Read(ref bluetoothOutputTransportStopping) != 0)
-            {
-                return false;
-            }
-
-            long now = Stopwatch.GetTimestamp();
-            if (Volatile.Read(ref bluetoothAudioPacerRetryAfterTimestamp) >
-                now)
-            {
-                return false;
-            }
-
-            lock (bluetoothAudioPacerLock)
-            {
-                if (Volatile.Read(ref bluetoothOutputTransportStopping) != 0)
+                finally
                 {
-                    return false;
+                    Interlocked.Exchange(
+                        ref bluetoothAudioRecoveryWorkerScheduled, 0);
                 }
-
-                if (bluetoothAudioPacer?.IsRunning == true)
-                {
-                    return true;
-                }
-
-                now = Stopwatch.GetTimestamp();
-                if (Volatile.Read(
-                        ref bluetoothAudioPacerRetryAfterTimestamp) > now)
-                {
-                    return false;
-                }
-
-                if (bluetoothAudioPacer != null)
-                {
-                    bluetoothAudioPacerLastError =
-                        bluetoothAudioPacer.LastError;
-                    bluetoothAudioPacer.Dispose();
-                    bluetoothAudioPacer = null;
-                }
-
-                // The helper and the in-process writer must never interleave
-                // reports on the Sony sequence. Drain and release the old
-                // writer before duplicating the active HID handle.
-                if (!DisposeBluetoothRealtimeWriter(
-                    BluetoothWriterOwnershipHandoffTimeoutMilliseconds))
-                {
-                    bluetoothAudioPacerLastError =
-                        "The previous realtime writer has not released HID ownership.";
-                    Volatile.Write(ref bluetoothAudioPacerRetryAfterTimestamp,
-                        Stopwatch.GetTimestamp() + Stopwatch.Frequency *
-                            BluetoothAudioPacerStartupRetryMilliseconds / 1000);
-                    return false;
-                }
-                long initialHapticsExpiry = GetBluetoothHapticsExpiryQpc();
-                if (!TryStartBluetoothAudioPacer(
-                    initialTemplate,
-                    initialHapticsExpiry,
-                    out DualSenseBluetoothAudioPacer pacer,
-                    out string error))
-                {
-                    bluetoothAudioPacerLastError = error ?? string.Empty;
-                    Volatile.Write(ref bluetoothAudioPacerRetryAfterTimestamp,
-                        Stopwatch.GetTimestamp() + Stopwatch.Frequency *
-                            BluetoothAudioPacerStartupRetryMilliseconds / 1000);
-                    return false;
-                }
-
-                bluetoothAudioPacer = pacer;
-                pacer.UpdateCadenceRatio(
-                    DualSenseControllerClockStable ?
-                        DualSenseControllerClockRatio : 1.0,
-                    Volatile.Read(ref bluetoothLastInputArrivalQpc));
-                bluetoothAudioPacerLastError = string.Empty;
-                Volatile.Write(ref bluetoothAudioPacerRetryAfterTimestamp, 0);
-                return true;
-            }
-        }
-
-        private bool TryStartBluetoothAudioPacer(byte[] initialTemplate,
-            long initialHapticsExpiry,
-            out DualSenseBluetoothAudioPacer pacer, out string error)
-        {
-            pacer = null;
-            error = string.Empty;
-            Microsoft.Win32.SafeHandles.SafeFileHandle audioHandle = null;
-            bool dedicatedHandle = false;
-            try
-            {
-                dedicatedHandle = hDevice != null &&
-                    hDevice.TryOpenDedicatedAudioHandle(out audioHandle);
-                Microsoft.Win32.SafeHandles.SafeFileHandle selectedHandle =
-                    dedicatedHandle ? audioHandle : hDevice?.SafeReadHandle;
-                bool started = DualSenseBluetoothAudioPacer.TryStart(
-                    selectedHandle, initialTemplate, initialHapticsExpiry,
-                    out pacer, out error);
-                if (started)
-                {
-                    AppLogger.LogToGui(dedicatedHandle ?
-                        "DualSense Bluetooth audio pacer owns a dedicated shared HID session." :
-                        "DualSense Bluetooth audio pacer could not open its dedicated HID session; using the primary HID session.",
-                        warning: !dedicatedHandle);
-                }
-
-                return started;
-            }
-            finally
-            {
-                // TryStart duplicates the selected handle into the isolated
-                // helper before returning. The helper owns that duplicate;
-                // close only this short-lived parent copy.
-                audioHandle?.Dispose();
-            }
+            });
         }
 
         private void StopBluetoothAudioPacerLocked()
@@ -1577,15 +1463,6 @@ namespace DS4Windows.InputDevices
             }
         }
 
-        private long GetBluetoothHapticsExpiryQpc()
-        {
-            lock (bluetoothCombinedSpeakerReportLock)
-            {
-                return bluetoothCombinedSpeakerReportAvailable ?
-                    PersistentBluetoothHapticsExpiryQpc : 0;
-            }
-        }
-
         private bool TryUpdateBluetoothAudioPacerTemplate(byte[] template,
             long hapticsExpiryQpc, out bool pacerOwnsTransport)
         {
@@ -1608,6 +1485,8 @@ namespace DS4Windows.InputDevices
                     return false;
                 }
 
+                // The complete mutable controller state lives in the native
+                // 0x36 snapshot. Never create a second physical 0x31 lane.
                 return bluetoothAudioPacer.UpdateTemplate(template,
                     hapticsExpiryQpc);
             }
@@ -1621,7 +1500,7 @@ namespace DS4Windows.InputDevices
             {
                 // A faulted/stopping helper still owns its duplicated HID
                 // handle until Dispose crosses the child-process ownership
-                // barrier. Never let a direct writer race that retained owner.
+                // barrier. Never let recovery race that retained owner.
                 pacerOwnsTransport =
                     PacerReferenceRetainsBluetoothTransportOwnership(
                         bluetoothAudioPacer != null);
@@ -1635,6 +1514,15 @@ namespace DS4Windows.InputDevices
             }
         }
 
+        private void SignalBluetoothAudioPacerMicrophoneFrame(byte sequence)
+        {
+            // Do not take the transport lock on the physical input thread.
+            // Disconnect may retire this reference concurrently; the pacer's
+            // signal method treats that final race as a harmless no-op.
+            Volatile.Read(ref bluetoothAudioPacer)?.SignalMicrophoneFrame(
+                sequence);
+        }
+
         private bool TryUpdateBluetoothAudioPacerCadenceRatio(double ratio)
         {
             lock (bluetoothAudioPacerLock)
@@ -1642,6 +1530,29 @@ namespace DS4Windows.InputDevices
                 return bluetoothAudioPacer?.IsRunning == true &&
                     bluetoothAudioPacer.UpdateCadenceRatio(ratio,
                         Volatile.Read(ref bluetoothLastInputArrivalQpc));
+            }
+        }
+
+        private bool TryUpdateBluetoothAudioPacerMediaBuffer(byte level,
+            long observationQpc)
+        {
+            lock (bluetoothAudioPacerLock)
+            {
+                if (bluetoothAudioPacer?.IsRunning != true)
+                {
+                    bluetoothMediaBufferServo.Reset();
+                    Interlocked.Exchange(
+                        ref bluetoothMediaBufferCadenceRatioBits,
+                        BitConverter.DoubleToInt64Bits(1.0));
+                    return false;
+                }
+
+                double cadenceRatio = bluetoothMediaBufferServo.Update(level,
+                    observationQpc, observationQpc);
+                Interlocked.Exchange(ref bluetoothMediaBufferCadenceRatioBits,
+                    BitConverter.DoubleToInt64Bits(cadenceRatio));
+                return bluetoothAudioPacer.UpdateControllerMediaBuffer(level,
+                    observationQpc, cadenceRatio);
             }
         }
 
@@ -1710,10 +1621,47 @@ namespace DS4Windows.InputDevices
                 ApplyBluetoothMicrophoneStreamingRequest(template);
                 bool updated = TryUpdateBluetoothAudioPacerTemplate(template,
                     hapticsExpiryQpc, out bool pacerOwnsTransport);
-                // With no helper, the cached template is consumed by the next
-                // direct speaker-clocked report. A running helper must accept
-                // the update now; otherwise the caller must retain/retry state.
-                return !pacerOwnsTransport || updated;
+                if (!pacerOwnsTransport || !updated)
+                {
+                    RequestUnifiedBluetoothOutputTransportRecovery();
+                    return false;
+                }
+
+                return true;
+            }
+        }
+
+        private bool QueueBluetoothAudioPacerMicrophoneTransitionFromCache(
+            bool enabled)
+        {
+            lock (bluetoothCombinedTransportWriteLock)
+            {
+                byte[] template = bluetoothCombinedSpeakerWorkingReport;
+                long hapticsExpiryQpc;
+                lock (bluetoothCombinedSpeakerReportLock)
+                {
+                    if (!bluetoothCombinedSpeakerReportAvailable)
+                    {
+                        return false;
+                    }
+
+                    Array.Copy(latestBluetoothCombinedSpeakerReport, template,
+                        template.Length);
+                    hapticsExpiryQpc = PersistentBluetoothHapticsExpiryQpc;
+                }
+
+                ApplyBluetoothSpeakerVolumeAndRoutingCore(template,
+                    speakerVolume, headsetOnlyAudio, headphoneVolume);
+                // The requested flag was published before entering this path.
+                // Keep the live template synchronized with the exact 0x32
+                // transition that the isolated writer will serialize.
+                ApplyBluetoothMicrophoneStreamingRequest(template);
+                lock (bluetoothAudioPacerLock)
+                {
+                    return bluetoothAudioPacer?.IsRunning == true &&
+                        bluetoothAudioPacer.UpdateMicrophoneTransition(template,
+                            hapticsExpiryQpc, enabled);
+                }
             }
         }
 
@@ -1930,11 +1878,14 @@ namespace DS4Windows.InputDevices
                 }
             }
 
-            // Need to blank LED lights so lightbar will change colors
-            // as requested
             if (conType == ConnectionType.BT)
             {
-                SendInitialBTOutputReport();
+                // The PadSense-derived helper owns the physical Bluetooth HID
+                // writer for this entire connection, including the idle period
+                // before a virtual controller or audio endpoint is active.
+                // Startup state is queued there; never inject a legacy 0x31.
+                InitializeUnifiedBluetoothOutputTransport(
+                    "initial controller state");
             }
         }
 
@@ -2129,6 +2080,10 @@ namespace DS4Windows.InputDevices
 
         private unsafe void ReadInput()
         {
+            using global::DS4Windows.MultimediaThreadRegistration mmcss =
+                conType == ConnectionType.BT ?
+                    global::DS4Windows.MultimediaThreadRegistration.EnterGames() :
+                    default;
             unchecked
             {
                 Debouncer = SetupDebouncer();
@@ -2195,14 +2150,15 @@ namespace DS4Windows.InputDevices
                         {
                             if (IsBluetoothMicrophoneFrame(inputReport))
                             {
+                                SignalBluetoothAudioPacerMicrophoneFrame(
+                                    inputReport[2]);
                                 inputReportErrorCount = 0;
                                 RecordBluetoothMicrophoneFrame(inputReport);
-                                DrainQueuedInputEvents();
-                                if (outputDirty)
-                                {
-                                    PrepareOutReport();
-                                    FlushPreparedOutputReport();
-                                }
+                                // PadSense treats 0x31 microphone packets as a
+                                // media-only input lane. Do not let their 100 Hz
+                                // cadence pump pending state or publish a
+                                // competing output report; continuous 0x36
+                                // media carries the latest controller state.
                                 readWaitEv.Reset();
                                 continue;
                             }
@@ -2439,6 +2395,25 @@ namespace DS4Windows.InputDevices
                         long inputArrivalQpc = Stopwatch.GetTimestamp();
                         Volatile.Write(ref bluetoothLastInputArrivalQpc,
                             inputArrivalQpc);
+                        long previousMediaBufferPublish = Volatile.Read(
+                            ref bluetoothLastMediaBufferPublishQpc);
+                        bool mediaBufferPublishDue = inputArrivalQpc -
+                            previousMediaBufferPublish >= Stopwatch.Frequency *
+                                BluetoothMediaBufferPublishMilliseconds / 1000;
+                        if (mediaBufferPublishDue &&
+                            Interlocked.CompareExchange(
+                                ref bluetoothLastMediaBufferPublishQpc,
+                                inputArrivalQpc,
+                                previousMediaBufferPublish) ==
+                                    previousMediaBufferPublish)
+                        {
+                            // CRC validation and the normal-frame discriminator
+                            // make the vendor-tail byte stable enough for trace
+                            // correlation. Its semantics are undocumented, so
+                            // it remains diagnostic and cannot steer cadence.
+                            TryUpdateBluetoothAudioPacerMediaBuffer(
+                                inputReport[65], inputArrivalQpc);
+                        }
                         bool clockRatioUpdated =
                             bluetoothControllerClock.Observe(tempStamp,
                                 inputArrivalQpc);
@@ -2708,12 +2683,6 @@ namespace DS4Windows.InputDevices
             }
         }
 
-        private bool UsesCombinedBluetoothOutputTransport()
-        {
-            return conType == ConnectionType.BT &&
-                BluetoothCombinedOutputTransportEnabled;
-        }
-
         protected override void StopOutputUpdate()
         {
             // Publish the gate before waiting for transport ownership. A
@@ -2724,12 +2693,24 @@ namespace DS4Windows.InputDevices
             Interlocked.Exchange(ref bluetoothOutputTransportStopping, 1);
             lock (bluetoothCombinedTransportWriteLock)
             {
-                StopBluetoothAudioPacerLocked();
-                Volatile.Write(ref bluetoothAudioPacerRetryAfterTimestamp, 0);
                 lock (bluetoothSpeakerClockClaimLock)
                 {
                     bluetoothSpeakerClockActiveClaim = 0;
                     bluetoothSpeakerClockLeaseExpiryTimestamp = 0;
+                }
+
+                if (conType == ConnectionType.BT)
+                {
+                    bool helperRunning;
+                    lock (bluetoothAudioPacerLock)
+                    {
+                        helperRunning = bluetoothAudioPacer?.IsRunning == true;
+                    }
+
+                    if (!helperRunning)
+                    {
+                        RecoverBluetoothOutputTransportForShutdown();
+                    }
                 }
 
                 if (conType == ConnectionType.BT &&
@@ -2739,18 +2720,49 @@ namespace DS4Windows.InputDevices
                     DisableBluetoothMicrophoneStreamingForShutdown();
                 }
 
-                bool writerReleased = DisposeBluetoothRealtimeWriter(
-                    BluetoothWriterOwnershipHandoffTimeoutMilliseconds);
-                if (writerReleased)
+                if (conType == ConnectionType.BT)
                 {
-                    SendEmptyOutputReport();
+                    QueueUnifiedBluetoothShutdownState();
                 }
                 else
                 {
-                    LastBluetoothHapticsWriteStatus =
-                        "Skipped the legacy shutdown report because realtime HID ownership was not released.";
+                    SendEmptyOutputReport();
                 }
+
+                StopBluetoothAudioPacerLocked();
+                Volatile.Write(ref bluetoothAudioPacerRetryAfterTimestamp, 0);
             }
+        }
+
+        private bool QueueUnifiedBluetoothShutdownState()
+        {
+            if (!EnsureBluetoothCombinedOutputTransport())
+            {
+                return false;
+            }
+
+            lock (bluetoothCombinedSpeakerReportLock)
+            {
+                // Preserve the visible lightbar but neutralize every actuator
+                // and media lane before the sole helper owner is retired.
+                int stateOffset = BluetoothCombinedStateOffset;
+                latestBluetoothCombinedSpeakerReport[stateOffset + 2] = 0;
+                latestBluetoothCombinedSpeakerReport[stateOffset + 3] = 0;
+                Array.Clear(latestBluetoothCombinedSpeakerReport,
+                    stateOffset + 10, 27);
+                Array.Clear(latestBluetoothCombinedSpeakerReport,
+                    BluetoothCombinedHapticsDataOffset,
+                    BluetoothCombinedHapticsDataLength);
+                latestBluetoothCombinedSpeakerReportTimestamp = 0;
+                ApplyBluetoothMicrophoneStreamingRequest(
+                    latestBluetoothCombinedSpeakerReport, enabled: false);
+            }
+
+            return TryWriteCachedBluetoothCombinedControlReport(
+                includeNativeHaptics: false,
+                reportDescription: "final neutral controller state",
+                waitForCompletion: true,
+                allowDuringStopping: true);
         }
 
         private bool DisableBluetoothMicrophoneStreamingForShutdown()
@@ -2785,62 +2797,17 @@ namespace DS4Windows.InputDevices
             return written;
         }
 
-        private bool DisposeBluetoothRealtimeWriter(uint timeoutMilliseconds)
+        private void SendEmptyOutputReport()
         {
-            lock (bluetoothRealtimeWriterLock)
-            {
-                if (!TryCompleteRetiringBluetoothRealtimeWriterLocked(
-                    timeoutMilliseconds))
-                {
-                    return false;
-                }
-
-                BeginBluetoothRealtimeWriterRetirementLocked();
-                return TryCompleteRetiringBluetoothRealtimeWriterLocked(
-                    timeoutMilliseconds);
-            }
-        }
-
-        private void BeginBluetoothRealtimeWriterRetirementLocked()
-        {
-            if (bluetoothRealtimeWriter == null)
+            if (conType != ConnectionType.USB)
             {
                 return;
             }
 
-            // Keep a strong, separately tracked owner until the writer confirms
-            // that every OVERLAPPED and SafeFileHandle reference is gone. A
-            // Dispose call may deliberately finish cancellation on a worker.
-            retiringBluetoothRealtimeWriter = bluetoothRealtimeWriter;
-            bluetoothRealtimeWriter = null;
-            retiringBluetoothRealtimeWriter.Dispose();
-        }
-
-        private bool TryCompleteRetiringBluetoothRealtimeWriterLocked(
-            uint timeoutMilliseconds)
-        {
-            if (retiringBluetoothRealtimeWriter == null)
-            {
-                return true;
-            }
-
-            if (!retiringBluetoothRealtimeWriter.WaitForDisposal(
-                timeoutMilliseconds))
-            {
-                return false;
-            }
-
-            retiringBluetoothRealtimeWriter = null;
-            return true;
-        }
-
-        private void SendEmptyOutputReport()
-        {
-            int reportOffset = conType == ConnectionType.BT ? 1 : 0;
+            const int reportOffset = 0;
             Array.Clear(outputReport, 0, outputReport.Length);
 
-            outputReport[0] = conType == ConnectionType.USB ? OUTPUT_REPORT_ID_USB :
-                OUTPUT_REPORT_ID_BT;
+            outputReport[0] = OUTPUT_REPORT_ID_USB;
 
             // Disable haptics and trigger motors
             outputReport[1 + reportOffset] = useRumble ? (byte)0x0F : (byte)0x0C;
@@ -2851,40 +2818,8 @@ namespace DS4Windows.InputDevices
             outputReport[46 + reportOffset] = 0xFF;
             outputReport[47 + reportOffset] = 0xFF;
 
-            if (conType == ConnectionType.BT)
-            {
-                outputReport[1] = OUTPUT_REPORT_ID_DATA;
-
-                // Need to calculate and populate CRC32 data so controller will accept the report
-                uint calcCrc32 = ~Crc32Algorithm.Compute(outputBTCrc32Head);
-                calcCrc32 = ~Crc32Algorithm.CalculateBasicHash(ref calcCrc32, ref outputReport, 0, BT_OUTPUT_REPORT_LENGTH - 4);
-                outputReport[74] = (byte)calcCrc32;
-                outputReport[75] = (byte)(calcCrc32 >> 8);
-                outputReport[76] = (byte)(calcCrc32 >> 16);
-                outputReport[77] = (byte)(calcCrc32 >> 24);
-            }
-
             WriteReport();
             //hDevice.fileStream.Flush();
-        }
-
-        private void SendInitialBTOutputReport()
-        {
-            Array.Clear(outputReport, 0, outputReport.Length);
-
-            outputReport[0] = OUTPUT_REPORT_ID_BT; // Report ID
-            outputReport[1] = OUTPUT_REPORT_ID_DATA;
-            outputReport[3] = 0x15; // Toggle all LED lights. 0x01 | 0x04 | 0x10
-
-            // Need to calculate and populate CRC32 data so controller will accept the report
-            uint calcCrc32 = ~Crc32Algorithm.Compute(outputBTCrc32Head);
-            calcCrc32 = ~Crc32Algorithm.CalculateBasicHash(ref calcCrc32, ref outputReport, 0, BT_OUTPUT_REPORT_LENGTH - 4);
-            outputReport[74] = (byte)calcCrc32;
-            outputReport[75] = (byte)(calcCrc32 >> 8);
-            outputReport[76] = (byte)(calcCrc32 >> 16);
-            outputReport[77] = (byte)(calcCrc32 >> 24);
-
-            WriteReport();
         }
 
         private unsafe void PrepareOutReport()
@@ -2907,7 +2842,8 @@ namespace DS4Windows.InputDevices
                 // 0x80 Enable internal mic (even while headset is connected)
                 outputReport[1] = (byte)((useRumble ? 0x0F : 0x0C) | 0x10 | 0x40 |
                     (enableSpeakerOutput ? DualSenseOutputFlag0AudioControlEnable |
-                        (headsetOnlyAudio ? 0x00 :
+                        (headsetOnlyAudio ?
+                            DualSenseOutputFlag0HeadphoneVolumeEnable :
                             DualSenseOutputFlag0SpeakerVolumeEnable) : 0x00));
 
                 // 0x01 Toggling microphone LED, 0x02 Toggling Audio/Mic Mute
@@ -2933,7 +2869,7 @@ namespace DS4Windows.InputDevices
                 // Only the isolated AUX route requires Sony's 0x00-0x7F map.
                 outputReport[5] = headsetOnlyAudio ?
                     MapDualSenseHeadphoneVolume(headphoneVolume) :
-                    headphoneVolume; // Left and Right
+                    (byte)0; // Left and Right; speaker mode keeps AUX muted.
                 // Internal speaker volume
                 outputReport[6] = headsetOnlyAudio ? (byte)0 :
                     MapDualSenseSpeakerVolume(speakerVolume);
@@ -3058,7 +2994,8 @@ namespace DS4Windows.InputDevices
                 // 0x80 Enable internal mic (even while headset is connected)
                 outputReport[2] = (byte)((useRumble ? 0x0F : 0x0C) | 0x10 | 0x40 |
                     (enableSpeakerOutput ? DualSenseOutputFlag0AudioControlEnable |
-                        (headsetOnlyAudio ? 0x00 :
+                        (headsetOnlyAudio ?
+                            DualSenseOutputFlag0HeadphoneVolumeEnable :
                             DualSenseOutputFlag0SpeakerVolumeEnable) : 0x00));
 
                 // 0x01 Toggling microphone LED, 0x02 Toggling Audio/Mic Mute
@@ -3084,7 +3021,7 @@ namespace DS4Windows.InputDevices
                 // path alone uses the controller's 0x00-0x7F gain range.
                 outputReport[6] = headsetOnlyAudio ?
                     MapDualSenseHeadphoneVolume(headphoneVolume) :
-                    headphoneVolume; // Left and Right
+                    (byte)0; // Left and Right; speaker mode keeps AUX muted.
                 // Internal speaker volume
                 outputReport[7] = headsetOnlyAudio ? (byte)0 :
                     MapDualSenseSpeakerVolume(speakerVolume);
@@ -3229,20 +3166,27 @@ namespace DS4Windows.InputDevices
 
         private bool WriteReport()
         {
-            bool result;
             if (conType == ConnectionType.BT)
             {
-                // DualSense seems to only accept output data via the Interrupt endpoint
-                result = hDevice.WriteOutputReportViaInterrupt(outputReport, READ_STREAM_TIMEOUT);
-                //result = hDevice.WriteOutputReportViaControl(outputReport);
-            }
-            else
-            {
-                result = hDevice.WriteOutputReportViaInterrupt(outputReport, READ_STREAM_TIMEOUT);
+                bool published = EnsureBluetoothCombinedOutputTransport() &&
+                    UpdateCachedBluetoothCombinedStateFromBluetoothOutput(
+                        outputReport) &&
+                    TryPublishCachedBluetoothCombinedState(
+                        includeNativeHaptics: true,
+                        activeStatus:
+                            "Queued controller state on the unified Bluetooth transport.",
+                        idleReportDescription: "controller state",
+                        out _);
+                if (!published)
+                {
+                    RequestUnifiedBluetoothOutputTransportRecovery();
+                }
+
+                return published;
             }
 
-            //Console.WriteLine("STAUTS: {0}", result);
-            return result;
+            return hDevice.WriteOutputReportViaInterrupt(outputReport,
+                READ_STREAM_TIMEOUT);
         }
 
         public bool WriteRawOutputReportFromGame(byte[] report, int offset, int length)
@@ -3258,49 +3202,34 @@ namespace DS4Windows.InputDevices
 
             queueEvent(() =>
             {
-                if (UsesCombinedBluetoothOutputTransport() &&
-                    UpdateCachedBluetoothCombinedState(report, offset))
+                if (conType == ConnectionType.BT)
                 {
-                    TryPublishCachedBluetoothCombinedState(
-                        includeNativeHaptics: true,
-                        activeStatus:
-                            "Merged game output state into the next speaker-clocked combined Bluetooth report.",
-                        idleReportDescription: "native controller state",
-                        out _);
+                    bool published =
+                        EnsureBluetoothCombinedOutputTransport() &&
+                        UpdateCachedBluetoothCombinedState(report, offset) &&
+                        TryPublishCachedBluetoothCombinedState(
+                            includeNativeHaptics: true,
+                            activeStatus:
+                                "Merged game output state into the unified Bluetooth stream.",
+                            idleReportDescription: "native controller state",
+                            out _);
+                    if (!published)
+                    {
+                        RequestUnifiedBluetoothOutputTransportRecovery();
+                    }
 
                     return;
                 }
 
                 Array.Clear(outputReport, 0, outputReport.Length);
 
-                if (conType == ConnectionType.BT)
+                if (outputReport.Length < USB_OUTPUT_CHANGE_LENGTH)
                 {
-                    if (outputReport.Length < BT_OUTPUT_REPORT_LENGTH)
-                    {
-                        return;
-                    }
-
-                    outputReport[0] = OUTPUT_REPORT_ID_BT;
-                    outputReport[1] = OUTPUT_REPORT_ID_DATA;
-                    Array.Copy(report, offset + 1, outputReport, 2, USB_OUTPUT_CHANGE_LENGTH - 1);
-
-                    uint calcCrc32 = ~Crc32Algorithm.Compute(outputBTCrc32Head);
-                    calcCrc32 = ~Crc32Algorithm.CalculateBasicHash(ref calcCrc32, ref outputReport, 0, BT_OUTPUT_REPORT_LENGTH - 4);
-                    outputReport[74] = (byte)calcCrc32;
-                    outputReport[75] = (byte)(calcCrc32 >> 8);
-                    outputReport[76] = (byte)(calcCrc32 >> 16);
-                    outputReport[77] = (byte)(calcCrc32 >> 24);
-                }
-                else
-                {
-                    if (outputReport.Length < USB_OUTPUT_CHANGE_LENGTH)
-                    {
-                        return;
-                    }
-
-                    Array.Copy(report, offset, outputReport, 0, USB_OUTPUT_CHANGE_LENGTH);
+                    return;
                 }
 
+                Array.Copy(report, offset, outputReport, 0,
+                    USB_OUTPUT_CHANGE_LENGTH);
                 WriteReport();
             });
 
@@ -3430,7 +3359,7 @@ namespace DS4Windows.InputDevices
                 offset, hasNativeGameState);
 
             bool written = TryPublishCachedBluetoothCombinedState(
-                includeNativeHaptics: hasNativeGameState,
+                includeNativeHaptics: true,
                 activeStatus:
                     "Cached native Bluetooth haptics for the next speaker-clocked frame.",
                 idleReportDescription: "combined haptics/audio",
@@ -3490,10 +3419,10 @@ namespace DS4Windows.InputDevices
                 // profile/custom lightbar and audio routing in that case.
                 if (hasNativeGameState)
                 {
-                    Array.Copy(report, offset + BluetoothCombinedStateOffset,
+                    MergeProfileStateIntoPadSenseAudioSnapshot(report,
+                        offset + BluetoothCombinedStateOffset,
                         latestBluetoothCombinedSpeakerReport,
-                        BluetoothCombinedStateOffset,
-                        BluetoothCombinedStateLength);
+                        BluetoothCombinedStateOffset);
                     latestBluetoothCombinedNativeStateTimestamp =
                         Stopwatch.GetTimestamp();
                 }
@@ -3502,10 +3431,9 @@ namespace DS4Windows.InputDevices
                         BluetoothCombinedNativeStateLength &&
                     outputReport[0] == OUTPUT_REPORT_ID_BT)
                 {
-                    Array.Copy(outputReport, 2,
-                        latestBluetoothCombinedSpeakerReport,
-                        BluetoothCombinedStateOffset,
-                        BluetoothCombinedNativeStateLength);
+                    MergeProfileStateIntoPadSenseAudioSnapshot(outputReport,
+                        2, latestBluetoothCombinedSpeakerReport,
+                        BluetoothCombinedStateOffset);
                     latestBluetoothCombinedNativeStateTimestamp = 0;
                 }
                 else
@@ -3525,23 +3453,16 @@ namespace DS4Windows.InputDevices
                     BluetoothCombinedHapticsOffset + 1] =
                     BluetoothCombinedHapticsDataLength;
                 long now = Stopwatch.GetTimestamp();
-                if (hasNativeGameState)
-                {
-                    Array.Copy(report,
-                        offset + BluetoothCombinedHapticsDataOffset,
-                        latestBluetoothCombinedSpeakerReport,
-                        BluetoothCombinedHapticsDataOffset,
-                        BluetoothCombinedHapticsDataLength);
-                    latestBluetoothCombinedSpeakerReportTimestamp = now;
-                    bluetoothCombinedHapticsGeneration++;
-                }
-                else
-                {
-                    Array.Clear(latestBluetoothCombinedSpeakerReport,
-                        BluetoothCombinedHapticsDataOffset,
-                        BluetoothCombinedHapticsDataLength);
-                    latestBluetoothCombinedSpeakerReportTimestamp = 0;
-                }
+                // Audio-only sidecars can carry DS4Windows audio haptics even
+                // without a native virtual-DualSense game-state report. Treat
+                // the 0x92 lane as authoritative independently of state origin.
+                Array.Copy(report,
+                    offset + BluetoothCombinedHapticsDataOffset,
+                    latestBluetoothCombinedSpeakerReport,
+                    BluetoothCombinedHapticsDataOffset,
+                    BluetoothCombinedHapticsDataLength);
+                latestBluetoothCombinedSpeakerReportTimestamp = now;
+                bluetoothCombinedHapticsGeneration++;
 
                 bluetoothCombinedSpeakerReportAvailable = true;
                 hapticsGeneration = bluetoothCombinedHapticsGeneration;
@@ -3604,8 +3525,9 @@ namespace DS4Windows.InputDevices
                     return false;
                 }
 
-                Array.Copy(report, offset + 1, latestBluetoothCombinedSpeakerReport,
-                    BluetoothCombinedStateOffset, BluetoothCombinedNativeStateLength);
+                MergeProfileStateIntoPadSenseAudioSnapshot(report,
+                    offset + 1, latestBluetoothCombinedSpeakerReport,
+                    BluetoothCombinedStateOffset);
                 latestBluetoothCombinedNativeStateTimestamp =
                     Stopwatch.GetTimestamp();
                 return true;
@@ -3617,16 +3539,16 @@ namespace DS4Windows.InputDevices
             if (outputDirty)
             {
                 bool published = true;
-                // Once audio or native haptics activates report 0x36, keep all
-                // Bluetooth output state on that one transport. A competing
-                // 0x31 write can interrupt both audio lanes.
-                if (UsesCombinedBluetoothOutputTransport())
+                // Every Bluetooth state uses the long-lived PadSense helper,
+                // even while speaker and microphone media are idle.
+                if (conType == ConnectionType.BT)
                 {
                     published =
+                        EnsureBluetoothCombinedOutputTransport() &&
                         UpdateCachedBluetoothCombinedStateFromBluetoothOutput(
                             outputReport) &&
                         TryPublishCachedBluetoothCombinedState(
-                            includeNativeHaptics: false,
+                            includeNativeHaptics: true,
                             activeStatus:
                                 "Merged controller state into the next speaker-clocked combined Bluetooth report.",
                             idleReportDescription: "controller state",
@@ -3642,6 +3564,7 @@ namespace DS4Windows.InputDevices
                     // Keep dirty state pending so a transient helper queue/fault
                     // cannot turn the latest light/rumble state into a silent
                     // permanent loss.
+                    RequestUnifiedBluetoothOutputTransportRecovery();
                     return;
                 }
 
@@ -3702,18 +3625,48 @@ namespace DS4Windows.InputDevices
                     return true;
                 }
 
-                Array.Copy(report, 2, latestBluetoothCombinedSpeakerReport,
-                    BluetoothCombinedStateOffset,
-                    BluetoothCombinedNativeStateLength);
+                MergeProfileStateIntoPadSenseAudioSnapshot(report, 2,
+                    latestBluetoothCombinedSpeakerReport,
+                    BluetoothCombinedStateOffset);
                 return true;
             }
+        }
+
+        private static void MergeProfileStateIntoPadSenseAudioSnapshot(
+            byte[] source, int sourceOffset, byte[] destination,
+            int destinationOffset)
+        {
+            // PadSense keeps the native audio contract stable on every media
+            // frame and overlays only mutable controller state. In particular,
+            // generic DS4Windows output reports must not replace FD/F7, the
+            // three audio gains, route 0x09, or audio-control2 0x0A with their
+            // Bluetooth control-report equivalents.
+            Array.Copy(source, sourceOffset + 2, destination,
+                destinationOffset + 2, 2);       // rumble motors
+            // PadSense keeps UseRumbleNotHaptics clear on an idle carrier.
+            // A virtual report may leave its validity bit asserted while both
+            // motors are zero; forwarding that bit alone switches firmware
+            // out of the native tactile/audio mode on every media report.
+            destination[destinationOffset] &= 0xFD;
+            if (source[sourceOffset + 2] != 0 ||
+                source[sourceOffset + 3] != 0)
+            {
+                destination[destinationOffset] |= 0x02;
+            }
+            // PadSense keeps mute LED and power-save/mute state in its fixed
+            // media snapshot. Microphone transitions travel through the
+            // ordered 0x32 control report instead of mutating each 0x36.
+            Array.Copy(source, sourceOffset + 10, destination,
+                destinationOffset + 10, 27);     // triggers and effect power
+            Array.Copy(source, sourceOffset + 43, destination,
+                destinationOffset + 43, 4);      // player LEDs and lightbar
         }
 
         private bool BluetoothAudioPacerOwnsTransport()
         {
             lock (bluetoothAudioPacerLock)
             {
-                // A faulted or stopping helper still owns the duplicated HID
+                // A faulted or stopping helper still owns its dedicated HID
                 // handle until its process/writer retirement barrier completes.
                 // Test the owner reference, not IsRunning.
                 return PacerReferenceRetainsBluetoothTransportOwnership(
@@ -3778,11 +3731,19 @@ namespace DS4Windows.InputDevices
                     BluetoothAudioPacerOwnsTransport();
                 bool speakerClockActive =
                     IsBluetoothSpeakerClockActive();
+                if (!pacerOwnedTransport)
+                {
+                    LastBluetoothHapticsWriteStatus =
+                        $"Deferred {reportDescription}: unified Bluetooth helper is unavailable.";
+                    RequestUnifiedBluetoothOutputTransportRecovery();
+                    return false;
+                }
+
                 waitForCompletion =
                     RequiresCompletionAwareBluetoothControlWrite(
                         waitForCompletion, speakerClockActive,
                         pacerOwnedTransport);
-                bool commitThroughPacer = pacerOwnedTransport &&
+                bool commitThroughPacer =
                     (waitForCompletion || !speakerClockActive);
 
                 byte[] combined = bluetoothCombinedSpeakerWorkingReport;
@@ -3830,26 +3791,19 @@ namespace DS4Windows.InputDevices
                 // A control-only report participates in Sony's shared output
                 // report sequence but carries no media frame. DS5Dongle leaves
                 // the audio packet counter untouched on this path.
+                byte reportSequenceBefore;
+                byte packetSequenceBefore;
+                bool sequenceInitializedBefore;
+                lock (bluetoothCombinedSpeakerReportLock)
+                {
+                    reportSequenceBefore = bluetoothCombinedSpeakerReportSequence;
+                    packetSequenceBefore = bluetoothCombinedSpeakerPacketSequence;
+                    sequenceInitializedBefore =
+                        bluetoothCombinedSpeakerSequenceInitialized;
+                }
                 ApplyNextBluetoothCombinedSequence(combined,
                     advancesMediaPacketSequence: false);
                 ApplyBluetoothCombinedCrc(combined);
-
-                if (waitForCompletion && !commitThroughPacer)
-                {
-                    // A completion-aware direct control write is also a
-                    // transport handoff when no reusable helper owns HID.
-                    // Retire the in-process writer too: TryWriteAndWait waits
-                    // for its own IRP, but older slots could otherwise complete
-                    // after it and restore stale microphone state.
-                    StopBluetoothAudioPacerLocked();
-                    if (!DisposeBluetoothRealtimeWriter(
-                        BluetoothWriterOwnershipHandoffTimeoutMilliseconds))
-                    {
-                        LastBluetoothHapticsWriteStatus =
-                            $"Could not commit {reportDescription}: prior realtime HID ownership is still retiring.";
-                        return false;
-                    }
-                }
 
                 bool written;
                 if (commitThroughPacer)
@@ -3858,48 +3812,30 @@ namespace DS4Windows.InputDevices
                         PersistentBluetoothHapticsExpiryQpc : 0;
                     written = TryCommitBluetoothControlThroughAudioPacer(
                         combined, hapticsExpiryQpc, waitForCompletion,
-                        out bool pacerStillOwnsTransport);
-                    if (!written && waitForCompletion &&
-                        pacerStillOwnsTransport)
-                    {
-                        // A timed-out/faulted helper must cross its full process
-                        // ownership barrier before the direct completion-aware
-                        // fallback may touch this HID handle.
-                        StopBluetoothAudioPacerLocked();
-                    }
-
-                    if (!written && waitForCompletion)
-                    {
-                        if (!DisposeBluetoothRealtimeWriter(
-                            BluetoothWriterOwnershipHandoffTimeoutMilliseconds))
-                        {
-                            LastBluetoothHapticsWriteStatus =
-                                $"Could not commit {reportDescription}: failed isolated writer ownership did not retire.";
-                            return false;
-                        }
-
-                        written = TrySubmitBluetoothCombinedReport(combined,
-                            reportDescription, waitForCompletion: true);
-                        commitThroughPacer = false;
-                    }
-                    else if (!written && !pacerStillOwnsTransport)
-                    {
-                        // TryCommit retired a faulted helper through the full
-                        // process-exit barrier. Ordinary idle state can now be
-                        // accepted by a fresh in-process writer without ever
-                        // overlapping the old duplicated HID owner.
-                        written = TrySubmitBluetoothCombinedReport(combined,
-                            reportDescription, waitForCompletion: false);
-                        commitThroughPacer = false;
-                    }
+                        out _);
                 }
                 else
                 {
-                    written = TrySubmitBluetoothCombinedReport(combined,
-                        reportDescription, waitForCompletion);
+                    long hapticsExpiryQpc = includeHaptics ?
+                        PersistentBluetoothHapticsExpiryQpc : 0;
+                    written = TryUpdateBluetoothAudioPacerTemplate(combined,
+                        hapticsExpiryQpc, out bool helperOwnsTransport) &&
+                        helperOwnsTransport;
                 }
                 if (!written)
                 {
+                    lock (bluetoothCombinedSpeakerReportLock)
+                    {
+                        bluetoothCombinedSpeakerReportSequence =
+                            reportSequenceBefore;
+                        bluetoothCombinedSpeakerPacketSequence =
+                            packetSequenceBefore;
+                        bluetoothCombinedSpeakerSequenceInitialized =
+                            sequenceInitializedBefore;
+                    }
+                    LastBluetoothHapticsWriteStatus =
+                        $"Deferred {reportDescription}: unified Bluetooth helper rejected the update.";
+                    RequestUnifiedBluetoothOutputTransportRecovery();
                     return false;
                 }
 
@@ -3910,20 +3846,14 @@ namespace DS4Windows.InputDevices
 
                 if (waitForCompletion)
                 {
-                    // Both completion-aware paths now retire the exact IRP:
-                    // directly in this process or through the helper's
-                    // speaker-free control-report lane.
+                    // The helper acknowledged the exact ordered control IRP.
                     Interlocked.Exchange(
                         ref bluetoothMicrophoneControlUpdatePending, 0);
                 }
                 LastBluetoothHapticsWriteStatus =
-                    commitThroughPacer ?
-                        waitForCompletion ?
-                            $"Isolated combined Bluetooth {reportDescription} write completed." :
-                            $"Queued combined Bluetooth {reportDescription} on the isolated control lane." :
                     waitForCompletion ?
-                        $"Direct combined Bluetooth {reportDescription} write completed." :
-                        $"Combined Bluetooth {reportDescription} request accepted.";
+                        $"Unified Bluetooth {reportDescription} write completed." :
+                        $"Queued unified Bluetooth {reportDescription}.";
                 return true;
             }
         }
@@ -3983,7 +3913,6 @@ namespace DS4Windows.InputDevices
                 GetBluetoothCombinedSpeakerPacketType(headsetOnlyAudio);
             combined[BluetoothCombinedSpeakerOffset + 1] =
                 BluetoothCombinedSpeakerFrameLength;
-            SanitizeBluetoothSpeakerAudioSnapshot(combined);
             ApplyBluetoothSpeakerVolumeAndRoutingCore(combined, speakerVolume,
                 headsetOnlyAudio, headphoneVolume);
             ApplyBluetoothMicrophoneStreamingRequest(combined);
@@ -4006,8 +3935,7 @@ namespace DS4Windows.InputDevices
                 hapticsExpiryQpc, out bool pacerOwnsTransport);
             if (!pacerOwnsTransport)
             {
-                written = TrySubmitBluetoothCombinedReport(combined,
-                    "speaker-clocked audio");
+                RequestUnifiedBluetoothOutputTransportRecovery();
             }
 
             if (!written)
@@ -4027,6 +3955,7 @@ namespace DS4Windows.InputDevices
                         sequenceInitializedBefore;
                 }
                 Interlocked.Increment(ref bluetoothCombinedSpeakerWriteFailures);
+                RequestUnifiedBluetoothOutputTransportRecovery();
                 return false;
             }
 
@@ -4047,50 +3976,6 @@ namespace DS4Windows.InputDevices
             }
 
             return true;
-        }
-
-        private bool TrySubmitBluetoothCombinedReport(byte[] combined,
-            string reportDescription, bool waitForCompletion = false)
-        {
-            if (!waitForCompletion)
-            {
-                long hapticsExpiryQpc = GetBluetoothHapticsExpiryQpc();
-                bool templateUpdated = TryUpdateBluetoothAudioPacerTemplate(
-                    combined, hapticsExpiryQpc,
-                    out bool pacerOwnsTransport);
-                if (pacerOwnsTransport)
-                {
-                    if (templateUpdated)
-                    {
-                        LastBluetoothHapticsWriteStatus =
-                            $"Queued {reportDescription} state for the isolated Bluetooth audio clock.";
-                    }
-
-                    return templateUpdated;
-                }
-            }
-
-            bool written;
-            try
-            {
-                written = TryWriteBluetoothCombinedSpeakerReport(combined,
-                    out _, waitForCompletion);
-            }
-            catch (Exception ex)
-            {
-                written = false;
-                LastBluetoothHapticsWriteStatus =
-                    $"Combined Bluetooth {reportDescription} write threw {ex.GetType().Name}: {ex.Message}";
-            }
-
-            if (!written && string.IsNullOrWhiteSpace(
-                    LastBluetoothHapticsWriteStatus))
-            {
-                LastBluetoothHapticsWriteStatus =
-                    $"Combined Bluetooth {reportDescription} write was rejected.";
-            }
-
-            return written;
         }
 
         private static void ApplyBluetoothCombinedCrc(byte[] combined)
@@ -4157,20 +4042,24 @@ namespace DS4Windows.InputDevices
                         latestBluetoothCombinedSpeakerReport, enabled);
                 }
 
-                if (enableSpeakerOutput && IsBluetoothSpeakerClockActive())
+                // Re-evaluate ownership under the transport lock. The speaker
+                // producer can claim the clock after the prewarm check above;
+                // in that race a completion-aware control write would drain
+                // active audio IRPs and create an audible mic-toggle gap.
+                if (ShouldPublishMicrophoneStateThroughSpeakerClock(
+                    enableSpeakerOutput, IsBluetoothSpeakerClockActive()))
                 {
-                    // Recheck ownership only after entering the transport lock.
-                    // The speaker can claim the clock while prewarm is running;
-                    // publishing a standalone control in that race would drain
-                    // queued audio and force an audible eight-frame re-prime.
-                    bool statusQueued;
-                    lock (bluetoothAudioPacerLock)
+                    // Enqueue Sony's native 0x32 transition and the matching
+                    // live media template as one helper command group. The
+                    // steady speaker/haptics carrier changes mode only at that
+                    // accepted physical boundary.
+                    bool published =
+                        QueueBluetoothAudioPacerMicrophoneTransitionFromCache(
+                            enabled);
+                    if (!published)
                     {
-                        statusQueued = bluetoothAudioPacer?.
-                            UpdateMicrophoneStatus(enabled) == true;
+                        RequestUnifiedBluetoothOutputTransportRecovery();
                     }
-                    bool published = statusQueued &&
-                        RefreshBluetoothAudioPacerTemplateFromCache();
                     LastBluetoothMicrophoneWriteStatus = published ?
                         (enabled ?
                             "Microphone enable is pending physical commit on the combined speaker stream." :
@@ -4180,7 +4069,7 @@ namespace DS4Windows.InputDevices
                 }
 
                 bool written = TryWriteCachedBluetoothCombinedControlReport(
-                    includeNativeHaptics: false,
+                    includeNativeHaptics: true,
                     reportDescription: enabled ?
                         "microphone enable" : "microphone disable",
                     waitForCompletion: true);
@@ -4188,6 +4077,12 @@ namespace DS4Windows.InputDevices
                     LastBluetoothHapticsWriteStatus;
                 return written;
             }
+        }
+
+        internal static bool ShouldPublishMicrophoneStateThroughSpeakerClock(
+            bool speakerOutputEnabled, bool speakerClockActive)
+        {
+            return speakerOutputEnabled && speakerClockActive;
         }
 
         private void ApplyBluetoothMicrophoneStreamingRequest(byte[] report)
@@ -4272,20 +4167,31 @@ namespace DS4Windows.InputDevices
             byte[] combined, byte profileVolume, bool headsetOnlyAudio,
             byte headphoneVolume)
         {
-            // Speaker loudness is gated by both validity flags. The effective
-            // firmware range used by the PS5 is 0x3D-0x64; values above it do
-            // not add volume, while zero is the explicit mute value.
-            combined[BluetoothCombinedStateFlag0Offset] |=
-                DualSenseOutputFlag0AudioControlEnable;
+            // PadSense keeps the complete native audio snapshot armed on every
+            // 0x36, independent of the header's FE/FF microphone mode. Keep
+            // both volume fields valid and preserve the microphone volume and
+            // audio-clock fields instead of alternating state shapes.
+            combined[BluetoothCombinedStateFlag0Offset] |= (byte)(
+                DualSenseOutputFlag0HeadphoneVolumeEnable |
+                DualSenseOutputFlag0SpeakerVolumeEnable |
+                DualSenseOutputFlag0MicrophoneVolumeEnable |
+                DualSenseOutputFlag0AudioControlEnable);
+            combined[BluetoothCombinedStateFlag1Offset] |= (byte)(
+                DualSenseOutputFlag1MicrophoneMuteLedControlEnable |
+                DualSenseOutputFlag1PowerSaveControlEnable |
+                DualSenseOutputFlag1AudioControl2Enable);
+            byte mappedSpeakerVolume = MapDualSenseSpeakerVolume(
+                profileVolume);
             combined[BluetoothCombinedStateHeadphoneVolumeOffset] =
-                MapDualSenseHeadphoneVolume(headphoneVolume);
+                headsetOnlyAudio ?
+                    MapDualSenseHeadphoneVolume(headphoneVolume) :
+                    mappedSpeakerVolume;
             combined[BluetoothCombinedStateSpeakerVolumeOffset] =
-                headsetOnlyAudio ? (byte)0 :
-                    MapDualSenseSpeakerVolume(profileVolume);
+                headsetOnlyAudio ? (byte)0 : mappedSpeakerVolume;
+            combined[BluetoothCombinedStateMicrophoneVolumeOffset] =
+                DualSenseMicrophoneVolumeMaximum;
             if (headsetOnlyAudio)
             {
-                combined[BluetoothCombinedStateFlag0Offset] &=
-                    unchecked((byte)~DualSenseOutputFlag0SpeakerVolumeEnable);
                 // A 0x96 headset frame is the same fixed-cadence audio lane as
                 // 0x93. Keep a valid gain snapshot just as the DS5 Bridge
                 // combined transport does; clearing it can leave the AUX DAC
@@ -4299,10 +4205,6 @@ namespace DS4Windows.InputDevices
             }
             else
             {
-                combined[BluetoothCombinedStateFlag0Offset] |=
-                    DualSenseOutputFlag0SpeakerVolumeEnable;
-                combined[BluetoothCombinedStateFlag1Offset] |=
-                    DualSenseOutputFlag1AudioControl2Enable;
                 combined[BluetoothCombinedStateAudioControlOffset] =
                     DualSenseAudioControlOutputSpeaker;
                 combined[BluetoothCombinedStateAudioControl2Offset] =
@@ -4334,178 +4236,6 @@ namespace DS4Windows.InputDevices
                 MapDualSenseMicrophoneVolume(profileVolume);
         }
 
-        private static void SanitizeBluetoothSpeakerAudioSnapshot(
-            byte[] combined)
-        {
-            // A 0x36 speaker report is an audio snapshot, not a microphone
-            // control transaction. Replaying the virtual controller's mic
-            // volume, mute-LED, internal-mic, and DSP bits on every 10.667 ms
-            // frame leaves the physical speaker on a different firmware path
-            // than both PadForge and DS5 Bridge. One control report still
-            // applies microphone settings; subsequent speaker snapshots omit
-            // their validity bits so the controller retains that state.
-            combined[BluetoothCombinedStateFlag0Offset] &=
-                unchecked((byte)~DualSenseOutputFlag0MicrophoneVolumeEnable);
-            combined[BluetoothCombinedStateFlag1Offset] &=
-                unchecked((byte)~
-                    DualSenseOutputFlag1MicrophoneMuteLedControlEnable);
-            combined[BluetoothCombinedStateMicrophoneVolumeOffset] = 0;
-            combined[BluetoothCombinedStateMuteLedOffset] = 0;
-
-            byte powerSaveControl = (byte)(
-                combined[BluetoothCombinedStatePowerSaveControlOffset] &
-                ~DualSensePowerSaveControlMicrophoneMute);
-            combined[BluetoothCombinedStatePowerSaveControlOffset] =
-                powerSaveControl;
-            if (powerSaveControl == 0)
-            {
-                combined[BluetoothCombinedStateFlag1Offset] &=
-                    unchecked((byte)~
-                        DualSenseOutputFlag1PowerSaveControlEnable);
-            }
-        }
-
-        private bool TryWriteBluetoothCombinedSpeakerReport(byte[] report,
-            out bool realtimeWriterActive, bool waitForCompletion = false)
-        {
-            realtimeWriterActive = false;
-            if (Volatile.Read(ref bluetoothAudioLifecycleTransitioning) != 0)
-            {
-                LastBluetoothHapticsWriteStatus =
-                    "Bluetooth audio ownership is transitioning; direct HID creation is deferred.";
-                return false;
-            }
-
-            lock (bluetoothRealtimeWriterLock)
-            {
-                if (bluetoothRealtimeWriter == null)
-                {
-                    if (!TryCompleteRetiringBluetoothRealtimeWriterLocked(0))
-                    {
-                        LastBluetoothHapticsWriteStatus =
-                            "Realtime combined writer retirement is still pending; refusing competing HID ownership.";
-                        return false;
-                    }
-
-                    int error = 0;
-                    if (hDevice?.SafeReadHandle == null ||
-                        !DualSenseBluetoothRealtimeWriter.TryCreate(hDevice.SafeReadHandle,
-                            BluetoothCombinedOutputReportLength,
-                            out bluetoothRealtimeWriter, out error,
-                            slotCount: 8))
-                    {
-                        bluetoothRealtimeWriter = null;
-                        LastBluetoothHapticsWriteStatus =
-                            $"Realtime combined writer unavailable. LastWin32Error={error}.";
-                        return false;
-                    }
-                }
-
-                realtimeWriterActive = true;
-                bool transportFault;
-                bool accepted;
-                if (waitForCompletion)
-                {
-                    accepted = bluetoothRealtimeWriter.TryWriteAndWait(report,
-                        BluetoothFinalControlWriteTimeoutMilliseconds,
-                        out transportFault);
-                }
-                else
-                {
-                    accepted = bluetoothRealtimeWriter.TryWrite(report,
-                        out transportFault);
-                }
-
-                if (accepted)
-                {
-                    return true;
-                }
-
-                Interlocked.Increment(ref bluetoothRealtimeWriterDroppedReports);
-                if (transportFault)
-                {
-                    BeginBluetoothRealtimeWriterRetirementLocked();
-                    realtimeWriterActive = false;
-                    LastBluetoothHapticsWriteStatus =
-                        "Realtime combined writer faulted; the report was dropped and replacement is blocked until HID ownership is released.";
-                }
-                else
-                {
-                    LastBluetoothHapticsWriteStatus =
-                        "Realtime combined writer saturated; dropped one stale frame.";
-                }
-
-                return false;
-            }
-        }
-
-        public bool PlayBluetoothHapticsTestTone(int durationMs = 900, int frequencyHz = 85, byte amplitude = 72)
-        {
-            if (conType != ConnectionType.BT)
-            {
-                LastBluetoothHapticsWriteStatus = $"Rejected: controller connection type is {conType}, not Bluetooth.";
-                return false;
-            }
-
-            durationMs = Math.Max(100, Math.Min(durationMs, 3000));
-            frequencyHz = Math.Max(20, Math.Min(frequencyHz, 900));
-            amplitude = (byte)Math.Min(amplitude, (byte)120);
-
-            const int sampleRate = 3000;
-            const int sampleBytes = 64;
-            const int framesPerPacket = sampleBytes / 2;
-            int packetCount = Math.Max(1, (durationMs * sampleRate) / (1000 * framesPerPacket));
-
-            for (int packet = 0; packet < packetCount; packet++)
-            {
-                byte[] sample = new byte[sampleBytes];
-                for (int frame = 0; frame < framesPerPacket; frame++)
-                {
-                    int sampleIndex = packet * framesPerPacket + frame;
-                    double phase = 2.0 * Math.PI * frequencyHz * sampleIndex / sampleRate;
-                    sbyte value = (sbyte)Math.Round(Math.Sin(phase) * amplitude);
-                    sample[frame * 2] = unchecked((byte)value);
-                    sample[(frame * 2) + 1] = unchecked((byte)value);
-                }
-
-                byte[] report = BuildBluetoothHapticsOutputReport((byte)packet, (byte)packet, sample);
-                if (!WriteBluetoothHapticsOutputReport(report, 0, report.Length, true))
-                {
-                    return false;
-                }
-
-                Thread.Sleep(11);
-            }
-
-            return true;
-        }
-
-        private static byte[] BuildBluetoothHapticsOutputReport(byte sequence, byte intervalIndex, byte[] sample)
-        {
-            const int reportSize = 141;
-            const int sampleSize = 64;
-            byte[] report = new byte[reportSize];
-            report[0] = 0x32;
-            report[1] = (byte)((sequence & 0x0F) << 4);
-
-            report[2] = 0x91;
-            report[3] = 0x07;
-            report[4] = 0xFE;
-            report[9] = 0xFF;
-            report[10] = intervalIndex;
-
-            report[11] = 0x92;
-            report[12] = sampleSize;
-            Array.Copy(sample, 0, report, 13, sampleSize);
-
-            uint crc = DualSenseBluetoothCrc32(report, reportSize - 4);
-            report[reportSize - 4] = (byte)crc;
-            report[reportSize - 3] = (byte)(crc >> 8);
-            report[reportSize - 2] = (byte)(crc >> 16);
-            report[reportSize - 1] = (byte)(crc >> 24);
-            return report;
-        }
-
         private static uint DualSenseBluetoothCrc32(byte[] data, int length)
         {
             uint crc = ~0xEADA2D49u;
@@ -4519,11 +4249,6 @@ namespace DS4Windows.InputDevices
             }
 
             return ~crc;
-        }
-
-        private void Detach()
-        {
-            SendEmptyOutputReport();
         }
 
         private void CalculateDeviceSlotMask()

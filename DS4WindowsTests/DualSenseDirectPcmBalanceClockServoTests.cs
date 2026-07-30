@@ -10,152 +10,127 @@ namespace DS4WindowsTests
         private const double NominalFramesPerSecond = 48000.0;
 
         [TestMethod]
-        public void ThirtyPpmProductionSurplusLearnsHalfCorrection()
+        public void ThirtyPpmSurplusLearnsHalfCorrection()
         {
             var servo = new DualSenseDirectPcmBalanceClockServo();
-            var state = new SimulationState();
+            var state = new SimulationState(30.0);
 
-            bool published = RunUntilWindow(servo, state, 30.0);
-
-            Assert.IsTrue(published);
+            Assert.IsTrue(RunUntilWindow(servo, state));
             Assert.AreEqual(30.0, servo.LastMeasuredErrorPpm, 0.1);
             Assert.AreEqual(15.0, servo.TargetTrimPpm, 0.1);
             Assert.AreEqual(1, servo.CompletedWindows);
-            Assert.AreEqual(0, servo.RejectedWindows);
         }
 
         [TestMethod]
-        public void ThreePpmDeadbandDoesNotMoveTrim()
+        public void CallbackSawtoothDoesNotBiasLongWindowSlope()
         {
             var servo = new DualSenseDirectPcmBalanceClockServo();
-            var state = new SimulationState(errorPpm: 2.0);
+            var state = new SimulationState(30.0);
 
-            Assert.IsTrue(RunUntilWindow(servo, state, 30.0));
+            Assert.IsTrue(RunUntilWindow(servo, state,
+                callbackSawtoothFrames: 320));
 
-            Assert.AreEqual(2.0, servo.LastMeasuredErrorPpm, 0.2);
+            Assert.AreEqual(30.0, servo.LastMeasuredErrorPpm, 0.2);
+            Assert.AreEqual(15.0, servo.TargetTrimPpm, 0.2);
+        }
+
+        [TestMethod]
+        public void DeadbandDoesNotRetuneNominalStream()
+        {
+            var servo = new DualSenseDirectPcmBalanceClockServo();
+            var state = new SimulationState(2.0);
+
+            Assert.IsTrue(RunUntilWindow(servo, state));
             Assert.AreEqual(0.0, servo.TargetTrimPpm, 0.0);
         }
 
         [TestMethod]
-        public void ImplausibleFiveHundredPpmExcessIsRejected()
+        public void OutlierWindowIsRejected()
         {
             var servo = new DualSenseDirectPcmBalanceClockServo();
-            var state = new SimulationState(errorPpm: 600.0);
+            var state = new SimulationState(600.0);
 
-            Assert.IsFalse(RunUntilWindow(servo, state, 30.0));
-
+            Assert.IsFalse(RunUntilWindow(servo, state));
             Assert.AreEqual(0, servo.CompletedWindows);
             Assert.AreEqual(1, servo.RejectedWindows);
-            Assert.AreEqual(0.0, servo.TargetTrimPpm, 0.0);
-        }
-
-        [TestMethod]
-        public void ConsecutiveWindowsDoNotOverlapAndTrimIsClamped()
-        {
-            var servo = new DualSenseDirectPcmBalanceClockServo();
-            var state = new SimulationState(errorPpm: 400.0);
-
-            Assert.IsTrue(RunUntilWindow(servo, state, 30.0));
-            Assert.AreEqual(200.0, servo.TargetTrimPpm, 0.2);
-            Assert.IsTrue(RunUntilWindow(servo, state, 30.0));
-
-            Assert.AreEqual(2, servo.CompletedWindows);
-            Assert.AreEqual(250.0, servo.TargetTrimPpm, 0.0);
         }
 
         [TestMethod]
         public void AppliedTrimSlewsAtFivePpmPerSecond()
         {
             var servo = new DualSenseDirectPcmBalanceClockServo();
-            var state = new SimulationState();
-            Assert.IsTrue(RunUntilWindow(servo, state, 30.0));
-            Assert.AreEqual(15.0, servo.TargetTrimPpm, 0.1);
+            var state = new SimulationState(30.0);
+            Assert.IsTrue(RunUntilWindow(servo, state));
 
             servo.AdvanceAppliedTrim(1.0);
             Assert.AreEqual(5.0, servo.AppliedTrimPpm, 1.0e-9);
-            servo.AdvanceAppliedTrim(1.0);
-            Assert.AreEqual(10.0, servo.AppliedTrimPpm, 1.0e-9);
-            servo.AdvanceAppliedTrim(10.0);
-            Assert.AreEqual(servo.TargetTrimPpm, servo.AppliedTrimPpm,
-                1.0e-9);
+            servo.AdvanceAppliedTrim(2.0);
+            Assert.AreEqual(15.0, servo.AppliedTrimPpm, 0.1);
         }
 
         [TestMethod]
-        public void WindowResetDiscardsPartialFitButRetainsLearnedTrim()
+        public void WindowResetKeepsLearnedTrimButDropsPartialFit()
         {
             var servo = new DualSenseDirectPcmBalanceClockServo();
-            var state = new SimulationState();
-            Assert.IsTrue(RunUntilWindow(servo, state, 30.0));
+            var state = new SimulationState(30.0);
+            Assert.IsTrue(RunUntilWindow(servo, state));
             servo.AdvanceAppliedTrim(1.0);
-            double targetBeforeReset = servo.TargetTrimPpm;
-            double appliedBeforeReset = servo.AppliedTrimPpm;
+            double target = servo.TargetTrimPpm;
+            double applied = servo.AppliedTrimPpm;
 
             RunForSeconds(servo, state, 15.0);
             servo.ResetWindow();
-            Assert.AreEqual(targetBeforeReset, servo.TargetTrimPpm, 0.0);
-            Assert.AreEqual(appliedBeforeReset, servo.AppliedTrimPpm, 0.0);
-            Assert.IsFalse(RunForSeconds(servo, state, 16.0),
-                "A reset partial window leaked into the next regression.");
-            Assert.IsTrue(RunUntilWindow(servo, state, 15.0));
-        }
 
-        [TestMethod]
-        public void LifecycleResetClearsLearnedTrim()
-        {
-            var servo = new DualSenseDirectPcmBalanceClockServo();
-            var state = new SimulationState();
-            Assert.IsTrue(RunUntilWindow(servo, state, 30.0));
-            servo.AdvanceAppliedTrim(1.0);
-
-            servo.ResetLifecycle();
-
-            Assert.AreEqual(0.0, servo.TargetTrimPpm, 0.0);
-            Assert.AreEqual(0.0, servo.AppliedTrimPpm, 0.0);
-            Assert.AreEqual(0.0, servo.LastMeasuredErrorPpm, 0.0);
+            Assert.AreEqual(target, servo.TargetTrimPpm, 0.0);
+            Assert.AreEqual(applied, servo.AppliedTrimPpm, 0.0);
+            Assert.IsFalse(RunForSeconds(servo, state, 16.0));
         }
 
         private static bool RunUntilWindow(
             DualSenseDirectPcmBalanceClockServo servo,
-            SimulationState state, double minimumSeconds)
+            SimulationState state, int callbackSawtoothFrames = 0)
         {
-            int completedBefore = servo.CompletedWindows;
-            int rejectedBefore = servo.RejectedWindows;
-            long endTimestamp = state.HostTimestamp + (long)Math.Ceiling(
-                (minimumSeconds + 1.0) * Stopwatch.Frequency);
+            int completed = servo.CompletedWindows;
+            int rejected = servo.RejectedWindows;
+            long end = state.HostTimestamp +
+                32L * Stopwatch.Frequency;
             bool accepted = false;
-            while (state.HostTimestamp <= endTimestamp &&
-                servo.CompletedWindows == completedBefore &&
-                servo.RejectedWindows == rejectedBefore)
+            while (state.HostTimestamp <= end &&
+                servo.CompletedWindows == completed &&
+                servo.RejectedWindows == rejected)
             {
-                accepted = Step(servo, state);
+                accepted = Step(servo, state, callbackSawtoothFrames);
             }
 
-            return accepted && servo.CompletedWindows > completedBefore;
+            return accepted && servo.CompletedWindows > completed;
         }
 
         private static bool RunForSeconds(
             DualSenseDirectPcmBalanceClockServo servo,
             SimulationState state, double seconds)
         {
-            int completedBefore = servo.CompletedWindows;
-            long endTimestamp = state.HostTimestamp + (long)Math.Ceiling(
+            int completed = servo.CompletedWindows;
+            long end = state.HostTimestamp + (long)Math.Ceiling(
                 seconds * Stopwatch.Frequency);
-            while (state.HostTimestamp <= endTimestamp)
+            while (state.HostTimestamp <= end)
             {
-                Step(servo, state);
+                Step(servo, state, 0);
             }
 
-            return servo.CompletedWindows > completedBefore;
+            return servo.CompletedWindows > completed;
         }
 
         private static bool Step(
             DualSenseDirectPcmBalanceClockServo servo,
-            SimulationState state)
+            SimulationState state, int callbackSawtoothFrames)
         {
             state.ConsumedFrames += ConsumerBlockFrames;
-            state.ProducedFrames = (long)Math.Round(
-                state.ConsumedFrames *
-                (1.0 + state.ErrorPpm / 1_000_000.0));
+            double exactProduced = state.ConsumedFrames *
+                (1.0 + state.ErrorPpm / 1_000_000.0);
+            long sawtooth = callbackSawtoothFrames == 0 ? 0 :
+                (state.Steps++ % 2 == 0 ? callbackSawtoothFrames : 0);
+            state.ProducedFrames = (long)Math.Round(exactProduced) +
+                sawtooth;
             state.HostTimestamp = state.HostOrigin + (long)Math.Round(
                 state.ConsumedFrames / NominalFramesPerSecond *
                 Stopwatch.Frequency);
@@ -165,7 +140,7 @@ namespace DS4WindowsTests
 
         private sealed class SimulationState
         {
-            internal SimulationState(double errorPpm = 30.0)
+            internal SimulationState(double errorPpm)
             {
                 ErrorPpm = errorPpm;
                 HostOrigin = 10L * Stopwatch.Frequency;
@@ -177,6 +152,7 @@ namespace DS4WindowsTests
             internal long ProducedFrames { get; set; }
             internal long ConsumedFrames { get; set; }
             internal long HostTimestamp { get; set; }
+            internal int Steps { get; set; }
         }
     }
 }

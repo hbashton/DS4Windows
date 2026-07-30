@@ -6,6 +6,23 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 $script:ExitCode = 0
 $script:RebootRecommended = $false
+$script:UsbipRuntimeReady = $false
+$script:UsbipRuntimeProbeState = "not-run"
+$script:Ds4WindowsRestartPath = $null
+$script:RequiredUsbipVersion = [Version]"0.9.7.8"
+$script:UsbipInstallerUrl =
+    "https://github.com/vadimgrn/usbip-win2/releases/download/v.0.9.7.8/USBip-0.9.7.8-x64.exe"
+$script:UsbipInstallerSha256 =
+    "44451fe06f4186125c2a5ecd25b099c5560a61a60b1e56f5a0758e77a60afa44"
+$script:BundledUsbipInstallerPath = Join-Path $PSScriptRoot `
+    "USBip-0.9.7.8-x64.exe"
+$programFilesRoot = if ($env:ProgramW6432) {
+    $env:ProgramW6432
+}
+else {
+    $env:ProgramFiles
+}
+$script:CanonicalUsbipPath = Join-Path $programFilesRoot "USBip\usbip.exe"
 $script:InstallDir = Join-Path $env:LOCALAPPDATA "VIIPER"
 $script:LogPath = Join-Path $script:InstallDir "install.log"
 $script:TempDir = Join-Path ([IO.Path]::GetTempPath()) (
@@ -35,6 +52,17 @@ function Test-Administrator {
 }
 
 function Get-UsbipInstalledVersion {
+    # The official x64 installer owns this canonical executable. Its product
+    # version is the authoritative userspace ABI version; check it before
+    # driver metadata or historical uninstall records.
+    if (Test-Path -LiteralPath $script:CanonicalUsbipPath) {
+        try {
+            $versionText = (Get-Item -LiteralPath $script:CanonicalUsbipPath).VersionInfo.ProductVersion
+            return ConvertTo-VersionFromObject $versionText
+        }
+        catch { return $null }
+    }
+
     $driverPath = Join-Path $env:SystemRoot "System32\drivers\usbip2_ude.sys"
     if (Test-Path -LiteralPath $driverPath) {
         try {
@@ -65,6 +93,151 @@ function Get-UsbipInstalledVersion {
     }
 
     return $null
+}
+
+function Assert-FileSha256([string]$path, [string]$expectedHash) {
+    $actualHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+    if (-not [string]::Equals($actualHash, $expectedHash,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Downloaded usbip-win2 installer failed SHA256 verification. " +
+            "Expected $expectedHash; received $actualHash."
+    }
+
+    Write-SetupLog "Verified usbip-win2 installer SHA256: $actualHash" Green
+}
+
+function Test-UsbipRuntime([string]$usbipPath) {
+    if (-not (Test-Path -LiteralPath $usbipPath)) {
+        $script:UsbipRuntimeProbeState = "missing"
+        Write-SetupLog (
+            "usbip-win2 runtime is missing at its canonical path: $usbipPath"
+        ) Yellow
+        return $false
+    }
+
+    try {
+        # Windows PowerShell turns native stderr into ErrorRecord objects. Do
+        # not let the script-wide Stop policy hide the text we need to
+        # distinguish a pending-reboot ABI mismatch from a broken install.
+        $previousErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $probeOutput = @(& $usbipPath port 2>&1)
+        }
+        finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+        $probeExitCode = $LASTEXITCODE
+        $probeText = ($probeOutput | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
+        $abiMismatch = $probeText -match "(?i)ABI\s+mismatch|unexpected\s+size.*(?:input|structure)"
+
+        if ($abiMismatch) {
+            $script:UsbipRuntimeProbeState = "abi-mismatch"
+            Write-SetupLog (
+                "usbip-win2 0.9.7.8 is installed, but Windows still has a " +
+                "different driver ABI loaded. A reboot is required."
+            ) Yellow
+            return $false
+        }
+
+        if ($probeExitCode -ne 0) {
+            $script:UsbipRuntimeProbeState = "failed"
+            $summary = if ($probeText) { $probeText.Trim() }
+                else { "no diagnostic output" }
+            Write-SetupLog (
+                "usbip-win2 runtime probe failed (exit=$probeExitCode): " +
+                $summary
+            ) Yellow
+            return $false
+        }
+
+        $script:UsbipRuntimeProbeState = "ready"
+        Write-SetupLog "usbip-win2 runtime ABI probe succeeded." Green
+        return $true
+    }
+    catch {
+        $script:UsbipRuntimeProbeState = "failed"
+        Write-SetupLog (
+            "usbip-win2 runtime probe could not run: $($_.Exception.Message)"
+        ) Yellow
+        return $false
+    }
+}
+
+function Get-RunningPadSenseProcesses {
+    try {
+        return @(Get-CimInstance Win32_Process -ErrorAction Stop |
+            Where-Object { $_.Name -match "^PadSense.*\.exe$" })
+    }
+    catch {
+        return @(Get-Process -ErrorAction SilentlyContinue |
+            Where-Object { $_.ProcessName -match "^PadSense" } |
+            ForEach-Object {
+                [pscustomobject]@{
+                    Name = "$($_.ProcessName).exe"
+                    ProcessId = $_.Id
+                }
+            })
+    }
+}
+
+function Assert-PadSenseNotRunning([string]$operation) {
+    $processes = @(Get-RunningPadSenseProcesses)
+    if ($processes.Count -eq 0) { return }
+
+    $owners = ($processes | ForEach-Object {
+        "$($_.Name) PID=$($_.ProcessId)"
+    }) -join ", "
+    $message = "PadSense is running ($owners) and may own active USBIP " +
+        "imports. Close PadSense completely, including its tray/background " +
+        "process, then run Install / Repair again. Setup did not begin the " +
+        "$operation."
+    Write-SetupLog $message Red
+    throw $message
+}
+
+function Stop-Ds4WindowsProcesses([string]$operation) {
+    $processes = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -ieq "DS4Windows.exe" })
+    if ($processes.Count -eq 0) { return $true }
+
+    $restartPath = $processes |
+        Where-Object { $_.ExecutablePath -and
+            (Test-Path -LiteralPath $_.ExecutablePath) } |
+        Select-Object -First 1 -ExpandProperty ExecutablePath
+    if (-not $restartPath) {
+        $bundledPath = Join-Path (Split-Path -Parent $PSScriptRoot) "DS4Windows.exe"
+        if (Test-Path -LiteralPath $bundledPath) {
+            $restartPath = $bundledPath
+        }
+    }
+    $script:Ds4WindowsRestartPath = $restartPath
+
+    Write-SetupLog "Stopping DS4Windows output owners for $operation..." Yellow
+    foreach ($entry in $processes) {
+        try {
+            $process = Get-Process -Id $entry.ProcessId -ErrorAction Stop
+            [void]$process.CloseMainWindow()
+        }
+        catch { }
+    }
+    Start-Sleep -Milliseconds 1500
+    foreach ($entry in $processes) {
+        try {
+            Stop-Process -Id $entry.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+        catch { }
+    }
+    Start-Sleep -Milliseconds 750
+
+    $remaining = @(Get-Process -Name "DS4Windows" -ErrorAction SilentlyContinue)
+    if ($remaining.Count -eq 0) { return $true }
+
+    Write-SetupLog (
+        "DS4Windows could not be stopped safely for $operation. " +
+        "Close it manually and run Install / Repair again."
+    ) Red
+    return $false
 }
 
 function ConvertTo-VersionFromObject([object]$value) {
@@ -290,6 +463,27 @@ function Stop-ViiperProcesses([string]$operation) {
     return $false
 }
 
+function Invoke-ViiperInstallRegistration([string]$viiperPath) {
+    # viiper.exe install intentionally launches the long-running server before
+    # its short-lived registration process exits. Start-Process -Wait follows
+    # the whole descendant tree on Windows and therefore waits on that server
+    # forever. Wait on the registration PID itself and bound genuine hangs.
+    $registration = Start-Process -FilePath $viiperPath `
+        -ArgumentList "install" -WindowStyle Hidden -PassThru
+    if (-not $registration.WaitForExit(15000)) {
+        try {
+            & taskkill.exe /PID $registration.Id /T /F | Out-Null
+        }
+        catch { }
+        throw "VIIPER registration did not finish within 15 seconds. Its process tree was stopped safely; run Install / Repair again."
+    }
+
+    $registration.Refresh()
+    if ($registration.ExitCode -ne 0) {
+        throw "VIIPER registration failed with exit code $($registration.ExitCode)."
+    }
+}
+
 function Test-ViiperApi([int]$timeoutMilliseconds = 1000) {
     $client = $null
     try {
@@ -376,64 +570,24 @@ try {
     New-Item -ItemType Directory -Path $script:TempDir -Force | Out-Null
     Write-SetupLog ""
     Write-SetupLog "DS4Windows VIIPER virtual controller setup" Green
-    Write-SetupLog "Installing or repairing VIIPER and usbip-win2."
-
-    Write-Step "Checking usbip-win2"
-    $requiredUsbipVersion = [Version]"0.9.7.7"
-    try {
-        $usbipVersion = Get-UsbipInstalledVersion
-    }
-    catch {
-        Write-SetupLog "usbip-win2 version check failed: $($_.Exception.Message)" Yellow
-        $usbipVersion = $null
-    }
-    if ($usbipVersion -and $usbipVersion -ge $requiredUsbipVersion) {
-        Write-SetupLog "usbip-win2 is ready: $usbipVersion" Green
-    }
-    else {
-        $state = if ($usbipVersion) { "old ($usbipVersion)" } else { "missing" }
-        Write-SetupLog "usbip-win2 is $state; installing $requiredUsbipVersion." Yellow
-        $usbipUrl = "https://github.com/vadimgrn/usbip-win2/releases/download/v.0.9.7.7/USBip-0.9.7.7-x64.exe"
-        $usbipInstaller = Join-Path $script:TempDir "USBip-0.9.7.7-x64.exe"
-        Invoke-Download $usbipUrl $usbipInstaller
-        Write-SetupLog "Windows may briefly restart USB hub devices." Yellow
-        $installer = Start-Process -FilePath $usbipInstaller `
-            -ArgumentList "/S" -PassThru -Wait
-        if ($installer.ExitCode -notin @(0, 1641, 3010)) {
-            throw "usbip-win2 setup failed with exit code $($installer.ExitCode)."
-        }
-        if ($installer.ExitCode -in @(1641, 3010)) {
-            $script:RebootRecommended = $true
-        }
-        $usbipVersion = Get-UsbipInstalledVersion
-        if (-not $usbipVersion) {
-            $script:RebootRecommended = $true
-            Write-SetupLog "The driver will finish registering after a Windows restart." Yellow
-        }
-    }
+    Write-SetupLog "Installing VIIPER first, then checking usbip-win2."
 
     Write-Step "Installing VIIPER"
     $viiperPath = Join-Path $script:InstallDir "viiper.exe"
     $candidatePath = Join-Path $script:TempDir "viiper.exe"
     Expand-ViiperAsset (Get-ViiperAssetUrl) $candidatePath
+    if (-not (Stop-Ds4WindowsProcesses "VIIPER backend replacement")) {
+        throw "Unable to quiesce DS4Windows before replacing VIIPER."
+    }
     Install-ViiperAtomically $candidatePath $viiperPath
     Write-SetupLog "VIIPER installed to $viiperPath" Green
 
     Write-Step "Registering VIIPER"
-    $registrationSafeToRun = $true
     if (-not (Stop-ViiperProcesses "install registration")) {
-        $registrationSafeToRun = $false
+        throw "VIIPER registration could not proceed because a VIIPER process could not be closed automatically. Please close viiper.exe manually, then run Install / Repair again."
     }
 
-    $registration = Start-Process -FilePath $viiperPath `
-        -ArgumentList "install" -WindowStyle Hidden -PassThru -Wait
-    if ($registration.ExitCode -ne 0) {
-        if (-not $registrationSafeToRun) {
-            throw "VIIPER registration could not proceed because a VIIPER process could not be closed automatically. " +
-                  "Please close viiper.exe manually, then run Install / Repair again."
-        }
-        throw "VIIPER registration failed with exit code $($registration.ExitCode)."
-    }
+    Invoke-ViiperInstallRegistration $viiperPath
 
     $taskName = "RunVIIPER"
     if (Register-ViiperRunTask $viiperPath $taskName) {
@@ -443,28 +597,154 @@ try {
         Write-SetupLog "Could not create hidden logon task. Setup will continue; VIIPER can still be started by DS4Windows when needed." Yellow
     }
 
+    Write-Step "Checking usbip-win2"
+    $requiredUsbipVersion = $script:RequiredUsbipVersion
+    try {
+        $usbipVersion = Get-UsbipInstalledVersion
+    }
+    catch {
+        Write-SetupLog "usbip-win2 version check failed: $($_.Exception.Message)" Yellow
+        $usbipVersion = $null
+    }
+
+    $canonicalUsbipPresent = Test-Path -LiteralPath $script:CanonicalUsbipPath
+    $usbipVersionReady = $canonicalUsbipPresent -and $usbipVersion -and $usbipVersion -ge $requiredUsbipVersion
+    if ($usbipVersionReady) {
+        $script:UsbipRuntimeReady = Test-UsbipRuntime $script:CanonicalUsbipPath
+    }
+
+    if ($usbipVersionReady -and $script:UsbipRuntimeReady) {
+        Write-SetupLog (
+            "usbip-win2 is ready: $usbipVersion at " +
+            $script:CanonicalUsbipPath
+        ) Green
+    }
+    elseif ($usbipVersionReady -and
+            $script:UsbipRuntimeProbeState -eq "abi-mismatch") {
+        $script:RebootRecommended = $true
+        Write-SetupLog (
+            "The supported usbip-win2 $requiredUsbipVersion package is " +
+            "already installed. Skipping a redundant reinstall; restart " +
+            "Windows to load its matching driver."
+        ) Yellow
+    }
+    else {
+        $state = if (-not $canonicalUsbipPresent) {
+            "missing from the canonical Program Files location"
+        }
+        elseif (-not $usbipVersion) {
+            "present with an unreadable version"
+        }
+        elseif ($usbipVersion -lt $requiredUsbipVersion) {
+            "old ($usbipVersion)"
+        }
+        else {
+            "installed but its userspace/driver ABI probe failed"
+        }
+        Write-SetupLog (
+            "usbip-win2 is $state; installing or repairing " +
+            "$requiredUsbipVersion."
+        ) Yellow
+        Assert-PadSenseNotRunning "usbip-win2 driver transition"
+
+        $usbipInstaller = Join-Path $script:TempDir "USBip-0.9.7.8-x64.exe"
+        if (Test-Path -LiteralPath $script:BundledUsbipInstallerPath) {
+            Write-SetupLog (
+                "Using the bundled usbip-win2 0.9.7.8 installer."
+            ) Green
+            Assert-FileSha256 $script:BundledUsbipInstallerPath `
+                $script:UsbipInstallerSha256
+            Copy-Item -LiteralPath $script:BundledUsbipInstallerPath `
+                -Destination $usbipInstaller -Force
+        }
+        else {
+            Write-SetupLog (
+                "Bundled usbip-win2 installer is unavailable; using the " +
+                "verified upstream recovery download."
+            ) Yellow
+            Invoke-Download $script:UsbipInstallerUrl $usbipInstaller
+        }
+        Assert-FileSha256 $usbipInstaller $script:UsbipInstallerSha256
+
+        if (-not (Stop-Ds4WindowsProcesses "usbip-win2 driver upgrade")) {
+            throw "Unable to quiesce DS4Windows before the usbip-win2 driver upgrade."
+        }
+        if (-not (Stop-ViiperProcesses "usbip-win2 driver upgrade")) {
+            throw "Unable to quiesce VIIPER before the usbip-win2 driver upgrade. " +
+                "Close viiper.exe manually and run Install / Repair again."
+        }
+        Assert-PadSenseNotRunning "usbip-win2 driver transition"
+
+        Write-SetupLog "Windows may briefly restart USB hub devices." Yellow
+        $installer = Start-Process -FilePath $usbipInstaller `
+            -ArgumentList "/S" -PassThru -Wait
+        if ($installer.ExitCode -notin @(0, 1641, 3010)) {
+            throw "usbip-win2 setup failed with exit code $($installer.ExitCode)."
+        }
+        if ($installer.ExitCode -in @(1641, 3010)) {
+            $script:RebootRecommended = $true
+        }
+
+        $usbipVersion = Get-UsbipInstalledVersion
+        $canonicalUsbipPresent = Test-Path -LiteralPath $script:CanonicalUsbipPath
+        $usbipVersionReady = $canonicalUsbipPresent -and $usbipVersion -and $usbipVersion -ge $requiredUsbipVersion
+        if (-not $usbipVersionReady) {
+            $script:RebootRecommended = $true
+            Write-SetupLog (
+                "usbip-win2 $requiredUsbipVersion is not active at its " +
+                "canonical Program Files path yet. A reboot or repair is required."
+            ) Yellow
+        }
+        else {
+            $script:UsbipRuntimeReady = Test-UsbipRuntime $script:CanonicalUsbipPath
+            if (-not $script:UsbipRuntimeReady) {
+                $script:RebootRecommended = $true
+                Write-SetupLog (
+                    "usbip.exe port did not confirm a compatible driver ABI. " +
+                    "A reboot or repair is required; setup will not report Ready."
+                ) Yellow
+            }
+        }
+    }
+
     Write-Step "Verification"
-    if (Start-AndVerifyViiper $viiperPath) {
+    if ($script:UsbipRuntimeReady -and -not $script:RebootRecommended -and
+            (Start-AndVerifyViiper $viiperPath)) {
         Write-SetupLog "VIIPER API is ready." Green
         $backupPath = "$viiperPath.previous"
         if (Test-Path -LiteralPath $backupPath) {
             Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue
         }
     }
-    elseif ($script:RebootRecommended) {
-        Write-SetupLog "VIIPER is installed; restart Windows to finish driver setup." Yellow
+    elseif (-not $script:UsbipRuntimeReady -or $script:RebootRecommended) {
+        [void](Stop-ViiperProcesses "pending usbip-win2 reboot")
+        Write-SetupLog (
+            "VIIPER is installed, but usbip-win2 is not runtime-ready. " +
+            "Restart Windows; if usbip.exe port still fails, run Repair again."
+        ) Yellow
     }
     else {
         throw "VIIPER installed, but its local API did not start. See $script:LogPath"
     }
 
     Write-Host ""
-    $finish = if ($script:RebootRecommended) {
-        "Setup complete. Restart Windows once before using a virtual controller."
+    $finish = if (-not $script:UsbipRuntimeReady -or
+            $script:RebootRecommended) {
+        "Setup complete, but not Ready. Restart Windows before using a virtual controller; run Repair if the usbip ABI probe still fails."
     } else {
         "Setup complete. VIIPER is ready for DS4Windows."
     }
-    Write-SetupLog $finish Green
+    if ($script:UsbipRuntimeReady -and -not $script:RebootRecommended) {
+        Write-SetupLog $finish Green
+        if ($script:Ds4WindowsRestartPath) {
+            Write-SetupLog "SUCCESSFUL: restarting DS4Windows in 2 seconds." Green
+            Start-Sleep -Seconds 2
+            Start-Process -FilePath $script:Ds4WindowsRestartPath
+        }
+    }
+    else {
+        Write-SetupLog $finish Yellow
+    }
 }
 catch {
     $script:ExitCode = 1

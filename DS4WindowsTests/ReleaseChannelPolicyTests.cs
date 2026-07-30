@@ -31,7 +31,7 @@ namespace DS4WindowsTests
 
             Assert.AreEqual("VIIPERBeta7", selected.TagName);
             Assert.IsTrue(ReleaseChannelPolicy.ShouldUpdate(
-                selected, "4.0.2.1", true, installedReleaseTag: null));
+                selected, "5.0.0.0", true, installedReleaseTag: null));
         }
 
         [TestMethod]
@@ -65,7 +65,7 @@ namespace DS4WindowsTests
                 "VIIPERBeta7", "2026-07-22T00:00:00Z");
 
             Assert.IsFalse(ReleaseChannelPolicy.ShouldUpdate(
-                selected, "4.0.2.1", true, "viiperbeta7"));
+                selected, "5.0.0.0", true, "viiperbeta7"));
         }
 
         [TestMethod]
@@ -96,7 +96,7 @@ namespace DS4WindowsTests
 
             Assert.IsTrue(ReleaseChannelPolicy.IsPrerelease(mislabeled));
             Assert.IsTrue(ReleaseChannelPolicy.IsPrereleaseBuild(
-                "4.0.2.1 DualSense Beta"));
+                "5.0.0.0 DualSense Beta"));
         }
 
         [TestMethod]

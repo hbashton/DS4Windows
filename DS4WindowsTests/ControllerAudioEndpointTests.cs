@@ -781,7 +781,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void FramedReaderAcceptsAtomicV4GenerationWithoutChangingIt()
+        public void FramedWriterRejectsRemovedAtomicV4Generation()
         {
             var cleanup = new CleanupCounters();
             var lifetime = cleanup.CreateLifetime(82, "9", 15);
@@ -792,16 +792,10 @@ namespace DS4WindowsTests
             byte[] generation = Enumerable.Range(0, 2524)
                 .Select(index => (byte)(index * 23 + 5)).ToArray();
 
-            stream.WriteFrame(0x04, 0x83, generation);
-            payloadStream.Position = 0;
-            byte[] received = new byte[4096];
-
-            int length = stream.ReadFrame(0x04, out byte frameType,
-                received);
-
-            Assert.AreEqual(0x83, frameType);
-            Assert.AreEqual(generation.Length, length);
-            CollectionAssert.AreEqual(generation, received[..length]);
+            Assert.ThrowsException<ArgumentOutOfRangeException>(() =>
+                stream.WriteFrame(0x04, 0x83, generation));
+            Assert.AreEqual(0, payloadStream.Length,
+                "Removed V4 frames must never reach the backend transport.");
 
             stream.Dispose();
             Assert.AreEqual(1, payloadStream.DisposeCount);

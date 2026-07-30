@@ -40,6 +40,25 @@ namespace DS4WindowsTests
             Assert.AreEqual(0, packet[3], "RY should be centered");
         }
 
+        [DataTestMethod]
+        [DataRow(ViiperVirtualDeviceType.DualSense,
+            "dualsensecombinedaudioduplexv5")]
+        [DataRow(ViiperVirtualDeviceType.DualSenseEdge,
+            "dualsenseedgecombinedaudioduplexv5")]
+        public void DualSenseFamiliesSelectOnlyPadSenseV5(
+            ViiperVirtualDeviceType type, string expectedName)
+        {
+            Type builderType = typeof(ViiperVirtualDeviceType).Assembly.GetType(
+                "DS4Windows.ViiperStatePacketBuilder",
+                throwOnError: true);
+            MethodInfo method = builderType.GetMethod(
+                "GetViiperDeviceName",
+                BindingFlags.Public | BindingFlags.Static);
+
+            Assert.AreEqual(expectedName,
+                (string)method.Invoke(null, new object[] { type }));
+        }
+
         private static DS4State CreateMotionState()
         {
             DS4State state = new DS4State();

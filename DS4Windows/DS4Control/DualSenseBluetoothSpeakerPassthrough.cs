@@ -431,12 +431,14 @@ namespace DS4Windows
         // prebuffer duplicated that protection and made game audio feel late.
         internal const int InitialBufferMs = 20;
         internal const int TargetBufferMs = 20;
-        // PadSense primes eight source-complete reports once, then produces the
-        // next report only after the preceding report has entered its writer.
-        // A permanent multi-report lead is converted by HidBth into recurring
-        // radio bursts, so steady state retains exactly one pending report.
+        // Legacy capture sources retain the existing stop-and-wait policy.
+        // PadSense-native V5 source owns a bounded eight-generation FIFO and
+        // drains every complete retained generation into its strict writer
+        // after a host stall, so it uses the separate target below.
         internal const int PacerReservoirTargetFrames = 1;
         internal const int StartupWarmupReportCount = 8;
+        internal const int PadSenseSourceReservoirTargetFrames =
+            StartupWarmupReportCount;
         private const int CaptureRingFrames = (SampleRate * CaptureBufferMs) / 1000;
         private const int CapturePumpBufferFrames = 2048;
         private const int DirectPcmChunkBytes = 4096;
@@ -1735,17 +1737,41 @@ namespace DS4Windows
 
         internal static bool ShouldBackpressurePacerProducer(
             bool helperActive, int pendingFrames,
-            long presentedReports = 1)
+            bool usesPadSenseSource, long presentedReports = 1)
         {
             if (!helperActive)
             {
                 return false;
             }
 
-            int target = presentedReports <= 0 ?
-                DualSenseBluetoothAudioPacer.NativePrimeReportCount :
-                PacerReservoirTargetFrames;
+            int target;
+            if (presentedReports <= 0)
+            {
+                target = DualSenseBluetoothAudioPacer.NativePrimeReportCount;
+            }
+            else
+            {
+                target = usesPadSenseSource ?
+                    PadSenseSourceReservoirTargetFrames :
+                    PacerReservoirTargetFrames;
+            }
             return pendingFrames >= target;
+        }
+
+        internal static bool ShouldMaintainIdleCarrierDuringPadSensePrime(
+            bool usesPadSenseSource, bool sourcePrimePending,
+            bool captureReady, bool sourceRecentlyActive)
+        {
+            return usesPadSenseSource && sourcePrimePending &&
+                !captureReady && sourceRecentlyActive;
+        }
+
+        internal static bool ShouldResetPadSenseSourcePrime(
+            bool usesPadSenseSource, bool sourceWasObserved,
+            bool sourceRecentlyActive)
+        {
+            return usesPadSenseSource && sourceWasObserved &&
+                !sourceRecentlyActive;
         }
 
         // PadSense transfers its eight complete source blocks into the strict
@@ -1852,6 +1878,68 @@ namespace DS4Windows
             long age = now - sourcePcm;
             return sourcePcm != 0 && age >= 0 && age <=
                 Stopwatch.Frequency * maximumAgeMilliseconds / 1000;
+        }
+
+        private bool IsPadSenseSourcePrimePending()
+        {
+            if (!directSpeakerUsesPadSenseSource)
+            {
+                return false;
+            }
+
+            lock (directPcmSync)
+            {
+                lock (syncRoot)
+                {
+                    return !capturePrimed;
+                }
+            }
+        }
+
+        private bool TryResetInactivePadSenseSourcePrime()
+        {
+            if (!directSpeakerUsesPadSenseSource)
+            {
+                return true;
+            }
+
+            // Recheck source freshness under the producer lock. A new VIIPER
+            // callback can arrive after StreamLoop's optimistic idle check;
+            // never erase that callback or replace it with an idle carrier.
+            lock (directPcmSync)
+            {
+                long sourceTimestamp = Interlocked.Read(
+                    ref lastSourcePcmTimestamp);
+                bool sourceRecentlyActive = HasRecentSourcePcm(
+                    Stopwatch.GetTimestamp());
+                if (sourceRecentlyActive)
+                {
+                    return false;
+                }
+
+                if (!ShouldResetPadSenseSourcePrime(
+                    usesPadSenseSource: true,
+                    sourceWasObserved: sourceTimestamp != 0,
+                    sourceRecentlyActive: false))
+                {
+                    return true;
+                }
+
+                Interlocked.Exchange(ref lastSourcePcmTimestamp, 0);
+                Interlocked.Exchange(ref lastRawAudibleTimestamp, 0);
+                lock (syncRoot)
+                {
+                    ResetCapturePipelineAtSegmentBoundaryLocked();
+                }
+
+                if (audioSegmentActive)
+                {
+                    audioSegmentActive = false;
+                    Interlocked.Increment(ref audioSegmentStops);
+                }
+                Volatile.Write(ref pacerPrewarmAttemptedForSegment, 0);
+                return true;
+            }
         }
 
         internal static bool ShouldDeferTransientCaptureShortage(
@@ -2125,14 +2213,16 @@ namespace DS4Windows
 
                     directPcmRecoveryWindowInvalidated = false;
 
-                    // The helper owns presentation cadence. Never let a
-                    // transient helper/startup stall turn the one-time prime
-                    // into a permanent media lead. After the first presentation
-                    // keep at most one source-complete report pending, matching
-                    // PadSense's source-driven FIFO.
+                    // The helper owns physical presentation. PadSense-native
+                    // V5 retains its newest eight complete source generations
+                    // independently; after a host stall, admit that bounded
+                    // backlog immediately into the strict writer just as the
+                    // reference does. Legacy capture sources preserve their
+                    // existing one-report stop-and-wait policy.
                     if (ShouldBackpressurePacerProducer(
                         device.BluetoothAudioPacerActive,
                         device.PendingBluetoothSpeakerFrames,
+                        directSpeakerUsesPadSenseSource,
                         device.BluetoothAudioPacerPresentedReports))
                     {
                         nextTick = Stopwatch.GetTimestamp();
@@ -2148,6 +2238,40 @@ namespace DS4Windows
                     if (!pendingEncodedFrame && !captureReady &&
                         sourceRecentlyActive)
                     {
+                        bool sourcePrimePending =
+                            IsPadSenseSourcePrimePending();
+                        if (ShouldMaintainIdleCarrierDuringPadSensePrime(
+                            directSpeakerUsesPadSenseSource,
+                            sourcePrimePending, captureReady,
+                            sourceRecentlyActive))
+                        {
+                            // The physical lane is already armed with valid
+                            // timer-paced Opus silence. Keep that carrier
+                            // continuous while the first eight real PadSense
+                            // blocks accumulate; the first complete source
+                            // frame replaces it atomically on the next pass.
+                            // Stopping here previously opened a seven-interval
+                            // host hole and drained the controller reserve.
+                            Array.Clear(frame, 0, frame.Length);
+                            bool submittedPrimeCarrier = EncodeCurrentFrame() &&
+                                SendEncodedFrame();
+                            if (submittedPrimeCarrier)
+                            {
+                                Interlocked.Increment(ref framesSent);
+                                Interlocked.Increment(ref silentFramesSent);
+                            }
+                            else if (device.BluetoothAudioPacerRecoveryRequired ||
+                                device.BluetoothAudioLifecycleTransitioning)
+                            {
+                                RequestPacerLifecyclePreparation(
+                                    recovery: true, gateSource: true);
+                            }
+
+                            ScheduleNextStreamTick(submittedPrimeCarrier,
+                                ref nextTick, highResolutionTimer);
+                            continue;
+                        }
+
                         // PadSense does not advance an independent producer
                         // deadline while a real source block is incomplete.
                         // The source callback wakes this worker as soon as the
@@ -2209,6 +2333,15 @@ namespace DS4Windows
 
                     if (!captureReady && !sourceRecentlyActive)
                     {
+                        if (!TryResetInactivePadSenseSourcePrime())
+                        {
+                            // A producer callback won the idle-boundary race.
+                            // Re-evaluate readiness without sending an unrelated
+                            // carrier or discarding the new source generation.
+                            nextTick = Stopwatch.GetTimestamp();
+                            continue;
+                        }
+
                         // Preserve a fully armed controller-side stream while
                         // Windows is silent. This is real fixed-size CBR Opus
                         // silence over the same atomic 0x36 path; no source

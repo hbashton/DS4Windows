@@ -299,9 +299,8 @@ namespace DS4Windows.InputDevices
             BitConverter.Int64BitsToDouble(Interlocked.Read(
                 ref bluetoothMediaBufferCadenceRatioBits));
         internal double DualSenseBluetoothPresentationClockRatio =>
-            Math.Clamp((DualSenseControllerClockStable ?
-                DualSenseControllerClockRatio : 1.0) *
-                DualSenseMediaBufferCadenceRatio,
+            Math.Clamp(DualSenseControllerClockStable ?
+                DualSenseControllerClockRatio : 1.0,
                 DualSenseBluetoothAudioPacerScheduler.MinimumRateRatio,
                 DualSenseBluetoothAudioPacerScheduler.MaximumRateRatio);
         private bool outputDirty = false;
@@ -1710,6 +1709,37 @@ namespace DS4Windows.InputDevices
                 // direct speaker-clocked report. A running helper must accept
                 // the update now; otherwise the caller must retain/retry state.
                 return !pacerOwnsTransport || updated;
+            }
+        }
+
+        private bool QueueBluetoothAudioPacerMicrophoneTransitionFromCache(
+            bool enabled)
+        {
+            lock (bluetoothCombinedTransportWriteLock)
+            {
+                byte[] template = bluetoothCombinedSpeakerWorkingReport;
+                long hapticsExpiryQpc;
+                lock (bluetoothCombinedSpeakerReportLock)
+                {
+                    if (!bluetoothCombinedSpeakerReportAvailable)
+                    {
+                        return false;
+                    }
+
+                    Array.Copy(latestBluetoothCombinedSpeakerReport, template,
+                        template.Length);
+                    hapticsExpiryQpc = PersistentBluetoothHapticsExpiryQpc;
+                }
+
+                ApplyBluetoothSpeakerVolumeAndRoutingCore(template,
+                    speakerVolume, headsetOnlyAudio, headphoneVolume);
+                ApplyBluetoothMicrophoneStreamingRequest(template, enabled);
+                lock (bluetoothAudioPacerLock)
+                {
+                    return bluetoothAudioPacer?.IsRunning == true &&
+                        bluetoothAudioPacer.UpdateMicrophoneTransition(template,
+                            hapticsExpiryQpc, enabled);
+                }
             }
         }
 
@@ -4186,18 +4216,9 @@ namespace DS4Windows.InputDevices
                     // share the helper's physical sequence/FIFO. The steady
                     // compact speaker+haptics carrier remains byte-identical
                     // before and after this boundary.
-                    bool stateQueued =
-                        RefreshBluetoothAudioPacerTemplateFromCache();
-                    bool statusQueued = false;
-                    if (stateQueued)
-                    {
-                        lock (bluetoothAudioPacerLock)
-                        {
-                            statusQueued = bluetoothAudioPacer?.
-                                UpdateMicrophoneStatus(enabled) == true;
-                        }
-                    }
-                    bool published = stateQueued && statusQueued;
+                    bool published =
+                        QueueBluetoothAudioPacerMicrophoneTransitionFromCache(
+                            enabled);
                     LastBluetoothMicrophoneWriteStatus = published ?
                         (enabled ?
                             "Microphone enable is pending physical commit on the combined speaker stream." :

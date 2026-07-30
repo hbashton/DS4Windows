@@ -88,6 +88,15 @@ namespace DS4WindowsTests
                     controlOnly: false,
                     accepted: false,
                     transportFault: false));
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.
+                ShouldDropSaturatedAudio(
+                    padForgeAudioTransport: true,
+                    pairedAudioReport: false,
+                    controlOnly: false,
+                    accepted: false,
+                    transportFault: false,
+                    preserveForMicrophoneReserve: true),
+                "A busy writer must not spend a report that is charging the microphone reserve.");
         }
 
         [TestMethod]
@@ -604,6 +613,45 @@ namespace DS4WindowsTests
             Assert.AreEqual((byte)64, combined[12]);
             Assert.AreEqual((byte)0x93, combined[77]);
             Assert.AreEqual((byte)200, combined[78]);
+        }
+
+        [TestMethod]
+        public void PendingMicrophoneModeCannotOvertakePhysicalCommitBoundary()
+        {
+            byte[] source = CreateSpeakerReport(0x34, 0x56, 0x70, 0x42);
+            source[4] = 0xFF;
+            byte[] expectedHaptics = source.Skip(78).Take(64).ToArray();
+            byte[] expectedSpeaker = source.Skip(144).Take(200).ToArray();
+            byte[] physical = new byte[
+                DualSenseBluetoothPadForgeCombinedAudioReportBuilder.
+                    ReportLength];
+
+            DualSenseBluetoothAudioPacer.ApplyCommittedMicrophoneMode(source,
+                microphoneEnabled: false);
+            DualSenseBluetoothPadForgeCombinedAudioReportBuilder.Build(source,
+                reportSequence: 9, packetSequence: 0x42, physical);
+            Assert.AreEqual((byte)0xFE, physical[4]);
+            AssertRangeIsZero(physical, 5, 4,
+                "A pending microphone request leaked duplex lane depths.");
+            Assert.AreEqual((byte)0xFF, physical[9]);
+            CollectionAssert.AreEqual(expectedHaptics,
+                physical.Skip(13).Take(64).ToArray());
+            CollectionAssert.AreEqual(expectedSpeaker,
+                physical.Skip(79).Take(200).ToArray());
+
+            DualSenseBluetoothAudioPacer.ApplyCommittedMicrophoneMode(source,
+                microphoneEnabled: true);
+            DualSenseBluetoothPadForgeCombinedAudioReportBuilder.Build(source,
+                reportSequence: 10, packetSequence: 0x43, physical);
+            Assert.AreEqual((byte)0xFF, physical[4]);
+            for (int index = 5; index <= 9; index++)
+            {
+                Assert.AreEqual((byte)96, physical[index]);
+            }
+            CollectionAssert.AreEqual(expectedHaptics,
+                physical.Skip(13).Take(64).ToArray());
+            CollectionAssert.AreEqual(expectedSpeaker,
+                physical.Skip(79).Take(200).ToArray());
         }
 
         [TestMethod]

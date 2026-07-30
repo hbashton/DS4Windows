@@ -36,13 +36,14 @@ namespace DS4Windows.InputDevices
         internal const int PrimeReportCount = UsePairedAudioReports ? 2 : 1;
         internal const int PairedAudioInFlightLimit =
             PairedAudioTransportSlotCount;
-        // DS5Dongle may queue ten packets in application memory, but submits
-        // exactly one packet for each L2CAP CAN_SEND_NOW credit. HidBth does
-        // not expose that credit, so one outstanding OVERLAPPED write is the
-        // closest observable equivalent: its completion releases the next
-        // physical 0x39. A multi-slot kernel queue hides the credit boundary
-        // and lets a host timer get ahead of the controller.
-        internal const int PairedAudioTransportSlotCount = 1;
+        // PadForge's Windows transport uses eight pinned OVERLAPPED slots in a
+        // strict oldest-first ring. DS5Dongle's one-at-a-time CAN_SEND_NOW
+        // discipline cannot be reproduced from HidBth completion events:
+        // completion is an IRP boundary, not an exposed L2CAP send credit.
+        // Keep PadForge's eight-slot Windows cushion around DS5Dongle's 0x39
+        // wire image so normal 39-82 ms completion droughts do not starve the
+        // controller while newer reports can never pass the oldest slot.
+        internal const int PairedAudioTransportSlotCount = 8;
         // Windows does not expose BTstack's CAN_SEND_NOW credit. A strict
         // ten-slot OVERLAPPED FIFO covers the measured 39-82 ms HidBth service
         // drought while its oldest completion event remains our credit proxy.
@@ -77,10 +78,24 @@ namespace DS4Windows.InputDevices
             return IsSpeakerAudioReport(report) && (report[4] & 0x01) != 0;
         }
 
-        internal static bool ShouldWaitForHostPresentationDeadline(
-            bool pairedAudioReports)
+        internal static bool ShouldWaitForPhysicalWriteCredit(
+            bool padForgeAudioTransport, bool pairedAudioReports)
         {
-            return !pairedAudioReports;
+            return !padForgeAudioTransport && !pairedAudioReports;
+        }
+
+        internal static bool ShouldDropSaturatedAudio(
+            bool padForgeAudioTransport, bool pairedAudioReport,
+            bool controlOnly, bool accepted, bool transportFault)
+        {
+            return !controlOnly && !accepted && !transportFault &&
+                (padForgeAudioTransport || pairedAudioReport);
+        }
+
+        internal static int CompletePairedReportBoundary(
+            int leadingSpeakerReports)
+        {
+            return Math.Max(0, leadingSpeakerReports & ~1);
         }
 
         private const string HelperArgument = "--dualsense-bt-audio-pacer-helper";
@@ -1809,6 +1824,7 @@ namespace DS4Windows.InputDevices
             private int pendingMicrophoneStatus = -1;
             private int microphoneStatusReportsAhead;
             private bool pendingControllerStateAvailable;
+            private int controllerStateReportsAhead;
             private long lastControllerStateSubmissionQpc;
             private int disposed;
             private readonly string presentationTraceDirectory;
@@ -2134,6 +2150,10 @@ namespace DS4Windows.InputDevices
                     {
                         microphoneStatusReportsAhead = 0;
                     }
+                    if (pendingControllerStateAvailable)
+                    {
+                        controllerStateReportsAhead = 0;
+                    }
                 }
 
                 reservoirChanged.Set();
@@ -2178,10 +2198,14 @@ namespace DS4Windows.InputDevices
                 lock (stateLock)
                 {
                     pendingMicrophoneStatus = payload[0];
-                    // Preserve the parent command order. Reports admitted
-                    // before this command remain ahead of the native 0x32;
-                    // reports received later wait behind it.
-                    microphoneStatusReportsAhead = reservoir.Count;
+                    // 0x39 takes its mic/audio-clock header from the second
+                    // logical frame. Preserve only complete physical pairs
+                    // ahead of 0x32; an odd old-mode half stays behind the
+                    // transition and pairs with the next new-mode frame.
+                    microphoneStatusReportsAhead =
+                        CompletePairedReportBoundary(
+                            reservoir.CountLeading(
+                                IsQueuedSpeakerReport));
                 }
 
                 reservoirChanged.Set();
@@ -2200,9 +2224,17 @@ namespace DS4Windows.InputDevices
 
                 lock (stateLock)
                 {
-                    // PadForge treats 0x31 as a latest-value state latch.
-                    // Keep no more than one unsent snapshot; audio itself is
-                    // never coalesced or displaced.
+                    // PadForge treats 0x31 as a latest-value state latch. The
+                    // first snapshot reserves its physical-pair boundary;
+                    // later snapshots coalesce at that same position rather
+                    // than jumping ahead of audio already admitted.
+                    if (!pendingControllerStateAvailable)
+                    {
+                        controllerStateReportsAhead =
+                            CompletePairedReportBoundary(
+                                reservoir.CountLeading(
+                                    IsQueuedSpeakerReport));
+                    }
                     Buffer.BlockCopy(payload, 0, pendingControllerState, 0,
                         payloadLength);
                     pendingControllerStateAvailable = true;
@@ -2237,6 +2269,7 @@ namespace DS4Windows.InputDevices
                             long nowQpc = Stopwatch.GetTimestamp();
                             controllerStateReady =
                                 pendingControllerStateAvailable &&
+                                controllerStateReportsAhead <= 0 &&
                                 (lastControllerStateSubmissionQpc == 0 ||
                                     nowQpc -
                                         lastControllerStateSubmissionQpc >=
@@ -2296,6 +2329,7 @@ namespace DS4Windows.InputDevices
                                 long nowQpc = Stopwatch.GetTimestamp();
                                 bool stillReady =
                                     pendingControllerStateAvailable &&
+                                    controllerStateReportsAhead <= 0 &&
                                     (lastControllerStateSubmissionQpc == 0 ||
                                         nowQpc -
                                             lastControllerStateSubmissionQpc >=
@@ -2330,6 +2364,7 @@ namespace DS4Windows.InputDevices
                                             CommitControllerState();
                                         pendingControllerStateAvailable =
                                             false;
+                                        controllerStateReportsAhead = 0;
                                         lastControllerStateSubmissionQpc =
                                             nowQpc;
                                         RecordPresentationTrace(
@@ -2423,34 +2458,29 @@ namespace DS4Windows.InputDevices
                             scheduler.SetInputPhaseReference(
                                 useCompactCombinedHapticsTransport ? 0 :
                                     Interlocked.Read(ref inputArrivalQpc));
-                            // A complete 0x39 pair is already source-paced by
-                            // the two 10.667 ms logical generations that feed
-                            // the reservoir. DS5Dongle queues that pair at once
-                            // and lets CAN_SEND_NOW provide the only physical
-                            // send clock. Do the same here: the single oldest
-                            // OVERLAPPED completion below is our Windows credit
-                            // proxy. Applying another host deadline creates two
-                            // unsynchronised clocks and periodically misses the
-                            // controller's receive window.
-                            if (ShouldWaitForHostPresentationDeadline(
-                                    UsePairedAudioReports))
-                            {
-                                WaitUntil(timer,
-                                    scheduler.PresentationDeadlineQpc,
-                                    stopRequested);
-                            }
+                            // PadForge's Windows path owns one absolute media
+                            // deadline and never catch-up bursts. Our logical
+                            // reports can also be refreshed by high-rate HID
+                            // state, so pair availability alone is not a media
+                            // clock. Pace every physical 0x39 at the rational
+                            // deadline; advancing twice below preserves its two
+                            // 10.667 ms generations and the long-window clock
+                            // correction without relying on IRP completion as
+                            // an L2CAP credit.
+                            WaitUntil(timer,
+                                scheduler.PresentationDeadlineQpc,
+                                stopRequested);
                         }
                         if (stopRequested.WaitOne(0))
                         {
                             break;
                         }
 
-                        // DS5 Bridge and DS5Dongle dequeue only after an actual
-                        // L2CAP CAN_SEND_NOW credit. HidBth does not expose that
-                        // signal, so wait for completion of our strict oldest
-                        // OVERLAPPED slot before consuming the corresponding
-                        // logical audio report. A true transport fault is left
-                        // for the normal submission path below to acknowledge.
+                        // Legacy lossless paths wait for an oldest-slot credit.
+                        // PadForge and the paired hybrid instead probe the
+                        // strict oldest slot without waiting at the due tick;
+                        // if it is busy they spend/drop that new audio
+                        // generation rather than delaying or bursting it.
                         bool audioWriteAtHead;
                         lock (stateLock)
                         {
@@ -2460,7 +2490,9 @@ namespace DS4Windows.InputDevices
                         }
 
                         if (audioWriteAtHead &&
-                            !usePadForgeAudioTransport &&
+                            ShouldWaitForPhysicalWriteCredit(
+                                usePadForgeAudioTransport,
+                                UsePairedAudioReports) &&
                             !writer.WaitForNextWriteSlot(
                                 HelperAudioCreditPollMilliseconds,
                                 out bool creditTransportFault) &&
@@ -2664,19 +2696,20 @@ namespace DS4Windows.InputDevices
                                     }
                                 }
 
-                                // PadForge deliberately spends both counters
-                                // when its oldest OVERLAPPED slot is busy and
-                                // drops that single Opus generation. This lets
-                                // the controller's decoder conceal a sequence
-                                // gap instead of delaying the entire FIFO and
-                                // replaying stale audio in a catch-up cluster.
-                                bool padForgeSkippedSaturatedAudio =
-                                    usePadForgeAudioTransport &&
-                                    !controlOnly && pairedItem == null &&
-                                    !accepted && !transportFault;
+                                // PadForge spends counters and drops the new
+                                // audio generation when its strict oldest slot
+                                // is busy. Apply that Windows transport rule to
+                                // one indivisible 0x39 pair as well. Controls
+                                // remain retriable; hard I/O faults still tear
+                                // down ownership.
+                                bool skippedSaturatedAudio =
+                                    ShouldDropSaturatedAudio(
+                                        usePadForgeAudioTransport,
+                                        pairedItem != null, controlOnly,
+                                        accepted, transportFault);
 
                                 if (accepted ||
-                                    padForgeSkippedSaturatedAudio)
+                                    skippedSaturatedAudio)
                                 {
                                     physicalOutputSequence.Commit(
                                         pairedItem != null || !controlOnly);
@@ -2689,7 +2722,7 @@ namespace DS4Windows.InputDevices
                                         AcknowledgementDisposition.Rejected;
                                 pairedDisposition = disposition;
 
-                                if (!padForgeSkippedSaturatedAudio &&
+                                if (!skippedSaturatedAudio &&
                                     ShouldRetainSaturatedWrite(accepted,
                                         transportFault))
                                 {
@@ -2715,6 +2748,14 @@ namespace DS4Windows.InputDevices
                                 // overtake the same restored audio pair.
                                 microphoneStatusReportsAhead = Math.Max(0,
                                     microphoneStatusReportsAhead -
+                                    (pairedItem == null ? 1 : 2));
+                            }
+                            if (!retainedForRetry &&
+                                pendingControllerStateAvailable &&
+                                controllerStateReportsAhead > 0)
+                            {
+                                controllerStateReportsAhead = Math.Max(0,
+                                    controllerStateReportsAhead -
                                         (pairedItem == null ? 1 : 2));
                             }
 

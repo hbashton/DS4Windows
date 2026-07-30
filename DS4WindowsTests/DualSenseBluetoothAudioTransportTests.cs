@@ -26,20 +26,70 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void PairedTransportUsesOneCompletionAsPhysicalSendCredit()
+        public void PairedTransportUsesPadForgeWindowsWritePoolAndHostClock()
         {
-            Assert.AreEqual(1,
+            Assert.AreEqual(8,
                 DualSenseBluetoothAudioPacer.PairedAudioTransportSlotCount);
-            Assert.AreEqual(1,
+            Assert.AreEqual(8,
                 DualSenseBluetoothAudioPacer.PairedAudioInFlightLimit);
             Assert.IsFalse(
                 DualSenseBluetoothAudioPacer.
-                    ShouldWaitForHostPresentationDeadline(
+                    ShouldWaitForPhysicalWriteCredit(
+                        padForgeAudioTransport: false,
                         pairedAudioReports: true));
+            Assert.IsFalse(
+                DualSenseBluetoothAudioPacer.
+                    ShouldWaitForPhysicalWriteCredit(
+                        padForgeAudioTransport: true,
+                        pairedAudioReports: false));
             Assert.IsTrue(
                 DualSenseBluetoothAudioPacer.
-                    ShouldWaitForHostPresentationDeadline(
+                    ShouldWaitForPhysicalWriteCredit(
+                        padForgeAudioTransport: false,
                         pairedAudioReports: false));
+        }
+
+        [TestMethod]
+        public void PairedTransportDropsWholeSaturatedAudioGeneration()
+        {
+            Assert.IsTrue(DualSenseBluetoothAudioPacer.
+                ShouldDropSaturatedAudio(
+                    padForgeAudioTransport: false,
+                    pairedAudioReport: true,
+                    controlOnly: false,
+                    accepted: false,
+                    transportFault: false));
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.
+                ShouldDropSaturatedAudio(
+                    padForgeAudioTransport: false,
+                    pairedAudioReport: true,
+                    controlOnly: false,
+                    accepted: false,
+                    transportFault: true));
+            Assert.IsFalse(DualSenseBluetoothAudioPacer.
+                ShouldDropSaturatedAudio(
+                    padForgeAudioTransport: false,
+                    pairedAudioReport: false,
+                    controlOnly: false,
+                    accepted: false,
+                    transportFault: false));
+        }
+
+        [TestMethod]
+        public void MicrophoneAndStateBarrierLeavesOddFrameForNewMode()
+        {
+            Assert.AreEqual(0,
+                DualSenseBluetoothAudioPacer.
+                    CompletePairedReportBoundary(0));
+            Assert.AreEqual(0,
+                DualSenseBluetoothAudioPacer.
+                    CompletePairedReportBoundary(1));
+            Assert.AreEqual(2,
+                DualSenseBluetoothAudioPacer.
+                    CompletePairedReportBoundary(3));
+            Assert.AreEqual(6,
+                DualSenseBluetoothAudioPacer.
+                    CompletePairedReportBoundary(6));
         }
 
         [TestMethod]

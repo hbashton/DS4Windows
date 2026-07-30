@@ -280,6 +280,33 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
+        public void PairedSchedulerCarriesFractionalClockAcrossBothMediaIntervals()
+        {
+            const long qpcFrequency = 10_000_000;
+            const double controllerClockRatio = 0.999800;
+            const int physicalPairs = 1500;
+            var scheduler = new DualSenseBluetoothAudioPacerScheduler(
+                qpcFrequency);
+            scheduler.SetRateRatio(controllerClockRatio);
+            scheduler.Start(0);
+
+            for (int pair = 0; pair < physicalPairs; pair++)
+            {
+                // One physical 0x39 packages two ordered 10.667 ms media
+                // generations. Both share one Windows presentation timestamp,
+                // but each must spend its own fractional cadence interval.
+                long presentedAt = scheduler.NextDeadlineQpc;
+                scheduler.AdvanceAfterSend(presentedAt);
+                scheduler.AdvanceAfterSend(presentedAt);
+            }
+
+            double expected = qpcFrequency * 32.0 /
+                controllerClockRatio;
+            Assert.AreEqual(expected, scheduler.NextDeadlineQpc, 1.0,
+                "A paired 0x39 write lost fractional media-clock correction.");
+        }
+
+        [TestMethod]
         public void PairedSchedulerDoesNotReplayLegacyReserveTransfer()
         {
             const long qpcFrequency = 10_000_000;

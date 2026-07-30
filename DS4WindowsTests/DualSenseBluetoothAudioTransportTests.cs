@@ -245,7 +245,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void PhysicalSequenceMatchesNativeMicrophoneTransition()
+        public void PhysicalSequenceMatchesPadSenseNativeMicrophoneTransition()
         {
             var sequence = new DualSenseBluetoothPhysicalOutputSequence();
             byte[] initialization = CreateSpeakerReport(
@@ -260,8 +260,14 @@ namespace DS4WindowsTests
             Assert.AreEqual((byte)0x32, microphoneStatus[0]);
             Assert.AreEqual((byte)0x50, microphoneStatus[1]);
             Assert.AreEqual((byte)0x91, microphoneStatus[2]);
-            Assert.AreEqual((byte)0x01, microphoneStatus[3]);
-            Assert.AreEqual((byte)0x03, microphoneStatus[4]);
+            Assert.AreEqual((byte)0x07, microphoneStatus[3]);
+            Assert.AreEqual((byte)0xFF, microphoneStatus[4]);
+            for (int index = 5; index <= 9; index++)
+            {
+                Assert.AreEqual((byte)0x80, microphoneStatus[index]);
+            }
+            Assert.AreEqual((byte)0x23, microphoneStatus[10],
+                "The native 0x32 did not consume one media interval.");
             uint expectedCrc =
                 DualSenseBluetoothAudioReportPatcher.ComputeSonyCrc(
                     microphoneStatus,
@@ -271,15 +277,17 @@ namespace DS4WindowsTests
                     microphoneStatus.AsSpan(
                         microphoneStatus.Length - sizeof(uint))));
 
-            sequence.Commit(audio: false);
+            sequence.CommitMicrophoneStatus();
             byte[] duplex = CreateSpeakerReport(
                 0x11, 0x21, 0xA0, 0x23);
             duplex[4] = 0xFF;
             sequence.PrepareFullDuplexAudio(duplex);
-            Assert.AreEqual((byte)0x60, duplex[1],
-                "The duplex report did not follow the accepted 0x32 transition.");
-            Assert.AreEqual((byte)0x23, duplex[10],
-                "The 0x32 transition consumed the media packet counter.");
+            Assert.AreEqual((byte)0x50, duplex[1],
+                "The dedicated 0x32 sequence disturbed the audio sequence.");
+            Assert.AreEqual((byte)0x24, duplex[10],
+                "The first audio frame did not follow the 0x32 media interval.");
+            Assert.AreEqual((byte)6,
+                sequence.NextMicrophoneStatusSequence);
         }
 
         [TestMethod]
@@ -356,7 +364,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void MicrophoneEnabledAudioUsesFullStateCarrierAnd96ByteDepths()
+        public void MicrophoneEnabledAudioUsesPadSense128ByteDepths()
         {
             var sequence = new DualSenseBluetoothPhysicalOutputSequence();
             byte[] duplex = CreateSpeakerReport(
@@ -377,7 +385,7 @@ namespace DS4WindowsTests
             Assert.AreEqual((byte)0xFF, duplex[4]);
             for (int index = 5; index <= 9; index++)
             {
-                Assert.AreEqual((byte)96, duplex[index]);
+                Assert.AreEqual((byte)0x80, duplex[index]);
             }
             Assert.AreEqual((byte)0x90, duplex[11]);
             Assert.AreEqual((byte)63, duplex[12]);
@@ -397,7 +405,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void NativeAudioPreparationNormalizesOnlyFullDuplexHeader()
+        public void NativeAudioPreparationNormalizesEveryMediaLaneDepth()
         {
             var sequence = new DualSenseBluetoothPhysicalOutputSequence();
             byte[] duplex = CreateSpeakerReport(0x31, 0x41, 0x90, 1);
@@ -410,7 +418,7 @@ namespace DS4WindowsTests
             sequence.PrepareNativeAudio(duplex);
             for (int index = 5; index <= 9; index++)
             {
-                Assert.AreEqual((byte)96, duplex[index]);
+                Assert.AreEqual((byte)0x80, duplex[index]);
             }
 
             byte[] speakerOnly = CreateSpeakerReport(0x32, 0x42, 0xA0, 2);
@@ -423,7 +431,7 @@ namespace DS4WindowsTests
             sequence.PrepareNativeAudio(speakerOnly);
             for (int index = 5; index <= 9; index++)
             {
-                Assert.AreEqual((byte)80, speakerOnly[index]);
+                Assert.AreEqual((byte)0x80, speakerOnly[index]);
             }
         }
 

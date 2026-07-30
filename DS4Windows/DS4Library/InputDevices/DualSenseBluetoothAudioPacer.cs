@@ -140,13 +140,14 @@ namespace DS4Windows.InputDevices
         private const uint HelperWriterReleaseTimeoutMilliseconds = 3000;
         private const uint HelperControlWriteTimeoutMilliseconds = 750;
         private const uint HelperAudioCreditPollMilliseconds = 1;
-        // Duplex input exposes the controller's logical 100 Hz media clock.
-        // HidBth may deliver those frames in batches, so raw arrival times are
-        // observations only: a lower-envelope model reconstructs the original
-        // clock and places output in the measured quiet service phase. Fifteen
-        // speaker generations per sixteen microphone ticks remains exactly
-        // 93.75 Hz without copying host batching into audible presentation.
-        private const bool UseMicrophoneSequencePresentationClock = true;
+        // Inbound microphone reports are observations, not output credits or
+        // speaker presentation deadlines. Every working reference keeps the
+        // outbound media clock independent; coupling it to bursty HidBth input
+        // arrivals makes duplex traffic modulate an otherwise stable speaker
+        // cadence. Retain the model for diagnostics, but never let it own the
+        // physical 0x35 schedule.
+        private static readonly bool UseMicrophoneSequencePresentationClock =
+            false;
         private const int InputClockMapLength = 24;
         private const long InputClockVersionOffset = 0;
         private const long InputClockTimestampOffset = 8;
@@ -346,6 +347,11 @@ namespace DS4Windows.InputDevices
         /// </summary>
         public void SignalMicrophoneFrame(byte sequence)
         {
+            if (!UseMicrophoneSequencePresentationClock)
+            {
+                return;
+            }
+
             // Do not consult LastError/IsRunning here: LastError owns the
             // pacer state lock and this method runs on the physical HID input
             // thread for every completed Bluetooth report.
@@ -914,11 +920,10 @@ namespace DS4Windows.InputDevices
         }
 
         /// <summary>
-        /// Atomically queues microphone intent, its matching live template,
-        /// and the controller-state snapshot required before native 0x32.
-        /// Reserving all three queue entries before publishing the first one
-        /// prevents a successful status request from surviving a later state
-        /// enqueue failure and crossing the helper's fail-open path alone.
+        /// Atomically queues microphone intent and its matching live template.
+        /// PadSense's observed Windows contract uses one native 0x32 transition
+        /// followed by full-state 0x36 media; it does not insert a competing
+        /// 0x31 state write into the active audio FIFO.
         /// </summary>
         public bool UpdateMicrophoneTransition(byte[] latestCombinedReport,
             long hapticsExpiryQpc, bool enabled)
@@ -930,13 +935,6 @@ namespace DS4Windows.InputDevices
             }
 
             byte[] template = (byte[])latestCombinedReport.Clone();
-            byte[] controllerState = new byte[
-                DualSenseBluetoothPhysicalOutputSequence.
-                    ControllerStatePayloadLength];
-            Buffer.BlockCopy(template,
-                DualSenseBluetoothPhysicalOutputSequence.
-                    ControllerStateSourceOffset,
-                controllerState, 0, controllerState.Length);
             byte[] status = { enabled ? (byte)1 : (byte)0 };
 
             lock (stateLock)
@@ -947,8 +945,6 @@ namespace DS4Windows.InputDevices
                         status),
                     new OutboundCommand(MessageKind.UpdateTemplate,
                         BuildTemplatePayload(template, hapticsExpiryQpc)),
-                    new OutboundCommand(MessageKind.UpdateControllerState,
-                        controllerState),
                 };
                 if (!outboundCommands.TryReplaceWhereWithGroup(command =>
                         command.Kind == MessageKind.UpdateMicrophoneStatus ||
@@ -965,9 +961,6 @@ namespace DS4Windows.InputDevices
                 // 0x32 after the ordered audio boundary.
                 latestTemplate = template;
                 latestTemplateHapticsExpiryQpc = hapticsExpiryQpc;
-                Buffer.BlockCopy(controllerState, 0, latestControllerState, 0,
-                    controllerState.Length);
-                latestControllerStateAvailable = true;
             }
 
             outboundAvailable.Set();
@@ -2042,8 +2035,6 @@ namespace DS4Windows.InputDevices
             private int pendingMicrophoneStatus = -1;
             private int microphoneStatusReportsAhead;
             private bool committedMicrophoneEnabled;
-            private bool microphoneControllerStateRequired;
-            private bool microphoneTransitionStateReceived;
             private bool pendingControllerStateAvailable;
             private int controllerStateReportsAhead;
             private long lastControllerStateSubmissionQpc;
@@ -2152,12 +2143,15 @@ namespace DS4Windows.InputDevices
                     Name = "DualSense BT isolated audio pacer",
                     Priority = ThreadPriority.Highest,
                 };
-                inputClockThread = new Thread(InputClockLoop)
+                if (UseMicrophoneSequencePresentationClock)
                 {
-                    IsBackground = true,
-                    Name = "DualSense BT microphone clock observer",
-                    Priority = ThreadPriority.Highest,
-                };
+                    inputClockThread = new Thread(InputClockLoop)
+                    {
+                        IsBackground = true,
+                        Name = "DualSense BT microphone clock observer",
+                        Priority = ThreadPriority.Highest,
+                    };
+                }
                 acknowledgementThread = new Thread(AcknowledgementLoop)
                 {
                     IsBackground = true,
@@ -2170,7 +2164,7 @@ namespace DS4Windows.InputDevices
                 TryRaiseHelperProcessPriority();
                 TrySetSustainedLowLatencyGc();
                 acknowledgementThread.Start();
-                inputClockThread.Start();
+                inputClockThread?.Start();
                 pacerThread.Start();
 
                 try
@@ -2234,7 +2228,8 @@ namespace DS4Windows.InputDevices
                     acknowledgementAvailable.Set();
                     bool pacerStopped = !pacerThread.IsAlive ||
                         pacerThread.Join(2000);
-                    bool inputClockStopped = !inputClockThread.IsAlive ||
+                    bool inputClockStopped = inputClockThread == null ||
+                        !inputClockThread.IsAlive ||
                         inputClockThread.Join(2000);
                     bool acknowledgementsStopped =
                         !acknowledgementThread.IsAlive ||
@@ -2496,8 +2491,6 @@ namespace DS4Windows.InputDevices
                     }
 
                     pendingMicrophoneStatus = status;
-                    microphoneControllerStateRequired = true;
-                    microphoneTransitionStateReceived = false;
                     // 0x39 takes its mic/audio-clock header from the second
                     // logical frame. Preserve only complete physical pairs
                     // ahead of 0x32; an odd old-mode half stays behind the
@@ -2551,14 +2544,6 @@ namespace DS4Windows.InputDevices
                     Buffer.BlockCopy(payload, 0, pendingControllerState, 0,
                         payloadLength);
                     pendingControllerStateAvailable = true;
-                    if (pendingMicrophoneStatus >= 0)
-                    {
-                        // The parent publishes status -> template -> state as
-                        // one reserved command group. Only this post-status
-                        // snapshot may satisfy the microphone state barrier;
-                        // a stale state already pending in the helper cannot.
-                        microphoneTransitionStateReceived = true;
-                    }
                 }
 
                 reservoirChanged.Set();
@@ -2585,8 +2570,7 @@ namespace DS4Windows.InputDevices
                             long nowQpc = Stopwatch.GetTimestamp();
                             microphoneStatusReady =
                                 pendingMicrophoneStatus >= 0 &&
-                                microphoneStatusReportsAhead <= 0 &&
-                                !microphoneControllerStateRequired;
+                                microphoneStatusReportsAhead <= 0;
                             reservoir.TryPeek(out QueuedReport nextReport);
                             controllerStateReady =
                                 pendingControllerStateAvailable &&
@@ -2642,11 +2626,10 @@ namespace DS4Windows.InputDevices
                             continue;
                         }
 
-                        // A microphone transition has two ordered pieces:
-                        // first publish the full controller/mic state, then
-                        // arm or disarm the native microphone clock. This
-                        // is the ordering used by vDS and prevents 0x32
-                        // from overtaking the state that makes it valid.
+                        // Controller-state snapshots remain serialized with
+                        // media when one is independently pending. Native mic
+                        // transitions do not manufacture an extra 0x31 write;
+                        // their complete audio-mode contract is the 0x32.
                         if (controllerStateReady)
                         {
                             bool transportFault;
@@ -2692,14 +2675,6 @@ namespace DS4Windows.InputDevices
                                         pendingControllerStateAvailable =
                                             false;
                                         controllerStateReportsAhead = 0;
-                                        if (pendingMicrophoneStatus >= 0 &&
-                                            microphoneTransitionStateReceived)
-                                        {
-                                            microphoneControllerStateRequired =
-                                                false;
-                                            microphoneTransitionStateReceived =
-                                                false;
-                                        }
                                         lastControllerStateSubmissionQpc =
                                             nowQpc;
                                         RecordPresentationTrace(
@@ -2776,8 +2751,8 @@ namespace DS4Windows.InputDevices
                                         out transportFault);
                                     if (accepted)
                                     {
-                                        physicalOutputSequence.Commit(
-                                            audio: false);
+                                        physicalOutputSequence.
+                                            CommitMicrophoneStatus();
                                         if (pendingMicrophoneStatus == status)
                                         {
                                             committedMicrophoneEnabled =
@@ -2790,10 +2765,6 @@ namespace DS4Windows.InputDevices
                                             microphonePresentationClock.Reset();
                                             pendingMicrophoneStatus = -1;
                                             microphoneStatusReportsAhead = 0;
-                                            microphoneControllerStateRequired =
-                                                false;
-                                            microphoneTransitionStateReceived =
-                                                false;
                                         }
                                     }
                                 }
@@ -3828,8 +3799,9 @@ namespace DS4Windows.InputDevices
                     pacerStopped = pacerThread.Join(2000);
                 }
 
-                bool inputClockStopped = !inputClockThread.IsAlive;
-                if (!inputClockStopped &&
+                bool inputClockStopped = inputClockThread == null ||
+                    !inputClockThread.IsAlive;
+                if (!inputClockStopped && inputClockThread != null &&
                     Thread.CurrentThread != inputClockThread)
                 {
                     inputClockStopped = inputClockThread.Join(2000);
@@ -4638,12 +4610,11 @@ namespace DS4Windows.InputDevices
 
     /// <summary>
     /// Owns the sequence numbers that the controller observes on the physical
-    /// Bluetooth output lane. DS5Dongle consumes one global four-bit report
-    /// sequence across 0x31 state, 0x32 microphone status, and 0x39 audio.
-    /// The media packet counter remains independent and advances only when the
-    /// two Opus frames in a 0x39 are accepted. Keeping the counters here keeps
-    /// logical 0x36 staging frames from consuming values that never appear on
-    /// the wire.
+    /// Bluetooth output lane. Audio reports keep one four-bit sequence while
+    /// native 0x32 microphone transitions keep their own. The byte-10 media
+    /// counter is shared by both: a 0x32 occupies one media interval even
+    /// though it contains no Opus payload. This is the exact ordering observed
+    /// from PadSense over Windows HidBth.
     /// </summary>
     internal sealed class DualSenseBluetoothPhysicalOutputSequence
     {
@@ -4652,12 +4623,17 @@ namespace DS4Windows.InputDevices
         internal const int ControllerStateReportLength = 78;
         internal const int ControllerStatePayloadLength = 47;
         internal const int ControllerStateSourceOffset = 13;
+        private const byte NativeAudioBufferLength = 0x80;
         private bool initialized;
+        private bool mediaPacketSequenceInitialized;
         private byte nextReportSequence;
+        private byte nextMicrophoneStatusSequence;
         private byte mediaPacketSequence;
         private byte preparedMediaPacketSequence;
 
         internal byte NextReportSequence => nextReportSequence;
+        internal byte NextMicrophoneStatusSequence =>
+            nextMicrophoneStatusSequence;
         internal byte NextControllerStateSequence =>
             nextReportSequence;
         internal byte MediaPacketSequence => mediaPacketSequence;
@@ -4678,7 +4654,7 @@ namespace DS4Windows.InputDevices
             ValidateSource(first, nameof(first));
             ValidateSource(second, nameof(second));
             EnsureInitialized(first);
-            preparedMediaPacketSequence = second[10];
+            PrepareMediaCounter(second[10], 2);
 
             DualSenseBluetoothPairedAudioReportBuilder.Build(first, second,
                 nextReportSequence, preparedMediaPacketSequence, destination);
@@ -4695,20 +4671,26 @@ namespace DS4Windows.InputDevices
             }
 
             EnsureInitialized(report);
-            preparedMediaPacketSequence = report[10];
+            PrepareMediaCounter(report[10], 1);
             report[1] = (byte)((nextReportSequence & 0x0F) << 4);
+            report[10] = preparedMediaPacketSequence;
             WriteSonyCrc(report);
         }
 
         internal void PrepareNativeAudio(byte[] report)
         {
-            if (DualSenseBluetoothAudioPacer.
-                    RequiresFullDuplexAudioReport(report))
+            ValidateSource(report, nameof(report));
+            if (!DualSenseBluetoothAudioPacer.IsSpeakerAudioReport(report))
             {
-                PrepareFullDuplexAudio(report);
-                return;
+                throw new ArgumentException(
+                    "Source must be a complete 398-byte 0x36 speaker report.",
+                    nameof(report));
             }
 
+            for (int index = 5; index <= 9; index++)
+            {
+                report[index] = NativeAudioBufferLength;
+            }
             PrepareSingleAudio(report);
         }
 
@@ -4723,12 +4705,12 @@ namespace DS4Windows.InputDevices
                     nameof(report));
             }
 
-            // Controlled transport probe: keep the reference FF mask and use
-            // the empirically strongest finite lane depth from the verified
-            // 64/96/127 wire matrix. Compact speaker/AUX remains unchanged.
+            // PadSense's clean Windows duplex stream keeps all five native
+            // 0x36 media-lane depths at 0x80 for both FE speaker-only and FF
+            // microphone-enabled playback.
             for (int index = 5; index <= 9; index++)
             {
-                report[index] = 96;
+                report[index] = NativeAudioBufferLength;
             }
 
             PrepareSingleAudio(report);
@@ -4745,7 +4727,7 @@ namespace DS4Windows.InputDevices
             }
 
             EnsureInitialized(source);
-            preparedMediaPacketSequence = source[10];
+            PrepareMediaCounter(source[10], 1);
             DualSenseBluetoothPadForgeAudioReportBuilder.Build(source,
                 nextReportSequence, preparedMediaPacketSequence, destination);
         }
@@ -4762,7 +4744,7 @@ namespace DS4Windows.InputDevices
             }
 
             EnsureInitialized(source);
-            preparedMediaPacketSequence = source[10];
+            PrepareMediaCounter(source[10], 1);
             DualSenseBluetoothPadForgeCombinedAudioReportBuilder.Build(source,
                 nextReportSequence, preparedMediaPacketSequence, destination);
         }
@@ -4781,13 +4763,35 @@ namespace DS4Windows.InputDevices
             }
 
             EnsureInitialized(initializationReport);
+            preparedMediaPacketSequence = unchecked(
+                (byte)(mediaPacketSequence + 1));
             Array.Clear(destination, 0, destination.Length);
             destination[0] = 0x32;
-            destination[1] = (byte)((nextReportSequence & 0x0F) << 4);
+            destination[1] = (byte)(
+                (nextMicrophoneStatusSequence & 0x0F) << 4);
             destination[2] = 0x91;
-            destination[3] = 1;
-            destination[4] = enabled ? (byte)0x03 : (byte)0x02;
+            destination[3] = 0x07;
+            destination[4] = enabled ? (byte)0xFF : (byte)0xFE;
+            for (int index = 5; index <= 9; index++)
+            {
+                destination[index] = NativeAudioBufferLength;
+            }
+            destination[10] = preparedMediaPacketSequence;
             WriteSonyCrc(destination);
+        }
+
+        internal void CommitMicrophoneStatus()
+        {
+            if (!initialized)
+            {
+                throw new InvalidOperationException(
+                    "A DualSense microphone status cannot be committed before it is prepared.");
+            }
+
+            nextMicrophoneStatusSequence = (byte)(
+                (nextMicrophoneStatusSequence + 1) & 0x0F);
+            mediaPacketSequence = preparedMediaPacketSequence;
+            mediaPacketSequenceInitialized = true;
         }
 
         internal void PrepareControllerState(byte[] statePayload,
@@ -4833,6 +4837,7 @@ namespace DS4Windows.InputDevices
             if (audio)
             {
                 mediaPacketSequence = preparedMediaPacketSequence;
+                mediaPacketSequenceInitialized = true;
             }
         }
 
@@ -4855,8 +4860,16 @@ namespace DS4Windows.InputDevices
             }
 
             nextReportSequence = (byte)(report[1] >> 4);
+            nextMicrophoneStatusSequence = nextReportSequence;
             mediaPacketSequence = report[10];
             initialized = true;
+        }
+
+        private void PrepareMediaCounter(byte firstSourceCounter, int step)
+        {
+            preparedMediaPacketSequence = mediaPacketSequenceInitialized ?
+                unchecked((byte)(mediaPacketSequence + step)) :
+                firstSourceCounter;
         }
 
         private static void ValidateSource(byte[] report, string parameter)

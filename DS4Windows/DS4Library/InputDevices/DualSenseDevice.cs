@@ -404,10 +404,10 @@ namespace DS4Windows.InputDevices
         private const int BluetoothCombinedStateLength = 63;
         private const int BluetoothCombinedNativeStateLength = USB_OUTPUT_CHANGE_LENGTH - 1;
         private const byte BluetoothCombinedLowLatencyBufferLength = 16;
-        // Sony's 0x36 transport uses the same 64-byte depth for every lane.
-        // Dropout prevention belongs to clock discipline and packet delivery,
-        // not a larger device-side buffer field.
-        private const byte BluetoothCombinedSpeakerBufferLength = 80;
+        // PadSense's clean Windows speaker and duplex traces keep every 0x36
+        // media-lane depth at 0x80. Use the same native contract for both FE
+        // and FF reports; cadence remains one frame per 10.667 ms.
+        private const byte BluetoothCombinedSpeakerBufferLength = 0x80;
         // The game, not a wall-clock timeout in DS4Windows, owns the end of a
         // native DualSense effect by publishing an explicit silent haptics
         // block. Expiring the newest block between otherwise valid virtual-
@@ -1743,9 +1743,8 @@ namespace DS4Windows.InputDevices
                 ApplyBluetoothSpeakerVolumeAndRoutingCore(template,
                     speakerVolume, headsetOnlyAudio, headphoneVolume);
                 // The requested flag was published before entering this path.
-                // Use the instance policy so the forced pre-0x32 state also
-                // restores the pending physical ADC gain validity/value that
-                // speaker snapshots intentionally sanitize.
+                // Keep the live template synchronized with the exact 0x32
+                // transition that the isolated writer will serialize.
                 ApplyBluetoothMicrophoneStreamingRequest(template);
                 lock (bluetoothAudioPacerLock)
                 {
@@ -4226,11 +4225,10 @@ namespace DS4Windows.InputDevices
                 if (ShouldPublishMicrophoneStateThroughSpeakerClock(
                     enableSpeakerOutput, IsBluetoothSpeakerClockActive()))
                 {
-                    // Publish the complete mic/controller state first, then
-                    // enqueue Sony's native 0x32 transition. Both operations
-                    // share the helper's physical sequence/FIFO. The steady
-                    // compact speaker+haptics carrier remains byte-identical
-                    // before and after this boundary.
+                    // Enqueue Sony's native 0x32 transition and the matching
+                    // live media template as one helper command group. The
+                    // steady speaker/haptics carrier changes mode only at that
+                    // accepted physical boundary.
                     bool published =
                         QueueBluetoothAudioPacerMicrophoneTransitionFromCache(
                             enabled);

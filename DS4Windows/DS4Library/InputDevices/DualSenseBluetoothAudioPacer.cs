@@ -4216,6 +4216,7 @@ namespace DS4Windows.InputDevices
         private const int SourceSpeakerDataOffset = 144;
         private const int SpeakerDataOffset = 13;
         private const int SpeakerFrameLength = 200;
+        private const byte DuplexBufferLength = 64;
 
         public static void Build(byte[] source, byte reportSequence,
             byte packetSequence, byte[] destination)
@@ -4233,13 +4234,19 @@ namespace DS4Windows.InputDevices
             destination[1] = (byte)((reportSequence & 0x0F) << 4);
             destination[2] = 0x91;
             destination[3] = 7;
-            // The compact carrier is deliberately immutable across microphone
-            // transitions. FE means this report updates the outbound media
-            // sections without overwriting the independently armed inbound
-            // microphone section. Rewriting every media report as FF was the
-            // source of the audible duplex cadence regression.
-            destination[4] = 0xFE;
-            destination[9] = 0xFF;
+            bool microphoneEnabled = (source[4] & 0x01) != 0;
+            destination[4] = microphoneEnabled ? (byte)0xFF : (byte)0xFE;
+            if (microphoneEnabled)
+            {
+                for (int index = 5; index <= 9; index++)
+                {
+                    destination[index] = DuplexBufferLength;
+                }
+            }
+            else
+            {
+                destination[9] = 0xFF;
+            }
             destination[10] = packetSequence;
             // Preserve the logical media destination. 0x93 targets the
             // controller speaker; 0x96 targets the headset/AUX DAC. Rewriting
@@ -4296,6 +4303,7 @@ namespace DS4Windows.InputDevices
         private const int GoldenSpeakerHeaderOffset = 77;
         private const int GoldenSpeakerDataOffset = 79;
         private const int SpeakerFrameLength = 200;
+        private const byte DuplexBufferLength = 64;
 
         internal static void Build(byte[] source, byte reportSequence,
             byte packetSequence, byte[] destination)
@@ -4313,12 +4321,23 @@ namespace DS4Windows.InputDevices
             destination[1] = (byte)((reportSequence & 0x0F) << 4);
             destination[2] = 0x91;
             destination[3] = 7;
-            // Keep the exact golden speaker/haptics carrier even while the
-            // microphone is active. A full state write followed by native
-            // 0x32 owns microphone activation; this high-rate FE carrier must
-            // never reconfigure that receive lane or alter media ordering.
-            destination[4] = 0xFE;
-            destination[9] = 0xFF;
+            bool microphoneEnabled = (source[4] & 0x01) != 0;
+            destination[4] = microphoneEnabled ? (byte)0xFF : (byte)0xFE;
+            if (microphoneEnabled)
+            {
+                // Every mic-capable reference reasserts the inbound audio
+                // section and real lane depths on each steady carrier. Keep
+                // that header rule while preserving the golden haptics-first
+                // TLV order byte-for-byte below.
+                for (int index = 5; index <= 9; index++)
+                {
+                    destination[index] = DuplexBufferLength;
+                }
+            }
+            else
+            {
+                destination[9] = 0xFF;
+            }
             destination[10] = packetSequence;
             destination[GoldenHapticsHeaderOffset] = 0x92;
             destination[GoldenHapticsHeaderOffset + 1] = HapticsLength;

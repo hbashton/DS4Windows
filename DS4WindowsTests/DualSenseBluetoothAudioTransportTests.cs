@@ -572,7 +572,7 @@ namespace DS4WindowsTests
         [DataTestMethod]
         [DataRow(false)]
         [DataRow(true)]
-        public void CompactAudioReportsDoNotRewriteMicrophoneSection(
+        public void CompactAudioReportsUseReferenceMicrophoneHeaderWithoutReorderingMedia(
             bool microphoneEnabled)
         {
             byte[] source = CreateSpeakerReport(0, 0, 0, 0x42);
@@ -588,17 +588,18 @@ namespace DS4WindowsTests
             DualSenseBluetoothPadForgeCombinedAudioReportBuilder.Build(source,
                 reportSequence: 9, packetSequence: 0x42, combined);
 
-            Assert.AreEqual((byte)0xFE, speaker[4],
-                "The compact speaker carrier tried to rewrite the microphone lane.");
-            Assert.AreEqual((byte)0xFE, combined[4],
-                "The compact speaker/haptics carrier tried to rewrite the microphone lane.");
+            byte expectedMask = microphoneEnabled ? (byte)0xFF : (byte)0xFE;
+            Assert.AreEqual(expectedMask, speaker[4]);
+            Assert.AreEqual(expectedMask, combined[4]);
             for (int index = 5; index <= 8; index++)
             {
-                Assert.AreEqual((byte)0, speaker[index]);
-                Assert.AreEqual((byte)0, combined[index]);
+                byte expectedDepth = microphoneEnabled ? (byte)64 : (byte)0;
+                Assert.AreEqual(expectedDepth, speaker[index]);
+                Assert.AreEqual(expectedDepth, combined[index]);
             }
-            Assert.AreEqual((byte)0xFF, speaker[9]);
-            Assert.AreEqual((byte)0xFF, combined[9]);
+            byte expectedLastDepth = microphoneEnabled ? (byte)64 : (byte)0xFF;
+            Assert.AreEqual(expectedLastDepth, speaker[9]);
+            Assert.AreEqual(expectedLastDepth, combined[9]);
             Assert.AreEqual((byte)0x92, combined[11]);
             Assert.AreEqual((byte)64, combined[12]);
             Assert.AreEqual((byte)0x93, combined[77]);

@@ -529,7 +529,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             }
         }
 
-        public void RefreshSelectedControllerProperties()
+        public void RefreshSelectedControllerProperties(
+            bool refreshControllerAudioChoices = true)
         {
             CaptureRuntimeSnapshot(App.rootHub);
             SelectedControllerChanged?.Invoke(this, EventArgs.Empty);
@@ -547,8 +548,11 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             HapticStrengthPercentChanged?.Invoke(this, EventArgs.Empty);
             SpeakerOutputEnabledChanged?.Invoke(this, EventArgs.Empty);
             HeadsetOnlyAudioChanged?.Invoke(this, EventArgs.Empty);
-            ControllerAudioSourceChoicesChanged?.Invoke(this,
-                EventArgs.Empty);
+            if (refreshControllerAudioChoices)
+            {
+                ControllerAudioSourceChoicesChanged?.Invoke(this,
+                    EventArgs.Empty);
+            }
             ControllerAudioSourceIdChanged?.Invoke(this, EventArgs.Empty);
             AudioHapticsSpeakerOverrideActiveChanged?.Invoke(this,
                 EventArgs.Empty);

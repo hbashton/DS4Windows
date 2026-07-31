@@ -1236,7 +1236,12 @@ Suspend support not enabled.", true);
                 }
             }
 
-            mainWinVM.RefreshSelectedControllerProperties();
+            // The source dropdown's ItemsSource is stable while its explicit
+            // selection is being saved. Replacing the collection here made
+            // WPF synthesize a selection of the first item and erase the app
+            // endpoint that had just been committed.
+            mainWinVM.RefreshSelectedControllerProperties(
+                refreshControllerAudioChoices: false);
             if (overviewDirtyControllerIndices.Count > 0)
             {
                 overviewProfileSaveTimer.Start();

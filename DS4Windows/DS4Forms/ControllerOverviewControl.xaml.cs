@@ -20,6 +20,8 @@ namespace DS4WinWPF.DS4Forms
     public partial class ControllerOverviewControl : UserControl
     {
         private bool controllerAudioSourceDropDownOpen;
+        private bool controllerAudioSourceSelectionCommitted;
+        private string pendingControllerAudioSourceId;
 
         public ControllerOverviewControl()
         {
@@ -51,26 +53,39 @@ namespace DS4WinWPF.DS4Forms
             // user selection; accepting the synthetic selection here cleared
             // the saved app source several seconds after the user chose it.
             if (!controllerAudioSourceDropDownOpen ||
-                e.AddedItems.Count == 0 || sender is not ComboBox comboBox)
+                controllerAudioSourceSelectionCommitted ||
+                e.AddedItems.Count == 0 || sender is not ComboBox comboBox ||
+                comboBox.SelectedValue is not string endpointId)
             {
                 return;
             }
 
-            CommitControllerAudioSource(comboBox);
+            pendingControllerAudioSourceId = endpointId;
+            controllerAudioSourceSelectionCommitted = true;
+            CommitControllerAudioSource(endpointId);
         }
 
         private void ControllerAudioSourceCombo_DropDownOpened(object sender,
-            EventArgs e) => controllerAudioSourceDropDownOpen = true;
+            EventArgs e)
+        {
+            controllerAudioSourceDropDownOpen = true;
+            controllerAudioSourceSelectionCommitted = false;
+            pendingControllerAudioSourceId = DataContext is
+                MainWindowsViewModel viewModel
+                    ? viewModel.ControllerAudioSourceId : null;
+        }
 
         private void ControllerAudioSourceCombo_DropDownClosed(object sender,
             EventArgs e)
         {
-            if (sender is ComboBox comboBox)
+            if (pendingControllerAudioSourceId != null)
             {
-                CommitControllerAudioSource(comboBox);
+                CommitControllerAudioSource(pendingControllerAudioSourceId);
             }
 
             controllerAudioSourceDropDownOpen = false;
+            controllerAudioSourceSelectionCommitted = false;
+            pendingControllerAudioSourceId = null;
         }
 
         private void ControllerAudioSourceCombo_PreviewKeyDown(object sender,
@@ -87,13 +102,18 @@ namespace DS4WinWPF.DS4Forms
             // WPF applies the key so keyboard and mouse users get identical
             // profile serialization without reopening the ItemsSource race.
             Dispatcher.BeginInvoke(DispatcherPriority.Input,
-                new Action(() => CommitControllerAudioSource(comboBox)));
+                new Action(() =>
+                {
+                    if (comboBox.SelectedValue is string endpointId)
+                    {
+                        CommitControllerAudioSource(endpointId);
+                    }
+                }));
         }
 
-        private void CommitControllerAudioSource(ComboBox comboBox)
+        private void CommitControllerAudioSource(string endpointId)
         {
-            if (!IsLoaded || comboBox.SelectedValue is not string endpointId ||
-                DataContext is not MainWindowsViewModel viewModel)
+            if (!IsLoaded || DataContext is not MainWindowsViewModel viewModel)
             {
                 return;
             }

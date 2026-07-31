@@ -8,6 +8,7 @@ namespace DS4Windows
         Off = 0,
         Balanced = 1,
         Strong = 2,
+        NvidiaAi = 3,
     }
 
     public sealed class DualSenseMicrophoneProcessor : IDisposable
@@ -26,6 +27,7 @@ namespace DS4Windows
         private readonly float[] workingFrame = new float[FrameSize];
         private readonly float[] dryFrame = new float[FrameSize];
         private RnnoiseSuppressor noiseSuppressor;
+        private NvidiaAudioNoiseSuppressor nvidiaNoiseSuppressor;
         private bool noiseSuppressorUnavailable;
         private string noiseSuppressorFailure = string.Empty;
         private float previousInput;
@@ -39,7 +41,8 @@ namespace DS4Windows
             {
                 lock (syncRoot)
                 {
-                    return noiseSuppressor != null;
+                    return noiseSuppressor != null ||
+                        nvidiaNoiseSuppressor != null;
                 }
             }
         }
@@ -91,7 +94,25 @@ namespace DS4Windows
                 Array.Clear(workingFrame, sampleCount, FrameSize - sampleCount);
                 Array.Clear(dryFrame, sampleCount, FrameSize - sampleCount);
 
-                if (suppression != DualSenseMicrophoneNoiseSuppression.Off &&
+                bool suppressed = false;
+                if (suppression ==
+                    DualSenseMicrophoneNoiseSuppression.NvidiaAi &&
+                    EnsureNvidiaNoiseSuppressor())
+                {
+                    try
+                    {
+                        nvidiaNoiseSuppressor.Process(workingFrame);
+                        suppressed = true;
+                    }
+                    catch (Exception ex) when (IsNativeFailure(ex))
+                    {
+                        DisableNvidiaNoiseSuppressor(ex);
+                        Array.Copy(dryFrame, workingFrame, FrameSize);
+                    }
+                }
+
+                if (!suppressed && suppression !=
+                        DualSenseMicrophoneNoiseSuppression.Off &&
                     EnsureNoiseSuppressor())
                 {
                     try
@@ -156,6 +177,8 @@ namespace DS4Windows
             {
                 noiseSuppressor?.Dispose();
                 noiseSuppressor = null;
+                nvidiaNoiseSuppressor?.Dispose();
+                nvidiaNoiseSuppressor = null;
                 noiseSuppressorUnavailable = false;
                 noiseSuppressorFailure = string.Empty;
                 previousInput = 0.0f;
@@ -201,6 +224,31 @@ namespace DS4Windows
             noiseSuppressor?.Dispose();
             noiseSuppressor = null;
             noiseSuppressorUnavailable = true;
+            noiseSuppressorFailure = ex.GetBaseException().Message;
+        }
+
+        private bool EnsureNvidiaNoiseSuppressor()
+        {
+            if (nvidiaNoiseSuppressor != null) return true;
+            if (!NvidiaAudioNoiseSuppressor.IsRuntimeInstalled) return false;
+
+            try
+            {
+                nvidiaNoiseSuppressor = new NvidiaAudioNoiseSuppressor();
+                noiseSuppressorFailure = string.Empty;
+                return true;
+            }
+            catch (Exception ex) when (IsNativeFailure(ex))
+            {
+                DisableNvidiaNoiseSuppressor(ex);
+                return false;
+            }
+        }
+
+        private void DisableNvidiaNoiseSuppressor(Exception ex)
+        {
+            nvidiaNoiseSuppressor?.Dispose();
+            nvidiaNoiseSuppressor = null;
             noiseSuppressorFailure = ex.GetBaseException().Message;
         }
 

@@ -2506,7 +2506,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
                     destination.dualSenseMicrophoneVolume[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.MicrophoneVolume;
                     destination.dualSenseMicrophoneNoiseSuppression[deviceIndex] = Math.Min(
                         DualSenseControllerSettings.AudioSettingsGroup.MicrophoneNoiseSuppression,
-                        (byte)DualSenseMicrophoneNoiseSuppression.Strong);
+                        (byte)DualSenseMicrophoneNoiseSuppression.NvidiaAi);
                     destination.dualSenseAudioCaptureEndpointId[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.CaptureEndpointId ?? string.Empty;
                     destination.dualSenseAudioSpeakerEndpointId[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.SpeakerEndpointId ?? string.Empty;
                     destination.dualSenseEnableMicrophonePassthrough[deviceIndex] = DualSenseControllerSettings.AudioSettingsGroup.EnableMicrophonePassthrough;

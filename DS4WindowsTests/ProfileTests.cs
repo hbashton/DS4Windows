@@ -373,6 +373,12 @@ namespace DS4WindowsTests
 
             Assert.AreEqual((byte)DualSenseMicrophoneNoiseSuppression.Strong,
                 dto.DualSenseControllerSettings.AudioSettingsGroup.MicrophoneNoiseSuppression);
+
+            store.dualSenseMicrophoneNoiseSuppression[0] =
+                (byte)DualSenseMicrophoneNoiseSuppression.NvidiaAi;
+            dto.MapFrom(store);
+            Assert.AreEqual((byte)DualSenseMicrophoneNoiseSuppression.NvidiaAi,
+                dto.DualSenseControllerSettings.AudioSettingsGroup.MicrophoneNoiseSuppression);
         }
 
         [TestMethod]

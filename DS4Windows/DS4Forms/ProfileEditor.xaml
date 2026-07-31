@@ -2392,6 +2392,9 @@
                                                     <ComboBoxItem Content="Off" />
                                                     <ComboBoxItem Content="Balanced" />
                                                     <ComboBoxItem Content="Strong" />
+                                                    <ComboBoxItem Content="NVIDIA AI"
+                                                                  IsEnabled="{Binding NvidiaNoiseSuppressionAvailable}"
+                                                                  ToolTip="{Binding NvidiaNoiseSuppressionAvailability}" />
                                                 </ComboBox>
                                                 <Label Content="Bass/body boost:" Grid.Row="6" Grid.Column="0"
                                                        ToolTip="Adds up to 6 dB around 200 Hz while filtering unusable sub-bass. Applies only to the Bluetooth controller speaker stream." />

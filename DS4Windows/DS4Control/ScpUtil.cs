@@ -7567,7 +7567,9 @@ namespace DS4Windows
                         {
                             Item = xmlDSAudioGroupElement.SelectSingleNode("MicrophoneNoiseSuppression");
                             byte.TryParse(Item.InnerText, out byte temp);
-                            dualSenseMicrophoneNoiseSuppression[device] = Math.Min(temp, (byte)2);
+                            dualSenseMicrophoneNoiseSuppression[device] =
+                                Math.Min(temp, (byte)
+                                    DualSenseMicrophoneNoiseSuppression.NvidiaAi);
                         }
                         catch { missingSetting = true; }
 

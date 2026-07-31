@@ -381,6 +381,7 @@
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
@@ -433,6 +434,35 @@
                                         Style="{StaticResource OverviewQuickSliderStyle}"
                                         Minimum="0" Maximum="100" TickFrequency="1"
                                         Value="{Binding HeadphoneVolumePercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
+                                <Expander Grid.Row="8" Grid.ColumnSpan="2" Header="Speaker processing"
+                                          Margin="0,8,0,0">
+                                    <Grid Margin="4,7,0,1">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="150" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="Dynamic range" VerticalAlignment="Center"
+                                                   ToolTip="Raises quiet detail and safely restrains loud effects without look-ahead latency." />
+                                        <ComboBox Grid.Column="1" SelectedIndex="{Binding SpeakerCompressionIndex, Mode=TwoWay}">
+                                            <ComboBoxItem Content="Off" />
+                                            <ComboBoxItem Content="Balanced" />
+                                            <ComboBoxItem Content="Strong" />
+                                        </ComboBox>
+                                        <TextBlock Grid.Row="1" Text="Bass / body" VerticalAlignment="Center"
+                                                   Margin="0,8,0,0"
+                                                   ToolTip="Adds body around 200 Hz while filtering unusable sub-bass." />
+                                        <DockPanel Grid.Row="1" Grid.Column="1" Margin="0,8,0,0">
+                                            <TextBlock DockPanel.Dock="Right" Margin="8,0,0,0"
+                                                       Text="{Binding SpeakerBassBoostDb, StringFormat={}{0} dB}" />
+                                            <Slider Minimum="0" Maximum="6" TickFrequency="1" IsSnapToTickEnabled="True"
+                                                    Value="{Binding SpeakerBassBoostDb, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
+                                        </DockPanel>
+                                    </Grid>
+                                </Expander>
                             </Grid>
 
                             <StackPanel Grid.Row="4" Grid.ColumnSpan="2">
@@ -466,6 +496,23 @@
                                              Style="{StaticResource OverviewQuickSliderStyle}"
                                             Minimum="0" Maximum="100" TickFrequency="1"
                                             Value="{Binding MicrophoneVolumePercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
+                                </Grid>
+                                <Grid Margin="0,10,0,0"
+                                      IsEnabled="{Binding MicrophoneLevelControlsEnabled}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="150" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Noise suppression" VerticalAlignment="Center" />
+                                    <ComboBox Grid.Column="1"
+                                              SelectedIndex="{Binding MicrophoneNoiseSuppressionIndex, Mode=TwoWay}">
+                                        <ComboBoxItem Content="Off" />
+                                        <ComboBoxItem Content="Balanced" />
+                                        <ComboBoxItem Content="Strong" />
+                                        <ComboBoxItem Content="NVIDIA AI"
+                                                      IsEnabled="{Binding NvidiaNoiseSuppressionAvailable}"
+                                                      ToolTip="{Binding NvidiaNoiseSuppressionAvailability}" />
+                                    </ComboBox>
                                 </Grid>
                             </StackPanel>
                         </Grid>

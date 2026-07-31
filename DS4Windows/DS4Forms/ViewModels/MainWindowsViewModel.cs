@@ -143,7 +143,10 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public event EventHandler MicrophoneInputEnabledChanged;
         public event EventHandler SpeakerVolumePercentChanged;
         public event EventHandler HeadphoneVolumePercentChanged;
+        public event EventHandler SpeakerCompressionIndexChanged;
+        public event EventHandler SpeakerBassBoostDbChanged;
         public event EventHandler MicrophoneVolumePercentChanged;
+        public event EventHandler MicrophoneNoiseSuppressionIndexChanged;
         public event EventHandler<QuickProfileSettingChangedEventArgs> QuickProfileSettingChanged;
 
         public bool HasSelectedController => selectedController != null;
@@ -462,6 +465,48 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             }
         }
 
+        public int SpeakerCompressionIndex
+        {
+            get => HasValidSelectedDevice
+                ? Global.DualSenseSpeakerCompression[
+                    selectedController.DevIndex]
+                : 0;
+            set
+            {
+                if (!HasValidSelectedDevice) return;
+                int deviceIndex = selectedController.DevIndex;
+                byte converted = (byte)Math.Clamp(value,
+                    (int)DualSenseSpeakerCompression.Off,
+                    (int)DualSenseSpeakerCompression.Strong);
+                if (Global.DualSenseSpeakerCompression[deviceIndex] ==
+                    converted) return;
+                Global.DualSenseSpeakerCompression[deviceIndex] = converted;
+                SpeakerCompressionIndexChanged?.Invoke(this,
+                    EventArgs.Empty);
+                RaiseQuickProfileSettingChanged(deviceIndex);
+            }
+        }
+
+        public int SpeakerBassBoostDb
+        {
+            get => HasValidSelectedDevice
+                ? Global.DualSenseSpeakerBassBoost[
+                    selectedController.DevIndex]
+                : 0;
+            set
+            {
+                if (!HasValidSelectedDevice) return;
+                int deviceIndex = selectedController.DevIndex;
+                byte converted = (byte)Math.Clamp(value, 0,
+                    DualSenseSpeakerProcessor.MaximumBassBoostDb);
+                if (Global.DualSenseSpeakerBassBoost[deviceIndex] ==
+                    converted) return;
+                Global.DualSenseSpeakerBassBoost[deviceIndex] = converted;
+                SpeakerBassBoostDbChanged?.Invoke(this, EventArgs.Empty);
+                RaiseQuickProfileSettingChanged(deviceIndex);
+            }
+        }
+
         public int MicrophoneVolumePercent
         {
             get => HasValidSelectedDevice
@@ -506,7 +551,11 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             MicrophoneInputEnabledChanged?.Invoke(this, EventArgs.Empty);
             SpeakerVolumePercentChanged?.Invoke(this, EventArgs.Empty);
             HeadphoneVolumePercentChanged?.Invoke(this, EventArgs.Empty);
+            SpeakerCompressionIndexChanged?.Invoke(this, EventArgs.Empty);
+            SpeakerBassBoostDbChanged?.Invoke(this, EventArgs.Empty);
             MicrophoneVolumePercentChanged?.Invoke(this, EventArgs.Empty);
+            MicrophoneNoiseSuppressionIndexChanged?.Invoke(this,
+                EventArgs.Empty);
         }
 
         public void RefreshRuntimeState(ControlService controlService)
@@ -616,9 +665,24 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             {
                 HeadphoneVolumePercentChanged?.Invoke(this, EventArgs.Empty);
             }
+            if (previous.SpeakerCompression != snapshot.SpeakerCompression)
+            {
+                SpeakerCompressionIndexChanged?.Invoke(this,
+                    EventArgs.Empty);
+            }
+            if (previous.SpeakerBassBoost != snapshot.SpeakerBassBoost)
+            {
+                SpeakerBassBoostDbChanged?.Invoke(this, EventArgs.Empty);
+            }
             if (previous.MicrophoneVolume != snapshot.MicrophoneVolume)
             {
                 MicrophoneVolumePercentChanged?.Invoke(this, EventArgs.Empty);
+            }
+            if (previous.MicrophoneNoiseSuppression !=
+                snapshot.MicrophoneNoiseSuppression)
+            {
+                MicrophoneNoiseSuppressionIndexChanged?.Invoke(this,
+                    EventArgs.Empty);
             }
             if (previous.StartupStatus != snapshot.StartupStatus)
             {
@@ -715,7 +779,9 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 HeadsetOnlyAudio, ControllerAudioSourceId,
                 AudioHapticsSpeakerOverrideActive, MicrophoneInputEnabled,
                 SpeakerVolumePercent,
-                HeadphoneVolumePercent, MicrophoneVolumePercent, startupStatus);
+                HeadphoneVolumePercent, SpeakerCompressionIndex,
+                SpeakerBassBoostDb, MicrophoneVolumePercent,
+                MicrophoneNoiseSuppressionIndex, startupStatus);
         }
 
         private readonly struct OverviewRuntimeSnapshot
@@ -727,7 +793,9 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 string controllerAudioSourceId,
                 bool audioHapticsSpeakerOverrideActive,
                 bool microphoneEnabled,
-                int speakerVolume, int headphoneVolume, int microphoneVolume,
+                int speakerVolume, int headphoneVolume,
+                int speakerCompression, int speakerBassBoost,
+                int microphoneVolume, int microphoneNoiseSuppression,
                 ControllerStartupStatus startupStatus)
             {
                 ProfileName = profileName;
@@ -745,7 +813,10 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 MicrophoneEnabled = microphoneEnabled;
                 SpeakerVolume = speakerVolume;
                 HeadphoneVolume = headphoneVolume;
+                SpeakerCompression = speakerCompression;
+                SpeakerBassBoost = speakerBassBoost;
                 MicrophoneVolume = microphoneVolume;
+                MicrophoneNoiseSuppression = microphoneNoiseSuppression;
                 StartupStatus = startupStatus;
             }
 
@@ -762,9 +833,41 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             public bool MicrophoneEnabled { get; }
             public int SpeakerVolume { get; }
             public int HeadphoneVolume { get; }
+            public int SpeakerCompression { get; }
+            public int SpeakerBassBoost { get; }
             public int MicrophoneVolume { get; }
+            public int MicrophoneNoiseSuppression { get; }
             public ControllerStartupStatus StartupStatus { get; }
         }
+
+        public int MicrophoneNoiseSuppressionIndex
+        {
+            get => HasValidSelectedDevice
+                ? Global.DualSenseMicrophoneNoiseSuppression[
+                    selectedController.DevIndex]
+                : 0;
+            set
+            {
+                if (!HasValidSelectedDevice) return;
+                int deviceIndex = selectedController.DevIndex;
+                byte converted = (byte)Math.Clamp(value,
+                    (int)DualSenseMicrophoneNoiseSuppression.Off,
+                    (int)DualSenseMicrophoneNoiseSuppression.NvidiaAi);
+                if (Global.DualSenseMicrophoneNoiseSuppression[deviceIndex] ==
+                    converted) return;
+                Global.DualSenseMicrophoneNoiseSuppression[deviceIndex] =
+                    converted;
+                MicrophoneNoiseSuppressionIndexChanged?.Invoke(this,
+                    EventArgs.Empty);
+                RaiseQuickProfileSettingChanged(deviceIndex);
+            }
+        }
+
+        public bool NvidiaNoiseSuppressionAvailable =>
+            NvidiaAudioNoiseSuppressor.IsRuntimeInstalled;
+
+        public string NvidiaNoiseSuppressionAvailability =>
+            NvidiaAudioNoiseSuppressor.RuntimeAvailability;
 
         private async Task RefreshControllerAudioChoicesAsync()
         {

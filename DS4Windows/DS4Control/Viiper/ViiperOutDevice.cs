@@ -2367,7 +2367,7 @@ namespace DS4Windows
                 (DualSenseMicrophoneNoiseSuppression)Math.Clamp(
                     Volatile.Read(ref microphoneNoiseSuppression),
                     (int)DualSenseMicrophoneNoiseSuppression.Off,
-                    (int)DualSenseMicrophoneNoiseSuppression.Strong);
+                    (int)DualSenseMicrophoneNoiseSuppression.NvidiaAi);
             microphoneProcessor.Process(microphoneMonoPcm, frames,
                 (byte)Math.Clamp(Volatile.Read(ref microphoneVolume), 0,
                     byte.MaxValue), suppression, muteOutput: muted);

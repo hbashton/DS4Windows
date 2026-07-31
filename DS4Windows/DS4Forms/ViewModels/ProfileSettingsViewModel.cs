@@ -3436,8 +3436,15 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         {
             get => Global.DualSenseMicrophoneNoiseSuppression[device];
             set => Global.DualSenseMicrophoneNoiseSuppression[device] =
-                (byte)Math.Clamp(value, 0, 2);
+                (byte)Math.Clamp(value, 0,
+                    (int)DualSenseMicrophoneNoiseSuppression.NvidiaAi);
         }
+
+        public bool NvidiaNoiseSuppressionAvailable =>
+            NvidiaAudioNoiseSuppressor.IsRuntimeInstalled;
+
+        public string NvidiaNoiseSuppressionAvailability =>
+            NvidiaAudioNoiseSuppressor.RuntimeAvailability;
 
         public bool InverseRumbleMotors
         {

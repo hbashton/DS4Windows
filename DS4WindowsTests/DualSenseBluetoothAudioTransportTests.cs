@@ -1185,21 +1185,6 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void LegacySpeakerCompatibilityPropagatesSubmissionFailure()
-        {
-            DualSenseDevice device = CreateBluetoothDevice();
-            device.EnableSpeakerOutput = true;
-            byte[] report = new byte[334];
-            report[0] = 0x35;
-            report[11] = 0x93;
-            report[12] = 200;
-
-            Assert.IsFalse(device.WriteBluetoothSpeakerAudioOutputReport(
-                report, 0, report.Length),
-                "The compatibility API hid the physical speaker submission failure.");
-        }
-
-        [TestMethod]
         public void AudioOnlyCombinedCarrierPreservesProfileLightbarAndHaptics()
         {
             DualSenseDevice device = CreateBluetoothDevice();

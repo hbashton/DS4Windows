@@ -3824,9 +3824,8 @@ namespace DS4Windows
             Program.rootHub?.ApplyAudioHapticsToGameReport(deviceIndex,
                 feedback, DualSenseBluetoothHapticsReportOffset + 13, 64);
 
-            return dualSenseDevice.WriteBluetoothHapticsOutputReport(feedback,
-                DualSenseBluetoothHapticsReportOffset,
-                DualSenseBluetoothHapticsReportLength);
+            return dualSenseDevice.WriteBluetoothHapticsSamples(feedback,
+                DualSenseBluetoothHapticsReportOffset + 13, 64);
         }
 
         private bool TryApplyBluetoothCombinedHapticsOutputReport(

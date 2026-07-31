@@ -3239,22 +3239,6 @@ namespace DS4Windows.InputDevices
             return true;
         }
 
-        public bool WriteBluetoothHapticsOutputReport(byte[] report, int offset, int length, bool waitForWrite = false)
-        {
-            if (report == null || offset < 0 || length != 141 ||
-                offset + length > report.Length || report[offset] != 0x32 ||
-                report[offset + 11] != 0x92 ||
-                report[offset + 12] != BluetoothCombinedHapticsDataLength)
-            {
-                LastBluetoothHapticsWriteStatus =
-                    "Rejected: invalid legacy Bluetooth haptics report.";
-                return false;
-            }
-
-            return WriteBluetoothHapticsSamples(report, offset + 13,
-                BluetoothCombinedHapticsDataLength, waitForWrite);
-        }
-
         /// <summary>
         /// Publishes one native 3 kHz stereo haptics packet through the same
         /// combined Bluetooth transport used by controller speaker audio,
@@ -3308,28 +3292,6 @@ namespace DS4Windows.InputDevices
             }
 
             return written;
-        }
-
-        /// <summary>
-        /// Compatibility entry point for callers that still package the old
-        /// 0x35 speaker lane. The Opus payload is extracted and submitted through
-        /// the unified 0x36 transport; report 0x35 is never written to hardware.
-        /// </summary>
-        public bool WriteBluetoothSpeakerAudioOutputReport(byte[] report, int offset, int length)
-        {
-            if (report == null || offset < 0 || length != 334 ||
-                offset + length > report.Length || report[offset] != 0x35 ||
-                report[offset + 11] != 0x93 ||
-                report[offset + 12] != BluetoothCombinedSpeakerFrameLength)
-            {
-                LastBluetoothHapticsWriteStatus =
-                    "Rejected: invalid legacy Bluetooth speaker report.";
-                return false;
-            }
-
-            byte[] frame = new byte[BluetoothCombinedSpeakerFrameLength];
-            Array.Copy(report, offset + 13, frame, 0, frame.Length);
-            return SetBluetoothSpeakerAudioFrame(frame, frame.Length);
         }
 
         /// <summary>

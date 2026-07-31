@@ -520,23 +520,6 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 Global.OlderProfilePath[devIndex] = Global.ProfilePath[devIndex];
             }
 
-            //Global.Save();
-            // Run profile loading in Task. Need to still wait for Task to finish
-            Task.Run(() =>
-            {
-                if (device != null)
-                {
-                    device.HaltReportingRunAction(() =>
-                    {
-                        Global.LoadProfile(devIndex, true, App.rootHub);
-                    });
-                }
-
-            }).Wait();
-
-            string prolog = string.Format(Properties.Resources.UsingProfile, (devIndex + 1).ToString(), prof, $"{device.Battery}");
-            DS4Windows.AppLogger.LogToGui(prolog, false);
-
             SelectedProfile = prof;
             this.selectedEntity = profileListHolder.ProfileListCol.SingleOrDefault(x => x.Name == prof);
             if (this.selectedEntity != null)
@@ -545,7 +528,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 HookEvents(true);
             }
 
-            LightColorChanged?.Invoke(this, EventArgs.Empty);
+            Mapping.RequestRegularProfileReload(devIndex, true, App.rootHub,
+                loaded => CompleteProfileReload(loaded, prof, logSelection: true));
         }
 
         public bool SynchronizeRuntimeProfile()
@@ -627,16 +611,43 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 SelectedProfile = selectedEntity.Name;
             }
 
-            // Run profile loading in Task. Need to still wait for Task to finish
-            Task.Run(() =>
-            {
-                device.HaltReportingRunAction(() =>
-                {
-                    Global.LoadProfile(devIndex, false, App.rootHub);
-                });
-            }).Wait();
+            Mapping.RequestRegularProfileReload(devIndex, false, App.rootHub,
+                loaded => CompleteProfileReload(loaded, SelectedProfile,
+                    logSelection: false));
+        }
 
-            LightColorChanged?.Invoke(this, EventArgs.Empty);
+        private void CompleteProfileReload(bool loaded, string profileName,
+            bool logSelection)
+        {
+            if (!loaded)
+            {
+                return;
+            }
+
+            void CompleteOnUiThread()
+            {
+                if (logSelection)
+                {
+                    string prolog = string.Format(
+                        Properties.Resources.UsingProfile,
+                        (devIndex + 1).ToString(), profileName,
+                        $"{device?.Battery ?? 0}");
+                    AppLogger.LogToGui(prolog, false);
+                }
+
+                LightColorChanged?.Invoke(this, EventArgs.Empty);
+            }
+
+            System.Windows.Threading.Dispatcher dispatcher =
+                System.Windows.Application.Current?.Dispatcher;
+            if (dispatcher == null || dispatcher.CheckAccess())
+            {
+                CompleteOnUiThread();
+            }
+            else
+            {
+                dispatcher.BeginInvoke((Action)CompleteOnUiThread);
+            }
         }
 
         public void RequestUpdatedTooltipID()

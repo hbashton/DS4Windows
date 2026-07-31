@@ -1867,21 +1867,7 @@ namespace DS4WinWPF.DS4Forms
 
             Global.outDevTypeTemp[deviceNum] = OutContType.ViiperX360;
             profileTriggerLabControl.RestorePhysicalProfileEffects();
-            // Run profile loading in Task. Need to still wait for Task to finish
-            Task.Run(() =>
-            {
-                DS4Device device = deviceNum >= 0 && deviceNum < ControlService.CURRENT_DS4_CONTROLLER_LIMIT
-                    ? App.rootHub.DS4Controllers[deviceNum]
-                    : null;
-                if (device != null)
-                {
-                    device.HaltReportingRunAction(() => { Global.LoadProfile(deviceNum, false, App.rootHub); });
-                }
-                else
-                {
-                    Global.LoadProfile(deviceNum, false, App.rootHub);
-                }
-            });
+            Mapping.RequestRegularProfileReload(deviceNum, false, App.rootHub);
 
             Closed?.Invoke(this, EventArgs.Empty);
         }

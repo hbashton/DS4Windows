@@ -881,6 +881,31 @@ namespace DS4Windows
             Task.Run(() => RunProfileSwitchRequests(device, ctrl));
         }
 
+        /// <summary>
+        /// Reloads the controller's selected regular profile on the serialized,
+        /// coalescing profile worker. Callers return immediately, so XML parsing,
+        /// output-device negotiation, and optional launch helpers never block the
+        /// WPF dispatcher or pause the physical controller report loop.
+        /// </summary>
+        public static void RequestRegularProfileReload(int device,
+            bool launchProgram, ControlService ctrl, Action<bool> afterLoad = null)
+        {
+            RequestProfileSwitch(device, string.Empty, false, launchProgram,
+                ctrl, afterLoad);
+        }
+
+        /// <summary>
+        /// Loads a temporary profile through the same serialized worker used by
+        /// button-triggered profile switching.
+        /// </summary>
+        public static void RequestTemporaryProfileLoad(int device,
+            string profileName, bool launchProgram, ControlService ctrl,
+            Action<bool> afterLoad = null)
+        {
+            RequestProfileSwitch(device, profileName, true, launchProgram,
+                ctrl, afterLoad);
+        }
+
         private static void RunProfileSwitchRequests(int device, ControlService ctrl)
         {
             while (true)

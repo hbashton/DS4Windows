@@ -3627,25 +3627,6 @@ namespace DS4Windows
             return builder.Length == 0 ? "none" : builder.ToString();
         }
 
-        private bool RunProfileActionWithReportingPaused(int ind, Action action)
-        {
-            DS4Device device = ind >= 0 && ind < DS4Controllers.Length ? DS4Controllers[ind] : null;
-            if (device == null)
-            {
-                action?.Invoke();
-                return true;
-            }
-
-            bool actionRan = false;
-            device.HaltReportingRunAction(() =>
-            {
-                actionRan = true;
-                action?.Invoke();
-            });
-
-            return actionRan;
-        }
-
         private bool HasAnyPendingDualSenseMuteProfile()
         {
             for (int i = 0; i < MAX_DS4_CONTROLLER_COUNT; i++)
@@ -3687,22 +3668,18 @@ namespace DS4Windows
                 }
 
                 string profileName = dualSenseMuteRequestedProfileName[i];
-                bool profileLoaded = false;
-                bool actionRan = RunProfileActionWithReportingPaused(i,
-                    () => profileLoaded = Global.LoadTempProfile(i, profileName, false, this));
-
-                if (!actionRan)
-                {
-                    continue;
-                }
-
                 dualSenseMuteProfilePending[i] = false;
                 dualSenseMuteRequestedProfileName[i] = string.Empty;
-
-                if (!profileLoaded)
-                {
-                    LogDebug($"DualSense mute profile action failed to load '{profileName}'.", true);
-                }
+                int deviceIndex = i;
+                Mapping.RequestTemporaryProfileLoad(deviceIndex, profileName,
+                    false, this, loaded =>
+                    {
+                        if (!loaded)
+                        {
+                            LogDebug($"DualSense mute profile action failed to load " +
+                                $"'{profileName}'.", true);
+                        }
+                    });
             }
         }
 

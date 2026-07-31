@@ -1166,12 +1166,8 @@ Suspend support not enabled.", true);
                     Global.SaveProfile(deviceIndex, profileName);
                     if (reloadProfile)
                     {
-                        DS4Device device = App.rootHub.DS4Controllers[deviceIndex];
-                        if (device != null)
-                        {
-                            device.HaltReportingRunAction(() =>
-                                Global.LoadProfile(deviceIndex, false, App.rootHub));
-                        }
+                        Mapping.RequestRegularProfileReload(deviceIndex, false,
+                            App.rootHub);
                     }
                 }
             }
@@ -1623,17 +1619,9 @@ Suspend support not enabled.", true);
                                         }
                                         else
                                         {
-                                            Task.Run(() =>
-                                            {
-                                                DS4Device device = conLvViewModel.ControllerCol[tdevice].Device;
-                                                if (device != null)
-                                                {
-                                                    device.HaltReportingRunAction(() =>
-                                                    {
-                                                        Global.LoadTempProfile(tdevice, strData[2], true, Program.rootHub);
-                                                    });
-                                                }
-                                            }).Wait();
+                                            Mapping.RequestTemporaryProfileLoad(
+                                                tdevice, strData[2], true,
+                                                Program.rootHub);
                                         }
 
                                         DS4Device device = conLvViewModel.ControllerCol[tdevice].Device;

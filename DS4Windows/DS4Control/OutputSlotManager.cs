@@ -125,13 +125,19 @@ namespace DS4Windows
                     outputDevice = new ViiperOutDevice(contType, ViiperVirtualDeviceType.Xbox360);
                     break;
                 case OutContType.ViiperDS4:
-                    outputDevice = new ViiperOutDevice(contType, ViiperVirtualDeviceType.DualShock4);
+                    outputDevice = new ViiperOutDevice(contType,
+                        ViiperVirtualDeviceType.DualShock4,
+                        gamepadOnly: true);
                     break;
                 case OutContType.ViiperDualSense:
-                    outputDevice = new ViiperOutDevice(contType, ViiperVirtualDeviceType.DualSense);
+                    outputDevice = new ViiperOutDevice(contType,
+                        ViiperVirtualDeviceType.DualSense,
+                        gamepadOnly: true);
                     break;
                 case OutContType.ViiperDualSenseEdge:
-                    outputDevice = new ViiperOutDevice(contType, ViiperVirtualDeviceType.DualSenseEdge);
+                    outputDevice = new ViiperOutDevice(contType,
+                        ViiperVirtualDeviceType.DualSenseEdge,
+                        gamepadOnly: true);
                     break;
                 case OutContType.ViiperSwitch2Pro:
                     outputDevice = new ViiperOutDevice(contType, ViiperVirtualDeviceType.Switch2Pro);

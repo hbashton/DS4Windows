@@ -182,6 +182,7 @@ namespace DS4Windows
         private readonly OutContType outputType;
         private readonly ViiperVirtualDeviceType viiperType;
         private readonly bool audioOnlySidecar;
+        private readonly bool gamepadOnly;
         private readonly ViiperClient client;
         private readonly object pendingPacketLock = new object();
         private readonly object microphoneQueueLock = new object();
@@ -370,11 +371,18 @@ namespace DS4Windows
         }
 
         public ViiperOutDevice(OutContType outputType,
-            ViiperVirtualDeviceType viiperType, bool audioOnlySidecar = false)
+            ViiperVirtualDeviceType viiperType, bool audioOnlySidecar = false,
+            bool gamepadOnly = false)
         {
             this.outputType = outputType;
             this.viiperType = viiperType;
             this.audioOnlySidecar = audioOnlySidecar;
+            this.gamepadOnly = gamepadOnly;
+            if (audioOnlySidecar && gamepadOnly)
+            {
+                throw new ArgumentException(
+                    "A VIIPER device cannot be both audio-only and gamepad-only.");
+            }
             feedbackDispatchBuffer = new ViiperFeedbackDispatchBuffer(
                 // The buffer implementation requires one preallocated slot.
                 // Non-audio devices never enqueue it; their public policy is
@@ -569,6 +577,8 @@ namespace DS4Windows
 
         internal bool IsAudioOnlySidecar => audioOnlySidecar;
 
+        internal bool IsGamepadOnly => gamepadOnly;
+
         internal bool UsesAudioOnlyUsbDescriptor =>
             connected && activeStreamUsesAudioOnlyDescriptor;
 
@@ -721,13 +731,14 @@ namespace DS4Windows
             {
                 ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
                     audioOnlySidecar ? "dualsenseaudioonlyduplexv5" :
-                        "dualsensecombinedaudioduplexv5");
+                        gamepadOnly ? "dualsensegamepadv5" :
+                            "dualsensecombinedaudioduplexv5");
                 activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
                 activeStreamUsesFramedProtocol = true;
-                activeStreamSupportsMicrophone = true;
-                activeStreamSupportsDirectSpeaker = true;
-                activeStreamSupportsAtomicAudioHaptics = true;
-                activeStreamUsesV5AudioSource = true;
+                activeStreamSupportsMicrophone = !gamepadOnly;
+                activeStreamSupportsDirectSpeaker = !gamepadOnly;
+                activeStreamSupportsAtomicAudioHaptics = !gamepadOnly;
+                activeStreamUsesV5AudioSource = !gamepadOnly;
                 activeStreamUsesAudioOnlyDescriptor = audioOnlySidecar;
                 activeStreamFrameVersion = ViiperStreamFrameVersionV5;
                 return stream;
@@ -736,19 +747,27 @@ namespace DS4Windows
             if (viiperType == ViiperVirtualDeviceType.DualSenseEdge)
             {
                 ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
-                    "dualsenseedgecombinedaudioduplexv5");
+                    gamepadOnly ? "dualsenseedgegamepadv5" :
+                        "dualsenseedgecombinedaudioduplexv5");
                 activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
                 activeStreamUsesFramedProtocol = true;
-                activeStreamSupportsMicrophone = true;
-                activeStreamSupportsDirectSpeaker = true;
-                activeStreamSupportsAtomicAudioHaptics = true;
-                activeStreamUsesV5AudioSource = true;
+                activeStreamSupportsMicrophone = !gamepadOnly;
+                activeStreamSupportsDirectSpeaker = !gamepadOnly;
+                activeStreamSupportsAtomicAudioHaptics = !gamepadOnly;
+                activeStreamUsesV5AudioSource = !gamepadOnly;
                 activeStreamFrameVersion = ViiperStreamFrameVersionV5;
                 return stream;
             }
 
             if (viiperType == ViiperVirtualDeviceType.DualShock4)
             {
+                if (gamepadOnly)
+                {
+                    activeFeedbackLength = ViiperStatePacketBuilder
+                        .GetFeedbackLength(viiperType);
+                    return client.CreateDeviceAndOpenStream(viiperType);
+                }
+
                 if (audioOnlySidecar)
                 {
                     try

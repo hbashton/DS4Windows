@@ -2533,23 +2533,15 @@ namespace DS4Windows
         }
 
         /// <summary>
-        /// Returns the VIIPER device that owns the Windows PlayStation audio
-        /// endpoints for a controller. PlayStation profiles use their primary
-        /// virtual pad; Xbox and Switch profiles use a HID-free audio sidecar.
+        /// Returns the persistent VIIPER device that owns the Windows
+        /// PlayStation audio endpoints for a physical controller. Its lifetime
+        /// is independent from the game-visible virtual controller.
         /// </summary>
         internal ViiperOutDevice GetPlayStationFeatureOutput(int index)
         {
             if (index < 0 || index >= MAX_DS4_CONTROLLER_COUNT)
             {
                 return null;
-            }
-
-            ViiperOutDevice primary = outputDevices[index] as ViiperOutDevice;
-            if (primary != null &&
-                PlayStationFeatureOutputPolicy.IsPlayStationAudioOutput(
-                    primary.OutputType))
-            {
-                return primary;
             }
 
             lock (playStationFeatureOutputLock)
@@ -2571,18 +2563,9 @@ namespace DS4Windows
             OutContType primaryType = primary?.OutputType ??
                 Global.OutContType[index].Normalize();
 
-            if (primary?.IsRuntimeConnected == true &&
-                PlayStationFeatureOutputPolicy.IsPlayStationAudioOutput(
-                    primaryType))
-            {
-                DisconnectPlayStationFeatureOutput(index);
-                return primary;
-            }
-
-            OutContType desiredSidecar = primary?.IsRuntimeConnected == true
-                ? PlayStationFeatureOutputPolicy.GetAudioOnlySidecarType(
-                    source, primaryType, getDInputOnly(index))
-                : OutContType.None;
+            OutContType desiredSidecar =
+                PlayStationFeatureOutputPolicy.GetAudioOnlySidecarType(
+                    source, primaryType, getDInputOnly(index));
             if (desiredSidecar == OutContType.None)
             {
                 DisconnectPlayStationFeatureOutput(index);
@@ -2614,12 +2597,12 @@ namespace DS4Windows
                 try
                 {
                     StartupDiag(
-                        $"PlayStation audio sidecar connect begin index={index} type={desiredSidecar}");
+                        $"Persistent PlayStation audio owner connect begin index={index} type={desiredSidecar}");
                     sidecar.Connect();
                     sidecar.BindPhysicalController(index);
                     playStationFeatureOutputDevices[index] = sidecar;
                     StartupDiag(
-                        $"PlayStation audio sidecar ready index={index} type={desiredSidecar} port={sidecar.DirectSpeakerUsbipPort}");
+                        $"Persistent PlayStation audio owner ready index={index} type={desiredSidecar} port={sidecar.DirectSpeakerUsbipPort}");
                     return sidecar;
                 }
                 catch (Exception ex)
@@ -2651,7 +2634,7 @@ namespace DS4Windows
             if (sidecar != null)
             {
                 StartupDiag(
-                    $"PlayStation audio sidecar disconnect index={index} type={sidecar.OutputType}");
+                    $"Persistent PlayStation audio owner disconnect index={index} type={sidecar.OutputType}");
                 sidecar.Disconnect();
             }
         }
@@ -3334,10 +3317,12 @@ namespace DS4Windows
             bool advancedHapticsRequired = virtualRequired &&
                 (desiredType == OutContType.ViiperDualSense ||
                     desiredType == OutContType.ViiperDualSenseEdge);
+            ViiperOutDevice advancedHapticsOutput =
+                playStationFeatureOutput ?? viiperOutput;
             ControllerRuntimeLaneState advancedHaptics =
                 !advancedHapticsRequired
                     ? ControllerRuntimeLaneState.NotRequired
-                    : viiperOutput?.SupportsAtomicAudioHaptics == true
+                    : advancedHapticsOutput?.SupportsAtomicAudioHaptics == true
                         ? ControllerRuntimeLaneState.Ready
                         : virtualConnected
                             ? ControllerRuntimeLaneState.Unavailable

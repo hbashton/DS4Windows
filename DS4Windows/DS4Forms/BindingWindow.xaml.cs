@@ -49,6 +49,8 @@ namespace DS4WinWPF.DS4Forms
             new Dictionary<DS4Windows.X360Controls, Button>();
         private readonly Dictionary<Button, Geometry> outputButtonHitGeometries =
             new Dictionary<Button, Geometry>();
+        private readonly Dictionary<Button, ImageSource> outputButtonRasterHighlights =
+            new Dictionary<Button, ImageSource>();
         private BindingWindowViewModel bindingVM;
         private Button highlightBtn;
         private ExposeMode expose;
@@ -126,9 +128,20 @@ namespace DS4WinWPF.DS4Forms
             double left = Canvas.GetLeft(button);
             double top = Canvas.GetTop(button);
 
-            outputControllerHighlight.Data = CreateOutputHighlightGeometry(
-                button, left, top);
-            outputControllerHighlight.Visibility = Visibility.Visible;
+            if (outputButtonRasterHighlights.TryGetValue(button,
+                out ImageSource rasterHighlight))
+            {
+                outputControllerRasterHighlight.Source = rasterHighlight;
+                outputControllerRasterHighlight.Visibility = Visibility.Visible;
+                outputControllerHighlight.Visibility = Visibility.Collapsed;
+            }
+            else
+            {
+                outputControllerHighlight.Data = CreateOutputHighlightGeometry(
+                    button, left, top);
+                outputControllerHighlight.Visibility = Visibility.Visible;
+                outputControllerRasterHighlight.Visibility = Visibility.Collapsed;
+            }
 
             Canvas.SetLeft(highlightLb, left + (button.Width / 2.0) - (highlightLb.ActualWidth / 2.0));
             double labelTop = top >= 30
@@ -152,6 +165,7 @@ namespace DS4WinWPF.DS4Forms
         private void OutConBtn_MouseLeave(object sender, MouseEventArgs e)
         {
             highlightImg.Visibility = Visibility.Hidden;
+            outputControllerRasterHighlight.Visibility = Visibility.Collapsed;
             outputControllerHighlight.Visibility = Visibility.Collapsed;
             highlightLb.Visibility = Visibility.Hidden;
         }
@@ -927,6 +941,8 @@ namespace DS4WinWPF.DS4Forms
                 button.Clip = null;
             }
             outputButtonHitGeometries.Clear();
+            outputButtonRasterHighlights.Clear();
+            outputControllerRasterHighlight.Visibility = Visibility.Collapsed;
             outputType = outputType.Normalize();
             configuredOutputType = outputType;
             switch (outputType)
@@ -948,102 +964,221 @@ namespace DS4WinWPF.DS4Forms
                     break;
             }
 
-            ConfigureOutputStickHitGeometries(lsbBtn, lsuBtn, lsrBtn,
-                lsdBtn, lslBtn);
-            ConfigureOutputStickHitGeometries(rsbBtn, rsuBtn, rsrBtn,
-                rsdBtn, rslBtn);
+            ConfigureOutputRasterHighlights(outputType);
         }
 
-        private void ConfigureOutputStickHitGeometries(Button press,
-            Button up, Button right, Button down, Button left)
+        private void ConfigureOutputRasterHighlights(OutContType outputType)
         {
-            double x = Canvas.GetLeft(press);
-            double y = Canvas.GetTop(press);
-            double width = press.Width;
-            double height = press.Height;
-            if (double.IsNaN(x) || double.IsNaN(y) || width <= 0 ||
-                height <= 0)
+            string controllerAtlas;
+            string stickAtlas;
+            switch (outputType)
+            {
+                case OutContType.ViiperDS4:
+                    controllerAtlas = "DualShock4-Config_Highlights.png";
+                    stickAtlas = "DualShock4-Stick_Highlights.png";
+                    break;
+                case OutContType.ViiperDualSense:
+                    controllerAtlas = "DualSense-Config_Highlights.png";
+                    stickAtlas = "DualSense-Stick_Highlights.png";
+                    break;
+                case OutContType.ViiperDualSenseEdge:
+                    controllerAtlas = "DualSenseEdge-Config_Highlights.png";
+                    stickAtlas = "DualSenseEdge-Stick_Highlights.png";
+                    break;
+                case OutContType.ViiperSwitch2Pro:
+                    controllerAtlas = "Switch2Pro-Config_Highlights.png";
+                    stickAtlas = "Switch2Pro-Stick_Highlights.png";
+                    break;
+                default:
+                    ConfigureXbox360RasterHighlights();
+                    return;
+            }
+
+            Canvas.SetLeft(outputControllerRasterHighlight, 68);
+            Canvas.SetTop(outputControllerRasterHighlight, 0);
+            outputControllerRasterHighlight.Width = 494;
+            outputControllerRasterHighlight.Height = 247;
+
+            AssignOutputRasterFrame(aBtn, controllerAtlas, 0);
+            AssignOutputRasterFrame(bBtn, controllerAtlas, 1);
+            AssignOutputRasterFrame(xBtn, controllerAtlas, 2);
+            AssignOutputRasterFrame(yBtn, controllerAtlas, 3);
+            AssignOutputRasterFrame(lbBtn, controllerAtlas, 4);
+            AssignOutputRasterFrame(rbBtn, controllerAtlas, 5);
+            AssignOutputRasterFrame(ltBtn, controllerAtlas, 6);
+            AssignOutputRasterFrame(rtBtn, controllerAtlas, 7);
+            AssignOutputRasterFrame(backBtn, controllerAtlas, 8);
+            AssignOutputRasterFrame(startBtn, controllerAtlas, 9);
+            AssignOutputRasterFrame(guideBtn, controllerAtlas, 10);
+            AssignOutputRasterFrame(dpadUBtn, controllerAtlas, 14);
+            AssignOutputRasterFrame(dpadRBtn, controllerAtlas, 15);
+            AssignOutputRasterFrame(dpadDBtn, controllerAtlas, 16);
+            AssignOutputRasterFrame(dpadLBtn, controllerAtlas, 17);
+
+            Button[] stickButtons =
+            {
+                lsbBtn, lsuBtn, lsrBtn, lsdBtn, lslBtn,
+                rsbBtn, rsuBtn, rsrBtn, rsdBtn, rslBtn,
+            };
+            for (int frameIndex = 0; frameIndex < stickButtons.Length;
+                frameIndex++)
+            {
+                AssignOutputRasterFrame(stickButtons[frameIndex], stickAtlas,
+                    frameIndex);
+            }
+
+            if (outputType == OutContType.ViiperSwitch2Pro)
+            {
+                AssignOutputRasterFrame(touchpadClickBtn, controllerAtlas, 26);
+            }
+            else if (outputType == OutContType.ViiperDS4 ||
+                outputType == OutContType.ViiperDualSenseEdge)
+            {
+                AssignOutputCombinedRasterFrames(touchpadClickBtn,
+                    controllerAtlas, 18, 19, 20, 21);
+            }
+            else
+            {
+                AssignDualSenseTouchpadHighlight();
+            }
+        }
+
+        private void ConfigureXbox360RasterHighlights()
+        {
+            const string atlas = "Xbox360-Action_Highlights.png";
+            Canvas.SetLeft(outputControllerRasterHighlight, 0);
+            Canvas.SetTop(outputControllerRasterHighlight, 0);
+            outputControllerRasterHighlight.Width = 630;
+            outputControllerRasterHighlight.Height = 247;
+
+            Button[] buttons =
+            {
+                aBtn, bBtn, xBtn, yBtn, lbBtn, rbBtn, ltBtn, rtBtn,
+                backBtn, startBtn, guideBtn,
+                lsbBtn, lsuBtn, lsrBtn, lsdBtn, lslBtn,
+                rsbBtn, rsuBtn, rsrBtn, rsdBtn, rslBtn,
+                dpadUBtn, dpadRBtn, dpadDBtn, dpadLBtn,
+            };
+            for (int frameIndex = 0; frameIndex < buttons.Length; frameIndex++)
+            {
+                Button button = buttons[frameIndex];
+                outputButtonRasterHighlights[button] = RasterHighlightAtlas.Frame(
+                    atlas, frameIndex, 630, 247);
+                Geometry mask = RasterHighlightAtlas.Mask(atlas, frameIndex,
+                    630, 247);
+                AssignOutputCanvasGeometry(button, mask);
+            }
+        }
+
+        private void AssignOutputRasterFrame(Button button, string resourceName,
+            int frameIndex)
+        {
+            outputButtonRasterHighlights[button] = RasterHighlightAtlas.Frame(
+                resourceName, frameIndex);
+            AssignOutputRasterGeometry(button,
+                RasterHighlightAtlas.Mask(resourceName, frameIndex));
+        }
+
+        private void AssignOutputCombinedRasterFrames(Button button,
+            string resourceName, params int[] frameIndexes)
+        {
+            var geometry = new GeometryGroup
+            {
+                FillRule = FillRule.Nonzero,
+            };
+            foreach (int frameIndex in frameIndexes)
+            {
+                geometry.Children.Add(RasterHighlightAtlas.Mask(resourceName,
+                    frameIndex));
+            }
+            geometry.Freeze();
+            outputButtonRasterHighlights[button] =
+                CreateAtlasSizedHighlight(geometry);
+            AssignOutputRasterGeometry(button, geometry);
+        }
+
+        private void AssignDualSenseTouchpadHighlight()
+        {
+            // The four shipped touch masks form the exact visible touchpad.
+            // Drawing them together keeps the output click surface aligned
+            // with the already-polished input remapper.
+            string[] resources =
+            {
+                "DualSense-Config_TouchLeft.png",
+                "DualSense-Config_TouchMulti.png",
+                "DualSense-Config_TouchRight.png",
+                "DualSense-Config_TouchUpper.png",
+            };
+            var geometry = new GeometryGroup
+            {
+                FillRule = FillRule.Nonzero,
+            };
+            foreach (string resource in resources)
+            {
+                Geometry part = RasterHighlightAtlas.Mask(resource, 0, 880, 440)
+                    .Clone();
+                part.Transform = new ScaleTransform(0.5, 0.5);
+                part.Freeze();
+                geometry.Children.Add(part);
+            }
+            geometry.Freeze();
+            outputButtonRasterHighlights[touchpadClickBtn] =
+                CreateAtlasSizedHighlight(geometry);
+            AssignOutputRasterGeometry(touchpadClickBtn, geometry);
+        }
+
+        private static ImageSource CreateAtlasSizedHighlight(Geometry geometry)
+        {
+            var accent = new SolidColorBrush(Color.FromArgb(178, 47, 128, 237));
+            accent.Freeze();
+            var drawing = new DrawingGroup();
+            drawing.Children.Add(new GeometryDrawing(Brushes.Transparent, null,
+                new RectangleGeometry(new Rect(0, 0,
+                    RasterHighlightAtlas.FrameWidth,
+                    RasterHighlightAtlas.FrameHeight))));
+            drawing.Children.Add(new GeometryDrawing(accent, null, geometry));
+            drawing.Freeze();
+            var image = new DrawingImage(drawing);
+            image.Freeze();
+            return image;
+        }
+
+        private void AssignOutputRasterGeometry(Button button,
+            Geometry atlasGeometry)
+        {
+            const double scale = 247.0 / RasterHighlightAtlas.FrameHeight;
+            double offsetX = (630.0 -
+                (RasterHighlightAtlas.FrameWidth * scale)) / 2.0;
+            Geometry canvasGeometry = atlasGeometry.Clone();
+            canvasGeometry.Transform = new MatrixTransform(scale, 0, 0, scale,
+                offsetX, 0);
+            AssignOutputCanvasGeometry(button, canvasGeometry);
+        }
+
+        private void AssignOutputCanvasGeometry(Button button,
+            Geometry canvasGeometry)
+        {
+            Rect bounds = canvasGeometry.Bounds;
+            if (bounds.IsEmpty)
             {
                 return;
             }
 
-            const double pressInset = 0.27;
-            SetOutputGeometryFromCanvas(press, new EllipseGeometry(new Rect(
-                x + width * pressInset, y + height * pressInset,
-                width * (1.0 - pressInset * 2.0),
-                height * (1.0 - pressInset * 2.0))));
+            Canvas.SetLeft(button, bounds.Left);
+            Canvas.SetTop(button, bounds.Top);
+            button.Width = bounds.Width;
+            button.Height = bounds.Height;
 
-            Geometry outer = new EllipseGeometry(new Rect(
-                x + width * 0.05, y + height * 0.05,
-                width * 0.90, height * 0.90));
-            Geometry center = new EllipseGeometry(new Rect(
-                x + width * 0.29, y + height * 0.29,
-                width * 0.42, height * 0.42));
-            Geometry ring = new CombinedGeometry(
-                GeometryCombineMode.Exclude, outer, center);
-
-            SetOutputStickDirectionGeometry(up, ring, x, y, width,
-                height, 0);
-            SetOutputStickDirectionGeometry(right, ring, x, y, width,
-                height, 1);
-            SetOutputStickDirectionGeometry(down, ring, x, y, width,
-                height, 2);
-            SetOutputStickDirectionGeometry(left, ring, x, y, width,
-                height, 3);
-        }
-
-        private void SetOutputStickDirectionGeometry(Button button,
-            Geometry ring, double x, double y, double width, double height,
-            int direction)
-        {
-            Point[] points = direction switch
+            Geometry local = canvasGeometry.Clone();
+            Transform existingTransform = local.Transform;
+            var transforms = new TransformGroup();
+            if (existingTransform != null && existingTransform != Transform.Identity)
             {
-                0 => new[]
-                {
-                    new Point(x + width * 0.12, y),
-                    new Point(x + width * 0.88, y),
-                    new Point(x + width * 0.63, y + height * 0.52),
-                    new Point(x + width * 0.37, y + height * 0.52),
-                },
-                1 => new[]
-                {
-                    new Point(x + width * 0.48, y + height * 0.37),
-                    new Point(x + width, y + height * 0.12),
-                    new Point(x + width, y + height * 0.88),
-                    new Point(x + width * 0.48, y + height * 0.63),
-                },
-                2 => new[]
-                {
-                    new Point(x + width * 0.37, y + height * 0.48),
-                    new Point(x + width * 0.63, y + height * 0.48),
-                    new Point(x + width * 0.88, y + height),
-                    new Point(x + width * 0.12, y + height),
-                },
-                _ => new[]
-                {
-                    new Point(x, y + height * 0.12),
-                    new Point(x + width * 0.52, y + height * 0.37),
-                    new Point(x + width * 0.52, y + height * 0.63),
-                    new Point(x, y + height * 0.88),
-                },
-            };
-            Geometry sector = new CombinedGeometry(
-                GeometryCombineMode.Intersect, ring,
-                CreatePolygonGeometry(1, 1, points));
-            SetOutputGeometryFromCanvas(button, sector);
-        }
-
-        private void SetOutputGeometryFromCanvas(Button button,
-            Geometry canvasGeometry)
-        {
-            double left = Canvas.GetLeft(button);
-            double top = Canvas.GetTop(button);
-            Geometry clipped = new CombinedGeometry(
-                GeometryCombineMode.Intersect, canvasGeometry,
-                new RectangleGeometry(new Rect(left, top, button.Width,
-                    button.Height)));
-            Geometry local = clipped.Clone();
-            local.Transform = new TranslateTransform(-left, -top);
+                transforms.Children.Add(existingTransform);
+            }
+            transforms.Children.Add(new TranslateTransform(-bounds.Left,
+                -bounds.Top));
+            local.Transform = transforms;
             local.Freeze();
             outputButtonHitGeometries[button] = local;
             button.Clip = local;

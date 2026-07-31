@@ -76,6 +76,7 @@ namespace DS4WinWPF.DS4Forms
         private Dictionary<int, Button> reverseHoverIndexes = new Dictionary<int, Button>();
         private Dictionary<Button, ImageSource> controllerHoverImages = new Dictionary<Button, ImageSource>();
         private Dictionary<Button, Geometry> vectorHoverGeometries = new Dictionary<Button, Geometry>();
+        private readonly HashSet<Button> rasterHitGeometryButtons = new HashSet<Button>();
 
         private bool keepsize;
         private bool controllerReadingsTabActive = false;
@@ -169,6 +170,7 @@ namespace DS4WinWPF.DS4Forms
             controllerDiagramKind = diagramKind;
             controllerHoverImages.Clear();
             vectorHoverGeometries.Clear();
+            rasterHitGeometryButtons.Clear();
             ClearControllerButtonClips();
             HideControllerHover();
 
@@ -272,6 +274,7 @@ namespace DS4WinWPF.DS4Forms
             controllerHoverImages[topTouchConBtn] =
                 LoadResourceImage("DualSense-Config_TouchUpper.png");
             PopulateDualSenseHitGeometries();
+            PopulateControllerStickAtlas("DualSense-Stick_Highlights.png");
             ApplyControllerButtonClips();
         }
 
@@ -324,6 +327,7 @@ namespace DS4WinWPF.DS4Forms
             PopulateControllerHoverAtlas("DualShock4-Config_Highlights.png",
                 includeMute: false, includeTouch: true,
                 includeEdgeControls: false, includeCapture: false);
+            PopulateControllerStickAtlas("DualShock4-Stick_Highlights.png");
             ApplyControllerButtonClips();
         }
 
@@ -382,6 +386,7 @@ namespace DS4WinWPF.DS4Forms
             PopulateControllerHoverAtlas("DualSenseEdge-Config_Highlights.png",
                 includeMute: true, includeTouch: true,
                 includeEdgeControls: true, includeCapture: false);
+            PopulateControllerStickAtlas("DualSenseEdge-Stick_Highlights.png");
             ApplyControllerButtonClips();
         }
 
@@ -436,6 +441,7 @@ namespace DS4WinWPF.DS4Forms
             PopulateControllerHoverAtlas("Switch2Pro-Config_Highlights.png",
                 includeMute: false, includeTouch: false,
                 includeEdgeControls: true, includeCapture: true);
+            PopulateControllerStickAtlas("Switch2Pro-Stick_Highlights.png");
             ApplyControllerButtonClips();
         }
 
@@ -735,29 +741,33 @@ namespace DS4WinWPF.DS4Forms
             bool includeMute, bool includeTouch, bool includeEdgeControls,
             bool includeCapture)
         {
-            BitmapSource atlas = LoadResourceImage(resourceName) as BitmapSource;
-            if (atlas == null)
+            bool exactRasterHitTest = controllerDiagramKind !=
+                ControllerDiagramKind.DualSense;
+            void Assign(Button button, int frameIndex)
             {
-                return;
+                controllerHoverImages[button] = RasterHighlightAtlas.Frame(
+                    resourceName, frameIndex);
+                if (exactRasterHitTest)
+                {
+                    AssignControllerRasterHitGeometry(button, resourceName,
+                        frameIndex);
+                }
             }
 
-            ImageSource Frame(int index) => new CroppedBitmap(
-                atlas, new Int32Rect(0, index * 220, 440, 220));
-
-            controllerHoverImages[crossConBtn] = Frame(0);
-            controllerHoverImages[circleConBtn] = Frame(1);
-            controllerHoverImages[squareConBtn] = Frame(2);
-            controllerHoverImages[triangleConBtn] = Frame(3);
-            controllerHoverImages[l1ConBtn] = Frame(4);
-            controllerHoverImages[r1ConBtn] = Frame(5);
-            controllerHoverImages[l2ConBtn] = Frame(6);
-            controllerHoverImages[r2ConBtn] = Frame(7);
-            controllerHoverImages[shareConBtn] = Frame(8);
-            controllerHoverImages[optionsConBtn] = Frame(9);
-            controllerHoverImages[guideConBtn] = Frame(10);
+            Assign(crossConBtn, 0);
+            Assign(circleConBtn, 1);
+            Assign(squareConBtn, 2);
+            Assign(triangleConBtn, 3);
+            Assign(l1ConBtn, 4);
+            Assign(r1ConBtn, 5);
+            Assign(l2ConBtn, 6);
+            Assign(r2ConBtn, 7);
+            Assign(shareConBtn, 8);
+            Assign(optionsConBtn, 9);
+            Assign(guideConBtn, 10);
             if (includeMute)
             {
-                controllerHoverImages[muteConBtn] = Frame(11);
+                Assign(muteConBtn, 11);
             }
 
             // Stick presses and stick directions use controller-space vector
@@ -765,31 +775,66 @@ namespace DS4WinWPF.DS4Forms
             // stick for every one of those mappings, which made Up/Right/Down/
             // Left indistinguishable and made L3/R3 much too large.
 
-            controllerHoverImages[upConBtn] = Frame(14);
-            controllerHoverImages[rightConBtn] = Frame(15);
-            controllerHoverImages[downConBtn] = Frame(16);
-            controllerHoverImages[leftConBtn] = Frame(17);
+            Assign(upConBtn, 14);
+            Assign(rightConBtn, 15);
+            Assign(downConBtn, 16);
+            Assign(leftConBtn, 17);
 
             if (includeTouch)
             {
-                controllerHoverImages[leftTouchConBtn] = Frame(18);
-                controllerHoverImages[multiTouchConBtn] = Frame(19);
-                controllerHoverImages[rightTouchConBtn] = Frame(20);
-                controllerHoverImages[topTouchConBtn] = Frame(21);
+                Assign(leftTouchConBtn, 18);
+                Assign(multiTouchConBtn, 19);
+                Assign(rightTouchConBtn, 20);
+                Assign(topTouchConBtn, 21);
             }
 
             if (includeEdgeControls)
             {
-                controllerHoverImages[fnlConBtn] = Frame(22);
-                controllerHoverImages[fnrConBtn] = Frame(23);
-                controllerHoverImages[blpConBtn] = Frame(24);
-                controllerHoverImages[brpConBtn] = Frame(25);
+                Assign(fnlConBtn, 22);
+                Assign(fnrConBtn, 23);
+                Assign(blpConBtn, 24);
+                Assign(brpConBtn, 25);
             }
 
             if (includeCapture)
             {
-                controllerHoverImages[captureConBtn] = Frame(26);
+                Assign(captureConBtn, 26);
             }
+        }
+
+        private void PopulateControllerStickAtlas(string resourceName)
+        {
+            Button[] buttons =
+            {
+                l3ConBtn, lsuConBtn, lsrConBtn, lsdConBtn, lslConBtn,
+                r3ConBtn, rsuConBtn, rsrConBtn, rsdConBtn, rslConBtn,
+            };
+            for (int frameIndex = 0; frameIndex < buttons.Length; frameIndex++)
+            {
+                Button button = buttons[frameIndex];
+                controllerHoverImages[button] = RasterHighlightAtlas.Frame(
+                    resourceName, frameIndex);
+                AssignControllerRasterHitGeometry(button, resourceName,
+                    frameIndex);
+            }
+        }
+
+        private void AssignControllerRasterHitGeometry(Button button,
+            string resourceName, int frameIndex)
+        {
+            Geometry mask = RasterHighlightAtlas.Mask(resourceName, frameIndex);
+            Rect bounds = mask.Bounds;
+            if (bounds.IsEmpty)
+            {
+                return;
+            }
+
+            vectorHoverGeometries[button] = mask;
+            rasterHitGeometryButtons.Add(button);
+            Canvas.SetLeft(button, bounds.Left);
+            Canvas.SetTop(button, bounds.Top);
+            button.Width = bounds.Width;
+            button.Height = bounds.Height;
         }
 
         private static DS4Device ResolveControllerContext(int profileDevice,
@@ -934,8 +979,9 @@ namespace DS4WinWPF.DS4Forms
                 // painting. In particular, stick directions are ring sectors;
                 // a rounded rectangle around that sector made hover activate
                 // while the pointer was visibly outside the highlighted rim.
-                Geometry hitGeometry = TransformControllerGeometry(
-                    entry.Value);
+                Geometry hitGeometry = rasterHitGeometryButtons.Contains(entry.Key)
+                    ? entry.Value
+                    : TransformControllerGeometry(entry.Value);
 
                 Geometry localGeometry = hitGeometry.Clone();
                 Transform existingTransform = localGeometry.Transform;

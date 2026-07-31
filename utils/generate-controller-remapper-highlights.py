@@ -13,13 +13,35 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw
 
 
 CANVAS_WIDTH = 440
 CANVAS_HEIGHT = 220
 SUPERSAMPLE = 4
 ACCENT = (47, 128, 237, 178)
+
+
+def split_stick_ring(ring: Image.Image, center_x: float,
+                     center_y: float) -> list[Image.Image]:
+    """Assign every ring pixel to exactly one cardinal direction."""
+
+    sectors = [Image.new("L", ring.size, 0) for _ in range(4)]
+    source = ring.load()
+    targets = [sector.load() for sector in sectors]
+    for y in range(ring.height):
+        for x in range(ring.width):
+            alpha = source[x, y]
+            if alpha == 0:
+                continue
+            dx = x + 0.5 - center_x
+            dy = y + 0.5 - center_y
+            if abs(dx) > abs(dy):
+                direction = 1 if dx > 0 else 3
+            else:
+                direction = 2 if dy > 0 else 0
+            targets[direction][x, y] = alpha
+    return sectors
 
 
 @dataclass(frozen=True)
@@ -143,6 +165,157 @@ def render_atlas(
     print(f"generated {artwork.atlas}: {atlas.width} x {atlas.height}")
 
 
+def render_stick_atlas(resources: Path, source_atlas: str, target_atlas: str) -> None:
+    """Derive pixel-exact stick press/direction masks from the painted sticks.
+
+    Frames 12 and 13 in every controller atlas trace the visible left and
+    right stick surfaces.  Intersecting sectors with those masks retains the
+    raster's real rim instead of approximating it with a floating circle.
+    """
+
+    atlas = Image.open(resources / source_atlas).convert("RGBA")
+    output: list[Image.Image] = []
+    for frame_index in (12, 13):
+        frame = atlas.crop((0, frame_index * CANVAS_HEIGHT,
+                            CANVAS_WIDTH, (frame_index + 1) * CANVAS_HEIGHT))
+        surface = frame.getchannel("A").point(
+            lambda value: min(255, round(value * 255 / ACCENT[3]))
+        )
+        bounds = surface.getbbox()
+        if bounds is None:
+            output.extend(Image.new("RGBA", (CANVAS_WIDTH, CANVAS_HEIGHT),
+                                    (0, 0, 0, 0)) for _ in range(5))
+            continue
+
+        left, top, right, bottom = bounds
+        width = right - left
+        height = bottom - top
+        center_x = left + width / 2.0
+        center_y = top + height / 2.0
+
+        center = Image.new("L", surface.size, 0)
+        center_draw = ImageDraw.Draw(center)
+        center_draw.ellipse((
+            center_x - width * 0.22,
+            center_y - height * 0.22,
+            center_x + width * 0.22,
+            center_y + height * 0.22,
+        ), fill=255)
+        press_mask = ImageChops.multiply(surface, center)
+
+        ring = ImageChops.subtract(surface, press_mask)
+        sector_masks = split_stick_ring(ring, center_x, center_y)
+
+        for mask in (press_mask, *sector_masks):
+            result = Image.new("RGBA", (CANVAS_WIDTH, CANVAS_HEIGHT), ACCENT)
+            result.putalpha(mask.point(lambda value: value * ACCENT[3] // 255))
+            output.append(result)
+
+    stick_atlas = Image.new(
+        "RGBA", (CANVAS_WIDTH, CANVAS_HEIGHT * len(output)), (0, 0, 0, 0)
+    )
+    for index, frame in enumerate(output):
+        stick_atlas.alpha_composite(frame, (0, index * CANVAS_HEIGHT))
+
+    stick_atlas.save(resources / target_atlas, optimize=True)
+    print(f"generated {target_atlas}: {stick_atlas.width} x {stick_atlas.height}")
+
+
+def render_xbox_action_atlas(resources: Path) -> None:
+    """Render the Xbox action picker against its native 630 x 247 canvas."""
+
+    width = 630
+    height = 247
+    frame_height = height
+    source_width = 1323
+    source_height = 439
+    scale = width / source_width
+    offset_y = (height - source_height * scale) / 2.0
+
+    def point(x: float, y: float) -> tuple[int, int]:
+        return (round(x * scale * SUPERSAMPLE),
+                round((offset_y + y * scale) * SUPERSAMPLE))
+
+    def make_mask(kind: str, data, radius: float = 0) -> Image.Image:
+        mask = Image.new("L", (width * SUPERSAMPLE,
+                               height * SUPERSAMPLE), 0)
+        draw = ImageDraw.Draw(mask)
+        if kind in ("ellipse", "rounded"):
+            x1, y1 = point(data[0], data[1])
+            x2, y2 = point(data[2], data[3])
+            if kind == "ellipse":
+                draw.ellipse((x1, y1, x2, y2), fill=255)
+            else:
+                draw.rounded_rectangle((x1, y1, x2, y2),
+                    radius=round(radius * scale * SUPERSAMPLE), fill=255)
+        else:
+            draw.polygon([point(x, y) for x, y in data], fill=255)
+        return mask.resize((width, height), Image.Resampling.LANCZOS)
+
+    masks = [
+        make_mask("ellipse", (895, 186, 970, 251)),   # A
+        make_mask("ellipse", (980, 124, 1057, 190)),  # B
+        make_mask("ellipse", (829, 126, 902, 193)),   # X
+        make_mask("ellipse", (904, 65, 979, 133)),    # Y
+        make_mask("polygon", [(28, 106), (42, 78), (115, 51),
+                               (181, 74), (201, 107), (197, 129),
+                               (51, 150), (31, 132)]),
+        make_mask("polygon", [(1122, 107), (1142, 74), (1208, 51),
+                               (1281, 78), (1295, 106), (1292, 132),
+                               (1272, 150), (1126, 129)]),
+        make_mask("polygon", [(108, 82), (119, 8), (135, 0),
+                               (164, 1), (174, 11), (176, 84)]),
+        make_mask("polygon", [(1147, 84), (1149, 11), (1159, 1),
+                               (1188, 0), (1204, 8), (1215, 82)]),
+        make_mask("ellipse", (538, 142, 589, 182)),
+        make_mask("ellipse", (738, 142, 790, 182)),
+        make_mask("ellipse", (607, 113, 718, 207)),
+    ]
+
+    def stick_masks(surface: Image.Image) -> list[Image.Image]:
+        bounds = surface.getbbox()
+        assert bounds is not None
+        left, top, right, bottom = bounds
+        center_x = (left + right) / 2.0
+        center_y = (top + bottom) / 2.0
+        center = Image.new("L", surface.size, 0)
+        ImageDraw.Draw(center).ellipse((
+            center_x - (right - left) * 0.22,
+            center_y - (bottom - top) * 0.22,
+            center_x + (right - left) * 0.22,
+            center_y + (bottom - top) * 0.22,
+        ), fill=255)
+        press = ImageChops.multiply(surface, center)
+        ring = ImageChops.subtract(surface, press)
+        return [press, *split_stick_ring(ring, center_x, center_y)]
+
+    masks.extend(stick_masks(make_mask("ellipse", (321, 119, 451, 245))))
+    masks.extend(stick_masks(make_mask("ellipse", (727, 252, 858, 387))))
+    masks.extend([
+        make_mask("polygon", [(500, 250), (548, 250), (551, 291),
+                               (541, 301), (507, 301), (497, 291)]),
+        make_mask("polygon", [(548, 280), (599, 280), (607, 292),
+                               (607, 326), (596, 337), (548, 337)]),
+        make_mask("polygon", [(500, 326), (548, 326), (551, 367),
+                               (541, 378), (507, 378), (497, 367)]),
+        make_mask("polygon", [(452, 280), (500, 280), (500, 337),
+                               (452, 337), (441, 326), (441, 292)]),
+    ])
+
+    frames: list[Image.Image] = []
+    for mask in masks:
+        frame = Image.new("RGBA", (width, height), ACCENT)
+        frame.putalpha(mask.point(lambda value: value * ACCENT[3] // 255))
+        frames.append(frame)
+    atlas = Image.new("RGBA", (width, frame_height * len(frames)),
+                      (0, 0, 0, 0))
+    for index, frame in enumerate(frames):
+        atlas.alpha_composite(frame, (0, index * frame_height))
+    target = resources / "Xbox360-Action_Highlights.png"
+    atlas.save(target, optimize=True)
+    print(f"generated {target.name}: {atlas.width} x {atlas.height}")
+
+
 def dualshock4_shapes():
     return [
         ellipse((294, 134, 323, 163)),  # Cross
@@ -254,6 +427,16 @@ def main() -> None:
     ]
     for artwork, shapes in jobs:
         render_atlas(resources, artwork, shapes)
+
+    for source_atlas, target_atlas in (
+        ("DualSense-Config_Highlights.png", "DualSense-Stick_Highlights.png"),
+        ("DualShock4-Config_Highlights.png", "DualShock4-Stick_Highlights.png"),
+        ("DualSenseEdge-Config_Highlights.png", "DualSenseEdge-Stick_Highlights.png"),
+        ("Switch2Pro-Config_Highlights.png", "Switch2Pro-Stick_Highlights.png"),
+    ):
+        render_stick_atlas(resources, source_atlas, target_atlas)
+
+    render_xbox_action_atlas(resources)
 
 
 if __name__ == "__main__":

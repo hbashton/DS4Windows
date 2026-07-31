@@ -235,6 +235,11 @@
 		<None Include="Resources\DualShock4-Config_Highlights.png" />
 		<None Include="Resources\DualSenseEdge-Config_Highlights.png" />
 		<None Include="Resources\Switch2Pro-Config_Highlights.png" />
+		<None Include="Resources\DualSense-Stick_Highlights.png" />
+		<None Include="Resources\DualShock4-Stick_Highlights.png" />
+		<None Include="Resources\DualSenseEdge-Stick_Highlights.png" />
+		<None Include="Resources\Switch2Pro-Stick_Highlights.png" />
+		<None Include="Resources\Xbox360-Action_Highlights.png" />
 
 		<None Include="Resources\0.ico" />
 		<None Include="Resources\10.ico" />
@@ -333,6 +338,11 @@
 		<Resource Include="Resources\DualShock4-Config_Highlights.png" />
 		<Resource Include="Resources\DualSenseEdge-Config_Highlights.png" />
 		<Resource Include="Resources\Switch2Pro-Config_Highlights.png" />
+		<Resource Include="Resources\DualSense-Stick_Highlights.png" />
+		<Resource Include="Resources\DualShock4-Stick_Highlights.png" />
+		<Resource Include="Resources\DualSenseEdge-Stick_Highlights.png" />
+		<Resource Include="Resources\Switch2Pro-Stick_Highlights.png" />
+		<Resource Include="Resources\Xbox360-Action_Highlights.png" />
 
 		<Resource Include="Resources\0.ico" />
 		<Resource Include="Resources\10.ico" />

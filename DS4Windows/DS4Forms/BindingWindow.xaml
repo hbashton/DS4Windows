@@ -157,6 +157,9 @@
                             </Style>
                         </Canvas.Resources>
 
+                        <Image x:Name="outputControllerRasterHighlight" Visibility="Collapsed"
+                               Width="494" Height="247" Canvas.Left="68" Canvas.Top="0"
+                               Stretch="Fill" IsHitTestVisible="False" />
                         <Path x:Name="outputControllerHighlight" Visibility="Collapsed"
                               Fill="{DynamicResource AccentColor}" Stroke="{DynamicResource AccentColor}"
                               StrokeThickness="1.5" Opacity="0.62" IsHitTestVisible="False" />

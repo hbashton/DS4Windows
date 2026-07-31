@@ -1,21 +1,43 @@
-# DS4Windows
+<div align="center">
 
-[![CI Build](https://github.com/hbashton/DS4Windows/actions/workflows/ci-build.yml/badge.svg?branch=main)](https://github.com/hbashton/DS4Windows/actions/workflows/ci-build.yml?query=branch%3Amain)
-[![Download CI builds](https://img.shields.io/badge/download-CI%20artifacts-2f81f7?logo=githubactions&logoColor=white)](https://github.com/hbashton/DS4Windows/actions/workflows/ci-build.yml?query=branch%3Amain)
-[![Reddit](https://img.shields.io/badge/community-Reddit-ff4500?logo=reddit&logoColor=white)](https://www.reddit.com/r/DS4Windows/)
-[![Support on PayPal](https://img.shields.io/badge/support-PayPal-0070ba?logo=paypal&logoColor=white)](https://www.paypal.com/paypalme/hbashton)
+# DS4Windows 5
 
-DS4Windows is a Windows controller mapper maintained by hbashton. It reads
-supported PlayStation and Nintendo controllers, applies per-profile mappings,
-and presents the output expected by games. This fork continues the work of
-Jays2Kings, Ryochan7, Schmaldeo, and the wider DS4Windows community.
+### Your controller. Your profile. Every game.
 
-This is the hbashton fork. Downloads, update checks, bug reports, and VIIPER
-integration documented here all refer to hbashton repositories.
+Modern remapping, virtual controllers, PlayStation audio, adaptive triggers,
+advanced haptics, and controller-aware automation in one low-latency Windows app.
+
+[![Main build](https://github.com/hbashton/DS4Windows/actions/workflows/ci-build.yml/badge.svg?branch=main)](https://github.com/hbashton/DS4Windows/actions/workflows/ci-build.yml?query=branch%3Amain)
+[![Main artifacts](https://img.shields.io/badge/download-main%20builds-2f81f7?logo=githubactions&logoColor=white)](https://github.com/hbashton/DS4Windows/actions/workflows/ci-build.yml?query=branch%3Amain)
+[![Releases](https://img.shields.io/github/v/release/hbashton/DS4Windows?include_prereleases&logo=github&label=release)](https://github.com/hbashton/DS4Windows/releases)
+[![Reddit](https://img.shields.io/badge/community-r%2FDS4Windows-ff4500?logo=reddit&logoColor=white)](https://www.reddit.com/r/DS4Windows/)
+[![Support](https://img.shields.io/badge/support-PayPal-0070ba?logo=paypal&logoColor=white)](https://www.paypal.com/paypalme/hbashton)
+
+<img src="docs/images/tour/overview.png" width="1000" alt="DS4Windows 5 Overview with a connected controller and quick profile controls">
+
+</div>
+
+DS4Windows reads supported PlayStation and Nintendo controllers, applies a
+profile in real time, and presents the virtual device a game expects. Version 5
+combines the complete mapper with a redesigned interface and the VIIPER virtual
+controller backend.
+
+| What you get | Why it matters |
+|---|---|
+| **One profile, any output** | Emulate Xbox 360, DualShock 4, DualSense, DualSense Edge, or Switch 2 Pro without giving up physical-controller features. |
+| **PlayStation audio over Bluetooth** | Route a selected app or the default Windows mix to the controller speaker or AUX port, and expose the controller microphone to Windows. |
+| **Audio Haptics + native game feedback** | Convert system or per-app audio into DualSense haptics, or mix it with the game's own advanced feedback. |
+| **Trigger Lab** | Design, preview, and save independent L2/R2 effects directly in each profile. |
+| **Controller-accurate remapping** | Work from the controller you have and the virtual controller the game will see. |
+| **Automation without input stalls** | Searchable profiles, Auto Profiles, Game Bar support, and asynchronous profile changes keep input responsive. |
+
+This hbashton fork continues the work of Jays2Kings, Ryochan7, Schmaldeo, and
+the wider DS4Windows community. Downloads, update checks, support links, and
+VIIPER integration on this page refer to the hbashton repositories.
 
 ## Download and install
 
-### Stable release
+### Stable release — recommended
 
 Most users should start with the stable build.
 
@@ -31,14 +53,13 @@ For a one-file stable installer, download and run
 It installs the latest stable hbashton release to `%LOCALAPPDATA%\DS4Windows`
 and creates a desktop shortcut.
 
-### DualSense and VIIPER preview
+### DS4Windows 5 release candidates
 
-Native virtual DualSense output, advanced haptics, controller audio, and
-microphone support are being released as VIIPER preview builds. These builds
-appear as pre-releases on the
+DS4Windows 5 release candidates include virtual DualSense output, advanced
+haptics, controller audio, microphone capture, and the redesigned interface.
+They appear as pre-releases on the
 [DS4Windows Releases page](https://github.com/hbashton/DS4Windows/releases).
-Choose the newest release whose tag begins with `VIIPER` when you want these
-features.
+Choose the newest release-candidate build when you want to test these features.
 
 > **VIIPER is x64 only.** VIIPER releases do not work with x86 Windows or the
 > x86 DS4Windows build. Install the x64 DS4Windows package on a 64-bit Windows
@@ -81,7 +102,7 @@ The matching VIIPER backend is published at
 installer when possible so the backend and driver are placed and started
 correctly.
 
-## What this fork adds
+## Why DS4Windows 5 is different
 
 ### Profiles and automation
 

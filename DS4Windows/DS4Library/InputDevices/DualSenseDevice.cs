@@ -2090,7 +2090,7 @@ namespace DS4Windows.InputDevices
                 firstActive = DateTime.UtcNow;
                 NativeMethods.HidD_SetNumInputBuffers(hDevice.SafeReadHandle.DangerousGetHandle(),
                     conType == ConnectionType.BT ? 64 : 3);
-                Queue<long> latencyQueue = new Queue<long>(21); // Set capacity at max + 1 to avoid any resizing
+                Queue<double> latencyQueue = new Queue<double>(21); // Set capacity at max + 1 to avoid any resizing
                 int tempLatencyCount = 0;
                 long oldtime = 0;
                 string currerror = string.Empty;
@@ -2115,7 +2115,7 @@ namespace DS4Windows.InputDevices
                     CRC32_POS_3 = BT_INPUT_REPORT_CRC32_POS + 3;
                 int crcpos = BT_INPUT_REPORT_CRC32_POS;
                 int crcoffset = 0;
-                long latencySum = 0;
+                double latencySum = 0.0;
                 int reportOffset = conType == ConnectionType.BT ? 1 : 0;
 
                 // Run continuous calibration on Gyro when starting input loop
@@ -2133,8 +2133,11 @@ namespace DS4Windows.InputDevices
                         tempLatencyCount--;
                     }
 
-                    latencySum += this.lastTimeElapsed;
-                    latencyQueue.Enqueue(this.lastTimeElapsed);
+                    // Preserve the fractional part of the observed HID input
+                    // interval. Truncating every sample to an integer made a
+                    // 1.4 ms cadence look like 1.0 ms (1000 Hz) in the UI.
+                    latencySum += lastTimeElapsedDouble;
+                    latencyQueue.Enqueue(lastTimeElapsedDouble);
                     tempLatencyCount++;
 
                     //Latency = latencyQueue.Average();

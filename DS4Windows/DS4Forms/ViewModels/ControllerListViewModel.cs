@@ -252,7 +252,22 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             _ => "Connected",
         };
 
-        public string LatencyText => $"{device.Latency:0.00} ms";
+        public string LatencyText
+        {
+            get
+            {
+                double intervalMilliseconds = device.Latency;
+                if (intervalMilliseconds <= 0.0 ||
+                    double.IsNaN(intervalMilliseconds) ||
+                    double.IsInfinity(intervalMilliseconds))
+                {
+                    return "--";
+                }
+
+                double frequencyHz = 1000.0 / intervalMilliseconds;
+                return $"{intervalMilliseconds:0.00} ms · {frequencyHz:0} Hz";
+            }
+        }
 
         public bool IsWireless => device.ConnectionType != ConnectionType.USB;
 

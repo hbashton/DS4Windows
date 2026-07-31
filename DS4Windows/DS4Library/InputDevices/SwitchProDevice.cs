@@ -357,7 +357,7 @@ namespace DS4Windows.InputDevices
                 Debouncer = SetupDebouncer();
                 firstActive = DateTime.UtcNow;
                 NativeMethods.HidD_SetNumInputBuffers(hDevice.SafeReadHandle.DangerousGetHandle(), 3);
-                Queue<long> latencyQueue = new Queue<long>(21); // Set capacity at max + 1 to avoid any resizing
+                Queue<double> latencyQueue = new Queue<double>(21); // Set capacity at max + 1 to avoid any resizing
                 int tempLatencyCount = 0;
                 long oldtime = 0;
                 string currerror = string.Empty;
@@ -376,7 +376,7 @@ namespace DS4Windows.InputDevices
                 double elapsedDeltaTime = 0.0;
                 //uint tempDelta = 0;
                 byte tempByte = 0;
-                long latencySum = 0;
+                double latencySum = 0.0;
 
                 long previousCheckTime = 0;
                 long deltaCheckElapsed;
@@ -454,8 +454,8 @@ namespace DS4Windows.InputDevices
                         tempLatencyCount--;
                     }
 
-                    latencySum += this.lastTimeElapsed;
-                    latencyQueue.Enqueue(this.lastTimeElapsed);
+                    latencySum += lastTimeElapsedDouble;
+                    latencyQueue.Enqueue(lastTimeElapsedDouble);
                     tempLatencyCount++;
 
                     //Latency = latencyQueue.Average();

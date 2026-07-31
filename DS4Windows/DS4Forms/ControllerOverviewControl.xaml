@@ -244,7 +244,7 @@
                             <TextBlock Text="CONNECTION" Style="{StaticResource OverviewEyebrowStyle}" />
                             <TextBlock Text="{Binding SelectedControllerConnection}" Margin="0,11,0,3"
                                        Style="{StaticResource OverviewValueStyle}" />
-                            <TextBlock Text="{Binding SelectedControllerLatency, StringFormat=Input latency {0}}"
+                            <TextBlock Text="{Binding SelectedControllerLatency, StringFormat=Observed input rate {0}}"
                                        Foreground="{DynamicResource MutedForegroundColor}" />
                         </StackPanel>
                     </Border>
@@ -377,6 +377,8 @@
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
@@ -403,6 +405,15 @@
                                          Style="{StaticResource OverviewQuickSliderStyle}"
                                         Minimum="0" Maximum="100" TickFrequency="1"
                                         Value="{Binding SpeakerVolumePercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
+                                <TextBlock Grid.Row="4" Text="Headset / AUX level" VerticalAlignment="Center"
+                                           ToolTip="Controls the controller headset jack independently from its built-in speaker." />
+                                <TextBlock Grid.Row="4" Grid.Column="1"
+                                           Text="{Binding HeadphoneVolumePercent, StringFormat={}{0}%}"
+                                           Foreground="{DynamicResource AccentColor}" />
+                                <Slider Grid.Row="5" Grid.ColumnSpan="2" Margin="0,7,0,2"
+                                        Style="{StaticResource OverviewQuickSliderStyle}"
+                                        Minimum="0" Maximum="100" TickFrequency="1"
+                                        Value="{Binding HeadphoneVolumePercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
                             </Grid>
 
                             <StackPanel Grid.Row="4" Grid.ColumnSpan="2">

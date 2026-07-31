@@ -133,6 +133,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public event EventHandler HeadsetOnlyAudioChanged;
         public event EventHandler MicrophoneInputEnabledChanged;
         public event EventHandler SpeakerVolumePercentChanged;
+        public event EventHandler HeadphoneVolumePercentChanged;
         public event EventHandler MicrophoneVolumePercentChanged;
         public event EventHandler<QuickProfileSettingChangedEventArgs> QuickProfileSettingChanged;
 
@@ -375,6 +376,29 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             }
         }
 
+        public int HeadphoneVolumePercent
+        {
+            get => HasValidSelectedDevice
+                ? ByteToPercent(Global.DualSenseHeadphoneVolume[
+                    selectedController.DevIndex])
+                : 0;
+            set
+            {
+                if (!HasValidSelectedDevice) return;
+
+                int deviceIndex = selectedController.DevIndex;
+                byte converted = PercentToByte(value);
+                if (Global.DualSenseHeadphoneVolume[deviceIndex] == converted)
+                {
+                    return;
+                }
+
+                Global.DualSenseHeadphoneVolume[deviceIndex] = converted;
+                HeadphoneVolumePercentChanged?.Invoke(this, EventArgs.Empty);
+                RaiseQuickProfileSettingChanged(deviceIndex);
+            }
+        }
+
         public int MicrophoneVolumePercent
         {
             get => HasValidSelectedDevice
@@ -413,6 +437,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             HeadsetOnlyAudioChanged?.Invoke(this, EventArgs.Empty);
             MicrophoneInputEnabledChanged?.Invoke(this, EventArgs.Empty);
             SpeakerVolumePercentChanged?.Invoke(this, EventArgs.Empty);
+            HeadphoneVolumePercentChanged?.Invoke(this, EventArgs.Empty);
             MicrophoneVolumePercentChanged?.Invoke(this, EventArgs.Empty);
         }
 
@@ -505,6 +530,10 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             if (previous.SpeakerVolume != snapshot.SpeakerVolume)
             {
                 SpeakerVolumePercentChanged?.Invoke(this, EventArgs.Empty);
+            }
+            if (previous.HeadphoneVolume != snapshot.HeadphoneVolume)
+            {
+                HeadphoneVolumePercentChanged?.Invoke(this, EventArgs.Empty);
             }
             if (previous.MicrophoneVolume != snapshot.MicrophoneVolume)
             {
@@ -603,7 +632,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 SelectedControllerBattery, SelectedOutputController,
                 HapticStrengthPercent, SpeakerOutputEnabled,
                 HeadsetOnlyAudio, MicrophoneInputEnabled, SpeakerVolumePercent,
-                MicrophoneVolumePercent, startupStatus);
+                HeadphoneVolumePercent, MicrophoneVolumePercent, startupStatus);
         }
 
         private readonly struct OverviewRuntimeSnapshot
@@ -613,7 +642,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 OutContType outputController, int hapticStrength,
                 bool speakerEnabled, bool headsetOnlyAudio,
                 bool microphoneEnabled,
-                int speakerVolume, int microphoneVolume,
+                int speakerVolume, int headphoneVolume, int microphoneVolume,
                 ControllerStartupStatus startupStatus)
             {
                 ProfileName = profileName;
@@ -626,6 +655,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 HeadsetOnlyAudio = headsetOnlyAudio;
                 MicrophoneEnabled = microphoneEnabled;
                 SpeakerVolume = speakerVolume;
+                HeadphoneVolume = headphoneVolume;
                 MicrophoneVolume = microphoneVolume;
                 StartupStatus = startupStatus;
             }
@@ -640,6 +670,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             public bool HeadsetOnlyAudio { get; }
             public bool MicrophoneEnabled { get; }
             public int SpeakerVolume { get; }
+            public int HeadphoneVolume { get; }
             public int MicrophoneVolume { get; }
             public ControllerStartupStatus StartupStatus { get; }
         }

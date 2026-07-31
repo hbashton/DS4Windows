@@ -61,6 +61,7 @@ namespace DS4Windows.Tests
                 ViiperStartupTaskReady = true,
                 ServerRunning = true,
                 UsbipInstalled = true,
+                UsbipDriverFilesSafe = true,
                 UsbipRuntimeReady = false,
             };
 
@@ -80,6 +81,41 @@ namespace DS4Windows.Tests
             status.ViiperPackageCurrent = false;
             Assert.IsFalse(status.Ready,
                 "An older same-version VIIPER binary must not survive a DS4Windows update.");
+        }
+
+        [TestMethod]
+        public void ReadyRejectsUnsafeCitrixUsbMonitor()
+        {
+            ViiperPrerequisiteStatus status = new ViiperPrerequisiteStatus
+            {
+                ViiperInstalled = true,
+                ViiperPackageCurrent = true,
+                ServerRunning = true,
+                UsbipInstalled = true,
+                UsbipDriverFilesSafe = true,
+                UsbipRuntimeReady = true,
+                CitrixUsbMonitorConflict = true,
+                CitrixUsbMonitorConflictMessage =
+                    "Citrix USB Monitor is unsafe",
+            };
+
+            Assert.IsFalse(status.Ready);
+            StringAssert.Contains(status.DisplayText, "unsafe");
+        }
+
+        [DataTestMethod]
+        [DataRow(false, null, null, false)]
+        [DataRow(true, "Stopped", 4, false)]
+        [DataRow(true, "Running", 4, true)]
+        [DataRow(true, "Stopped", 2, true)]
+        [DataRow(true, null, 3, true)]
+        [DataRow(true, null, null, true)]
+        public void CitrixUsbMonitorGuardFailsClosed(bool installed,
+            string state, int? startValue, bool expected)
+        {
+            Assert.AreEqual(expected, ViiperSetupManager.
+                IsUnsafeCitrixUsbMonitorState(installed, state,
+                    startValue));
         }
 
         [TestMethod]
@@ -109,6 +145,7 @@ namespace DS4Windows.Tests
                 ViiperPackageCurrent = true,
                 ServerRunning = true,
                 UsbipInstalled = true,
+                UsbipDriverFilesSafe = true,
                 UsbipRuntimeReady = true,
                 ViiperProcessConflict = true,
                 ViiperProcessConflictMessage =
@@ -117,6 +154,46 @@ namespace DS4Windows.Tests
 
             Assert.IsFalse(status.Ready);
             StringAssert.Contains(status.DisplayText, "startup blocked");
+        }
+
+        [TestMethod]
+        public void ReadyRejectsMixedUsbipDriverFiles()
+        {
+            ViiperPrerequisiteStatus status = new ViiperPrerequisiteStatus
+            {
+                ViiperInstalled = true,
+                ViiperPackageCurrent = true,
+                ServerRunning = true,
+                UsbipInstalled = true,
+                UsbipDriverFilesSafe = false,
+                UsbipDriverIntegrityMessage =
+                    "Unsafe or mixed usbip-win2 driver files detected",
+                UsbipRuntimeReady = true,
+            };
+
+            Assert.IsFalse(status.Ready);
+            StringAssert.Contains(status.DisplayText, "mixed");
+        }
+
+        [TestMethod]
+        public void UsbipDriverHashesMustMatchBothPinnedFiles()
+        {
+            Assert.AreEqual(64,
+                ViiperSetupManager.SupportedUsbipUdeSha256.Length);
+            Assert.AreEqual(64,
+                ViiperSetupManager.SupportedUsbipFilterSha256.Length);
+            Assert.IsTrue(ViiperSetupManager.
+                AreSupportedUsbipDriverHashes(
+                    ViiperSetupManager.SupportedUsbipUdeSha256,
+                    ViiperSetupManager.SupportedUsbipFilterSha256));
+            Assert.IsFalse(ViiperSetupManager.
+                AreSupportedUsbipDriverHashes(
+                    new string('0', 64),
+                    ViiperSetupManager.SupportedUsbipFilterSha256));
+            Assert.IsFalse(ViiperSetupManager.
+                AreSupportedUsbipDriverHashes(
+                    ViiperSetupManager.SupportedUsbipUdeSha256,
+                    new string('0', 64)));
         }
 
         [TestMethod]

@@ -55,6 +55,7 @@ $script:UsbipRuntimeProbeState = "not-run"
 $script:Ds4WindowsRestartPath = $TargetDs4WindowsPath
 $script:UserCanceled = $false
 $script:RebootBoundaryPending = $false
+$script:SafetyRestartPending = $false
 $script:UsbipReplacementPhaseOne = $false
 $script:SetupMutex = $null
 $script:RequiredUsbipVersion = [Version]"0.9.7.7"
@@ -62,6 +63,10 @@ $script:UsbipInstallerUrl =
     "https://github.com/vadimgrn/usbip-win2/releases/download/v.0.9.7.7/USBip-0.9.7.7-x64.exe"
 $script:UsbipInstallerSha256 =
     "51620fa5f9f8be5932bc9d786deee557ce06d5407a99cab490dcfac71f185fea"
+$script:UsbipUdeDriverSha256 =
+    "51db440065393e588a6b2585508c50eb3e1510b7b06d9afa6c5bde583751ea7d"
+$script:UsbipFilterDriverSha256 =
+    "c290299ff4d0f6a597db5ce03e15b29a5349cdce7c587ebfbd9ecaeca04f73ed"
 $script:BundledViiperPath = Join-Path $script:PackageExtrasRoot `
     "VIIPER-0.0.6-x64.exe"
 $script:BundledViiperSha256 =
@@ -132,6 +137,84 @@ function Test-Administrator {
         [Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
+function Get-CitrixUsbMonitorState {
+    $service = Get-CimInstance Win32_SystemDriver `
+        -Filter "Name='ctxusbm'" -ErrorAction SilentlyContinue
+    $keyPath = "HKLM:\SYSTEM\CurrentControlSet\Services\ctxusbm"
+    $registry = Get-ItemProperty -LiteralPath $keyPath `
+        -ErrorAction SilentlyContinue
+    if (-not $service -and -not $registry) {
+        return $null
+    }
+
+    $imagePath = if ($service.PathName) {
+        [string]$service.PathName
+    }
+    elseif ($registry.ImagePath) {
+        [string]$registry.ImagePath
+    }
+    else { "" }
+    if ($imagePath -and
+            $imagePath.IndexOf("ctxusbmon.sys",
+                [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+        throw "The ctxusbm service exists but does not point to the known " +
+            "Citrix ctxusbmon.sys driver. Refusing to change it."
+    }
+
+    [pscustomobject]@{
+        State = [string]$service.State
+        Start = if ($null -ne $registry.Start) {
+            [int]$registry.Start
+        } else { $null }
+        ImagePath = $imagePath
+    }
+}
+
+function Disable-ConflictingCitrixUsbMonitor {
+    $state = Get-CitrixUsbMonitorState
+    if (-not $state) { return $false }
+    if ($state.State -ne "Running" -and $state.Start -eq 4) {
+        return $false
+    }
+
+    Write-SetupLog (
+        "Citrix USB Monitor (ctxusbmon.sys) is enabled. A verified " +
+        "IRQL_NOT_LESS_OR_EQUAL crash occurs when it races USB/IP virtual " +
+        "controller enumeration. VIIPER will not start while it is loaded."
+    ) Red
+    Write-SetupLog (
+        "This repair disables only Citrix generic USB redirection; the " +
+        "rest of Citrix Workspace remains installed."
+    ) Yellow
+
+    if (-not $Yes) {
+        $answer = Read-Host (
+            "Disable the conflicting Citrix USB monitor and require a " +
+            "restart? [Y/N]")
+        if ($answer -notmatch '^(?i:y|yes)$') {
+            $script:UserCanceled = $true
+            throw "Setup canceled before the Citrix USB monitor was changed."
+        }
+    }
+
+    Set-ItemProperty -LiteralPath `
+        "HKLM:\SYSTEM\CurrentControlSet\Services\ctxusbm" `
+        -Name Start -Type DWord -Value 4
+    $verified = Get-ItemPropertyValue -LiteralPath `
+        "HKLM:\SYSTEM\CurrentControlSet\Services\ctxusbm" `
+        -Name Start
+    if ([int]$verified -ne 4) {
+        throw "Windows did not disable the Citrix USB monitor service."
+    }
+
+    $script:RebootRecommended = $true
+    Write-SetupLog (
+        "Citrix generic USB redirection is disabled. Its kernel driver " +
+        "remains loaded until Windows restarts, so VIIPER stays stopped."
+    ) Green
+    return $true
+}
+
 function Get-UsbipInstalledVersion {
     # The official x64 installer owns this canonical executable. Its product
     # version is the authoritative userspace ABI version; check it before
@@ -166,6 +249,105 @@ function Get-UsbipInstalledVersion {
     }
 
     return $null
+}
+
+function Resolve-SystemDriverPath([string]$pathName) {
+    if ([string]::IsNullOrWhiteSpace($pathName)) { return $null }
+
+    $path = [Environment]::ExpandEnvironmentVariables($pathName.Trim())
+    if ($path.StartsWith('"')) {
+        $closingQuote = $path.IndexOf('"', 1)
+        if ($closingQuote -le 1) { return $null }
+        $path = $path.Substring(1, $closingQuote - 1)
+    }
+    else {
+        $extension = $path.IndexOf('.sys',
+            [StringComparison]::OrdinalIgnoreCase)
+        if ($extension -ge 0) {
+            $path = $path.Substring(0, $extension + 4)
+        }
+    }
+
+    if ($path.StartsWith('\??\') -or $path.StartsWith('\\?\')) {
+        $path = $path.Substring(4)
+    }
+    if ($path.StartsWith('\SystemRoot\',
+            [StringComparison]::OrdinalIgnoreCase)) {
+        $path = Join-Path $env:SystemRoot `
+            $path.Substring('\SystemRoot\'.Length)
+    }
+    elseif (-not [IO.Path]::IsPathRooted($path)) {
+        $path = Join-Path $env:SystemRoot $path
+    }
+
+    try { return [IO.Path]::GetFullPath($path) }
+    catch { return $null }
+}
+
+function Get-UsbipDriverIntegrity {
+    $expected = [ordered]@{
+        usbip2_ude = $script:UsbipUdeDriverSha256
+        usbip2_filter = $script:UsbipFilterDriverSha256
+    }
+    $details = [Collections.Generic.List[string]]::new()
+    $installedServiceCount = 0
+
+    foreach ($serviceName in $expected.Keys) {
+        try {
+            $drivers = @(Get-CimInstance Win32_SystemDriver `
+                -Filter "Name='$serviceName'" -ErrorAction Stop)
+        }
+        catch {
+            return [pscustomobject]@{
+                Safe = $false
+                InstalledServiceCount = -1
+                Message = "Could not inspect $serviceName`: " +
+                    $_.Exception.Message
+            }
+        }
+
+        $installedServiceCount += $drivers.Count
+        if ($drivers.Count -ne 1) {
+            $details.Add($(if ($drivers.Count -eq 0) {
+                "$serviceName service is missing"
+            } else {
+                "multiple $serviceName services were returned"
+            }))
+            continue
+        }
+
+        $driverPath = Resolve-SystemDriverPath `
+            ([string]$drivers[0].PathName)
+        if (-not $driverPath -or
+                -not (Test-Path -LiteralPath $driverPath -PathType Leaf)) {
+            $details.Add("$serviceName driver file is missing")
+            continue
+        }
+
+        try {
+            $hash = (Get-FileHash -LiteralPath $driverPath `
+                -Algorithm SHA256 -ErrorAction Stop).Hash
+        }
+        catch {
+            $details.Add("$serviceName driver could not be hashed")
+            continue
+        }
+        if (-not [string]::Equals($hash, $expected[$serviceName],
+                [StringComparison]::OrdinalIgnoreCase)) {
+            $details.Add("$serviceName does not match signed 0.9.7.7")
+            continue
+        }
+
+        $details.Add("$serviceName verified at $driverPath")
+    }
+
+    $safe = $details.Count -eq 2 -and
+        @($details | Where-Object { $_ -match ' verified at ' }).Count -eq 2
+    return [pscustomobject]@{
+        Safe = $safe
+        InstalledServiceCount = $installedServiceCount
+        Message = ($details -join '; ')
+    }
 }
 
 function Get-WindowsBootSessionId {
@@ -501,15 +683,17 @@ function Disconnect-UsbipImports([string]$usbipPath) {
 }
 
 function Remove-MismatchedUsbipPackage($entry, [Version]$installedVersion,
-        [Version]$requiredVersion) {
-    if (-not $installedVersion -or $installedVersion -eq $requiredVersion) {
+        [Version]$requiredVersion, [switch]$ForceUnsafeReplacement) {
+    if (-not $installedVersion -or
+            ($installedVersion -eq $requiredVersion -and
+            -not $ForceUnsafeReplacement)) {
         return $false
     }
     if (-not $entry) {
-        throw "usbip-win2 $installedVersion is unsupported, but no exact " +
-            "uninstall record for that version exists. Refusing to overlay " +
-            "$requiredVersion. Repair or remove the installed package " +
-            "manually, reboot, then run setup again."
+        throw "usbip-win2 $installedVersion requires safe replacement, " +
+            "but no exact uninstall record for that version exists. " +
+            "Refusing to overlay $requiredVersion. Repair or remove the " +
+            "installed package manually, reboot, then run setup again."
     }
 
     $entryVersion = ConvertTo-VersionFromObject $entry.DisplayVersion
@@ -553,8 +737,13 @@ function Remove-MismatchedUsbipPackage($entry, [Version]$installedVersion,
             "the canonical install directory: $uninstaller"
     }
 
+    $reason = if ($ForceUnsafeReplacement) {
+        "unsafe or mixed usbip-win2 $installedVersion driver files"
+    } else {
+        "unsupported usbip-win2 $installedVersion"
+    }
     Write-SetupLog (
-        "Removing unsupported usbip-win2 $installedVersion before " +
+        "Removing $reason before " +
         "a required reboot boundary. Pinned $requiredVersion will not be " +
         "installed in this Windows session."
     ) Yellow
@@ -1447,6 +1636,17 @@ try {
     New-Item -ItemType Directory -Path $script:TempDir -Force | Out-Null
     Write-SetupLog ""
     Write-SetupLog "Setup authorized; beginning verified installation." Green
+    if (Disable-ConflictingCitrixUsbMonitor) {
+        # Do not enumerate, detach, uninstall, or replace any USB/IP device
+        # while the crashing Citrix kernel filter remains loaded. Changing
+        # Start only affects the next boot; crossing that boundary is the
+        # only safe continuation.
+        Disable-ViiperStartup
+        $script:SafetyRestartPending = $true
+        throw "Citrix generic USB redirection was disabled. Restart Windows " +
+            "before running Install / Repair again; no USB/IP operation was " +
+            "attempted in this unsafe kernel session."
+    }
     Resolve-UsbipReplacementBoundary
 
     Write-Step "Step 1 of 4 - Installing VIIPER 0.0.6"
@@ -1546,13 +1746,14 @@ try {
     }
 
     $canonicalUsbipPresent = Test-Path -LiteralPath $script:CanonicalUsbipPath
-    $usbipDriverPaths = @(
-        (Join-Path $env:SystemRoot "System32\drivers\usbip2_ude.sys"),
-        (Join-Path $env:SystemRoot "System32\drivers\usbip2_filter.sys")
-    )
-    $usbipDriverPresent = @($usbipDriverPaths | Where-Object {
-        Test-Path -LiteralPath $_ -PathType Leaf
-    }).Count -gt 0
+    $usbipDriverIntegrity = Get-UsbipDriverIntegrity
+    if ($usbipDriverIntegrity.InstalledServiceCount -lt 0) {
+        throw "USBIP driver integrity inspection failed: " +
+            $usbipDriverIntegrity.Message
+    }
+    $usbipDriverPresent =
+        $usbipDriverIntegrity.InstalledServiceCount -gt 0
+    $usbipDriverFilesSafe = [bool]$usbipDriverIntegrity.Safe
     if (-not $canonicalUsbipPresent -and
             ($usbipDriverPresent -or $usbipVersion)) {
         throw "USBIP driver or package artifacts exist, but canonical " +
@@ -1566,18 +1767,20 @@ try {
             "be read. Refusing an unknown driver ABI. Repair or remove the " +
             "existing USBIP package manually, reboot, then run setup again."
     }
-    $usbipVersionReady = $canonicalUsbipPresent -and $usbipVersion -and $usbipVersion -eq $requiredUsbipVersion
-    if ($usbipVersionReady) {
+    $usbipVersionReady = $canonicalUsbipPresent -and $usbipVersion -and
+        $usbipVersion -eq $requiredUsbipVersion
+    $usbipPackageReady = $usbipVersionReady -and $usbipDriverFilesSafe
+    if ($usbipPackageReady) {
         $script:UsbipRuntimeReady = Test-UsbipRuntime $script:CanonicalUsbipPath
     }
 
-    if ($usbipVersionReady -and $script:UsbipRuntimeReady) {
+    if ($usbipPackageReady -and $script:UsbipRuntimeReady) {
         Write-SetupLog (
-            "usbip-win2 is ready: $usbipVersion at " +
-            $script:CanonicalUsbipPath
+            "usbip-win2 is ready: $usbipVersion with exact signed driver " +
+            "files at $script:CanonicalUsbipPath"
         ) Green
     }
-    elseif ($usbipVersionReady) {
+    elseif ($usbipPackageReady) {
         $script:RebootRecommended = $true
         Write-SetupLog (
             "The supported usbip-win2 $requiredUsbipVersion package is " +
@@ -1597,6 +1800,10 @@ try {
         elseif ($usbipVersion -ne $requiredUsbipVersion) {
             "unsupported ($usbipVersion)"
         }
+        elseif (-not $usbipDriverFilesSafe) {
+            "installed with unsafe or mixed driver files (" +
+                $usbipDriverIntegrity.Message + ")"
+        }
         else {
             "installed but its userspace/driver ABI probe failed"
         }
@@ -1605,13 +1812,15 @@ try {
             "$requiredUsbipVersion."
         ) Yellow
         $uninstallEntry = $null
-        if ($usbipVersion -and $usbipVersion -ne $requiredUsbipVersion) {
+        if ($usbipVersion -and
+                ($usbipVersion -ne $requiredUsbipVersion -or
+                -not $usbipDriverFilesSafe)) {
             $uninstallEntry = Get-UsbipUninstallEntry $usbipVersion
             if (-not $uninstallEntry) {
-                throw "usbip-win2 $usbipVersion is unsupported, but no exact " +
-                    "uninstall record for that version exists. Refusing to " +
-                    "overlay $requiredUsbipVersion. Remove it manually, " +
-                    "reboot, then run Repair again."
+                throw "usbip-win2 $usbipVersion requires safe replacement, " +
+                    "but no exact uninstall record for that version exists. " +
+                    "Refusing to overlay $requiredUsbipVersion. Remove it " +
+                    "manually, reboot, then run Repair again."
             }
         }
 
@@ -1631,7 +1840,9 @@ try {
         }
         $removedMismatchedPackage = Remove-MismatchedUsbipPackage `
             $uninstallEntry $usbipVersion `
-            $requiredUsbipVersion
+            $requiredUsbipVersion `
+            -ForceUnsafeReplacement:($usbipVersion -eq `
+                $requiredUsbipVersion -and -not $usbipDriverFilesSafe)
 
         if ($removedMismatchedPackage) {
             Write-SetupLog (
@@ -1678,12 +1889,19 @@ try {
 
             $usbipVersion = Get-UsbipInstalledVersion
             $canonicalUsbipPresent = Test-Path -LiteralPath $script:CanonicalUsbipPath
-            $usbipVersionReady = $canonicalUsbipPresent -and $usbipVersion -and $usbipVersion -eq $requiredUsbipVersion
-            if (-not $usbipVersionReady) {
+            $usbipDriverIntegrity = Get-UsbipDriverIntegrity
+            $usbipDriverFilesSafe = [bool]$usbipDriverIntegrity.Safe
+            $usbipVersionReady = $canonicalUsbipPresent -and $usbipVersion -and
+                $usbipVersion -eq $requiredUsbipVersion
+            $usbipPackageReady = $usbipVersionReady -and
+                $usbipDriverFilesSafe
+            if (-not $usbipPackageReady) {
                 $script:RebootRecommended = $true
                 Write-SetupLog (
-                    "usbip-win2 $requiredUsbipVersion is not active at its " +
-                    "canonical Program Files path yet. A reboot or repair is required."
+                    "usbip-win2 $requiredUsbipVersion and its exact signed " +
+                    "driver files are not active yet (" +
+                    $usbipDriverIntegrity.Message + "). A reboot or repair " +
+                    "is required."
                 ) Yellow
             }
             elseif (-not $script:RebootRecommended) {
@@ -1787,7 +2005,8 @@ catch {
             "changed."
         ) Yellow
     }
-    elseif ($script:RebootBoundaryPending) {
+    elseif ($script:RebootBoundaryPending -or
+            $script:SafetyRestartPending) {
         $script:ExitCode = 3010
         Write-SetupLog $_.Exception.Message Yellow
         Write-SetupLog "Restart required; no install changes were made." Yellow

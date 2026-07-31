@@ -19,10 +19,22 @@ namespace DS4WinWPF.DS4Forms
             suppressPromptCheck.IsChecked == true;
 
         public ViiperSetupPrompt(string currentStatus,
-            string existingViiperPath)
+            string existingViiperPath, bool citrixUsbMonitorConflict = false)
         {
             InitializeComponent();
             statusText.Text = currentStatus;
+
+            if (citrixUsbMonitorConflict)
+            {
+                headingText.Text = "VIIPER paused for system safety";
+                summaryText.Text =
+                    "A conflicting Citrix USB monitor is active.";
+                requirementsText.Text =
+                    "• Disable Citrix generic USB redirection only\n" +
+                    "• Restart Windows before VIIPER starts again";
+                installButton.Content = "Disable conflicting USB monitor";
+                return;
+            }
 
             if (!string.IsNullOrWhiteSpace(existingViiperPath))
             {

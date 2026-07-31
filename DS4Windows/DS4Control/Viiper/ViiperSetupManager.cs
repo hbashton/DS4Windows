@@ -13,6 +13,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Management;
 using System.Net.Sockets;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -21,6 +22,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Windows;
+using Microsoft.Win32;
 using ExecAction = Microsoft.Win32.TaskScheduler.ExecAction;
 using LogonTrigger = Microsoft.Win32.TaskScheduler.LogonTrigger;
 using TaskDefinition = Microsoft.Win32.TaskScheduler.TaskDefinition;
@@ -36,6 +38,8 @@ namespace DS4Windows
         public bool ViiperPackageCurrent { get; set; }
         public bool ServerRunning { get; set; }
         public bool UsbipInstalled { get; set; }
+        public bool UsbipDriverFilesSafe { get; set; }
+        public string UsbipDriverIntegrityMessage { get; set; }
         public bool UsbipRuntimeReady { get; set; }
         public bool UsbipRebootOrRepairRequired { get; set; }
         public bool ViiperProcessConflict { get; set; }
@@ -48,6 +52,8 @@ namespace DS4Windows
         public string UsbipProbeMessage { get; set; }
         public string ViiperProcessConflictMessage { get; set; }
         public bool UsingExternalViiper { get; set; }
+        public bool CitrixUsbMonitorConflict { get; set; }
+        public string CitrixUsbMonitorConflictMessage { get; set; }
 
         // Runtime readiness is deliberately independent of startup-task
         // maintenance. A healthy compatible VIIPER server must remain usable
@@ -55,7 +61,8 @@ namespace DS4Windows
         // be repaired without preventing virtual devices from being created.
         public bool Ready => ViiperInstalled && ViiperPackageCurrent &&
             !ViiperProcessConflict && ServerRunning && UsbipInstalled &&
-            UsbipRuntimeReady;
+            UsbipDriverFilesSafe && UsbipRuntimeReady &&
+            !CitrixUsbMonitorConflict;
 
         public string DisplayText
         {
@@ -66,6 +73,14 @@ namespace DS4Windows
                     return ViiperStartupTaskReady
                         ? "VIIPER ready"
                         : "VIIPER ready; startup task needs repair";
+                }
+
+                if (CitrixUsbMonitorConflict)
+                {
+                    return string.IsNullOrWhiteSpace(
+                        CitrixUsbMonitorConflictMessage)
+                        ? "Citrix USB Monitor must be disabled before VIIPER can start safely"
+                        : CitrixUsbMonitorConflictMessage;
                 }
 
                 if (ViiperProcessConflict)
@@ -86,6 +101,14 @@ namespace DS4Windows
                     return string.IsNullOrWhiteSpace(UsbipVersion)
                         ? "usbip-win2 0.9.7.7 is missing"
                         : $"usbip-win2 {UsbipVersion} must be replaced with supported 0.9.7.7";
+                }
+
+                if (!UsbipDriverFilesSafe)
+                {
+                    return string.IsNullOrWhiteSpace(
+                        UsbipDriverIntegrityMessage)
+                        ? "usbip-win2 driver repair required"
+                        : UsbipDriverIntegrityMessage;
                 }
 
                 if (!UsbipRuntimeReady || UsbipRebootOrRepairRequired)
@@ -137,8 +160,22 @@ namespace DS4Windows
         private const int ForeignViiperHelperTimeoutMilliseconds = 15000;
         private const string UsbipRelativePath = @"USBip\usbip.exe";
         private const int UsbipProbeTimeoutMilliseconds = 3000;
+        private const string CitrixUsbMonitorServiceName = "ctxusbm";
+        private const string CitrixUsbMonitorImageName = "ctxusbmon.sys";
+        private const string UsbipUdeServiceName = "usbip2_ude";
+        private const string UsbipFilterServiceName = "usbip2_filter";
+        internal const string SupportedUsbipUdeSha256 =
+            "51DB440065393E588A6B2585508C50EB3E1510B7B06D9AFA6C5BDE583751EA7D";
+        internal const string SupportedUsbipFilterSha256 =
+            "C290299FF4D0F6A597DB5CE03E15B29A5349CDCE7C587EBFBD9ECAECA04F73ED";
         private static readonly object serverStartLock = new object();
         private static readonly object foreignViiperProcessLock = new object();
+        private static readonly Lazy<(bool Conflict, string Message)>
+            citrixUsbMonitorStatus = new(EvaluateCitrixUsbMonitorConflict,
+                LazyThreadSafetyMode.ExecutionAndPublication);
+        private static readonly Lazy<(bool Safe, string Message)>
+            usbipDriverIntegrityStatus = new(EvaluateUsbipDriverIntegrity,
+                LazyThreadSafetyMode.ExecutionAndPublication);
         private static DateTime lastServerStartAttemptUtc = DateTime.MinValue;
         private static DateTime lastForeignViiperTerminationAttemptUtc =
             DateTime.MinValue;
@@ -184,8 +221,14 @@ namespace DS4Windows
             bool usbipInstalled = IsSupportedUsbipVersion(usbipVersion);
             bool usbipRuntimeReady = false;
             string usbipProbeMessage;
+            (bool usbipDriverFilesSafe,
+                string usbipDriverIntegrityMessage) =
+                usbipDriverIntegrityStatus.Value;
+            bool citrixUsbMonitorConflict =
+                TryGetCitrixUsbMonitorConflict(
+                    out string citrixUsbMonitorConflictMessage);
 
-            if (usbipInstalled)
+            if (usbipInstalled && usbipDriverFilesSafe)
             {
                 usbipRuntimeReady = TryProbeUsbipRuntime(usbipPath,
                     out usbipProbeMessage);
@@ -197,9 +240,12 @@ namespace DS4Windows
             }
             else
             {
-                usbipProbeMessage = usbipVersion == null
-                    ? "The canonical usbip.exe version could not be read."
-                    : $"usbip.exe {usbipVersion} does not match the supported {RequiredUsbipVersion}.";
+                usbipProbeMessage = !usbipDriverFilesSafe &&
+                    usbipInstalled
+                    ? usbipDriverIntegrityMessage
+                    : usbipVersion == null
+                        ? "The canonical usbip.exe version could not be read."
+                        : $"usbip.exe {usbipVersion} does not match the supported {RequiredUsbipVersion}.";
             }
 
             bool viiperPackageCurrent = usingExternalViiper
@@ -214,7 +260,8 @@ namespace DS4Windows
                 out viiperProcessConflictMessage);
 
             if (tryStartServer && File.Exists(viiperPath) &&
-                viiperPackageCurrent && usbipRuntimeReady)
+                viiperPackageCurrent && usbipRuntimeReady &&
+                !citrixUsbMonitorConflict)
             {
                 if (viiperProcessOwnershipReady &&
                     !canonicalViiperRunning)
@@ -242,13 +289,19 @@ namespace DS4Windows
                 ViiperStartupTaskReady = viiperStartupTaskReady,
                 SetupScriptFound = File.Exists(setupScriptPath),
                 UsbipInstalled = usbipInstalled,
+                UsbipDriverFilesSafe = usbipDriverFilesSafe,
+                UsbipDriverIntegrityMessage =
+                    usbipDriverIntegrityMessage,
                 UsbipRuntimeReady = usbipRuntimeReady,
                 UsbipRebootOrRepairRequired = usbipInstalled &&
-                    !usbipRuntimeReady,
+                    (!usbipDriverFilesSafe || !usbipRuntimeReady),
                 UsbipPath = usbipPath,
                 UsbipVersion = usbipVersion?.ToString(),
                 UsbipProbeMessage = usbipProbeMessage,
                 ServerRunning = viiperServerRunning,
+                CitrixUsbMonitorConflict = citrixUsbMonitorConflict,
+                CitrixUsbMonitorConflictMessage =
+                    citrixUsbMonitorConflictMessage,
             };
 
             return status;
@@ -276,7 +329,8 @@ namespace DS4Windows
             string alternativeViiperPath = FindAlternativeViiperPath(
                 GetCanonicalViiperExePath());
             DS4WinWPF.DS4Forms.ViiperSetupPrompt prompt = new(
-                status.DisplayText, alternativeViiperPath);
+                status.DisplayText, alternativeViiperPath,
+                status.CitrixUsbMonitorConflict);
             if (owner != null && owner.IsLoaded)
             {
                 prompt.Owner = owner;
@@ -472,9 +526,10 @@ namespace DS4Windows
                 if (exitCode == 3010)
                 {
                     ShowInstallerMessage(owner,
-                        "VIIPER setup completed the safe driver-removal " +
-                        "phase. Restart Windows, then run Install / Repair " +
-                        "again to finish installing usbip-win2 0.9.7.7.",
+                        "VIIPER setup reached a required kernel-driver " +
+                        "safety boundary. Restart Windows, then run Install " +
+                        "/ Repair again to finish setup. No replacement " +
+                        "driver was overlaid in the current Windows session.",
                         "VIIPER setup requires a restart",
                         MessageBoxImage.Warning);
                     return;
@@ -651,9 +706,10 @@ namespace DS4Windows
                     if (exitCode == 3010)
                     {
                         MessageBox.Show(
-                            "VIIPER setup completed the safe USBIP removal " +
-                            "phase. Restart Windows, then run Install / " +
-                            "Repair again to finish USBIP 0.9.7.7.",
+                            "VIIPER setup reached a required kernel-driver " +
+                            "safety boundary. Restart Windows, then run " +
+                            "Install / Repair again to finish setup. No " +
+                            "replacement driver was overlaid in this session.",
                             "Restart required", MessageBoxButton.OK,
                             MessageBoxImage.Warning);
                     }
@@ -1748,6 +1804,252 @@ namespace DS4Windows
         internal static bool IsSupportedUsbipVersion(Version version)
         {
             return version != null && version == RequiredUsbipVersion;
+        }
+
+        internal static bool AreSupportedUsbipDriverHashes(string udeHash,
+            string filterHash)
+        {
+            return string.Equals(udeHash, SupportedUsbipUdeSha256,
+                       StringComparison.OrdinalIgnoreCase) &&
+                   string.Equals(filterHash, SupportedUsbipFilterSha256,
+                       StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static (bool Safe, string Message)
+            EvaluateUsbipDriverIntegrity()
+        {
+            try
+            {
+                if (!TryGetSystemDriverSha256(UsbipUdeServiceName,
+                        out string udeHash, out string udeError))
+                {
+                    return (false,
+                        $"usbip-win2 driver repair required: {udeError}");
+                }
+
+                if (!TryGetSystemDriverSha256(UsbipFilterServiceName,
+                        out string filterHash, out string filterError))
+                {
+                    return (false,
+                        $"usbip-win2 driver repair required: {filterError}");
+                }
+
+                if (!AreSupportedUsbipDriverHashes(udeHash, filterHash))
+                {
+                    return (false,
+                        "Unsafe or mixed usbip-win2 driver files detected. " +
+                        "Install / Repair must replace them before VIIPER " +
+                        "can start.");
+                }
+
+                return (true,
+                    "The loaded usbip-win2 0.9.7.7 driver files match the " +
+                    "verified signed package.");
+            }
+            catch (Exception ex)
+            {
+                return (false,
+                    "usbip-win2 driver integrity could not be verified: " +
+                    ex.Message);
+            }
+        }
+
+        private static bool TryGetSystemDriverSha256(string serviceName,
+            out string sha256, out string error)
+        {
+            sha256 = null;
+            error = null;
+            string pathName = null;
+            int matches = 0;
+
+            using ManagementObjectSearcher searcher = new(
+                "SELECT PathName FROM Win32_SystemDriver " +
+                $"WHERE Name='{serviceName}'");
+            foreach (ManagementObject driver in searcher.Get())
+            {
+                matches++;
+                pathName = driver["PathName"] as string;
+            }
+
+            if (matches != 1)
+            {
+                error = matches == 0
+                    ? $"the {serviceName} service is missing"
+                    : $"multiple {serviceName} services were returned";
+                return false;
+            }
+
+            string driverPath = ResolveSystemDriverPath(pathName);
+            if (string.IsNullOrWhiteSpace(driverPath) ||
+                !File.Exists(driverPath))
+            {
+                error = $"the active {serviceName} driver file is missing";
+                return false;
+            }
+
+            using FileStream stream = new(driverPath, FileMode.Open,
+                FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            sha256 = Convert.ToHexString(SHA256.HashData(stream));
+            return true;
+        }
+
+        private static string ResolveSystemDriverPath(string pathName)
+        {
+            if (string.IsNullOrWhiteSpace(pathName))
+            {
+                return null;
+            }
+
+            string path = Environment.ExpandEnvironmentVariables(
+                pathName.Trim());
+            if (path.StartsWith("\"", StringComparison.Ordinal))
+            {
+                int closingQuote = path.IndexOf('"', 1);
+                if (closingQuote <= 1)
+                {
+                    return null;
+                }
+
+                path = path.Substring(1, closingQuote - 1);
+            }
+            else
+            {
+                int sysExtension = path.IndexOf(".sys",
+                    StringComparison.OrdinalIgnoreCase);
+                if (sysExtension >= 0)
+                {
+                    path = path.Substring(0, sysExtension + 4);
+                }
+            }
+
+            if (path.StartsWith(@"\??\", StringComparison.Ordinal) ||
+                path.StartsWith(@"\\?\", StringComparison.Ordinal))
+            {
+                path = path.Substring(4);
+            }
+
+            const string systemRootPrefix = @"\SystemRoot\";
+            if (path.StartsWith(systemRootPrefix,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                path = Path.Combine(Environment.GetEnvironmentVariable(
+                        "SystemRoot") ?? @"C:\Windows",
+                    path.Substring(systemRootPrefix.Length));
+            }
+            else if (!Path.IsPathRooted(path))
+            {
+                path = Path.Combine(Environment.GetEnvironmentVariable(
+                        "SystemRoot") ?? @"C:\Windows", path);
+            }
+
+            return Path.GetFullPath(path);
+        }
+
+        internal static bool IsUnsafeCitrixUsbMonitorState(bool installed,
+            string state, int? startValue)
+        {
+            if (!installed)
+            {
+                return false;
+            }
+
+            if (string.Equals(state, "Running",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            // SERVICE_DISABLED is 4. An installed monitor that is Manual or
+            // Automatic can load on the next USB enumeration even when it
+            // happens to be stopped at the instant we inspect it.
+            return !startValue.HasValue || startValue.Value != 4;
+        }
+
+        private static bool TryGetCitrixUsbMonitorConflict(
+            out string conflictMessage)
+        {
+            (bool conflict, string message) = citrixUsbMonitorStatus.Value;
+            conflictMessage = message;
+            return conflict;
+        }
+
+        private static (bool Conflict, string Message)
+            EvaluateCitrixUsbMonitorConflict()
+        {
+            bool installed = false;
+            string state = null;
+            string imagePath = null;
+            int? startValue = null;
+
+            try
+            {
+                using RegistryKey service = Registry.LocalMachine.OpenSubKey(
+                    @"SYSTEM\CurrentControlSet\Services\" +
+                    CitrixUsbMonitorServiceName);
+                if (service != null)
+                {
+                    installed = true;
+                    imagePath = service.GetValue("ImagePath") as string;
+                    object rawStart = service.GetValue("Start");
+                    if (rawStart != null)
+                    {
+                        startValue = Convert.ToInt32(rawStart);
+                    }
+                }
+            }
+            catch
+            {
+                // A present service whose configuration cannot be read is
+                // intentionally treated as unsafe below.
+                installed = true;
+            }
+
+            try
+            {
+                using ManagementObjectSearcher searcher = new(
+                    "SELECT State, PathName FROM Win32_SystemDriver " +
+                    $"WHERE Name='{CitrixUsbMonitorServiceName}'");
+                foreach (ManagementObject driver in searcher.Get())
+                {
+                    installed = true;
+                    state = driver["State"] as string;
+                    imagePath ??= driver["PathName"] as string;
+                    break;
+                }
+            }
+            catch
+            {
+                // Registry state is sufficient when WMI is unavailable.
+            }
+
+            if (!installed)
+            {
+                return (false, null);
+            }
+
+            if (!string.IsNullOrWhiteSpace(imagePath) &&
+                imagePath.IndexOf(CitrixUsbMonitorImageName,
+                    StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                return (true,
+                    "A ctxusbm kernel service with an unexpected driver " +
+                    "image is installed. DS4Windows cannot validate this " +
+                    "USB filter safely, so VIIPER remains stopped.");
+            }
+
+            if (!IsUnsafeCitrixUsbMonitorState(installed, state,
+                    startValue))
+            {
+                return (false, null);
+            }
+
+            string conflictMessage =
+                "Citrix USB Monitor (ctxusbmon.sys) is enabled. " +
+                "It can crash Windows while USB/IP virtual controllers " +
+                "connect or disconnect. DS4Windows has paused VIIPER for " +
+                "system safety. Install / Repair can disable only Citrix " +
+                "generic USB redirection; restart Windows afterward.";
+            return (true, conflictMessage);
         }
 
         internal static bool IsSuccessfulUsbipPortProbe(int exitCode,

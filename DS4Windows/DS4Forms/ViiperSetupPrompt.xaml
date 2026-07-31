@@ -70,10 +70,12 @@
                                        VerticalAlignment="Center" />
                         </Border>
                         <StackPanel Grid.Column="1">
-                            <TextBlock Text="VIIPER needs attention"
+                            <TextBlock x:Name="headingText"
+                                       Text="VIIPER needs attention"
                                        Style="{StaticResource BridgeSectionTitleStyle}"
                                        FontSize="20" />
-                            <TextBlock Text="This profile uses a VIIPER virtual controller output."
+                            <TextBlock x:Name="summaryText"
+                                       Text="This profile uses a VIIPER virtual controller output."
                                        Foreground="{DynamicResource MutedForegroundColor}"
                                        TextWrapping="Wrap" />
                         </StackPanel>
@@ -86,7 +88,8 @@
                             <TextBlock Text="What DS4Windows needs"
                                        FontWeight="SemiBold"
                                        Margin="0,0,0,7" />
-                            <TextBlock Text="• VIIPER helper/server&#x0a;• usbip-win2 Windows USB/IP driver"
+                            <TextBlock x:Name="requirementsText"
+                                       Text="• VIIPER helper/server&#x0a;• usbip-win2 Windows USB/IP driver"
                                        TextWrapping="Wrap"
                                        LineHeight="22" />
                             <Border Height="1"
@@ -147,7 +150,8 @@
                                     Visibility="Collapsed"
                                     Style="{StaticResource BridgeSecondaryButtonStyle}"
                                     Click="UseExistingButton_Click" />
-                            <Button Content="Install standard VIIPER"
+                            <Button x:Name="installButton"
+                                    Content="Install standard VIIPER"
                                     MinWidth="164"
                                     Style="{StaticResource BridgePrimaryButtonStyle}"
                                     Click="InstallButton_Click" />

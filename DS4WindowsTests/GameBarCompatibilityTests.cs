@@ -10,7 +10,8 @@ namespace DS4WindowsTests
         [DataTestMethod]
         [DataRow(OutContType.ViiperDualSense)]
         [DataRow(OutContType.ViiperDualSenseEdge)]
-        public void UsesTemporaryXInputForNativeDualSenseOutputs(OutContType outputType)
+        [DataRow(OutContType.ViiperDS4)]
+        public void UsesTemporaryXInputForNativePlayStationOutputs(OutContType outputType)
         {
             Assert.IsTrue(ControlService.ShouldUseGameBarControllerCompatibility(
                 enabled: true, outputType, dInputOnly: false));
@@ -21,7 +22,6 @@ namespace DS4WindowsTests
         [DataRow(OutContType.X360)]
         [DataRow(OutContType.DS4)]
         [DataRow(OutContType.ViiperX360)]
-        [DataRow(OutContType.ViiperDS4)]
         [DataRow(OutContType.ViiperSwitch2Pro)]
         public void DoesNotCreateCompanionForOtherOutputs(OutContType outputType)
         {

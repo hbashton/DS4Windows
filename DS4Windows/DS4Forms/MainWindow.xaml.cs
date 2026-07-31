@@ -76,6 +76,7 @@ namespace DS4WinWPF.DS4Forms
         private NonFormTimer autoProfilesTimer;
         private AutoProfileChecker autoprofileChecker;
         private ProfileEditor editor;
+        private int shutdownRequested;
         private bool profileEditorLoading;
         private int profileEditorReturnTabIndex = -1;
         private bool profileEditorNavigationChanging;
@@ -162,6 +163,7 @@ namespace DS4WinWPF.DS4Forms
             // Need to define before calling TaskbarIcon.ForceCreate
             notifyIcon.DataContext = trayIconVM;
             notifyIcon.CustomName = Global.exelocation;
+            notifyIcon.ContextMenu = trayIconVM.ContextMenu;
 
             // Remove TaskbarIcon from visual tree so Loaded and Unloaded events
             // are not fired for TaskbarIcon instance. Ignores early Dispose calls
@@ -172,16 +174,7 @@ namespace DS4WinWPF.DS4Forms
                 parent.Children.Remove(notifyIcon);
                 // Since Loaded event will not get fired from Window, need to
                 // create the tray icon explicitly here
-                try
-                {
-                    // Loaded event handler has enablesEfficiencyMode default to false so
-                    // do the same here
-                    notifyIcon.ForceCreate(enablesEfficiencyMode: false);
-                }
-                catch (Exception)
-                {
-                    // Ignore exception
-                }
+                EnsureTrayIconCreated();
             }
 
             startMinimized = Global.StartMinimized || parser.Mini;
@@ -309,9 +302,7 @@ namespace DS4WinWPF.DS4Forms
 
                 if (launch)
                 {
-                    // Set that the window is getting ready to close for other components
-                    contextclose = true;
-                    Dispatcher.BeginInvoke(Close);
+                    RequestApplicationShutdown();
                 }
                 else
                 {
@@ -369,12 +360,7 @@ namespace DS4WinWPF.DS4Forms
 
                     if (launch)
                     {
-                        // Set that the window is getting ready to close for other components
-                        contextclose = true;
-                        Dispatcher.BeginInvoke((Action)(() =>
-                        {
-                            Close();
-                        }));
+                        RequestApplicationShutdown();
                     }
                     else
                     {
@@ -843,8 +829,60 @@ Suspend support not enabled.", true);
 
         private void TrayIconVM_RequestShutdown(object sender, EventArgs e)
         {
+            RequestApplicationShutdown();
+        }
+
+        private async void EnsureTrayIconCreated()
+        {
+            int[] retryDelaysMs = { 0, 250, 1000 };
+            Exception lastFailure = null;
+            foreach (int retryDelayMs in retryDelaysMs)
+            {
+                if (retryDelayMs > 0)
+                {
+                    await Task.Delay(retryDelayMs);
+                }
+
+                if (notifyIcon == null || Volatile.Read(ref shutdownRequested) != 0)
+                {
+                    return;
+                }
+
+                try
+                {
+                    if (!notifyIcon.IsCreated)
+                    {
+                        notifyIcon.ForceCreate(enablesEfficiencyMode: false);
+                    }
+
+                    notifyIcon.ContextMenu = trayIconVM.ContextMenu;
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    lastFailure = ex;
+                }
+            }
+
+            if (lastFailure != null)
+            {
+                AppLogger.LogToGui($"Tray icon creation failed: {lastFailure.Message}", true);
+            }
+        }
+
+        private void RequestApplicationShutdown()
+        {
+            if (Interlocked.Exchange(ref shutdownRequested, 1) != 0)
+            {
+                return;
+            }
+
             contextclose = true;
-            this.Close();
+            Dispatcher.BeginInvoke((Action)(() =>
+            {
+                editor?.Close();
+                Close();
+            }), DispatcherPriority.Send);
         }
 
         private void UpdateLastStatusMessage(object sender, DS4Windows.DebugEventArgs e)
@@ -1418,14 +1456,19 @@ Suspend support not enabled.", true);
             if (editor != null)
             {
                 editor.Close();
-                e.Cancel = true;
-                return;
+                if (!contextclose)
+                {
+                    e.Cancel = true;
+                    return;
+                }
             }
-            else if (contextclose)
+
+            if (contextclose)
             {
                 return;
             }
-            else if (Global.CloseMini)
+
+            if (Global.CloseMini)
             {
                 WindowState = WindowState.Minimized;
                 e.Cancel = true;
@@ -1458,6 +1501,7 @@ Suspend support not enabled.", true);
             // Attempt to dispose of notify icon early
             if (notifyIcon != null)
             {
+                trayIconVM?.Dispose();
                 notifyIcon.Dispose();
                 notifyIcon = null;
             }
@@ -1545,13 +1589,7 @@ Suspend support not enabled.", true);
                                 }
                                 else if (strData[0] == "shutdown")
                                 {
-                                    // Force disconnect all gamepads before closing the app to avoid "Are you sure you want to close the app" messagebox
-                                    if (Program.rootHub.running)
-                                        ChangeService();
-
-                                    // Call closing method and let it to close editor wnd (if it is open) before proceeding to the actual "app closed" handler
-                                    MainDS4Window_Closing(null, new System.ComponentModel.CancelEventArgs());
-                                    MainDS4Window_Closed(this, new System.EventArgs());
+                                    RequestApplicationShutdown();
                                 }
                                 else if (strData[0] == "disconnect")
                                 {
@@ -2243,8 +2281,7 @@ Suspend support not enabled.", true);
 
         private void NotifyIcon_TrayMiddleMouseDown(object sender, RoutedEventArgs e)
         {
-            contextclose = true;
-            Close();
+            RequestApplicationShutdown();
         }
 
         private void SwipeTouchCk_Click(object sender, RoutedEventArgs e)

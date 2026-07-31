@@ -3271,7 +3271,8 @@ namespace DS4Windows
         {
             return enabled && !dInputOnly &&
                 (outputType == OutContType.ViiperDualSense ||
-                outputType == OutContType.ViiperDualSenseEdge);
+                outputType == OutContType.ViiperDualSenseEdge ||
+                outputType == OutContType.ViiperDS4);
         }
 
         private bool HasAnyConfiguredGameBarCompatibility()

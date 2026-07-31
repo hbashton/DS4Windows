@@ -27,7 +27,7 @@ using DS4Windows;
 
 namespace DS4WinWPF.DS4Forms.ViewModels
 {
-    public class TrayIconViewModel
+    public sealed class TrayIconViewModel : IDisposable
     {
         private string tooltipText = "DS4Windows";
         private string iconSource;
@@ -40,6 +40,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         private MenuItem openProgramItem;
         private MenuItem closeItem;
         private int? prevBattery = null;
+        private bool disposed;
 
 
         public string TooltipText
@@ -520,6 +521,43 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         private void ExitMenuItem_Click(object sender, System.Windows.RoutedEventArgs e)
         {
             RequestShutdown?.Invoke(this, EventArgs.Empty);
+        }
+
+        public void Dispose()
+        {
+            if (disposed)
+            {
+                return;
+            }
+
+            disposed = true;
+            Global.BatteryChanged -= UpdateTrayBattery;
+            profileListHolder.ProfileListCol.CollectionChanged -= ProfileListCol_CollectionChanged;
+            controlService.ServiceStarted -= BuildControllerList;
+            controlService.ServiceStarted -= HookEvents;
+            controlService.ServiceStarted -= StartPopulateText;
+            controlService.PreServiceStop -= ClearToolText;
+            controlService.PreServiceStop -= UnhookEvents;
+            controlService.PreServiceStop -= ClearControllerList;
+            controlService.RunningChanged -= Service_RunningChanged;
+            controlService.HotplugController -= Service_HotplugController;
+
+            using (WriteLocker locker = new WriteLocker(_colLocker))
+            {
+                foreach (ControllerHolder holder in controllerList)
+                {
+                    RemoveDeviceEvents(holder.Device);
+                }
+
+                controllerList.Clear();
+            }
+
+            changeServiceItem.Click -= ChangeControlServiceItem_Click;
+            openItem.Click -= OpenMenuItem_Click;
+            minimizeItem.Click -= MinimizeMenuItem_Click;
+            openProgramItem.Click -= OpenProgramFolderItem_Click;
+            closeItem.Click -= ExitMenuItem_Click;
+            contextMenu.Items.Clear();
         }
     }
 

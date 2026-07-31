@@ -357,7 +357,11 @@
                                                    Foreground="{DynamicResource MutedForegroundColor}" />
                                         <ComboBox ItemsSource="{Binding OutputControllerChoices}"
                                                   SelectedValuePath="Type"
-                                                  SelectedValue="{Binding SelectedOutputController, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  SelectedValue="{Binding SelectedOutputController, Mode=OneWay}"
+                                                  SelectionChanged="OutputControllerCombo_SelectionChanged"
+                                                  DropDownOpened="OutputControllerCombo_DropDownOpened"
+                                                  DropDownClosed="OutputControllerCombo_DropDownClosed"
+                                                  PreviewKeyDown="OutputControllerCombo_PreviewKeyDown"
                                                   Style="{StaticResource OverviewSettingsComboBoxStyle}">
                                             <ComboBox.ItemTemplate>
                                                 <DataTemplate>

@@ -10,9 +10,9 @@ namespace DS4WindowsTests
         private static readonly string[] StickAtlases =
         {
             "DualSense-Stick_Highlights.png",
-            "DualShock4-Stick_Highlights.png",
-            "DualSenseEdge-Stick_Highlights.png",
-            "Switch2Pro-Stick_Highlights.png",
+            "DualShock4-Mapping-Stick_Highlights.png",
+            "DualSenseEdge-Mapping-Stick_Highlights.png",
+            "Switch2Pro-Mapping-Stick_Highlights.png",
         };
 
         [TestMethod]
@@ -69,13 +69,13 @@ namespace DS4WindowsTests
                 ["DualSense-Config_Highlights.png"] =
                     Enumerable.Range(0, 12).Concat(Enumerable.Range(14, 4))
                         .ToArray(),
-                ["DualShock4-Config_Highlights.png"] =
+                ["DualShock4-Mapping_Highlights.png"] =
                     Enumerable.Range(0, 11).Concat(Enumerable.Range(14, 8))
                         .ToArray(),
-                ["DualSenseEdge-Config_Highlights.png"] =
+                ["DualSenseEdge-Mapping_Highlights.png"] =
                     Enumerable.Range(0, 12).Concat(Enumerable.Range(14, 10))
                         .ToArray(),
-                ["Switch2Pro-Config_Highlights.png"] =
+                ["Switch2Pro-Mapping_Highlights.png"] =
                     Enumerable.Range(0, 11).Concat(Enumerable.Range(14, 4))
                         .Concat(new[] { 24, 25, 26 }).ToArray(),
             };
@@ -90,6 +90,25 @@ namespace DS4WindowsTests
                     Assert.IsFalse(RasterHighlightAtlas.Mask(atlas, frame)
                         .Bounds.IsEmpty, $"{atlas} frame {frame} has no hit mask.");
                 }
+            }
+        }
+
+        [TestMethod]
+        public void MappingHighlightsKeepTextureVisibleInsideACrispBoundedEdge()
+        {
+            foreach (string atlas in new[]
+            {
+                "DualShock4-Mapping_Highlights.png",
+                "DualSenseEdge-Mapping_Highlights.png",
+                "Switch2Pro-Mapping_Highlights.png",
+            })
+            {
+                byte[] alpha = AlphaPixels(
+                    RasterHighlightAtlas.Frame(atlas, 7));
+                Assert.IsTrue(alpha.Any(value => value >= 180),
+                    $"{atlas} has no crisp inner edge.");
+                Assert.IsTrue(alpha.Any(value => value >= 32 && value <= 120),
+                    $"{atlas} has no translucent interior.");
             }
         }
 

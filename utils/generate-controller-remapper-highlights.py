@@ -13,13 +13,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from PIL import Image, ImageChops, ImageDraw
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 
 CANVAS_WIDTH = 440
 CANVAS_HEIGHT = 220
 SUPERSAMPLE = 4
 ACCENT = (47, 128, 237, 178)
+MAPPING_FILL_ALPHA = 88
+MAPPING_EDGE_ALPHA = 224
 
 
 def split_stick_ring(ring: Image.Image, center_x: float,
@@ -219,6 +221,65 @@ def render_stick_atlas(resources: Path, source_atlas: str, target_atlas: str) ->
 
     stick_atlas.save(resources / target_atlas, optimize=True)
     print(f"generated {target_atlas}: {stick_atlas.width} x {stick_atlas.height}")
+
+
+def render_mapping_atlas(resources: Path, source_atlas: str,
+                         target_atlas: str) -> None:
+    """Create a bounded inner-glow treatment for the button-mapping view.
+
+    The action picker intentionally retains its existing solid overlays. The
+    profile map needs the underlying label and button texture to remain
+    visible, so it uses a translucent fill plus a crisp edge entirely inside
+    the exact source mask. No blur is allowed outside the control surface.
+    """
+
+    source = Image.open(resources / source_atlas).convert("RGBA")
+    frame_count = source.height // CANVAS_HEIGHT
+    output = Image.new("RGBA", source.size, (0, 0, 0, 0))
+    for frame_index in range(frame_count):
+        frame = source.crop((0, frame_index * CANVAS_HEIGHT,
+                             CANVAS_WIDTH,
+                             (frame_index + 1) * CANVAS_HEIGHT))
+        source_alpha = frame.getchannel("A")
+        normalized = source_alpha.point(
+            lambda value: min(255, round(value * 255 / ACCENT[3])))
+        eroded = normalized.filter(ImageFilter.MinFilter(5))
+        inner_edge = ImageChops.subtract(normalized, eroded)
+        fill = normalized.point(
+            lambda value: round(value * MAPPING_FILL_ALPHA / 255))
+        edge = inner_edge.point(
+            lambda value: round(value * MAPPING_EDGE_ALPHA / 255))
+        alpha = ImageChops.lighter(fill, edge)
+        styled = Image.new("RGBA", (CANVAS_WIDTH, CANVAS_HEIGHT),
+                           ACCENT[:3] + (0,))
+        styled.putalpha(alpha)
+        output.alpha_composite(styled, (0, frame_index * CANVAS_HEIGHT))
+
+    output.save(resources / target_atlas, optimize=True)
+    print(f"generated {target_atlas}: {output.width} x {output.height}")
+
+
+def render_dualshock4_mapping_lightbar(resources: Path) -> None:
+    """Trace only the blue light pipe visible in the DS4 front raster."""
+
+    source = Image.open(resources / "DualShock 4 Controller.png").convert("RGBA")
+    left, top, right, bottom = (128, 47, 256, 61)
+    crop = source.crop((left, top, right, bottom))
+    pixels = crop.load()
+    mask = Image.new("L", crop.size, 0)
+    target = mask.load()
+    for y in range(crop.height):
+        for x in range(crop.width):
+            red, green, blue, alpha = pixels[x, y]
+            if alpha > 0 and blue >= 110 and blue > red * 1.35 and blue > green * 1.08:
+                target[x, y] = alpha
+
+    mask = mask.filter(ImageFilter.MaxFilter(3)).filter(ImageFilter.MinFilter(3))
+    result = Image.new("RGBA", crop.size, (255, 255, 255, 0))
+    result.putalpha(mask)
+    target_name = "DualShock4-Mapping-Lightbar.png"
+    result.save(resources / target_name, optimize=True)
+    print(f"generated {target_name}: {result.width} x {result.height}")
 
 
 def render_xbox_action_atlas(resources: Path) -> None:
@@ -435,6 +496,18 @@ def main() -> None:
         ("Switch2Pro-Config_Highlights.png", "Switch2Pro-Stick_Highlights.png"),
     ):
         render_stick_atlas(resources, source_atlas, target_atlas)
+
+    for source_atlas, target_atlas in (
+        ("DualShock4-Config_Highlights.png", "DualShock4-Mapping_Highlights.png"),
+        ("DualShock4-Stick_Highlights.png", "DualShock4-Mapping-Stick_Highlights.png"),
+        ("DualSenseEdge-Config_Highlights.png", "DualSenseEdge-Mapping_Highlights.png"),
+        ("DualSenseEdge-Stick_Highlights.png", "DualSenseEdge-Mapping-Stick_Highlights.png"),
+        ("Switch2Pro-Config_Highlights.png", "Switch2Pro-Mapping_Highlights.png"),
+        ("Switch2Pro-Stick_Highlights.png", "Switch2Pro-Mapping-Stick_Highlights.png"),
+    ):
+        render_mapping_atlas(resources, source_atlas, target_atlas)
+
+    render_dualshock4_mapping_lightbar(resources)
 
     render_xbox_action_atlas(resources)
 

@@ -17,8 +17,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 using System;
+using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.Principal;
+using System.Text;
 using Microsoft.Win32.TaskScheduler;
 using Task = Microsoft.Win32.TaskScheduler.Task;
 
@@ -27,8 +31,104 @@ namespace DS4WinWPF
     [System.Security.SuppressUnmanagedCodeSecurity]
     public static class StartupMethods
     {
+        private const string RefreshTaskArgument =
+            "--refresh-ds4windows-startup-task";
         public static string lnkpath = Environment.GetFolderPath(Environment.SpecialFolder.Startup) + "\\DS4Windows.lnk";
-        private static string taskBatPath = Path.Combine(DS4Windows.Global.exedirpath, "task.bat");
+
+        public static bool TryRunTaskRefreshHelper(string[] args,
+            out int exitCode)
+        {
+            exitCode = 1;
+            if (args == null || args.Length != 2 ||
+                !string.Equals(args[0], RefreshTaskArgument,
+                    StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            string targetUserSid;
+            try
+            {
+                targetUserSid = Encoding.UTF8.GetString(
+                    Convert.FromBase64String(args[1]));
+            }
+            catch
+            {
+                exitCode = 87;
+                return true;
+            }
+
+            string currentUserSid = WindowsIdentity.GetCurrent().User?.Value;
+            if (!DS4Windows.Global.IsAdministrator() ||
+                !string.Equals(currentUserSid, targetUserSid,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                exitCode = 5;
+                return true;
+            }
+
+            try
+            {
+                WriteTaskEntry();
+                exitCode = 0;
+            }
+            catch
+            {
+                exitCode = 1;
+            }
+
+            return true;
+        }
+
+        public static void RetargetExistingTaskToCurrentExecutable()
+        {
+            try
+            {
+                using TaskService ts = new TaskService();
+                using Task task = ts.GetTask(@"\RunDS4Windows");
+                if (task == null || TaskTargetsCurrentExecutable(task))
+                {
+                    return;
+                }
+
+                if (DS4Windows.Global.IsAdministrator())
+                {
+                    WriteTaskEntry();
+                    return;
+                }
+
+                ProcessStartInfo startInfo = new ProcessStartInfo
+                {
+                    FileName = DS4Windows.Global.exelocation,
+                    UseShellExecute = true,
+                    Verb = "runas",
+                };
+                startInfo.ArgumentList.Add(RefreshTaskArgument);
+                string currentUserSid = WindowsIdentity.GetCurrent()
+                    .User?.Value;
+                if (string.IsNullOrWhiteSpace(currentUserSid))
+                {
+                    return;
+                }
+                startInfo.ArgumentList.Add(Convert.ToBase64String(
+                    Encoding.UTF8.GetBytes(currentUserSid)));
+                using Process process = Process.Start(startInfo);
+                if (process == null)
+                {
+                    return;
+                }
+                process.WaitForExit(15000);
+            }
+            catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
+            {
+                // The portable copy remains usable when the user declines UAC;
+                // only the existing startup task keeps its previous target.
+            }
+            catch
+            {
+                // Startup task repair must never prevent controller startup.
+            }
+        }
 
         public static bool HasStartProgEntry()
         {
@@ -39,9 +139,9 @@ namespace DS4WinWPF
 
         public static bool HasTaskEntry()
         {
-            TaskService ts = new TaskService();
-            Task tasker = ts.FindTask("RunDS4Windows");
-            return tasker != null;
+            using TaskService ts = new TaskService();
+            using Task tasker = ts.GetTask(@"\RunDS4Windows");
+            return tasker != null && TaskTargetsCurrentExecutable(tasker);
         }
 
         public static void WriteStartProgEntry()
@@ -86,22 +186,11 @@ namespace DS4WinWPF
 
         public static void DeleteOldTaskEntry()
         {
-            TaskService ts = new TaskService();
-            Task tasker = ts.FindTask("RunDS4Windows");
-            if (tasker != null)
+            using TaskService ts = new TaskService();
+            using Task tasker = ts.GetTask(@"\RunDS4Windows");
+            if (tasker != null && !TaskTargetsCurrentExecutable(tasker))
             {
-                foreach(Microsoft.Win32.TaskScheduler.Action act in tasker.Definition.Actions)
-                {
-                    if (act.ActionType == TaskActionType.Execute)
-                    {
-                        ExecAction temp = act as ExecAction;
-                        if (temp.Path != taskBatPath)
-                        {
-                            ts.RootFolder.DeleteTask("RunDS4Windows");
-                            break;
-                        }
-                    }
-                }
+                ts.RootFolder.DeleteTask("RunDS4Windows");
             }
         }
 
@@ -120,28 +209,29 @@ namespace DS4WinWPF
         {
             DeleteTaskEntry();
 
-            // Create new version of task.bat file using current exe
-            // filename. Allow dynamic file
-            RefreshTaskBat();
-
             TaskService ts = new TaskService();
             TaskDefinition td = ts.NewTask();
-            td.Triggers.Add(new LogonTrigger());
+            string currentUser = WindowsIdentity.GetCurrent().Name;
+            td.Triggers.Add(new LogonTrigger { UserId = currentUser });
             string dir = DS4Windows.Global.exedirpath;
-            td.Actions.Add(new ExecAction($@"{dir}\task.bat",
-                "",
-                dir));
+            td.Actions.Add(new ExecAction(
+                DS4Windows.Global.exelocation, "-m", dir));
 
+            td.Principal.UserId = currentUser;
+            td.Principal.LogonType = TaskLogonType.InteractiveToken;
             td.Principal.RunLevel = TaskRunLevel.Highest;
             td.Settings.StopIfGoingOnBatteries = false;
             td.Settings.DisallowStartIfOnBatteries = false;
+            td.Settings.ExecutionTimeLimit = TimeSpan.Zero;
+            td.Settings.MultipleInstances = TaskInstancesPolicy.IgnoreNew;
+            td.Settings.AllowDemandStart = true;
             ts.RootFolder.RegisterTaskDefinition("RunDS4Windows", td);
         }
 
         public static void DeleteTaskEntry()
         {
             TaskService ts = new TaskService();
-            Task tasker = ts.FindTask("RunDS4Windows");
+            Task tasker = ts.GetTask(@"\RunDS4Windows");
             if (tasker != null)
             {
                 ts.RootFolder.DeleteTask("RunDS4Windows");
@@ -157,7 +247,7 @@ namespace DS4WinWPF
         public static void LaunchOldTask()
         {
             TaskService ts = new TaskService();
-            Task tasker = ts.FindTask("RunDS4Windows");
+            Task tasker = ts.GetTask(@"\RunDS4Windows");
             if (tasker != null)
             {
                 tasker.Run("");
@@ -189,20 +279,82 @@ namespace DS4WinWPF
             return result;
         }
 
-        private static void RefreshTaskBat()
+        private static bool PathsEqual(string first, string second)
         {
-            string dir = DS4Windows.Global.exedirpath;
-            string path = $@"{dir}\task.bat";
-            FileStream fileStream = new FileStream(path, FileMode.Create, FileAccess.Write);
-            using (StreamWriter w = new StreamWriter(fileStream))
+            if (string.IsNullOrWhiteSpace(first) ||
+                string.IsNullOrWhiteSpace(second))
             {
-                string temp = string.Empty;
-                w.WriteLine("@echo off"); // Turn off echo
-                w.WriteLine("SET mypath=\"%~dp0\"");
-                temp = $"cmd.exe /c start \"RunDS4Windows\" %mypath%\\{DS4Windows.Global.exeFileName} -m";
-                w.WriteLine(temp);
-                w.WriteLine("exit");
+                return false;
+            }
+
+            try
+            {
+                return string.Equals(Path.GetFullPath(first),
+                    Path.GetFullPath(second),
+                    StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
             }
         }
+
+        private static bool TaskTargetsCurrentExecutable(Task task)
+        {
+            if (task.Definition.Actions.Count != 1 ||
+                task.Definition.Actions[0] is not ExecAction action ||
+                task.Definition.Triggers.Count != 1 ||
+                task.Definition.Triggers[0] is not LogonTrigger trigger)
+            {
+                return false;
+            }
+
+            TaskDefinition definition = task.Definition;
+            string currentUserSid = WindowsIdentity.GetCurrent().User?.Value;
+            return task.Enabled && definition.Settings.Enabled &&
+                definition.Principal.RunLevel == TaskRunLevel.Highest &&
+                definition.Principal.LogonType ==
+                    TaskLogonType.InteractiveToken &&
+                AccountMatchesSid(definition.Principal.UserId,
+                    currentUserSid) &&
+                trigger.Enabled &&
+                AccountMatchesSid(trigger.UserId, currentUserSid) &&
+                definition.Settings.ExecutionTimeLimit == TimeSpan.Zero &&
+                definition.Settings.MultipleInstances ==
+                    TaskInstancesPolicy.IgnoreNew &&
+                !definition.Settings.StopIfGoingOnBatteries &&
+                !definition.Settings.DisallowStartIfOnBatteries &&
+                PathsEqual(action.Path, DS4Windows.Global.exelocation) &&
+                string.Equals(action.Arguments?.Trim(), "-m",
+                    StringComparison.Ordinal) &&
+                PathsEqual(action.WorkingDirectory,
+                    DS4Windows.Global.exedirpath);
+        }
+
+        private static bool AccountMatchesSid(string account,
+            string expectedSid)
+        {
+            if (string.IsNullOrWhiteSpace(account) ||
+                string.IsNullOrWhiteSpace(expectedSid))
+            {
+                return false;
+            }
+
+            try
+            {
+                string actualSid = account.StartsWith("S-1-",
+                        StringComparison.OrdinalIgnoreCase)
+                    ? new SecurityIdentifier(account).Value
+                    : ((SecurityIdentifier)new NTAccount(account).Translate(
+                        typeof(SecurityIdentifier))).Value;
+                return string.Equals(actualSid, expectedSid,
+                    StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
     }
 }

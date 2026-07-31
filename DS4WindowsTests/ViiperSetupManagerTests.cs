@@ -1,5 +1,6 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
+using System.IO;
 
 namespace DS4Windows.Tests
 {
@@ -21,6 +22,15 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
+        public void UsbipRecoveryLinkCannotDriftToLatestRelease()
+        {
+            StringAssert.EndsWith(ViiperSetupManager.UsbipWin2ReleasesUrl,
+                "/releases/tag/v.0.9.7.7");
+            StringAssert.EndsWith(ViiperSetupManager.ViiperReleasesUrl,
+                "/releases/tag/v0.0.6");
+        }
+
+        [TestMethod]
         public void UsbipPortProbeRequiresZeroExitCode()
         {
             Assert.IsTrue(ViiperSetupManager.IsSuccessfulUsbipPortProbe(
@@ -33,6 +43,8 @@ namespace DS4Windows.Tests
         [DataRow("error: ABI mismatch, unexpected size of the input structure")]
         [DataRow("ABI MISMATCH")]
         [DataRow("unexpected size of output structure")]
+        [DataRow("The specified conversion is not valid.")]
+        [DataRow("invalid structure size")]
         public void UsbipPortProbeRejectsAbiMismatchDiagnostics(string output)
         {
             Assert.IsFalse(ViiperSetupManager.IsSuccessfulUsbipPortProbe(
@@ -45,6 +57,8 @@ namespace DS4Windows.Tests
             ViiperPrerequisiteStatus status = new ViiperPrerequisiteStatus
             {
                 ViiperInstalled = true,
+                ViiperPackageCurrent = true,
+                ViiperStartupTaskReady = true,
                 ServerRunning = true,
                 UsbipInstalled = true,
                 UsbipRuntimeReady = false,
@@ -55,6 +69,65 @@ namespace DS4Windows.Tests
 
             status.UsbipRuntimeReady = true;
             Assert.IsTrue(status.Ready);
+
+            status.ViiperStartupTaskReady = false;
+            Assert.IsFalse(status.Ready,
+                "An unverified elevated task must never satisfy readiness.");
+            status.ViiperStartupTaskReady = true;
+
+            status.ViiperPackageCurrent = false;
+            Assert.IsFalse(status.Ready,
+                "An older same-version VIIPER binary must not survive a DS4Windows update.");
+        }
+
+        [TestMethod]
+        public void ViiperExecutableOwnershipRequiresExactCanonicalPath()
+        {
+            string canonical = Path.Combine("C:\\Users", "Tester",
+                "AppData", "Local", "VIIPER", "viiper.exe");
+            string equivalent = Path.Combine("c:\\users", "tester",
+                "AppData", "Local", "VIIPER", ".", "viiper.exe");
+            string foreign = Path.Combine("C:\\Tools", "VIIPER",
+                "viiper.exe");
+
+            Assert.IsTrue(ViiperSetupManager.IsExactViiperExecutablePath(
+                equivalent, canonical));
+            Assert.IsFalse(ViiperSetupManager.IsExactViiperExecutablePath(
+                foreign, canonical));
+            Assert.IsFalse(ViiperSetupManager.IsExactViiperExecutablePath(
+                null, canonical));
+        }
+
+        [TestMethod]
+        public void ForeignViiperConflictAlwaysBlocksReadyStatus()
+        {
+            ViiperPrerequisiteStatus status = new ViiperPrerequisiteStatus
+            {
+                ViiperInstalled = true,
+                ViiperPackageCurrent = true,
+                ServerRunning = true,
+                UsbipInstalled = true,
+                UsbipRuntimeReady = true,
+                ViiperProcessConflict = true,
+                ViiperProcessConflictMessage =
+                    "VIIPER startup blocked: foreign process",
+            };
+
+            Assert.IsFalse(status.Ready);
+            StringAssert.Contains(status.DisplayText, "startup blocked");
+        }
+
+        [TestMethod]
+        public void ElevatedTerminationHelperRejectsMalformedRequest()
+        {
+            Assert.IsFalse(ViiperSetupManager.
+                TryRunForeignViiperTerminationHelper(
+                    new[] { "--not-the-helper" }, out _));
+            Assert.IsTrue(ViiperSetupManager.
+                TryRunForeignViiperTerminationHelper(
+                    new[] { "--terminate-foreign-viiper", "not-base64" },
+                    out int exitCode));
+            Assert.AreEqual(87, exitCode);
         }
     }
 }

@@ -762,9 +762,18 @@ namespace DS4Windows
             try
             {
                 Process child = Process.Start(startInfo);
+                if (child == null)
+                {
+                    return;
+                }
+
                 if (!child.WaitForExit(30000))
                 {
-                    child.Kill();
+                    // Never terminate this helper while it may be between the
+                    // SetupAPI disable and enable calls.  The helper owns the
+                    // recovery path and must be allowed to finish even when a
+                    // slow driver stack exceeds the normal wait window.
+                    LogDebug("The elevated controller recovery helper is still running; leaving it active so it can safely re-enable the HID device.", true);
                 }
                 else
                 {

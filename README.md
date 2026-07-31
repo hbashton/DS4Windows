@@ -48,17 +48,33 @@ After installing a VIIPER-capable DS4Windows build:
 
 1. Open **Settings**.
 2. Under **VIIPER Virtual Controller Support**, click **Install / Repair VIIPER**.
-3. Accept the administrator prompt. The setup installs the hbashton VIIPER
-   backend and the required `usbip-win2` driver.
+3. Accept the administrator prompt from an administrator account. The setup
+   installs the hbashton VIIPER backend and the required `usbip-win2` driver;
+   alternate administrator credentials are not used to create another user's
+   startup tasks.
 4. Restart Windows if the setup installed or updated `usbip-win2`.
 5. Edit a profile and select **DualSense**, **DualSense Edge**, **DualShock 4**,
    **Xbox 360**, or **Switch 2 Pro**. VIIPER is the backend for every virtual
    controller type; it is not repeated in the device names.
 
-The installer also registers a hidden `RunVIIPER` task at sign-in. It starts
-the backend elevated without a recurring console or UAC popup. DS4Windows
-checks the backend at startup, starts it when possible, and opens a guided,
-self-elevating repair flow when VIIPER or usbip-win2 is missing.
+Before any driver step can require a restart, the installer registers and
+verifies enabled, highest-privilege `RunVIIPER` and `RunDS4Windows` sign-in
+tasks. They launch the managed VIIPER binary and the user's selected
+DS4Windows executable directly without recurring console or UAC popups.
+DS4Windows checks the backend at startup and
+opens a guided, self-elevating repair flow when VIIPER or usbip-win2 is missing.
+Setup copies DS4Windows and VIIPER into the dedicated
+`%ProgramFiles%\DS4Windows` application tree and protects the managed VIIPER
+task target and recovery copy from unelevated replacement. It never changes permissions on the folder
+where a user happened to extract the ZIP, so Desktop and Downloads contents
+remain untouched. Opening a different portable DS4Windows copy later keeps that
+copy portable and, after one administrator confirmation, retargets the existing
+`RunDS4Windows` task to the copy the user deliberately opened.
+
+For portable users, the `RunDS4Windows` task created during Install / Repair
+points to the exact portable executable that launched setup. The Program Files
+copy is still refreshed for managed installation and recovery, but it does not
+silently take ownership of that portable user's startup choice.
 
 The matching VIIPER backend is published at
 [hbashton/VIIPER](https://github.com/hbashton/VIIPER). Use DS4Windows' built-in
@@ -107,8 +123,8 @@ DualSense or DualShock 4 selected by the profile. Supported paths include:
 - A profile option that lets the DualSense mute button mute and restore the
   microphone while keeping the recording stream active.
 
-Audio, microphone, and advanced haptics support require matching DS4Windows and
-VIIPER preview builds. They are not part of the current stable 4.0.2.x backend.
+Audio, microphone, and advanced haptics support require matching DS4Windows 5
+and VIIPER 0.0.6 builds.
 
 ### Quality of life
 
@@ -235,8 +251,15 @@ and backend tools remain available under the advanced sections.
 - [Microsoft .NET 8 Desktop Runtime](https://dotnet.microsoft.com/en-us/download/dotnet/8.0).
 - [Microsoft Visual C++ 2015-2022 Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe).
 - [HidHide](https://github.com/nefarius/HidHide) is strongly recommended to
-  prevent games from seeing both the physical and virtual controllers.
+  prevent games from seeing both the physical and virtual controllers. The
+  pinned HidHide installer is included in the DS4Windows package, so first-run
+  HidHide setup does not need to download it.
 - `usbip-win2` and [hbashton/VIIPER](https://github.com/hbashton/VIIPER), installed through the built-in guided setup.
+- FakerInput is optional. Its runtime bridge DLLs and pinned x64/x86 driver
+  installers ship with DS4Windows, so its first-run driver setup works offline.
+
+The .NET and Visual C++ runtimes remain system prerequisites and are not
+included in the DS4Windows ZIP.
 
 Supported physical inputs include first-party DualShock 4, DualSense,
 DualSense Edge, DualShock 3, Switch Pro, and Joy-Con controllers. Some compatible
@@ -269,7 +292,9 @@ For a manual update:
 
 1. Close DS4Windows.
 2. Extract the new release over the application folder.
-3. Start DS4Windows again.
+3. Start DS4Windows again. Opening a portable copy automatically offers to
+   retarget the existing startup task to that copy. Run **Install / Repair
+   VIIPER** only when the app reports that its managed backend needs repair.
 
 Profiles and logs are stored separately under `%APPDATA%\DS4Windows`, so
 replacing the application folder does not normally remove user profiles. When

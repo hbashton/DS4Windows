@@ -9,31 +9,47 @@ the Free Software Foundation, either version 3 of the License, or
 */
 
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Sockets;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Windows;
+using ExecAction = Microsoft.Win32.TaskScheduler.ExecAction;
+using LogonTrigger = Microsoft.Win32.TaskScheduler.LogonTrigger;
+using TaskDefinition = Microsoft.Win32.TaskScheduler.TaskDefinition;
+using TaskLogonType = Microsoft.Win32.TaskScheduler.TaskLogonType;
+using TaskRunLevel = Microsoft.Win32.TaskScheduler.TaskRunLevel;
+using TaskService = Microsoft.Win32.TaskScheduler.TaskService;
 
 namespace DS4Windows
 {
     public sealed class ViiperPrerequisiteStatus
     {
         public bool ViiperInstalled { get; set; }
+        public bool ViiperPackageCurrent { get; set; }
         public bool ServerRunning { get; set; }
         public bool UsbipInstalled { get; set; }
         public bool UsbipRuntimeReady { get; set; }
         public bool UsbipRebootOrRepairRequired { get; set; }
+        public bool ViiperProcessConflict { get; set; }
+        public bool ViiperStartupTaskReady { get; set; }
         public bool SetupScriptFound { get; set; }
         public string ViiperPath { get; set; }
         public string SetupScriptPath { get; set; }
         public string UsbipPath { get; set; }
         public string UsbipVersion { get; set; }
         public string UsbipProbeMessage { get; set; }
+        public string ViiperProcessConflictMessage { get; set; }
 
-        public bool Ready => ViiperInstalled && ServerRunning &&
+        public bool Ready => ViiperInstalled && ViiperPackageCurrent &&
+            !ViiperProcessConflict && ViiperStartupTaskReady && ServerRunning &&
             UsbipInstalled && UsbipRuntimeReady;
 
         public string DisplayText
@@ -43,6 +59,14 @@ namespace DS4Windows
                 if (Ready)
                 {
                     return "VIIPER ready";
+                }
+
+                if (ViiperProcessConflict)
+                {
+                    return string.IsNullOrWhiteSpace(
+                        ViiperProcessConflictMessage)
+                        ? "VIIPER startup blocked by another viiper.exe"
+                        : ViiperProcessConflictMessage;
                 }
 
                 if (!UsbipInstalled && !ViiperInstalled)
@@ -67,6 +91,16 @@ namespace DS4Windows
                     return "VIIPER helper missing";
                 }
 
+                if (!ViiperPackageCurrent)
+                {
+                    return "packaged VIIPER update required";
+                }
+
+                if (!ViiperStartupTaskReady)
+                {
+                    return "VIIPER elevated startup task needs repair";
+                }
+
                 return ServerRunning ? "VIIPER status unknown" : "VIIPER server not running";
             }
         }
@@ -76,23 +110,59 @@ namespace DS4Windows
     {
         public const string ApiHost = "127.0.0.1";
         public const int ApiPort = 3242;
-        public const string UsbipWin2ReleasesUrl = "https://github.com/vadimgrn/usbip-win2/releases";
-        public const string ViiperReleasesUrl = "https://github.com/hbashton/VIIPER/releases";
+        public const string UsbipWin2ReleasesUrl = "https://github.com/vadimgrn/usbip-win2/releases/tag/v.0.9.7.7";
+        public const string ViiperReleasesUrl = "https://github.com/hbashton/VIIPER/releases/tag/v0.0.6";
         internal static readonly Version RequiredUsbipVersion = new Version(0, 9, 7, 7);
 
         private const string InstallerScriptName = "install-viiper-backend.ps1";
+        private const string InstallerHostArgument =
+            "--run-embedded-viiper-installer";
+        private const string InstallerResourceName =
+            "DS4Windows.install-viiper-backend.ps1";
+        private const string BundledViiperName = "VIIPER-0.0.6-x64.exe";
+        private const string TerminateForeignViiperArgument =
+            "--terminate-foreign-viiper";
+        private const string ViiperStartupTaskName = "RunVIIPER";
+        private const int ForeignViiperHelperTimeoutMilliseconds = 15000;
         private const string UsbipRelativePath = @"USBip\usbip.exe";
         private const int UsbipProbeTimeoutMilliseconds = 3000;
         private static readonly object serverStartLock = new object();
+        private static readonly object foreignViiperProcessLock = new object();
         private static DateTime lastServerStartAttemptUtc = DateTime.MinValue;
+        private static DateTime lastForeignViiperTerminationAttemptUtc =
+            DateTime.MinValue;
+        private static string lastForeignViiperTerminationFailure;
         private static int promptShownThisSession;
         private static int installerRunning;
+
+        private const uint ProcessQueryLimitedInformation = 0x1000;
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr OpenProcess(uint desiredAccess,
+            bool inheritHandle, int processId);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode,
+            SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool QueryFullProcessImageName(IntPtr process,
+            int flags, StringBuilder executablePath, ref int size);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CloseHandle(IntPtr handle);
+
+        private sealed class ViiperProcessIdentity
+        {
+            public int ProcessId { get; init; }
+            public string ExecutablePath { get; init; }
+        }
 
         public static bool IsViiperOutputType(OutContType type) => ViiperOutDevice.IsViiperType(type);
 
         public static ViiperPrerequisiteStatus GetStatus(bool tryStartServer = false)
         {
             string viiperPath = GetViiperExePath();
+            string bundledViiperPath = GetBundledViiperPath();
             string setupScriptPath = GetSetupScriptPath();
             string usbipPath = GetCanonicalUsbipPath();
             Version usbipVersion = TryGetUsbipVersion(usbipPath);
@@ -117,11 +187,57 @@ namespace DS4Windows
                     : $"usbip.exe {usbipVersion} does not match the supported {RequiredUsbipVersion}.";
             }
 
+            bool viiperPackageCurrent = FilesHaveSameSha256(viiperPath,
+                bundledViiperPath);
+            bool viiperStartupTaskReady = IsViiperStartupTaskValid(
+                viiperPath, out _);
+            bool canonicalViiperRunning;
+            string viiperProcessConflictMessage;
+            bool viiperProcessOwnershipReady = InspectViiperProcessOwnership(
+                viiperPath, out canonicalViiperRunning,
+                out viiperProcessConflictMessage);
+
+            if (tryStartServer && File.Exists(viiperPath) &&
+                viiperPackageCurrent && viiperStartupTaskReady &&
+                usbipRuntimeReady)
+            {
+                if (!viiperProcessOwnershipReady)
+                {
+                    viiperProcessOwnershipReady =
+                        TryTerminateForeignViiperProcesses(viiperPath,
+                            out viiperProcessConflictMessage);
+                    if (viiperProcessOwnershipReady)
+                    {
+                        viiperProcessOwnershipReady =
+                            InspectViiperProcessOwnership(viiperPath,
+                            out canonicalViiperRunning,
+                            out viiperProcessConflictMessage);
+                    }
+                }
+
+                if (viiperProcessOwnershipReady &&
+                    !canonicalViiperRunning)
+                {
+                    TryStartServerOnce(viiperPath);
+                    viiperProcessOwnershipReady =
+                        InspectViiperProcessOwnership(viiperPath,
+                            out canonicalViiperRunning,
+                            out viiperProcessConflictMessage);
+                }
+            }
+
+            bool viiperServerRunning = viiperProcessOwnershipReady &&
+                canonicalViiperRunning && CanPingServer();
+
             ViiperPrerequisiteStatus status = new ViiperPrerequisiteStatus
             {
                 ViiperPath = viiperPath,
                 SetupScriptPath = setupScriptPath,
                 ViiperInstalled = File.Exists(viiperPath),
+                ViiperPackageCurrent = viiperPackageCurrent,
+                ViiperProcessConflict = !viiperProcessOwnershipReady,
+                ViiperProcessConflictMessage = viiperProcessConflictMessage,
+                ViiperStartupTaskReady = viiperStartupTaskReady,
                 SetupScriptFound = File.Exists(setupScriptPath),
                 UsbipInstalled = usbipInstalled,
                 UsbipRuntimeReady = usbipRuntimeReady,
@@ -130,15 +246,8 @@ namespace DS4Windows
                 UsbipPath = usbipPath,
                 UsbipVersion = usbipVersion?.ToString(),
                 UsbipProbeMessage = usbipProbeMessage,
-                ServerRunning = CanPingServer(),
+                ServerRunning = viiperServerRunning,
             };
-
-            if (tryStartServer && !status.ServerRunning &&
-                status.ViiperInstalled && status.UsbipRuntimeReady)
-            {
-                TryStartServerOnce(viiperPath);
-                status.ServerRunning = CanPingServer();
-            }
 
             return status;
         }
@@ -209,13 +318,40 @@ namespace DS4Windows
 
             try
             {
+                string targetLocalAppData = Environment.GetFolderPath(
+                    Environment.SpecialFolder.LocalApplicationData);
+                WindowsIdentity identity = WindowsIdentity.GetCurrent();
+                string targetUserSid = identity.User?.Value ?? string.Empty;
+                string targetUserName = identity.Name ?? string.Empty;
+
+                if (string.IsNullOrWhiteSpace(targetLocalAppData) ||
+                    string.IsNullOrWhiteSpace(targetUserSid) ||
+                    string.IsNullOrWhiteSpace(targetUserName) ||
+                    string.IsNullOrWhiteSpace(Global.exelocation))
+                {
+                    throw new InvalidOperationException(
+                        "DS4Windows could not determine the current Windows " +
+                        "account required for elevated startup-task setup.");
+                }
+
                 ProcessStartInfo startInfo = new ProcessStartInfo
                 {
-                    FileName = "powershell.exe",
-                    Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{status.SetupScriptPath}\" -NoPause",
+                    FileName = Global.exelocation,
                     UseShellExecute = true,
                     Verb = "runas",
                 };
+                startInfo.ArgumentList.Add(InstallerHostArgument);
+                startInfo.ArgumentList.Add("--target-local-appdata");
+                startInfo.ArgumentList.Add(targetLocalAppData);
+                startInfo.ArgumentList.Add("--target-user-sid");
+                startInfo.ArgumentList.Add(targetUserSid);
+                startInfo.ArgumentList.Add("--target-user-name");
+                startInfo.ArgumentList.Add(targetUserName);
+                startInfo.ArgumentList.Add("--target-ds4windows-path");
+                startInfo.ArgumentList.Add(Global.exelocation);
+                startInfo.ArgumentList.Add("--package-extras");
+                startInfo.ArgumentList.Add(Path.Combine(Global.exedirpath,
+                    "extras"));
                 Process process = Process.Start(startInfo);
                 if (process == null)
                 {
@@ -270,20 +406,29 @@ namespace DS4Windows
                 {
                     Interlocked.Exchange(ref promptShownThisSession, 0);
                     AppLogger.LogToGui(
-                        "SUCCESSFUL: VIIPER setup finished successfully. Virtual controllers are ready. Restarting DS4Windows.",
+                        "SUCCESSFUL: VIIPER setup finished successfully. The managed startup task owns the DS4Windows restart.",
                         false, false);
-                    RestartDs4Windows();
+                    return;
+                }
+
+                if (exitCode == 3010)
+                {
+                    ShowInstallerMessage(owner,
+                        "VIIPER setup completed the safe driver-removal " +
+                        "phase. Restart Windows, then run Install / Repair " +
+                        "again to finish installing usbip-win2 0.9.7.7.",
+                        "VIIPER setup requires a restart",
+                        MessageBoxImage.Warning);
                     return;
                 }
 
                 string logPath = Path.Combine(
-                    Environment.GetFolderPath(
-                        Environment.SpecialFolder.LocalApplicationData),
-                    "VIIPER", "install.log");
+                    GetNativeProgramFilesPath(),
+                    "DS4Windows", "VIIPER", "install.log");
                 string message = exitCode == 0
                     ? "VIIPER was installed, but Windows is not reporting every component as ready yet. Restart Windows once, then click Refresh."
                     : exitCode == 1223
-                    ? "VIIPER setup was canceled before it made changes."
+                    ? "VIIPER setup was canceled. No USBIP driver or foreign executable was changed."
                     : $"VIIPER setup could not finish (exit code {exitCode}).\n\n" +
                       "If a viiper.exe process was still running, it may have blocked the VIIPER registration step. " +
                       "Close viiper.exe manually and run Repair again.\n\nReview the setup log for details:\n{logPath}";
@@ -294,50 +439,280 @@ namespace DS4Windows
             }));
         }
 
-        private static void RestartDs4Windows()
+        public static bool TryRunElevatedInstallerHost(string[] args,
+            out int exitCode)
         {
-            string exePath = Path.Combine(Global.exedirpath, "DS4Windows.exe");
-            if (!File.Exists(exePath))
+            exitCode = 1;
+            if (args == null || args.Length == 0 ||
+                !string.Equals(args[0], InstallerHostArgument,
+                    StringComparison.Ordinal))
             {
-                AppLogger.LogToGui("VIIPER setup succeeded, but DS4Windows.exe was not found for automatic restart.", true, true);
-                return;
+                return false;
             }
 
-            ThreadPool.QueueUserWorkItem(_ =>
+            try
             {
-                Thread.Sleep(2000);
+                WindowsPrincipal principal = new WindowsPrincipal(
+                    WindowsIdentity.GetCurrent());
+                if (!principal.IsInRole(WindowsBuiltInRole.Administrator))
+                {
+                    throw new InvalidOperationException(
+                        "The embedded VIIPER installer host is not elevated.");
+                }
+
+                string targetLocalAppData = GetRequiredInstallerArgument(args,
+                    "--target-local-appdata");
+                string targetUserSid = GetRequiredInstallerArgument(args,
+                    "--target-user-sid");
+                string targetUserName = GetRequiredInstallerArgument(args,
+                    "--target-user-name");
+                string targetDs4WindowsPath =
+                    GetRequiredInstallerArgument(args,
+                        "--target-ds4windows-path");
+                string packageExtras = GetRequiredInstallerArgument(args,
+                    "--package-extras");
+
+                string setupRoot = Path.Combine(
+                    GetNativeProgramFilesPath(),
+                    "DS4Windows.Setup");
+                string setupDirectory = Path.Combine(setupRoot,
+                    Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(setupDirectory);
+                string scriptPath = Path.Combine(setupDirectory,
+                    InstallerScriptName);
 
                 try
                 {
+                    using Stream resource = Assembly.GetExecutingAssembly()
+                        .GetManifestResourceStream(InstallerResourceName);
+                    if (resource == null)
+                    {
+                        throw new InvalidOperationException(
+                            "The embedded VIIPER installer resource is missing.");
+                    }
+                    using (FileStream file = new FileStream(scriptPath,
+                               FileMode.CreateNew, FileAccess.Write,
+                               FileShare.None))
+                    {
+                        resource.CopyTo(file);
+                    }
+
+                    // Snapshot the complete release package after elevation
+                    // into a Program Files staging directory. Every source
+                    // handle denies write/delete sharing while it is copied,
+                    // so another unelevated process cannot swap a DLL or
+                    // rewrite the package manifest across the UAC boundary.
+                    string stagedPackageRoot = StageInstallerPackage(
+                        packageExtras, setupDirectory);
+                    string stagedExtras = Path.Combine(stagedPackageRoot,
+                        "extras");
+
+                    string powershellPath = Path.Combine(
+                        Environment.SystemDirectory, "WindowsPowerShell",
+                        "v1.0", "powershell.exe");
                     ProcessStartInfo startInfo = new ProcessStartInfo
                     {
-                        FileName = exePath,
+                        FileName = powershellPath,
                         UseShellExecute = true,
+                        WorkingDirectory = stagedExtras,
                     };
-                    Process.Start(startInfo);
+                    startInfo.ArgumentList.Add("-NoProfile");
+                    startInfo.ArgumentList.Add("-ExecutionPolicy");
+                    startInfo.ArgumentList.Add("Bypass");
+                    startInfo.ArgumentList.Add("-File");
+                    startInfo.ArgumentList.Add(scriptPath);
+                    startInfo.ArgumentList.Add("-NoPause");
+                    startInfo.ArgumentList.Add("-TargetLocalAppData");
+                    startInfo.ArgumentList.Add(targetLocalAppData);
+                    startInfo.ArgumentList.Add("-TargetUserSid");
+                    startInfo.ArgumentList.Add(targetUserSid);
+                    startInfo.ArgumentList.Add("-TargetUserName");
+                    startInfo.ArgumentList.Add(targetUserName);
+                    startInfo.ArgumentList.Add("-TargetDs4WindowsPath");
+                    startInfo.ArgumentList.Add(targetDs4WindowsPath);
+                    startInfo.ArgumentList.Add("-PackageExtrasRoot");
+                    startInfo.ArgumentList.Add(stagedExtras);
+                    startInfo.ArgumentList.Add("-InstallerHostPid");
+                    startInfo.ArgumentList.Add(
+                        Environment.ProcessId.ToString());
+
+                    using Process process = Process.Start(startInfo);
+                    if (process == null)
+                    {
+                        throw new InvalidOperationException(
+                            "Windows did not start the embedded VIIPER setup.");
+                    }
+                    process.WaitForExit();
+                    exitCode = process.ExitCode;
+
+                    if (exitCode == 3010)
+                    {
+                        MessageBox.Show(
+                            "VIIPER setup completed the safe USBIP removal " +
+                            "phase. Restart Windows, then run Install / " +
+                            "Repair again to finish USBIP 0.9.7.7.",
+                            "Restart required", MessageBoxButton.OK,
+                            MessageBoxImage.Warning);
+                    }
+                    else if (exitCode != 0 && exitCode != 1223)
+                    {
+                        MessageBox.Show(
+                            $"VIIPER setup did not finish (exit code " +
+                            $"{exitCode}). Review " +
+                            @"%ProgramFiles%\DS4Windows\VIIPER\install.log " +
+                            "and run Install / Repair again.",
+                            "VIIPER setup failed", MessageBoxButton.OK,
+                            MessageBoxImage.Error);
+                    }
                 }
-                catch (Exception ex)
+                finally
                 {
-                    AppLogger.LogToGui(
-                        $"Could not restart DS4Windows automatically after VIIPER install: {ex.Message}",
-                        true, true);
-                    return;
+                    try
+                    {
+                        Directory.Delete(setupDirectory, recursive: true);
+                    }
+                    catch { }
                 }
 
+                return true;
+            }
+            catch (Exception ex)
+            {
                 try
                 {
-                    Application.Current?.Dispatcher?.BeginInvoke(new Action(() =>
-                    {
-                        Application.Current.Shutdown();
-                    }));
+                    MessageBox.Show(
+                        $"VIIPER setup host failed: {ex.Message}",
+                        "VIIPER setup", MessageBoxButton.OK,
+                        MessageBoxImage.Error);
                 }
-                catch (Exception ex)
+                catch { }
+                return true;
+            }
+        }
+
+        private static string StageInstallerPackage(string packageExtras,
+            string setupDirectory)
+        {
+            string sourceRoot = Directory.GetParent(packageExtras)?.FullName;
+            if (string.IsNullOrWhiteSpace(sourceRoot) ||
+                !Directory.Exists(sourceRoot))
+            {
+                throw new InvalidOperationException(
+                    "The DS4Windows release package root is missing.");
+            }
+
+            string manifestPath = Path.Combine(sourceRoot,
+                ".ds4windows-managed-files.txt");
+            string stagedRoot = Path.Combine(setupDirectory, "package");
+            Directory.CreateDirectory(stagedRoot);
+
+            using FileStream manifestStream = new FileStream(manifestPath,
+                FileMode.Open, FileAccess.Read, FileShare.Read);
+            List<string> relativePaths = new List<string>();
+            using (StreamReader reader = new StreamReader(manifestStream,
+                       Encoding.UTF8, detectEncodingFromByteOrderMarks: true,
+                       bufferSize: 4096, leaveOpen: true))
+            {
+                string line;
+                while ((line = reader.ReadLine()) != null)
                 {
-                    AppLogger.LogToGui(
-                        $"DS4Windows failed to restart automatically after VIIPER install: {ex.Message}",
-                        true, true);
+                    string relativePath = line.Trim().Replace('/',
+                        Path.DirectorySeparatorChar);
+                    if (!string.IsNullOrWhiteSpace(relativePath))
+                    {
+                        relativePaths.Add(relativePath);
+                    }
                 }
-            });
+            }
+
+            if (relativePaths.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    "The DS4Windows managed-file manifest is empty.");
+            }
+
+            string sourcePrefix = Path.GetFullPath(sourceRoot)
+                .TrimEnd(Path.DirectorySeparatorChar) +
+                Path.DirectorySeparatorChar;
+            string stagedPrefix = Path.GetFullPath(stagedRoot)
+                .TrimEnd(Path.DirectorySeparatorChar) +
+                Path.DirectorySeparatorChar;
+            HashSet<string> seen = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase);
+
+            foreach (string relativePath in relativePaths)
+            {
+                if (Path.IsPathFullyQualified(relativePath) ||
+                    !seen.Add(relativePath))
+                {
+                    throw new InvalidOperationException(
+                        $"Unsafe or duplicate package path: {relativePath}");
+                }
+
+                string sourcePath = Path.GetFullPath(Path.Combine(sourceRoot,
+                    relativePath));
+                string targetPath = Path.GetFullPath(Path.Combine(stagedRoot,
+                    relativePath));
+                if (!sourcePath.StartsWith(sourcePrefix,
+                        StringComparison.OrdinalIgnoreCase) ||
+                    !targetPath.StartsWith(stagedPrefix,
+                        StringComparison.OrdinalIgnoreCase) ||
+                    !File.Exists(sourcePath) ||
+                    (File.GetAttributes(sourcePath) &
+                        FileAttributes.ReparsePoint) != 0)
+                {
+                    throw new InvalidOperationException(
+                        $"Invalid package file: {relativePath}");
+                }
+
+                Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+                using FileStream source = new FileStream(sourcePath,
+                    FileMode.Open, FileAccess.Read, FileShare.Read);
+                using FileStream target = new FileStream(targetPath,
+                    FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                source.CopyTo(target);
+                target.Flush(flushToDisk: true);
+            }
+
+            manifestStream.Position = 0;
+            string stagedManifest = Path.Combine(stagedRoot,
+                ".ds4windows-managed-files.txt");
+            using (FileStream target = new FileStream(stagedManifest,
+                       FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                manifestStream.CopyTo(target);
+                target.Flush(flushToDisk: true);
+            }
+
+            if (!File.Exists(Path.Combine(stagedRoot, "DS4Windows.exe")) ||
+                !File.Exists(Path.Combine(stagedRoot, "extras",
+                    BundledViiperName)))
+            {
+                throw new InvalidOperationException(
+                    "The staged DS4Windows package is incomplete.");
+            }
+
+            return stagedRoot;
+        }
+
+        private static string GetRequiredInstallerArgument(string[] args,
+            string name)
+        {
+            for (int i = 1; i < args.Length - 1; i++)
+            {
+                if (string.Equals(args[i], name,
+                        StringComparison.Ordinal))
+                {
+                    string value = args[i + 1];
+                    if (!string.IsNullOrWhiteSpace(value))
+                    {
+                        return value;
+                    }
+                }
+            }
+
+            throw new InvalidOperationException(
+                $"The required installer argument {name} is missing.");
         }
 
         private static void ShowInstallerMessage(Window owner, string message,
@@ -356,19 +731,14 @@ namespace DS4Windows
 
         private static string GetViiperExePath()
         {
-            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            return Path.Combine(localAppData, "VIIPER", "viiper.exe");
+            return Path.Combine(GetNativeProgramFilesPath(), "DS4Windows", "VIIPER",
+                "viiper.exe");
         }
 
-        private static string GetSetupScriptPath()
+        private static string GetNativeProgramFilesPath()
         {
-            return Path.Combine(Global.exedirpath, "extras", InstallerScriptName);
-        }
-
-        private static string GetCanonicalUsbipPath()
-        {
-            // ProgramW6432 resolves the native 64-bit Program Files directory
-            // even when the x86 DS4Windows build performs this check.
+            // ProgramW6432 remains the native 64-bit Program Files directory
+            // even if an x86 process is inspecting the x64-only VIIPER setup.
             string programFiles = Environment.GetEnvironmentVariable(
                 "ProgramW6432");
             if (string.IsNullOrWhiteSpace(programFiles))
@@ -377,7 +747,553 @@ namespace DS4Windows
                     Environment.SpecialFolder.ProgramFiles);
             }
 
-            return Path.Combine(programFiles, UsbipRelativePath);
+            return Path.GetFullPath(programFiles);
+        }
+
+        private static string TryResolveAccountSid(string account)
+        {
+            if (string.IsNullOrWhiteSpace(account))
+            {
+                return null;
+            }
+
+            try
+            {
+                return new SecurityIdentifier(account).Value;
+            }
+            catch { }
+
+            try
+            {
+                return ((SecurityIdentifier)new NTAccount(account).Translate(
+                    typeof(SecurityIdentifier))).Value;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static bool IsViiperStartupTaskValid(string viiperPath,
+            out string failureMessage)
+        {
+            failureMessage = null;
+            try
+            {
+                using TaskService service = new TaskService();
+                Microsoft.Win32.TaskScheduler.Task task =
+                    service.GetTask(@"\" + ViiperStartupTaskName);
+                if (task == null)
+                {
+                    failureMessage = "RunVIIPER is not registered.";
+                    return false;
+                }
+
+                using (task)
+                {
+                    TaskDefinition definition = task.Definition;
+                    if (!task.Enabled || definition.Actions.Count != 1 ||
+                        definition.Triggers.Count != 1 ||
+                        definition.Principal.RunLevel != TaskRunLevel.Highest ||
+                        definition.Principal.LogonType !=
+                            TaskLogonType.InteractiveToken ||
+                        definition.Actions[0] is not ExecAction action ||
+                        definition.Triggers[0] is not LogonTrigger trigger)
+                    {
+                        failureMessage = "RunVIIPER does not have the exact " +
+                            "enabled, elevated logon-task shape.";
+                        return false;
+                    }
+
+                    string expectedDirectory = Path.GetDirectoryName(
+                        viiperPath);
+                    string currentSid = WindowsIdentity.GetCurrent().User?.Value;
+                    bool valid = IsExactViiperExecutablePath(action.Path,
+                            viiperPath) &&
+                        string.Equals(action.Arguments?.Trim(), "server",
+                            StringComparison.Ordinal) &&
+                        IsExactViiperExecutablePath(
+                            Path.Combine(action.WorkingDirectory ?? string.Empty,
+                                "viiper.exe"), viiperPath) &&
+                        string.Equals(TryResolveAccountSid(
+                                definition.Principal.UserId), currentSid,
+                            StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(TryResolveAccountSid(trigger.UserId),
+                            currentSid, StringComparison.OrdinalIgnoreCase);
+                    if (!valid)
+                    {
+                        failureMessage = "RunVIIPER does not target the " +
+                            "packaged backend for the current Windows account.";
+                    }
+
+                    return valid;
+                }
+            }
+            catch (Exception ex)
+            {
+                failureMessage = "RunVIIPER could not be verified: " +
+                    ex.Message;
+                return false;
+            }
+        }
+
+        internal static bool IsExactViiperExecutablePath(string candidatePath,
+            string canonicalPath)
+        {
+            if (string.IsNullOrWhiteSpace(candidatePath) ||
+                string.IsNullOrWhiteSpace(canonicalPath))
+            {
+                return false;
+            }
+
+            try
+            {
+                string candidate = Path.GetFullPath(candidatePath)
+                    .TrimEnd(Path.DirectorySeparatorChar,
+                        Path.AltDirectorySeparatorChar);
+                string canonical = Path.GetFullPath(canonicalPath)
+                    .TrimEnd(Path.DirectorySeparatorChar,
+                        Path.AltDirectorySeparatorChar);
+                return string.Equals(candidate, canonical,
+                    StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static List<ViiperProcessIdentity> GetRunningViiperProcesses()
+        {
+            List<ViiperProcessIdentity> result = new();
+            Process[] processes;
+            try
+            {
+                processes = Process.GetProcessesByName("viiper");
+            }
+            catch
+            {
+                return null;
+            }
+
+            foreach (Process process in processes)
+            {
+                using (process)
+                {
+                    try
+                    {
+                        result.Add(new ViiperProcessIdentity
+                        {
+                            ProcessId = process.Id,
+                            ExecutablePath = TryGetProcessExecutablePath(
+                                process.Id),
+                        });
+                    }
+                    catch
+                    {
+                        // A process can exit between enumeration and identity
+                        // inspection. A later convergence pass handles it.
+                    }
+                }
+            }
+
+            return result;
+        }
+
+        private static string TryGetProcessExecutablePath(int processId)
+        {
+            IntPtr processHandle = OpenProcess(ProcessQueryLimitedInformation,
+                false, processId);
+            if (processHandle != IntPtr.Zero)
+            {
+                try
+                {
+                    StringBuilder path = new(32768);
+                    int length = path.Capacity;
+                    if (QueryFullProcessImageName(processHandle, 0, path,
+                            ref length) && length > 0)
+                    {
+                        return path.ToString(0, length);
+                    }
+                }
+                finally
+                {
+                    CloseHandle(processHandle);
+                }
+            }
+
+            try
+            {
+                using Process process = Process.GetProcessById(processId);
+                return process.MainModule?.FileName;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static bool InspectViiperProcessOwnership(
+            string canonicalPath, out bool canonicalProcessRunning,
+            out string conflictMessage)
+        {
+            canonicalProcessRunning = false;
+            List<string> conflicts = new();
+            List<ViiperProcessIdentity> processes =
+                GetRunningViiperProcesses();
+            if (processes == null)
+            {
+                conflictMessage = "VIIPER startup blocked: Windows could " +
+                    "not enumerate running viiper.exe processes, so process " +
+                    "ownership could not be verified.";
+                return false;
+            }
+
+            foreach (ViiperProcessIdentity process in processes)
+            {
+                if (IsExactViiperExecutablePath(process.ExecutablePath,
+                        canonicalPath))
+                {
+                    canonicalProcessRunning = true;
+                    continue;
+                }
+
+                string path = string.IsNullOrWhiteSpace(process.ExecutablePath)
+                    ? "an unreadable executable path"
+                    : process.ExecutablePath;
+                conflicts.Add($"PID {process.ProcessId} from {path}");
+            }
+
+            if (conflicts.Count == 0)
+            {
+                conflictMessage = null;
+                return true;
+            }
+
+            conflictMessage = "VIIPER startup blocked: another viiper.exe " +
+                $"is not the packaged copy at {canonicalPath} " +
+                $"({string.Join("; ", conflicts)}). Close it or approve the " +
+                "administrator prompt so DS4Windows can stop it safely.";
+            return false;
+        }
+
+        private static bool TryTerminateForeignViiperProcesses(
+            string canonicalPath, out string failureMessage,
+            bool allowElevation = true)
+        {
+            lock (foreignViiperProcessLock)
+            {
+                bool canonicalRunning;
+                if (InspectViiperProcessOwnership(canonicalPath,
+                        out canonicalRunning, out failureMessage))
+                {
+                    lastForeignViiperTerminationFailure = null;
+                    return true;
+                }
+
+                DateTime now = DateTime.UtcNow;
+                if (allowElevation &&
+                    (now - lastForeignViiperTerminationAttemptUtc).
+                        TotalSeconds < 5)
+                {
+                    failureMessage = lastForeignViiperTerminationFailure ??
+                        failureMessage;
+                    return false;
+                }
+
+                lastForeignViiperTerminationAttemptUtc = now;
+                bool success = TryTerminateForeignViiperProcessesLocked(
+                    canonicalPath, out failureMessage, allowElevation);
+                lastForeignViiperTerminationFailure = success
+                    ? null
+                    : failureMessage;
+                return success;
+            }
+        }
+
+        private static bool TryTerminateForeignViiperProcessesLocked(
+            string canonicalPath, out string failureMessage,
+            bool allowElevation)
+        {
+            List<string> failures = new();
+            List<ViiperProcessIdentity> processes =
+                GetRunningViiperProcesses();
+            if (processes == null)
+            {
+                failureMessage = "VIIPER startup blocked: Windows could " +
+                    "not enumerate running viiper.exe processes.";
+                return false;
+            }
+
+            foreach (ViiperProcessIdentity identity in processes)
+            {
+                if (IsExactViiperExecutablePath(identity.ExecutablePath,
+                        canonicalPath))
+                {
+                    continue;
+                }
+
+                if (!TryTerminateForeignViiperProcess(identity.ProcessId,
+                        canonicalPath, out string detail))
+                {
+                    failures.Add(detail);
+                }
+            }
+
+            bool canonicalRunning;
+            if (InspectViiperProcessOwnership(canonicalPath,
+                    out canonicalRunning, out failureMessage))
+            {
+                return true;
+            }
+
+            if (!allowElevation)
+            {
+                if (failures.Count > 0)
+                {
+                    failureMessage = $"{failureMessage} " +
+                        string.Join("; ", failures);
+                }
+
+                return false;
+            }
+
+            if (!TryRunElevatedForeignViiperTermination(canonicalPath,
+                    out string elevatedFailure))
+            {
+                string directFailure = failures.Count == 0
+                    ? string.Empty
+                    : $" Direct stop: {string.Join("; ", failures)}.";
+                failureMessage = $"{failureMessage}{directFailure} " +
+                    elevatedFailure;
+                return false;
+            }
+
+            for (int attempt = 0; attempt < 20; attempt++)
+            {
+                if (InspectViiperProcessOwnership(canonicalPath,
+                        out canonicalRunning, out failureMessage))
+                {
+                    return true;
+                }
+
+                Thread.Sleep(100);
+            }
+
+            failureMessage = $"{failureMessage} The conflicting process " +
+                "remained active after elevated termination.";
+            return false;
+        }
+
+        private static bool TryTerminateForeignViiperProcess(int processId,
+            string canonicalPath, out string failureMessage)
+        {
+            failureMessage = null;
+            try
+            {
+                using Process process = Process.GetProcessById(processId);
+                if (!string.Equals(process.ProcessName, "viiper",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                string currentPath = TryGetProcessExecutablePath(processId);
+                if (string.IsNullOrWhiteSpace(currentPath))
+                {
+                    failureMessage = $"PID {processId} path could not be " +
+                        "verified";
+                    return false;
+                }
+
+                if (IsExactViiperExecutablePath(currentPath, canonicalPath))
+                {
+                    return true;
+                }
+
+                process.Kill(entireProcessTree: true);
+                if (!process.WaitForExit(5000))
+                {
+                    failureMessage = $"PID {processId} did not exit";
+                    return false;
+                }
+
+                return true;
+            }
+            catch (ArgumentException)
+            {
+                return true;
+            }
+            catch (InvalidOperationException)
+            {
+                return true;
+            }
+            catch (Exception ex)
+            {
+                failureMessage = $"PID {processId}: {ex.Message}";
+                return false;
+            }
+        }
+
+        private static bool TryRunElevatedForeignViiperTermination(
+            string canonicalPath, out string failureMessage)
+        {
+            failureMessage = null;
+            string helperPath = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(helperPath) ||
+                !File.Exists(helperPath))
+            {
+                helperPath = Global.exelocation;
+            }
+
+            if (string.IsNullOrWhiteSpace(helperPath) ||
+                !File.Exists(helperPath))
+            {
+                failureMessage = "DS4Windows could not locate its elevated " +
+                    "termination helper. No fallback executable was used.";
+                return false;
+            }
+
+            string encodedCanonicalPath = Convert.ToBase64String(
+                Encoding.UTF8.GetBytes(canonicalPath));
+            Process helper = null;
+            try
+            {
+                ProcessStartInfo startInfo = new()
+                {
+                    FileName = helperPath,
+                    Arguments = $"{TerminateForeignViiperArgument} " +
+                        encodedCanonicalPath,
+                    UseShellExecute = true,
+                    Verb = "runas",
+                    WindowStyle = ProcessWindowStyle.Hidden,
+                };
+                helper = Process.Start(startInfo);
+                if (helper == null)
+                {
+                    failureMessage = "Windows did not start the elevated " +
+                        "VIIPER termination helper.";
+                    return false;
+                }
+
+                if (!helper.WaitForExit(
+                        ForeignViiperHelperTimeoutMilliseconds))
+                {
+                    try { helper.Kill(entireProcessTree: true); } catch { }
+                    failureMessage = "The elevated VIIPER termination helper " +
+                        "timed out.";
+                    return false;
+                }
+
+                if (helper.ExitCode != 0)
+                {
+                    failureMessage = "The elevated VIIPER termination helper " +
+                        $"failed with exit code {helper.ExitCode}.";
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
+            {
+                failureMessage = "Administrator permission was canceled; " +
+                    "the conflicting viiper.exe remains active.";
+                return false;
+            }
+            catch (Exception ex)
+            {
+                failureMessage = "Could not run the elevated VIIPER " +
+                    $"termination helper: {ex.Message}";
+                return false;
+            }
+            finally
+            {
+                helper?.Dispose();
+            }
+        }
+
+        public static bool TryRunForeignViiperTerminationHelper(string[] args,
+            out int exitCode)
+        {
+            exitCode = 0;
+            if (args == null || args.Length == 0 ||
+                !string.Equals(args[0], TerminateForeignViiperArgument,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (args.Length != 2)
+            {
+                exitCode = 87;
+                return true;
+            }
+
+            string canonicalPath;
+            try
+            {
+                canonicalPath = Encoding.UTF8.GetString(
+                    Convert.FromBase64String(args[1]));
+                if (!Path.IsPathFullyQualified(canonicalPath) ||
+                    !string.Equals(Path.GetFileName(canonicalPath),
+                        "viiper.exe", StringComparison.OrdinalIgnoreCase))
+                {
+                    exitCode = 87;
+                    return true;
+                }
+            }
+            catch
+            {
+                exitCode = 87;
+                return true;
+            }
+
+            exitCode = TryTerminateForeignViiperProcesses(canonicalPath,
+                out _, allowElevation: false) ? 0 : 5;
+            return true;
+        }
+
+        private static string GetSetupScriptPath()
+        {
+            return Path.Combine(Global.exedirpath, "extras", InstallerScriptName);
+        }
+
+        private static string GetBundledViiperPath()
+        {
+            return Path.Combine(Global.exedirpath, "extras",
+                BundledViiperName);
+        }
+
+        private static bool FilesHaveSameSha256(string installedPath,
+            string bundledPath)
+        {
+            try
+            {
+                FileInfo installed = new FileInfo(installedPath);
+                FileInfo bundled = new FileInfo(bundledPath);
+                if (!installed.Exists || !bundled.Exists ||
+                    installed.Length != bundled.Length)
+                {
+                    return false;
+                }
+
+                using FileStream installedStream = installed.OpenRead();
+                using FileStream bundledStream = bundled.OpenRead();
+                byte[] installedHash = SHA256.HashData(installedStream);
+                byte[] bundledHash = SHA256.HashData(bundledStream);
+                return CryptographicOperations.FixedTimeEquals(installedHash,
+                    bundledHash);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static string GetCanonicalUsbipPath()
+        {
+            return Path.Combine(GetNativeProgramFilesPath(),
+                UsbipRelativePath);
         }
 
         private static Version TryGetUsbipVersion(string usbipPath)
@@ -423,6 +1339,10 @@ namespace DS4Windows
             return diagnostic.IndexOf("ABI mismatch",
                        StringComparison.OrdinalIgnoreCase) < 0 &&
                    diagnostic.IndexOf("unexpected size",
+                       StringComparison.OrdinalIgnoreCase) < 0 &&
+                   diagnostic.IndexOf("specified conversion is not valid",
+                       StringComparison.OrdinalIgnoreCase) < 0 &&
+                   diagnostic.IndexOf("invalid structure size",
                        StringComparison.OrdinalIgnoreCase) < 0;
         }
 
@@ -487,9 +1407,15 @@ namespace DS4Windows
         {
             lock (serverStartLock)
             {
-                if (CanPingServer())
+                if (!InspectViiperProcessOwnership(viiperPath,
+                        out bool canonicalProcessRunning, out _))
                 {
-                    return true;
+                    return false;
+                }
+
+                if (canonicalProcessRunning)
+                {
+                    return CanPingServer();
                 }
 
                 DateTime now = DateTime.UtcNow;
@@ -507,17 +1433,34 @@ namespace DS4Windows
         {
             try
             {
+                // Setup owns one verified, highest-privilege RunVIIPER task.
+                // Never fall back to launching an arbitrary or unelevated
+                // backend process from DS4Windows.
+                if (!IsViiperStartupTaskValid(viiperPath, out _))
+                {
+                    return false;
+                }
+
                 ProcessStartInfo startInfo = new ProcessStartInfo
                 {
-                    FileName = viiperPath,
-                    Arguments = "server",
+                    FileName = Path.Combine(Environment.SystemDirectory,
+                        "schtasks.exe"),
+                    Arguments = $"/Run /TN \"\\{ViiperStartupTaskName}\"",
                     CreateNoWindow = true,
                     WindowStyle = ProcessWindowStyle.Hidden,
                     UseShellExecute = false,
                 };
-                Process.Start(startInfo);
-                System.Threading.Thread.Sleep(750);
-                return true;
+                using Process process = Process.Start(startInfo);
+                if (process == null || !process.WaitForExit(5000) ||
+                    process.ExitCode != 0)
+                {
+                    return false;
+                }
+
+                Thread.Sleep(750);
+                return InspectViiperProcessOwnership(viiperPath,
+                        out bool canonicalProcessRunning, out _) &&
+                    canonicalProcessRunning;
             }
             catch
             {

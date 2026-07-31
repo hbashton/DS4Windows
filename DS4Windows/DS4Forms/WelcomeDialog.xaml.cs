@@ -11,6 +11,7 @@ the Free Software Foundation, either version 3 of the License, or
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Security.Cryptography;
 using System.Threading.Tasks;
 using System.Windows;
 
@@ -18,12 +19,24 @@ namespace DS4WinWPF.DS4Forms
 {
     public partial class WelcomeDialog : Window
     {
-        private const string HidHideInstaller =
+        private const string HidHideInstallerFileName =
+            "HidHide_1.5.230_x64.exe";
+        private const string HidHideInstallerUrl =
             "https://github.com/nefarius/HidHide/releases/download/v1.5.230.0/HidHide_1.5.230_x64.exe";
-        private const string FakerInputX64 =
+        private const string HidHideInstallerSha256 =
+            "F4BBBCB82E6258641B887C74BC81C4C5F66E4AA811808DFC304347687B7605F6";
+        private const string FakerInputX64FileName =
+            "FakerInput_0.1.0_x64.msi";
+        private const string FakerInputX64Url =
             "https://github.com/Ryochan7/FakerInput/releases/download/v0.1.0/FakerInput_0.1.0_x64.msi";
-        private const string FakerInputX86 =
+        private const string FakerInputX64Sha256 =
+            "30CF218B624740A91BE4FCCA3ADFB4550BA8CC8F31AC9625FE39D238E64D13EA";
+        private const string FakerInputX86FileName =
+            "FakerInput_0.1.0_x86.msi";
+        private const string FakerInputX86Url =
             "https://github.com/Ryochan7/FakerInput/releases/download/v0.1.0/FakerInput_0.1.0_x86.msi";
+        private const string FakerInputX86Sha256 =
+            "0C0A01EEF8C57C9B3DB917131995A10ADB3599CC643D2F27AD28D9511B96DEC1";
 
         public WelcomeDialog(bool loadConfig = false)
         {
@@ -63,29 +76,62 @@ namespace DS4WinWPF.DS4Forms
 
         private async void HidHideInstall_Click(object sender, RoutedEventArgs e)
         {
-            await DownloadAndRunInstallerAsync(HidHideInstaller,
-                hidHideInstallBtn, "HidHide");
+            await DownloadAndRunInstallerAsync(HidHideInstallerUrl,
+                hidHideInstallBtn, "HidHide", HidHideInstallerFileName,
+                HidHideInstallerSha256);
         }
 
         private async void FakerInputInstallBtn_Click(object sender, RoutedEventArgs e)
         {
-            string url = Environment.Is64BitOperatingSystem ?
-                FakerInputX64 : FakerInputX86;
+            bool useX64 = Environment.Is64BitOperatingSystem;
+            string url = useX64 ? FakerInputX64Url : FakerInputX86Url;
+            string fileName = useX64 ? FakerInputX64FileName :
+                FakerInputX86FileName;
+            string sha256 = useX64 ? FakerInputX64Sha256 :
+                FakerInputX86Sha256;
             await DownloadAndRunInstallerAsync(url, fakerInputInstallBtn,
-                "FakerInput");
+                "FakerInput", fileName, sha256);
         }
 
         private async Task DownloadAndRunInstallerAsync(string url,
-            System.Windows.Controls.Button button, string componentName)
+            System.Windows.Controls.Button button, string componentName,
+            string bundledFileName = null, string expectedSha256 = null)
         {
-            string target = Path.Combine(Path.GetTempPath(),
-                Path.GetFileName(new Uri(url).AbsolutePath));
+            string bundledTarget = string.IsNullOrWhiteSpace(bundledFileName) ?
+                null : Path.Combine(AppContext.BaseDirectory, "extras",
+                    bundledFileName);
+            string target = null;
+            bool deleteTarget = false;
             try
             {
                 SetInstallerControlsEnabled(false);
-                button.Content = $"Downloading {componentName}…";
-                byte[] payload = await App.requestClient.GetByteArrayAsync(url);
-                await File.WriteAllBytesAsync(target, payload);
+
+                if (bundledTarget != null && File.Exists(bundledTarget))
+                {
+                    button.Content = $"Verifying bundled {componentName}…";
+                    if (await InstallerMatchesSha256Async(bundledTarget,
+                        expectedSha256))
+                    {
+                        target = bundledTarget;
+                    }
+                }
+
+                if (target == null)
+                {
+                    target = Path.Combine(Path.GetTempPath(),
+                        $"{Guid.NewGuid():N}-{Path.GetFileName(new Uri(url).AbsolutePath)}");
+                    deleteTarget = true;
+                    button.Content = $"Downloading {componentName}…";
+                    byte[] payload = await App.requestClient.GetByteArrayAsync(url);
+                    await File.WriteAllBytesAsync(target, payload);
+
+                    if (!await InstallerMatchesSha256Async(target,
+                        expectedSha256))
+                    {
+                        throw new InvalidDataException(
+                            $"The downloaded {componentName} installer failed its SHA-256 integrity check.");
+                    }
+                }
 
                 button.Content = $"Installing {componentName}…";
                 using Process process = Process.Start(new ProcessStartInfo
@@ -93,14 +139,37 @@ namespace DS4WinWPF.DS4Forms
                     FileName = target,
                     UseShellExecute = true,
                     Verb = "runas",
-                });
-                if (process != null)
+                }) ?? throw new InvalidOperationException(
+                    $"Windows did not start the {componentName} installer.");
+                await process.WaitForExitAsync();
+
+                const int RestartRequiredExitCode = 3010;
+                bool restartRequired = process.ExitCode ==
+                    RestartRequiredExitCode;
+                if (process.ExitCode != 0 && !restartRequired)
                 {
-                    await process.WaitForExitAsync();
+                    throw new InvalidOperationException(
+                        $"The {componentName} installer exited with code {process.ExitCode}.");
                 }
 
-                DS4Windows.Global.RefreshHidHideInfo();
-                button.Content = $"{componentName} setup complete";
+                if (componentName == "HidHide")
+                {
+                    DS4Windows.Global.RefreshHidHideInfo();
+                }
+                else if (componentName == "FakerInput")
+                {
+                    DS4Windows.Global.RefreshFakerInputInfo();
+                }
+                button.Content = restartRequired ?
+                    $"{componentName} setup complete — restart required" :
+                    $"{componentName} setup complete";
+                if (restartRequired)
+                {
+                    MessageBox.Show(this,
+                        $"{componentName} was installed successfully. Restart Windows to finish setup.",
+                        $"{componentName} setup", MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                }
             }
             catch (Exception ex)
             {
@@ -114,12 +183,29 @@ namespace DS4WinWPF.DS4Forms
             {
                 try
                 {
-                    if (File.Exists(target)) File.Delete(target);
+                    if (deleteTarget && target != null && File.Exists(target))
+                    {
+                        File.Delete(target);
+                    }
                 }
                 catch { }
 
                 SetInstallerControlsEnabled(true);
             }
+        }
+
+        private static async Task<bool> InstallerMatchesSha256Async(
+            string path, string expectedSha256)
+        {
+            if (string.IsNullOrWhiteSpace(expectedSha256)) return true;
+
+            using FileStream stream = new FileStream(path, FileMode.Open,
+                FileAccess.Read, FileShare.Read, bufferSize: 81920,
+                useAsync: true);
+            using SHA256 sha256 = SHA256.Create();
+            byte[] hash = await sha256.ComputeHashAsync(stream);
+            return string.Equals(Convert.ToHexString(hash), expectedSha256,
+                StringComparison.OrdinalIgnoreCase);
         }
 
         private void SetInstallerControlsEnabled(bool enabled)

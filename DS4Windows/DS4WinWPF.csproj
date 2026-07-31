@@ -78,6 +78,9 @@
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
 		</Content>
+		<EmbeddedResource Include="..\extras\install-viiper-backend.ps1">
+			<LogicalName>DS4Windows.install-viiper-backend.ps1</LogicalName>
+		</EmbeddedResource>
 		<Content Include="..\extras\VIIPER-0.0.6-x64.exe">
 			<Link>extras\VIIPER-0.0.6-x64.exe</Link>
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
@@ -90,6 +93,31 @@
 		</Content>
 		<Content Include="..\extras\USBip-0.9.7.7-LICENSE.txt">
 			<Link>extras\USBip-0.9.7.7-LICENSE.txt</Link>
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+		</Content>
+		<Content Include="..\extras\HidHide_1.5.230_x64.exe">
+			<Link>extras\HidHide_1.5.230_x64.exe</Link>
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+		</Content>
+		<Content Include="..\extras\HidHide-1.5.230-LICENSE.txt">
+			<Link>extras\HidHide-1.5.230-LICENSE.txt</Link>
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+		</Content>
+		<Content Include="..\extras\FakerInput_0.1.0_x64.msi">
+			<Link>extras\FakerInput_0.1.0_x64.msi</Link>
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+		</Content>
+		<Content Include="..\extras\FakerInput_0.1.0_x86.msi">
+			<Link>extras\FakerInput_0.1.0_x86.msi</Link>
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+		</Content>
+		<Content Include="..\extras\FakerInput-0.1.0-LICENSE.txt">
+			<Link>extras\FakerInput-0.1.0-LICENSE.txt</Link>
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
 		</Content>

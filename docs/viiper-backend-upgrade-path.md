@@ -9,9 +9,23 @@ interfaces.
 
 DS4Windows checks VIIPER and usbip-win2 at startup. When either component is
 missing, the app offers its bundled self-elevating setup. Setup installs both
-components, registers a hidden `RunVIIPER` logon task, starts the server, and
-verifies its local API. Settings also provides Install / Repair and Refresh
-actions.
+components and registers exact, enabled, highest-privilege `RunVIIPER` and
+`RunDS4Windows` logon tasks before any driver step can require a restart. Once
+the USBIP ABI is ready, setup starts the server and verifies its local API.
+Settings also provides Install / Repair and Refresh actions.
+
+The elevated tasks are rooted explicitly at `\RunVIIPER` and
+`\RunDS4Windows`. The VIIPER executable and managed DS4Windows recovery copy
+live in the dedicated, protected `%ProgramFiles%\DS4Windows` tree; the
+installer never rewrites access controls on an arbitrary ZIP extraction
+directory.
+
+Install / Repair copies a managed recovery build into Program Files, but its
+`RunDS4Windows` task points to the exact executable that launched setup. If the
+user later opens a different portable copy, DS4Windows asks once for
+administrator confirmation and retargets that task to the newly chosen
+portable executable. Installing VIIPER remains independent of where that
+portable package was extracted.
 
 ## Profile migration
 

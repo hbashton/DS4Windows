@@ -429,6 +429,9 @@
                                                       SelectedValuePath="EndpointId"
                                                       SelectedValue="{Binding ControllerAudioSourceId, Mode=OneWay}"
                                                       SelectionChanged="ControllerAudioSourceCombo_SelectionChanged"
+                                                      DropDownOpened="ControllerAudioSourceCombo_DropDownOpened"
+                                                      DropDownClosed="ControllerAudioSourceCombo_DropDownClosed"
+                                                      PreviewKeyDown="ControllerAudioSourceCombo_PreviewKeyDown"
                                                       IsEnabled="{Binding AudioHapticsSpeakerOverrideActive, Converter={StaticResource InverseBoolConverter}}"
                                                       Style="{StaticResource OverviewSettingsComboBoxStyle}"
                                                       ToolTip="{Binding SelectedItem.Name, RelativeSource={RelativeSource Self}}">

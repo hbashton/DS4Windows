@@ -418,7 +418,9 @@ namespace DS4WindowsTests
 
             Assert.AreEqual(48000, capture.WaveFormat.SampleRate);
             Assert.AreEqual(2, capture.WaveFormat.Channels);
-            Assert.AreEqual(16, capture.WaveFormat.BitsPerSample);
+            Assert.AreEqual(32, capture.WaveFormat.BitsPerSample);
+            Assert.AreEqual(NAudio.Wave.WaveFormatEncoding.IeeeFloat,
+                capture.WaveFormat.Encoding);
         }
     }
 }

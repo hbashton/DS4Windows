@@ -188,8 +188,6 @@ namespace DS4Windows
             private const int CaptureRetryIntervalMilliseconds = 250;
             private const int BluetoothTransportRetryIntervalMilliseconds =
                 2000;
-            private const long PacketIntervalNumerator =
-                FramesPerPacket * 10000000L;
             private const int TelemetryIntervalMilliseconds = 5000;
 
             private readonly int slot;
@@ -899,7 +897,10 @@ namespace DS4Windows
                 Stopwatch clock = Stopwatch.StartNew();
                 long nextPacketTicks = clock.ElapsedTicks;
                 long packetIntervalTicks = Stopwatch.Frequency *
-                    PacketIntervalNumerator / 10000000L / TargetSampleRate;
+                    FramesPerPacket / TargetSampleRate;
+                long packetIntervalRemainder = Stopwatch.Frequency *
+                    FramesPerPacket % TargetSampleRate;
+                long packetPhaseRemainder = 0;
                 long nextTelemetryTimestamp = Stopwatch.GetTimestamp() +
                     Stopwatch.Frequency * TelemetryIntervalMilliseconds / 1000;
                 bool prebuffered = false;
@@ -910,11 +911,18 @@ namespace DS4Windows
                     EnsureBluetoothTransport();
                     WaitUntil(clock, nextPacketTicks);
                     nextPacketTicks += packetIntervalTicks;
+                    packetPhaseRemainder += packetIntervalRemainder;
+                    if (packetPhaseRemainder >= TargetSampleRate)
+                    {
+                        nextPacketTicks++;
+                        packetPhaseRemainder -= TargetSampleRate;
+                    }
                     if (clock.ElapsedTicks - nextPacketTicks >
                         packetIntervalTicks * 3)
                     {
                         nextPacketTicks = clock.ElapsedTicks +
                             packetIntervalTicks;
+                        packetPhaseRemainder = 0;
                     }
 
                     bool hasFrame = false;

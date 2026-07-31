@@ -43,7 +43,7 @@ namespace DS4Windows
             fixedProcessId = processId;
             // Match the controller media clock so app-only capture does not
             // incur a mandatory 44.1 -> 48 kHz conversion before encoding.
-            WaveFormat = new WaveFormat(48000, 16, 2);
+            WaveFormat = WaveFormat.CreateIeeeFloatWaveFormat(48000, 2);
         }
 
         private ProcessLoopbackWaveCapture(int automaticSlot,
@@ -58,7 +58,7 @@ namespace DS4Windows
             automaticSettings = (settings ??
                 new AudioHapticsProfileSettings()).Clone();
             automaticDetector = new AutomaticGameAudioDetector();
-            WaveFormat = new WaveFormat(48000, 16, 2);
+            WaveFormat = WaveFormat.CreateIeeeFloatWaveFormat(48000, 2);
         }
 
         public WaveFormat WaveFormat { get; set; }
@@ -504,6 +504,8 @@ namespace DS4Windows
 
             private void CaptureLoop()
             {
+                using MultimediaThreadRegistration mmcss =
+                    MultimediaThreadRegistration.EnterProAudio();
                 Exception stoppedWith = null;
                 WaitHandle[] waits = { stopped, captureEvent };
                 try

@@ -1773,7 +1773,7 @@ namespace DS4WindowsTests
             DualShock4BluetoothAudioState.Snapshot speakerPublished = null;
             DualShock4BluetoothAudioState.Snapshot microphonePublished = null;
 
-            Task speaker = Task.Run(() => state.Update(true, null,
+            Task speaker = StartDedicated(() => state.Update(true, null,
                 null, null, null, snapshot =>
                 {
                     speakerPublished = snapshot;
@@ -1783,10 +1783,10 @@ namespace DS4WindowsTests
                 }));
             Assert.IsTrue(speakerWriterEntered.Wait(TimeSpan.FromSeconds(2)));
 
-            Task microphone = Task.Run(() =>
+            Task microphone = StartDedicated(() =>
             {
                 microphoneUpdateStarted.Set();
-                return state.Update(null, true, null, null, null, snapshot =>
+                state.Update(null, true, null, null, null, snapshot =>
                 {
                     microphonePublished = snapshot;
                     microphoneWriterEntered.Set();
@@ -1828,7 +1828,7 @@ namespace DS4WindowsTests
             byte[] submittedReport = null;
             bool updateResult = false;
 
-            Task microphoneUpdate = Task.Run(() =>
+            Task microphoneUpdate = StartDedicated(() =>
             {
                 updateResult = state.Update(null, true, null, null, null,
                     snapshot =>
@@ -1847,7 +1847,7 @@ namespace DS4WindowsTests
                 new byte[DualShock4BluetoothAudioProtocol.
                     SpeakerSbcFrameLength],
             };
-            Task speakerRead = Task.Run(() =>
+            Task speakerRead = StartDedicated(() =>
             {
                 readStarted.Set();
                 state.ReadSynchronized(snapshot =>
@@ -1881,6 +1881,12 @@ namespace DS4WindowsTests
             Assert.AreEqual(0xA1, submittedReport[2],
                 "The first speaker payload after the committed microphone update must retain A1 mode.");
             Assert.IsTrue(state.Current.MicrophoneEnabled);
+        }
+
+        private static Task StartDedicated(Action action)
+        {
+            return Task.Factory.StartNew(action, CancellationToken.None,
+                TaskCreationOptions.LongRunning, TaskScheduler.Default);
         }
 
         [TestMethod]

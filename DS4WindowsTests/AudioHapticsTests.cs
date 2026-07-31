@@ -422,5 +422,17 @@ namespace DS4WindowsTests
             Assert.AreEqual(NAudio.Wave.WaveFormatEncoding.IeeeFloat,
                 capture.WaveFormat.Encoding);
         }
+
+        [TestMethod]
+        public void AppCaptureDoesNotClimbIntoADifferentExecutableParent()
+        {
+            int currentProcessId = Environment.ProcessId;
+
+            Assert.AreEqual(currentProcessId,
+                ProcessLoopbackWaveCapture.ResolveCaptureRootProcessId(
+                    currentProcessId));
+            Assert.AreEqual(0,
+                ProcessLoopbackWaveCapture.ResolveCaptureRootProcessId(0));
+        }
     }
 }

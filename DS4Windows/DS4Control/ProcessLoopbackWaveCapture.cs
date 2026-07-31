@@ -2,6 +2,7 @@ using NAudio.CoreAudioApi;
 using NAudio.CoreAudioApi.Interfaces;
 using NAudio.Wave;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -26,7 +27,7 @@ namespace DS4Windows
         private readonly AutomaticGameAudioDetector automaticDetector;
         private readonly object sessionLock = new();
         private readonly ManualResetEvent stopped = new(false);
-        private ProcessCaptureSession session;
+        private ProcessCaptureLease session;
         private Thread monitorThread;
         private int currentProcessId;
         private string currentSourceDisplayName = string.Empty;
@@ -40,7 +41,7 @@ namespace DS4Windows
                 throw new ArgumentOutOfRangeException(nameof(processId));
             }
 
-            fixedProcessId = processId;
+            fixedProcessId = ResolveCaptureRootProcessId(processId);
             // Match the controller media clock so app-only capture does not
             // incur a mandatory 44.1 -> 48 kHz conversion before encoding.
             WaveFormat = WaveFormat.CreateIeeeFloatWaveFormat(48000, 2);
@@ -121,7 +122,7 @@ namespace DS4Windows
             }
 
             stopped.Set();
-            ProcessCaptureSession oldSession;
+            ProcessCaptureLease oldSession;
             lock (sessionLock)
             {
                 oldSession = session;
@@ -322,17 +323,19 @@ namespace DS4Windows
         private void SwitchToProcess(int processId, string displayName,
             string evidence)
         {
+            processId = ResolveCaptureRootProcessId(processId);
             if (processId <= 0 || processId == CurrentProcessId ||
                 Volatile.Read(ref disposed) != 0)
             {
                 return;
             }
 
-            ProcessCaptureSession replacement = null;
-            replacement = new ProcessCaptureSession(processId, WaveFormat,
+            ProcessCaptureLease replacement = null;
+            replacement = ProcessCaptureRegistry.Acquire(processId,
+                WaveFormat,
                 (buffer, count) => OnSessionData(replacement, buffer, count),
                 (_, exception) => OnSessionStopped(replacement, exception));
-            ProcessCaptureSession oldSession;
+            ProcessCaptureLease oldSession;
             int oldProcessId;
             string oldDisplayName;
             lock (sessionLock)
@@ -381,7 +384,7 @@ namespace DS4Windows
 
         private void ClearCurrentSession()
         {
-            ProcessCaptureSession oldSession;
+            ProcessCaptureLease oldSession;
             lock (sessionLock)
             {
                 oldSession = session;
@@ -395,7 +398,7 @@ namespace DS4Windows
                     "Waiting for a detected game", "waiting"));
         }
 
-        private void OnSessionData(ProcessCaptureSession source,
+        private void OnSessionData(ProcessCaptureLease source,
             byte[] buffer, int byteCount)
         {
             if (ReferenceEquals(session, source))
@@ -405,7 +408,7 @@ namespace DS4Windows
             }
         }
 
-        private void OnSessionStopped(ProcessCaptureSession source,
+        private void OnSessionStopped(ProcessCaptureLease source,
             Exception exception)
         {
             if (Volatile.Read(ref disposed) != 0) return;
@@ -455,6 +458,211 @@ namespace DS4Windows
             catch { return $"process {processId}"; }
         }
 
+        /// <summary>
+        /// Process-loopback includes the target and its descendants, but it
+        /// does not include siblings. Browsers and Electron applications move
+        /// audio sessions between same-executable renderer children, so using
+        /// the transient session PID makes a valid capture appear to stop and
+        /// later recover. Walk only same-executable parents to the stable app
+        /// root; never climb into an unrelated launcher such as Steam.
+        /// </summary>
+        internal static int ResolveCaptureRootProcessId(int processId)
+        {
+            if (processId <= 0)
+            {
+                return processId;
+            }
+
+            int currentProcessId = processId;
+            for (int depth = 0; depth < 16; depth++)
+            {
+                int parentProcessId = TryGetParentProcessId(
+                    currentProcessId);
+                if (parentProcessId <= 0 ||
+                    parentProcessId == currentProcessId ||
+                    !HaveSameExecutableIdentity(currentProcessId,
+                        parentProcessId))
+                {
+                    break;
+                }
+
+                currentProcessId = parentProcessId;
+            }
+
+            return currentProcessId;
+        }
+
+        private static int TryGetParentProcessId(int processId)
+        {
+            try
+            {
+                using Process process = Process.GetProcessById(processId);
+                ProcessBasicInformation information = default;
+                int status = NtQueryInformationProcess(process.Handle, 0,
+                    ref information,
+                    Marshal.SizeOf<ProcessBasicInformation>(), out _);
+                long parent = information.InheritedFromUniqueProcessId
+                    .ToInt64();
+                return status >= 0 && parent > 0 && parent <= int.MaxValue
+                    ? (int)parent : 0;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private static bool HaveSameExecutableIdentity(int processId,
+            int parentProcessId)
+        {
+            try
+            {
+                using Process process = Process.GetProcessById(processId);
+                using Process parent = Process.GetProcessById(parentProcessId);
+                if (parent.HasExited || process.HasExited ||
+                    parent.StartTime > process.StartTime)
+                {
+                    return false;
+                }
+
+                string processPath = TryGetProcessPath(process);
+                string parentPath = TryGetProcessPath(parent);
+                if (!string.IsNullOrWhiteSpace(processPath) &&
+                    !string.IsNullOrWhiteSpace(parentPath))
+                {
+                    return string.Equals(processPath, parentPath,
+                        StringComparison.OrdinalIgnoreCase);
+                }
+
+                return string.Equals(process.ProcessName,
+                    parent.ProcessName, StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static string TryGetProcessPath(Process process)
+        {
+            try
+            {
+                return process.MainModule?.FileName ?? string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        [DllImport("ntdll.dll")]
+        private static extern int NtQueryInformationProcess(
+            IntPtr processHandle, int processInformationClass,
+            ref ProcessBasicInformation processInformation,
+            int processInformationLength, out int returnLength);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ProcessBasicInformation
+        {
+            public IntPtr Reserved1;
+            public IntPtr PebBaseAddress;
+            public IntPtr Reserved2_0;
+            public IntPtr Reserved2_1;
+            public IntPtr UniqueProcessId;
+            public IntPtr InheritedFromUniqueProcessId;
+        }
+
+        /// <summary>
+        /// One Windows process-loopback client is shared by every feature that
+        /// consumes the same application. Opening an independent IAudioClient
+        /// for speaker routing and Audio Haptics made their event streams race
+        /// and caused intermittent silence until the polling fallback happened
+        /// to drain one of them.
+        /// </summary>
+        private static class ProcessCaptureRegistry
+        {
+            private static readonly object syncRoot = new();
+            private static readonly Dictionary<string, ProcessCaptureSession>
+                sessions = new(StringComparer.Ordinal);
+
+            public static ProcessCaptureLease Acquire(int processId,
+                WaveFormat waveFormat, Action<byte[], int> dataAvailable,
+                Action<int, Exception> recordingStopped)
+            {
+                string key = BuildKey(processId, waveFormat);
+                lock (syncRoot)
+                {
+                    if (!sessions.TryGetValue(key,
+                            out ProcessCaptureSession captureSession) ||
+                        captureSession.IsDisposed)
+                    {
+                        captureSession = new ProcessCaptureSession(processId,
+                            waveFormat, key);
+                        sessions[key] = captureSession;
+                    }
+
+                    return captureSession.Subscribe(dataAvailable,
+                        recordingStopped);
+                }
+            }
+
+            public static void Remove(string key,
+                ProcessCaptureSession captureSession)
+            {
+                lock (syncRoot)
+                {
+                    if (sessions.TryGetValue(key, out ProcessCaptureSession
+                            current) && ReferenceEquals(current,
+                            captureSession))
+                    {
+                        sessions.Remove(key);
+                    }
+                }
+            }
+
+            private static string BuildKey(int processId,
+                WaveFormat waveFormat) =>
+                $"{processId}:{waveFormat.SampleRate}:" +
+                $"{waveFormat.Channels}:{waveFormat.BitsPerSample}:" +
+                $"{(int)waveFormat.Encoding}";
+        }
+
+        private sealed class ProcessCaptureLease : IDisposable
+        {
+            private ProcessCaptureSession session;
+            private readonly ProcessCaptureSubscriber subscriber;
+
+            public ProcessCaptureLease(ProcessCaptureSession session,
+                ProcessCaptureSubscriber subscriber)
+            {
+                this.session = session;
+                this.subscriber = subscriber;
+            }
+
+            public void Start() => Volatile.Read(ref session)?.Start();
+
+            public void Dispose()
+            {
+                ProcessCaptureSession current = Interlocked.Exchange(
+                    ref session, null);
+                current?.Unsubscribe(subscriber);
+            }
+        }
+
+        private sealed class ProcessCaptureSubscriber
+        {
+            public ProcessCaptureSubscriber(Action<byte[], int> dataAvailable,
+                Action<int, Exception> recordingStopped)
+            {
+                DataAvailable = dataAvailable;
+                RecordingStopped = recordingStopped;
+            }
+
+            public Action<byte[], int> DataAvailable { get; }
+            public Action<int, Exception> RecordingStopped { get; }
+            public int Disposed;
+        }
+
         private sealed class ProcessCaptureSession : IDisposable
         {
             private readonly AudioClient audioClient;
@@ -464,20 +672,21 @@ namespace DS4Windows
             private readonly ManualResetEvent stopped = new(false);
             private readonly Thread captureThread;
             private readonly WaveFormat waveFormat;
-            private readonly Action<byte[], int> dataAvailable;
-            private readonly Action<int, Exception> recordingStopped;
+            private readonly string registryKey;
+            private readonly object subscriberLock = new();
+            private readonly List<ProcessCaptureSubscriber> subscribers =
+                new();
             private byte[] scratch = Array.Empty<byte>();
+            private int started;
             private int disposed;
             private int loggedPollingRecovery;
 
             public ProcessCaptureSession(int processId, WaveFormat waveFormat,
-                Action<byte[], int> dataAvailable,
-                Action<int, Exception> recordingStopped)
+                string registryKey)
             {
                 ProcessId = processId;
                 this.waveFormat = waveFormat;
-                this.dataAvailable = dataAvailable;
-                this.recordingStopped = recordingStopped;
+                this.registryKey = registryKey;
                 audioClient = ProcessLoopbackAudioClient.Activate(processId,
                     TimeSpan.FromSeconds(5));
                 // Process loopback is a virtual audio device, not a physical
@@ -502,13 +711,57 @@ namespace DS4Windows
             }
 
             public int ProcessId { get; }
+            public bool IsDisposed => Volatile.Read(ref disposed) != 0;
+
+            public ProcessCaptureLease Subscribe(
+                Action<byte[], int> dataAvailable,
+                Action<int, Exception> recordingStopped)
+            {
+                var subscriber = new ProcessCaptureSubscriber(dataAvailable,
+                    recordingStopped);
+                lock (subscriberLock)
+                {
+                    if (IsDisposed)
+                    {
+                        throw new ObjectDisposedException(
+                            nameof(ProcessCaptureSession));
+                    }
+                    subscribers.Add(subscriber);
+                }
+                return new ProcessCaptureLease(this, subscriber);
+            }
 
             public void Start()
             {
+                if (Interlocked.Exchange(ref started, 1) != 0)
+                {
+                    return;
+                }
                 // Arm the engine before dispatching the event consumer, as in
                 // the Windows reference. Auto-reset preserves an early signal.
                 audioClient.Start();
                 captureThread.Start();
+            }
+
+            public void Unsubscribe(ProcessCaptureSubscriber subscriber)
+            {
+                if (subscriber == null || Interlocked.Exchange(
+                        ref subscriber.Disposed, 1) != 0)
+                {
+                    return;
+                }
+
+                bool lastSubscriber;
+                lock (subscriberLock)
+                {
+                    subscribers.Remove(subscriber);
+                    lastSubscriber = subscribers.Count == 0;
+                }
+                if (lastSubscriber)
+                {
+                    ProcessCaptureRegistry.Remove(registryKey, this);
+                    Dispose();
+                }
             }
 
             private void CaptureLoop()
@@ -554,7 +807,8 @@ namespace DS4Windows
                 {
                     if (Volatile.Read(ref disposed) == 0)
                     {
-                        recordingStopped?.Invoke(ProcessId, stoppedWith);
+                        ProcessCaptureRegistry.Remove(registryKey, this);
+                        NotifyStopped(stoppedWith);
                     }
                 }
             }
@@ -569,10 +823,10 @@ namespace DS4Windows
                     IntPtr buffer = captureClient.GetBuffer(
                         out int framesAvailable,
                         out AudioClientBufferFlags flags, out _, out _);
+                    int byteCount = checked(framesAvailable *
+                        waveFormat.BlockAlign);
                     try
                     {
-                        int byteCount = checked(framesAvailable *
-                            waveFormat.BlockAlign);
                         if (scratch.Length < byteCount)
                             scratch = new byte[byteCount];
                         if ((flags & AudioClientBufferFlags.Silent) != 0 ||
@@ -580,15 +834,76 @@ namespace DS4Windows
                             Array.Clear(scratch, 0, byteCount);
                         else
                             Marshal.Copy(buffer, scratch, 0, byteCount);
-                        dataAvailable?.Invoke(scratch, byteCount);
-                        drainedPackets++;
                     }
                     finally
                     {
                         captureClient.ReleaseBuffer(framesAvailable);
                     }
+
+                    // Never hold an IAudioCaptureClient packet while speaker
+                    // processing or Audio Haptics runs. The Windows engine can
+                    // reuse its packet immediately, and both consumers receive
+                    // the same immutable contents before this thread drains
+                    // the next packet.
+                    NotifyDataAvailable(scratch, byteCount);
+                    drainedPackets++;
                 }
                 return drainedPackets;
+            }
+
+            private void NotifyDataAvailable(byte[] buffer, int byteCount)
+            {
+                ProcessCaptureSubscriber[] snapshot;
+                lock (subscriberLock)
+                {
+                    snapshot = subscribers.ToArray();
+                }
+                foreach (ProcessCaptureSubscriber subscriber in snapshot)
+                {
+                    if (Volatile.Read(ref subscriber.Disposed) == 0)
+                    {
+                        try
+                        {
+                            subscriber.DataAvailable?.Invoke(buffer,
+                                byteCount);
+                        }
+                        catch (Exception exception)
+                        {
+                            // A speaker processor failure must not tear down
+                            // Audio Haptics (or vice versa) now that they share
+                            // the authoritative Windows process-loopback
+                            // client. Retire only the failed subscriber; its
+                            // owner can reconnect through the normal retry
+                            // path while every other consumer keeps flowing.
+                            try
+                            {
+                                subscriber.RecordingStopped?.Invoke(ProcessId,
+                                    exception);
+                            }
+                            catch
+                            {
+                                // Subscriber teardown is isolated too.
+                            }
+                        }
+                    }
+                }
+            }
+
+            private void NotifyStopped(Exception exception)
+            {
+                ProcessCaptureSubscriber[] snapshot;
+                lock (subscriberLock)
+                {
+                    snapshot = subscribers.ToArray();
+                }
+                foreach (ProcessCaptureSubscriber subscriber in snapshot)
+                {
+                    if (Volatile.Read(ref subscriber.Disposed) == 0)
+                    {
+                        subscriber.RecordingStopped?.Invoke(ProcessId,
+                            exception);
+                    }
+                }
             }
 
             public void Dispose()

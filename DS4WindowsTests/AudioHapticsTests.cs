@@ -424,6 +424,45 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void QuietProcessLoopbackPcmIsRaisedWithoutClipping()
+        {
+            var normalizer = new ProcessLoopbackWaveCapture
+                .ProcessLoopbackLevelNormalizer();
+            float[] input = Enumerable.Range(0, 960)
+                .Select(index => (float)Math.Sin(index * Math.PI / 24.0) *
+                    0.05f).ToArray();
+            byte[] pcm = new byte[input.Length * sizeof(float)];
+            Buffer.BlockCopy(input, 0, pcm, 0, pcm.Length);
+
+            normalizer.Normalize(pcm, pcm.Length);
+
+            float[] output = new float[input.Length];
+            Buffer.BlockCopy(pcm, 0, output, 0, pcm.Length);
+            Assert.IsTrue(output.Max(value => Math.Abs(value)) > 0.05f);
+            Assert.IsTrue(output.All(value => Math.Abs(value) <= 0.98f));
+            Assert.IsTrue(normalizer.CurrentMakeupGain > 1.0f);
+        }
+
+        [TestMethod]
+        public void FullLevelProcessLoopbackPcmIsNotAmplified()
+        {
+            var normalizer = new ProcessLoopbackWaveCapture
+                .ProcessLoopbackLevelNormalizer();
+            float[] input = Enumerable.Range(0, 960)
+                .Select(index => (float)Math.Sin(index * Math.PI / 24.0) *
+                    0.8f).ToArray();
+            byte[] pcm = new byte[input.Length * sizeof(float)];
+            Buffer.BlockCopy(input, 0, pcm, 0, pcm.Length);
+
+            normalizer.Normalize(pcm, pcm.Length);
+
+            float[] output = new float[input.Length];
+            Buffer.BlockCopy(pcm, 0, output, 0, pcm.Length);
+            CollectionAssert.AreEqual(input, output);
+            Assert.AreEqual(1.0f, normalizer.CurrentMakeupGain, 0.0001f);
+        }
+
+        [TestMethod]
         public void AppCaptureDoesNotClimbIntoADifferentExecutableParent()
         {
             int currentProcessId = Environment.ProcessId;

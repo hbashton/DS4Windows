@@ -24,7 +24,6 @@ namespace DS4WinWPF.DS4Forms
         private bool controllerAudioSourceSelectionCommitted;
         private string pendingControllerAudioSourceId;
         private bool outputControllerDropDownOpen;
-        private bool outputControllerSelectionCommitted;
         private OutContType? pendingOutputController;
 
         public ControllerOverviewControl()
@@ -128,13 +127,11 @@ namespace DS4WinWPF.DS4Forms
         private void OutputControllerCombo_SelectionChanged(object sender,
             SelectionChangedEventArgs e)
         {
-            // Profile refresh raises SelectedValue notifications while the
-            // virtual output is being replaced. A TwoWay binding treated the
-            // ComboBox's temporary first-item selection as user input and
-            // wrote Xbox 360 back into the profile. Only commit a selection
-            // made while the user has this dropdown open.
+            // Keep the final visible selection locally until the popup closes.
+            // Committing the first event immediately started a profile reload
+            // while WPF was still processing the same dropdown gesture; that
+            // refresh could select Xbox 360 and suppress the user's real click.
             if (!outputControllerDropDownOpen ||
-                outputControllerSelectionCommitted ||
                 e.AddedItems.Count == 0 || sender is not ComboBox comboBox ||
                 comboBox.SelectedValue is not OutContType outputType)
             {
@@ -142,15 +139,12 @@ namespace DS4WinWPF.DS4Forms
             }
 
             pendingOutputController = outputType.Normalize();
-            outputControllerSelectionCommitted = true;
-            CommitOutputController(pendingOutputController.Value);
         }
 
         private void OutputControllerCombo_DropDownOpened(object sender,
             EventArgs e)
         {
             outputControllerDropDownOpen = true;
-            outputControllerSelectionCommitted = false;
             pendingOutputController = DataContext is MainWindowsViewModel viewModel
                 ? viewModel.SelectedOutputController
                 : null;
@@ -159,20 +153,25 @@ namespace DS4WinWPF.DS4Forms
         private void OutputControllerCombo_DropDownClosed(object sender,
             EventArgs e)
         {
+            if (sender is ComboBox comboBox &&
+                comboBox.SelectedValue is OutContType outputType)
+            {
+                pendingOutputController = outputType.Normalize();
+            }
+
             if (pendingOutputController.HasValue)
             {
                 CommitOutputController(pendingOutputController.Value);
             }
 
             outputControllerDropDownOpen = false;
-            outputControllerSelectionCommitted = false;
             pendingOutputController = null;
         }
 
         private void OutputControllerCombo_PreviewKeyDown(object sender,
             KeyEventArgs e)
         {
-            if (sender is not ComboBox comboBox ||
+            if (outputControllerDropDownOpen || sender is not ComboBox comboBox ||
                 e.Key is not (Key.Up or Key.Down or Key.Home or Key.End or
                     Key.PageUp or Key.PageDown))
             {

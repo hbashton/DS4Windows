@@ -947,6 +947,106 @@ namespace DS4WinWPF.DS4Forms
                     ConfigureXbox360OutputCanvas();
                     break;
             }
+
+            ConfigureOutputStickHitGeometries(lsbBtn, lsuBtn, lsrBtn,
+                lsdBtn, lslBtn);
+            ConfigureOutputStickHitGeometries(rsbBtn, rsuBtn, rsrBtn,
+                rsdBtn, rslBtn);
+        }
+
+        private void ConfigureOutputStickHitGeometries(Button press,
+            Button up, Button right, Button down, Button left)
+        {
+            double x = Canvas.GetLeft(press);
+            double y = Canvas.GetTop(press);
+            double width = press.Width;
+            double height = press.Height;
+            if (double.IsNaN(x) || double.IsNaN(y) || width <= 0 ||
+                height <= 0)
+            {
+                return;
+            }
+
+            const double pressInset = 0.27;
+            SetOutputGeometryFromCanvas(press, new EllipseGeometry(new Rect(
+                x + width * pressInset, y + height * pressInset,
+                width * (1.0 - pressInset * 2.0),
+                height * (1.0 - pressInset * 2.0))));
+
+            Geometry outer = new EllipseGeometry(new Rect(
+                x + width * 0.05, y + height * 0.05,
+                width * 0.90, height * 0.90));
+            Geometry center = new EllipseGeometry(new Rect(
+                x + width * 0.29, y + height * 0.29,
+                width * 0.42, height * 0.42));
+            Geometry ring = new CombinedGeometry(
+                GeometryCombineMode.Exclude, outer, center);
+
+            SetOutputStickDirectionGeometry(up, ring, x, y, width,
+                height, 0);
+            SetOutputStickDirectionGeometry(right, ring, x, y, width,
+                height, 1);
+            SetOutputStickDirectionGeometry(down, ring, x, y, width,
+                height, 2);
+            SetOutputStickDirectionGeometry(left, ring, x, y, width,
+                height, 3);
+        }
+
+        private void SetOutputStickDirectionGeometry(Button button,
+            Geometry ring, double x, double y, double width, double height,
+            int direction)
+        {
+            Point[] points = direction switch
+            {
+                0 => new[]
+                {
+                    new Point(x + width * 0.12, y),
+                    new Point(x + width * 0.88, y),
+                    new Point(x + width * 0.63, y + height * 0.52),
+                    new Point(x + width * 0.37, y + height * 0.52),
+                },
+                1 => new[]
+                {
+                    new Point(x + width * 0.48, y + height * 0.37),
+                    new Point(x + width, y + height * 0.12),
+                    new Point(x + width, y + height * 0.88),
+                    new Point(x + width * 0.48, y + height * 0.63),
+                },
+                2 => new[]
+                {
+                    new Point(x + width * 0.37, y + height * 0.48),
+                    new Point(x + width * 0.63, y + height * 0.48),
+                    new Point(x + width * 0.88, y + height),
+                    new Point(x + width * 0.12, y + height),
+                },
+                _ => new[]
+                {
+                    new Point(x, y + height * 0.12),
+                    new Point(x + width * 0.52, y + height * 0.37),
+                    new Point(x + width * 0.52, y + height * 0.63),
+                    new Point(x, y + height * 0.88),
+                },
+            };
+            Geometry sector = new CombinedGeometry(
+                GeometryCombineMode.Intersect, ring,
+                CreatePolygonGeometry(1, 1, points));
+            SetOutputGeometryFromCanvas(button, sector);
+        }
+
+        private void SetOutputGeometryFromCanvas(Button button,
+            Geometry canvasGeometry)
+        {
+            double left = Canvas.GetLeft(button);
+            double top = Canvas.GetTop(button);
+            Geometry clipped = new CombinedGeometry(
+                GeometryCombineMode.Intersect, canvasGeometry,
+                new RectangleGeometry(new Rect(left, top, button.Width,
+                    button.Height)));
+            Geometry local = clipped.Clone();
+            local.Transform = new TranslateTransform(-left, -top);
+            local.Freeze();
+            outputButtonHitGeometries[button] = local;
+            button.Clip = local;
         }
 
         private void ConfigureXbox360OutputCanvas()

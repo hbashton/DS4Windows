@@ -930,17 +930,12 @@ namespace DS4WinWPF.DS4Forms
                     continue;
                 }
 
-                Geometry hitGeometry;
-                if (IsStickDirectionButton(entry.Key))
-                {
-                    hitGeometry = RoundedHighlight(left, top, entry.Key.Width,
-                        entry.Key.Height, Math.Min(entry.Key.Width,
-                            entry.Key.Height) / 2.0);
-                }
-                else
-                {
-                    hitGeometry = TransformControllerGeometry(entry.Value);
-                }
+                // Use the exact same controller-space mask for hit testing and
+                // painting. In particular, stick directions are ring sectors;
+                // a rounded rectangle around that sector made hover activate
+                // while the pointer was visibly outside the highlighted rim.
+                Geometry hitGeometry = TransformControllerGeometry(
+                    entry.Value);
 
                 Geometry localGeometry = hitGeometry.Clone();
                 Transform existingTransform = localGeometry.Transform;
@@ -955,14 +950,6 @@ namespace DS4WinWPF.DS4Forms
                 localGeometry.Freeze();
                 entry.Key.Clip = localGeometry;
             }
-        }
-
-        private bool IsStickDirectionButton(Button button)
-        {
-            return button == lsuConBtn || button == lsrConBtn ||
-                button == lsdConBtn || button == lslConBtn ||
-                button == rsuConBtn || button == rsrConBtn ||
-                button == rsdConBtn || button == rslConBtn;
         }
 
         private static ImageSource LoadResourceImage(string fileName)

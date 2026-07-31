@@ -3194,35 +3194,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public List<AudioEndpointChoice> AudioCaptureEndpointChoices
         {
-            get
-            {
-                var choices = new List<AudioEndpointChoice>()
-                {
-                    new AudioEndpointChoice("Automatic for emulated controller", string.Empty),
-                    new AudioEndpointChoice("System default audio endpoint",
-                        DualSenseAudioPassthrough.DefaultSystemAudioEndpointId),
-                };
-
-                foreach (AudioEndpointSnapshot endpoint in
-                    AudioEndpointChoiceCache.RenderEndpoints)
-                {
-                    string name = endpoint.Name;
-                    if (endpoint.IsControllerAudio)
-                    {
-                        name += " (controller / game audio)";
-                    }
-
-                    choices.Add(new AudioEndpointChoice(name, endpoint.EndpointId));
-                }
-
-                string savedEndpointId = DualSenseAudioCaptureEndpointId;
-                if (!string.IsNullOrEmpty(savedEndpointId) && !choices.Exists(item => item.EndpointId == savedEndpointId))
-                {
-                    choices.Add(new AudioEndpointChoice("Saved endpoint (not currently available)", savedEndpointId));
-                }
-
-                return choices;
-            }
+            get => AudioEndpointChoiceCache.BuildControllerAudioChoices(
+                DualSenseAudioCaptureEndpointId);
         }
 
         public string DualSenseAudioCaptureEndpointId

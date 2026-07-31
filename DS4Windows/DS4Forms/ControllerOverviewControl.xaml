@@ -379,6 +379,8 @@
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
@@ -397,20 +399,37 @@
                                           IsEnabled="{Binding SpeakerOutputEnabled}"
                                           ToolTip="Mutes the built-in speaker while continuing the same stream through a headset connected to the controller's AUX port."
                                           Margin="0,0,0,12" />
-                                <TextBlock Grid.Row="2" Text="Speaker level" VerticalAlignment="Center" />
-                                <TextBlock Grid.Row="2" Grid.Column="1"
+                                <DockPanel Grid.Row="2" Grid.ColumnSpan="2" Margin="0,0,0,8">
+                                    <TextBlock Text="Audio source" VerticalAlignment="Center"
+                                               Margin="0,0,10,0"
+                                               ToolTip="Default captures the normal endpoint mix. Choose an app to stream only that app." />
+                                    <ComboBox ItemsSource="{Binding ControllerAudioSourceChoices}"
+                                              DisplayMemberPath="Name" SelectedValuePath="EndpointId"
+                                              SelectedValue="{Binding ControllerAudioSourceId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                              IsEnabled="{Binding AudioHapticsSpeakerOverrideActive, Converter={StaticResource InverseBoolConverter}}"
+                                              MinWidth="230" MaxWidth="330" HorizontalAlignment="Stretch" />
+                                </DockPanel>
+                                <Border Grid.Row="3" Grid.ColumnSpan="2" Margin="0,0,0,10" Padding="8,5"
+                                        CornerRadius="4" Background="#26FFB020"
+                                        BorderBrush="#80FFB020" BorderThickness="1"
+                                        Visibility="{Binding AudioHapticsSpeakerOverrideActive, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <TextBlock Text="Audio Haptics is streaming its selected app here and temporarily overrides this source. Turn off Play this app through controller in Audio Haptics to restore it."
+                                               TextWrapping="Wrap" FontSize="11" Foreground="#FFFFC45C" />
+                                </Border>
+                                <TextBlock Grid.Row="4" Text="Speaker level" VerticalAlignment="Center" />
+                                <TextBlock Grid.Row="4" Grid.Column="1"
                                            Text="{Binding SpeakerVolumePercent, StringFormat={}{0}%}"
                                            Foreground="{DynamicResource AccentColor}" />
-                                 <Slider Grid.Row="3" Grid.ColumnSpan="2" Margin="0,7,0,14"
+                                 <Slider Grid.Row="5" Grid.ColumnSpan="2" Margin="0,7,0,14"
                                          Style="{StaticResource OverviewQuickSliderStyle}"
                                         Minimum="0" Maximum="100" TickFrequency="1"
                                         Value="{Binding SpeakerVolumePercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
-                                <TextBlock Grid.Row="4" Text="Headset / AUX level" VerticalAlignment="Center"
+                                <TextBlock Grid.Row="6" Text="Headset / AUX level" VerticalAlignment="Center"
                                            ToolTip="Controls the controller headset jack independently from its built-in speaker." />
-                                <TextBlock Grid.Row="4" Grid.Column="1"
+                                <TextBlock Grid.Row="6" Grid.Column="1"
                                            Text="{Binding HeadphoneVolumePercent, StringFormat={}{0}%}"
                                            Foreground="{DynamicResource AccentColor}" />
-                                <Slider Grid.Row="5" Grid.ColumnSpan="2" Margin="0,7,0,2"
+                                <Slider Grid.Row="7" Grid.ColumnSpan="2" Margin="0,7,0,2"
                                         Style="{StaticResource OverviewQuickSliderStyle}"
                                         Minimum="0" Maximum="100" TickFrequency="1"
                                         Value="{Binding HeadphoneVolumePercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />

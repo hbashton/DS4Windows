@@ -410,5 +410,15 @@ namespace DS4WindowsTests
             Assert.IsTrue((flags &
                 NAudio.CoreAudioApi.AudioClientStreamFlags.SrcDefaultQuality) != 0);
         }
+
+        [TestMethod]
+        public void AppCaptureUsesControllerNativeMediaRate()
+        {
+            using var capture = new ProcessLoopbackWaveCapture(1);
+
+            Assert.AreEqual(48000, capture.WaveFormat.SampleRate);
+            Assert.AreEqual(2, capture.WaveFormat.Channels);
+            Assert.AreEqual(16, capture.WaveFormat.BitsPerSample);
+        }
     }
 }

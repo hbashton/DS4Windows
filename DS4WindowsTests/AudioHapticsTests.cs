@@ -396,7 +396,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void AppCaptureRequestsWindowsFormatConversion()
+        public void AppCaptureUsesReferenceEventDrivenFlags()
         {
             NAudio.CoreAudioApi.AudioClientStreamFlags flags =
                 ProcessLoopbackWaveCapture.CaptureStreamFlags;
@@ -405,61 +405,22 @@ namespace DS4WindowsTests
                 NAudio.CoreAudioApi.AudioClientStreamFlags.Loopback) != 0);
             Assert.IsTrue((flags &
                 NAudio.CoreAudioApi.AudioClientStreamFlags.EventCallback) != 0);
-            Assert.IsTrue((flags &
+            Assert.IsFalse((flags &
                 NAudio.CoreAudioApi.AudioClientStreamFlags.AutoConvertPcm) != 0);
-            Assert.IsTrue((flags &
+            Assert.IsFalse((flags &
                 NAudio.CoreAudioApi.AudioClientStreamFlags.SrcDefaultQuality) != 0);
         }
 
         [TestMethod]
-        public void AppCaptureUsesControllerNativeMediaRate()
+        public void AppCaptureUsesReferenceProcessLoopbackFormat()
         {
             using var capture = new ProcessLoopbackWaveCapture(1);
 
-            Assert.AreEqual(48000, capture.WaveFormat.SampleRate);
+            Assert.AreEqual(44100, capture.WaveFormat.SampleRate);
             Assert.AreEqual(2, capture.WaveFormat.Channels);
-            Assert.AreEqual(32, capture.WaveFormat.BitsPerSample);
-            Assert.AreEqual(NAudio.Wave.WaveFormatEncoding.IeeeFloat,
+            Assert.AreEqual(16, capture.WaveFormat.BitsPerSample);
+            Assert.AreEqual(NAudio.Wave.WaveFormatEncoding.Pcm,
                 capture.WaveFormat.Encoding);
-        }
-
-        [TestMethod]
-        public void QuietProcessLoopbackPcmIsRaisedWithoutClipping()
-        {
-            var normalizer = new ProcessLoopbackWaveCapture
-                .ProcessLoopbackLevelNormalizer();
-            float[] input = Enumerable.Range(0, 960)
-                .Select(index => (float)Math.Sin(index * Math.PI / 24.0) *
-                    0.05f).ToArray();
-            byte[] pcm = new byte[input.Length * sizeof(float)];
-            Buffer.BlockCopy(input, 0, pcm, 0, pcm.Length);
-
-            normalizer.Normalize(pcm, pcm.Length);
-
-            float[] output = new float[input.Length];
-            Buffer.BlockCopy(pcm, 0, output, 0, pcm.Length);
-            Assert.IsTrue(output.Max(value => Math.Abs(value)) > 0.05f);
-            Assert.IsTrue(output.All(value => Math.Abs(value) <= 0.98f));
-            Assert.IsTrue(normalizer.CurrentMakeupGain > 1.0f);
-        }
-
-        [TestMethod]
-        public void FullLevelProcessLoopbackPcmIsNotAmplified()
-        {
-            var normalizer = new ProcessLoopbackWaveCapture
-                .ProcessLoopbackLevelNormalizer();
-            float[] input = Enumerable.Range(0, 960)
-                .Select(index => (float)Math.Sin(index * Math.PI / 24.0) *
-                    0.8f).ToArray();
-            byte[] pcm = new byte[input.Length * sizeof(float)];
-            Buffer.BlockCopy(input, 0, pcm, 0, pcm.Length);
-
-            normalizer.Normalize(pcm, pcm.Length);
-
-            float[] output = new float[input.Length];
-            Buffer.BlockCopy(pcm, 0, output, 0, pcm.Length);
-            CollectionAssert.AreEqual(input, output);
-            Assert.AreEqual(1.0f, normalizer.CurrentMakeupGain, 0.0001f);
         }
 
         [TestMethod]

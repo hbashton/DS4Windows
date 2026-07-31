@@ -42,9 +42,10 @@ namespace DS4Windows
             }
 
             fixedProcessId = ResolveCaptureRootProcessId(processId);
-            // Match the controller media clock so app-only capture does not
-            // incur a mandatory 44.1 -> 48 kHz conversion before encoding.
-            WaveFormat = WaveFormat.CreateIeeeFloatWaveFormat(48000, 2);
+            // Match the proven process-loopback contract. Both speaker
+            // routing and Audio Haptics consume this untouched PCM through
+            // their existing downstream resamplers.
+            WaveFormat = new WaveFormat(44100, 16, 2);
         }
 
         private ProcessLoopbackWaveCapture(int automaticSlot,
@@ -59,20 +60,16 @@ namespace DS4Windows
             automaticSettings = (settings ??
                 new AudioHapticsProfileSettings()).Clone();
             automaticDetector = new AutomaticGameAudioDetector();
-            WaveFormat = WaveFormat.CreateIeeeFloatWaveFormat(48000, 2);
+            WaveFormat = new WaveFormat(44100, 16, 2);
         }
 
         public WaveFormat WaveFormat { get; set; }
-        // Process-loopback activation is a virtual render endpoint. Windows'
-        // reference implementation explicitly asks the audio engine to
-        // convert the selected app's native mix into our fixed PCM format.
-        // Omitting these flags made 48 kHz float apps sound harsh and
-        // time-warped when streamed through the controller.
+        // Process-loopback activation is a virtual render endpoint. Use the
+        // same shared event-driven flags as the proven app-capture reference;
+        // its fixed PCM contract is accepted directly by the audio engine.
         internal const AudioClientStreamFlags CaptureStreamFlags =
             AudioClientStreamFlags.Loopback |
-            AudioClientStreamFlags.EventCallback |
-            AudioClientStreamFlags.AutoConvertPcm |
-            AudioClientStreamFlags.SrcDefaultQuality;
+            AudioClientStreamFlags.EventCallback;
         public int CurrentProcessId => Volatile.Read(ref currentProcessId);
         public string CurrentSourceDisplayName
         {
@@ -674,8 +671,6 @@ namespace DS4Windows
             private readonly WaveFormat waveFormat;
             private readonly string registryKey;
             private readonly object subscriberLock = new();
-            private readonly ProcessLoopbackLevelNormalizer levelNormalizer =
-                new();
             private readonly List<ProcessCaptureSubscriber> subscribers =
                 new();
             private byte[] scratch = Array.Empty<byte>();
@@ -691,16 +686,13 @@ namespace DS4Windows
                 this.registryKey = registryKey;
                 audioClient = ProcessLoopbackAudioClient.Activate(processId,
                     TimeSpan.FromSeconds(5));
-                // Process loopback is a virtual audio device, not a physical
-                // endpoint. Match Microsoft's ApplicationLoopback reference:
-                // in shared event-driven mode both requested durations are
-                // zero so the audio engine selects the native periodicity.
-                // Supplying our controller's 5 ms capture preference here can
-                // successfully initialize while never producing sample-ready
-                // notifications on some Windows audio-engine configurations.
+                // Match the proven reference contract: 10 ms shared
+                // process-loopback buffer, event-driven delivery, and the
+                // fixed 44.1 kHz stereo PCM format above.
                 audioClient.Initialize(AudioClientShareMode.Shared,
                     CaptureStreamFlags,
-                    0, 0, waveFormat, Guid.Empty);
+                    TimeSpan.FromMilliseconds(10).Ticks, 0, waveFormat,
+                    Guid.Empty);
                 audioClient.SetEventHandle(
                     captureEvent.SafeWaitHandle.DangerousGetHandle());
                 captureClient = audioClient.AudioCaptureClient;
@@ -842,20 +834,6 @@ namespace DS4Windows
                         captureClient.ReleaseBuffer(framesAvailable);
                     }
 
-                    // Application loopback is captured before output-endpoint
-                    // gain and DSP. On real systems this can be several times
-                    // quieter than loopback from the system mix, even with the
-                    // application's session volume at 100%. Normalize that
-                    // one shared PCM stream before it fans out so speaker
-                    // routing and Audio Haptics receive the same useful,
-                    // unclipped waveform without opening competing clients.
-                    if (waveFormat.Encoding ==
-                            WaveFormatEncoding.IeeeFloat &&
-                        waveFormat.BitsPerSample == 32)
-                    {
-                        levelNormalizer.Normalize(scratch, byteCount);
-                    }
-
                     // Never hold an IAudioCaptureClient packet while speaker
                     // processing or Audio Haptics runs. The Windows engine can
                     // reuse its packet immediately, and both consumers receive
@@ -938,90 +916,6 @@ namespace DS4Windows
             }
         }
 
-        /// <summary>
-        /// Restores useful loudness to process-loopback PCM, which Windows
-        /// exposes before output-endpoint amplification and enhancements. The
-        /// estimator follows packet RMS without buffering, retains program
-        /// dynamics across short quiet passages, and caps each packet below
-        /// full scale so a sudden transient cannot clip.
-        /// </summary>
-        internal sealed class ProcessLoopbackLevelNormalizer
-        {
-            internal const float TargetRms = 0.06f;
-            internal const float MaximumMakeupGain = 12.0f;
-            private const float SilenceFloor = 0.00005f;
-            private const float LevelAttack = 0.25f;
-            private const float LevelRelease = 0.01f;
-            private const float GainIncreaseRate = 0.05f;
-            private const float GainDecreaseRate = 0.50f;
-            private const float PeakCeiling = 0.98f;
-
-            private float smoothedRms;
-            private float makeupGain = 1.0f;
-            private bool initialized;
-
-            public float CurrentMakeupGain => makeupGain;
-
-            public void Normalize(byte[] buffer, int byteCount)
-            {
-                if (buffer == null || byteCount < sizeof(float)) return;
-                int alignedByteCount = Math.Min(buffer.Length, byteCount) & ~3;
-                Span<float> samples = MemoryMarshal.Cast<byte, float>(
-                    buffer.AsSpan(0, alignedByteCount));
-                if (samples.Length == 0) return;
-
-                double energy = 0.0;
-                float peak = 0.0f;
-                int finiteSamples = 0;
-                for (int index = 0; index < samples.Length; index++)
-                {
-                    float sample = samples[index];
-                    if (!float.IsFinite(sample))
-                    {
-                        samples[index] = 0.0f;
-                        continue;
-                    }
-                    float magnitude = Math.Abs(sample);
-                    energy += sample * sample;
-                    peak = Math.Max(peak, magnitude);
-                    finiteSamples++;
-                }
-
-                if (finiteSamples == 0) return;
-                float rms = (float)Math.Sqrt(energy / finiteSamples);
-                if (rms <= SilenceFloor) return;
-
-                if (!initialized)
-                {
-                    smoothedRms = rms;
-                    makeupGain = CalculateTargetGain(rms);
-                    initialized = true;
-                }
-                else
-                {
-                    float levelRate = rms > smoothedRms ? LevelAttack :
-                        LevelRelease;
-                    smoothedRms += (rms - smoothedRms) * levelRate;
-                    float targetGain = CalculateTargetGain(smoothedRms);
-                    float gainRate = targetGain < makeupGain ?
-                        GainDecreaseRate : GainIncreaseRate;
-                    makeupGain += (targetGain - makeupGain) * gainRate;
-                }
-
-                float appliedGain = Math.Min(makeupGain,
-                    PeakCeiling / Math.Max(peak, SilenceFloor));
-                if (appliedGain <= 1.0001f) return;
-                for (int index = 0; index < samples.Length; index++)
-                {
-                    samples[index] = Math.Clamp(samples[index] * appliedGain,
-                        -PeakCeiling, PeakCeiling);
-                }
-            }
-
-            internal static float CalculateTargetGain(float rms) =>
-                Math.Clamp(TargetRms / Math.Max(rms, SilenceFloor),
-                    1.0f, MaximumMakeupGain);
-        }
     }
 
     internal sealed class ProcessAudioSourceChangedEventArgs : EventArgs

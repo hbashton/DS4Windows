@@ -37,7 +37,6 @@ namespace DS4WindowsTests
                         "BridgeProfileComboBoxStyle"));
                     Assert.IsNotNull(application.TryFindResource(
                         "BridgeDescribedCheckBoxStyle"));
-                    application.Shutdown();
                 }
                 catch (Exception ex)
                 {

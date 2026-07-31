@@ -2024,6 +2024,22 @@ Suspend support not enabled.", true);
             StartStopBtn.IsEnabled = true;
         }
 
+        private void ReclaimSteamInputCk_Click(object sender, RoutedEventArgs e)
+        {
+            bool enabled = reclaimSteamInputCk.IsChecked == true;
+            Global.ReclaimSteamInput = enabled;
+            if (enabled && hideDS4ContCk.IsChecked != true)
+            {
+                hideDS4ContCk.IsChecked = true;
+                Global.UseExclusiveMode = true;
+            }
+
+            if (enabled)
+            {
+                HideDS4ContCk_Click(hideDS4ContCk, e);
+            }
+        }
+
         private void UseOscServerCk_Click(object sender, RoutedEventArgs e)
         {
             bool status = useOscServerCk.IsChecked == true;

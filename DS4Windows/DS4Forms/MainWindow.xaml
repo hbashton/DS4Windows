@@ -466,6 +466,11 @@
                               ToolTip="Prevents games from seeing both the physical controller and its virtual output. HidHide is recommended on current Windows versions."
                               Style="{StaticResource BridgeDescribedCheckBoxStyle}">
                         </CheckBox>
+                        <CheckBox x:Name="reclaimSteamInputCk" Content="Reclaim controller from Steam Input automatically"
+                              Margin="{StaticResource spaceMargin}" IsChecked="{Binding ReclaimSteamInput}"
+                              Click="ReclaimSteamInputCk_Click"
+                              ToolTip="Cloaks the physical controller with HidHide, then safely restarts only its HID collection so Steam releases any handle it opened first. The virtual controller remains available to games."
+                              Style="{StaticResource BridgeDescribedCheckBoxStyle}" />
                         <StackPanel Orientation="Horizontal" Margin="{StaticResource spaceMargin}">
                             <CheckBox x:Name="swipeTouchCk" Content="{lex:Loc SwipeTouchpadToSwitchProfiles}" VerticalAlignment="Center"
                                   IsChecked="{Binding SwipeTouchSwitchProfile}"

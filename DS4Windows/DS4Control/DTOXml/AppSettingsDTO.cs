@@ -98,6 +98,16 @@ namespace DS4WinWPF.DS4Control.DTOXml
         [XmlIgnore]
         public bool UseExclusiveMode { get; private set; }
 
+        [XmlElement("ReclaimSteamInput")]
+        public string ReclaimSteamInputString
+        {
+            get => ReclaimSteamInput.ToString();
+            set => ReclaimSteamInput = XmlDataUtilities.StrToBool(value);
+        }
+
+        [XmlIgnore]
+        public bool ReclaimSteamInput { get; private set; }
+
         [XmlIgnore]
         public bool StartMinimized { get; private set; }
         [XmlElement("startMinimized")]
@@ -843,6 +853,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
         public void MapFrom(BackingStore source)
         {
             UseExclusiveMode = source.useExclusiveMode;
+            ReclaimSteamInput = source.reclaimSteamInput;
             StartMinimized = source.startMinimized;
             MinimizeToTaskbar = source.minToTaskbar;
             ProcessPriority = source.processPriority;
@@ -944,6 +955,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
         public void MapTo(BackingStore destination)
         {
             destination.useExclusiveMode = UseExclusiveMode;
+            destination.reclaimSteamInput = ReclaimSteamInput;
             destination.startMinimized = StartMinimized;
             destination.minToTaskbar = MinimizeToTaskbar;
             destination.processPriority = ProcessPriority;

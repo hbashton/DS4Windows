@@ -43,6 +43,7 @@ namespace DS4WindowsTests
 
 <Profile>
   <useExclusiveMode>False</useExclusiveMode>
+  <ReclaimSteamInput>False</ReclaimSteamInput>
   <startMinimized>False</startMinimized>
   <minimizeToTaskbar>False</minimizeToTaskbar>
   <formWidth>782</formWidth>
@@ -133,6 +134,27 @@ namespace DS4WindowsTests
             // Check settings
             DateTime.TryParse(dto.LastCheckString, out DateTime tempLastChecked);
             Assert.AreEqual(tempLastChecked, tempStore.lastChecked);
+        }
+
+        [TestMethod]
+        public void SteamInputReclaimSettingRoundTrips()
+        {
+            string enabledXml = appSettingsXml.Replace(
+                "<ReclaimSteamInput>False</ReclaimSteamInput>",
+                "<ReclaimSteamInput>True</ReclaimSteamInput>");
+            XmlSerializer serializer = new XmlSerializer(typeof(AppSettingsDTO));
+            using StringReader reader = new StringReader(enabledXml);
+            AppSettingsDTO source = (AppSettingsDTO)serializer.Deserialize(reader);
+            BackingStore store = new BackingStore();
+            source.MapTo(store);
+            Assert.IsTrue(store.reclaimSteamInput);
+
+            AppSettingsDTO roundTrip = new AppSettingsDTO();
+            roundTrip.MapFrom(store);
+            using StringWriter writer = new StringWriter();
+            serializer.Serialize(writer, roundTrip);
+            StringAssert.Contains(writer.ToString(),
+                "<ReclaimSteamInput>True</ReclaimSteamInput>");
         }
 
         [TestMethod]

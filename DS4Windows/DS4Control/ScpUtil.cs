@@ -1624,6 +1624,12 @@ namespace DS4Windows
         {
             return m_Config.useExclusiveMode;
         }
+
+        public static bool ReclaimSteamInput
+        {
+            set { m_Config.reclaimSteamInput = value; }
+            get { return m_Config.reclaimSteamInput; }
+        }
         public static DateTime LastChecked
         {
             set { m_Config.lastChecked = value; }
@@ -4059,6 +4065,7 @@ namespace DS4Windows
           new int[1] { DEFAULT_TOUCH_DIS_INVERT_TRIGGER}, new int[1] { DEFAULT_TOUCH_DIS_INVERT_TRIGGER }, new int[1] { DEFAULT_TOUCH_DIS_INVERT_TRIGGER },
           new int[1] { DEFAULT_TOUCH_DIS_INVERT_TRIGGER }, new int[1] { DEFAULT_TOUCH_DIS_INVERT_TRIGGER}, new int[1] { DEFAULT_TOUCH_DIS_INVERT_TRIGGER } };
         public Boolean useExclusiveMode = false; // Re-enable Ex Mode
+        public bool reclaimSteamInput = false;
 
         public const int DEFAULT_FORM_WIDTH = 782;
         public int formWidth = DEFAULT_FORM_WIDTH;
@@ -8455,6 +8462,8 @@ namespace DS4Windows
 
                     try { Item = m_Xdoc.SelectSingleNode("/Profile/useExclusiveMode"); Boolean.TryParse(Item.InnerText, out useExclusiveMode); } // Ex Mode
                     catch { missingSetting = true; } // Ex Mode
+                    try { Item = m_Xdoc.SelectSingleNode("/Profile/ReclaimSteamInput"); Boolean.TryParse(Item.InnerText, out reclaimSteamInput); }
+                    catch { missingSetting = true; }
                     try { Item = m_Xdoc.SelectSingleNode("/Profile/startMinimized"); Boolean.TryParse(Item.InnerText, out startMinimized); }
                     catch { missingSetting = true; }
                     try { Item = m_Xdoc.SelectSingleNode("/Profile/minimizeToTaskbar"); Boolean.TryParse(Item.InnerText, out minToTaskbar); }
@@ -8836,6 +8845,7 @@ namespace DS4Windows
 
             // Ex Mode (+1 line)
             XmlNode xmlUseExclNode = m_Xdoc.CreateNode(XmlNodeType.Element, "useExclusiveMode", null); xmlUseExclNode.InnerText = useExclusiveMode.ToString(); rootElement.AppendChild(xmlUseExclNode);
+            XmlNode xmlReclaimSteamInput = m_Xdoc.CreateNode(XmlNodeType.Element, "ReclaimSteamInput", null); xmlReclaimSteamInput.InnerText = reclaimSteamInput.ToString(); rootElement.AppendChild(xmlReclaimSteamInput);
             XmlNode xmlStartMinimized = m_Xdoc.CreateNode(XmlNodeType.Element, "startMinimized", null); xmlStartMinimized.InnerText = startMinimized.ToString(); rootElement.AppendChild(xmlStartMinimized);
             XmlNode xmlminToTaskbar = m_Xdoc.CreateNode(XmlNodeType.Element, "minimizeToTaskbar", null); xmlminToTaskbar.InnerText = minToTaskbar.ToString(); rootElement.AppendChild(xmlminToTaskbar);
             XmlNode xmlFormWidth = m_Xdoc.CreateNode(XmlNodeType.Element, "formWidth", null); xmlFormWidth.InnerText = formWidth.ToString(); rootElement.AppendChild(xmlFormWidth);

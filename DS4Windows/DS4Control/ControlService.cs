@@ -49,6 +49,9 @@ namespace DS4Windows
         private readonly object hidHideSessionLock = new object();
         private readonly HashSet<string> hidHideSessionManagedInstanceIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> hidHidePersistentManagedInstanceIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly object steamInputReclaimLock = new object();
+        private readonly Dictionary<string, DateTime> steamInputReclaimAttempts =
+            new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
         private bool? hidHideActiveStateBeforeManagedSession;
         // Might be useful for ScpVBus build
         public const int EXPANDED_CONTROLLER_COUNT = 8;
@@ -1074,6 +1077,146 @@ namespace DS4Windows
 
             LogDebug($"HidHide persistent hiding enabled for {dev.DisplayName} ({instanceId})", false);
             return true;
+        }
+
+        private void QueueSteamInputReclaim(DS4Device device)
+        {
+            if (!Global.ReclaimSteamInput || !Global.hidHideInstalled ||
+                device?.CurrentExclusiveStatus !=
+                    DS4Device.ExclusiveStatus.HidHideAffected ||
+                !IsSteamClientRunning())
+            {
+                return;
+            }
+
+            string instanceId = Global.GetInstanceIdFromDevicePath(
+                device.HidDevice.DevicePath);
+            if (string.IsNullOrWhiteSpace(instanceId))
+            {
+                return;
+            }
+
+            DateTime now = DateTime.UtcNow;
+            lock (steamInputReclaimLock)
+            {
+                if (steamInputReclaimAttempts.TryGetValue(instanceId,
+                        out DateTime previousAttempt) &&
+                    now - previousAttempt < TimeSpan.FromSeconds(10))
+                {
+                    return;
+                }
+
+                steamInputReclaimAttempts[instanceId] = now;
+            }
+
+            string displayName = device.DisplayName;
+            Task task = Task.Run(async () =>
+            {
+                bool success = false;
+                try
+                {
+                    if (!Global.IsAdministrator())
+                    {
+                        LogDebug("Steam Input reclaim requires DS4Windows to " +
+                            "run as administrator.", true);
+                        return;
+                    }
+
+                    ProcessStartInfo startInfo = new ProcessStartInfo
+                    {
+                        FileName = Path.Combine(Environment.SystemDirectory,
+                            "pnputil.exe"),
+                        CreateNoWindow = true,
+                        WindowStyle = ProcessWindowStyle.Hidden,
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                    };
+                    startInfo.ArgumentList.Add("/restart-device");
+                    startInfo.ArgumentList.Add(instanceId);
+
+                    using Process process = Process.Start(startInfo);
+                    if (process == null)
+                    {
+                        return;
+                    }
+
+                    Task<string> outputTask = process.StandardOutput.ReadToEndAsync();
+                    Task<string> errorTask = process.StandardError.ReadToEndAsync();
+                    using CancellationTokenSource timeout =
+                        new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                    try
+                    {
+                        await process.WaitForExitAsync(timeout.Token)
+                            .ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        try { process.Kill(entireProcessTree: true); }
+                        catch { }
+                        LogDebug($"Steam Input reclaim timed out for " +
+                            $"{displayName}.", true);
+                        return;
+                    }
+
+                    string output = await outputTask.ConfigureAwait(false);
+                    string error = await errorTask.ConfigureAwait(false);
+                    success = process.ExitCode == 0;
+                    if (success)
+                    {
+                        LogDebug($"Reclaimed {displayName} from Steam " +
+                            "Input; reconnecting its hidden HID collection.",
+                            false);
+                    }
+                    else
+                    {
+                        string detail = string.IsNullOrWhiteSpace(error)
+                            ? output : error;
+                        LogDebug($"Steam Input reclaim failed for " +
+                            $"{displayName}: {detail.Trim()}", true);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogDebug($"Steam Input reclaim failed for " +
+                        $"{displayName}: {ex.Message}", true);
+                }
+                finally
+                {
+                    if (!success)
+                    {
+                        lock (steamInputReclaimLock)
+                        {
+                            steamInputReclaimAttempts.Remove(instanceId);
+                        }
+                    }
+                }
+            });
+            Util.LogAssistBackgroundTask(task);
+        }
+
+        private static bool IsSteamClientRunning()
+        {
+            Process[] processes = null;
+            try
+            {
+                processes = Process.GetProcessesByName("steam");
+                return processes.Length > 0;
+            }
+            catch
+            {
+                return false;
+            }
+            finally
+            {
+                if (processes != null)
+                {
+                    foreach (Process process in processes)
+                    {
+                        process.Dispose();
+                    }
+                }
+            }
         }
 
         private void ReleaseHidHideManagedDevices()
@@ -2340,6 +2483,7 @@ namespace DS4Windows
 
             StartupDiag($"device.StartUpdate begin index={index}");
             device.StartUpdate();
+            QueueSteamInputReclaim(device);
             StartupDiag($"device.StartUpdate end index={index}");
             StartupDiag($"Controller prep end index={index}");
         }

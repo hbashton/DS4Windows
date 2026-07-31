@@ -1,0 +1,160 @@
+<Window x:Class="DS4WinWPF.DS4Forms.ViiperSetupPrompt"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="VIIPER virtual controller setup"
+        Width="620"
+        SizeToContent="Height"
+        MaxHeight="720"
+        ResizeMode="NoResize"
+        WindowStyle="None"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource SurfaceBackgroundColor}"
+        Foreground="{DynamicResource ForegroundColor}">
+    <Border Background="{DynamicResource SurfaceBackgroundColor}"
+            BorderBrush="{DynamicResource BorderColor}"
+            BorderThickness="1"
+            CornerRadius="8">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0"
+                    Background="{DynamicResource SidebarBackgroundColor}"
+                    BorderBrush="{DynamicResource BorderColor}"
+                    BorderThickness="0,0,0,1"
+                    CornerRadius="8,8,0,0"
+                    Padding="18,12"
+                    PreviewMouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+                <Grid>
+                    <TextBlock Text="VIIPER virtual controller setup"
+                               FontSize="14"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center" />
+                    <Button HorizontalAlignment="Right"
+                            VerticalAlignment="Center"
+                            Width="30"
+                            Height="30"
+                            Padding="0"
+                            Content="×"
+                            FontSize="18"
+                            Style="{StaticResource BridgeSecondaryButtonStyle}"
+                            Click="CloseButton_Click"
+                            ToolTip="Close" />
+                </Grid>
+            </Border>
+
+            <ScrollViewer Grid.Row="1"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Margin="26,24,26,22">
+                    <Grid Margin="0,0,0,18">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="52" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Border Width="40"
+                                Height="40"
+                                CornerRadius="20"
+                                Background="{DynamicResource NavigationSelectionColor}"
+                                BorderBrush="{DynamicResource AccentColor}"
+                                BorderThickness="1">
+                            <TextBlock Text="i"
+                                       Foreground="{DynamicResource AccentColor}"
+                                       FontSize="24"
+                                       FontWeight="Bold"
+                                       FontFamily="Segoe UI"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center" />
+                        </Border>
+                        <StackPanel Grid.Column="1">
+                            <TextBlock Text="VIIPER needs attention"
+                                       Style="{StaticResource BridgeSectionTitleStyle}"
+                                       FontSize="20" />
+                            <TextBlock Text="This profile uses a VIIPER virtual controller output."
+                                       Foreground="{DynamicResource MutedForegroundColor}"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Grid>
+
+                    <Border Style="{StaticResource BridgeCardStyle}"
+                            Padding="16"
+                            Margin="0,0,0,16">
+                        <StackPanel>
+                            <TextBlock Text="What DS4Windows needs"
+                                       FontWeight="SemiBold"
+                                       Margin="0,0,0,7" />
+                            <TextBlock Text="• VIIPER helper/server&#x0a;• usbip-win2 Windows USB/IP driver"
+                                       TextWrapping="Wrap"
+                                       LineHeight="22" />
+                            <Border Height="1"
+                                    Background="{DynamicResource BorderColor}"
+                                    Margin="0,12,0,10" />
+                            <TextBlock Text="Current status"
+                                       Foreground="{DynamicResource MutedForegroundColor}"
+                                       FontSize="12" />
+                            <TextBlock x:Name="statusText"
+                                       TextWrapping="Wrap"
+                                       Margin="0,3,0,0" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border x:Name="existingViiperPanel"
+                            Background="{DynamicResource RaisedBackgroundColor}"
+                            BorderBrush="{DynamicResource AccentColor}"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="14"
+                            Margin="0,0,0,16"
+                            Visibility="Collapsed">
+                        <StackPanel>
+                            <TextBlock Text="Keep the VIIPER you already launched"
+                                       FontWeight="SemiBold" />
+                            <TextBlock Text="DS4Windows can trust this executable and keep its RunVIIPER startup task pointed here:"
+                                       Foreground="{DynamicResource MutedForegroundColor}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,4,0,7" />
+                            <TextBlock x:Name="existingViiperPathText"
+                                       FontFamily="Consolas"
+                                       FontSize="11"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+
+                    <CheckBox x:Name="suppressPromptCheck"
+                              Content="Don't show this setup prompt again"
+                              ToolTip="You can turn setup prompts back on from Settings → VIIPER Virtual Controller Support."
+                              Style="{StaticResource BridgeDescribedCheckBoxStyle}"
+                              Margin="0,0,0,20" />
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Button Content="Not now"
+                                MinWidth="94"
+                                Style="{StaticResource BridgeSecondaryButtonStyle}"
+                                HorizontalAlignment="Left"
+                                Click="NotNowButton_Click" />
+                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                            <Button x:Name="useExistingButton"
+                                    Content="Use this VIIPER"
+                                    MinWidth="132"
+                                    Margin="0,0,10,0"
+                                    Visibility="Collapsed"
+                                    Style="{StaticResource BridgeSecondaryButtonStyle}"
+                                    Click="UseExistingButton_Click" />
+                            <Button Content="Install standard VIIPER"
+                                    MinWidth="164"
+                                    Style="{StaticResource BridgePrimaryButtonStyle}"
+                                    Click="InstallButton_Click" />
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+    </Border>
+</Window>

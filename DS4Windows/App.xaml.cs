@@ -99,6 +99,15 @@ namespace DS4WinWPF
             }
 
             if (DS4Windows.ViiperSetupManager.
+                TryRunStartupTaskRegistrationHelper(e.Args,
+                    out int viiperTaskExitCode))
+            {
+                runShutdown = false;
+                Current.Shutdown(viiperTaskExitCode);
+                return;
+            }
+
+            if (DS4Windows.ViiperSetupManager.
                 TryRunElevatedInstallerHost(e.Args,
                     out int viiperInstallerExitCode))
             {
@@ -302,12 +311,20 @@ namespace DS4WinWPF
                 logger.Info("Default config created");
             }
 
+            // Apply the saved theme before showing any startup UI. This keeps
+            // prerequisite prompts consistent with the main application in
+            // both explicit and Windows-following theme modes.
+            SetUICulture(DS4Windows.Global.UseLang);
+            ChangeTheme(DS4Windows.Global.UseCurrentTheme, false);
+
             // VIIPER is the only virtual-controller backend. Make a missing
             // backend actionable at startup instead of letting profile output
             // fail later with an opaque device error. The installer requests
             // elevation itself, so DS4Windows does not need to stay elevated.
             if (Environment.Is64BitProcess)
             {
+                DS4Windows.ViiperSetupManager.
+                    RefreshSelectedStartupTaskOnLaunch();
                 DS4Windows.ViiperSetupManager.EnsureReadyWithPrompt(null);
             }
             else
@@ -331,11 +348,6 @@ namespace DS4WinWPF
             {
                 StartupDiag(logger, "Global.LoadActions end success");
             }
-
-            // Have app use selected culture
-            SetUICulture(DS4Windows.Global.UseLang);
-            DS4Windows.AppThemeChoice themeChoice = DS4Windows.Global.UseCurrentTheme;
-            ChangeTheme(DS4Windows.Global.UseCurrentTheme, false);
 
             StartupDiag(logger, "LoadLinkedProfiles begin");
             DS4Windows.Global.LoadLinkedProfiles();

@@ -40,6 +40,30 @@
             </Style.Triggers>
         </Style>
 
+        <Style x:Key="OverviewInsetCardStyle" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource RaisedBackgroundColor}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderColor}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="15" />
+            <Setter Property="Margin" Value="0,0,0,12" />
+        </Style>
+
+        <Style x:Key="OverviewSettingsComboBoxStyle" TargetType="ComboBox"
+               BasedOn="{StaticResource BridgeProfileComboBoxStyle}">
+            <Setter Property="Width" Value="Auto" />
+            <!-- Keep the chrome on whole device pixels at common Windows DPI
+                 scales. 38 DIP becomes 47.5 px at 125%, which clipped the
+                 lower one-pixel border and rounded corners. -->
+            <Setter Property="Height" Value="40" />
+            <Setter Property="MinHeight" Value="40" />
+            <Setter Property="SnapsToDevicePixels" Value="True" />
+            <Setter Property="UseLayoutRounding" Value="True" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
+
         <Style x:Key="OverviewQuickSliderStyle" TargetType="Slider">
             <Setter Property="Height" Value="28" />
             <Setter Property="VerticalAlignment" Value="Center" />
@@ -244,8 +268,14 @@
                             <TextBlock Text="CONNECTION" Style="{StaticResource OverviewEyebrowStyle}" />
                             <TextBlock Text="{Binding SelectedControllerConnection}" Margin="0,11,0,3"
                                        Style="{StaticResource OverviewValueStyle}" />
-                            <TextBlock Text="{Binding SelectedControllerLatency, StringFormat=Observed input rate {0}}"
+                            <TextBlock Text="Latency · polling rate" Margin="0,5,0,2"
+                                       FontSize="11"
                                        Foreground="{DynamicResource MutedForegroundColor}" />
+                            <TextBlock Text="{Binding SelectedControllerLatency}"
+                                       FontSize="12" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource AccentColor}"
+                                       TextWrapping="Wrap"
+                                       ToolTip="Observed input interval and effective polling frequency" />
                         </StackPanel>
                     </Border>
 
@@ -302,218 +332,249 @@
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="26" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
 
-                        <StackPanel Grid.ColumnSpan="3" Margin="0,0,0,18">
+                        <StackPanel Margin="0,0,0,18">
                             <TextBlock Text="Quick profile controls" FontSize="18" FontWeight="SemiBold" />
-                             <TextBlock Text="Changes are saved to the selected controller's active profile and applied automatically."
-                                        Margin="0,3,0,0" TextWrapping="Wrap"
-                                        Foreground="{DynamicResource MutedForegroundColor}" />
+                            <TextBlock Text="Every change is saved to the selected controller's active profile and applied automatically."
+                                       Margin="0,3,0,0" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource MutedForegroundColor}" />
                         </StackPanel>
 
                         <Grid Grid.Row="1">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="5*" />
+                                <ColumnDefinition Width="24" />
+                                <ColumnDefinition Width="6*" />
                             </Grid.ColumnDefinitions>
 
-                            <TextBlock Text="{Binding SelectedController.FeedbackControlLabel}"
-                                       FontWeight="SemiBold" />
-                            <TextBlock Grid.Column="1" Text="{Binding HapticStrengthPercent, StringFormat={}{0}%}"
-                                       FontWeight="SemiBold" Foreground="{DynamicResource AccentColor}" />
-                             <Slider Grid.Row="1" Grid.ColumnSpan="2" Margin="0,9,0,0"
-                                     Style="{StaticResource OverviewQuickSliderStyle}"
-                                    Minimum="0" Maximum="100" TickFrequency="1"
-                                    Value="{Binding HapticStrengthPercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
-                        </Grid>
-
-                        <StackPanel Grid.Row="2" Margin="0,19,0,0">
-                            <TextBlock Text="Emulated device" FontWeight="SemiBold" />
-                             <ComboBox ItemsSource="{Binding OutputControllerChoices}"
-                                      DisplayMemberPath="Name" SelectedValuePath="Type"
-                                      SelectedValue="{Binding SelectedOutputController, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                       Style="{StaticResource BridgeProfileComboBoxStyle}"
-                                       HorizontalAlignment="Left" Margin="0,8,0,0" />
-                            <TextBlock Text="Changing the output device briefly reloads this controller's profile."
-                                       Margin="0,6,0,0" TextWrapping="Wrap"
-                                       Foreground="{DynamicResource MutedForegroundColor}" FontSize="11" />
-                        </StackPanel>
-
-                        <Grid Grid.Row="1" Grid.RowSpan="2" Grid.Column="2">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-
-                            <StackPanel Grid.ColumnSpan="2" Margin="0,0,0,12">
-                                <TextBlock Text="{Binding SelectedController.ControllerAudioHeader}"
-                                           FontWeight="SemiBold" />
-                                <TextBlock Text="{Binding SelectedController.ControllerAudioDescription}"
-                                           Margin="0,3,0,0" FontSize="11" TextWrapping="Wrap"
-                                           Foreground="{DynamicResource MutedForegroundColor}" />
-                            </StackPanel>
-
-                            <Grid Grid.Row="1" Grid.RowSpan="3" Grid.ColumnSpan="2"
-                                  Style="{StaticResource OverviewSpeakerPanelStyle}">
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-
-                                 <CheckBox Grid.ColumnSpan="2" Content="Stream audio to controller"
-                                           Style="{StaticResource OverviewToggleStyle}"
-                                          IsChecked="{Binding SpeakerOutputEnabled, Mode=TwoWay}"
-                                          ToolTip="Streams the selected audio to the controller. Uses its built-in speaker unless Headset only routes it exclusively to the AUX port."
-                                          Margin="0,0,0,12" />
-                                <CheckBox Grid.Row="1" Grid.ColumnSpan="2"
-                                          Content="Headset only (mute controller speaker)"
-                                          Style="{StaticResource OverviewToggleStyle}"
-                                          IsChecked="{Binding HeadsetOnlyAudio, Mode=TwoWay}"
-                                          IsEnabled="{Binding SpeakerOutputEnabled}"
-                                          ToolTip="Mutes the built-in speaker while continuing the same stream through a headset connected to the controller's AUX port."
-                                          Margin="0,0,0,12" />
-                                <DockPanel Grid.Row="2" Grid.ColumnSpan="2" Margin="0,0,0,8">
-                                    <TextBlock Text="Audio source" VerticalAlignment="Center"
-                                               Margin="0,0,10,0"
-                                               ToolTip="Default captures the normal endpoint mix. Choose an app to stream only that app." />
-                                    <ComboBox ItemsSource="{Binding ControllerAudioSourceChoices}"
-                                              DisplayMemberPath="Name" SelectedValuePath="EndpointId"
-                                              SelectedValue="{Binding ControllerAudioSourceId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                              IsEnabled="{Binding AudioHapticsSpeakerOverrideActive, Converter={StaticResource InverseBoolConverter}}"
-                                              MinWidth="230" MaxWidth="330" HorizontalAlignment="Stretch" />
-                                </DockPanel>
-                                <Border Grid.Row="3" Grid.ColumnSpan="2" Margin="0,0,0,10" Padding="8,5"
-                                        CornerRadius="4" Background="#26FFB020"
-                                        BorderBrush="#80FFB020" BorderThickness="1"
-                                        Visibility="{Binding AudioHapticsSpeakerOverrideActive, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                    <TextBlock Text="Audio Haptics is streaming its selected app here and temporarily overrides this source. Turn off Play this app through controller in Audio Haptics to restore it."
-                                               TextWrapping="Wrap" FontSize="11" Foreground="#FFFFC45C" />
+                            <StackPanel>
+                                <Border Style="{StaticResource OverviewInsetCardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="Emulated controller" FontSize="15" FontWeight="SemiBold" />
+                                        <TextBlock Text="The virtual controller presented to games."
+                                                   Margin="0,3,0,11" FontSize="11" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource MutedForegroundColor}" />
+                                        <ComboBox ItemsSource="{Binding OutputControllerChoices}"
+                                                  SelectedValuePath="Type"
+                                                  SelectedValue="{Binding SelectedOutputController, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  Style="{StaticResource OverviewSettingsComboBoxStyle}">
+                                            <ComboBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                                </DataTemplate>
+                                            </ComboBox.ItemTemplate>
+                                        </ComboBox>
+                                        <TextBlock Text="Changing this setting saves the profile, then performs one controlled output reload."
+                                                   Margin="0,7,0,0" TextWrapping="Wrap" FontSize="11"
+                                                   Foreground="{DynamicResource MutedForegroundColor}" />
+                                    </StackPanel>
                                 </Border>
-                                <TextBlock Grid.Row="4" Text="Speaker level" VerticalAlignment="Center" />
-                                <TextBlock Grid.Row="4" Grid.Column="1"
-                                           Text="{Binding SpeakerVolumePercent, StringFormat={}{0}%}"
-                                           Foreground="{DynamicResource AccentColor}" />
-                                 <Slider Grid.Row="5" Grid.ColumnSpan="2" Margin="0,7,0,14"
-                                         Style="{StaticResource OverviewQuickSliderStyle}"
-                                        Minimum="0" Maximum="100" TickFrequency="1"
-                                        Value="{Binding SpeakerVolumePercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
-                                <TextBlock Grid.Row="6" Text="Headset / AUX level" VerticalAlignment="Center"
-                                           ToolTip="Controls the controller headset jack independently from its built-in speaker." />
-                                <TextBlock Grid.Row="6" Grid.Column="1"
-                                           Text="{Binding HeadphoneVolumePercent, StringFormat={}{0}%}"
-                                           Foreground="{DynamicResource AccentColor}" />
-                                <Slider Grid.Row="7" Grid.ColumnSpan="2" Margin="0,7,0,2"
-                                        Style="{StaticResource OverviewQuickSliderStyle}"
-                                        Minimum="0" Maximum="100" TickFrequency="1"
-                                        Value="{Binding HeadphoneVolumePercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
-                                <Expander Grid.Row="8" Grid.ColumnSpan="2" Header="Speaker processing"
-                                          Margin="0,8,0,0">
-                                    <Grid Margin="4,7,0,1">
+
+                                <Border Style="{StaticResource OverviewInsetCardStyle}">
+                                    <Grid>
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto" />
                                             <RowDefinition Height="Auto" />
                                         </Grid.RowDefinitions>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="150" />
+                                            <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <TextBlock Text="Dynamic range" VerticalAlignment="Center"
-                                                   ToolTip="Raises quiet detail and safely restrains loud effects without look-ahead latency." />
-                                        <ComboBox Grid.Column="1" SelectedIndex="{Binding SpeakerCompressionIndex, Mode=TwoWay}">
-                                            <ComboBoxItem Content="Off" />
-                                            <ComboBoxItem Content="Balanced" />
-                                            <ComboBoxItem Content="Strong" />
-                                        </ComboBox>
-                                        <TextBlock Grid.Row="1" Text="Bass / body" VerticalAlignment="Center"
-                                                   Margin="0,8,0,0"
-                                                   ToolTip="Adds body around 200 Hz while filtering unusable sub-bass." />
-                                        <DockPanel Grid.Row="1" Grid.Column="1" Margin="0,8,0,0">
-                                            <TextBlock DockPanel.Dock="Right" Margin="8,0,0,0"
-                                                       Text="{Binding SpeakerBassBoostDb, StringFormat={}{0} dB}" />
-                                            <Slider Minimum="0" Maximum="6" TickFrequency="1" IsSnapToTickEnabled="True"
-                                                    Value="{Binding SpeakerBassBoostDb, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
-                                        </DockPanel>
+                                        <TextBlock Text="{Binding SelectedController.FeedbackControlLabel}"
+                                                   FontSize="15" FontWeight="SemiBold" />
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding HapticStrengthPercent, StringFormat={}{0}%}"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource AccentColor}" />
+                                        <Slider Grid.Row="1" Grid.ColumnSpan="2" Margin="0,11,0,0"
+                                                Style="{StaticResource OverviewQuickSliderStyle}"
+                                                Minimum="0" Maximum="100" TickFrequency="1"
+                                                Value="{Binding HapticStrengthPercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
                                     </Grid>
-                                </Expander>
-                            </Grid>
+                                </Border>
 
-                            <StackPanel Grid.Row="4" Grid.ColumnSpan="2">
-                                 <CheckBox Content="{Binding SelectedController.MicrophoneToggleLabel}"
-                                           Style="{StaticResource OverviewToggleStyle}"
-                                          IsChecked="{Binding MicrophoneInputEnabled, Mode=TwoWay}"
-                                          IsEnabled="{Binding CanChangeMicrophoneInput}"
-                                          ToolTip="{Binding MicrophoneAvailabilityText}"
-                                          Margin="0,0,0,9" />
-                                <TextBlock Text="{Binding SelectedController.MicrophoneDescription}"
-                                           Margin="0,0,0,9" FontSize="11" TextWrapping="Wrap"
-                                           Foreground="{DynamicResource MutedForegroundColor}" />
-                                <TextBlock Margin="0,0,0,9" FontSize="11" TextWrapping="Wrap"
-                                           Foreground="{DynamicResource MutedForegroundColor}"
-                                           Text="{Binding MicrophoneAvailabilityText}"
-                                           Visibility="{Binding ShowMicrophoneAvailabilityMessage, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                <Grid IsEnabled="{Binding MicrophoneLevelControlsEnabled}">
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                    </Grid.RowDefinitions>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="Microphone level" />
-                                    <TextBlock Grid.Column="1"
-                                               Text="{Binding MicrophoneVolumePercent, StringFormat={}{0}%}"
-                                               Foreground="{DynamicResource AccentColor}" />
-                                     <Slider Grid.Row="1" Grid.ColumnSpan="2" Margin="0,7,0,0"
-                                             Style="{StaticResource OverviewQuickSliderStyle}"
-                                            Minimum="0" Maximum="100" TickFrequency="1"
-                                            Value="{Binding MicrophoneVolumePercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
-                                </Grid>
-                                <Grid Margin="0,10,0,0"
-                                      IsEnabled="{Binding MicrophoneLevelControlsEnabled}">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="150" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="Noise suppression" VerticalAlignment="Center" />
-                                    <ComboBox Grid.Column="1"
-                                              SelectedIndex="{Binding MicrophoneNoiseSuppressionIndex, Mode=TwoWay}">
-                                        <ComboBoxItem Content="Off" />
-                                        <ComboBoxItem Content="Balanced" />
-                                        <ComboBoxItem Content="Strong" />
-                                        <ComboBoxItem Content="NVIDIA AI"
-                                                      IsEnabled="{Binding NvidiaNoiseSuppressionAvailable}"
-                                                      ToolTip="{Binding NvidiaNoiseSuppressionAvailability}" />
-                                    </ComboBox>
-                                </Grid>
+                                <Border Style="{StaticResource OverviewInsetCardStyle}" Margin="0">
+                                    <Grid Style="{StaticResource OverviewSpeakerPanelStyle}">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Text="{Binding SelectedController.ControllerAudioHeader}"
+                                                   FontSize="15" FontWeight="SemiBold" />
+                                        <TextBlock Grid.Row="1"
+                                                   Text="{Binding SelectedController.ControllerAudioDescription}"
+                                                   Margin="0,3,0,13" FontSize="11" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource MutedForegroundColor}" />
+                                        <StackPanel Grid.Row="2">
+                                            <CheckBox Content="Stream audio to controller"
+                                                      Style="{StaticResource OverviewToggleStyle}"
+                                                      IsChecked="{Binding SpeakerOutputEnabled, Mode=TwoWay}"
+                                                      ToolTip="Streams the selected audio to the controller. Uses its built-in speaker unless Headset only routes it exclusively to the AUX port."
+                                                      Margin="0,0,0,12" />
+                                            <CheckBox Content="Headset only (mute controller speaker)"
+                                                      Style="{StaticResource OverviewToggleStyle}"
+                                                      IsChecked="{Binding HeadsetOnlyAudio, Mode=TwoWay}"
+                                                      IsEnabled="{Binding SpeakerOutputEnabled}"
+                                                      ToolTip="Mutes the built-in speaker while continuing the stream through a headset connected to the controller's AUX port."
+                                                      Margin="0,0,0,13" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="3">
+                                            <TextBlock Text="Audio source" Margin="0,0,0,7" FontWeight="SemiBold"
+                                                       ToolTip="Default captures the normal endpoint mix. Choose an app to stream only that app." />
+                                            <ComboBox ItemsSource="{Binding ControllerAudioSourceChoices}"
+                                                      SelectedValuePath="EndpointId"
+                                                      SelectedValue="{Binding ControllerAudioSourceId, Mode=OneWay}"
+                                                      SelectionChanged="ControllerAudioSourceCombo_SelectionChanged"
+                                                      IsEnabled="{Binding AudioHapticsSpeakerOverrideActive, Converter={StaticResource InverseBoolConverter}}"
+                                                      Style="{StaticResource OverviewSettingsComboBoxStyle}"
+                                                      ToolTip="{Binding SelectedItem.Name, RelativeSource={RelativeSource Self}}">
+                                                <ComboBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                                    </DataTemplate>
+                                                </ComboBox.ItemTemplate>
+                                            </ComboBox>
+                                        </StackPanel>
+                                        <Border Grid.Row="4" Margin="0,10,0,0" Padding="9,7"
+                                                CornerRadius="4" Background="#26FFB020"
+                                                BorderBrush="#80FFB020" BorderThickness="1"
+                                                Visibility="{Binding AudioHapticsSpeakerOverrideActive, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <TextBlock Text="Audio Haptics is supplying this stream. Turn off Play this app through controller to choose another source."
+                                                       TextWrapping="Wrap" FontSize="11" Foreground="#FFFFC45C" />
+                                        </Border>
+                                    </Grid>
+                                </Border>
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="2">
+                                <Border Style="{StaticResource OverviewInsetCardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="Output levels" FontSize="15" FontWeight="SemiBold" />
+                                        <Grid Margin="0,13,0,0">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="Controller speaker" />
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding SpeakerVolumePercent, StringFormat={}{0}%}"
+                                                       Foreground="{DynamicResource AccentColor}" />
+                                            <Slider Grid.Row="1" Grid.ColumnSpan="2" Margin="0,7,0,14"
+                                                    Style="{StaticResource OverviewQuickSliderStyle}"
+                                                    Minimum="0" Maximum="100" TickFrequency="1"
+                                                    Value="{Binding SpeakerVolumePercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
+                                            <TextBlock Grid.Row="2" Text="Headset / AUX"
+                                                       ToolTip="Controls the controller headset jack independently from its built-in speaker." />
+                                            <TextBlock Grid.Row="2" Grid.Column="1"
+                                                       Text="{Binding HeadphoneVolumePercent, StringFormat={}{0}%}"
+                                                       Foreground="{DynamicResource AccentColor}" />
+                                            <Slider Grid.Row="3" Grid.ColumnSpan="2" Margin="0,7,0,0"
+                                                    Style="{StaticResource OverviewQuickSliderStyle}"
+                                                    Minimum="0" Maximum="100" TickFrequency="1"
+                                                    Value="{Binding HeadphoneVolumePercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource OverviewInsetCardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="Speaker processing" FontSize="15" FontWeight="SemiBold" />
+                                        <Grid Margin="0,12,0,0">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="2*" />
+                                                <ColumnDefinition Width="3*" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="Dynamic range" VerticalAlignment="Center"
+                                                       ToolTip="Raises quiet detail and safely restrains loud effects without look-ahead latency." />
+                                            <ComboBox Grid.Column="1"
+                                                      Style="{StaticResource OverviewSettingsComboBoxStyle}"
+                                                      SelectedIndex="{Binding SpeakerCompressionIndex, Mode=TwoWay}">
+                                                <ComboBoxItem Content="Off" />
+                                                <ComboBoxItem Content="Balanced" />
+                                                <ComboBoxItem Content="Strong" />
+                                            </ComboBox>
+                                            <TextBlock Grid.Row="1" Text="Bass / body" VerticalAlignment="Center"
+                                                       Margin="0,13,0,0"
+                                                       ToolTip="Adds body around 200 Hz while filtering unusable sub-bass." />
+                                            <DockPanel Grid.Row="1" Grid.Column="1" Margin="0,13,0,0">
+                                                <TextBlock DockPanel.Dock="Right" Margin="10,0,0,0"
+                                                           MinWidth="34" TextAlignment="Right"
+                                                           Text="{Binding SpeakerBassBoostDb, StringFormat={}{0} dB}" />
+                                                <Slider Minimum="0" Maximum="6" TickFrequency="1"
+                                                        IsSnapToTickEnabled="True"
+                                                        Value="{Binding SpeakerBassBoostDb, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
+                                            </DockPanel>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource OverviewInsetCardStyle}" Margin="0">
+                                    <StackPanel>
+                                        <TextBlock Text="Microphone" FontSize="15" FontWeight="SemiBold" />
+                                        <CheckBox Content="{Binding SelectedController.MicrophoneToggleLabel}"
+                                                  Style="{StaticResource OverviewToggleStyle}"
+                                                  IsChecked="{Binding MicrophoneInputEnabled, Mode=TwoWay}"
+                                                  IsEnabled="{Binding CanChangeMicrophoneInput}"
+                                                  ToolTip="{Binding MicrophoneAvailabilityText}"
+                                                  Margin="0,12,0,9" />
+                                        <TextBlock Text="{Binding SelectedController.MicrophoneDescription}"
+                                                   Margin="0,0,0,8" FontSize="11" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource MutedForegroundColor}" />
+                                        <TextBlock Margin="0,0,0,9" FontSize="11" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource MutedForegroundColor}"
+                                                   Text="{Binding MicrophoneAvailabilityText}"
+                                                   Visibility="{Binding ShowMicrophoneAvailabilityMessage, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                        <Grid IsEnabled="{Binding MicrophoneLevelControlsEnabled}">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="Microphone level" />
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding MicrophoneVolumePercent, StringFormat={}{0}%}"
+                                                       Foreground="{DynamicResource AccentColor}" />
+                                            <Slider Grid.Row="1" Grid.ColumnSpan="2" Margin="0,7,0,12"
+                                                    Style="{StaticResource OverviewQuickSliderStyle}"
+                                                    Minimum="0" Maximum="100" TickFrequency="1"
+                                                    Value="{Binding MicrophoneVolumePercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
+                                        </Grid>
+                                        <Grid IsEnabled="{Binding MicrophoneLevelControlsEnabled}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="2*" />
+                                                <ColumnDefinition Width="3*" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="Noise suppression" VerticalAlignment="Center" />
+                                            <ComboBox Grid.Column="1"
+                                                      Style="{StaticResource OverviewSettingsComboBoxStyle}"
+                                                      SelectedIndex="{Binding MicrophoneNoiseSuppressionIndex, Mode=TwoWay}">
+                                                <ComboBoxItem Content="Off" />
+                                                <ComboBoxItem Content="Balanced" />
+                                                <ComboBoxItem Content="Strong" />
+                                                <ComboBoxItem Content="NVIDIA AI"
+                                                              IsEnabled="{Binding NvidiaNoiseSuppressionAvailable}"
+                                                              ToolTip="{Binding NvidiaNoiseSuppressionAvailability}" />
+                                            </ComboBox>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
                             </StackPanel>
                         </Grid>
                     </Grid>

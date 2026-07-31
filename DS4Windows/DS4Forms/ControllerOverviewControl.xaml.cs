@@ -11,6 +11,7 @@ the Free Software Foundation, either version 3 of the License, or
 using System;
 using System.Windows;
 using System.Windows.Controls;
+using DS4WinWPF.DS4Forms.ViewModels;
 
 namespace DS4WinWPF.DS4Forms
 {
@@ -37,5 +38,22 @@ namespace DS4WinWPF.DS4Forms
 
         private void DisconnectBtn_Click(object sender, RoutedEventArgs e) =>
             DisconnectRequested?.Invoke(this, EventArgs.Empty);
+
+        private void ControllerAudioSourceCombo_SelectionChanged(object sender,
+            SelectionChangedEventArgs e)
+        {
+            // Replacing an ItemsSource temporarily clears SelectedValue. A
+            // TwoWay binding consequently wrote that transient null into the
+            // profile. Commit only a real selection; refreshes remain one-way.
+            if (!IsLoaded || e.AddedItems.Count == 0 ||
+                sender is not ComboBox comboBox ||
+                comboBox.SelectedValue is not string endpointId ||
+                DataContext is not MainWindowsViewModel viewModel)
+            {
+                return;
+            }
+
+            viewModel.ControllerAudioSourceId = endpointId;
+        }
     }
 }

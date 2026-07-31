@@ -406,6 +406,20 @@ namespace DS4WinWPF.DS4Control.DTOXml
             set;
         }
 
+        [XmlElement("SuppressViiperSetupPrompt")]
+        public bool SuppressViiperSetupPrompt
+        {
+            get;
+            set;
+        }
+
+        [XmlElement("PreferredViiperPath")]
+        public string PreferredViiperPath
+        {
+            get;
+            set;
+        } = string.Empty;
+
         [XmlIgnore]
         public bool CloseMinimizes
         {
@@ -883,6 +897,8 @@ namespace DS4WinWPF.DS4Control.DTOXml
             UseMoonlight = source.useMoonlight;
             UseAdvancedMoonlight = source.useAdvancedMoonlight;
             VerboseStartupLogging = source.verboseStartupLogging;
+            SuppressViiperSetupPrompt = source.suppressViiperSetupPrompt;
+            PreferredViiperPath = source.preferredViiperPath;
             CloseMinimizes = source.closeMini;
             UseLang = source.useLang;
             DownloadLang = source.downloadLang;
@@ -985,6 +1001,10 @@ namespace DS4WinWPF.DS4Control.DTOXml
             destination.useMoonlight = UseMoonlight;
             destination.useAdvancedMoonlight = UseAdvancedMoonlight;
             destination.verboseStartupLogging = VerboseStartupLogging;
+            destination.suppressViiperSetupPrompt =
+                SuppressViiperSetupPrompt;
+            destination.preferredViiperPath = PreferredViiperPath ??
+                string.Empty;
             destination.closeMini = CloseMinimizes;
             destination.useLang = UseLang;
             destination.downloadLang = DownloadLang;

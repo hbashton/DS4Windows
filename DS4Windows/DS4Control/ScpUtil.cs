@@ -1719,6 +1719,18 @@ namespace DS4Windows
             set => m_Config.verboseStartupLogging = value;
         }
 
+        public static bool SuppressViiperSetupPrompt
+        {
+            get => m_Config.suppressViiperSetupPrompt;
+            set => m_Config.suppressViiperSetupPrompt = value;
+        }
+
+        public static string PreferredViiperPath
+        {
+            get => m_Config.preferredViiperPath;
+            set => m_Config.preferredViiperPath = value ?? string.Empty;
+        }
+
         public static bool getQuickCharge()
         {
             return m_Config.quickCharge;
@@ -4099,6 +4111,8 @@ namespace DS4Windows
         public bool useMoonlight = false;
         public bool useAdvancedMoonlight = false;
         public bool verboseStartupLogging = false;
+        public bool suppressViiperSetupPrompt = false;
+        public string preferredViiperPath = string.Empty;
         public bool closeMini = false;
         public List<SpecialAction> actions = new List<SpecialAction>();
         public List<DS4ControlSettings>[] ds4settings = new List<DS4ControlSettings>[Global.TEST_PROFILE_ITEM_COUNT]

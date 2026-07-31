@@ -164,6 +164,22 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             }
         }
 
+        public bool PromptForViiperSetup
+        {
+            get => !DS4Windows.Global.SuppressViiperSetupPrompt;
+            set
+            {
+                bool suppress = !value;
+                if (DS4Windows.Global.SuppressViiperSetupPrompt == suppress)
+                {
+                    return;
+                }
+
+                DS4Windows.Global.SuppressViiperSetupPrompt = suppress;
+                DS4Windows.Global.Save();
+            }
+        }
+
         public int IconChoiceIndex
         {
             get => (int)DS4Windows.Global.UseIconChoice;
@@ -596,6 +612,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             if (runStartTask)
             {
                 StartupMethods.WriteTaskEntry();
+                ViiperSetupManager.
+                    RefreshSelectedStartupTaskAfterRunAtStartupChange();
             }
             else
             {
@@ -608,6 +626,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             if (runStartProg)
             {
                 StartupMethods.WriteStartProgEntry();
+                ViiperSetupManager.
+                    RefreshSelectedStartupTaskAfterRunAtStartupChange();
             }
             else
             {

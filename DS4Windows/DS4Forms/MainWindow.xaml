@@ -595,6 +595,11 @@
                                            MaxWidth="420"
                                            Opacity="0.75"
                                            Margin="0,6,0,0" />
+                                <CheckBox Content="Prompt me when VIIPER needs setup"
+                                          IsChecked="{Binding PromptForViiperSetup}"
+                                          ToolTip="Turn this off to suppress automatic VIIPER setup prompts. Install / Repair and Refresh remain available here."
+                                          Style="{StaticResource BridgeDescribedCheckBoxStyle}"
+                                          Margin="0,8,0,0" />
                             </StackPanel>
                         </GroupBox>
                             </StackPanel>

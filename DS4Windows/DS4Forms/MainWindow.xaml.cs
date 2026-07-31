@@ -81,6 +81,8 @@ namespace DS4WinWPF.DS4Forms
         private int profileEditorReturnTabIndex = -1;
         private bool profileEditorNavigationChanging;
         private readonly HashSet<int> overviewDirtyControllerIndices = new();
+        private readonly HashSet<int> overviewProfileReloadControllerIndices =
+            new();
         private DispatcherTimer overviewProfileSaveTimer;
         private DispatcherTimer overviewStatusRefreshTimer;
         private bool preserveSize = true;
@@ -1127,8 +1129,17 @@ Suspend support not enabled.", true);
             QuickProfileSettingChangedEventArgs e)
         {
             overviewDirtyControllerIndices.Add(e.DeviceIndex);
+            if (e.RequiresProfileReload)
+            {
+                overviewProfileReloadControllerIndices.Add(e.DeviceIndex);
+            }
             overviewProfileSaveTimer.Stop();
-            overviewProfileSaveTimer.Start();
+            // Save after the current binding pass, before the next status
+            // refresh can reconcile controls against the active profile.
+            // Slider bindings already debounce their source update by 220 ms.
+            Dispatcher.BeginInvoke(DispatcherPriority.Background,
+                new Action(() =>
+                    FlushOverviewQuickSettings(e.DeviceIndex)));
         }
 
         private void MainWinVM_SelectedControllerChanged(object sender, EventArgs e)
@@ -1177,6 +1188,11 @@ Suspend support not enabled.", true);
 
             foreach (int deviceIndex in deviceIndices)
             {
+                bool outputControllerChanged =
+                    overviewProfileReloadControllerIndices.Remove(
+                        deviceIndex);
+                bool requiresProfileReload = reloadProfile &&
+                    outputControllerChanged;
                 if (!overviewDirtyControllerIndices.Remove(deviceIndex) ||
                     deviceIndex < 0 || deviceIndex >= ControlService.CURRENT_DS4_CONTROLLER_LIMIT)
                 {
@@ -1194,7 +1210,7 @@ Suspend support not enabled.", true);
                 if (profile != null)
                 {
                     profile.SaveProfile(deviceIndex);
-                    if (reloadProfile)
+                    if (requiresProfileReload)
                     {
                         profile.FireSaved();
                     }
@@ -1202,10 +1218,20 @@ Suspend support not enabled.", true);
                 else
                 {
                     Global.SaveProfile(deviceIndex, profileName);
-                    if (reloadProfile)
+                    if (requiresProfileReload)
                     {
                         Mapping.RequestRegularProfileReload(deviceIndex, false,
                             App.rootHub);
+                    }
+                }
+
+                if (reloadProfile && !requiresProfileReload)
+                {
+                    DS4Device device = App.rootHub.DS4Controllers[
+                        deviceIndex];
+                    if (device != null)
+                    {
+                        App.rootHub.CheckProfileOptions(deviceIndex, device);
                     }
                 }
             }

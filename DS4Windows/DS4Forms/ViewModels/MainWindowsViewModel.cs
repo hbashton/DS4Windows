@@ -45,12 +45,15 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
     public sealed class QuickProfileSettingChangedEventArgs : EventArgs
     {
-        public QuickProfileSettingChangedEventArgs(int deviceIndex)
+        public QuickProfileSettingChangedEventArgs(int deviceIndex,
+            bool requiresProfileReload)
         {
             DeviceIndex = deviceIndex;
+            RequiresProfileReload = requiresProfileReload;
         }
 
         public int DeviceIndex { get; }
+        public bool RequiresProfileReload { get; }
     }
 
     public class MainWindowsViewModel
@@ -246,7 +249,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 SelectedOutputControllerChanged?.Invoke(this, EventArgs.Empty);
                 SelectedOutputControllerNameChanged?.Invoke(this, EventArgs.Empty);
                 RaiseMicrophoneCapabilityChanged();
-                RaiseQuickProfileSettingChanged(deviceIndex);
+                RaiseQuickProfileSettingChanged(deviceIndex,
+                    requiresProfileReload: true);
             }
         }
 
@@ -877,10 +881,12 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             ControllerAudioSourceIdChanged?.Invoke(this, EventArgs.Empty);
         }
 
-        private void RaiseQuickProfileSettingChanged(int deviceIndex)
+        private void RaiseQuickProfileSettingChanged(int deviceIndex,
+            bool requiresProfileReload = false)
         {
             QuickProfileSettingChanged?.Invoke(this,
-                new QuickProfileSettingChangedEventArgs(deviceIndex));
+                new QuickProfileSettingChangedEventArgs(deviceIndex,
+                    requiresProfileReload));
         }
 
         private static int ByteToPercent(byte value) =>

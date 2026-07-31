@@ -18,7 +18,7 @@ namespace DS4Windows
         public const string EndpointPrefix = "DS4Windows:AudioHapticsApp:";
         public const string AutomaticEndpointPrefix =
             "DS4Windows:AudioHapticsAuto:";
-        private const int CaptureBufferMilliseconds = 5;
+        private const int CapturePollMilliseconds = 4;
         private const int DetectionIntervalMilliseconds = 500;
         private readonly int fixedProcessId;
         private readonly int automaticSlot = -1;
@@ -468,6 +468,7 @@ namespace DS4Windows
             private readonly Action<int, Exception> recordingStopped;
             private byte[] scratch = Array.Empty<byte>();
             private int disposed;
+            private int loggedPollingRecovery;
 
             public ProcessCaptureSession(int processId, WaveFormat waveFormat,
                 Action<byte[], int> dataAvailable,
@@ -479,10 +480,16 @@ namespace DS4Windows
                 this.recordingStopped = recordingStopped;
                 audioClient = ProcessLoopbackAudioClient.Activate(processId,
                     TimeSpan.FromSeconds(5));
+                // Process loopback is a virtual audio device, not a physical
+                // endpoint. Match Microsoft's ApplicationLoopback reference:
+                // in shared event-driven mode both requested durations are
+                // zero so the audio engine selects the native periodicity.
+                // Supplying our controller's 5 ms capture preference here can
+                // successfully initialize while never producing sample-ready
+                // notifications on some Windows audio-engine configurations.
                 audioClient.Initialize(AudioClientShareMode.Shared,
                     CaptureStreamFlags,
-                    CaptureBufferMilliseconds * 10000L, 0, waveFormat,
-                    Guid.Empty);
+                    0, 0, waveFormat, Guid.Empty);
                 audioClient.SetEventHandle(
                     captureEvent.SafeWaitHandle.DangerousGetHandle());
                 captureClient = audioClient.AudioCaptureClient;
@@ -498,8 +505,10 @@ namespace DS4Windows
 
             public void Start()
             {
-                captureThread.Start();
+                // Arm the engine before dispatching the event consumer, as in
+                // the Windows reference. Auto-reset preserves an early signal.
                 audioClient.Start();
+                captureThread.Start();
             }
 
             private void CaptureLoop()
@@ -512,9 +521,28 @@ namespace DS4Windows
                 {
                     while (Volatile.Read(ref disposed) == 0)
                     {
-                        int signaled = WaitHandle.WaitAny(waits, 1000);
+                        int signaled = WaitHandle.WaitAny(waits,
+                            CapturePollMilliseconds);
                         if (signaled == 0) break;
-                        if (signaled == 1) DrainCapture();
+                        // The process-loopback virtual device occasionally
+                        // queues packets without signaling its event when it
+                        // is hosted beside another WASAPI capture client in a
+                        // WPF process. GetNextPacketSize is the authoritative
+                        // readiness contract, so poll it at a bounded interval
+                        // as well as draining every event. This preserves the
+                        // event-driven fast path and prevents a successfully
+                        // activated app source from remaining silent forever.
+                        int drainedPackets = DrainCapture();
+                        if (signaled == WaitHandle.WaitTimeout &&
+                            drainedPackets > 0 && Interlocked.Exchange(
+                                ref loggedPollingRecovery, 1) == 0)
+                        {
+                            int recoveredProcessId = ProcessId;
+                            ThreadPool.QueueUserWorkItem(_ =>
+                                AppLogger.LogToGui(
+                                    $"Per-app audio capture recovered queued packets for process {recoveredProcessId} after a missing WASAPI sample-ready signal.",
+                                    false));
+                        }
                     }
                 }
                 catch (Exception exception) when (
@@ -531,12 +559,13 @@ namespace DS4Windows
                 }
             }
 
-            private void DrainCapture()
+            private int DrainCapture()
             {
+                int drainedPackets = 0;
                 while (Volatile.Read(ref disposed) == 0)
                 {
                     int nextFrames = captureClient.GetNextPacketSize();
-                    if (nextFrames <= 0) return;
+                    if (nextFrames <= 0) return drainedPackets;
                     IntPtr buffer = captureClient.GetBuffer(
                         out int framesAvailable,
                         out AudioClientBufferFlags flags, out _, out _);
@@ -552,12 +581,14 @@ namespace DS4Windows
                         else
                             Marshal.Copy(buffer, scratch, 0, byteCount);
                         dataAvailable?.Invoke(scratch, byteCount);
+                        drainedPackets++;
                     }
                     finally
                     {
                         captureClient.ReleaseBuffer(framesAvailable);
                     }
                 }
+                return drainedPackets;
             }
 
             public void Dispose()

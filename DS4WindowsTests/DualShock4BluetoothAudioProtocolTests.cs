@@ -442,14 +442,14 @@ namespace DS4WindowsTests
             Assert.AreEqual("source-driven",
                 DualShock4AudioTransportSettings.Format(
                     DualShock4AudioTransportMode.SourceDriven));
-            Assert.AreEqual(DualShock4AudioTransportMode.PadForgeReference,
+            Assert.AreEqual(DualShock4AudioTransportMode.MeasuredTransportReference,
                 DualShock4AudioTransportSettings.Parse(
-                    " padforge-reference "));
-            Assert.AreEqual(DualShock4AudioTransportMode.PadForgeReference,
-                DualShock4AudioTransportSettings.Parse("PADFORGE-EXACT"));
-            Assert.AreEqual("padforge-reference",
+                    " measured-transport-reference "));
+            Assert.AreEqual(DualShock4AudioTransportMode.MeasuredTransportReference,
+                DualShock4AudioTransportSettings.Parse("MEASURED-TRANSPORT-EXACT"));
+            Assert.AreEqual("measured-transport-reference",
                 DualShock4AudioTransportSettings.Format(
-                    DualShock4AudioTransportMode.PadForgeReference));
+                    DualShock4AudioTransportMode.MeasuredTransportReference));
             Assert.AreEqual(DualShock4AudioTransportMode.Realtime0x12,
                 DualShock4AudioTransportSettings.Parse("unknown"));
             Assert.AreEqual(DualShock4AudioTransportMode.Realtime0x12,
@@ -463,23 +463,23 @@ namespace DS4WindowsTests
                 DualShock4AudioTransportSettings.Parse(" scheduled "));
             Assert.AreEqual(DualShock4AudioTransportMode.Scheduled,
                 DualShock4AudioTransportSettings.Parse("CLOCKED"));
-            Assert.AreEqual(DualShock4AudioTransportMode.PadForgeAsync,
-                DualShock4AudioTransportSettings.Parse("padforge"));
-            Assert.AreEqual(DualShock4AudioTransportMode.PadForgeAsync,
-                DualShock4AudioTransportSettings.Parse(" PADFORGE-ASYNC "));
-            Assert.AreEqual("padforge-async",
+            Assert.AreEqual(DualShock4AudioTransportMode.MeasuredTransportAsync,
+                DualShock4AudioTransportSettings.Parse("measured-transport"));
+            Assert.AreEqual(DualShock4AudioTransportMode.MeasuredTransportAsync,
+                DualShock4AudioTransportSettings.Parse(" MEASURED-TRANSPORT-ASYNC "));
+            Assert.AreEqual("measured-transport-async",
                 DualShock4AudioTransportSettings.Format(
-                    DualShock4AudioTransportMode.PadForgeAsync));
+                    DualShock4AudioTransportMode.MeasuredTransportAsync));
             Assert.AreEqual(
-                DualShock4AudioTransportMode.PadForgeSpeakerOnly,
+                DualShock4AudioTransportMode.MeasuredTransportSpeakerOnly,
                 DualShock4AudioTransportSettings.Parse(
-                    " padforge-speaker-only "));
+                    " measured-transport-speaker-only "));
             Assert.AreEqual(
-                DualShock4AudioTransportMode.PadForgeSpeakerOnly,
-                DualShock4AudioTransportSettings.Parse("PADFORGE-A2"));
-            Assert.AreEqual("padforge-speaker-only",
+                DualShock4AudioTransportMode.MeasuredTransportSpeakerOnly,
+                DualShock4AudioTransportSettings.Parse("MEASURED-TRANSPORT-A2"));
+            Assert.AreEqual("measured-transport-speaker-only",
                 DualShock4AudioTransportSettings.Format(
-                    DualShock4AudioTransportMode.PadForgeSpeakerOnly));
+                    DualShock4AudioTransportMode.MeasuredTransportSpeakerOnly));
             Assert.AreEqual(
                 DualShock4AudioTransportMode.InputSynchronized,
                 DualShock4AudioTransportSettings.Parse(
@@ -578,50 +578,50 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void PadForgeAsyncTransportDoesNotBurstItsTwoFrameRemainder()
+        public void MeasuredTransportAsyncTransportDoesNotBurstItsTwoFrameRemainder()
         {
             Assert.IsFalse(DualShock4AudioTransportSettings.
-                ShouldWakePadForgeAsyncSender(3));
+                ShouldWakeMeasuredTransportAsyncSender(3));
             Assert.IsTrue(DualShock4AudioTransportSettings.
-                ShouldWakePadForgeAsyncSender(4));
+                ShouldWakeMeasuredTransportAsyncSender(4));
 
             Assert.AreEqual(4, DualShock4AudioTransportSettings.
-                SelectPadForgeAsyncReportFrameCount(4));
+                SelectMeasuredTransportAsyncReportFrameCount(4));
             Assert.AreEqual(4, DualShock4AudioTransportSettings.
-                SelectPadForgeAsyncReportFrameCount(6));
+                SelectMeasuredTransportAsyncReportFrameCount(6));
             Assert.AreEqual(0, DualShock4AudioTransportSettings.
-                SelectPadForgeAsyncReportFrameCount(2),
+                SelectMeasuredTransportAsyncReportFrameCount(2),
                 "A continuous source must retain its two-frame remainder.");
             Assert.AreEqual(2, DualShock4AudioTransportSettings.
-                SelectPadForgeAsyncReportFrameCount(2, flushTail: true),
+                SelectMeasuredTransportAsyncReportFrameCount(2, flushTail: true),
                 "A real source tail must use report 0x14.");
             Assert.AreEqual(0, DualShock4AudioTransportSettings.
-                SelectPadForgeAsyncReportFrameCount(1, flushTail: true));
+                SelectMeasuredTransportAsyncReportFrameCount(1, flushTail: true));
             Assert.AreEqual(12, DualShock4AudioTransportSettings.
-                PadForgeAsyncEncodedFrameQueueLimit);
+                MeasuredTransportAsyncEncodedFrameQueueLimit);
             Assert.ThrowsException<ArgumentOutOfRangeException>(() =>
                 DualShock4AudioTransportSettings.
-                    SelectPadForgeAsyncReportFrameCount(-1));
+                    SelectMeasuredTransportAsyncReportFrameCount(-1));
         }
 
         [TestMethod]
-        public void PadForgeAsyncCapacityStopsBeforeAQueuedFrameCanBeDequeued()
+        public void MeasuredTransportAsyncCapacityStopsBeforeAQueuedFrameCanBeDequeued()
         {
             Assert.AreEqual(8, DualShock4AudioTransportSettings.
-                PadForgeAsyncSlotCount);
+                MeasuredTransportAsyncSlotCount);
             for (int pending = 0; pending <
-                DualShock4AudioTransportSettings.PadForgeAsyncSlotCount;
+                DualShock4AudioTransportSettings.MeasuredTransportAsyncSlotCount;
                 pending++)
             {
                 Assert.IsTrue(DualShock4AudioTransportSettings.
-                    CanSubmitPadForgeAsync(pending));
+                    CanSubmitMeasuredTransportAsync(pending));
             }
             Assert.IsFalse(DualShock4AudioTransportSettings.
-                CanSubmitPadForgeAsync(8));
+                CanSubmitMeasuredTransportAsync(8));
             Assert.IsFalse(DualShock4AudioTransportSettings.
-                CanSubmitPadForgeAsync(32));
+                CanSubmitMeasuredTransportAsync(32));
             Assert.ThrowsException<ArgumentOutOfRangeException>(() =>
-                DualShock4AudioTransportSettings.CanSubmitPadForgeAsync(-1));
+                DualShock4AudioTransportSettings.CanSubmitMeasuredTransportAsync(-1));
         }
 
         [TestMethod]
@@ -795,12 +795,12 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void PadForgeReferencePreservesMeasuredTwoOneTickCadence()
+        public void MeasuredTransportReferencePreservesMeasuredTwoOneTickCadence()
         {
             int frameThirds = 0;
             bool[] presentations = Enumerable.Range(0, 6)
                 .Select(_ => DualShock4AudioTransportSettings.
-                    AdvancePadForgeReferencePresentation(ref frameThirds))
+                    AdvanceMeasuredTransportReferencePresentation(ref frameThirds))
                 .ToArray();
 
             CollectionAssert.AreEqual(
@@ -809,11 +809,11 @@ namespace DS4WindowsTests
             Assert.AreEqual(0, frameThirds);
             Assert.AreEqual(10.666666666666666,
                 DualShock4AudioTransportSettings.
-                    PadForgeReferenceTickMilliseconds, 0.0000001);
+                    MeasuredTransportReferenceTickMilliseconds, 0.0000001);
         }
 
         [TestMethod]
-        public void PadForgeReferencePreservesIntegratedInputModeAndNormalizesInterval()
+        public void MeasuredTransportReferencePreservesIntegratedInputModeAndNormalizesInterval()
         {
             byte[][] frames = Enumerable.Range(0, 4)
                 .Select(_ => new byte[
@@ -823,7 +823,7 @@ namespace DS4WindowsTests
                 BuildSpeakerReport(0x1234, frames, bluetoothPollRate: 5);
 
             DualShock4BluetoothSpeakerPassthrough.
-                ApplyPadForgeReferenceAudioMode(data);
+                ApplyMeasuredTransportReferenceAudioMode(data);
 
             Assert.AreEqual(0x17, data[0]);
             Assert.AreEqual(0x40, data[1]);
@@ -842,7 +842,7 @@ namespace DS4WindowsTests
                     bluetoothPollRate: 5);
 
             DualShock4BluetoothSpeakerPassthrough.
-                ApplyPadForgeReferenceAudioMode(control);
+                ApplyMeasuredTransportReferenceAudioMode(control);
 
             Assert.AreEqual(0x11, control[0]);
             Assert.AreEqual(0xC0, control[1]);
@@ -871,7 +871,7 @@ namespace DS4WindowsTests
                 BuildSpeakerReport(0x1234, frames,
                     microphoneEnabled: true, bluetoothPollRate: 5);
             DualShock4BluetoothSpeakerPassthrough.
-                ApplyPadForgeReferenceAudioMode(duplex);
+                ApplyMeasuredTransportReferenceAudioMode(duplex);
             Assert.AreEqual(0x40, duplex[1]);
             Assert.AreEqual(0xA1, duplex[2]);
         }

@@ -166,14 +166,14 @@ namespace DS4Windows
     }
 
     /// <summary>
-    /// Converts PadSense-compatible V5 source PCM into the physical media
+    /// Converts V5-compatible V5 source PCM into the physical media
     /// clock. VIIPER publishes untouched 48 kHz front-channel audio in exact
     /// 480-frame source callbacks, independently from its 512-frame haptics
-    /// assembler. PadSense then consumes the continuous source at 45 kHz:
+    /// assembler. V5 then consumes the continuous source at 45 kHz:
     /// every physical Opus report draws 512 source frames and emits 480 while
     /// the small controller-clock correction is applied continuously.
     /// </summary>
-    internal sealed class DualSensePadSenseSpeakerClockResampler
+    internal sealed class DualSenseV5SpeakerClockResampler
     {
         internal const int Channels = 2;
         internal const int OutputFrames = 480;
@@ -223,7 +223,7 @@ namespace DS4Windows
     }
 
     /// <summary>
-    /// DualSense direct-PCM route matching DS5 Bridge's signal stages while
+    /// DualSense direct-PCM route matching the validated implementation's signal stages while
     /// retaining DS4Windows' long-window source/controller clock correction.
     ///
     /// Stage one applies only the small dynamic clock ratio and always emits
@@ -382,7 +382,7 @@ namespace DS4Windows
             }
 
             preparedSourceFrames = 0;
-            // Match DS5 Bridge's feed-driven WDL stage with fixed storage. Its
+            // Match the validated implementation's feed-driven WDL stage with fixed storage. Its
             // nominal ratio is exactly 16:15, but retaining WDL's fractional
             // position and boundary frame also preserves its floating-point
             // continuity indefinitely without any Array.Resize calls.

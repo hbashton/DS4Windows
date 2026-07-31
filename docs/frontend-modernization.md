@@ -1,19 +1,16 @@
 # Frontend modernization
 
-This branch keeps the DS4Windows runtime and WPF binding layer intact while adopting the
-navigation, spacing, cards, descriptions, and progressive-disclosure patterns used by the
-DS5 Bridge companion app.
+This branch keeps the DS4Windows runtime and WPF binding layer intact while adopting
+clear navigation, consistent spacing, descriptive cards, and progressive disclosure.
 
 ## Why the frontend remains WPF
 
-DS5 Bridge's companion is an Electron/React application backed by a small vendor-HID
-protocol. DS4Windows has hundreds of mature WPF bindings and event handlers connected
+DS4Windows has hundreds of mature WPF bindings and event handlers connected
 directly to controller, profile, output-slot, automation, and diagnostic services. Replacing
 that layer with Electron would require a second public API for nearly the entire program and
 would make regressions easy to miss.
 
-The modernization therefore treats DS5 Bridge as the visual and information-architecture
-reference. `BridgeShellStyles.xaml` provides the shared shell and component geometry, while
+`BridgeShellStyles.xaml` provides the shared shell and component geometry, while
 the existing view models remain the source of truth. Theme-specific colors stay in the
 existing light and dark theme dictionaries, so runtime theme switching continues to work.
 
@@ -61,8 +58,8 @@ settings rail explicit:
 4. Visible helper text is preferred to unexplained acronyms or tooltip-only documentation.
 5. Device-specific controls remain visible only when their existing availability binding
    says the device supports them.
-6. New DS5 Bridge-derived features are separate follow-up work, not part of the visual
-   migration.
+6. New features are isolated behind profile-backed services instead of being coupled to
+   visual controls.
 
 ## Follow-up feature seams
 

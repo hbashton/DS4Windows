@@ -216,8 +216,8 @@ namespace DS4Windows
         private const int IdleStreamTimeoutMs = 2000;
         private const int DirectSourceIdleThresholdMilliseconds = 200;
         private const int MaxFramesAvailableWaitMilliseconds = 20;
-        private const int PadForgeAsyncTailFlushIdleMilliseconds = 60;
-        private const int PadForgeAsyncBackpressureWaitMilliseconds = 1;
+        private const int MeasuredTransportAsyncTailFlushIdleMilliseconds = 60;
+        private const int MeasuredTransportAsyncBackpressureWaitMilliseconds = 1;
         private static readonly bool EnableDiagnosticCapture =
             string.Equals(Environment.GetEnvironmentVariable(
                 "DS4WINDOWS_DS4_AUDIO_DIAGNOSTIC_CAPTURE"), "1",
@@ -245,7 +245,7 @@ namespace DS4Windows
         private const double ResampleStep =
             CaptureSampleRate / (double)SpeakerSampleRate;
 
-        private enum PadForgeAsyncSubmissionResult
+        private enum MeasuredTransportAsyncSubmissionResult
         {
             Submitted,
             Saturated,
@@ -367,7 +367,7 @@ namespace DS4Windows
         private int reportsSubmitted;
         private bool speakerTransportEnabled;
         private bool speakerSharedHandleControlLaneRegistered;
-        private bool padForgeReferenceInputIntervalOverrideEnabled;
+        private bool measuredTransportReferenceInputIntervalOverrideEnabled;
         private long directPacketsReceived;
         private long directPcmBytesReceived;
         private long directPacketsDropped;
@@ -516,10 +516,10 @@ namespace DS4Windows
                 }
 
                 if (directTransportMode ==
-                    DualShock4AudioTransportMode.PadForgeReference)
+                    DualShock4AudioTransportMode.MeasuredTransportReference)
                 {
                     device.SetBluetoothAudioDefaultInputIntervalOverride(true);
-                    padForgeReferenceInputIntervalOverrideEnabled = true;
+                    measuredTransportReferenceInputIntervalOverrideEnabled = true;
                 }
 
                 directSpeakerSource.VirtualSpeakerPcmReceived +=
@@ -527,8 +527,8 @@ namespace DS4Windows
                 try
                 {
                     bool transportReady = directTransportMode ==
-                        DualShock4AudioTransportMode.PadForgeReference ?
-                        EnsurePadForgeReferenceSharedHandle() :
+                        DualShock4AudioTransportMode.MeasuredTransportReference ?
+                        EnsureMeasuredTransportReferenceSharedHandle() :
                         EnsureSpeakerWritePool();
                     if (!transportReady)
                     {
@@ -552,7 +552,7 @@ namespace DS4Windows
                     directSpeakerSource.VirtualSpeakerPcmReceived -=
                         DirectSpeakerPcmReceived;
                     DisableSpeakerTransport();
-                    ReleasePadForgeReferenceInputIntervalOverride();
+                    ReleaseMeasuredTransportReferenceInputIntervalOverride();
                     throw;
                 }
             }
@@ -1023,9 +1023,9 @@ namespace DS4Windows
                 return;
             }
             if (directTransportMode ==
-                DualShock4AudioTransportMode.PadForgeReference)
+                DualShock4AudioTransportMode.MeasuredTransportReference)
             {
-                // PadForge's working DS4 transport is source-driven and keeps
+                // the measured transport's working DS4 transport is source-driven and keeps
                 // up to eight ordered OVERLAPPED writes in flight. Use that
                 // exact 0x17/0x14 policy on the controller's already-open
                 // primary HID handle so input and audio remain one physical
@@ -1034,11 +1034,11 @@ namespace DS4Windows
                 return;
             }
             if (directTransportMode ==
-                    DualShock4AudioTransportMode.PadForgeAsync ||
+                    DualShock4AudioTransportMode.MeasuredTransportAsync ||
                 directTransportMode ==
-                    DualShock4AudioTransportMode.PadForgeSpeakerOnly)
+                    DualShock4AudioTransportMode.MeasuredTransportSpeakerOnly)
             {
-                PadForgeAsyncDirectStreamLoop();
+                MeasuredTransportAsyncDirectStreamLoop();
                 return;
             }
             if (directTransportMode ==
@@ -1200,20 +1200,20 @@ namespace DS4Windows
                             break;
                         }
 
-                        PadForgeAsyncSubmissionResult result =
-                            SubmitEncodedFramesPadForgeAsync(reportFrames);
-                        if (result == PadForgeAsyncSubmissionResult.Failed)
+                        MeasuredTransportAsyncSubmissionResult result =
+                            SubmitEncodedFramesMeasuredTransportAsync(reportFrames);
+                        if (result == MeasuredTransportAsyncSubmissionResult.Failed)
                         {
                             return;
                         }
-                        if (result == PadForgeAsyncSubmissionResult.NoFrames)
+                        if (result == MeasuredTransportAsyncSubmissionResult.NoFrames)
                         {
                             break;
                         }
-                        if (result == PadForgeAsyncSubmissionResult.Saturated)
+                        if (result == MeasuredTransportAsyncSubmissionResult.Saturated)
                         {
                             if (stoppingSignal.WaitOne(
-                                PadForgeAsyncBackpressureWaitMilliseconds))
+                                MeasuredTransportAsyncBackpressureWaitMilliseconds))
                             {
                                 return;
                             }
@@ -1233,7 +1233,7 @@ namespace DS4Windows
             }
         }
 
-        private void PadForgeAsyncDirectStreamLoop()
+        private void MeasuredTransportAsyncDirectStreamLoop()
         {
             var waitHandles = new WaitHandle[]
             {
@@ -1284,7 +1284,7 @@ namespace DS4Windows
                     WaitForNextTick(ref nextTick, cadenceTicks,
                         highResolutionTimer,
                         DualShock4AudioTransportSettings.
-                            PadForgeAsyncSlotCount);
+                            MeasuredTransportAsyncSlotCount);
 
                     int bufferedFrames;
                     lock (syncRoot)
@@ -1293,8 +1293,8 @@ namespace DS4Windows
                     }
 
                     int reportFrames = DualShock4AudioTransportSettings.
-                        SelectPadForgeAsyncReportFrameCount(bufferedFrames,
-                            IsPadForgeAsyncTailFlushReady());
+                        SelectMeasuredTransportAsyncReportFrameCount(bufferedFrames,
+                            IsMeasuredTransportAsyncTailFlushReady());
                     if (reportFrames == 0)
                     {
                         TraceDirectStreamStatus();
@@ -1308,29 +1308,29 @@ namespace DS4Windows
                         continue;
                     }
 
-                    // The sender uses PadForge's report shape, but presents it
+                    // The sender uses the measured transport's report shape, but presents it
                     // on the controller's 16 ms clock. Source callbacks are
                     // not a transport clock: they can arrive at 10/20 ms
                     // boundaries and produced the measured 7-22 ms write
                     // jitter that correlated with acoustic dropouts.
                     directDriftCorrectionEnabled = false;
-                    PadForgeAsyncSubmissionResult result =
-                        SubmitEncodedFramesPadForgeAsync(reportFrames);
-                    if (result == PadForgeAsyncSubmissionResult.Failed)
+                    MeasuredTransportAsyncSubmissionResult result =
+                        SubmitEncodedFramesMeasuredTransportAsync(reportFrames);
+                    if (result == MeasuredTransportAsyncSubmissionResult.Failed)
                     {
                         return;
                     }
-                    if (result == PadForgeAsyncSubmissionResult.NoFrames)
+                    if (result == MeasuredTransportAsyncSubmissionResult.NoFrames)
                     {
                         continue;
                     }
-                    if (result == PadForgeAsyncSubmissionResult.Saturated)
+                    if (result == MeasuredTransportAsyncSubmissionResult.Saturated)
                     {
                         // This is backpressure, not presentation cadence. The
                         // ordered eight-slot ring leaves every SBC frame queued
                         // until its oldest in-flight write releases a credit.
                         if (stoppingSignal.WaitOne(
-                            PadForgeAsyncBackpressureWaitMilliseconds))
+                            MeasuredTransportAsyncBackpressureWaitMilliseconds))
                         {
                             return;
                         }
@@ -1354,7 +1354,7 @@ namespace DS4Windows
             }
         }
 
-        private void PadForgeReferenceDirectStreamLoop()
+        private void MeasuredTransportReferenceDirectStreamLoop()
         {
             var waitHandles = new WaitHandle[]
             {
@@ -1503,24 +1503,24 @@ namespace DS4Windows
                     }
 
                     directDriftCorrectionEnabled = false;
-                    PadForgeAsyncSubmissionResult result =
-                        SubmitEncodedFramesPadForgeAsync(
+                    MeasuredTransportAsyncSubmissionResult result =
+                        SubmitEncodedFramesMeasuredTransportAsync(
                             DualShock4BluetoothAudioProtocol.
                                 SpeakerLargeFramesPerReport);
-                    if (result == PadForgeAsyncSubmissionResult.Failed)
+                    if (result == MeasuredTransportAsyncSubmissionResult.Failed)
                     {
                         return;
                     }
-                    if (result == PadForgeAsyncSubmissionResult.Saturated)
+                    if (result == MeasuredTransportAsyncSubmissionResult.Saturated)
                     {
                         if (stoppingSignal.WaitOne(
-                            PadForgeAsyncBackpressureWaitMilliseconds))
+                            MeasuredTransportAsyncBackpressureWaitMilliseconds))
                         {
                             return;
                         }
                         continue;
                     }
-                    if (result == PadForgeAsyncSubmissionResult.Submitted)
+                    if (result == MeasuredTransportAsyncSubmissionResult.Submitted)
                     {
                         lastPresentedInputTick = inputTick;
                     }
@@ -1536,7 +1536,7 @@ namespace DS4Windows
             }
         }
 
-        private bool IsPadForgeAsyncTailFlushReady()
+        private bool IsMeasuredTransportAsyncTailFlushReady()
         {
             long lastPacket = Interlocked.Read(ref lastDirectPacketTimestamp);
             if (lastPacket == 0)
@@ -1548,7 +1548,7 @@ namespace DS4Windows
             long elapsedMilliseconds = elapsedTicks * 1000 /
                 Stopwatch.Frequency;
             return elapsedMilliseconds >=
-                PadForgeAsyncTailFlushIdleMilliseconds;
+                MeasuredTransportAsyncTailFlushIdleMilliseconds;
         }
 
         private void ProductionReplayDirectStreamLoop()
@@ -1717,7 +1717,7 @@ namespace DS4Windows
                     // Capacity backpressure never consumes or replaces the
                     // unique source frame.
                     if (stoppingSignal.WaitOne(
-                        PadForgeAsyncBackpressureWaitMilliseconds))
+                        MeasuredTransportAsyncBackpressureWaitMilliseconds))
                     {
                         return false;
                     }
@@ -1919,7 +1919,7 @@ namespace DS4Windows
                     // Four dedicated slots bound this shallow FIFO probe. A
                     // capacity wait never consumes or replaces a source frame.
                     if (stoppingSignal.WaitOne(
-                        PadForgeAsyncBackpressureWaitMilliseconds))
+                        MeasuredTransportAsyncBackpressureWaitMilliseconds))
                     {
                         return false;
                     }
@@ -2111,7 +2111,7 @@ namespace DS4Windows
                     // slot is available. Priming never substitutes silence for
                     // a unique source frame.
                     if (stoppingSignal.WaitOne(
-                        PadForgeAsyncBackpressureWaitMilliseconds))
+                        MeasuredTransportAsyncBackpressureWaitMilliseconds))
                     {
                         return false;
                     }
@@ -2182,7 +2182,7 @@ namespace DS4Windows
                 }
 
                 // Build the controller cushion with paced 0x17 reports. The
-                // independent PadForge/DS4AudioStreamer trace showed that
+                // independent MeasuredTransport/SynchronousDs4Audio trace showed that
                 // zero-interval 0x17+0x14 pairs produce 48-89 ms completion
                 // holes on this Windows Bluetooth stack. Four-millisecond
                 // spacing is fast enough to accumulate coverage but never
@@ -2514,17 +2514,17 @@ namespace DS4Windows
         {
             int consumed = 0;
             int queueLimit = directTransportMode ==
-                    DualShock4AudioTransportMode.PadForgeAsync ||
+                    DualShock4AudioTransportMode.MeasuredTransportAsync ||
                     directTransportMode ==
-                        DualShock4AudioTransportMode.PadForgeSpeakerOnly ||
+                        DualShock4AudioTransportMode.MeasuredTransportSpeakerOnly ||
                     directTransportMode ==
-                        DualShock4AudioTransportMode.PadForgeReference ||
+                        DualShock4AudioTransportMode.MeasuredTransportReference ||
                     directTransportMode ==
                         DualShock4AudioTransportMode.InputSynchronized ||
                     directTransportMode ==
                         DualShock4AudioTransportMode.SourceDriven ?
                 DualShock4AudioTransportSettings.
-                    PadForgeAsyncEncodedFrameQueueLimit :
+                    MeasuredTransportAsyncEncodedFrameQueueLimit :
                 EncodedFrameQueueLimit;
             while (pendingPcmCount - consumed >= PcmValuesPerSbcFrame)
             {
@@ -2796,9 +2796,9 @@ namespace DS4Windows
             }
 
             bool useSharedHandle = directTransportMode ==
-                DualShock4AudioTransportMode.PadForgeReference;
+                DualShock4AudioTransportMode.MeasuredTransportReference;
             bool transportReady = useSharedHandle ?
-                EnsurePadForgeReferenceSharedHandle() :
+                EnsureMeasuredTransportReferenceSharedHandle() :
                 EnsureSpeakerWritePool();
             if (!transportReady)
             {
@@ -2846,7 +2846,7 @@ namespace DS4Windows
                                     microphoneEnabled: microphoneEnabled,
                                     bluetoothPollRate:
                                         GetBluetoothPollRate());
-                            ApplyPadForgeReferenceAudioMode(report);
+                            ApplyMeasuredTransportReferenceAudioMode(report);
                             CaptureDiagnosticSubmittedSbc(report, count);
                             Array.Clear(speakerSharedHandleAudioReport, 0,
                                 speakerSharedHandleAudioReport.Length);
@@ -2924,20 +2924,20 @@ namespace DS4Windows
             return true;
         }
 
-        private PadForgeAsyncSubmissionResult
-            SubmitEncodedFramesPadForgeAsync(int count)
+        private MeasuredTransportAsyncSubmissionResult
+            SubmitEncodedFramesMeasuredTransportAsync(int count)
         {
             if (count != DualShock4BluetoothAudioProtocol.
                     SpeakerSmallFramesPerReport &&
                 count != DualShock4BluetoothAudioProtocol.
                     SpeakerLargeFramesPerReport)
             {
-                return PadForgeAsyncSubmissionResult.Failed;
+                return MeasuredTransportAsyncSubmissionResult.Failed;
             }
 
             if (!EnsureSpeakerWritePool())
             {
-                return PadForgeAsyncSubmissionResult.Failed;
+                return MeasuredTransportAsyncSubmissionResult.Failed;
             }
 
             byte[] report = count == DualShock4BluetoothAudioProtocol.
@@ -2952,7 +2952,7 @@ namespace DS4Windows
                 {
                     submitted = speakerWritePool.TrySendPrepared(report,
                         DualShock4AudioTransportSettings.
-                            PadForgeAsyncSlotCount,
+                            MeasuredTransportAsyncSlotCount,
                         () =>
                         {
                             lock (syncRoot)
@@ -2977,16 +2977,16 @@ namespace DS4Windows
                                             GetBluetoothPollRate());
                                 if (directTransportMode ==
                                     DualShock4AudioTransportMode.
-                                        PadForgeSpeakerOnly)
+                                        MeasuredTransportSpeakerOnly)
                                 {
                                     ApplySpeakerOnlyAudioMode(report,
-                                        "padforge-speaker-only", 0xA2);
+                                        "measured-transport-speaker-only", 0xA2);
                                 }
                                 else if (directTransportMode ==
                                     DualShock4AudioTransportMode.
-                                        PadForgeReference)
+                                        MeasuredTransportReference)
                                 {
-                                    ApplyPadForgeReferenceAudioMode(report);
+                                    ApplyMeasuredTransportReferenceAudioMode(report);
                                 }
                                 frameNumber += (ushort)count;
                                 prepared = true;
@@ -3013,7 +3013,7 @@ namespace DS4Windows
             if (saturated)
             {
                 Interlocked.Increment(ref directWriteSaturations);
-                return PadForgeAsyncSubmissionResult.Saturated;
+                return MeasuredTransportAsyncSubmissionResult.Saturated;
             }
             if (!prepared)
             {
@@ -3023,13 +3023,13 @@ namespace DS4Windows
                     if (Interlocked.Exchange(ref writeFailureLogged, 1) == 0)
                     {
                         AppLogger.LogToGui(
-                            "DualShock 4 Bluetooth PadForge async speaker " +
+                            "DualShock 4 Bluetooth MeasuredTransport async speaker " +
                             "transport could not reserve a healthy HID slot.",
                             true);
                     }
-                    return PadForgeAsyncSubmissionResult.Failed;
+                    return MeasuredTransportAsyncSubmissionResult.Failed;
                 }
-                return PadForgeAsyncSubmissionResult.NoFrames;
+                return MeasuredTransportAsyncSubmissionResult.NoFrames;
             }
             if (!submitted)
             {
@@ -3040,10 +3040,10 @@ namespace DS4Windows
                 if (Interlocked.Exchange(ref writeFailureLogged, 1) == 0)
                 {
                     AppLogger.LogToGui(
-                        "DualShock 4 Bluetooth PadForge async speaker " +
+                        "DualShock 4 Bluetooth MeasuredTransport async speaker " +
                         "transport write failed.", true);
                 }
-                return PadForgeAsyncSubmissionResult.Failed;
+                return MeasuredTransportAsyncSubmissionResult.Failed;
             }
 
             RecordReportSize(count);
@@ -3052,13 +3052,13 @@ namespace DS4Windows
             {
                 AppLogger.LogToGui(
                     $"DualShock 4 Bluetooth speaker submitted its first " +
-                    $"PadForge async SBC report (id=0x{report[0]:X2}, " +
+                    $"MeasuredTransport async SBC report (id=0x{report[0]:X2}, " +
                     $"mode=0x{report[2]:X2}, frames={count}, " +
                     $"bytes={report.Length}, slots=" +
-                    $"{DualShock4AudioTransportSettings.PadForgeAsyncSlotCount}).",
+                    $"{DualShock4AudioTransportSettings.MeasuredTransportAsyncSlotCount}).",
                     false);
             }
-            return PadForgeAsyncSubmissionResult.Submitted;
+            return MeasuredTransportAsyncSubmissionResult.Submitted;
         }
 
         private ProductionReplaySubmissionResult
@@ -3592,18 +3592,18 @@ namespace DS4Windows
             report[crcOffset + 3] = (byte)(crc >> 24);
         }
 
-        internal static void ApplyPadForgeReferenceAudioMode(byte[] report)
+        internal static void ApplyMeasuredTransportReferenceAudioMode(byte[] report)
         {
             if (report == null || report.Length < 7)
             {
                 throw new ArgumentException(
-                    "A PadForge reference report must include a Bluetooth CRC.",
+                    "A MeasuredTransport reference report must include a Bluetooth CRC.",
                     nameof(report));
             }
 
             int crcOffset = report.Length - sizeof(uint);
             report[1] = (byte)(report[1] & 0xC0);
-            // DS4AudioStreamer can use A2 because it owns the physical pad by
+            // SynchronousDs4Audio can use A2 because it owns the physical pad by
             // itself. DS4Windows must preserve the mode selected by the shared
             // protocol builder: A0 keeps ordinary HID input alive for
             // speaker-only playback and A1 keeps HID + microphone input alive
@@ -4110,7 +4110,7 @@ namespace DS4Windows
             return (byte)Math.Clamp(device.getBTPollRate(), 0, 16);
         }
 
-        private bool EnsurePadForgeReferenceSharedHandle()
+        private bool EnsureMeasuredTransportReferenceSharedHandle()
         {
             lock (speakerSharedHandleWriteGate)
             {
@@ -4158,7 +4158,7 @@ namespace DS4Windows
                 return false;
             }
 
-            if (!EnsurePadForgeReferenceSharedHandle())
+            if (!EnsureMeasuredTransportReferenceSharedHandle())
             {
                 error = "shared physical HID write pool unavailable";
                 return false;
@@ -4167,7 +4167,7 @@ namespace DS4Windows
             // TrySendControl drains all older audio slots under the pool gate,
             // submits this mode/effect report, and only then lets newer SBC
             // reports proceed. This is the same ordering barrier used by the
-            // dedicated PadForge lane, but no second HID file session exists.
+            // dedicated MeasuredTransport lane, but no second HID file session exists.
             return speakerWritePool.TrySendControl(report, out error);
         }
 
@@ -4216,17 +4216,17 @@ namespace DS4Windows
         private bool WriteBluetoothAudioControlBarrier(byte[] report)
         {
             if (directTransportMode ==
-                    DualShock4AudioTransportMode.PadForgeReference &&
+                    DualShock4AudioTransportMode.MeasuredTransportReference &&
                 report != null && report.Length >= 7 && report[2] != 0)
             {
-                ApplyPadForgeReferenceAudioMode(report);
+                ApplyMeasuredTransportReferenceAudioMode(report);
             }
             else if (directTransportMode ==
-                    DualShock4AudioTransportMode.PadForgeSpeakerOnly &&
+                    DualShock4AudioTransportMode.MeasuredTransportSpeakerOnly &&
                 report != null && report.Length >= 7 && report[2] != 0)
             {
                 ApplySpeakerOnlyAudioMode(report,
-                    "padforge-speaker-only control", 0xA2);
+                    "measured-transport-speaker-only control", 0xA2);
             }
             return TrySendBluetoothAudioControl(report, out _);
         }
@@ -4235,7 +4235,7 @@ namespace DS4Windows
             out string error)
         {
             if (directTransportMode ==
-                DualShock4AudioTransportMode.PadForgeReference)
+                DualShock4AudioTransportMode.MeasuredTransportReference)
             {
                 return TrySendBluetoothAudioControlSharedHandle(report,
                     out error);
@@ -4314,8 +4314,8 @@ namespace DS4Windows
 
             string controlError = "not submitted";
             bool transportReady = directTransportMode ==
-                DualShock4AudioTransportMode.PadForgeReference ?
-                EnsurePadForgeReferenceSharedHandle() :
+                DualShock4AudioTransportMode.MeasuredTransportReference ?
+                EnsureMeasuredTransportReferenceSharedHandle() :
                 EnsureSpeakerWritePool();
             if (!transportReady ||
                 !device.SetDualShock4BluetoothSpeakerStreaming(true,
@@ -4539,7 +4539,7 @@ namespace DS4Windows
             }
             worker = null;
             DisableSpeakerTransport();
-            ReleasePadForgeReferenceInputIntervalOverride();
+            ReleaseMeasuredTransportReferenceInputIntervalOverride();
             device.UnregisterDualShock4BluetoothAudioControlLane(this);
             speakerSharedHandleControlLaneRegistered = false;
             speakerWritePool?.Dispose();
@@ -4578,14 +4578,14 @@ namespace DS4Windows
 
         }
 
-        private void ReleasePadForgeReferenceInputIntervalOverride()
+        private void ReleaseMeasuredTransportReferenceInputIntervalOverride()
         {
-            if (!padForgeReferenceInputIntervalOverrideEnabled)
+            if (!measuredTransportReferenceInputIntervalOverrideEnabled)
             {
                 return;
             }
 
-            padForgeReferenceInputIntervalOverrideEnabled = false;
+            measuredTransportReferenceInputIntervalOverrideEnabled = false;
             device.SetBluetoothAudioDefaultInputIntervalOverride(false);
         }
 
@@ -4607,13 +4607,13 @@ namespace DS4Windows
         /// realtime 0x12/0x17 stream use this same overlapped handle. Input
         /// remains
         /// exclusively owned by DS4Windows' primary HID session, as in the
-        /// independently verified PadForge transport architecture.
+        /// independently verified MeasuredTransport transport architecture.
         /// </summary>
         private sealed class NativeOverlappedWritePool : IDisposable
         {
             private const int SlotCount = 32;
             private const int OverlappedSize = 32;
-            // DS4AudioStreamer uses a 640-byte pinned buffer even for the
+            // SynchronousDs4Audio uses a 640-byte pinned buffer even for the
             // variable-length 78/270/462-byte reports. Genuine CUH-ZCT2 HIDCLASS
             // completes these writes as 547 bytes, so a 462-byte backing array
             // lets the native stack read beyond the pinned object.
@@ -4789,7 +4789,7 @@ namespace DS4Windows
                             Marshal.GetLastWin32Error();
                         if (submitted)
                         {
-                            // This is the common HIDCLASS fast path. PadForge's
+                            // This is the common HIDCLASS fast path. the measured transport's
                             // WriteOneShot returns immediately here as well; a
                             // synchronous overlapped WriteFile need not report
                             // the transfer count through a second result query.
@@ -4802,7 +4802,7 @@ namespace DS4Windows
                         }
 
                         uint wait = WaitForSingleObject(completionEvent, 1000);
-                        // PadForge's WriteOneShot treats a signaled OVERLAPPED
+                        // the measured transport's WriteOneShot treats a signaled OVERLAPPED
                         // event as completion. HIDCLASS commonly reports zero
                         // via GetOverlappedResult even though the output report
                         // was accepted, so requiring a byte count creates false
@@ -4923,7 +4923,7 @@ namespace DS4Windows
             /// <summary>
             /// Atomically checks bounded async capacity, then invokes the
             /// caller's report builder before copying and submitting the
-            /// report. The builder is never called while all PadForge slots
+            /// report. The builder is never called while all MeasuredTransport slots
             /// are occupied, so source frames remain queued on backpressure.
             /// </summary>
             public bool TrySendPrepared(byte[] report,
@@ -4956,17 +4956,17 @@ namespace DS4Windows
                         return false;
                     }
 
-                    bool padForgeOrderedRing = maximumOutstanding ==
+                    bool measuredTransportOrderedRing = maximumOutstanding ==
                         DualShock4AudioTransportSettings.
-                            PadForgeAsyncSlotCount;
-                    int slotLimit = padForgeOrderedRing ?
+                            MeasuredTransportAsyncSlotCount;
+                    int slotLimit = measuredTransportOrderedRing ?
                         DualShock4AudioTransportSettings.
-                            PadForgeAsyncSlotCount : SlotCount;
+                            MeasuredTransportAsyncSlotCount : SlotCount;
                     int pending = 0;
                     int slot = -1;
                     for (int offset = 0; offset < slotLimit; offset++)
                     {
-                        int candidate = padForgeOrderedRing ? offset :
+                        int candidate = measuredTransportOrderedRing ? offset :
                             (next + offset) % SlotCount;
                         if (outstanding[candidate])
                         {
@@ -4977,9 +4977,9 @@ namespace DS4Windows
                             slot = candidate;
                         }
                     }
-                    if (padForgeOrderedRing)
+                    if (measuredTransportOrderedRing)
                     {
-                        // PadForge's pool probes exactly the oldest ring slot.
+                        // the measured transport's pool probes exactly the oldest ring slot.
                         // Do not skip over that still-pending write and spend a
                         // newer Bluetooth ACL credit out of presentation order.
                         int oldest = next % slotLimit;
@@ -4988,10 +4988,10 @@ namespace DS4Windows
                     bool boundedCapacity;
                     if (maximumOutstanding ==
                         DualShock4AudioTransportSettings.
-                            PadForgeAsyncSlotCount)
+                            MeasuredTransportAsyncSlotCount)
                     {
                         boundedCapacity = DualShock4AudioTransportSettings.
-                            CanSubmitPadForgeAsync(pending);
+                            CanSubmitMeasuredTransportAsync(pending);
                     }
                     else if (maximumOutstanding ==
                         DualShock4AudioTransportSettings.
@@ -5136,7 +5136,7 @@ namespace DS4Windows
             }
 
             /// <summary>
-            /// DS4AudioStreamer-compatible in-order write. The caller does
+            /// SynchronousDs4Audio-compatible in-order write. The caller does
             /// not present the next SBC report until the HID stack completes
             /// this one. This is completion-paced, not an HCI acknowledgement
             /// from the physical controller.

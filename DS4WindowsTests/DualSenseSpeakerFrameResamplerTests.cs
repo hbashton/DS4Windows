@@ -9,47 +9,47 @@ namespace DS4Windows.Tests
     public class DualSenseSpeakerFrameResamplerTests
     {
         [TestMethod]
-        public void PadSenseRawSourceReceivesOneContinuous512To480Conversion()
+        public void V5RawSourceReceivesOneContinuous512To480Conversion()
         {
             const int packetCount = 4096;
-            var converter = new DualSensePadSenseSpeakerClockResampler();
+            var converter = new DualSenseV5SpeakerClockResampler();
             float[] source = new float[
-                DualSensePadSenseSpeakerClockResampler.MaximumInputFrames * 2];
+                DualSenseV5SpeakerClockResampler.MaximumInputFrames * 2];
             float[] output = new float[
-                DualSensePadSenseSpeakerClockResampler.OutputFrames * 2];
+                DualSenseV5SpeakerClockResampler.OutputFrames * 2];
             long consumed = 0;
             for (int packet = 0; packet < packetCount; packet++)
             {
                 int requested = converter.PrepareOutputFrame();
                 Assert.IsTrue(requested > 0 && requested <=
-                    DualSensePadSenseSpeakerClockResampler.MaximumInputFrames);
+                    DualSenseV5SpeakerClockResampler.MaximumInputFrames);
                 FillStereoFloat(source, requested, consumed,
-                    DualSensePadSenseSpeakerClockResampler.NominalInputRate,
+                    DualSenseV5SpeakerClockResampler.NominalInputRate,
                     523.0, 997.0, 0.65);
                 Assert.AreEqual(
-                    DualSensePadSenseSpeakerClockResampler.OutputFrames,
+                    DualSenseV5SpeakerClockResampler.OutputFrames,
                     converter.ConvertPreparedOutput(source, 0, requested,
                         output, 0));
                 consumed += requested;
             }
 
             long nominal = packetCount *
-                DualSensePadSenseSpeakerClockResampler.ReferenceInputFrames;
+                DualSenseV5SpeakerClockResampler.ReferenceInputFrames;
             Assert.IsTrue(Math.Abs(consumed - nominal) <=
-                DualSensePadSenseSpeakerClockResampler.MaximumInputFrames,
-                $"PadSense source consumed {consumed} frames instead of " +
+                DualSenseV5SpeakerClockResampler.MaximumInputFrames,
+                $"V5 source consumed {consumed} frames instead of " +
                 $"approximately {nominal}; the single fixed 16:15 stage " +
                 "lost its continuous phase.");
         }
 
         [TestMethod]
-        public void PadSenseInitialSourceGateCanProduceEightPhysicalReports()
+        public void V5InitialSourceGateCanProduceEightPhysicalReports()
         {
-            var converter = new DualSensePadSenseSpeakerClockResampler();
+            var converter = new DualSenseV5SpeakerClockResampler();
             float[] source = new float[
-                DualSensePadSenseSpeakerClockResampler.MaximumInputFrames * 2];
+                DualSenseV5SpeakerClockResampler.MaximumInputFrames * 2];
             float[] output = new float[
-                DualSensePadSenseSpeakerClockResampler.OutputFrames * 2];
+                DualSenseV5SpeakerClockResampler.OutputFrames * 2];
             int requestedTotal = 0;
 
             for (int report = 0;
@@ -60,31 +60,31 @@ namespace DS4Windows.Tests
                 int requested = converter.PrepareOutputFrame();
                 requestedTotal += requested;
                 Assert.AreEqual(
-                    DualSensePadSenseSpeakerClockResampler.OutputFrames,
+                    DualSenseV5SpeakerClockResampler.OutputFrames,
                     converter.ConvertPreparedOutput(source, 0, requested,
                         output, 0));
             }
 
             Assert.AreEqual(
                 DualSenseBluetoothSpeakerPassthrough.
-                    PadSenseInitialSourceBufferFrames,
+                    V5InitialSourceBufferFrames,
                 requestedTotal,
                 "The V5 source gate must contain every frame and the four " +
                 "look-ahead samples required by its eight-report handoff.");
         }
 
         [TestMethod]
-        public void PadSenseHundredHertzSourceBalancesNinetyThreePointSevenFiveHertzWire()
+        public void V5HundredHertzSourceBalancesNinetyThreePointSevenFiveHertzWire()
         {
             const int sourceFramesPerTenMilliseconds = 480;
             const int sourceBlocksPerCycle = 16;
             const int physicalReportsPerCycle = 15;
             const int cycles = 100;
-            var converter = new DualSensePadSenseSpeakerClockResampler();
+            var converter = new DualSenseV5SpeakerClockResampler();
             float[] source = new float[
-                DualSensePadSenseSpeakerClockResampler.MaximumInputFrames * 2];
+                DualSenseV5SpeakerClockResampler.MaximumInputFrames * 2];
             float[] output = new float[
-                DualSensePadSenseSpeakerClockResampler.OutputFrames * 2];
+                DualSenseV5SpeakerClockResampler.OutputFrames * 2];
             int bufferedFrames = sourceFramesPerTenMilliseconds * 9;
 
             for (int report = 0;
@@ -125,14 +125,14 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
-        public void PadSenseSourceClockCorrectionIsContinuousAndBounded()
+        public void V5SourceClockCorrectionIsContinuousAndBounded()
         {
             const int packetCount = 10000;
-            var converter = new DualSensePadSenseSpeakerClockResampler();
+            var converter = new DualSenseV5SpeakerClockResampler();
             float[] source = new float[
-                DualSensePadSenseSpeakerClockResampler.MaximumInputFrames * 2];
+                DualSenseV5SpeakerClockResampler.MaximumInputFrames * 2];
             float[] output = new float[
-                DualSensePadSenseSpeakerClockResampler.OutputFrames * 2];
+                DualSenseV5SpeakerClockResampler.OutputFrames * 2];
             long sourceFrame = 0;
             double expected = 0.0;
             float previous = 0.0f;
@@ -142,17 +142,17 @@ namespace DS4Windows.Tests
             {
                 double ratio = 1.0 + Math.Sin(packet * 0.003) * 0.001;
                 expected += ratio *
-                    DualSensePadSenseSpeakerClockResampler.
+                    DualSenseV5SpeakerClockResampler.
                         ReferenceInputFrames;
                 converter.SetInputRateRatio(ratio);
                 int requested = converter.PrepareOutputFrame();
                 FillStereoFloat(source, requested, sourceFrame,
-                    DualSensePadSenseSpeakerClockResampler.NominalInputRate,
+                    DualSenseV5SpeakerClockResampler.NominalInputRate,
                     523.0, 997.0, 0.65);
                 converter.ConvertPreparedOutput(source, 0, requested,
                     output, 0);
                 for (int frame = 0;
-                    frame < DualSensePadSenseSpeakerClockResampler.OutputFrames;
+                    frame < DualSenseV5SpeakerClockResampler.OutputFrames;
                     frame++)
                 {
                     float current = output[frame * 2];
@@ -169,7 +169,7 @@ namespace DS4Windows.Tests
 
             Assert.IsTrue(Math.Abs(sourceFrame - expected) < 6.0);
             Assert.IsTrue(maximumStep < 0.12f,
-                $"PadSense clock correction introduced a waveform jump of " +
+                $"V5 clock correction introduced a waveform jump of " +
                 $"{maximumStep:F6}.");
         }
 

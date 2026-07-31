@@ -6,9 +6,9 @@ namespace DS4Windows
     {
         Reference,
         SourceDriven,
-        PadForgeReference,
-        PadForgeAsync,
-        PadForgeSpeakerOnly,
+        MeasuredTransportReference,
+        MeasuredTransportAsync,
+        MeasuredTransportSpeakerOnly,
         InputSynchronized,
         ProductionReplay,
         ProductionA0,
@@ -21,7 +21,7 @@ namespace DS4Windows
 
     /// <summary>
     /// Runtime selection and pure queue policy for the physical DualShock 4
-    /// speaker transport. The reference lane follows DS4AudioStreamer: source
+    /// speaker transport. The reference lane follows SynchronousDs4Audio: source
     /// availability wakes the sender, and each HID write completes before the
     /// next report is presented.
     /// </summary>
@@ -29,17 +29,17 @@ namespace DS4Windows
     {
         internal const string EnvironmentVariableName =
             "DS4WINDOWS_DS4_AUDIO_TRANSPORT_MODE";
-        internal const int PadForgeAsyncSlotCount = 8;
-        internal const int PadForgeAsyncEncodedFrameQueueLimit = 12;
-        // PadForge's clean hardware trace is driven by its shared 512-frame
+        internal const int MeasuredTransportAsyncSlotCount = 8;
+        internal const int MeasuredTransportAsyncEncodedFrameQueueLimit = 12;
+        // the measured transport's clean hardware trace is driven by its shared 512-frame
         // 48 kHz tick (10 2/3 ms). A DS4 tick produces 8/3 SBC frames, so a
         // four-frame 0x17 is presented on a 2,1,2,1... tick pattern. This is
         // deliberately not flattened to a uniform 16 ms clock: the measured
         // wire intervals alternate at approximately 21.33 and 10.67 ms.
-        internal const double PadForgeReferenceTickMilliseconds =
+        internal const double MeasuredTransportReferenceTickMilliseconds =
             1000.0 * 512.0 / 48000.0;
-        internal const int PadForgeReferenceProducedFrameThirdsPerTick = 8;
-        internal const int PadForgeReferenceReportFrameThirds =
+        internal const int MeasuredTransportReferenceProducedFrameThirdsPerTick = 8;
+        internal const int MeasuredTransportReferenceReportFrameThirds =
             DualShock4BluetoothAudioProtocol.SpeakerLargeFramesPerReport * 3;
         internal const int ProductionReplaySlotCount = 32;
         internal const int ProductionReplayRetainedSourceFrames = 8;
@@ -159,12 +159,12 @@ namespace DS4Windows
             {
                 return DualShock4AudioTransportMode.SourceDriven;
             }
-            if (string.Equals(value?.Trim(), "padforge-reference",
+            if (string.Equals(value?.Trim(), "measured-transport-reference",
                     StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(value?.Trim(), "padforge-exact",
+                string.Equals(value?.Trim(), "measured-transport-exact",
                     StringComparison.OrdinalIgnoreCase))
             {
-                return DualShock4AudioTransportMode.PadForgeReference;
+                return DualShock4AudioTransportMode.MeasuredTransportReference;
             }
             if (string.Equals(value?.Trim(), "scheduled",
                     StringComparison.OrdinalIgnoreCase) ||
@@ -173,21 +173,21 @@ namespace DS4Windows
             {
                 return DualShock4AudioTransportMode.Scheduled;
             }
-            if (string.Equals(value?.Trim(), "padforge",
+            if (string.Equals(value?.Trim(), "measured-transport",
                     StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(value?.Trim(), "padforge-async",
+                string.Equals(value?.Trim(), "measured-transport-async",
                     StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(value?.Trim(), "async",
                     StringComparison.OrdinalIgnoreCase))
             {
-                return DualShock4AudioTransportMode.PadForgeAsync;
+                return DualShock4AudioTransportMode.MeasuredTransportAsync;
             }
-            if (string.Equals(value?.Trim(), "padforge-speaker-only",
+            if (string.Equals(value?.Trim(), "measured-transport-speaker-only",
                     StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(value?.Trim(), "padforge-a2",
+                string.Equals(value?.Trim(), "measured-transport-a2",
                     StringComparison.OrdinalIgnoreCase))
             {
-                return DualShock4AudioTransportMode.PadForgeSpeakerOnly;
+                return DualShock4AudioTransportMode.MeasuredTransportSpeakerOnly;
             }
             if (string.Equals(value?.Trim(), "input-synchronized",
                     StringComparison.OrdinalIgnoreCase) ||
@@ -255,12 +255,12 @@ namespace DS4Windows
             {
                 DualShock4AudioTransportMode.SourceDriven =>
                     "source-driven",
-                DualShock4AudioTransportMode.PadForgeReference =>
-                    "padforge-reference",
-                DualShock4AudioTransportMode.PadForgeAsync =>
-                    "padforge-async",
-                DualShock4AudioTransportMode.PadForgeSpeakerOnly =>
-                    "padforge-speaker-only",
+                DualShock4AudioTransportMode.MeasuredTransportReference =>
+                    "measured-transport-reference",
+                DualShock4AudioTransportMode.MeasuredTransportAsync =>
+                    "measured-transport-async",
+                DualShock4AudioTransportMode.MeasuredTransportSpeakerOnly =>
+                    "measured-transport-speaker-only",
                 DualShock4AudioTransportMode.InputSynchronized =>
                     "input-synchronized",
                 DualShock4AudioTransportMode.ProductionReplay =>
@@ -303,12 +303,12 @@ namespace DS4Windows
                 GetSpeakerReportFrameCount(bufferedFrames);
         }
 
-        internal static bool ShouldWakePadForgeAsyncSender(int bufferedFrames)
+        internal static bool ShouldWakeMeasuredTransportAsyncSender(int bufferedFrames)
         {
             return ShouldWakeReferenceSender(bufferedFrames);
         }
 
-        internal static int SelectPadForgeAsyncReportFrameCount(
+        internal static int SelectMeasuredTransportAsyncReportFrameCount(
             int bufferedFrames, bool flushTail = false)
         {
             if (bufferedFrames < 0)
@@ -316,7 +316,7 @@ namespace DS4Windows
                 throw new ArgumentOutOfRangeException(nameof(bufferedFrames));
             }
 
-            // A real PadForge trace on this adapter contains a steady stream of
+            // A real MeasuredTransport trace on this adapter contains a steady stream of
             // one 0x17 report per four SBC frames. 0x14 is the two-frame tail,
             // not a second report to burst immediately after every 0x17. The
             // latter pattern was unique to our 10 ms VIIPER source callbacks
@@ -334,34 +334,34 @@ namespace DS4Windows
                 0;
         }
 
-        internal static bool CanSubmitPadForgeAsync(int pendingWrites)
+        internal static bool CanSubmitMeasuredTransportAsync(int pendingWrites)
         {
             if (pendingWrites < 0)
             {
                 throw new ArgumentOutOfRangeException(nameof(pendingWrites));
             }
 
-            return pendingWrites < PadForgeAsyncSlotCount;
+            return pendingWrites < MeasuredTransportAsyncSlotCount;
         }
 
-        internal static bool AdvancePadForgeReferencePresentation(
+        internal static bool AdvanceMeasuredTransportReferencePresentation(
             ref int bufferedFrameThirds)
         {
             if (bufferedFrameThirds < 0 ||
-                bufferedFrameThirds >= PadForgeReferenceReportFrameThirds)
+                bufferedFrameThirds >= MeasuredTransportReferenceReportFrameThirds)
             {
                 throw new ArgumentOutOfRangeException(
                     nameof(bufferedFrameThirds));
             }
 
             bufferedFrameThirds +=
-                PadForgeReferenceProducedFrameThirdsPerTick;
-            if (bufferedFrameThirds < PadForgeReferenceReportFrameThirds)
+                MeasuredTransportReferenceProducedFrameThirdsPerTick;
+            if (bufferedFrameThirds < MeasuredTransportReferenceReportFrameThirds)
             {
                 return false;
             }
 
-            bufferedFrameThirds -= PadForgeReferenceReportFrameThirds;
+            bufferedFrameThirds -= MeasuredTransportReferenceReportFrameThirds;
             return true;
         }
 

@@ -264,7 +264,7 @@ namespace DS4Windows
             report[2] = microphoneEnabled ? MicrophoneAudioMode :
                 (speakerEnabled ? SpeakerAudioMode : (byte)0x00);
 
-            // This is the Sony/DS4AudioStreamer audio-plane validity mask used
+            // This is the Sony/SynchronousDs4Audio audio-plane validity mask used
             // by the zero-dropout physical-controller trace. The normal effects
             // dispatcher resumes ownership immediately after this one-shot arm.
             byte validity = audioEnabled ? (byte)0xF3 : (byte)0xF0;

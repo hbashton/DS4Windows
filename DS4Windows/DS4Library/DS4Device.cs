@@ -1,4 +1,4 @@
-﻿/*
+/*
 DS4Windows
 Copyright (C) 2023  Travis Nickles
 
@@ -196,7 +196,7 @@ namespace DS4Windows
         internal const int USB_OUTPUT_CHANGE_LENGTH = 11;
         // Use large value for worst case scenario
         internal const int READ_STREAM_TIMEOUT = 3000;
-        // PadForge's proven Sony sole-writer path limits ordinary effect
+        // the measured transport's proven Sony sole-writer path limits ordinary effect
         // reports to roughly 30 Hz. A virtual DualSense produces haptics
         // feedback at about 94 Hz; forwarding every update while the physical
         // DS4 also receives 250 SBC reports per second saturates the Bluetooth
@@ -1200,7 +1200,7 @@ namespace DS4Windows
             lock (bluetoothOutputWriteLock)
             {
                 // DS4 Bluetooth audio control is an interrupt OUT report. The
-                // working PadForge and DS4AudioStreamer transports both send it
+                // working MeasuredTransport and SynchronousDs4Audio transports both send it
                 // with overlapped WriteFile; HidD_SetOutputReport does not arm
                 // the microphone lane on genuine CUH-ZCT2 hardware.
                 written = hDevice.WriteOutputReportViaSharedOverlapped(
@@ -1451,7 +1451,7 @@ namespace DS4Windows
                     {
                         //HidDevice.ReadStatus res = hDevice.ReadFile(btInputReport);
                         //HidDevice.ReadStatus res = hDevice.ReadAsyncWithFileStream(btInputReport, READ_STREAM_TIMEOUT);
-                        // Match PadForge/hidapi: one outstanding shared,
+                        // Match MeasuredTransport/hidapi: one outstanding shared,
                         // overlapped read on the primary input handle. The
                         // former two-deep IOCP pump stopped receiving when DS4
                         // firmware entered its Bluetooth audio report mode.

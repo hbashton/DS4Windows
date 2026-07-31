@@ -145,7 +145,7 @@ namespace DS4WindowsTests
             Assert.IsTrue(
                 DualSenseBluetoothAudioPacer.NativePrimeReportCount <=
                 DualSenseBluetoothAudioPacer.SingleAudioTransportSlotCount,
-                "The one-time prime must fit atomically in PadSense's strict FIFO.");
+                "The one-time prime must fit atomically in the native transport's strict FIFO.");
         }
 
         [TestMethod]
@@ -287,37 +287,37 @@ namespace DS4WindowsTests
 
             Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
                 ShouldBackpressurePacerProducer(true, target - 1,
-                    usesPadSenseSource: false, presentedReports: 1));
+                    usesV5Source: false, presentedReports: 1));
             Assert.IsTrue(DualSenseBluetoothSpeakerPassthrough.
                 ShouldBackpressurePacerProducer(true, target,
-                    usesPadSenseSource: false, presentedReports: 1));
+                    usesV5Source: false, presentedReports: 1));
             Assert.IsTrue(DualSenseBluetoothSpeakerPassthrough.
                 ShouldBackpressurePacerProducer(true, target + 40,
-                    usesPadSenseSource: false, presentedReports: 1));
+                    usesV5Source: false, presentedReports: 1));
             Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
                 ShouldBackpressurePacerProducer(false, target,
-                    usesPadSenseSource: false, presentedReports: 1));
+                    usesV5Source: false, presentedReports: 1));
 
             int prime = DualSenseBluetoothAudioPacer.NativePrimeReportCount;
             Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
                 ShouldBackpressurePacerProducer(true, prime - 1,
-                    usesPadSenseSource: false, presentedReports: 0));
+                    usesV5Source: false, presentedReports: 0));
             Assert.IsTrue(DualSenseBluetoothSpeakerPassthrough.
                 ShouldBackpressurePacerProducer(true, prime,
-                    usesPadSenseSource: false, presentedReports: 0));
+                    usesV5Source: false, presentedReports: 0));
         }
 
         [TestMethod]
-        public void PadSenseSourceCatchesUpSevenGenerationsAfterSeventyTwoMillisecondStall()
+        public void V5SourceCatchesUpSevenGenerationsAfterSeventyTwoMillisecondStall()
         {
             const int retainedGenerations = 7;
             int target = DualSenseBluetoothSpeakerPassthrough.
-                PadSenseSourceReservoirTargetFrames;
+                V5SourceReservoirTargetFrames;
 
             Assert.AreEqual(
                 DualSenseBluetoothSpeakerPassthrough.StartupWarmupReportCount,
                 target,
-                "The post-stall live window must match PadSense's bounded " +
+                "The post-stall live window must match the native transport's bounded " +
                 "eight-generation source FIFO.");
 
             // A roughly 72 ms host-thread drought retains seven complete
@@ -327,29 +327,29 @@ namespace DS4WindowsTests
             {
                 Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
                     ShouldBackpressurePacerProducer(true, pending,
-                        usesPadSenseSource: true, presentedReports: 1),
+                        usesV5Source: true, presentedReports: 1),
                     $"Retained generation {pending + 1} was not admitted " +
                     "during post-stall catch-up.");
             }
 
             Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
                 ShouldBackpressurePacerProducer(true, retainedGenerations,
-                    usesPadSenseSource: true, presentedReports: 1),
+                    usesV5Source: true, presentedReports: 1),
                 "Seven retained generations must remain admitted and ordered.");
             Assert.IsTrue(DualSenseBluetoothSpeakerPassthrough.
                 ShouldBackpressurePacerProducer(true, target,
-                    usesPadSenseSource: true, presentedReports: 1),
+                    usesV5Source: true, presentedReports: 1),
                 "Catch-up must remain bounded to the newest eight generations.");
         }
 
         [TestMethod]
-        public void PadSensePrimeKeepsIdleCarrierUntilEightReportsCanBeBuilt()
+        public void V5PrimeKeepsIdleCarrierUntilEightReportsCanBeBuilt()
         {
             const int sourceFramesPerBlock = 480;
             int bufferedFrames = 0;
             int requiredFrames =
                 DualSenseBluetoothSpeakerPassthrough.
-                    PadSenseInitialSourceBufferFrames;
+                    V5InitialSourceBufferFrames;
             int sourceBlocks = (requiredFrames + sourceFramesPerBlock - 1) /
                 sourceFramesPerBlock;
 
@@ -363,10 +363,10 @@ namespace DS4WindowsTests
 
                 Assert.AreEqual(block < sourceBlocks,
                     DualSenseBluetoothSpeakerPassthrough.
-                        ShouldMaintainIdleCarrierDuringPadSensePrime(
-                            usesPadSenseSource: true, sourcePrimePending,
+                        ShouldMaintainIdleCarrierDuringV5Prime(
+                            usesV5Source: true, sourcePrimePending,
                             captureReady, sourceRecentlyActive: true),
-                    $"PadSense source block {block} broke the continuous " +
+                    $"V5 source block {block} broke the continuous " +
                     "carrier-to-content handoff.");
             }
         }
@@ -375,40 +375,40 @@ namespace DS4WindowsTests
         [DataRow(false, true, false)]
         [DataRow(true, false, false)]
         [DataRow(true, true, true)]
-        public void LegacyAndActiveSourcesNeverUsePadSensePrimeCarrier(
-            bool usesPadSenseSource, bool sourcePrimePending,
+        public void LegacyAndActiveSourcesNeverUseV5PrimeCarrier(
+            bool usesV5Source, bool sourcePrimePending,
             bool captureReady)
         {
             Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
-                ShouldMaintainIdleCarrierDuringPadSensePrime(
-                    usesPadSenseSource, sourcePrimePending, captureReady,
+                ShouldMaintainIdleCarrierDuringV5Prime(
+                    usesV5Source, sourcePrimePending, captureReady,
                     sourceRecentlyActive: true));
         }
 
         [TestMethod]
-        public void PadSenseCallbackDroughtUsesIdleCarrierWithoutEndingGeneration()
+        public void V5CallbackDroughtUsesIdleCarrierWithoutEndingGeneration()
         {
             Assert.IsTrue(DualSenseBluetoothSpeakerPassthrough.
-                ShouldEmitPadSenseIdleCarrier(
-                    usesPadSenseSource: true,
+                ShouldEmitV5IdleCarrier(
+                    usesV5Source: true,
                     sourceRecentlyActive: false),
                 "A transient callback drought should use the armed idle " +
                 "carrier without declaring the source generation ended.");
             Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
-                ShouldEmitPadSenseIdleCarrier(
-                    usesPadSenseSource: true,
+                ShouldEmitV5IdleCarrier(
+                    usesV5Source: true,
                     sourceRecentlyActive: true),
                 "A callback that wins the freshness recheck must be retried " +
                 "instead of being replaced by an idle carrier.");
             Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
-                ShouldEmitPadSenseIdleCarrier(
-                    usesPadSenseSource: false,
+                ShouldEmitV5IdleCarrier(
+                    usesV5Source: false,
                     sourceRecentlyActive: false),
                 "Legacy capture transports must keep their existing policy.");
         }
 
         [TestMethod]
-        public void PadSenseReturningCallbackResetsOnlyAfterHardGenerationGap()
+        public void V5ReturningCallbackResetsOnlyAfterHardGenerationGap()
         {
             const long timestampFrequency = 10_000_000;
             const long previousCallback = timestampFrequency;
@@ -419,46 +419,46 @@ namespace DS4WindowsTests
             long lastContinuousReturn = previousCallback +
                 timestampFrequency *
                 DualSenseBluetoothSpeakerPassthrough.
-                    PadSenseHardSourceDiscontinuityMs / 1000 - 1;
+                    V5HardSourceDiscontinuityMs / 1000 - 1;
             long hardGenerationReturn = previousCallback +
                 timestampFrequency *
                 DualSenseBluetoothSpeakerPassthrough.
-                    PadSenseHardSourceDiscontinuityMs / 1000;
+                    V5HardSourceDiscontinuityMs / 1000;
 
             Assert.IsTrue(
                 DualSenseBluetoothSpeakerPassthrough.
-                    PadSenseHardSourceDiscontinuityMs >
+                    V5HardSourceDiscontinuityMs >
                 DualSenseBluetoothSpeakerPassthrough.
                     TransientCaptureShortageLeaseMs,
                 "The hard generation boundary must not reinterpret a normal " +
                 "100 ms source shortage as a reset.");
             Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
-                ShouldResetPadSenseSourceBeforeAppendingCallback(
-                    usesPadSenseSource: true, previousCallback,
+                ShouldResetV5SourceBeforeAppendingCallback(
+                    usesV5Source: true, previousCallback,
                     transientReturn, timestampFrequency),
                 "A 100 ms V5 callback drought must preserve the existing " +
                 "ring and fractional resampler history.");
             Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
-                ShouldResetPadSenseSourceBeforeAppendingCallback(
-                    usesPadSenseSource: true, previousCallback,
+                ShouldResetV5SourceBeforeAppendingCallback(
+                    usesV5Source: true, previousCallback,
                     lastContinuousReturn, timestampFrequency),
                 "V5 state must remain continuous until the hard generation " +
                 "boundary is reached.");
             Assert.IsTrue(DualSenseBluetoothSpeakerPassthrough.
-                ShouldResetPadSenseSourceBeforeAppendingCallback(
-                    usesPadSenseSource: true, previousCallback,
+                ShouldResetV5SourceBeforeAppendingCallback(
+                    usesV5Source: true, previousCallback,
                     hardGenerationReturn, timestampFrequency),
                 "The first callback after a hard V5 gap must clear stale " +
                 "source state before its new PCM is appended.");
             Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
-                ShouldResetPadSenseSourceBeforeAppendingCallback(
-                    usesPadSenseSource: false, previousCallback,
+                ShouldResetV5SourceBeforeAppendingCallback(
+                    usesV5Source: false, previousCallback,
                     hardGenerationReturn, timestampFrequency),
                 "Legacy and non-V5 routes must not inherit the new reset " +
                 "policy.");
             Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
-                ShouldResetPadSenseSourceBeforeAppendingCallback(
-                    usesPadSenseSource: true, previousCallbackTimestamp: 0,
+                ShouldResetV5SourceBeforeAppendingCallback(
+                    usesV5Source: true, previousCallbackTimestamp: 0,
                     callbackTimestamp: hardGenerationReturn,
                     timestampFrequency),
                 "The first callback has no prior generation to discard.");

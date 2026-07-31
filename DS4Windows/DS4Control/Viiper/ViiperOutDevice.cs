@@ -151,7 +151,6 @@ namespace DS4Windows
         private const byte ViiperStreamFrameOutputState = 0x81;
         private const byte ViiperStreamFrameSpeakerPcm = 0x82;
         private const byte ViiperStreamFrameAtomicAudioHaptics = 0x83;
-        private const byte ViiperStreamFrameVersionV2 = 0x02;
         private const byte ViiperStreamFrameVersionV3 = 0x03;
         private const byte ViiperStreamFrameVersionV5 = 0x05;
         private const byte FeedbackSpeakerKindPcm = 0;
@@ -162,7 +161,7 @@ namespace DS4Windows
         private const int MaximumStreamRecoveryBackoffMilliseconds = 1000;
         private const int MicrophoneDisableRetryMilliseconds = 250;
         // Virtual speaker formats have different proven buffering contracts.
-        // PadSense bounds DualSense latency with an eight-carrier newest-wins
+        // V5 bounds DualSense latency with an eight-carrier newest-wins
         // FIFO and never rejects a carrier based on wall-clock age. A paused
         // consumer therefore resumes from the live eight-frame window instead
         // of turning a scheduling pause into an artificial silence interval.
@@ -268,7 +267,7 @@ namespace DS4Windows
         private bool activeStreamSupportsMicrophone;
         private bool activeStreamSupportsDirectSpeaker;
         private bool activeStreamSupportsAtomicAudioHaptics;
-        private bool activeStreamUsesPadSenseAudioSource;
+        private bool activeStreamUsesV5AudioSource;
         private bool activeStreamUsesAudioOnlyDescriptor;
         private byte activeStreamFrameVersion;
         private int microphoneVolume = 128;
@@ -544,8 +543,8 @@ namespace DS4Windows
         /// assembler. The physical bridge owns the single continuous
         /// 512-to-480 speaker-clock conversion.
         /// </summary>
-        internal bool UsesPadSenseAudioSource =>
-            connected && activeStreamUsesPadSenseAudioSource;
+        internal bool UsesV5AudioSource =>
+            connected && activeStreamUsesV5AudioSource;
 
         internal void ApplyAtomicAudioHapticsFeedback(byte[] feedback,
             int feedbackLength, int expectedDeviceIndex)
@@ -712,7 +711,7 @@ namespace DS4Windows
             activeStreamSupportsMicrophone = false;
             activeStreamSupportsDirectSpeaker = false;
             activeStreamSupportsAtomicAudioHaptics = false;
-            activeStreamUsesPadSenseAudioSource = false;
+            activeStreamUsesV5AudioSource = false;
             activeStreamUsesAudioOnlyDescriptor = false;
             activeStreamFrameVersion = 0;
             Volatile.Write(ref virtualMicrophoneInterfaceActive, 0);
@@ -728,7 +727,7 @@ namespace DS4Windows
                 activeStreamSupportsMicrophone = true;
                 activeStreamSupportsDirectSpeaker = true;
                 activeStreamSupportsAtomicAudioHaptics = true;
-                activeStreamUsesPadSenseAudioSource = true;
+                activeStreamUsesV5AudioSource = true;
                 activeStreamUsesAudioOnlyDescriptor = audioOnlySidecar;
                 activeStreamFrameVersion = ViiperStreamFrameVersionV5;
                 return stream;
@@ -743,7 +742,7 @@ namespace DS4Windows
                 activeStreamSupportsMicrophone = true;
                 activeStreamSupportsDirectSpeaker = true;
                 activeStreamSupportsAtomicAudioHaptics = true;
-                activeStreamUsesPadSenseAudioSource = true;
+                activeStreamUsesV5AudioSource = true;
                 activeStreamFrameVersion = ViiperStreamFrameVersionV5;
                 return stream;
             }
@@ -791,31 +790,12 @@ namespace DS4Windows
                 catch (IOException ex)
                 {
                     AppLogger.LogToGui(
-                        $"VIIPER DualShock 4 direct speaker stream unavailable, trying microphone V2: {ex.Message}",
-                        false);
+                        $"VIIPER DualShock 4 audio stream unavailable: {ex.Message}",
+                        true);
+                    throw new IOException(
+                        "The installed VIIPER build does not support the current DualShock 4 audio interface. Update VIIPER from Settings and try again.",
+                        ex);
                 }
-
-                try
-                {
-                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
-                        "dualshock4micv2", 0x05C4);
-                    activeFeedbackLength = ViiperStatePacketBuilder.GetFeedbackLength(
-                        viiperType);
-                    activeStreamUsesFramedProtocol = true;
-                    activeStreamSupportsMicrophone = true;
-                    activeStreamFrameVersion = ViiperStreamFrameVersionV2;
-                    return stream;
-                }
-                catch (IOException ex)
-                {
-                    AppLogger.LogToGui(
-                        $"VIIPER DualShock 4 microphone input unavailable, continuing without mic-in: {ex.Message}",
-                        false);
-                }
-
-                activeFeedbackLength = ViiperStatePacketBuilder.GetFeedbackLength(
-                    viiperType);
-                return client.CreateDeviceAndOpenStream("dualshock4", 0x05C4);
             }
 
             activeFeedbackLength = ViiperStatePacketBuilder.GetFeedbackLength(viiperType);
@@ -5402,23 +5382,22 @@ namespace DS4Windows
         private readonly ViiperVirtualDeviceLifetime deviceLifetime;
         private readonly object writeLock = new object();
         private readonly byte[] incomingFrameHeader =
-            new byte[FrameV2HeaderLength];
+            new byte[FramedHeaderLength];
         // Input state and microphone writers share this buffer under
         // writeLock. Reusing it removes the per-frame managed allocation which
         // could otherwise pause the 4 ms physical speaker presenter during a
         // full process GC.
         private byte[] outgoingFrameBuffer =
-            new byte[FrameV2HeaderLength + 2048];
+            new byte[FramedHeaderLength + 2048];
         private uint frameSequence;
         private uint incomingFrameSequence;
         private bool incomingFrameSequenceKnown;
         private int transportClosed;
-        private const int FrameV2HeaderLength = 16;
+        private const int FramedHeaderLength = 16;
         private const byte FrameMagic0 = (byte)'V';
         private const byte FrameMagic1 = (byte)'P';
         private const byte FrameMagic2 = (byte)'C';
         private const byte FrameMagic3 = (byte)'M';
-        private const byte FrameVersionV2 = 0x02;
         private const byte FrameVersionV3 = 0x03;
         private const byte FrameVersionV5 = 0x05;
 
@@ -5476,8 +5455,7 @@ namespace DS4Windows
             {
                 throw new ArgumentOutOfRangeException(nameof(data));
             }
-            if (version != FrameVersionV2 && version != FrameVersionV3 &&
-                version != FrameVersionV5)
+            if (version != FrameVersionV3 && version != FrameVersionV5)
             {
                 throw new ArgumentOutOfRangeException(nameof(version));
             }
@@ -5489,7 +5467,7 @@ namespace DS4Windows
                     throw new ObjectDisposedException(nameof(ViiperDeviceStream));
                 }
 
-                int frameLength = FrameV2HeaderLength + data.Length;
+                int frameLength = FramedHeaderLength + data.Length;
                 if (outgoingFrameBuffer.Length < frameLength)
                 {
                     Array.Resize(ref outgoingFrameBuffer, Math.Max(frameLength,
@@ -5509,8 +5487,8 @@ namespace DS4Windows
                 frame[9] = (byte)(sequence >> 8);
                 frame[10] = (byte)(sequence >> 16);
                 frame[11] = (byte)(sequence >> 24);
-                Buffer.BlockCopy(data, 0, frame, FrameV2HeaderLength, data.Length);
-                uint crc = ComputeFrameV2Crc(frame, frameLength);
+                Buffer.BlockCopy(data, 0, frame, FramedHeaderLength, data.Length);
+                uint crc = ComputeFramedCrc(frame, frameLength);
                 frame[12] = (byte)crc;
                 frame[13] = (byte)(crc >> 8);
                 frame[14] = (byte)(crc >> 16);
@@ -5521,7 +5499,7 @@ namespace DS4Windows
 
         public byte[] ReadFrame(byte expectedVersion, out byte frameType)
         {
-            byte[] header = new byte[FrameV2HeaderLength];
+            byte[] header = new byte[FramedHeaderLength];
             ReadExactly(header, 0, header.Length);
             if (header[0] != FrameMagic0 || header[1] != FrameMagic1 ||
                 header[2] != FrameMagic2 || header[3] != FrameMagic3 ||
@@ -5605,19 +5583,19 @@ namespace DS4Windows
             return payloadLength;
         }
 
-        private static uint ComputeFrameV2Crc(byte[] frame)
+        private static uint ComputeFramedCrc(byte[] frame)
         {
-            return ComputeFrameV2Crc(frame, frame.Length);
+            return ComputeFramedCrc(frame, frame.Length);
         }
 
-        private static uint ComputeFrameV2Crc(byte[] frame, int frameLength)
+        private static uint ComputeFramedCrc(byte[] frame, int frameLength)
         {
             uint crc = 0xFFFFFFFFu;
             for (int i = 4; i < 12; i++)
             {
                 crc = UpdateCrc32(crc, frame[i]);
             }
-            for (int i = FrameV2HeaderLength; i < frameLength; i++)
+            for (int i = FramedHeaderLength; i < frameLength; i++)
             {
                 crc = UpdateCrc32(crc, frame[i]);
             }

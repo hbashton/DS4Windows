@@ -85,7 +85,7 @@ namespace DS4WindowsTests
                 "         Sony Corp. : Wireless Controller (054c:09cc)",
                 "           -> usbip://localhost:3241/8-4",
                 "           -> remote bus/dev 008/004",
-                "           -> serial 'PADSENSE1234567'",
+                "           -> serial 'DS4WIN1234567'",
             });
 
             IReadOnlyList<ViiperUsbipPortManager.UsbipPortBlock> ports =
@@ -120,15 +120,15 @@ namespace DS4WindowsTests
         {
             ViiperUsbipPortManager.UsbipPortBlock untagged = CreatePort(
                 "localhost", "1-1", null);
-            ViiperUsbipPortManager.UsbipPortBlock padSense = CreatePort(
-                "localhost", "1-1", "PADSENSE1234567");
+            ViiperUsbipPortManager.UsbipPortBlock nativeTransport = CreatePort(
+                "localhost", "1-1", "DS4WIN1234567");
             ViiperUsbipPortManager.UsbipPortBlock remoteDs4w = CreatePort(
                 "192.0.2.20", "1-1", "DS4W0123456789A");
 
             Assert.IsTrue(ViiperUsbipPortManager.
                 IsDs4WindowsOwnedLocalPort(untagged, "1-1"));
             Assert.IsFalse(ViiperUsbipPortManager.
-                IsDs4WindowsOwnedLocalPort(padSense, "1-1"));
+                IsDs4WindowsOwnedLocalPort(nativeTransport, "1-1"));
             Assert.IsFalse(ViiperUsbipPortManager.
                 IsDs4WindowsOwnedLocalPort(remoteDs4w, "1-1"));
         }
@@ -154,7 +154,7 @@ namespace DS4WindowsTests
         [DataRow(0, "DS4W0123456789A", false)]
         [DataRow(-1, "DS4W0123456789A", false)]
         [DataRow(1, null, true)]
-        [DataRow(1, "PADSENSE1234567", false)]
+        [DataRow(1, "DS4WIN1234567", false)]
         public void CreateTrustRequiresPositiveNativePortAndDs4wToken(
             int port, string serial, bool expected)
         {

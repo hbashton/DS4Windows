@@ -59,7 +59,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void CombinedReportAssertsPadSenseNativeAudioContract()
+        public void CombinedReportAssertsV5NativeAudioContract()
         {
             byte[] report = new byte[64];
             report[13] = 0xFD;
@@ -125,7 +125,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void SpeakerRouteRepeatsPadSenseNativeAudioContract()
+        public void SpeakerRouteRepeatsV5NativeAudioContract()
         {
             byte[] report = new byte[64];
             report[13] = 0xFD;
@@ -158,7 +158,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void MicrophoneProfileRangeMapsToPadSenseFullScale()
+        public void MicrophoneProfileRangeMapsToV5FullScale()
         {
             Assert.AreEqual((byte)0x00, MapMicrophoneVolume(0));
             Assert.AreEqual((byte)0x80, MapMicrophoneVolume(128));
@@ -169,7 +169,7 @@ namespace DS4WindowsTests
             {
                 byte mapped = MapMicrophoneVolume((byte)value);
                 Assert.AreEqual((byte)value, mapped,
-                    "PadSense microphone gain must retain the full profile byte.");
+                    "V5 microphone gain must retain the full profile byte.");
                 Assert.IsTrue(mapped >= previous,
                     $"Mapped microphone volume decreased at profile value {value}.");
                 previous = mapped;
@@ -177,7 +177,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void SpeakerSnapshotRepeatsPadSenseNativeAudioContract()
+        public void SpeakerSnapshotRepeatsV5NativeAudioContract()
         {
             byte[] report = new byte[64];
             report[4] = 0xFF; // 0x36 header: microphone stream remains enabled.

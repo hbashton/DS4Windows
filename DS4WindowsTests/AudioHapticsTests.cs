@@ -255,7 +255,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void Ds5BridgeAudioHapticsConfigurationMatrixClonesWithoutLoss()
+        public void ProductionReferenceAudioHapticsConfigurationMatrixClonesWithoutLoss()
         {
             foreach (AudioHapticsSourceKind source in
                 Enum.GetValues<AudioHapticsSourceKind>())

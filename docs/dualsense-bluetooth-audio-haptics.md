@@ -41,13 +41,12 @@ The profile can optionally process the physical Bluetooth controller-speaker str
 
 Selecting a DualSense or DualSense Edge as the emulated controller initializes the profile to **Balanced** and **3 dB** of bass/body boost. The user can tune or disable those values afterward. The processor is stereo-linked and bufferless, so it adds no look-ahead frame or transport latency. **Off** and **0 dB** preserve the original PCM path. These controls affect speaker audio only; advanced-haptics channels remain untouched.
 
-## Implementation references
+## Protocol basis
 
-This is an independent implementation based on publicly documented packet behavior, not a copy of PadForge source code.
-
-- [SAxense](https://apps.sdore.me/SAxense) documents the Bluetooth `0x32` haptics transport. Its source is MPL-2.0.
-- [dualsense-bt-haptics](https://github.com/awalol/dualsense-bt-haptics) documents the Bluetooth controller speaker packet grammar and Opus framing. It is MIT licensed.
-- [PadForge](https://github.com/hifihedgehog/PadForge) was used as a behavioral reference for per-controller sequencing, separate haptics and speaker lanes, and WASAPI loopback architecture. PadForge is CC BY-NC-SA 4.0, so its source code is not included here.
+This is an independent implementation built from public HID descriptors,
+documented Sony report formats, and hardware traces captured during development.
+The speaker, microphone, state, lightbar, trigger, and haptics lanes are owned by
+one DS4Windows transport so their ordering remains deterministic.
 
 ## Diagnostics
 

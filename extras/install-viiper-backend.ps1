@@ -704,38 +704,6 @@ function Test-UsbipRuntime([string]$usbipPath) {
     }
 }
 
-function Get-RunningPadSenseProcesses {
-    try {
-        return @(Get-CimInstance Win32_Process -ErrorAction Stop |
-            Where-Object { $_.Name -match "^PadSense.*\.exe$" })
-    }
-    catch {
-        return @(Get-Process -ErrorAction SilentlyContinue |
-            Where-Object { $_.ProcessName -match "^PadSense" } |
-            ForEach-Object {
-                [pscustomobject]@{
-                    Name = "$($_.ProcessName).exe"
-                    ProcessId = $_.Id
-                }
-            })
-    }
-}
-
-function Assert-PadSenseNotRunning([string]$operation) {
-    $processes = @(Get-RunningPadSenseProcesses)
-    if ($processes.Count -eq 0) { return }
-
-    $owners = ($processes | ForEach-Object {
-        "$($_.Name) PID=$($_.ProcessId)"
-    }) -join ", "
-    $message = "PadSense is running ($owners) and may own active USBIP " +
-        "imports. Close PadSense completely, including its tray/background " +
-        "process, then run Install / Repair again. Setup did not begin the " +
-        "$operation."
-    Write-SetupLog $message Red
-    throw $message
-}
-
 function Stop-Ds4WindowsProcesses([string]$operation) {
     $processes = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
         Where-Object {
@@ -1636,8 +1604,6 @@ try {
             "usbip-win2 is $state; installing or repairing " +
             "$requiredUsbipVersion."
         ) Yellow
-        Assert-PadSenseNotRunning "usbip-win2 driver transition"
-
         $uninstallEntry = $null
         if ($usbipVersion -and $usbipVersion -ne $requiredUsbipVersion) {
             $uninstallEntry = Get-UsbipUninstallEntry $usbipVersion
@@ -1656,8 +1622,6 @@ try {
             throw "Unable to quiesce VIIPER before the usbip-win2 driver upgrade. " +
                 "Close viiper.exe manually and run Install / Repair again."
         }
-        Assert-PadSenseNotRunning "usbip-win2 driver transition"
-
         if ($canonicalUsbipPresent) {
             Disconnect-UsbipImports $script:CanonicalUsbipPath
         }

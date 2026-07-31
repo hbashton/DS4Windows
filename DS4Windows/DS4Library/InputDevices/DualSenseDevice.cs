@@ -404,7 +404,7 @@ namespace DS4Windows.InputDevices
         private const int BluetoothCombinedStateLength = 63;
         private const int BluetoothCombinedNativeStateLength = USB_OUTPUT_CHANGE_LENGTH - 1;
         private const byte BluetoothCombinedLowLatencyBufferLength = 16;
-        // PadSense's clean Windows speaker and duplex traces keep every 0x36
+        // the native transport's clean Windows speaker and duplex traces keep every 0x36
         // media-lane depth at 0x80. Use the same native contract for both FE
         // and FF reports; cadence remains one frame per 10.667 ms.
         private const byte BluetoothCombinedSpeakerBufferLength = 0x80;
@@ -443,7 +443,7 @@ namespace DS4Windows.InputDevices
         private const byte BluetoothNormalInputBit = 0x01;
         private const byte BluetoothMicrophoneInputBit = 0x02;
         private const byte BluetoothMicrophoneControlEnable = 0x01;
-        // PadSense repeats Sony's native wired-DualSense audio snapshot on
+        // V5 repeats Sony's native wired-DualSense audio snapshot on
         // every 0x36 media report. Byte 0x09 selects the internal speaker
         // contract while retaining the controller's microphone clock.
         private const byte DualSenseAudioControlOutputSpeaker = 0x09;
@@ -888,7 +888,7 @@ namespace DS4Windows.InputDevices
             }
 
             if (!PrepareBluetoothSpeakerClockTransport(
-                    usePadSensePresentationCadence: true))
+                    useV5PresentationCadence: true))
             {
                 RequestUnifiedBluetoothOutputTransportRecovery();
                 return false;
@@ -1043,7 +1043,7 @@ namespace DS4Windows.InputDevices
                 }
 
                 // Route changes are state updates on the one long-lived
-                // PadSense transport. Never retire the helper or inject a
+                // V5 transport. Never retire the helper or inject a
                 // legacy 0x31 report between media generations.
                 lock (bluetoothCombinedSpeakerReportLock)
                 {
@@ -1201,20 +1201,20 @@ namespace DS4Windows.InputDevices
         /// lifecycle thread.
         /// </summary>
         internal bool PrepareBluetoothSpeakerClockTransport(
-            bool usePadSensePresentationCadence = false)
+            bool useV5PresentationCadence = false)
         {
             return TransitionBluetoothSpeakerClockTransport(
                 ignoreRetryCooldown: false,
-                usePadSensePresentationCadence,
+                useV5PresentationCadence,
                 allowDuringStopping: false);
         }
 
         internal bool RecoverBluetoothSpeakerClockTransport(
-            bool usePadSensePresentationCadence = false)
+            bool useV5PresentationCadence = false)
         {
             return TransitionBluetoothSpeakerClockTransport(
                 ignoreRetryCooldown: true,
-                usePadSensePresentationCadence,
+                useV5PresentationCadence,
                 allowDuringStopping: false);
         }
 
@@ -1222,13 +1222,13 @@ namespace DS4Windows.InputDevices
         {
             return TransitionBluetoothSpeakerClockTransport(
                 ignoreRetryCooldown: true,
-                usePadSensePresentationCadence: true,
+                useV5PresentationCadence: true,
                 allowDuringStopping: true);
         }
 
         private bool TransitionBluetoothSpeakerClockTransport(
             bool ignoreRetryCooldown,
-            bool usePadSensePresentationCadence,
+            bool useV5PresentationCadence,
             bool allowDuringStopping)
         {
             if (conType != ConnectionType.BT ||
@@ -1256,9 +1256,9 @@ namespace DS4Windows.InputDevices
                     lock (bluetoothAudioPacerLock)
                     {
                         if (bluetoothAudioPacer?.IsRunning == true &&
-                            (!usePadSensePresentationCadence ||
+                            (!useV5PresentationCadence ||
                                 bluetoothAudioPacer.
-                                    UsesPadSensePresentationCadence))
+                                    UsesV5PresentationCadence))
                         {
                             return true;
                         }
@@ -1316,7 +1316,7 @@ namespace DS4Windows.InputDevices
                     if (!DualSenseBluetoothAudioPacer.TryStart(
                         hDevice?.DevicePath, initialTemplate,
                         initialHapticsExpiry,
-                        usePadSensePresentationCadence, out candidate,
+                        useV5PresentationCadence, out candidate,
                         out string error))
                     {
                         bluetoothAudioPacerLastError = error ?? string.Empty;
@@ -1383,7 +1383,7 @@ namespace DS4Windows.InputDevices
                         ref bluetoothOutputTransportStopping) == 0)
                     {
                         if (RecoverBluetoothSpeakerClockTransport(
-                            usePadSensePresentationCadence: true))
+                            useV5PresentationCadence: true))
                         {
                             // Recovery starts a fresh physical FIFO. Commit the
                             // latest coalesced state once before returning so a
@@ -1880,7 +1880,7 @@ namespace DS4Windows.InputDevices
 
             if (conType == ConnectionType.BT)
             {
-                // The PadSense-derived helper owns the physical Bluetooth HID
+                // The V5 helper owns the physical Bluetooth HID
                 // writer for this entire connection, including the idle period
                 // before a virtual controller or audio endpoint is active.
                 // Startup state is queued there; never inject a legacy 0x31.
@@ -2157,7 +2157,7 @@ namespace DS4Windows.InputDevices
                                     inputReport[2]);
                                 inputReportErrorCount = 0;
                                 RecordBluetoothMicrophoneFrame(inputReport);
-                                // PadSense treats 0x31 microphone packets as a
+                                // V5 treats 0x31 microphone packets as a
                                 // media-only input lane. Do not let their 100 Hz
                                 // cadence pump pending state or publish a
                                 // competing output report; continuous 0x36
@@ -3384,7 +3384,7 @@ namespace DS4Windows.InputDevices
                 // profile/custom lightbar and audio routing in that case.
                 if (hasNativeGameState)
                 {
-                    MergeProfileStateIntoPadSenseAudioSnapshot(report,
+                    MergeProfileStateIntoV5AudioSnapshot(report,
                         offset + BluetoothCombinedStateOffset,
                         latestBluetoothCombinedSpeakerReport,
                         BluetoothCombinedStateOffset);
@@ -3396,7 +3396,7 @@ namespace DS4Windows.InputDevices
                         BluetoothCombinedNativeStateLength &&
                     outputReport[0] == OUTPUT_REPORT_ID_BT)
                 {
-                    MergeProfileStateIntoPadSenseAudioSnapshot(outputReport,
+                    MergeProfileStateIntoV5AudioSnapshot(outputReport,
                         2, latestBluetoothCombinedSpeakerReport,
                         BluetoothCombinedStateOffset);
                     latestBluetoothCombinedNativeStateTimestamp = 0;
@@ -3490,7 +3490,7 @@ namespace DS4Windows.InputDevices
                     return false;
                 }
 
-                MergeProfileStateIntoPadSenseAudioSnapshot(report,
+                MergeProfileStateIntoV5AudioSnapshot(report,
                     offset + 1, latestBluetoothCombinedSpeakerReport,
                     BluetoothCombinedStateOffset);
                 latestBluetoothCombinedNativeStateTimestamp =
@@ -3504,7 +3504,7 @@ namespace DS4Windows.InputDevices
             if (outputDirty)
             {
                 bool published = true;
-                // Every Bluetooth state uses the long-lived PadSense helper,
+                // Every Bluetooth state uses the long-lived V5 helper,
                 // even while speaker and microphone media are idle.
                 if (conType == ConnectionType.BT)
                 {
@@ -3590,25 +3590,25 @@ namespace DS4Windows.InputDevices
                     return true;
                 }
 
-                MergeProfileStateIntoPadSenseAudioSnapshot(report, 2,
+                MergeProfileStateIntoV5AudioSnapshot(report, 2,
                     latestBluetoothCombinedSpeakerReport,
                     BluetoothCombinedStateOffset);
                 return true;
             }
         }
 
-        private static void MergeProfileStateIntoPadSenseAudioSnapshot(
+        private static void MergeProfileStateIntoV5AudioSnapshot(
             byte[] source, int sourceOffset, byte[] destination,
             int destinationOffset)
         {
-            // PadSense keeps the native audio contract stable on every media
+            // V5 keeps the native audio contract stable on every media
             // frame and overlays only mutable controller state. In particular,
             // generic DS4Windows output reports must not replace FD/F7, the
             // three audio gains, route 0x09, or audio-control2 0x0A with their
             // Bluetooth control-report equivalents.
             Array.Copy(source, sourceOffset + 2, destination,
                 destinationOffset + 2, 2);       // rumble motors
-            // PadSense keeps UseRumbleNotHaptics clear on an idle carrier.
+            // V5 keeps UseRumbleNotHaptics clear on an idle carrier.
             // A virtual report may leave its validity bit asserted while both
             // motors are zero; forwarding that bit alone switches firmware
             // out of the native tactile/audio mode on every media report.
@@ -3618,7 +3618,7 @@ namespace DS4Windows.InputDevices
             {
                 destination[destinationOffset] |= 0x02;
             }
-            // PadSense keeps mute LED and power-save/mute state in its fixed
+            // V5 keeps mute LED and power-save/mute state in its fixed
             // media snapshot. Microphone transitions travel through the
             // ordered 0x32 control report instead of mutating each 0x36.
             Array.Copy(source, sourceOffset + 10, destination,
@@ -3754,7 +3754,7 @@ namespace DS4Windows.InputDevices
 
                 ApplyBluetoothMicrophoneStreamingRequest(combined);
                 // A control-only report participates in Sony's shared output
-                // report sequence but carries no media frame. DS5Dongle leaves
+                // report sequence but carries no media frame. CombinedReportReference leaves
                 // the audio packet counter untouched on this path.
                 byte reportSequenceBefore;
                 byte packetSequenceBefore;
@@ -4132,7 +4132,7 @@ namespace DS4Windows.InputDevices
             byte[] combined, byte profileVolume, bool headsetOnlyAudio,
             byte headphoneVolume)
         {
-            // PadSense keeps the complete native audio snapshot armed on every
+            // V5 keeps the complete native audio snapshot armed on every
             // 0x36, independent of the header's FE/FF microphone mode. Keep
             // both volume fields valid and preserve the microphone volume and
             // audio-clock fields instead of alternating state shapes.
@@ -4158,7 +4158,7 @@ namespace DS4Windows.InputDevices
             if (headsetOnlyAudio)
             {
                 // A 0x96 headset frame is the same fixed-cadence audio lane as
-                // 0x93. Keep a valid gain snapshot just as the DS5 Bridge
+                // 0x93. Keep a valid gain snapshot just as the the validated implementation
                 // combined transport does; clearing it can leave the AUX DAC
                 // quiet or inconsistently armed on controller firmware.
                 combined[BluetoothCombinedStateFlag1Offset] |=
@@ -4179,7 +4179,7 @@ namespace DS4Windows.InputDevices
 
         private static byte MapDualSenseMicrophoneVolume(byte profileVolume)
         {
-            // Sony's physical output report and DS5 Bridge both use 0x40 as
+            // Sony's physical output report and the validated implementation both use 0x40 as
             // the maximum microphone level. Keep the profile/UI byte range and
             // map it once at the hardware protocol boundary.
             return (byte)((profileVolume * DualSenseMicrophoneVolumeMaximum +

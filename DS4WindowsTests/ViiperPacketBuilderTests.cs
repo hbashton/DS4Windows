@@ -45,7 +45,7 @@ namespace DS4WindowsTests
             "dualsensecombinedaudioduplexv5")]
         [DataRow(ViiperVirtualDeviceType.DualSenseEdge,
             "dualsenseedgecombinedaudioduplexv5")]
-        public void DualSenseFamiliesSelectOnlyPadSenseV5(
+        public void DualSenseFamiliesSelectOnlyV5Contract(
             ViiperVirtualDeviceType type, string expectedName)
         {
             Type builderType = typeof(ViiperVirtualDeviceType).Assembly.GetType(

@@ -432,16 +432,16 @@ namespace DS4Windows
         internal const int InitialBufferMs = 20;
         internal const int TargetBufferMs = 20;
         // Legacy capture sources retain the existing stop-and-wait policy.
-        // PadSense-native V5 source owns a bounded eight-generation FIFO and
+        // The native V5 source owns a bounded eight-generation FIFO and
         // drains every complete retained generation into its strict writer
         // after a host stall, so it uses the separate target below.
         internal const int PacerReservoirTargetFrames = 1;
         internal const int StartupWarmupReportCount = 8;
-        internal const int PadSenseSourceReservoirTargetFrames =
+        internal const int V5SourceReservoirTargetFrames =
             StartupWarmupReportCount;
-        internal const int PadSenseInitialSourceBufferFrames =
+        internal const int V5InitialSourceBufferFrames =
             StartupWarmupReportCount *
-                DualSensePadSenseSpeakerClockResampler.ReferenceInputFrames +
+                DualSenseV5SpeakerClockResampler.ReferenceInputFrames +
             DualSenseReferenceSpeakerFrameResampler.
                 InterpolationLookaheadFrames;
         private const int CaptureRingFrames = (SampleRate * CaptureBufferMs) / 1000;
@@ -450,14 +450,14 @@ namespace DS4Windows
         private const int DirectPcmMaximumOutputFrames =
             (DirectPcmChunkBytes / (sizeof(short) * Channels) * 3 / 2) + 2;
         private const int IdleKeepAliveMs = 2000;
-        // PadSense waits 100 ms after the last produced PCM before replacing
+        // V5 waits 100 ms after the last produced PCM before replacing
         // a temporarily incomplete source block with timed silence.
         internal const int TransientCaptureShortageLeaseMs = 100;
         // Reuse the existing audible-generation boundary for V5 callbacks. A
         // scheduler pause just beyond the 100 ms shortage lease must preserve
         // the live resampler, while a producer returning after this boundary
         // starts a new source generation.
-        internal const int PadSenseHardSourceDiscontinuityMs =
+        internal const int V5HardSourceDiscontinuityMs =
             IdleKeepAliveMs;
         private const int PacerPrewarmRetryMs = 2000;
         private const double BluetoothSpeakerCadenceMs = 10.0 + (2.0 / 3.0);
@@ -487,7 +487,7 @@ namespace DS4Windows
         private readonly DualSenseSpeakerProcessor speakerProcessor;
         private readonly ViiperOutDevice directSpeakerSource;
         private readonly int directSpeakerSampleRate;
-        private readonly bool directSpeakerUsesPadSenseSource;
+        private readonly bool directSpeakerUsesV5Source;
         private readonly DualSensePcm16SourceRateConverter directPcmRateConverter;
         private readonly DualSenseSourceClockEstimator directSourceClockEstimator;
         private readonly DualSenseDirectPcmBalanceClockServo
@@ -496,8 +496,8 @@ namespace DS4Windows
             new DualSenseSpeakerFrameResampler();
         private readonly DualSenseReferenceSpeakerFrameResampler
             directSpeakerFrameResampler;
-        private readonly DualSensePadSenseSpeakerClockResampler
-            directPadSenseFrameResampler;
+        private readonly DualSenseV5SpeakerClockResampler
+            directV5FrameResampler;
         private Pcm16WaveTraceWriter rawDirectPcmTrace;
         private Pcm16WaveTraceWriter preOpusPcmTrace;
         private Pcm16WaveTraceWriter postOpusPcmTrace;
@@ -621,8 +621,8 @@ namespace DS4Windows
             this.sourceEndpointKind = sourceEndpointKind;
             this.directSpeakerSource = directSpeakerSource;
             directSpeakerSampleRate = directSpeakerSource?.DirectSpeakerPcmSampleRate ?? 0;
-            directSpeakerUsesPadSenseSource =
-                directSpeakerSource?.UsesPadSenseAudioSource == true;
+            directSpeakerUsesV5Source =
+                directSpeakerSource?.UsesV5AudioSource == true;
             if (directSpeakerSampleRate > 0)
             {
                 directPcmRateConverter = new DualSensePcm16SourceRateConverter(
@@ -631,10 +631,10 @@ namespace DS4Windows
                     directSpeakerSampleRate);
                 directPcmBalanceClockServo =
                     new DualSenseDirectPcmBalanceClockServo();
-                if (directSpeakerUsesPadSenseSource)
+                if (directSpeakerUsesV5Source)
                 {
-                    directPadSenseFrameResampler =
-                        new DualSensePadSenseSpeakerClockResampler();
+                    directV5FrameResampler =
+                        new DualSenseV5SpeakerClockResampler();
                 }
                 else
                 {
@@ -646,12 +646,12 @@ namespace DS4Windows
         }
 
         private int InitialSourceBufferFrames =>
-            directSpeakerUsesPadSenseSource ?
-                PadSenseInitialSourceBufferFrames :
+            directSpeakerUsesV5Source ?
+                V5InitialSourceBufferFrames :
                 (SampleRate * InitialBufferMs) / 1000;
 
         private int StartupWarmupReportsForCurrentSource =>
-            directSpeakerUsesPadSenseSource ? 0 :
+            directSpeakerUsesV5Source ? 0 :
                 StartupWarmupReportCount;
 
         private void TryCreateDirectPcmTraces()
@@ -1033,7 +1033,7 @@ namespace DS4Windows
                         feedbackOffset < 0 || speakerPcmOffset < 0 ||
                         feedbackOffset + feedbackLength > payload.Length ||
                         speakerPcmOffset + speakerPcmLength > payload.Length ||
-                        (directSpeakerUsesPadSenseSource &&
+                        (directSpeakerUsesV5Source &&
                             speakerPcmLength != FrameSamples * Channels *
                                 sizeof(short)))
                     {
@@ -1091,8 +1091,8 @@ namespace DS4Windows
                     callbackEntered - previousCallback);
             }
 
-            if (ShouldResetPadSenseSourceBeforeAppendingCallback(
-                    directSpeakerUsesPadSenseSource, previousCallback,
+            if (ShouldResetV5SourceBeforeAppendingCallback(
+                    directSpeakerUsesV5Source, previousCallback,
                     callbackEntered, Stopwatch.Frequency))
             {
                 // This is the first PCM callback of a genuinely new V5 source
@@ -1162,7 +1162,7 @@ namespace DS4Windows
         }
 
         /// <summary>
-        /// Creates the exact proven PadForge DualSense speaker encoder. The
+        /// Creates the exact proven MeasuredTransport DualSense speaker encoder. The
         /// 480-sample input passed to Encode selects a 10 ms Opus frame; leaving
         /// complexity at Concentus' recommended default preserves music quality.
         /// </summary>
@@ -1367,16 +1367,16 @@ namespace DS4Windows
             }
 
             int requestedSourceFrames;
-            if (directPadSenseFrameResampler != null)
+            if (directV5FrameResampler != null)
             {
                 requestedSourceFrames = preparedDirectSpeakerSourceFrames;
                 if (requestedSourceFrames == 0)
                 {
                     UpdateCaptureClockRatioLocked();
-                    directPadSenseFrameResampler.SetInputRateRatio(
+                    directV5FrameResampler.SetInputRateRatio(
                         captureCurrentClockRatio);
                     requestedSourceFrames =
-                        directPadSenseFrameResampler.PrepareOutputFrame();
+                        directV5FrameResampler.PrepareOutputFrame();
                     preparedDirectSpeakerSourceFrames =
                         requestedSourceFrames;
                 }
@@ -1415,8 +1415,8 @@ namespace DS4Windows
 
             CopyCaptureFramesToSpeakerResamplerLocked(
                 requestedSourceFrames);
-            int producedFrames = directPadSenseFrameResampler != null ?
-                directPadSenseFrameResampler.ConvertPreparedOutput(
+            int producedFrames = directV5FrameResampler != null ?
+                directV5FrameResampler.ConvertPreparedOutput(
                     speakerResampleInput, 0, requestedSourceFrames,
                     frame, 0) :
                 directSpeakerFrameResampler != null ?
@@ -1426,7 +1426,7 @@ namespace DS4Windows
                     speakerFrameResampler.ConvertPreparedOutput(
                         speakerResampleInput, 0, requestedSourceFrames,
                         frame, 0);
-            if (directPadSenseFrameResampler != null ||
+            if (directV5FrameResampler != null ||
                 directSpeakerFrameResampler != null)
             {
                 preparedDirectSpeakerSourceFrames = 0;
@@ -1478,7 +1478,7 @@ namespace DS4Windows
         {
             speakerFrameResampler.Reset();
             directSpeakerFrameResampler?.Reset();
-            directPadSenseFrameResampler?.Reset();
+            directV5FrameResampler?.Reset();
             preparedDirectSpeakerSourceFrames = 0;
         }
 
@@ -1710,15 +1710,15 @@ namespace DS4Windows
                 return captureRingBufferedFrames >= InitialSourceBufferFrames;
             }
 
-            if (directPadSenseFrameResampler != null)
+            if (directV5FrameResampler != null)
             {
                 if (preparedDirectSpeakerSourceFrames == 0)
                 {
                     UpdateCaptureClockRatioLocked();
-                    directPadSenseFrameResampler.SetInputRateRatio(
+                    directV5FrameResampler.SetInputRateRatio(
                         captureCurrentClockRatio);
                     preparedDirectSpeakerSourceFrames =
-                        directPadSenseFrameResampler.PrepareOutputFrame();
+                        directV5FrameResampler.PrepareOutputFrame();
                 }
 
                 return captureRingBufferedFrames >=
@@ -1775,7 +1775,7 @@ namespace DS4Windows
 
         internal static bool ShouldBackpressurePacerProducer(
             bool helperActive, int pendingFrames,
-            bool usesPadSenseSource, long presentedReports = 1)
+            bool usesV5Source, long presentedReports = 1)
         {
             if (!helperActive)
             {
@@ -1789,32 +1789,32 @@ namespace DS4Windows
             }
             else
             {
-                target = usesPadSenseSource ?
-                    PadSenseSourceReservoirTargetFrames :
+                target = usesV5Source ?
+                    V5SourceReservoirTargetFrames :
                     PacerReservoirTargetFrames;
             }
             return pendingFrames >= target;
         }
 
-        internal static bool ShouldMaintainIdleCarrierDuringPadSensePrime(
-            bool usesPadSenseSource, bool sourcePrimePending,
+        internal static bool ShouldMaintainIdleCarrierDuringV5Prime(
+            bool usesV5Source, bool sourcePrimePending,
             bool captureReady, bool sourceRecentlyActive)
         {
-            return usesPadSenseSource && sourcePrimePending &&
+            return usesV5Source && sourcePrimePending &&
                 !captureReady && sourceRecentlyActive;
         }
 
-        internal static bool ShouldEmitPadSenseIdleCarrier(
-            bool usesPadSenseSource, bool sourceRecentlyActive)
+        internal static bool ShouldEmitV5IdleCarrier(
+            bool usesV5Source, bool sourceRecentlyActive)
         {
-            return usesPadSenseSource && !sourceRecentlyActive;
+            return usesV5Source && !sourceRecentlyActive;
         }
 
-        internal static bool ShouldResetPadSenseSourceBeforeAppendingCallback(
-            bool usesPadSenseSource, long previousCallbackTimestamp,
+        internal static bool ShouldResetV5SourceBeforeAppendingCallback(
+            bool usesV5Source, long previousCallbackTimestamp,
             long callbackTimestamp, long timestampFrequency)
         {
-            if (!usesPadSenseSource || previousCallbackTimestamp <= 0 ||
+            if (!usesV5Source || previousCallbackTimestamp <= 0 ||
                 callbackTimestamp < previousCallbackTimestamp ||
                 timestampFrequency <= 0)
             {
@@ -1825,13 +1825,13 @@ namespace DS4Windows
                 (callbackTimestamp - previousCallbackTimestamp) * 1000.0 /
                 timestampFrequency;
             return callbackGapMilliseconds >=
-                PadSenseHardSourceDiscontinuityMs;
+                V5HardSourceDiscontinuityMs;
         }
 
-        // PadSense transfers its eight complete source blocks into the strict
+        // V5 transfers its eight complete source blocks into the strict
         // OVERLAPPED FIFO as one startup burst. HidBth still owns their radio
         // cadence; spacing the WriteFile admissions here prevents the
-        // controller-side reserve from ever reaching PadSense's operating
+        // controller-side reserve from ever reaching the native transport's operating
         // level and leaves ordinary completion droughts audible.
         internal static double StartupWarmupLatencyMilliseconds => 0.0;
 
@@ -1934,9 +1934,9 @@ namespace DS4Windows
                 Stopwatch.Frequency * maximumAgeMilliseconds / 1000;
         }
 
-        private bool IsPadSenseSourcePrimePending()
+        private bool IsV5SourcePrimePending()
         {
-            if (!directSpeakerUsesPadSenseSource)
+            if (!directSpeakerUsesV5Source)
             {
                 return false;
             }
@@ -1950,9 +1950,9 @@ namespace DS4Windows
             }
         }
 
-        private bool TryConfirmInactivePadSenseSource()
+        private bool TryConfirmInactiveV5Source()
         {
-            if (!directSpeakerUsesPadSenseSource)
+            if (!directSpeakerUsesV5Source)
             {
                 return true;
             }
@@ -1970,15 +1970,15 @@ namespace DS4Windows
                 }
 
                 // A missing callback is not a source-generation boundary.
-                // PadSense/VIIPER can pause longer than the freshness lease
+                // the native source and VIIPER can pause longer than the freshness lease
                 // while the same endpoint generation remains active. Emit a
                 // paced idle carrier, but preserve the ring, fractional
                 // resampler history, prime, and segment state so the next
                 // callback resumes immediately. An explicit lifecycle change,
                 // or the first callback after the conservative hard-gap
                 // boundary, resets those fields before new PCM is appended.
-                return ShouldEmitPadSenseIdleCarrier(
-                    usesPadSenseSource: true,
+                return ShouldEmitV5IdleCarrier(
+                    usesV5Source: true,
                     sourceRecentlyActive: false);
             }
         }
@@ -2090,9 +2090,9 @@ namespace DS4Windows
                         {
                             prepared = recovery ?
                                 device.RecoverBluetoothSpeakerClockTransport(
-                                    directSpeakerUsesPadSenseSource) :
+                                    directSpeakerUsesV5Source) :
                                 device.PrepareBluetoothSpeakerClockTransport(
-                                    directSpeakerUsesPadSenseSource);
+                                    directSpeakerUsesV5Source);
                             // The session boundary clears stale queued audio and
                             // physically commits any pending microphone transition
                             // before speaker traffic is released again.
@@ -2261,7 +2261,7 @@ namespace DS4Windows
 
                     directPcmRecoveryWindowInvalidated = false;
 
-                    // The helper owns physical presentation. PadSense-native
+                    // The helper owns physical presentation. Native V5
                     // V5 retains its newest eight complete source generations
                     // independently; after a host stall, admit that bounded
                     // backlog immediately into the strict writer just as the
@@ -2270,7 +2270,7 @@ namespace DS4Windows
                     if (ShouldBackpressurePacerProducer(
                         device.BluetoothAudioPacerActive,
                         device.PendingBluetoothSpeakerFrames,
-                        directSpeakerUsesPadSenseSource,
+                        directSpeakerUsesV5Source,
                         device.BluetoothAudioPacerPresentedReports))
                     {
                         nextTick = Stopwatch.GetTimestamp();
@@ -2287,15 +2287,15 @@ namespace DS4Windows
                         sourceRecentlyActive)
                     {
                         bool sourcePrimePending =
-                            IsPadSenseSourcePrimePending();
-                        if (ShouldMaintainIdleCarrierDuringPadSensePrime(
-                            directSpeakerUsesPadSenseSource,
+                            IsV5SourcePrimePending();
+                        if (ShouldMaintainIdleCarrierDuringV5Prime(
+                            directSpeakerUsesV5Source,
                             sourcePrimePending, captureReady,
                             sourceRecentlyActive))
                         {
                             // The physical lane is already armed with valid
                             // timer-paced Opus silence. Keep that carrier
-                            // continuous while the first eight real PadSense
+                            // continuous while the first eight real V5
                             // blocks accumulate; the first complete source
                             // frame replaces it atomically on the next pass.
                             // Stopping here previously opened a seven-interval
@@ -2320,7 +2320,7 @@ namespace DS4Windows
                             continue;
                         }
 
-                        // PadSense does not advance an independent producer
+                        // V5 does not advance an independent producer
                         // deadline while a real source block is incomplete.
                         // The source callback wakes this worker as soon as the
                         // stateful 512-ish -> 480 conversion can complete.
@@ -2337,7 +2337,7 @@ namespace DS4Windows
                         // Encode real fixed-size CBR Opus silence with the same
                         // encoder and 0x36 combined report path as content. No
                         // source frame is removed until all eight reports have
-                        // been accepted by the transport. PadSense submits this
+                        // been accepted by the transport. V5 submits this
                         // one-time prime into its OVERLAPPED FIFO without a
                         // user-mode cadence wait; HidBth schedules the radio and
                         // the controller starts with roughly eight reports of
@@ -2366,7 +2366,7 @@ namespace DS4Windows
                             // Continue immediately so the helper receives the
                             // whole one-time prime. The helper's eight-report
                             // gate then admits it to the strict writer exactly
-                            // as PadSense does.
+                            // as V5 does.
                             nextTick = Stopwatch.GetTimestamp();
                         }
                         else
@@ -2381,7 +2381,7 @@ namespace DS4Windows
 
                     if (!captureReady && !sourceRecentlyActive)
                     {
-                        if (!TryConfirmInactivePadSenseSource())
+                        if (!TryConfirmInactiveV5Source())
                         {
                             // A producer callback won the idle-boundary race.
                             // Re-evaluate readiness without sending an unrelated
@@ -2476,7 +2476,7 @@ namespace DS4Windows
                         // next physical reports. Do not replace one of them
                         // with an invented zero frame just because the drift
                         // resampler is waiting for the next callback block.
-                        // DS5Dongle only hands a paired report to L2CAP after
+                        // CombinedReportReference only hands a paired report to L2CAP after
                         // the speaker queue contains the next two frames; when
                         // our Windows source is one fractional frame short,
                         // wait for that source edge instead of sleeping an
@@ -2532,7 +2532,7 @@ namespace DS4Windows
                     if (captured)
                     {
                         // Every complete source block is media, including
-                        // digital silence. PadSense drains it without an
+                        // digital silence. V5 drains it without an
                         // amplitude gate or a second presentation clock.
                         preOpusPcmTrace?.Write(frame, frame.Length);
                         if (EncodeCurrentFrame())
@@ -2598,7 +2598,7 @@ namespace DS4Windows
                         (submittedFrameThisTick || pendingEncodedFrame))
                     {
                         // Real PCM follows source completion exactly as in
-                        // PadSense. Drain every complete resampler block now;
+                        // V5. Drain every complete resampler block now;
                         // only no-source/warmup silence uses the host timer.
                         nextTick = Stopwatch.GetTimestamp();
                         if (pendingEncodedFrame)

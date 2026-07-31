@@ -59,9 +59,8 @@ namespace DS4Windows
     }
 
     /// <summary>
-    /// Per-profile audio-to-advanced-haptics settings. Defaults and ranges match
-    /// the DS5 Bridge feature contract, while the implementation is native to
-    /// DS4Windows.
+    /// Per-profile audio-to-advanced-haptics settings. Defaults and ranges are
+    /// shared by the UI, persistence layer, and native DS4Windows runtime.
     /// </summary>
     public sealed class AudioHapticsProfileSettings
     {

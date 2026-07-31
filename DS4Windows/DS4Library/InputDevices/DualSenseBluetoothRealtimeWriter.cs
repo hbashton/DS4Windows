@@ -415,8 +415,8 @@ namespace DS4Windows.InputDevices
 
                 if (waitResult != WAIT_OBJECT_0)
                 {
-                    // PadForge advances a strict oldest-slot ring and
-                    // DS5Dongle removes exactly one oldest FIFO entry for each
+                    // MeasuredTransport advances a strict oldest-slot ring and
+                    // CombinedReportReference removes exactly one oldest FIFO entry for each
                     // CAN_SEND_NOW event. Never scan past this slot: doing so
                     // can admit a newer Opus pair around an older pending HID
                     // IRP on stacks whose OVERLAPPED completions are delayed.

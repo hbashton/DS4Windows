@@ -122,7 +122,7 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
-        public void LatestPadSenseSnapshotReplacesQueuedAudioStateAtomically()
+        public void LatestV5SnapshotReplacesQueuedAudioStateAtomically()
         {
             const long nowQpc = 50_000_000;
             byte[] queued = CreateReport(0x28);
@@ -139,7 +139,7 @@ namespace DS4Windows.Tests
             queued[20] = 0xBC;
             queued[22] = 0xDE;
             queued[50] = 0xF0;
-            SetPadSenseAudioContract(latestTemplate);
+            SetV5AudioContract(latestTemplate);
             latestTemplate[15] = 0xA1;
             latestTemplate[16] = 0xB2;
             latestTemplate[21] = 0x01;
@@ -160,7 +160,7 @@ namespace DS4Windows.Tests
             DualSenseBluetoothAudioReportPatcher.PatchForPresentation(
                 queued, latestTemplate, nowQpc + 1, nowQpc);
 
-            AssertPadSenseAudioContract(queued);
+            AssertV5AudioContract(queued);
             CollectionAssert.AreEqual(CopyRange(latestTemplate, 15, 2),
                 CopyRange(queued, 15, 2),
                 "Presentation lost the latest rumble motors.");
@@ -195,7 +195,7 @@ namespace DS4Windows.Tests
             queued[21] = 0x01;
             queued[22] = 0x55;
             queued[50] = 0x66;
-            SetPadSenseAudioContract(latestTemplate);
+            SetV5AudioContract(latestTemplate);
             latestTemplate[21] = 0;
 
             byte expectedSequence = queued[1];
@@ -206,7 +206,7 @@ namespace DS4Windows.Tests
             DualSenseBluetoothAudioReportPatcher.PatchForPresentation(
                 queued, latestTemplate, nowQpc + 1, nowQpc);
 
-            AssertPadSenseAudioContract(queued);
+            AssertV5AudioContract(queued);
             Assert.AreEqual((byte)0, queued[21]);
             Assert.AreEqual(expectedSequence, queued[1]);
             CollectionAssert.AreEqual(expectedDepths,
@@ -297,7 +297,7 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
-        public void NativeSchedulerMatchesPadSenseUniformHostDeadline()
+        public void NativeSchedulerMatchesV5UniformHostDeadline()
         {
             const long qpcFrequency = 1_000_000;
             const long startQpc = 3_000_000;
@@ -312,7 +312,7 @@ namespace DS4Windows.Tests
                 long next = scheduler.NextDeadlineQpc;
                 long expected = interval % 3 == 1 ? 10_666 : 10_667;
                 Assert.AreEqual(expected, next - previous,
-                    $"PadSense host interval {interval} was incorrect.");
+                    $"V5 host interval {interval} was incorrect.");
                 previous = next;
             }
 
@@ -322,7 +322,7 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
-        public void PadSenseNativeLatticeMatchesObservedTenTwentyPattern()
+        public void V5NativeLatticeMatchesObservedTenTwentyPattern()
         {
             const long qpcFrequency = 10_000_000;
             const long startQpc = 3_000_000;
@@ -332,7 +332,7 @@ namespace DS4Windows.Tests
                 80, 90, 100, 110, 120, 130, 140, 160,
             };
             var scheduler =
-                new DualSensePadSenseNativePresentationScheduler(
+                new DualSenseV5NativePresentationScheduler(
                     qpcFrequency);
             scheduler.Start(startQpc);
 
@@ -346,11 +346,11 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
-        public void PadSenseNativeLatticePreservesExactLongWindowCadence()
+        public void V5NativeLatticePreservesExactLongWindowCadence()
         {
             const long qpcFrequency = 10_000_000;
             var scheduler =
-                new DualSensePadSenseNativePresentationScheduler(
+                new DualSenseV5NativePresentationScheduler(
                     qpcFrequency);
             scheduler.Start(0);
 
@@ -362,16 +362,16 @@ namespace DS4Windows.Tests
             Assert.AreEqual(qpcFrequency * 16L / 10,
                 scheduler.NextDeadlineQpc,
                 "One hundred fifty reports must consume exactly ten " +
-                "PadSense 160 ms host cycles.");
+                "V5 160 ms host cycles.");
         }
 
         [TestMethod]
-        public void PadSenseNativeLatticeAppliesClockRatioWithoutPhaseReset()
+        public void V5NativeLatticeAppliesClockRatioWithoutPhaseReset()
         {
             const long qpcFrequency = 10_000_000;
             const double controllerClockRatio = 0.999800;
             var scheduler =
-                new DualSensePadSenseNativePresentationScheduler(
+                new DualSenseV5NativePresentationScheduler(
                     qpcFrequency);
             scheduler.Start(0);
             for (int report = 0; report < 75; report++)
@@ -384,7 +384,7 @@ namespace DS4Windows.Tests
             Assert.AreEqual(boundaryBeforeRatioUpdate,
                 scheduler.NextDeadlineQpc,
                 "A clock-ratio update must not move the already-published " +
-                "PadSense deadline.");
+                "V5 deadline.");
             for (int report = 0; report < 1500; report++)
             {
                 scheduler.AdvanceAfterSend(scheduler.NextDeadlineQpc);
@@ -393,16 +393,16 @@ namespace DS4Windows.Tests
             double expected = boundaryBeforeRatioUpdate +
                 qpcFrequency * 16.0 / controllerClockRatio;
             Assert.AreEqual(expected, scheduler.NextDeadlineQpc, 1.0,
-                "Fractional clock correction drifted across the PadSense " +
+                "Fractional clock correction drifted across the V5 " +
                 "10/20 ms lattice.");
         }
 
         [TestMethod]
-        public void PadSenseNativeLatticeReanchorsAfterLongHostStall()
+        public void V5NativeLatticeReanchorsAfterLongHostStall()
         {
             const long qpcFrequency = 10_000_000;
             var scheduler =
-                new DualSensePadSenseNativePresentationScheduler(
+                new DualSenseV5NativePresentationScheduler(
                     qpcFrequency);
             scheduler.Start(qpcFrequency);
             scheduler.AdvanceAfterSend(scheduler.NextDeadlineQpc);
@@ -414,7 +414,7 @@ namespace DS4Windows.Tests
             Assert.AreEqual(stalledPresentation + qpcFrequency / 100,
                 scheduler.NextDeadlineQpc,
                 "A long host stall must schedule one future 10 ms interval, " +
-                "not replay missed PadSense ticks in a catch-up burst.");
+                "not replay missed V5 ticks in a catch-up burst.");
         }
 
         [TestMethod]
@@ -436,13 +436,13 @@ namespace DS4Windows.Tests
             double expected = qpcFrequency * 32.0 /
                 controllerClockRatio;
             Assert.AreEqual(expected, scheduler.NextDeadlineQpc, 1.0,
-                "Fractional correction drifted across PadSense host deadlines.");
+                "Fractional correction drifted across V5 host deadlines.");
         }
 
         [TestMethod]
         public void NativeUniformCadencePrimeDoesNotDrain()
         {
-            // Model PadSense's one produced and consumed frame each 32/3 ms.
+            // Model the native transport's one produced and consumed frame each 32/3 ms.
             const double producerIntervalMilliseconds = 32.0 / 3.0;
             double nextProductionMilliseconds = producerIntervalMilliseconds;
             double presentationMilliseconds = 0.0;
@@ -466,13 +466,13 @@ namespace DS4Windows.Tests
             }
 
             Assert.IsTrue(queuedFrames >= 1,
-                "The uniform PadSense host cadence drained its startup reserve.");
+                "The uniform V5 host cadence drained its startup reserve.");
             Assert.AreEqual(1,
                 DualSenseBluetoothAudioPacer.GetPrimeReportCount(
-                    usePadForgeAudioTransport: true));
+                    useMeasuredTransportAudioTransport: true));
             Assert.AreEqual(8,
                 DualSenseBluetoothAudioPacer.GetPrimeReportCount(
-                    usePadForgeAudioTransport: false));
+                    useMeasuredTransportAudioTransport: false));
             Assert.AreEqual(8,
                 DualSenseBluetoothAudioPacer.NativePrimeReportCount);
             Assert.AreEqual(2,
@@ -697,12 +697,12 @@ namespace DS4Windows.Tests
         [DataRow(true, false, false)]
         [DataRow(false, true, true)]
         [DataRow(false, false, false)]
-        public void PadSensePresentationCadenceIsAlwaysNative(
+        public void V5PresentationCadenceIsAlwaysNative(
             bool requested, bool nativeTransport, bool expected)
         {
             Assert.AreEqual(expected,
                 DualSenseBluetoothAudioPacer.
-                    ShouldUsePadSensePresentationCadence(requested,
+                    ShouldUseV5PresentationCadence(requested,
                         nativeTransport));
         }
 
@@ -875,7 +875,7 @@ namespace DS4Windows.Tests
                 DualSenseBluetoothAudioPacer.
                     ShouldReprimeAfterEmptyReservoir(
                         useNativeAudioTransport: true),
-                "PadSense primes eight blocks once and waits for one next " +
+                "V5 primes eight blocks once and waits for one next " +
                 "source block at an ordinary empty boundary.");
             Assert.IsTrue(
                 DualSenseBluetoothAudioPacer.
@@ -891,7 +891,7 @@ namespace DS4Windows.Tests
                     ShouldRequireAudioPrimeAfterPresentation(
                         presentedControlReport: false,
                         remainingReportCount: 0),
-                "DS5Dongle waits for the next complete pair without replaying startup pacing.");
+                "CombinedReportReference waits for the next complete pair without replaying startup pacing.");
         }
 
         [TestMethod]
@@ -1010,7 +1010,7 @@ namespace DS4Windows.Tests
             }
         }
 
-        private static void SetPadSenseAudioContract(byte[] report)
+        private static void SetV5AudioContract(byte[] report)
         {
             report[13] = 0xFD;
             report[14] = 0xF7;
@@ -1022,7 +1022,7 @@ namespace DS4Windows.Tests
             report[50] = 0x0A;
         }
 
-        private static void AssertPadSenseAudioContract(byte[] report)
+        private static void AssertV5AudioContract(byte[] report)
         {
             Assert.AreEqual((byte)0xFD, report[13]);
             Assert.AreEqual((byte)0xF7, report[14]);

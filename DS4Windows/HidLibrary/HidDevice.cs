@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.IO;
@@ -372,7 +372,7 @@ namespace DS4Windows
 
         /// <summary>
         /// Writes one Sony effect report through a fresh, shared, overlapped
-        /// HID handle. This intentionally mirrors PadForge's SonyEffectWriter:
+        /// HID handle. This intentionally mirrors the measured transport's SonyEffectWriter:
         /// the input handle is never used for effects, and a disconnect cannot
         /// leave a stale persistent effect handle behind.
         /// </summary>
@@ -421,7 +421,7 @@ namespace DS4Windows
                     return false;
                 }
 
-                // PadForge drains the OVERLAPPED before closing the one-shot
+                // MeasuredTransport drains the OVERLAPPED before closing the one-shot
                 // handle even when WriteFile completed synchronously.
                 return PInvoke.GetOverlappedResult(
                     effectHandle, ov, out _, true);

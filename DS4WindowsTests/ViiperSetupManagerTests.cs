@@ -119,6 +119,33 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
+        public void ExplicitPortablePathWinsOverAStaleStartupTask()
+        {
+            string directory = Path.Combine(Path.GetTempPath(),
+                $"viiper-portable-{Guid.NewGuid():N}");
+            string preferred = Path.Combine(directory, "viiper.exe");
+            try
+            {
+                Directory.CreateDirectory(directory);
+                File.WriteAllBytes(preferred, new byte[] { 0x4D, 0x5A });
+
+                string selected = ViiperSetupManager.ResolveRuntimeViiperPath(
+                    Path.Combine(directory, "canonical", "viiper.exe"),
+                    preferred);
+
+                Assert.IsTrue(ViiperSetupManager.IsExactViiperExecutablePath(
+                    preferred, selected));
+            }
+            finally
+            {
+                if (Directory.Exists(directory))
+                {
+                    Directory.Delete(directory, recursive: true);
+                }
+            }
+        }
+
+        [TestMethod]
         public void ReadyRejectsUnsafeCitrixUsbMonitor()
         {
             ViiperPrerequisiteStatus status = new ViiperPrerequisiteStatus

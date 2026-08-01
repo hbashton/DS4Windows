@@ -944,6 +944,22 @@ namespace DS4Windows
         {
             string selectedPath = ResolveConfiguredViiperPath(canonicalPath,
                 preferredPath);
+            // An explicit, existing portable choice is authoritative. A stale
+            // running process or startup-task action describes yesterday's
+            // runtime; it must not silently replace the path the user saved.
+            if (!string.IsNullOrWhiteSpace(preferredPath))
+            {
+                try
+                {
+                    if (IsExactViiperExecutablePath(selectedPath,
+                            Path.GetFullPath(preferredPath)))
+                    {
+                        return selectedPath;
+                    }
+                }
+                catch { }
+            }
+
             List<ViiperProcessIdentity> processes =
                 GetRunningViiperProcesses();
             if (processes != null)

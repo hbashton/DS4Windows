@@ -73,6 +73,9 @@ namespace DS4WinWPF.DS4Forms
         private bool wasrunning = false;
         private AutoProfileHolder autoProfileHolder;
         private NonFormTimer hotkeysTimer;
+        private readonly object hotkeysTimerLock = new();
+        private bool hotkeysTimerSubscribed;
+        private bool hotkeysTimerEnabled;
         private NonFormTimer autoProfilesTimer;
         private AutoProfileChecker autoprofileChecker;
         private ProfileEditor editor;
@@ -647,58 +650,117 @@ Suspend support not enabled.", true);
 
         private void ChangeHotkeysStatus(bool state)
         {
-            if (state)
+            lock (hotkeysTimerLock)
             {
-                hotkeysTimer.Elapsed += HotkeysTimer_Elapsed;
-                hotkeysTimer.Start();
-            }
-            else
-            {
-                hotkeysTimer.Stop();
-                hotkeysTimer.Elapsed -= HotkeysTimer_Elapsed;
+                hotkeysTimerEnabled = state;
+                if (state)
+                {
+                    if (!hotkeysTimerSubscribed)
+                    {
+                        hotkeysTimer.Elapsed += HotkeysTimer_Elapsed;
+                        hotkeysTimerSubscribed = true;
+                    }
+
+                    hotkeysTimer.Start();
+                }
+                else
+                {
+                    hotkeysTimer.Stop();
+                    if (hotkeysTimerSubscribed)
+                    {
+                        hotkeysTimer.Elapsed -= HotkeysTimer_Elapsed;
+                        hotkeysTimerSubscribed = false;
+                    }
+                }
             }
         }
 
         private void HotkeysTimer_Elapsed(object sender, System.Timers.ElapsedEventArgs e)
         {
-            hotkeysTimer.Stop();
-
-            if (Global.SwipeProfiles)
+            lock (hotkeysTimerLock)
             {
-                foreach (CompositeDeviceModel item in conLvViewModel.ControllerCol)
-                //for (int i = 0; i < 4; i++)
+                if (!hotkeysTimerEnabled)
                 {
-                    string slide = App.rootHub.TouchpadSlide(item.DevIndex);
-                    if (slide == "left")
-                    {
-                        //int ind = i;
-                        Dispatcher.BeginInvoke((Action)(() =>
-                        {
-                            item.SelectedIndex = ComputeSwipeProfileIndex(item, forward: false);
-                        }));
-                    }
-                    else if (slide == "right")
-                    {
-                        //int ind = i;
-                        Dispatcher.BeginInvoke((Action)(() =>
-                        {
-                            item.SelectedIndex = ComputeSwipeProfileIndex(item, forward: true);
-                        }));
-                    }
+                    return;
+                }
 
-                    if (slide.Contains("t"))
+                hotkeysTimer.Stop();
+            }
+
+            try
+            {
+                // ControllerCol and SelectedIndex are UI-owned. Processing
+                // them on the timer thread could race controller hotplug or a
+                // profile refresh, throw once, and leave this one-shot timer
+                // permanently stopped. The swipe direction itself is already
+                // atomically latched, so it is safe to consume on the UI
+                // dispatcher.
+                Dispatcher.BeginInvoke((Action)(() =>
+                {
+                    try
                     {
-                        //int ind = i;
-                        Dispatcher.BeginInvoke((Action)(() =>
+                        ProcessProfileSwipeHotkeys();
+                    }
+                    catch (Exception exception)
+                    {
+                        AppLogger.LogToGui(
+                            $"Swipe profile switch recovered after an error: {exception.Message}",
+                            true);
+                    }
+                    finally
+                    {
+                        lock (hotkeysTimerLock)
                         {
-                            string temp = string.Format(Properties.Resources.UsingProfile, (item.DevIndex + 1).ToString(), item.SelectedProfile, $"{item.Device.Battery}");
-                            ShowHotkeyNotification(temp);
-                        }));
+                            if (hotkeysTimerEnabled)
+                            {
+                                hotkeysTimer.Start();
+                            }
+                        }
+                    }
+                }));
+            }
+            catch
+            {
+                lock (hotkeysTimerLock)
+                {
+                    if (hotkeysTimerEnabled)
+                    {
+                        hotkeysTimer.Start();
                     }
                 }
             }
+        }
 
-            hotkeysTimer.Start();
+        private void ProcessProfileSwipeHotkeys()
+        {
+            if (!Global.SwipeProfiles)
+            {
+                return;
+            }
+
+            foreach (CompositeDeviceModel item in
+                conLvViewModel.ControllerCol)
+            {
+                string slide = App.rootHub.TouchpadSlide(item.DevIndex);
+                if (Global.useTempProfile[item.DevIndex])
+                {
+                    // Auto Profiles own the runtime profile while active.
+                    // Consume rather than defer a gesture so it cannot switch
+                    // unexpectedly when the temporary profile is released.
+                    continue;
+                }
+
+                if (slide == "left")
+                {
+                    item.SelectedIndex = ComputeSwipeProfileIndex(item,
+                        forward: false);
+                }
+                else if (slide == "right")
+                {
+                    item.SelectedIndex = ComputeSwipeProfileIndex(item,
+                        forward: true);
+                }
+            }
         }
 
         /// <summary>

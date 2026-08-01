@@ -38,6 +38,19 @@ namespace DS4WindowsTests
                 enabled: true, OutContType.ViiperDualSense, dInputOnly: true));
         }
 
+        [TestMethod]
+        public void PrewarmKeepsCompanionUntilVisibilityProbeCatchesUp()
+        {
+            const long now = 1000;
+
+            Assert.IsTrue(ControlService.ShouldKeepGameBarCompatibilityRoute(
+                gameBarVisible: false, now, prewarmUntilTicks: 2000));
+            Assert.IsTrue(ControlService.ShouldKeepGameBarCompatibilityRoute(
+                gameBarVisible: true, now, prewarmUntilTicks: 0));
+            Assert.IsFalse(ControlService.ShouldKeepGameBarCompatibilityRoute(
+                gameBarVisible: false, now, prewarmUntilTicks: 999));
+        }
+
         [DataTestMethod]
         [DataRow(true, false, false, false, true)]
         [DataRow(true, false, true, false, true)]

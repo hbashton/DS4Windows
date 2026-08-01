@@ -20,6 +20,7 @@ using DS4Windows.StickModifiers;
 //using System.Diagnostics;
 using DS4WinWPF.DS4Control;
 using System;
+using System.Threading;
 
 namespace DS4Windows
 {
@@ -39,6 +40,7 @@ namespace DS4Windows
         public byte priorSwipeLeftB, priorSwipeRightB, priorSwipeUpB, priorSwipeDownB, priorSwipedB;
         public bool slideleft, slideright;
         public bool priorSlideLeft, priorSlideright;
+        private int pendingProfileSwipeDirection;
         // touch area stuff
         public bool leftDown, rightDown, upperDown, multiDown;
         public bool priorLeftDown, priorRightDown, priorUpperDown, priorMultiDown;
@@ -149,12 +151,16 @@ namespace DS4Windows
             currentToggleGyroMouse = false;
             currentToggleGyroStick = false;
 
-            previousTriggerActivated = false;
+            previousGyroControlsTriggerActivated = false;
+            previousGyroMouseTriggerActivated = false;
+            previousGyroStickTriggerActivated = false;
             triggeractivated = false;
         }
 
         bool triggeractivated = false;
-        bool previousTriggerActivated = false;
+        bool previousGyroControlsTriggerActivated = false;
+        bool previousGyroMouseTriggerActivated = false;
+        bool previousGyroStickTriggerActivated = false;
         bool useReverseRatchet = false;
 
         private bool toggleGyroControls = true;
@@ -363,22 +369,47 @@ namespace DS4Windows
                     }
                 }
             }
-            if (toggleGyroControls)
+            switch (mode)
             {
-                if (triggeractivated && triggeractivated != previousTriggerActivated)
-                {
-                    currentToggleGyroControls = !currentToggleGyroControls;
-                }
-
-                previousTriggerActivated = triggeractivated;
-                triggeractivated = currentToggleGyroControls;
-            }
-            else
-            {
-                previousTriggerActivated = triggeractivated;
+                case GyroOutMode.Controls:
+                    triggeractivated = ApplyGyroToggleState(
+                        toggleGyroControls, triggeractivated,
+                        ref previousGyroControlsTriggerActivated,
+                        ref currentToggleGyroControls);
+                    break;
+                case GyroOutMode.Mouse:
+                    triggeractivated = ApplyGyroToggleState(
+                        toggleGyroMouse, triggeractivated,
+                        ref previousGyroMouseTriggerActivated,
+                        ref currentToggleGyroMouse);
+                    break;
+                case GyroOutMode.MouseJoystick:
+                    triggeractivated = ApplyGyroToggleState(
+                        toggleGyroStick, triggeractivated,
+                        ref previousGyroStickTriggerActivated,
+                        ref currentToggleGyroStick);
+                    break;
             }
 
             return triggeractivated;
+        }
+
+        internal static bool ApplyGyroToggleState(bool toggleMode,
+            bool triggerActive, ref bool previousTriggerActive,
+            ref bool currentToggleMode)
+        {
+            if (toggleMode && triggerActive && !previousTriggerActive)
+            {
+                currentToggleMode = !currentToggleMode;
+            }
+
+            previousTriggerActive = triggerActive;
+            return toggleMode ? currentToggleMode : triggerActive;
+        }
+
+        internal int ConsumeProfileSwipeDirection()
+        {
+            return Interlocked.Exchange(ref pendingProfileSwipeDirection, 0);
         }
 
         private OneEuroFilterPair filterPair = new OneEuroFilterPair();
@@ -1200,12 +1231,24 @@ namespace DS4Windows
             }
 
             // Slide flags needed for possible profile switching from Touchpad swipes
-            if (Math.Abs(firstTouch.HwY - arg.Touches[0].HwY) < 50 && arg.Touches.Length == 2)
+            if (Global.SwipeProfiles &&
+                !Global.useTempProfile[deviceNum] &&
+                arg.Touches.Length == 2 &&
+                Math.Abs(firstTouch.HwY - arg.Touches[0].HwY) < 50 &&
+                !(dragging || dragging2))
             {
                 if (arg.Touches[0].HwX - firstTouch.HwX > 200 && !slideleft)
+                {
                     slideright = true;
+                    Interlocked.CompareExchange(
+                        ref pendingProfileSwipeDirection, 1, 0);
+                }
                 else if (firstTouch.HwX - arg.Touches[0].HwX > 200 && !slideright)
+                {
                     slideleft = true;
+                    Interlocked.CompareExchange(
+                        ref pendingProfileSwipeDirection, -1, 0);
+                }
             }
 
             TouchButtonCheckProcess(arg);

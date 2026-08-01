@@ -3289,6 +3289,7 @@ namespace DS4Windows
         private readonly OutputDevice[] gameBarCompatibilityOutputDevices = new OutputDevice[MAX_DS4_CONTROLLER_COUNT];
         private readonly int[] gameBarCompatibilityRoutingActive = new int[MAX_DS4_CONTROLLER_COUNT];
         private readonly DateTime[] gameBarCompatibilityNextRetryUtc = new DateTime[MAX_DS4_CONTROLLER_COUNT];
+        private readonly long[] gameBarCompatibilityPrewarmUntilTicks = new long[MAX_DS4_CONTROLLER_COUNT];
         private readonly object gameBarCompatibilityOutputLock = new object();
 
         private DateTime gameBarLastVisibleUtc = DateTime.MinValue;
@@ -3497,8 +3498,18 @@ namespace DS4Windows
                 cState.PS = false;
                 tempControlState.PS = false;
                 gameBarHomeButtonIgnoreUntilUtc[ind] = now + TimeSpan.FromSeconds(1);
-                string openResult = gameBarIntegration.OpenGameBar();
-                StartupDiag($"GameBar compatibility home button controller={ind + 1} {openResult}");
+                // A USB/IP attach is slow enough to make the first Game Bar
+                // interaction visibly hitch. Prewarm off the controller report
+                // thread, then open the overlay only after XInput is available.
+                Interlocked.Exchange(
+                    ref gameBarCompatibilityPrewarmUntilTicks[ind],
+                    Environment.TickCount64 + 2000);
+                _ = Task.Run(() =>
+                {
+                    ActivateGameBarCompatibilityOutput(ind);
+                    string openResult = gameBarIntegration.OpenGameBar();
+                    StartupDiag($"GameBar compatibility home button controller={ind + 1} {openResult}");
+                });
                 return;
             }
 
@@ -3509,9 +3520,22 @@ namespace DS4Windows
 
         private void UpdateGameBarCompatibilityOutputs(bool gameBarVisible)
         {
+            long nowTicks = Environment.TickCount64;
             for (int i = 0; i < MAX_DS4_CONTROLLER_COUNT; i++)
             {
-                bool shouldRoute = gameBarVisible && DS4Controllers[i] != null &&
+                if (gameBarVisible)
+                {
+                    // Once visibility is confirmed, the overlay owns the route.
+                    // Closing it can then remove the companion immediately.
+                    Interlocked.Exchange(
+                        ref gameBarCompatibilityPrewarmUntilTicks[i], 0);
+                }
+
+                bool shouldRoute = ShouldKeepGameBarCompatibilityRoute(
+                        gameBarVisible, nowTicks,
+                        Interlocked.Read(
+                            ref gameBarCompatibilityPrewarmUntilTicks[i])) &&
+                    DS4Controllers[i] != null &&
                     ShouldUseGameBarControllerCompatibility(
                         Global.GameBarControllerCompatibility[i],
                         Global.OutContType[i], getDInputOnly(i));
@@ -3524,6 +3548,12 @@ namespace DS4Windows
                     DeactivateGameBarCompatibilityOutput(i);
                 }
             }
+        }
+
+        internal static bool ShouldKeepGameBarCompatibilityRoute(
+            bool gameBarVisible, long nowTicks, long prewarmUntilTicks)
+        {
+            return gameBarVisible || nowTicks < prewarmUntilTicks;
         }
 
         private void ActivateGameBarCompatibilityOutput(int index)
@@ -4494,8 +4524,7 @@ namespace DS4Windows
             return result;
         }
 
-        public bool[] touchreleased = new bool[MAX_DS4_CONTROLLER_COUNT] { true, true, true, true, true, true, true, true },
-            touchslid = new bool[MAX_DS4_CONTROLLER_COUNT] { false, false, false, false, false, false, false, false };
+        public bool[] touchreleased = new bool[MAX_DS4_CONTROLLER_COUNT] { true, true, true, true, true, true, true, true };
 
         public Dispatcher EventDispatcher { get => eventDispatcher; }
         public OutputSlotManager OutputslotMan { get => outputslotMan; }
@@ -4542,29 +4571,14 @@ namespace DS4Windows
 
         public string TouchpadSlide(int ind)
         {
-            DS4State cState = CurrentState[ind];
-            string slidedir = "none";
-            if (DS4Controllers[ind] != null && cState.Touch2 &&
-               !(touchPad[ind].dragging || touchPad[ind].dragging2))
+            if (ind < 0 || ind >= touchPad.Length || touchPad[ind] == null ||
+                DS4Controllers[ind] == null)
             {
-                if (touchPad[ind].slideright && !touchslid[ind])
-                {
-                    slidedir = "right";
-                    touchslid[ind] = true;
-                }
-                else if (touchPad[ind].slideleft && !touchslid[ind])
-                {
-                    slidedir = "left";
-                    touchslid[ind] = true;
-                }
-                else if (!touchPad[ind].slideleft && !touchPad[ind].slideright)
-                {
-                    slidedir = "";
-                    touchslid[ind] = false;
-                }
+                return "none";
             }
 
-            return slidedir;
+            int direction = touchPad[ind].ConsumeProfileSwipeDirection();
+            return direction < 0 ? "left" : direction > 0 ? "right" : "none";
         }
 
         public void LogDebug(String Data, bool warning = false)

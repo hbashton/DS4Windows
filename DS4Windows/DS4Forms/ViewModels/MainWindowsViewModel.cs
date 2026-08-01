@@ -1139,7 +1139,10 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             ViiperPrerequisiteStatus status = ViiperSetupManager.GetStatus(tryStartServer: true);
             if (!status.Ready)
             {
-                ViiperSetupManager.EnsureReadyWithPrompt(null, forcePrompt: true);
+                // Startup already offered the prerequisite prompt on the STA
+                // UI thread. Respect that session decision here instead of
+                // constructing a second WPF window from this worker thread.
+                ViiperSetupManager.EnsureReadyWithPrompt(null);
             }
         }
 

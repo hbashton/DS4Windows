@@ -862,6 +862,7 @@ namespace DS4Windows
             feedbackSpeakerSignal.Set();
             feedbackControlSignal.Set();
             WaitForFeedbackDispatchCallbacks();
+            ReleaseNativeDualSenseFeedbackOwnership();
             // A real output-device disconnect must not inherit the interface
             // monitor's debounce period. The generation change prevents the
             // old monitor from reattaching after this synchronous detach.
@@ -920,6 +921,25 @@ namespace DS4Windows
             StopFeedbackReader();
             StopFeedbackDispatchWorkers();
             feedbackDispatchBuffer.ClearPending();
+        }
+
+        private void ReleaseNativeDualSenseFeedbackOwnership()
+        {
+            if (!IsDualSenseType() || audioOnlySidecar || Program.rootHub == null)
+            {
+                return;
+            }
+
+            int deviceIndex = Volatile.Read(ref lastInputDeviceIndex);
+            if (deviceIndex < 0 ||
+                deviceIndex >= Program.rootHub.DS4Controllers.Length ||
+                Program.rootHub.DS4Controllers[deviceIndex] is not
+                    DualSenseDevice dualSenseDevice)
+            {
+                return;
+            }
+
+            dualSenseDevice.ReleaseNativeGameOutputOwnership();
         }
 
         private void StopFeedbackReader()

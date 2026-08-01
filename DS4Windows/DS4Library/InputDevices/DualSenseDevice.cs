@@ -414,7 +414,6 @@ namespace DS4Windows.InputDevices
         // device callbacks creates audible and tactile holes in sustained
         // effects.
         private const long PersistentBluetoothHapticsExpiryQpc = long.MaxValue;
-        private const int BluetoothCombinedNativeStateFreshnessMilliseconds = 100;
         // Presented Opus frames refresh this lease on every 10.667 ms tick.
         // The normal idle boundary clears it explicitly; expiry is the
         // fail-safe when a producer thread dies before reaching that boundary.
@@ -3239,6 +3238,21 @@ namespace DS4Windows.InputDevices
             return true;
         }
 
+        internal void ReleaseNativeGameOutputOwnership()
+        {
+            lock (bluetoothCombinedSpeakerReportLock)
+            {
+                latestBluetoothCombinedNativeStateTimestamp = 0;
+            }
+
+            // The next physical output pass must replace the detached game's
+            // latched trigger/rumble/LED state with the active profile state.
+            // This is the explicit ownership boundary that replaces the former
+            // 100 ms timeout.
+            currentHap.dirty = true;
+            outputDirty = true;
+        }
+
         /// <summary>
         /// Publishes one native 3 kHz stereo haptics packet through the same
         /// combined Bluetooth transport used by controller speaker audio,
@@ -3384,7 +3398,7 @@ namespace DS4Windows.InputDevices
                 // profile/custom lightbar and audio routing in that case.
                 if (hasNativeGameState)
                 {
-                    MergeProfileStateIntoV5AudioSnapshot(report,
+                    MergeControllerStateIntoV5AudioSnapshot(report,
                         offset + BluetoothCombinedStateOffset,
                         latestBluetoothCombinedSpeakerReport,
                         BluetoothCombinedStateOffset);
@@ -3396,7 +3410,7 @@ namespace DS4Windows.InputDevices
                         BluetoothCombinedNativeStateLength &&
                     outputReport[0] == OUTPUT_REPORT_ID_BT)
                 {
-                    MergeProfileStateIntoV5AudioSnapshot(outputReport,
+                    MergeControllerStateIntoV5AudioSnapshot(outputReport,
                         2, latestBluetoothCombinedSpeakerReport,
                         BluetoothCombinedStateOffset);
                     latestBluetoothCombinedNativeStateTimestamp = 0;
@@ -3490,7 +3504,7 @@ namespace DS4Windows.InputDevices
                     return false;
                 }
 
-                MergeProfileStateIntoV5AudioSnapshot(report,
+                MergeControllerStateIntoV5AudioSnapshot(report,
                     offset + 1, latestBluetoothCombinedSpeakerReport,
                     BluetoothCombinedStateOffset);
                 latestBluetoothCombinedNativeStateTimestamp =
@@ -3576,55 +3590,59 @@ namespace DS4Windows.InputDevices
                     return false;
                 }
 
-                long nativeStateTimestamp =
-                    latestBluetoothCombinedNativeStateTimestamp;
-                if (nativeStateTimestamp > 0 &&
-                    Stopwatch.GetTimestamp() - nativeStateTimestamp <=
-                        (Stopwatch.Frequency *
-                            BluetoothCombinedNativeStateFreshnessMilliseconds) /
-                        1000)
+                if (latestBluetoothCombinedNativeStateTimestamp > 0)
                 {
-                    // A virtual DualSense 0x36 contains the authoritative game
-                    // trigger/light/rumble state. Do not overwrite it with the
-                    // generic profile snapshot produced by PrepareOutReport.
+                    // Native DualSense output is stateful, not a pulse with a
+                    // 100 ms lease. The game owns trigger, rumble, haptics, and
+                    // LED state until it sends another native report or the
+                    // virtual DualSense is detached. Replacing that state with
+                    // PrepareOutReport after an arbitrary timeout made the two
+                    // writers alternate ownership and caused triggers and
+                    // vibration to oscillate in PS5 games.
                     return true;
                 }
 
-                MergeProfileStateIntoV5AudioSnapshot(report, 2,
+                MergeControllerStateIntoV5AudioSnapshot(report, 2,
                     latestBluetoothCombinedSpeakerReport,
                     BluetoothCombinedStateOffset);
                 return true;
             }
         }
 
-        private static void MergeProfileStateIntoV5AudioSnapshot(
+        private static void MergeControllerStateIntoV5AudioSnapshot(
             byte[] source, int sourceOffset, byte[] destination,
             int destinationOffset)
         {
-            // V5 keeps the native audio contract stable on every media
-            // frame and overlays only mutable controller state. In particular,
-            // generic DS4Windows output reports must not replace FD/F7, the
-            // three audio gains, route 0x09, or audio-control2 0x0A with their
-            // Bluetooth control-report equivalents.
-            Array.Copy(source, sourceOffset + 2, destination,
-                destinationOffset + 2, 2);       // rumble motors
-            // V5 keeps UseRumbleNotHaptics clear on an idle carrier.
-            // A virtual report may leave its validity bit asserted while both
-            // motors are zero; forwarding that bit alone switches firmware
-            // out of the native tactile/audio mode on every media report.
-            destination[destinationOffset] &= 0xFD;
-            if (source[sourceOffset + 2] != 0 ||
-                source[sourceOffset + 3] != 0)
-            {
-                destination[destinationOffset] |= 0x02;
-            }
-            // V5 keeps mute LED and power-save/mute state in its fixed
-            // media snapshot. Microphone transitions travel through the
-            // ordered 0x32 control report instead of mutating each 0x36.
-            Array.Copy(source, sourceOffset + 10, destination,
-                destinationOffset + 10, 27);     // triggers and effect power
-            Array.Copy(source, sourceOffset + 43, destination,
-                destinationOffset + 43, 4);      // player LEDs and lightbar
+            // Keep the complete game/controller state contract. Validity bits
+            // are part of that contract: retaining the default FD/F7 flags
+            // while copying changing trigger blocks makes stale fields valid
+            // and causes the physical triggers to thrash. Only the seven
+            // fields owned locally by the PlayStation audio route survive the
+            // copy; they are refreshed again at the physical write boundary.
+            byte audioFlag0 = (byte)(destination[destinationOffset] & 0xF0);
+            byte audioFlag1 = (byte)(destination[destinationOffset + 1] & 0x83);
+            byte headphoneVolume = destination[destinationOffset + 4];
+            byte speakerVolumeSnapshot = destination[destinationOffset + 5];
+            byte microphoneVolumeSnapshot = destination[destinationOffset + 6];
+            byte audioControl = destination[destinationOffset + 7];
+            byte muteLed = destination[destinationOffset + 8];
+            byte powerSaveControl = destination[destinationOffset + 9];
+            byte audioControl2 = destination[destinationOffset + 37];
+
+            Array.Copy(source, sourceOffset, destination, destinationOffset,
+                BluetoothCombinedNativeStateLength);
+
+            destination[destinationOffset] = (byte)(
+                (source[sourceOffset] & 0x0F) | audioFlag0);
+            destination[destinationOffset + 1] = (byte)(
+                (source[sourceOffset + 1] & 0x7C) | audioFlag1);
+            destination[destinationOffset + 4] = headphoneVolume;
+            destination[destinationOffset + 5] = speakerVolumeSnapshot;
+            destination[destinationOffset + 6] = microphoneVolumeSnapshot;
+            destination[destinationOffset + 7] = audioControl;
+            destination[destinationOffset + 8] = muteLed;
+            destination[destinationOffset + 9] = powerSaveControl;
+            destination[destinationOffset + 37] = audioControl2;
         }
 
         private bool BluetoothAudioPacerOwnsTransport()

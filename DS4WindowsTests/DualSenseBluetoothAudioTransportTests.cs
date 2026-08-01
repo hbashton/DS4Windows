@@ -960,6 +960,15 @@ namespace DS4WindowsTests
             typeof(DualSenseDevice).GetMethod(
                 "UpdateCachedBluetoothCombinedState",
                 BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly MethodInfo
+            UpdateCachedCombinedStateFromBluetoothOutputMethod =
+                typeof(DualSenseDevice).GetMethod(
+                    "UpdateCachedBluetoothCombinedStateFromBluetoothOutput",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly MethodInfo ReleaseNativeGameOutputOwnershipMethod =
+            typeof(DualSenseDevice).GetMethod(
+                "ReleaseNativeGameOutputOwnership",
+                BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly MethodInfo DrainQueuedInputEventsMethod =
             typeof(DualSenseDevice).GetMethod(
                 "DrainQueuedInputEvents",
@@ -1240,7 +1249,8 @@ namespace DS4WindowsTests
 
             byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
                 device);
-            AssertV5AudioContract(cached, expectedFlag0: 0xFF);
+            AssertV5AudioContract(cached, expectedFlag0: 0xF2,
+                expectedFlag1: 0x8B);
             Assert.AreEqual((byte)0x41, cached[15]);
             Assert.AreEqual((byte)0x52, cached[16]);
             for (int index = 23; index <= 49; index++)
@@ -1257,7 +1267,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void IdleNativeCarrierKeepsV5HapticsMode()
+        public void IdleNativeCarrierPreservesGameSelectedVibrationMode()
         {
             DualSenseDevice device = CreateBluetoothDevice();
             byte[] report = BuildCombinedControlReport(0, 0, false);
@@ -1270,7 +1280,8 @@ namespace DS4WindowsTests
 
             byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
                 device);
-            AssertV5AudioContract(cached, expectedFlag0: 0xFD);
+            AssertV5AudioContract(cached, expectedFlag0: 0xF2,
+                expectedFlag1: 0xF7);
         }
 
         [TestMethod]
@@ -1313,7 +1324,8 @@ namespace DS4WindowsTests
 
             byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
                 device);
-            AssertV5AudioContract(cached);
+            AssertV5AudioContract(cached, expectedFlag0: 0xF0,
+                expectedFlag1: 0x8B);
             Assert.AreEqual((byte)0x00, cached[15]);
             Assert.AreEqual((byte)0x00, cached[16]);
             Assert.AreEqual((byte)0x00, cached[21]);
@@ -1332,6 +1344,81 @@ namespace DS4WindowsTests
                 "A profile/lightbar state merge cleared active haptics.");
             Assert.AreEqual((byte)0x43, cached[79],
                 "A profile/lightbar state merge cleared active haptics.");
+        }
+
+        [TestMethod]
+        public void NativeGameStateRemainsAuthoritativeUntilVirtualPadDetaches()
+        {
+            DualSenseDevice device = CreateBluetoothDevice();
+            byte[] native = BuildCombinedControlReport(0, 0, false);
+            native[13] = 0x0C;
+            native[14] = 0x14;
+            native[23] = 0x21;
+            native[24] = 0xFC;
+            native[34] = 0x22;
+            native[35] = 0xFD;
+            device.WriteBluetoothCombinedHapticsAudioOutputReport(native, 0,
+                native.Length, hasNativeGameState: true);
+
+            // Reproduce the former failure: a later DS4Windows profile output
+            // attempted to replace a game's latched trigger state after 100 ms.
+            SetFieldValue(NativeStateTimestampField, device, 1L);
+            byte[] profile = new byte[78];
+            profile[0] = 0x31;
+            profile[2] = 0xF0;
+            profile[3] = 0xC3;
+            profile[12] = 0;
+            profile[23] = 0;
+
+            Assert.IsNotNull(
+                UpdateCachedCombinedStateFromBluetoothOutputMethod);
+            Assert.IsTrue((bool)
+                UpdateCachedCombinedStateFromBluetoothOutputMethod.Invoke(
+                    device, new object[] { profile }));
+
+            byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
+                device);
+            Assert.AreEqual((byte)0x21, cached[23]);
+            Assert.AreEqual((byte)0xFC, cached[24]);
+            Assert.AreEqual((byte)0x22, cached[34]);
+            Assert.AreEqual((byte)0xFD, cached[35]);
+            Assert.AreEqual((byte)0xFC, cached[13],
+                "The profile writer replaced the game's native validity bits.");
+            Assert.AreEqual((byte)0x97, cached[14]);
+        }
+
+        [TestMethod]
+        public void VirtualPadDetachReturnsStateOwnershipToActiveProfile()
+        {
+            DualSenseDevice device = CreateBluetoothDevice();
+            byte[] native = BuildCombinedControlReport(0, 0, false);
+            native[13] = 0x0C;
+            native[23] = 0x21;
+            native[34] = 0x22;
+            device.WriteBluetoothCombinedHapticsAudioOutputReport(native, 0,
+                native.Length, hasNativeGameState: true);
+
+            Assert.IsNotNull(ReleaseNativeGameOutputOwnershipMethod);
+            ReleaseNativeGameOutputOwnershipMethod.Invoke(device, null);
+            Assert.AreEqual(0L, GetFieldValue<long>(
+                NativeStateTimestampField, device));
+
+            byte[] profile = new byte[78];
+            profile[0] = 0x31;
+            profile[2] = 0xF0;
+            profile[3] = 0xC3;
+            profile[12] = 0;
+            profile[23] = 0;
+            Assert.IsTrue((bool)
+                UpdateCachedCombinedStateFromBluetoothOutputMethod.Invoke(
+                    device, new object[] { profile }));
+
+            byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
+                device);
+            Assert.AreEqual((byte)0, cached[23]);
+            Assert.AreEqual((byte)0, cached[34]);
+            Assert.AreEqual((byte)0xF0, cached[13]);
+            Assert.AreEqual((byte)0xC3, cached[14]);
         }
 
         [TestMethod]
@@ -1532,10 +1619,10 @@ namespace DS4WindowsTests
         }
 
         private static void AssertV5AudioContract(byte[] report,
-            byte expectedFlag0 = 0xFD)
+            byte expectedFlag0 = 0xFD, byte expectedFlag1 = 0xF7)
         {
             Assert.AreEqual(expectedFlag0, report[13]);
-            Assert.AreEqual((byte)0xF7, report[14]);
+            Assert.AreEqual(expectedFlag1, report[14]);
             Assert.AreEqual((byte)0x64, report[17]);
             Assert.AreEqual((byte)0x64, report[18]);
             Assert.AreEqual((byte)0xFF, report[19]);

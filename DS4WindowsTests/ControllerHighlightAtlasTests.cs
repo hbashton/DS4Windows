@@ -1,3 +1,4 @@
+using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using DS4WinWPF.DS4Forms;
@@ -10,9 +11,9 @@ namespace DS4WindowsTests
         private static readonly string[] StickAtlases =
         {
             "DualSense-Stick_Highlights.png",
-            "DualShock4-Mapping-Stick_Highlights.png",
-            "DualSenseEdge-Mapping-Stick_Highlights.png",
-            "Switch2Pro-Mapping-Stick_Highlights.png",
+            "DualShock4-Stick_Highlights.png",
+            "DualSenseEdge-Stick_Highlights.png",
+            "Switch2Pro-Stick_Highlights.png",
         };
 
         [TestMethod]
@@ -69,13 +70,13 @@ namespace DS4WindowsTests
                 ["DualSense-Config_Highlights.png"] =
                     Enumerable.Range(0, 12).Concat(Enumerable.Range(14, 4))
                         .ToArray(),
-                ["DualShock4-Mapping_Highlights.png"] =
+                ["DualShock4-Config_Highlights.png"] =
                     Enumerable.Range(0, 11).Concat(Enumerable.Range(14, 8))
                         .ToArray(),
-                ["DualSenseEdge-Mapping_Highlights.png"] =
+                ["DualSenseEdge-Config_Highlights.png"] =
                     Enumerable.Range(0, 12).Concat(Enumerable.Range(14, 10))
                         .ToArray(),
-                ["Switch2Pro-Mapping_Highlights.png"] =
+                ["Switch2Pro-Config_Highlights.png"] =
                     Enumerable.Range(0, 11).Concat(Enumerable.Range(14, 4))
                         .Concat(new[] { 24, 25, 26 }).ToArray(),
             };
@@ -110,6 +111,30 @@ namespace DS4WindowsTests
                 Assert.IsTrue(alpha.Any(value => value >= 32 && value <= 120),
                     $"{atlas} has no translucent interior.");
             }
+        }
+
+        [TestMethod]
+        public void EveryNonDualSenseHighlightStaysOnControllerArtwork()
+        {
+            AssertAtlasStaysOnArtwork("DualShock 4 Controller.png", 384, 247,
+                "DualShock4-Config_Highlights.png", 440, 220);
+            AssertAtlasStaysOnArtwork("DualSense Edge Controller.png", 1558,
+                1009, "DualSenseEdge-Config_Highlights.png", 440, 220);
+            AssertAtlasStaysOnArtwork("Switch 2 Pro Controller.png", 1536,
+                1024, "Switch2Pro-Config_Highlights.png", 440, 220);
+            AssertAtlasStaysOnArtwork("360 map.png", 1323, 439,
+                "Xbox360-Action_Highlights.png", 630, 247);
+        }
+
+        [TestMethod]
+        public void DualShock4UpperTouchIsInsideTheTouchpadNotTheLightbar()
+        {
+            Rect upperTouch = RasterHighlightAtlas.Mask(
+                "DualShock4-Config_Highlights.png", 21).Bounds;
+            Assert.IsTrue(upperTouch.Top >= 69,
+                $"Upper touch starts above the touchpad at {upperTouch.Top}.");
+            Assert.IsTrue(upperTouch.Bottom <= 86,
+                $"Upper touch leaves the touchpad at {upperTouch.Bottom}.");
         }
 
         [TestMethod]
@@ -160,6 +185,84 @@ namespace DS4WindowsTests
 
         private static int CountOpaquePixels(BitmapSource source) =>
             AlphaPixels(source).Count(alpha => alpha >= 16);
+
+        private static void AssertAtlasStaysOnArtwork(string artworkName,
+            int artworkWidth, int artworkHeight, string atlasName,
+            int frameWidth, int frameHeight)
+        {
+            BitmapSource artwork = LoadResource(artworkName);
+            byte[] artworkAlpha = AlphaPixels(artwork);
+            BitmapSource atlas = LoadResource(atlasName);
+            int frameCount = atlas.PixelHeight / frameHeight;
+            double scale = Math.Min((double)frameWidth / artworkWidth,
+                (double)frameHeight / artworkHeight);
+            double offsetX = (frameWidth - artworkWidth * scale) / 2.0;
+            double offsetY = (frameHeight - artworkHeight * scale) / 2.0;
+
+            for (int frame = 0; frame < frameCount; frame++)
+            {
+                byte[] highlightAlpha = AlphaPixels(RasterHighlightAtlas.Frame(
+                    atlasName, frame, frameWidth, frameHeight));
+                for (int y = 0; y < frameHeight; y++)
+                {
+                    for (int x = 0; x < frameWidth; x++)
+                    {
+                        if (highlightAlpha[y * frameWidth + x] <
+                            RasterHighlightAtlas.HitAlphaThreshold)
+                        {
+                            continue;
+                        }
+
+                        int sourceX = Math.Clamp((int)((x + 0.5 - offsetX) /
+                            scale), 0, artworkWidth - 1);
+                        int sourceY = Math.Clamp((int)((y + 0.5 - offsetY) /
+                            scale), 0, artworkHeight - 1);
+                        bool touchesArtwork = false;
+                        for (int sampleY = Math.Max(0, sourceY - 1);
+                            sampleY <= Math.Min(artworkHeight - 1, sourceY + 1) &&
+                            !touchesArtwork; sampleY++)
+                        {
+                            for (int sampleX = Math.Max(0, sourceX - 1);
+                                sampleX <= Math.Min(artworkWidth - 1, sourceX + 1);
+                                sampleX++)
+                            {
+                                if (artworkAlpha[sampleY * artworkWidth +
+                                    sampleX] >= 16)
+                                {
+                                    touchesArtwork = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        Assert.IsTrue(touchesArtwork,
+                            $"{atlasName} frame {frame} paints transparent " +
+                            $"space at ({x}, {y}).");
+                    }
+                }
+            }
+        }
+
+        private static BitmapSource LoadResource(string resourceName)
+        {
+            var uri = new Uri(
+                $"/DS4Windows;component/Resources/{resourceName}",
+                UriKind.Relative);
+            System.Windows.Resources.StreamResourceInfo resource =
+                Application.GetResourceStream(uri);
+            Assert.IsNotNull(resource?.Stream,
+                $"Resource {resourceName} was not found.");
+            using (resource.Stream)
+            {
+                var bitmap = new BitmapImage();
+                bitmap.BeginInit();
+                bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                bitmap.StreamSource = resource.Stream;
+                bitmap.EndInit();
+                bitmap.Freeze();
+                return bitmap;
+            }
+        }
 
         private static byte[] AlphaPixels(BitmapSource source)
         {

@@ -144,6 +144,22 @@ def render_atlas(
     artwork: Artwork,
     source_shapes: list[Callable[[ImageDraw.ImageDraw], None]],
 ) -> None:
+    source_alpha = Image.open(resources / artwork.source).convert("RGBA").getchannel("A")
+    rendered_alpha = source_alpha.resize(
+        (artwork.rendered_width, artwork.rendered_height),
+        Image.Resampling.LANCZOS,
+    )
+    artwork_mask = Image.new("L", (CANVAS_WIDTH, CANVAS_HEIGHT), 0)
+    artwork_mask.paste(
+        rendered_alpha,
+        ((CANVAS_WIDTH - artwork.rendered_width) // 2,
+         (CANVAS_HEIGHT - artwork.rendered_height) // 2),
+    )
+    # Never let interpolation spill a hit target beyond the rendered pad.
+    # The authored geometry identifies the individual control; this final
+    # clip supplies the exact antialiased outside silhouette of the raster.
+    artwork_clip = artwork_mask.point(lambda value: 255 if value >= 64 else 0)
+
     frames: list[Image.Image] = []
     for source_shape in source_shapes:
         large_mask = Image.new(
@@ -153,6 +169,7 @@ def render_atlas(
         mask = large_mask.resize(
             (CANVAS_WIDTH, CANVAS_HEIGHT), Image.Resampling.LANCZOS
         )
+        mask = ImageChops.multiply(mask, artwork_clip)
         frame = Image.new("RGBA", (CANVAS_WIDTH, CANVAS_HEIGHT), ACCENT)
         frame.putalpha(mask.point(lambda value: value * ACCENT[3] // 255))
         frames.append(frame)
@@ -292,6 +309,13 @@ def render_xbox_action_atlas(resources: Path) -> None:
     source_height = 439
     scale = width / source_width
     offset_y = (height - source_height * scale) / 2.0
+    source_alpha = Image.open(resources / "360 map.png").convert("RGBA").getchannel("A")
+    rendered_height = round(source_height * scale)
+    rendered_alpha = source_alpha.resize(
+        (width, rendered_height), Image.Resampling.LANCZOS)
+    artwork_mask = Image.new("L", (width, height), 0)
+    artwork_mask.paste(rendered_alpha, (0, round(offset_y)))
+    artwork_clip = artwork_mask.point(lambda value: 255 if value >= 64 else 0)
 
     def point(x: float, y: float) -> tuple[int, int]:
         return (round(x * scale * SUPERSAMPLE),
@@ -350,8 +374,10 @@ def render_xbox_action_atlas(resources: Path) -> None:
         ring = ImageChops.subtract(surface, press)
         return [press, *split_stick_ring(ring, center_x, center_y)]
 
-    masks.extend(stick_masks(make_mask("ellipse", (321, 119, 451, 245))))
-    masks.extend(stick_masks(make_mask("ellipse", (727, 252, 858, 387))))
+    # Match the movable thumb-cap, not the stationary socket around it.
+    # L3/R3 then occupy the small center while directions divide its rim.
+    masks.extend(stick_masks(make_mask("ellipse", (341, 143, 433, 237))))
+    masks.extend(stick_masks(make_mask("ellipse", (746, 271, 840, 371))))
     masks.extend([
         make_mask("polygon", [(500, 250), (548, 250), (551, 291),
                                (541, 301), (507, 301), (497, 291)]),
@@ -365,6 +391,7 @@ def render_xbox_action_atlas(resources: Path) -> None:
 
     frames: list[Image.Image] = []
     for mask in masks:
+        mask = ImageChops.multiply(mask, artwork_clip)
         frame = Image.new("RGBA", (width, height), ACCENT)
         frame.putalpha(mask.point(lambda value: value * ACCENT[3] // 255))
         frames.append(frame)
@@ -379,28 +406,46 @@ def render_xbox_action_atlas(resources: Path) -> None:
 
 def dualshock4_shapes():
     return [
-        ellipse((294, 134, 323, 163)),  # Cross
-        ellipse((321, 112, 350, 141)),  # Circle
-        ellipse((266, 112, 295, 141)),  # Square
-        ellipse((294, 91, 323, 120)),   # Triangle
-        rounded((49, 49, 104, 78), 12),
-        rounded((280, 49, 335, 78), 12),
-        polygon([(49, 49), (52, 28), (62, 20), (91, 20), (102, 28), (104, 49)]),
-        polygon([(280, 49), (282, 28), (293, 20), (322, 20), (333, 28), (335, 49)]),
-        rounded((108, 80, 123, 105), 7),
-        rounded((260, 80, 275, 105), 7),
-        ellipse((179, 156, 204, 179)),
+        # Trace the dark, movable cap of each control rather than the pale
+        # bezel around it. This is the same visual contract as the polished
+        # DualSense atlas: the button itself glows, never its surroundings.
+        ellipse((295, 135, 322, 162)),  # Cross
+        ellipse((322, 113, 349, 140)),  # Circle
+        ellipse((267, 113, 294, 140)),  # Square
+        ellipse((295, 92, 322, 119)),   # Triangle
+        rounded((51, 50, 102, 76), 10),
+        rounded((282, 50, 333, 76), 10),
+        polygon([(54, 48), (60, 40), (64, 33), (67, 28),
+                 (72, 25), (88, 25), (93, 28), (96, 33),
+                 (97, 40), (99, 48)]),
+        polygon([(285, 48), (287, 40), (288, 33), (291, 28),
+                 (296, 25), (312, 25), (317, 28), (320, 33),
+                 (324, 40), (330, 48)]),
+        rounded((109, 81, 122, 104), 6),
+        rounded((261, 81, 274, 104), 6),
+        ellipse((182, 159, 202, 176)),
         ellipse((0, 0, 0, 0)),          # No mute button
-        ellipse((106, 156, 157, 204)),
-        ellipse((228, 156, 279, 204)),
-        rounded((63, 99, 90, 129), 8),
-        rounded((82, 112, 112, 141), 8),
-        rounded((63, 131, 90, 161), 8),
-        rounded((43, 112, 73, 141), 8),
-        polygon([(130, 79), (180, 79), (180, 135), (138, 135), (130, 127)]),
-        rounded((180, 79, 205, 135), 2),
-        polygon([(205, 79), (255, 79), (255, 127), (247, 135), (205, 135)]),
-        rounded((130, 62, 255, 79), 8),
+        # The stick map is the top cap only. The stick-atlas pass divides
+        # this exact cap into a small L3/R3 center and four disjoint sectors.
+        ellipse((112, 162, 152, 201)),
+        ellipse((234, 162, 274, 201)),
+        polygon([(65, 100), (88, 100), (89, 104), (89, 126),
+                 (85, 129), (68, 129), (64, 126), (64, 104)]),
+        polygon([(84, 114), (88, 113), (109, 113), (112, 117),
+                 (112, 136), (108, 140), (88, 140), (84, 137)]),
+        polygon([(65, 132), (88, 132), (89, 136), (89, 157),
+                 (85, 160), (68, 160), (64, 157), (64, 136)]),
+        polygon([(45, 114), (49, 113), (69, 113), (73, 117),
+                 (73, 136), (69, 140), (49, 140), (45, 137)]),
+        # Touch gestures share one bounded touch surface. Upper touch lives
+        # inside the pad (the old atlas accidentally painted the lightbar).
+        polygon([(130, 95), (180, 95), (180, 135), (138, 135),
+                 (130, 127)]),
+        rounded((180, 95, 205, 135), 2),
+        polygon([(205, 95), (255, 95), (255, 127), (247, 135),
+                 (205, 135)]),
+        polygon([(132, 79), (253, 79), (255, 81), (255, 95),
+                 (130, 95), (130, 81)]),
         ellipse((0, 0, 0, 0)),
         ellipse((0, 0, 0, 0)),
         ellipse((0, 0, 0, 0)),
@@ -411,20 +456,24 @@ def dualshock4_shapes():
 
 def dualsense_edge_shapes():
     return [
-        ellipse((1154, 421, 1252, 519)),
-        ellipse((1252, 319, 1352, 418)),
-        ellipse((1052, 319, 1152, 418)),
-        ellipse((1154, 218, 1252, 316)),
-        polygon([(246, 99), (278, 82), (390, 84), (433, 102), (458, 129), (458, 190), (447, 198), (249, 198)]),
-        polygon([(1100, 99), (1132, 82), (1244, 84), (1287, 102), (1312, 129), (1312, 190), (1301, 198), (1103, 198)]),
-        polygon([(251, 99), (255, 42), (274, 20), (370, 20), (410, 35), (437, 65), (447, 99)]),
-        polygon([(1111, 99), (1121, 65), (1148, 35), (1188, 20), (1284, 20), (1303, 42), (1307, 99)]),
-        rounded((435, 201, 481, 266), 18),
-        rounded((1077, 201, 1123, 266), 18),
+        ellipse((1159, 426, 1247, 514)),
+        ellipse((1258, 325, 1346, 413)),
+        ellipse((1058, 325, 1146, 413)),
+        ellipse((1159, 223, 1247, 311)),
+        polygon([(255, 101), (284, 91), (390, 92), (426, 106),
+                 (449, 132), (449, 189), (440, 192), (258, 192)]),
+        polygon([(1109, 101), (1138, 91), (1244, 92), (1280, 106),
+                 (1303, 132), (1303, 189), (1294, 192), (1112, 192)]),
+        polygon([(257, 97), (261, 45), (279, 25), (368, 25),
+                 (405, 40), (430, 68), (440, 97)]),
+        polygon([(1118, 97), (1128, 68), (1153, 40), (1190, 25),
+                 (1279, 25), (1297, 45), (1301, 97)]),
+        rounded((440, 204, 477, 263), 16),
+        rounded((1081, 204, 1118, 263), 16),
         polygon([(731, 512), (760, 523), (756, 568), (738, 568), (766, 583), (803, 574), (819, 584), (776, 604), (731, 583)]),
         rounded((744, 636, 814, 659), 10),
-        ellipse((470, 464, 659, 653)),
-        ellipse((899, 464, 1088, 653)),
+        ellipse((510, 506, 620, 616)),
+        ellipse((939, 506, 1049, 616)),
         polygon([(313, 259), (354, 253), (396, 259), (398, 311), (370, 352), (340, 352), (311, 311)]),
         polygon([(373, 328), (411, 311), (454, 325), (476, 352), (475, 389), (453, 412), (411, 409), (374, 389)]),
         polygon([(313, 389), (354, 385), (396, 389), (399, 438), (375, 480), (335, 480), (311, 438)]),
@@ -453,12 +502,12 @@ def switch2_pro_shapes():
         polygon([(1032, 91), (1051, 77), (1222, 77), (1249, 94), (1256, 143), (1246, 191), (1031, 191)]),
         polygon([(290, 84), (302, 37), (330, 21), (426, 21), (460, 38), (474, 84)]),
         polygon([(1062, 84), (1076, 38), (1110, 21), (1206, 21), (1234, 37), (1246, 84)]),
-        ellipse((578, 199, 646, 270)),
-        ellipse((879, 199, 947, 270)),
-        ellipse((807, 287, 878, 361)),
+        ellipse((585, 206, 640, 261)),
+        ellipse((886, 206, 941, 261)),
+        ellipse((812, 296, 875, 358)),
         ellipse((0, 0, 0, 0)),          # No mute button
-        ellipse((326, 235, 493, 412)),
-        ellipse((846, 414, 1038, 606)),
+        ellipse((350, 270, 470, 390)),
+        ellipse((872, 438, 1012, 578)),
         polygon([(538, 411), (610, 411), (610, 477), (592, 492),
                  (556, 492), (538, 477)]),
         polygon([(600, 465), (666, 465), (681, 483), (681, 522),
@@ -475,7 +524,7 @@ def switch2_pro_shapes():
         ellipse((0, 0, 0, 0)),
         polygon([(430, 694), (520, 694), (520, 756), (500, 780), (451, 774), (432, 746)]),
         polygon([(1000, 694), (1090, 694), (1088, 746), (1069, 774), (1020, 780), (1000, 756)]),
-        rounded((648, 288, 713, 355), 8),  # Capture
+        rounded((654, 300, 706, 352), 7),  # Capture
     ]
 
 

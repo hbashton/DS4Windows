@@ -324,10 +324,10 @@ namespace DS4WinWPF.DS4Forms
             SetControllerElementBounds(ds4LightbarColorBtn, 149, 53, 143, 16);
 
             PopulateDualShock4VectorHighlights();
-            PopulateControllerHoverAtlas("DualShock4-Mapping_Highlights.png",
+            PopulateControllerHoverAtlas("DualShock4-Config_Highlights.png",
                 includeMute: false, includeTouch: true,
                 includeEdgeControls: false, includeCapture: false);
-            PopulateControllerStickAtlas("DualShock4-Mapping-Stick_Highlights.png");
+            PopulateControllerStickAtlas("DualShock4-Stick_Highlights.png");
             lightbarRect.OpacityMask = new ImageBrush(
                 LoadResourceImage("DualShock4-Mapping-Lightbar.png"));
             ApplyControllerButtonClips();
@@ -385,10 +385,10 @@ namespace DS4WinWPF.DS4Forms
             SetControllerElementBounds(ds4LightbarColorBtn, 139, 43, 163, 8);
 
             PopulateDualSenseEdgeVectorHighlights();
-            PopulateControllerHoverAtlas("DualSenseEdge-Mapping_Highlights.png",
+            PopulateControllerHoverAtlas("DualSenseEdge-Config_Highlights.png",
                 includeMute: true, includeTouch: true,
                 includeEdgeControls: true, includeCapture: false);
-            PopulateControllerStickAtlas("DualSenseEdge-Mapping-Stick_Highlights.png");
+            PopulateControllerStickAtlas("DualSenseEdge-Stick_Highlights.png");
             ApplyControllerButtonClips();
         }
 
@@ -440,10 +440,10 @@ namespace DS4WinWPF.DS4Forms
             ds4LightbarColorBtn.Visibility = Visibility.Collapsed;
 
             PopulateSwitch2ProHitGeometries();
-            PopulateControllerHoverAtlas("Switch2Pro-Mapping_Highlights.png",
+            PopulateControllerHoverAtlas("Switch2Pro-Config_Highlights.png",
                 includeMute: false, includeTouch: false,
                 includeEdgeControls: true, includeCapture: true);
-            PopulateControllerStickAtlas("Switch2Pro-Mapping-Stick_Highlights.png");
+            PopulateControllerStickAtlas("Switch2Pro-Stick_Highlights.png");
             ApplyControllerButtonClips();
         }
 

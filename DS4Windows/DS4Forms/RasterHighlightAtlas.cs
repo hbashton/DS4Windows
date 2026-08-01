@@ -16,6 +16,10 @@ namespace DS4WinWPF.DS4Forms
     {
         internal const int FrameWidth = 440;
         internal const int FrameHeight = 220;
+        // Ignore the faint antialias fringe when building pointer geometry.
+        // The visible frame remains antialiased, while hover/click activates
+        // only on the painted control surface instead of beside the button.
+        internal const byte HitAlphaThreshold = 64;
 
         private static readonly object cacheLock = new object();
         private static readonly Dictionary<string, BitmapSource> atlasCache =
@@ -128,14 +132,14 @@ namespace DS4WinWPF.DS4Forms
                     while (x < pixels.PixelWidth)
                     {
                         while (x < pixels.PixelWidth &&
-                            buffer[row + (x * 4) + 3] < 16)
+                            buffer[row + (x * 4) + 3] < HitAlphaThreshold)
                         {
                             x++;
                         }
 
                         int start = x;
                         while (x < pixels.PixelWidth &&
-                            buffer[row + (x * 4) + 3] >= 16)
+                            buffer[row + (x * 4) + 3] >= HitAlphaThreshold)
                         {
                             x++;
                         }

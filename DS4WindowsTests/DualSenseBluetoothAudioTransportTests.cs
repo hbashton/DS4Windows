@@ -2,6 +2,7 @@ using DS4Windows;
 using DS4Windows.InputDevices;
 using System.Collections;
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -952,6 +953,10 @@ namespace DS4WindowsTests
             typeof(DualSenseDevice).GetField(
                 "latestBluetoothCombinedNativeStateTimestamp",
                 BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo NativeLightbarReleasedField =
+            typeof(DualSenseDevice).GetField(
+                "nativeGameLightbarOwnershipReleased",
+                BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly MethodInfo BuildCombinedControlReportMethod =
             typeof(DualSenseDevice).GetMethod(
                 "BuildBluetoothCombinedControlReport",
@@ -1385,6 +1390,58 @@ namespace DS4WindowsTests
             Assert.AreEqual((byte)0xFC, cached[13],
                 "The profile writer replaced the game's native validity bits.");
             Assert.AreEqual((byte)0x97, cached[14]);
+        }
+
+        [TestMethod]
+        public void InactiveGameReturnsOnlyLedOwnershipToProfile()
+        {
+            DualSenseDevice device = CreateBluetoothDevice();
+            byte[] native = BuildCombinedControlReport(0, 0, false);
+            native[13] = 0x0C;
+            native[14] = 0x14;
+            native[23] = 0x21;
+            native[34] = 0x22;
+            native[57] = 0xA1;
+            native[58] = 0xA2;
+            native[59] = 0xA3;
+            device.WriteBluetoothCombinedHapticsAudioOutputReport(native, 0,
+                native.Length, hasNativeGameState: true);
+
+            SetFieldValue(NativeLightbarReleasedField, device, true);
+            byte[] profile = new byte[78];
+            profile[0] = 0x31;
+            profile[3] = 0x14;
+            profile[40] = 0x02;
+            profile[46] = 0x11;
+            profile[47] = 0x22;
+            profile[48] = 0x33;
+            Assert.IsTrue((bool)
+                UpdateCachedCombinedStateFromBluetoothOutputMethod.Invoke(
+                    device, new object[] { profile }));
+
+            byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
+                device);
+            Assert.AreEqual((byte)0x21, cached[23],
+                "Profile LED recovery replaced the game's right trigger.");
+            Assert.AreEqual((byte)0x22, cached[34],
+                "Profile LED recovery replaced the game's left trigger.");
+            Assert.AreEqual((byte)0x11, cached[57]);
+            Assert.AreEqual((byte)0x22, cached[58]);
+            Assert.AreEqual((byte)0x33, cached[59]);
+        }
+
+        [TestMethod]
+        public void NativeGameLightbarLeaseUsesAStableIdleWindow()
+        {
+            long now = Stopwatch.GetTimestamp();
+            long twoSeconds = Stopwatch.Frequency * 2;
+
+            Assert.IsFalse(DualSenseDevice.NativeGameLightbarOwnershipExpired(
+                now, now - twoSeconds + 1));
+            Assert.IsTrue(DualSenseDevice.NativeGameLightbarOwnershipExpired(
+                now, now - twoSeconds));
+            Assert.IsFalse(DualSenseDevice.NativeGameLightbarOwnershipExpired(
+                now, 0));
         }
 
         [TestMethod]

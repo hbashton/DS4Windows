@@ -566,7 +566,8 @@ namespace DS4Windows
         internal void ApplyAtomicAudioHapticsFeedback(byte[] feedback,
             int feedbackLength, int expectedDeviceIndex)
         {
-            ApplyFeedback(feedback, feedbackLength, expectedDeviceIndex);
+            ApplyFeedback(feedback, feedbackLength, expectedDeviceIndex,
+                freshNativeOutput: false);
         }
 
         internal bool CanProvideDirectSpeakerPcm =>
@@ -1428,7 +1429,8 @@ namespace DS4Windows
                                         atomicFeedbackLength);
                                     ApplyFeedback(atomicFeedbackScratch,
                                         atomicFeedbackLength,
-                                        targetDeviceIndex);
+                                        targetDeviceIndex,
+                                        freshNativeOutput: false);
                                     Buffer.BlockCopy(payload,
                                         speakerPcmOffset, payload, 0,
                                         speakerPcmLength);
@@ -2878,7 +2880,8 @@ namespace DS4Windows
         }
 
         private void ApplyFeedback(byte[] feedback, int feedbackLength,
-            int expectedDeviceIndex = -1)
+            int expectedDeviceIndex = -1,
+            bool freshNativeOutput = true)
         {
             int deviceIndex = Volatile.Read(ref lastInputDeviceIndex);
             if ((expectedDeviceIndex >= 0 &&
@@ -2942,7 +2945,9 @@ namespace DS4Windows
                     {
                         bool nativeForwardingAllowed = IsNativeDualSenseFeedbackCompatible(device);
                         if (nativeForwardingAllowed &&
-                            TryApplyBluetoothCombinedHapticsOutputReport(device, deviceIndex, feedback, feedbackLength))
+                            TryApplyBluetoothCombinedHapticsOutputReport(device,
+                                deviceIndex, feedback, feedbackLength,
+                                freshNativeOutput))
                         {
                             break;
                         }
@@ -3886,7 +3891,8 @@ namespace DS4Windows
         }
 
         private bool TryApplyBluetoothCombinedHapticsOutputReport(
-            DS4Device device, int deviceIndex, byte[] feedback, int feedbackLength)
+            DS4Device device, int deviceIndex, byte[] feedback,
+            int feedbackLength, bool freshNativeOutput)
         {
             if (feedbackLength < DualSenseCombinedExtendedFeedbackLength ||
                 device is not DualSenseDevice dualSenseDevice ||
@@ -3912,6 +3918,7 @@ namespace DS4Windows
             }
 
             bool hasNativeGameState =
+                freshNativeOutput &&
                 feedback.Length > DualSenseNativeOutputReportOffset &&
                 feedback[DualSenseNativeOutputReportOffset] == 0x02;
             return dualSenseDevice.WriteBluetoothCombinedHapticsAudioOutputReport(report,

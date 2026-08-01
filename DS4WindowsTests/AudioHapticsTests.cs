@@ -405,9 +405,9 @@ namespace DS4WindowsTests
                 NAudio.CoreAudioApi.AudioClientStreamFlags.Loopback) != 0);
             Assert.IsTrue((flags &
                 NAudio.CoreAudioApi.AudioClientStreamFlags.EventCallback) != 0);
-            Assert.IsFalse((flags &
+            Assert.IsTrue((flags &
                 NAudio.CoreAudioApi.AudioClientStreamFlags.AutoConvertPcm) != 0);
-            Assert.IsFalse((flags &
+            Assert.IsTrue((flags &
                 NAudio.CoreAudioApi.AudioClientStreamFlags.SrcDefaultQuality) != 0);
         }
 
@@ -416,10 +416,10 @@ namespace DS4WindowsTests
         {
             using var capture = new ProcessLoopbackWaveCapture(1);
 
-            Assert.AreEqual(44100, capture.WaveFormat.SampleRate);
+            Assert.AreEqual(48000, capture.WaveFormat.SampleRate);
             Assert.AreEqual(2, capture.WaveFormat.Channels);
-            Assert.AreEqual(16, capture.WaveFormat.BitsPerSample);
-            Assert.AreEqual(NAudio.Wave.WaveFormatEncoding.Pcm,
+            Assert.AreEqual(32, capture.WaveFormat.BitsPerSample);
+            Assert.AreEqual(NAudio.Wave.WaveFormatEncoding.IeeeFloat,
                 capture.WaveFormat.Encoding);
         }
 

@@ -42,10 +42,14 @@ namespace DS4Windows
             }
 
             fixedProcessId = ResolveCaptureRootProcessId(processId);
-            // Match the proven process-loopback contract. Both speaker
-            // routing and Audio Haptics consume this untouched PCM through
-            // their existing downstream resamplers.
-            WaveFormat = new WaveFormat(44100, 16, 2);
+            // The controller speaker and haptics pipelines both run at
+            // 48 kHz. Request that format from the shared audio engine so app
+            // capture does not take a needless 44.1 -> 48 kHz detour.
+            // Preserve the engine's floating-point dynamic range. PCM16 here
+            // quantized quiet browser/game sessions before the speaker and
+            // haptics processors saw them, while system loopback remained
+            // float and therefore sounded materially different.
+            WaveFormat = WaveFormat.CreateIeeeFloatWaveFormat(48000, 2);
         }
 
         private ProcessLoopbackWaveCapture(int automaticSlot,
@@ -60,7 +64,7 @@ namespace DS4Windows
             automaticSettings = (settings ??
                 new AudioHapticsProfileSettings()).Clone();
             automaticDetector = new AutomaticGameAudioDetector();
-            WaveFormat = new WaveFormat(44100, 16, 2);
+            WaveFormat = WaveFormat.CreateIeeeFloatWaveFormat(48000, 2);
         }
 
         public WaveFormat WaveFormat { get; set; }
@@ -69,7 +73,9 @@ namespace DS4Windows
         // its fixed PCM contract is accepted directly by the audio engine.
         internal const AudioClientStreamFlags CaptureStreamFlags =
             AudioClientStreamFlags.Loopback |
-            AudioClientStreamFlags.EventCallback;
+            AudioClientStreamFlags.EventCallback |
+            AudioClientStreamFlags.AutoConvertPcm |
+            AudioClientStreamFlags.SrcDefaultQuality;
         public int CurrentProcessId => Volatile.Read(ref currentProcessId);
         public string CurrentSourceDisplayName
         {
@@ -686,12 +692,13 @@ namespace DS4Windows
                 this.registryKey = registryKey;
                 audioClient = ProcessLoopbackAudioClient.Activate(processId,
                     TimeSpan.FromSeconds(5));
-                // Match the proven reference contract: 10 ms shared
-                // process-loopback buffer, event-driven delivery, and the
-                // fixed 44.1 kHz stereo PCM format above.
+                // Match Microsoft's ApplicationLoopback contract: shared,
+                // event-driven capture with engine conversion enabled. A zero
+                // duration lets WASAPI choose the shared-engine period rather
+                // than layering a second arbitrary 10 ms cadence over it.
                 audioClient.Initialize(AudioClientShareMode.Shared,
                     CaptureStreamFlags,
-                    TimeSpan.FromMilliseconds(10).Ticks, 0, waveFormat,
+                    0, 0, waveFormat,
                     Guid.Empty);
                 audioClient.SetEventHandle(
                     captureEvent.SafeWaitHandle.DangerousGetHandle());

@@ -473,6 +473,7 @@ namespace DS4Windows.InputDevices
         private bool bluetoothCombinedSpeakerReportAvailable;
         private long latestBluetoothCombinedSpeakerReportTimestamp;
         private long latestBluetoothCombinedNativeStateTimestamp;
+        private bool nativeGameLightbarOwnershipReleased;
         private long bluetoothCombinedHapticsGeneration;
         private long bluetoothCombinedSubmittedHapticsGeneration;
         private byte bluetoothCombinedSpeakerReportSequence;
@@ -3243,6 +3244,7 @@ namespace DS4Windows.InputDevices
             lock (bluetoothCombinedSpeakerReportLock)
             {
                 latestBluetoothCombinedNativeStateTimestamp = 0;
+                nativeGameLightbarOwnershipReleased = false;
             }
 
             // The next physical output pass must replace the detached game's
@@ -3404,16 +3406,25 @@ namespace DS4Windows.InputDevices
                         BluetoothCombinedStateOffset);
                     latestBluetoothCombinedNativeStateTimestamp =
                         Stopwatch.GetTimestamp();
+                    nativeGameLightbarOwnershipReleased = false;
                 }
                 else if (outputReport != null &&
                     outputReport.Length >= 2 +
                         BluetoothCombinedNativeStateLength &&
                     outputReport[0] == OUTPUT_REPORT_ID_BT)
                 {
-                    MergeControllerStateIntoV5AudioSnapshot(outputReport,
-                        2, latestBluetoothCombinedSpeakerReport,
-                        BluetoothCombinedStateOffset);
-                    latestBluetoothCombinedNativeStateTimestamp = 0;
+                    if (latestBluetoothCombinedNativeStateTimestamp == 0)
+                    {
+                        MergeControllerStateIntoV5AudioSnapshot(outputReport,
+                            2, latestBluetoothCombinedSpeakerReport,
+                            BluetoothCombinedStateOffset);
+                    }
+                    else if (nativeGameLightbarOwnershipReleased)
+                    {
+                        MergeProfileLightbarIntoV5AudioSnapshot(outputReport,
+                            2, latestBluetoothCombinedSpeakerReport,
+                            BluetoothCombinedStateOffset);
+                    }
                 }
                 else
                 {
@@ -3509,12 +3520,14 @@ namespace DS4Windows.InputDevices
                     BluetoothCombinedStateOffset);
                 latestBluetoothCombinedNativeStateTimestamp =
                     Stopwatch.GetTimestamp();
+                nativeGameLightbarOwnershipReleased = false;
                 return true;
             }
         }
 
         private void FlushPreparedOutputReport()
         {
+            RefreshNativeGameLightbarOwnership();
             if (outputDirty)
             {
                 bool published = true;
@@ -3599,6 +3612,12 @@ namespace DS4Windows.InputDevices
                     // PrepareOutReport after an arbitrary timeout made the two
                     // writers alternate ownership and caused triggers and
                     // vibration to oscillate in PS5 games.
+                    if (nativeGameLightbarOwnershipReleased)
+                    {
+                        MergeProfileLightbarIntoV5AudioSnapshot(report, 2,
+                            latestBluetoothCombinedSpeakerReport,
+                            BluetoothCombinedStateOffset);
+                    }
                     return true;
                 }
 
@@ -3643,6 +3662,54 @@ namespace DS4Windows.InputDevices
             destination[destinationOffset + 8] = muteLed;
             destination[destinationOffset + 9] = powerSaveControl;
             destination[destinationOffset + 37] = audioControl2;
+        }
+
+        private void RefreshNativeGameLightbarOwnership()
+        {
+            lock (bluetoothCombinedSpeakerReportLock)
+            {
+                if (nativeGameLightbarOwnershipReleased ||
+                    !NativeGameLightbarOwnershipExpired(
+                        Stopwatch.GetTimestamp(),
+                        latestBluetoothCombinedNativeStateTimestamp))
+                {
+                    return;
+                }
+
+                // Keep the game's stateful rumble and trigger contract intact;
+                // only the visual LEDs return to the active profile after the
+                // game has stopped issuing DualSense output reports.
+                nativeGameLightbarOwnershipReleased = true;
+                currentHap.dirty = true;
+                outputDirty = true;
+            }
+        }
+
+        internal static bool NativeGameLightbarOwnershipExpired(long now,
+            long lastNativeOutput)
+        {
+            const int idleMilliseconds = 2000;
+            return lastNativeOutput > 0 && now >= lastNativeOutput &&
+                now - lastNativeOutput >=
+                    Stopwatch.Frequency * idleMilliseconds / 1000;
+        }
+
+        private static void MergeProfileLightbarIntoV5AudioSnapshot(
+            byte[] source, int sourceOffset, byte[] destination,
+            int destinationOffset)
+        {
+            const byte ledValidityMask = 0x14;
+            const byte lightbarSetupValidityMask = 0x02;
+            destination[destinationOffset + 1] = (byte)(
+                (destination[destinationOffset + 1] & ~ledValidityMask) |
+                (source[sourceOffset + 1] & ledValidityMask));
+            destination[destinationOffset + 38] = (byte)(
+                (destination[destinationOffset + 38] &
+                    ~lightbarSetupValidityMask) |
+                (source[sourceOffset + 38] &
+                    lightbarSetupValidityMask));
+            Array.Copy(source, sourceOffset + 41, destination,
+                destinationOffset + 41, 6);
         }
 
         private bool BluetoothAudioPacerOwnsTransport()

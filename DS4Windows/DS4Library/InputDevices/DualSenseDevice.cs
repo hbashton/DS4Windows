@@ -3812,8 +3812,17 @@ namespace DS4Windows.InputDevices
                     RequiresCompletionAwareBluetoothControlWrite(
                         waitForCompletion, speakerClockActive,
                         pacerOwnedTransport);
-                bool commitThroughPacer =
-                    (waitForCompletion || !speakerClockActive);
+                // The isolated helper is the single physical-output clock for
+                // the lifetime of a Bluetooth DualSense session. Ordinary game
+                // output is state, not an additional packet stream: publish it
+                // by replacing the helper's next-frame template. Queueing each
+                // virtual USB output report alongside the fixed 10.667 ms media
+                // cadence created two producers with independent sequencing;
+                // the resulting interleaving reset player LEDs, retriggered
+                // adaptive effects, and displaced speaker/haptics frames.
+                // Only an explicit lifecycle/control barrier (mic transition or
+                // shutdown) is allowed to enqueue and await a distinct report.
+                bool commitThroughPacer = waitForCompletion;
 
                 byte[] combined = bluetoothCombinedSpeakerWorkingReport;
                 long hapticsGeneration;

@@ -85,7 +85,8 @@
                             Padding="16"
                             Margin="0,0,0,16">
                         <StackPanel>
-                            <TextBlock Text="What DS4Windows needs"
+                            <TextBlock x:Name="requirementsHeadingText"
+                                       Text="What DS4Windows needs"
                                        FontWeight="SemiBold"
                                        Margin="0,0,0,7" />
                             <TextBlock x:Name="requirementsText"
@@ -113,9 +114,11 @@
                             Margin="0,0,0,16"
                             Visibility="Collapsed">
                         <StackPanel>
-                            <TextBlock Text="Keep the VIIPER you already launched"
+                            <TextBlock x:Name="existingViiperHeadingText"
+                                       Text="Keep the VIIPER you already launched"
                                        FontWeight="SemiBold" />
-                            <TextBlock Text="DS4Windows can trust this executable and keep its RunVIIPER startup task pointed here:"
+                            <TextBlock x:Name="existingViiperDescriptionText"
+                                       Text="DS4Windows can trust this executable and keep its RunVIIPER startup task pointed here:"
                                        Foreground="{DynamicResource MutedForegroundColor}"
                                        TextWrapping="Wrap"
                                        Margin="0,4,0,7" />

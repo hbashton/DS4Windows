@@ -97,6 +97,28 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
+        public void HealthyPortableRuntimeRemainsUsableWhileMigrationIsOffered()
+        {
+            ViiperPrerequisiteStatus status = new ViiperPrerequisiteStatus
+            {
+                ViiperInstalled = true,
+                ViiperPackageCurrent = true,
+                ServerRunning = true,
+                UsbipInstalled = true,
+                UsbipDriverFilesSafe = true,
+                UsbipRuntimeReady = true,
+                UsingExternalViiper = true,
+            };
+
+            Assert.IsTrue(ViiperSetupManager.IsReadyPortableRuntime(status));
+            status.UsingExternalViiper = false;
+            Assert.IsFalse(ViiperSetupManager.IsReadyPortableRuntime(status));
+            status.UsingExternalViiper = true;
+            status.ServerRunning = false;
+            Assert.IsFalse(ViiperSetupManager.IsReadyPortableRuntime(status));
+        }
+
+        [TestMethod]
         public void ReadyRejectsUnsafeCitrixUsbMonitor()
         {
             ViiperPrerequisiteStatus status = new ViiperPrerequisiteStatus

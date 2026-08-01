@@ -19,7 +19,8 @@ namespace DS4WinWPF.DS4Forms
             suppressPromptCheck.IsChecked == true;
 
         public ViiperSetupPrompt(string currentStatus,
-            string existingViiperPath, bool citrixUsbMonitorConflict = false)
+            string existingViiperPath, bool citrixUsbMonitorConflict = false,
+            bool portableMigration = false)
         {
             InitializeComponent();
             statusText.Text = currentStatus;
@@ -41,6 +42,25 @@ namespace DS4WinWPF.DS4Forms
                 existingViiperPathText.Text = existingViiperPath;
                 existingViiperPanel.Visibility = Visibility.Visible;
                 useExistingButton.Visibility = Visibility.Visible;
+            }
+
+            if (portableMigration)
+            {
+                headingText.Text = "Move VIIPER to its safer home?";
+                summaryText.Text =
+                    "Your portable DS4Windows can stay exactly where it is.";
+                requirementsHeadingText.Text = "Recommended setup";
+                requirementsText.Text =
+                    "• Keep DS4Windows portable\n" +
+                    "• Install only VIIPER in Program Files\n" +
+                    "• Let DS4Windows own the VIIPER startup task";
+                existingViiperHeadingText.Text = "Current portable VIIPER";
+                existingViiperDescriptionText.Text =
+                    "It is working and will remain usable if you keep it. " +
+                    "The standard location is safer for updates and prevents " +
+                    "two VIIPER copies from competing.";
+                useExistingButton.Content = "Keep portable VIIPER";
+                installButton.Content = "Move VIIPER to Program Files";
             }
         }
 

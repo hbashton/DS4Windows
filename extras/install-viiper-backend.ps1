@@ -70,7 +70,7 @@ $script:UsbipFilterDriverSha256 =
 $script:BundledViiperPath = Join-Path $script:PackageExtrasRoot `
     "VIIPER-0.0.6-x64.exe"
 $script:BundledViiperSha256 =
-    "90254e1352bff7607dbee0819f0750032f76c52cd9bf54150d21267224ba8f7a"
+    "ae03b04db7a59075706fb13dcbfcf5bc58ff986191e3b0c56e4221f556542016"
 $script:BundledUsbipInstallerPath = Join-Path $script:PackageExtrasRoot `
     "USBip-0.9.7.7-x64.exe"
 $programFilesRoot = if ($env:ProgramW6432) {

@@ -66,6 +66,22 @@
 		<None Remove="libs\x86\**" Condition="'$(Platform)' != 'x86'" />
 	</ItemGroup>
 
+	<!-- A raw `dotnet publish` must be a complete installable package too.
+	     The release post-build script rewrites this after reorganizing language
+	     files, but local/test publishes previously omitted it entirely. -->
+	<Target Name="GenerateManagedFileManifest" AfterTargets="Publish">
+		<ItemGroup>
+			<_ManagedPackageFile Include="$(PublishDir)**\*"
+				Exclude="$(PublishDir).ds4windows-managed-files.txt" />
+			<_ManagedPackageRelative Include="@(_ManagedPackageFile->'%(RecursiveDir)%(Filename)%(Extension)')" />
+		</ItemGroup>
+		<WriteLinesToFile
+			File="$(PublishDir).ds4windows-managed-files.txt"
+			Lines="@(_ManagedPackageRelative)"
+			Overwrite="true"
+			Encoding="UTF-8" />
+	</Target>
+
 	<ItemGroup>
 		<Content Include="BezierCurveEditor\build.js">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

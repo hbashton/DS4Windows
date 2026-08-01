@@ -31,6 +31,19 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
+        public void InstallerFailureMessageExpandsTheLogPath()
+        {
+            const string logPath =
+                @"C:\Program Files\DS4Windows\VIIPER\install.log";
+            string message = ViiperSetupManager.
+                BuildInstallerFailureMessage(1, logPath);
+
+            StringAssert.Contains(message, logPath);
+            Assert.IsFalse(message.Contains("{logPath}",
+                StringComparison.Ordinal));
+        }
+
+        [TestMethod]
         public void UsbipPortProbeRequiresZeroExitCode()
         {
             Assert.IsTrue(ViiperSetupManager.IsSuccessfulUsbipPortProbe(

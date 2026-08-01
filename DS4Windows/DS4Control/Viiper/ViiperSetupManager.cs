@@ -542,9 +542,7 @@ namespace DS4Windows
                     ? "VIIPER was installed, but Windows is not reporting every component as ready yet. Restart Windows once, then click Refresh."
                     : exitCode == 1223
                     ? "VIIPER setup was canceled. No USBIP driver or foreign executable was changed."
-                    : $"VIIPER setup could not finish (exit code {exitCode}).\n\n" +
-                      "If a viiper.exe process was still running, it may have blocked the VIIPER registration step. " +
-                      "Close viiper.exe manually and run Repair again.\n\nReview the setup log for details:\n{logPath}";
+                    : BuildInstallerFailureMessage(exitCode, logPath);
                 ShowInstallerMessage(owner, message, "VIIPER setup",
                     exitCode == 1223 ? MessageBoxImage.Information :
                     exitCode == 0 ? MessageBoxImage.Warning :
@@ -892,6 +890,16 @@ namespace DS4Windows
         {
             return Path.Combine(GetNativeProgramFilesPath(), "DS4Windows", "VIIPER",
                 "viiper.exe");
+        }
+
+        internal static string BuildInstallerFailureMessage(int exitCode,
+            string logPath)
+        {
+            return $"VIIPER setup could not finish (exit code {exitCode}).\n\n" +
+                "If a viiper.exe process was still running, it may have " +
+                "blocked the VIIPER registration step. Close viiper.exe " +
+                "manually and run Repair again.\n\nReview the setup log " +
+                $"for details:\n{logPath}";
         }
 
         internal static string ResolveConfiguredViiperPath(

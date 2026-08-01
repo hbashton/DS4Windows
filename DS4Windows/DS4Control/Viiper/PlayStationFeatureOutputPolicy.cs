@@ -4,20 +4,26 @@ namespace DS4Windows
 {
     /// <summary>
     /// Keeps PlayStation hardware features independent from the controller
-    /// persona presented to games. Every supported physical PlayStation pad
-    /// owns one stable USB audio companion while its gamepad persona can be
-    /// replaced independently.
+    /// persona presented to games. PlayStation profiles use one composite USB
+    /// device so games can associate its HID and audio interfaces; Xbox and
+    /// Switch profiles retain the controller's audio through a HID-free
+    /// companion.
     /// </summary>
     internal static class PlayStationFeatureOutputPolicy
     {
-        internal static bool SupportsPersistentAudioSidecar(
+        internal static bool IsPlayStationAudioOutput(
             OutContType outputType)
         {
             outputType = outputType.Normalize();
-            return outputType == OutContType.ViiperX360 ||
-                outputType == OutContType.ViiperDS4 ||
+            return outputType == OutContType.ViiperDS4 ||
                 outputType == OutContType.ViiperDualSense ||
-                outputType == OutContType.ViiperDualSenseEdge ||
+                outputType == OutContType.ViiperDualSenseEdge;
+        }
+
+        internal static bool NeedsAudioOnlySidecar(OutContType outputType)
+        {
+            outputType = outputType.Normalize();
+            return outputType == OutContType.ViiperX360 ||
                 outputType == OutContType.ViiperSwitch2Pro;
         }
 
@@ -44,7 +50,7 @@ namespace DS4Windows
         {
             if (dInputOnly || connectionType != ConnectionType.BT ||
                 vendorId != DS4Devices.SONY_VID ||
-                !SupportsPersistentAudioSidecar(primaryOutputType))
+                !NeedsAudioOnlySidecar(primaryOutputType))
             {
                 return OutContType.None;
             }

@@ -2533,15 +2533,24 @@ namespace DS4Windows
         }
 
         /// <summary>
-        /// Returns the persistent VIIPER device that owns the Windows
-        /// PlayStation audio endpoints for a physical controller. Its lifetime
-        /// is independent from the game-visible virtual controller.
+        /// Returns the VIIPER device that owns the Windows PlayStation audio
+        /// endpoints for a physical controller. PlayStation personas use their
+        /// game-visible composite device; Xbox and Switch personas use a
+        /// persistent audio-only companion.
         /// </summary>
         internal ViiperOutDevice GetPlayStationFeatureOutput(int index)
         {
             if (index < 0 || index >= MAX_DS4_CONTROLLER_COUNT)
             {
                 return null;
+            }
+
+            ViiperOutDevice primary = outputDevices[index] as ViiperOutDevice;
+            if (primary != null &&
+                PlayStationFeatureOutputPolicy.IsPlayStationAudioOutput(
+                    primary.OutputType))
+            {
+                return primary;
             }
 
             lock (playStationFeatureOutputLock)
@@ -2563,9 +2572,18 @@ namespace DS4Windows
             OutContType primaryType = primary?.OutputType ??
                 Global.OutContType[index].Normalize();
 
-            OutContType desiredSidecar =
-                PlayStationFeatureOutputPolicy.GetAudioOnlySidecarType(
-                    source, primaryType, getDInputOnly(index));
+            if (primary?.IsRuntimeConnected == true &&
+                PlayStationFeatureOutputPolicy.IsPlayStationAudioOutput(
+                    primaryType))
+            {
+                DisconnectPlayStationFeatureOutput(index);
+                return primary;
+            }
+
+            OutContType desiredSidecar = primary?.IsRuntimeConnected == true
+                ? PlayStationFeatureOutputPolicy.GetAudioOnlySidecarType(
+                    source, primaryType, getDInputOnly(index))
+                : OutContType.None;
             if (desiredSidecar == OutContType.None)
             {
                 DisconnectPlayStationFeatureOutput(index);

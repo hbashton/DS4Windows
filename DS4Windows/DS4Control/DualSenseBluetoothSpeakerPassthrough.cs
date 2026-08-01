@@ -570,6 +570,9 @@ namespace DS4Windows
         private long captureDriftAdjustments;
         private long captureOverflowFrames;
         private long directPcmCallbacks;
+        private long atomicCallbacksEntered;
+        private long atomicCallbacksRejected;
+        private long atomicFeedbackApplied;
         private long directPcmInputFrames;
         private long directPcmOutputFrames;
         private long directPcmConsumedFrames;
@@ -1020,6 +1023,7 @@ namespace DS4Windows
             int feedbackLength, int speakerPcmOffset, int speakerPcmLength,
             int targetDeviceIndex)
         {
+            Interlocked.Increment(ref atomicCallbacksEntered);
             long callbackEntered = Stopwatch.GetTimestamp();
             try
             {
@@ -1037,6 +1041,7 @@ namespace DS4Windows
                             speakerPcmLength != FrameSamples * Channels *
                                 sizeof(short)))
                     {
+                        Interlocked.Increment(ref atomicCallbacksRejected);
                         return;
                     }
 
@@ -1050,6 +1055,7 @@ namespace DS4Windows
                         !device.BeginBluetoothAtomicSpeakerFrame(
                             speakerSessionId))
                     {
+                        Interlocked.Increment(ref atomicCallbacksRejected);
                         return;
                     }
 
@@ -1057,6 +1063,7 @@ namespace DS4Windows
                         0, feedbackLength);
                     source.ApplyAtomicAudioHapticsFeedback(atomicFeedback,
                         feedbackLength, targetDeviceIndex);
+                    Interlocked.Increment(ref atomicFeedbackApplied);
                     ProcessDirectSpeakerPcmLocked(source, payload,
                         speakerPcmOffset, speakerPcmLength, callbackEntered);
                 }
@@ -2773,6 +2780,9 @@ namespace DS4Windows
                          $"sourceClockStable={directSourceClockEstimator?.IsStable ?? false} " +
                          $"smoothedBufferedFrames={GetCaptureSmoothedBufferedFrames():F1} " +
                          $"directPcmCallbacks={Interlocked.Read(ref directPcmCallbacks)} " +
+                         $"atomicCallbacks={Interlocked.Read(ref atomicCallbacksEntered)} " +
+                         $"atomicRejected={Interlocked.Read(ref atomicCallbacksRejected)} " +
+                         $"atomicApplied={Interlocked.Read(ref atomicFeedbackApplied)} " +
                          $"directPcmFrames={Interlocked.Read(ref directPcmInputFrames)}/" +
                          $"{Interlocked.Read(ref directPcmOutputFrames)} " +
                          $"directPcmConsumedFrames={Interlocked.Read(ref directPcmConsumedFrames)} " +

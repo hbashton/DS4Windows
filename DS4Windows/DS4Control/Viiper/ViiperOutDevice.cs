@@ -179,6 +179,15 @@ namespace DS4Windows
         internal const int FeedbackOrderedControlQueueCapacity = 4;
         internal const int FeedbackOrderedControlMaximumAgeMilliseconds = 20;
 
+        // One-shot transport diagnostics identify the persistent VIIPER
+        // stream that receives native media without adding periodic logging
+        // or allocations to the realtime path.
+        private long feedbackFramesRead;
+        private long feedbackAtomicFramesRead;
+        private long feedbackAtomicFramesQueued;
+        private int feedbackFirstFrameLogged;
+        private int feedbackFirstAtomicResultLogged;
+
         private readonly OutContType outputType;
         private readonly ViiperVirtualDeviceType viiperType;
         private readonly bool audioOnlySidecar;
@@ -2719,6 +2728,15 @@ namespace DS4Windows
                         int payloadLength = stream.ReadFrame(
                             activeStreamFrameVersion, out byte frameType,
                             framedPayload);
+                        long frameNumber = Interlocked.Increment(
+                            ref feedbackFramesRead);
+                        if (Interlocked.CompareExchange(
+                                ref feedbackFirstFrameLogged, 1, 0) == 0)
+                        {
+                            AppLogger.LogToGui(
+                                $"VIIPER feedback stream active: bus={stream.BusId} device={stream.DevId} port={stream.UsbipPort} sidecar={audioOnlySidecar} gamepadOnly={gamepadOnly} frame=0x{frameType:X2} payload={payloadLength} sequenceCount={frameNumber}",
+                                false);
+                        }
                         feedbackDispatchGenerationBarrier.EnterReadLock();
                         try
                         {
@@ -2768,6 +2786,8 @@ namespace DS4Windows
                                 payloadLength >
                                     AtomicAudioHapticsFeedbackLengthPrefix)
                             {
+                                Interlocked.Increment(
+                                    ref feedbackAtomicFramesRead);
                                 int atomicFeedbackLength =
                                     BinaryPrimitives.ReadUInt16LittleEndian(
                                         framedPayload.AsSpan(0,
@@ -2786,7 +2806,25 @@ namespace DS4Windows
                                         FeedbackSpeakerKindAtomicAudioHaptics,
                                         Volatile.Read(ref lastInputDeviceIndex)))
                                 {
+                                    long queued = Interlocked.Increment(
+                                        ref feedbackAtomicFramesQueued);
+                                    if (Interlocked.CompareExchange(
+                                            ref feedbackFirstAtomicResultLogged,
+                                            1, 0) == 0)
+                                    {
+                                        AppLogger.LogToGui(
+                                            $"VIIPER atomic media accepted: bus={stream.BusId} device={stream.DevId} sidecar={audioOnlySidecar} payload={payloadLength} feedback={atomicFeedbackLength} pcm={speakerPcmLength} queued={queued}",
+                                            false);
+                                    }
                                     feedbackSpeakerSignal.Set();
+                                }
+                                else if (Interlocked.CompareExchange(
+                                             ref feedbackFirstAtomicResultLogged,
+                                             1, 0) == 0)
+                                {
+                                    AppLogger.LogToGui(
+                                        $"VIIPER atomic media rejected: bus={stream.BusId} device={stream.DevId} sidecar={audioOnlySidecar} payload={payloadLength} feedback={atomicFeedbackLength} pcm={speakerPcmLength} pending={feedbackDispatchBuffer.PendingSpeakerCount}",
+                                        true);
                                 }
                             }
                         }

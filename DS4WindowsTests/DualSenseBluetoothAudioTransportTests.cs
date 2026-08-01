@@ -1362,8 +1362,12 @@ namespace DS4WindowsTests
             native[24] = 0xFC;
             native[34] = 0x22;
             native[35] = 0xFD;
+            Assert.AreEqual(1,
+                DualSenseDevice.GetNativeGameLedOwnershipUpdate(native, 13));
             device.WriteBluetoothCombinedHapticsAudioOutputReport(native, 0,
                 native.Length, hasNativeGameState: true);
+            Assert.IsFalse(GetFieldValue<bool>(NativeLightbarReleasedField,
+                device), "A native LED update did not claim visual ownership.");
 
             // Reproduce the former failure: a later DS4Windows profile output
             // attempted to replace a game's latched trigger state after 100 ms.
@@ -1398,7 +1402,7 @@ namespace DS4WindowsTests
             DualSenseDevice device = CreateBluetoothDevice();
             byte[] native = BuildCombinedControlReport(0, 0, false);
             native[13] = 0x0C;
-            native[14] = 0x14;
+            native[14] = 0x08;
             native[23] = 0x21;
             native[34] = 0x22;
             native[57] = 0xA1;
@@ -1407,7 +1411,6 @@ namespace DS4WindowsTests
             device.WriteBluetoothCombinedHapticsAudioOutputReport(native, 0,
                 native.Length, hasNativeGameState: true);
 
-            SetFieldValue(NativeLightbarReleasedField, device, true);
             byte[] profile = new byte[78];
             profile[0] = 0x31;
             profile[3] = 0x14;
@@ -1428,20 +1431,43 @@ namespace DS4WindowsTests
             Assert.AreEqual((byte)0x11, cached[57]);
             Assert.AreEqual((byte)0x22, cached[58]);
             Assert.AreEqual((byte)0x33, cached[59]);
+            Assert.AreEqual((byte)0, (byte)(cached[14] & 0x08),
+                "Profile LED recovery kept repeating the game's release command.");
         }
 
         [TestMethod]
-        public void NativeGameLightbarLeaseUsesAStableIdleWindow()
+        public void NativeGameLedOwnershipChangesOnlyOnExplicitState()
         {
-            long now = Stopwatch.GetTimestamp();
-            long twoSeconds = Stopwatch.Frequency * 2;
+            byte[] state = new byte[63];
+            Assert.AreEqual(0,
+                DualSenseDevice.GetNativeGameLedOwnershipUpdate(state, 0),
+                "Unrelated native output must not claim or release LEDs.");
 
-            Assert.IsFalse(DualSenseDevice.NativeGameLightbarOwnershipExpired(
-                now, now - twoSeconds + 1));
-            Assert.IsTrue(DualSenseDevice.NativeGameLightbarOwnershipExpired(
-                now, now - twoSeconds));
-            Assert.IsFalse(DualSenseDevice.NativeGameLightbarOwnershipExpired(
-                now, 0));
+            state[1] = 0x14;
+            state[43] = 0x24;
+            state[44] = 0x11;
+            Assert.AreEqual(1,
+                DualSenseDevice.GetNativeGameLedOwnershipUpdate(state, 0),
+                "A visible native LED state must give ownership to the game.");
+
+            state[1] = 0x08;
+            Assert.AreEqual(-1,
+                DualSenseDevice.GetNativeGameLedOwnershipUpdate(state, 0),
+                "Sony's release-LED bit must return ownership to the profile.");
+
+            state[1] = 0x10;
+            state[43] = 0;
+            Assert.AreEqual(1,
+                DualSenseDevice.GetNativeGameLedOwnershipUpdate(state, 0),
+                "Turning player indicators off remains an authoritative game state.");
+
+            state[1] = 0x04;
+            state[44] = 0;
+            state[45] = 0;
+            state[46] = 0;
+            Assert.AreEqual(1,
+                DualSenseDevice.GetNativeGameLedOwnershipUpdate(state, 0),
+                "A black lightbar remains an authoritative game state.");
         }
 
         [TestMethod]

@@ -473,7 +473,7 @@ namespace DS4Windows.InputDevices
         private bool bluetoothCombinedSpeakerReportAvailable;
         private long latestBluetoothCombinedSpeakerReportTimestamp;
         private long latestBluetoothCombinedNativeStateTimestamp;
-        private bool nativeGameLightbarOwnershipReleased;
+        private bool nativeGameLightbarOwnershipReleased = true;
         private long bluetoothCombinedHapticsGeneration;
         private long bluetoothCombinedSubmittedHapticsGeneration;
         private byte bluetoothCombinedSpeakerReportSequence;
@@ -3244,7 +3244,7 @@ namespace DS4Windows.InputDevices
             lock (bluetoothCombinedSpeakerReportLock)
             {
                 latestBluetoothCombinedNativeStateTimestamp = 0;
-                nativeGameLightbarOwnershipReleased = false;
+                nativeGameLightbarOwnershipReleased = true;
             }
 
             // The next physical output pass must replace the detached game's
@@ -3406,7 +3406,9 @@ namespace DS4Windows.InputDevices
                         BluetoothCombinedStateOffset);
                     latestBluetoothCombinedNativeStateTimestamp =
                         Stopwatch.GetTimestamp();
-                    nativeGameLightbarOwnershipReleased = false;
+                    UpdateNativeGameLedOwnership(
+                        GetNativeGameLedOwnershipUpdate(report,
+                            offset + BluetoothCombinedStateOffset));
                 }
                 else if (outputReport != null &&
                     outputReport.Length >= 2 +
@@ -3520,14 +3522,14 @@ namespace DS4Windows.InputDevices
                     BluetoothCombinedStateOffset);
                 latestBluetoothCombinedNativeStateTimestamp =
                     Stopwatch.GetTimestamp();
-                nativeGameLightbarOwnershipReleased = false;
+                UpdateNativeGameLedOwnership(
+                    GetNativeGameLedOwnershipUpdate(report, offset + 1));
                 return true;
             }
         }
 
         private void FlushPreparedOutputReport()
         {
-            RefreshNativeGameLightbarOwnership();
             if (outputDirty)
             {
                 bool published = true;
@@ -3664,34 +3666,49 @@ namespace DS4Windows.InputDevices
             destination[destinationOffset + 37] = audioControl2;
         }
 
-        private void RefreshNativeGameLightbarOwnership()
+        private void UpdateNativeGameLedOwnership(int ownershipUpdate)
         {
-            lock (bluetoothCombinedSpeakerReportLock)
+            if (ownershipUpdate == 0)
             {
-                if (nativeGameLightbarOwnershipReleased ||
-                    !NativeGameLightbarOwnershipExpired(
-                        Stopwatch.GetTimestamp(),
-                        latestBluetoothCombinedNativeStateTimestamp))
-                {
-                    return;
-                }
+                return;
+            }
 
-                // Keep the game's stateful rumble and trigger contract intact;
-                // only the visual LEDs return to the active profile after the
-                // game has stopped issuing DualSense output reports.
-                nativeGameLightbarOwnershipReleased = true;
+            bool released = ownershipUpdate < 0;
+            bool changed = nativeGameLightbarOwnershipReleased != released;
+            nativeGameLightbarOwnershipReleased = released;
+            if (changed && released)
+            {
+                // A native release/clear report is the ownership boundary.
+                // A quiet game can legitimately retain trigger and LED state
+                // for minutes, so elapsed wall time must never steal it back.
                 currentHap.dirty = true;
                 outputDirty = true;
             }
         }
 
-        internal static bool NativeGameLightbarOwnershipExpired(long now,
-            long lastNativeOutput)
+        internal static int GetNativeGameLedOwnershipUpdate(byte[] state,
+            int stateOffset)
         {
-            const int idleMilliseconds = 2000;
-            return lastNativeOutput > 0 && now >= lastNativeOutput &&
-                now - lastNativeOutput >=
-                    Stopwatch.Frequency * idleMilliseconds / 1000;
+            const byte lightbarControl = 0x04;
+            const byte releaseLeds = 0x08;
+            const byte playerLedControl = 0x10;
+            const int flag1Offset = 1;
+            if (state == null || stateOffset < 0 ||
+                stateOffset + flag1Offset >= state.Length)
+            {
+                return 0;
+            }
+
+            byte flags = state[stateOffset + flag1Offset];
+            bool controlsPlayer = (flags & playerLedControl) != 0;
+            bool controlsLightbar = (flags & lightbarControl) != 0;
+            bool explicitlyReleased = (flags & releaseLeds) != 0;
+            if (explicitlyReleased)
+            {
+                return -1;
+            }
+
+            return controlsPlayer || controlsLightbar ? 1 : 0;
         }
 
         private static void MergeProfileLightbarIntoV5AudioSnapshot(
@@ -3699,9 +3716,11 @@ namespace DS4Windows.InputDevices
             int destinationOffset)
         {
             const byte ledValidityMask = 0x14;
+            const byte releaseLedMask = 0x08;
             const byte lightbarSetupValidityMask = 0x02;
             destination[destinationOffset + 1] = (byte)(
-                (destination[destinationOffset + 1] & ~ledValidityMask) |
+                (destination[destinationOffset + 1] &
+                    ~(ledValidityMask | releaseLedMask)) |
                 (source[sourceOffset + 1] & ledValidityMask));
             destination[destinationOffset + 38] = (byte)(
                 (destination[destinationOffset + 38] &

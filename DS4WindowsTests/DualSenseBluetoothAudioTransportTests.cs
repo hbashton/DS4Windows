@@ -1549,6 +1549,44 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void AudioOnlyCarrierDoesNotReleaseNativeGameStateOwnership()
+        {
+            DualSenseDevice device = CreateBluetoothDevice();
+            byte[] native = BuildCombinedControlReport(0, 0, false);
+            native[13] = 0x0C;
+            native[14] = 0x14;
+            native[23] = 0x21;
+            native[34] = 0x22;
+            native[56] = 0x0A;
+            native[57] = 0xFF;
+            native[58] = 0xFF;
+            native[59] = 0xFF;
+            device.WriteBluetoothCombinedHapticsAudioOutputReport(native, 0,
+                native.Length, hasNativeGameState: true);
+            long nativeTimestamp = GetFieldValue<long>(
+                NativeStateTimestampField, device);
+            Assert.IsTrue(nativeTimestamp > 0);
+
+            byte[] mediaOnly = BuildCombinedControlReport(0, 0, false);
+            mediaOnly[78] = 0x44;
+            mediaOnly[79] = 0x55;
+            device.WriteBluetoothCombinedHapticsAudioOutputReport(mediaOnly, 0,
+                mediaOnly.Length, hasNativeGameState: false);
+
+            Assert.AreEqual(nativeTimestamp, GetFieldValue<long>(
+                NativeStateTimestampField, device),
+                "A media-only callback released native game state ownership.");
+            byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
+                device);
+            Assert.AreEqual((byte)0x0A, cached[56]);
+            Assert.AreEqual((byte)0xFF, cached[57]);
+            Assert.AreEqual((byte)0xFF, cached[58]);
+            Assert.AreEqual((byte)0xFF, cached[59]);
+            Assert.AreEqual((byte)0x21, cached[23]);
+            Assert.AreEqual((byte)0x22, cached[34]);
+        }
+
+        [TestMethod]
         public void NativeReleaseLedReportRemainsGameOwnedUntilSessionDetach()
         {
             DualSenseDevice device = CreateBluetoothDevice();

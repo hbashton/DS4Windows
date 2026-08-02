@@ -621,9 +621,6 @@ namespace DS4Windows.InputDevices
         private long latestBluetoothCombinedSpeakerReportTimestamp;
         private long latestBluetoothCombinedNativeStateTimestamp;
         private bool nativeGameLightbarOwnershipReleased = true;
-        private readonly DualSenseNativeStateTransitionFilter
-            nativeGameStateTransitionFilter =
-                new DualSenseNativeStateTransitionFilter();
         private long bluetoothCombinedHapticsGeneration;
         private long bluetoothCombinedSubmittedHapticsGeneration;
         private byte bluetoothCombinedSpeakerReportSequence;
@@ -3395,7 +3392,6 @@ namespace DS4Windows.InputDevices
             {
                 latestBluetoothCombinedNativeStateTimestamp = 0;
                 nativeGameLightbarOwnershipReleased = true;
-                nativeGameStateTransitionFilter.Reset();
                 if (bluetoothCombinedSpeakerReportAvailable)
                 {
                     Array.Clear(latestBluetoothCombinedSpeakerReport,
@@ -3403,6 +3399,11 @@ namespace DS4Windows.InputDevices
                         BluetoothCombinedHapticsDataLength);
                     bluetoothCombinedHapticsGeneration++;
                 }
+            }
+
+            lock (bluetoothAudioPacerLock)
+            {
+                bluetoothAudioPacer?.ResetControllerStateTransitions();
             }
 
             // The next physical output pass atomically replaces the ended
@@ -3544,8 +3545,6 @@ namespace DS4Windows.InputDevices
 
                 Array.Copy(latestBluetoothCombinedSpeakerReport, exactState,
                     exactState.Length);
-                nativeGameStateTransitionFilter.Filter(exactState,
-                    BluetoothCombinedStateOffset);
                 originalFlag0 = latestBluetoothCombinedSpeakerReport[
                     BluetoothCombinedStateOffset];
                 originalFlag1 = latestBluetoothCombinedSpeakerReport[
@@ -3579,7 +3578,6 @@ namespace DS4Windows.InputDevices
             {
                 lock (bluetoothCombinedSpeakerReportLock)
                 {
-                    nativeGameStateTransitionFilter.Reset();
                     latestBluetoothCombinedSpeakerReport[
                         BluetoothCombinedStateOffset] = originalFlag0;
                     latestBluetoothCombinedSpeakerReport[
@@ -3664,10 +3662,6 @@ namespace DS4Windows.InputDevices
                 // profile/custom lightbar and audio routing in that case.
                 if (hasNativeGameState)
                 {
-                    if (latestBluetoothCombinedNativeStateTimestamp == 0)
-                    {
-                        nativeGameStateTransitionFilter.Reset();
-                    }
                     MergeControllerStateIntoV5AudioSnapshot(report,
                         offset + BluetoothCombinedStateOffset,
                         latestBluetoothCombinedSpeakerReport,
@@ -3702,14 +3696,26 @@ namespace DS4Windows.InputDevices
                 }
                 else
                 {
-                    int lightbarOffset = BluetoothCombinedStateOffset + 44;
-                    latestBluetoothCombinedSpeakerReport[lightbarOffset] =
-                        currentHap.lightbarState.LightBarColor.red;
-                    latestBluetoothCombinedSpeakerReport[lightbarOffset + 1] =
-                        currentHap.lightbarState.LightBarColor.green;
-                    latestBluetoothCombinedSpeakerReport[lightbarOffset + 2] =
-                        currentHap.lightbarState.LightBarColor.blue;
-                    latestBluetoothCombinedNativeStateTimestamp = 0;
+                    // A media-only callback has no controller-state contract.
+                    // Once a native virtual-pad session owns state, it must not
+                    // silently release that ownership merely because the next
+                    // callback carries audio without a sidecar output report.
+                    // Doing so reset the transition latch on every media frame,
+                    // replaying the game's player LEDs, triggers, and other
+                    // stateful commands on the following native report.
+                    if (latestBluetoothCombinedNativeStateTimestamp == 0)
+                    {
+                        int lightbarOffset =
+                            BluetoothCombinedStateOffset + 44;
+                        latestBluetoothCombinedSpeakerReport[lightbarOffset] =
+                            currentHap.lightbarState.LightBarColor.red;
+                        latestBluetoothCombinedSpeakerReport[
+                            lightbarOffset + 1] =
+                            currentHap.lightbarState.LightBarColor.green;
+                        latestBluetoothCombinedSpeakerReport[
+                            lightbarOffset + 2] =
+                            currentHap.lightbarState.LightBarColor.blue;
+                    }
                 }
                 // A native HID SET_REPORT is state-only. VIIPER attaches the
                 // current media snapshot so state and media can share one

@@ -189,6 +189,7 @@ namespace DS4Windows.InputDevices
             UpdateControllerState = 8,
             UpdateControllerMediaBuffer = 9,
             UpdateGameStateAndTemplate = 10,
+            ResetControllerStateTransitions = 11,
             Ready = 0x80,
             ReportAcknowledged = 0x81,
             Stopped = 0x82,
@@ -1149,6 +1150,39 @@ namespace DS4Windows.InputDevices
 
                 latestTemplate = (byte[])quiescentTemplate.Clone();
                 latestTemplateHapticsExpiryQpc = hapticsExpiryQpc;
+            }
+
+            outboundAvailable.Set();
+            return true;
+        }
+
+        /// <summary>
+        /// Ends one native game-output ownership epoch. The helper performs
+        /// state-transition filtering at the final accepted physical-write
+        /// boundary, so its latch must be reset in FIFO order before profile
+        /// state is allowed to take ownership again.
+        /// </summary>
+        public bool ResetControllerStateTransitions()
+        {
+            if (!IsRunning)
+            {
+                return false;
+            }
+
+            lock (stateLock)
+            {
+                var reset = new OutboundCommand(
+                    MessageKind.ResetControllerStateTransitions,
+                    Array.Empty<byte>());
+                if (!outboundCommands.TryReplaceWhereWithGroup(command =>
+                        command.Kind == MessageKind.UpdateGameStateAndTemplate ||
+                        command.Kind == MessageKind.UpdateControllerState ||
+                        command.Kind ==
+                            MessageKind.ResetControllerStateTransitions,
+                    new[] { reset }))
+                {
+                    return false;
+                }
             }
 
             outboundAvailable.Set();
@@ -2128,6 +2162,8 @@ namespace DS4Windows.InputDevices
             private readonly byte[] pendingControllerState = new byte[
                 DualSenseBluetoothPhysicalOutputSequence.
                     ControllerStatePayloadLength];
+            private readonly DualSenseNativeStateTransitionFilter
+                physicalStateTransitionFilter = new();
             private readonly bool useMeasuredTransportAudioTransport;
             private readonly bool useCompactCombinedHapticsTransport;
             private readonly bool useNativeAudioTransport;
@@ -2313,6 +2349,10 @@ namespace DS4Windows.InputDevices
                                 break;
                             case MessageKind.UpdateGameStateAndTemplate:
                                 ReceiveGameStateAndTemplate(commandPayload,
+                                    payloadLength);
+                                break;
+                            case MessageKind.ResetControllerStateTransitions:
+                                ReceiveResetControllerStateTransitions(
                                     payloadLength);
                                 break;
                             case MessageKind.Stop:
@@ -3309,6 +3349,18 @@ namespace DS4Windows.InputDevices
                                         presentationMicrophoneEnabled);
                                 }
 
+                                // Filter at the last mutable boundary, after
+                                // queued media, the current template, pending
+                                // game state, and microphone mode have been
+                                // composed. Filtering earlier allowed a later
+                                // template patch to resurrect validity strobes
+                                // for player LEDs, triggers, and other stateful
+                                // commands on every media frame.
+                                physicalStateTransitionFilter.Filter(
+                                    item.Report,
+                                    DualSenseBluetoothPhysicalOutputSequence.
+                                        ControllerStateSourceOffset);
+
                                 bool transportFault;
                                 bool accepted;
                                 if (pairedItem == null)
@@ -3612,6 +3664,23 @@ namespace DS4Windows.InputDevices
                 }
 
                 reservoirChanged.Set();
+            }
+
+            private void ReceiveResetControllerStateTransitions(
+                int payloadLength)
+            {
+                if (payloadLength != 0)
+                {
+                    throw new InvalidDataException(
+                        "Invalid controller-state transition reset payload.");
+                }
+
+                lock (stateLock)
+                {
+                    physicalStateTransitionFilter.Reset();
+                    pendingControllerStateAvailable = false;
+                    controllerStateReportsAhead = 0;
+                }
             }
 
             private static bool IsQueuedSpeakerReport(QueuedReport report)

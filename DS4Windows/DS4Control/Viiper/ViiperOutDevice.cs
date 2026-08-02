@@ -187,6 +187,11 @@ namespace DS4Windows
         private long feedbackAtomicFramesQueued;
         private int feedbackFirstFrameLogged;
         private int feedbackFirstAtomicResultLogged;
+        private readonly object nativeGameOutputTraceLock = new object();
+        private readonly byte[] lastNativeGameOutputReport =
+            new byte[DualSenseNativeOutputReportLength];
+        private long lastNativeGameOutputTimestamp;
+        private int nativeGameOutputSessionActive;
 
         private readonly OutContType outputType;
         private readonly ViiperVirtualDeviceType viiperType;
@@ -1505,6 +1510,7 @@ namespace DS4Windows
 
                     if (!dequeued)
                     {
+                        TraceNativeGameOutputIdleBoundary();
                         feedbackControlSignal.WaitOne(100);
                         continue;
                     }
@@ -3835,7 +3841,7 @@ namespace DS4Windows
                 feedback[offset + 9]);
         }
 
-        private static bool TryApplyNativeDualSenseOutputReport(DS4Device device, int deviceIndex, byte[] feedback, int feedbackLength)
+        private bool TryApplyNativeDualSenseOutputReport(DS4Device device, int deviceIndex, byte[] feedback, int feedbackLength)
         {
             if (feedbackLength < DualSenseBluetoothHapticsReportOffset ||
                 device is not DualSenseDevice dualSenseDevice ||
@@ -3844,6 +3850,8 @@ namespace DS4Windows
                 return false;
             }
 
+            TraceNativeGameOutput(feedback,
+                DualSenseNativeOutputReportOffset);
             byte[] report = PrepareNativeDualSenseOutputReportForProfile(feedback,
                 deviceIndex);
             return dualSenseDevice.WriteRawOutputReportFromGame(report,
@@ -3856,16 +3864,6 @@ namespace DS4Windows
         {
             byte[] report = new byte[DualSenseNativeOutputReportLength];
             Array.Copy(feedback, DualSenseNativeOutputReportOffset, report, 0, report.Length);
-
-            // Keep game rumble, adaptive triggers, lightbar, and player LEDs.
-            // DS4Windows owns the mute button LED/mic mute state so profile
-            // mute actions cannot get stuck behind game output reports.
-            if (report.Length > 10)
-            {
-                report[2] &= 0xFC;
-                report[9] = 0x00;
-                report[10] = 0x00;
-            }
 
             ApplyTriggerLabNativeOverrides(report, 1, 11, 22,
                 TriggerLabForDevice(deviceIndex), feedback[1], feedback[0]);
@@ -3906,9 +3904,30 @@ namespace DS4Windows
             // combined audio/HID feedback packet.
             byte[] report = feedback;
             int reportOffset = DualSenseCombinedBluetoothReportOffset;
+            bool hasNativeGameState =
+                freshNativeOutput &&
+                feedback.Length >= DualSenseNativeOutputReportOffset +
+                    DualSenseNativeOutputReportLength &&
+                feedback[DualSenseNativeOutputReportOffset] == 0x02;
+            if (hasNativeGameState)
+            {
+                TraceNativeGameOutput(feedback,
+                    DualSenseNativeOutputReportOffset);
+                // VIIPER's combined carrier contains the persistent media
+                // snapshot. This callback represents one exact game-authored
+                // SET_REPORT, so replace its common-state section before the
+                // atomic compositor applies local overrides.
+                byte[] exactGameReport =
+                    PrepareNativeDualSenseOutputReportForProfile(feedback,
+                        deviceIndex);
+                Buffer.BlockCopy(exactGameReport, 1, report,
+                    reportOffset + 13,
+                    DualSenseNativeOutputReportLength - 1);
+            }
+
             Program.rootHub?.ApplyAudioHapticsToGameReport(deviceIndex,
                 report, reportOffset + 78, 64);
-            if (!audioOnlySidecar)
+            if (!audioOnlySidecar && !hasNativeGameState)
             {
                 int stateOffset = reportOffset + 13;
                 ApplyTriggerLabNativeOverrides(report, stateOffset,
@@ -3917,14 +3936,79 @@ namespace DS4Windows
                     feedback[0]);
             }
 
-            bool hasNativeGameState =
-                freshNativeOutput &&
-                feedback.Length > DualSenseNativeOutputReportOffset &&
-                feedback[DualSenseNativeOutputReportOffset] == 0x02;
+            if (!hasNativeGameState && !audioOnlySidecar &&
+                feedback.Length >= DualSenseNativeOutputReportOffset +
+                    DualSenseNativeOutputReportLength &&
+                feedback[DualSenseNativeOutputReportOffset] == 0x02)
+            {
+                // Atomic speaker/haptics frames carry the persistent native
+                // snapshot. They are not new SET_REPORT updates, but they do
+                // prove that the same game-owned output session is alive.
+                TouchNativeGameOutputSession();
+            }
             return dualSenseDevice.WriteBluetoothCombinedHapticsAudioOutputReport(report,
                 DualSenseCombinedBluetoothReportOffset,
                 DualSenseCombinedBluetoothReportLength,
                 hasNativeGameState);
+        }
+
+        private void TraceNativeGameOutput(byte[] feedback, int offset)
+        {
+            if (feedback == null || offset < 0 ||
+                offset + DualSenseNativeOutputReportLength > feedback.Length)
+            {
+                return;
+            }
+
+            lock (nativeGameOutputTraceLock)
+            {
+                bool sessionStarted = nativeGameOutputSessionActive == 0;
+                Buffer.BlockCopy(feedback, offset,
+                    lastNativeGameOutputReport, 0,
+                    DualSenseNativeOutputReportLength);
+                nativeGameOutputSessionActive = 1;
+                lastNativeGameOutputTimestamp = Stopwatch.GetTimestamp();
+                if (sessionStarted)
+                {
+                    AppLogger.LogToGui(
+                        $"DualSense native game-output session started: report={Convert.ToHexString(lastNativeGameOutputReport)}",
+                        false);
+                }
+            }
+        }
+
+        private void TouchNativeGameOutputSession()
+        {
+            lock (nativeGameOutputTraceLock)
+            {
+                nativeGameOutputSessionActive = 1;
+                lastNativeGameOutputTimestamp = Stopwatch.GetTimestamp();
+            }
+        }
+
+        private void TraceNativeGameOutputIdleBoundary()
+        {
+            lock (nativeGameOutputTraceLock)
+            {
+                if (nativeGameOutputSessionActive == 0 ||
+                    lastNativeGameOutputTimestamp <= 0 ||
+                    Stopwatch.GetTimestamp() -
+                        lastNativeGameOutputTimestamp < Stopwatch.Frequency)
+                {
+                    return;
+                }
+
+                nativeGameOutputSessionActive = 0;
+                lastNativeGameOutputTimestamp = 0;
+                AppLogger.LogToGui(
+                    $"DualSense native game-output stream idle for 1 second: finalReport={Convert.ToHexString(lastNativeGameOutputReport)}",
+                    false);
+                // Keep the session transition and physical ownership release
+                // under one ordering lock. A newly arriving game report can
+                // only merge after this release, so an old idle callback can
+                // never clear a newer report that raced it.
+                ReleaseNativeDualSenseFeedbackOwnership();
+            }
         }
 
         private static void ApplyTriggerLabNativeOverrides(byte[] report,

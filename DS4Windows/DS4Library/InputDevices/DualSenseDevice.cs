@@ -470,6 +470,8 @@ namespace DS4Windows.InputDevices
             new byte[BluetoothCombinedOutputReportLength];
         private readonly byte[] bluetoothCombinedSpeakerWorkingReport =
             new byte[BluetoothCombinedOutputReportLength];
+        private readonly byte[] bluetoothCombinedGameStateWorkingReport =
+            new byte[BluetoothCombinedOutputReportLength];
         private bool bluetoothCombinedSpeakerReportAvailable;
         private long latestBluetoothCombinedSpeakerReportTimestamp;
         private long latestBluetoothCombinedNativeStateTimestamp;
@@ -3245,12 +3247,19 @@ namespace DS4Windows.InputDevices
             {
                 latestBluetoothCombinedNativeStateTimestamp = 0;
                 nativeGameLightbarOwnershipReleased = true;
+                if (bluetoothCombinedSpeakerReportAvailable)
+                {
+                    Array.Clear(latestBluetoothCombinedSpeakerReport,
+                        BluetoothCombinedHapticsDataOffset,
+                        BluetoothCombinedHapticsDataLength);
+                    bluetoothCombinedHapticsGeneration++;
+                }
             }
 
-            // The next physical output pass must replace the detached game's
-            // latched trigger/rumble/LED state with the active profile state.
-            // This is the explicit ownership boundary that replaces the former
-            // 100 ms timeout.
+            // The next physical output pass atomically replaces the ended
+            // session's trigger, rumble, LED, and advanced-haptics state with
+            // the active profile state. A locally enabled audio-haptics source
+            // can publish its next fresh block after this zero boundary.
             currentHap.dirty = true;
             outputDirty = true;
         }
@@ -3336,21 +3345,124 @@ namespace DS4Windows.InputDevices
                 return false;
             }
 
-            long hapticsGeneration = CacheBluetoothCombinedSpeakerReport(report,
-                offset, hasNativeGameState);
-
-            bool written = TryPublishCachedBluetoothCombinedState(
-                includeNativeHaptics: true,
-                activeStatus:
-                    "Cached native Bluetooth haptics for the next speaker-clocked frame.",
-                idleReportDescription: "combined haptics/audio",
-                out bool deferredToSpeakerClock);
-            if (written && !deferredToSpeakerClock)
+            lock (bluetoothCombinedTransportWriteLock)
             {
-                MarkBluetoothCombinedHapticsSubmitted(hapticsGeneration);
+                long hapticsGeneration =
+                    CacheBluetoothCombinedSpeakerReport(report, offset,
+                        hasNativeGameState);
+
+                if (hasNativeGameState)
+                {
+                    bool published =
+                        TryPublishAtomicNativeGameStateTransition();
+                    if (published)
+                    {
+                        MarkBluetoothCombinedHapticsSubmitted(
+                            hapticsGeneration);
+                    }
+                    return published;
+                }
+
+                bool written = TryPublishCachedBluetoothCombinedState(
+                    includeNativeHaptics: true,
+                    activeStatus:
+                        "Cached native Bluetooth haptics for the next speaker-clocked frame.",
+                    idleReportDescription: "combined haptics/audio",
+                    out bool deferredToSpeakerClock);
+                if (written && !deferredToSpeakerClock)
+                {
+                    MarkBluetoothCombinedHapticsSubmitted(hapticsGeneration);
+                }
+
+                return written;
+            }
+        }
+
+        private bool TryPublishAtomicNativeGameStateTransition()
+        {
+            byte[] exactState = bluetoothCombinedGameStateWorkingReport;
+            byte[] quiescentTemplate =
+                bluetoothCombinedSpeakerWorkingReport;
+            byte originalFlag0;
+            byte originalFlag1;
+            byte originalFlag2;
+            lock (bluetoothCombinedSpeakerReportLock)
+            {
+                if (!bluetoothCombinedSpeakerReportAvailable)
+                {
+                    return false;
+                }
+
+                Array.Copy(latestBluetoothCombinedSpeakerReport, exactState,
+                    exactState.Length);
+                originalFlag0 = latestBluetoothCombinedSpeakerReport[
+                    BluetoothCombinedStateOffset];
+                originalFlag1 = latestBluetoothCombinedSpeakerReport[
+                    BluetoothCombinedStateOffset + 1];
+                originalFlag2 = latestBluetoothCombinedSpeakerReport[
+                    BluetoothCombinedStateOffset + 38];
+                ConsumeNativeGameStateValidity(
+                    latestBluetoothCombinedSpeakerReport,
+                    BluetoothCombinedStateOffset);
+                Array.Copy(latestBluetoothCombinedSpeakerReport,
+                    quiescentTemplate, quiescentTemplate.Length);
             }
 
-            return written;
+            ApplyBluetoothSpeakerVolumeAndRoutingCore(exactState,
+                speakerVolume, headsetOnlyAudio, headphoneVolume);
+            ApplyBluetoothMicrophoneStreamingRequest(exactState);
+            ApplyBluetoothSpeakerVolumeAndRoutingCore(quiescentTemplate,
+                speakerVolume, headsetOnlyAudio, headphoneVolume);
+            ApplyBluetoothMicrophoneStreamingRequest(quiescentTemplate);
+
+            bool published;
+            lock (bluetoothAudioPacerLock)
+            {
+                published = bluetoothAudioPacer?.IsRunning == true &&
+                    bluetoothAudioPacer.UpdateGameStateAndTemplate(
+                        exactState, quiescentTemplate,
+                        PersistentBluetoothHapticsExpiryQpc);
+            }
+
+            if (!published)
+            {
+                lock (bluetoothCombinedSpeakerReportLock)
+                {
+                    latestBluetoothCombinedSpeakerReport[
+                        BluetoothCombinedStateOffset] = originalFlag0;
+                    latestBluetoothCombinedSpeakerReport[
+                        BluetoothCombinedStateOffset + 1] = originalFlag1;
+                    latestBluetoothCombinedSpeakerReport[
+                        BluetoothCombinedStateOffset + 38] = originalFlag2;
+                }
+                LastBluetoothHapticsWriteStatus =
+                    "Could not atomically publish native game state to the unified Bluetooth compositor.";
+                RequestUnifiedBluetoothOutputTransportRecovery();
+                return false;
+            }
+
+            LastBluetoothHapticsWriteStatus =
+                "Merged exact native game state into the next unified Bluetooth frame.";
+            return true;
+        }
+
+        internal static void ConsumeNativeGameStateValidity(byte[] report,
+            int stateOffset)
+        {
+            if (report == null || stateOffset < 0 ||
+                stateOffset + BluetoothCombinedNativeStateLength >
+                    report.Length)
+            {
+                throw new ArgumentOutOfRangeException(nameof(stateOffset));
+            }
+
+            // Bits outside these masks are game-authored update strobes. The
+            // exact transition is already queued in the compositor; retaining
+            // them in its steady media template would retrigger adaptive
+            // effects, rumble, or LED release on every 10.667 ms carrier.
+            report[stateOffset] &= 0xF0;
+            report[stateOffset + 1] &= 0x83;
+            report[stateOffset + 38] = 0;
         }
 
         private static byte[] BuildBluetoothCombinedControlReport(byte sequence,
@@ -3406,9 +3518,13 @@ namespace DS4Windows.InputDevices
                         BluetoothCombinedStateOffset);
                     latestBluetoothCombinedNativeStateTimestamp =
                         Stopwatch.GetTimestamp();
-                    UpdateNativeGameLedOwnership(
-                        GetNativeGameLedOwnershipUpdate(report,
-                            offset + BluetoothCombinedStateOffset));
+                    // Sony's release-LED bit is itself game-authored state: it
+                    // asks the physical controller to release its LEDs, not
+                    // DS4Windows to begin alternating profile state with the
+                    // game's next report. Once a virtual game-output session
+                    // has produced native state, preserve that complete state
+                    // until the virtual output device is detached.
+                    nativeGameLightbarOwnershipReleased = false;
                 }
                 else if (outputReport != null &&
                     outputReport.Length >= 2 +
@@ -3522,8 +3638,7 @@ namespace DS4Windows.InputDevices
                     BluetoothCombinedStateOffset);
                 latestBluetoothCombinedNativeStateTimestamp =
                     Stopwatch.GetTimestamp();
-                UpdateNativeGameLedOwnership(
-                    GetNativeGameLedOwnershipUpdate(report, offset + 1));
+                nativeGameLightbarOwnershipReleased = false;
                 return true;
             }
         }
@@ -3664,26 +3779,6 @@ namespace DS4Windows.InputDevices
             destination[destinationOffset + 8] = muteLed;
             destination[destinationOffset + 9] = powerSaveControl;
             destination[destinationOffset + 37] = audioControl2;
-        }
-
-        private void UpdateNativeGameLedOwnership(int ownershipUpdate)
-        {
-            if (ownershipUpdate == 0)
-            {
-                return;
-            }
-
-            bool released = ownershipUpdate < 0;
-            bool changed = nativeGameLightbarOwnershipReleased != released;
-            nativeGameLightbarOwnershipReleased = released;
-            if (changed && released)
-            {
-                // A native release/clear report is the ownership boundary.
-                // A quiet game can legitimately retain trigger and LED state
-                // for minutes, so elapsed wall time must never steal it back.
-                currentHap.dirty = true;
-                outputDirty = true;
-            }
         }
 
         internal static int GetNativeGameLedOwnershipUpdate(byte[] state,

@@ -890,6 +890,51 @@ namespace DS4WindowsTests
                 RequiresSeparateControllerStateTransport("35combined"));
         }
 
+        [TestMethod]
+        public void NativeGameStateIsConsumedOnceBySteadyMediaTemplate()
+        {
+            byte[] report = CreateSpeakerReport(0x22, 0x33, 0, 1);
+            const int stateOffset = 13;
+            report[stateOffset] = 0xFF;
+            report[stateOffset + 1] = 0xFF;
+            report[stateOffset + 38] = 0x0F;
+            report[stateOffset + 10] = 0x26;
+            report[stateOffset + 44] = 0x08;
+
+            DualSenseDevice.ConsumeNativeGameStateValidity(report,
+                stateOffset);
+
+            Assert.AreEqual((byte)0xF0, report[stateOffset]);
+            Assert.AreEqual((byte)0x83, report[stateOffset + 1]);
+            Assert.AreEqual((byte)0x00, report[stateOffset + 38]);
+            Assert.AreEqual((byte)0x26, report[stateOffset + 10],
+                "Consuming update strobes changed the latched trigger payload.");
+            Assert.AreEqual((byte)0x08, report[stateOffset + 44],
+                "Consuming update strobes changed the latched player LED value.");
+        }
+
+        [TestMethod]
+        public void PendingGameStateReplacesOneNativeMediaGenerationExactly()
+        {
+            byte[] report = CreateSpeakerReport(0x22, 0x33, 0, 1);
+            byte[] state = new byte[
+                DualSenseBluetoothPhysicalOutputSequence.
+                    ControllerStatePayloadLength];
+            for (int index = 0; index < state.Length; index++)
+            {
+                state[index] = (byte)(0x40 + index);
+            }
+
+            DualSenseBluetoothAudioReportPatcher.
+                ApplyControllerStateForPresentation(report, state);
+
+            CollectionAssert.AreEqual(state,
+                report.AsSpan(
+                    DualSenseBluetoothPhysicalOutputSequence.
+                        ControllerStateSourceOffset,
+                    state.Length).ToArray());
+        }
+
         private static byte[] CreateSpeakerReport(byte haptics,
             byte audio, byte sequence, byte packetSequence = 0)
         {
@@ -1397,7 +1442,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void InactiveGameReturnsOnlyLedOwnershipToProfile()
+        public void NativeReleaseLedReportRemainsGameOwnedUntilSessionDetach()
         {
             DualSenseDevice device = CreateBluetoothDevice();
             byte[] native = BuildCombinedControlReport(0, 0, false);
@@ -1428,11 +1473,11 @@ namespace DS4WindowsTests
                 "Profile LED recovery replaced the game's right trigger.");
             Assert.AreEqual((byte)0x22, cached[34],
                 "Profile LED recovery replaced the game's left trigger.");
-            Assert.AreEqual((byte)0x11, cached[57]);
-            Assert.AreEqual((byte)0x22, cached[58]);
-            Assert.AreEqual((byte)0x33, cached[59]);
-            Assert.AreEqual((byte)0, (byte)(cached[14] & 0x08),
-                "Profile LED recovery kept repeating the game's release command.");
+            Assert.AreEqual((byte)0xA1, cached[57]);
+            Assert.AreEqual((byte)0xA2, cached[58]);
+            Assert.AreEqual((byte)0xA3, cached[59]);
+            Assert.AreEqual((byte)0x08, (byte)(cached[14] & 0x08),
+                "DS4Windows replaced Sony's game-authored release command before the virtual output session detached.");
         }
 
         [TestMethod]

@@ -9,7 +9,7 @@ namespace DS4WindowsTests
     {
         private const string HelperArgument =
             "--dualsense-bt-audio-pacer-helper";
-        private const int ProtocolVersion = 12;
+        private const int ProtocolVersion = 13;
 
         private static readonly MethodInfo TryParseHelperArgumentsMethod =
             typeof(DualSenseBluetoothAudioPacer).GetMethod(
@@ -25,7 +25,7 @@ namespace DS4WindowsTests
         {
             Guid token = new Guid("01ad84ef-2c70-46ff-b3d4-48a412985d69");
             const string devicePath =
-                @"\\?\hid#vid_054c&pid_0ce6&mi_03#protocol-v12";
+                @"\\?\hid#vid_054c&pid_0ce6&mi_03#protocol-v13";
             string[] args = BuildValidHelperArguments(token, devicePath);
 
             Assert.IsTrue(TryParseHelperArguments(args,

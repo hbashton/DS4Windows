@@ -155,7 +155,7 @@ namespace DS4Windows.InputDevices
         }
 
         private const string HelperArgument = "--dualsense-bt-audio-pacer-helper";
-        private const int ProtocolVersion = 12;
+        private const int ProtocolVersion = 13;
         private const int PipeConnectTimeoutMilliseconds = 5000;
         private const int HelperReadyTimeoutMilliseconds = 5000;
         private const int HelperStopTimeoutMilliseconds = 3000;
@@ -188,6 +188,7 @@ namespace DS4Windows.InputDevices
             UpdateMicrophoneStatus = 7,
             UpdateControllerState = 8,
             UpdateControllerMediaBuffer = 9,
+            UpdateGameStateAndTemplate = 10,
             Ready = 0x80,
             ReportAcknowledged = 0x81,
             Stopped = 0x82,
@@ -1105,6 +1106,56 @@ namespace DS4Windows.InputDevices
         }
 
         /// <summary>
+        /// Publishes one exact game-authored common-state update together with
+        /// the quiescent media template that follows it. The helper consumes
+        /// both under one state lock, so a speaker/haptics frame can never see
+        /// half of this transition.
+        /// </summary>
+        public bool UpdateGameStateAndTemplate(byte[] gameStateReport,
+            byte[] quiescentTemplate, long hapticsExpiryQpc)
+        {
+            if (gameStateReport == null ||
+                gameStateReport.Length != ReportLength ||
+                quiescentTemplate == null ||
+                quiescentTemplate.Length != ReportLength || !IsRunning)
+            {
+                return false;
+            }
+
+            const int stateLength =
+                DualSenseBluetoothPhysicalOutputSequence.
+                    ControllerStatePayloadLength;
+            byte[] payload = new byte[stateLength + sizeof(long) +
+                ReportLength];
+            Buffer.BlockCopy(gameStateReport,
+                DualSenseBluetoothPhysicalOutputSequence.
+                    ControllerStateSourceOffset,
+                payload, 0, stateLength);
+            BinaryPrimitives.WriteInt64LittleEndian(
+                payload.AsSpan(stateLength, sizeof(long)), hapticsExpiryQpc);
+            Buffer.BlockCopy(quiescentTemplate, 0, payload,
+                stateLength + sizeof(long), ReportLength);
+
+            lock (stateLock)
+            {
+                if (!outboundCommands.TryReplaceNewestOrEnqueue(
+                    command => command.Kind ==
+                        MessageKind.UpdateGameStateAndTemplate,
+                    new OutboundCommand(
+                        MessageKind.UpdateGameStateAndTemplate, payload)))
+                {
+                    return false;
+                }
+
+                latestTemplate = (byte[])quiescentTemplate.Clone();
+                latestTemplateHapticsExpiryQpc = hapticsExpiryQpc;
+            }
+
+            outboundAvailable.Set();
+            return true;
+        }
+
+        /// <summary>
         /// Drops every report not yet presented and re-arms the eight-report
         /// prime gate. Reports already sent to the helper are acknowledged as
         /// cleared; unsent reports are released here.
@@ -1991,7 +2042,7 @@ namespace DS4Windows.InputDevices
                 HostReservoirCapacity * 2;
             private const int PresentationTraceCapacity = 65536;
             private static readonly long ControllerStateIntervalQpc =
-                Math.Max(1, Stopwatch.Frequency / 30);
+                Math.Max(1, Stopwatch.Frequency / 200);
 
             private sealed class QueuedReport
             {
@@ -2258,6 +2309,10 @@ namespace DS4Windows.InputDevices
                                 break;
                             case MessageKind.UpdateControllerMediaBuffer:
                                 ReceiveControllerMediaBuffer(commandPayload,
+                                    payloadLength);
+                                break;
+                            case MessageKind.UpdateGameStateAndTemplate:
+                                ReceiveGameStateAndTemplate(commandPayload,
                                     payloadLength);
                                 break;
                             case MessageKind.Stop:
@@ -2683,8 +2738,12 @@ namespace DS4Windows.InputDevices
                                 pendingMicrophoneStatus >= 0 &&
                                 microphoneStatusReportsAhead <= 0;
                             reservoir.TryPeek(out QueuedReport nextReport);
+                            bool nativeMediaCanConsumeControllerState =
+                                useV5PresentationCadence &&
+                                IsSpeakerAudioReport(nextReport?.Report);
                             controllerStateReady =
                                 pendingControllerStateAvailable &&
+                                !nativeMediaCanConsumeControllerState &&
                                 controllerStateReportsAhead <= 0 &&
                                 (lastControllerStateSubmissionQpc == 0 ||
                                     nowQpc -
@@ -3119,6 +3178,7 @@ namespace DS4Windows.InputDevices
                         bool advanceScheduler;
                         bool advanceV5Scheduler;
                         bool controlOnly;
+                        bool controllerStatePiggybacked = false;
                         bool retainedForRetry = false;
                         lock (stateLock)
                         {
@@ -3226,6 +3286,18 @@ namespace DS4Windows.InputDevices
                                         presentedAt);
                                 }
 
+                                if (useV5PresentationCadence &&
+                                    pairedItem == null && !controlOnly &&
+                                    pendingControllerStateAvailable &&
+                                    controllerStateReportsAhead <= 0)
+                                {
+                                    DualSenseBluetoothAudioReportPatcher.
+                                        ApplyControllerStateForPresentation(
+                                            item.Report,
+                                            pendingControllerState);
+                                    controllerStatePiggybacked = true;
+                                }
+
                                 if (pairedItem == null && !controlOnly)
                                 {
                                     // The helper owns the physical microphone
@@ -3323,6 +3395,14 @@ namespace DS4Windows.InputDevices
                                 {
                                     physicalOutputSequence.Commit(
                                         pairedItem != null || !controlOnly);
+                                }
+
+                                if (accepted && controllerStatePiggybacked)
+                                {
+                                    pendingControllerStateAvailable = false;
+                                    controllerStateReportsAhead = 0;
+                                    lastControllerStateSubmissionQpc =
+                                        presentedAt;
                                 }
 
                                 disposition = accepted ?
@@ -3496,6 +3576,42 @@ namespace DS4Windows.InputDevices
 
                     timeEndPeriod(1);
                 }
+            }
+
+            private void ReceiveGameStateAndTemplate(byte[] payload,
+                int payloadLength)
+            {
+                const int stateLength =
+                    DualSenseBluetoothPhysicalOutputSequence.
+                        ControllerStatePayloadLength;
+                const int templateOffset = stateLength + sizeof(long);
+                if (payloadLength != templateOffset + ReportLength)
+                {
+                    throw new InvalidDataException(
+                        "Invalid atomic DualSense game-state/template payload length.");
+                }
+
+                long hapticsExpiryQpc =
+                    BinaryPrimitives.ReadInt64LittleEndian(
+                        payload.AsSpan(stateLength, sizeof(long)));
+                lock (stateLock)
+                {
+                    ShiftLatestTemplateToPrevious();
+                    Buffer.BlockCopy(payload, templateOffset,
+                        latestTemplate, 0, ReportLength);
+                    latestTemplateHapticsExpiryQpc = hapticsExpiryQpc;
+                    latestTemplateAvailable = true;
+
+                    Buffer.BlockCopy(payload, 0, pendingControllerState, 0,
+                        stateLength);
+                    pendingControllerStateAvailable = true;
+                    // A V5 media generation consumes this state atomically on
+                    // its next due slot. With no media pending, the normal
+                    // controller-state branch emits a serialized 0x31 latch.
+                    controllerStateReportsAhead = 0;
+                }
+
+                reservoirChanged.Set();
             }
 
             private static bool IsQueuedSpeakerReport(QueuedReport report)
@@ -4801,6 +4917,31 @@ namespace DS4Windows.InputDevices
             }
 
             WriteSonyCrc(queuedReport);
+        }
+
+        internal static void ApplyControllerStateForPresentation(
+            byte[] report, byte[] statePayload)
+        {
+            if (report == null || report.Length != ReportLength)
+            {
+                throw new ArgumentException(
+                    $"Report must be exactly {ReportLength} bytes.",
+                    nameof(report));
+            }
+
+            if (statePayload == null || statePayload.Length !=
+                DualSenseBluetoothPhysicalOutputSequence.
+                    ControllerStatePayloadLength)
+            {
+                throw new ArgumentException(
+                    "Controller state must be exactly 47 bytes.",
+                    nameof(statePayload));
+            }
+
+            Buffer.BlockCopy(statePayload, 0, report,
+                DualSenseBluetoothPhysicalOutputSequence.
+                    ControllerStateSourceOffset,
+                statePayload.Length);
         }
 
         public static uint ComputeSonyCrc(byte[] report, int length)

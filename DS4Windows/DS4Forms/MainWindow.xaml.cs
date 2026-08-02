@@ -70,7 +70,9 @@ namespace DS4WinWPF.DS4Forms
         private IntPtr regHandle = new IntPtr();
         private bool showAppInTaskbar = false;
         private ManagementEventWatcher managementEvWatcher;
-        private bool wasrunning = false;
+        private readonly object powerTransitionLock = new();
+        private readonly PowerLifecyclePolicy powerLifecycle = new();
+        private CancellationTokenSource powerResumeCancellation;
         private AutoProfileHolder autoProfileHolder;
         private NonFormTimer hotkeysTimer;
         private readonly object hotkeysTimerLock = new();
@@ -587,65 +589,165 @@ Suspend support not enabled.", true);
 
         private void PowerEventArrive(object sender, EventArrivedEventArgs e)
         {
-            short evType = Convert.ToInt16(e.NewEvent.GetPropertyValue("EventType"));
-            switch (evType)
+            try
             {
-                // Wakeup from Suspend
-                case POWER_RESUME:
-                    {
-                        DS4LightBar.shuttingdown = false;
-                        App.rootHub.suspending = false;
-
-                        if (wasrunning)
-                        {
-                            wasrunning = false;
-                            Dispatcher.Invoke(() =>
-                            {
-                                StartStopBtn.IsEnabled = false;
-                            });
-
-                            Program.rootHub.LogDebug(DS4WinWPF.Translations.Strings.WakeupFromSuspend);
-                            //Program.rootHub.LogDebug($"{Thread.CurrentThread.ManagedThreadId}");
-
-                            //Thread.Sleep(60000);
-                            //App.rootHub.Start();
-
-                            //Task startupTask = Task.Run(() =>
-                            Task startupTask = Task.Delay(5000).ContinueWith(t =>
-                            {
-                                App.rootHub.Start();
-                            });
-
-                            // Log exceptions that might occur
-                            Util.LogAssistBackgroundTask(startupTask);
-                        }
-                    }
-
-                    break;
-                // Entering Suspend
-                case POWER_SUSPEND:
-                    {
-                        DS4LightBar.shuttingdown = true;
-                        Program.rootHub.suspending = true;
-
-                        if (App.rootHub.running)
-                        {
-                            //Dispatcher.Invoke(() =>
-                            //{
-                            //    StartStopBtn.IsEnabled = false;
-                            //});
-
-                            App.rootHub.Stop(immediateUnplug: true);
-                            wasrunning = true;
-
-                            Thread.Sleep(1000);
-                        }
-                    }
-
-                    break;
-
-                default: break;
+                short evType = Convert.ToInt16(
+                    e?.NewEvent?.GetPropertyValue("EventType"));
+                switch (evType)
+                {
+                    case POWER_RESUME:
+                        HandlePowerResume();
+                        break;
+                    case POWER_SUSPEND:
+                        HandlePowerSuspend();
+                        break;
+                }
             }
+            catch (Exception ex)
+            {
+                LogPowerTransitionFailure("processing a Windows power event", ex);
+            }
+        }
+
+        private void HandlePowerSuspend()
+        {
+            lock (powerTransitionLock)
+            {
+                ControlService service = App.rootHub;
+                PowerSuspendTransition transition = powerLifecycle.Suspend(
+                    service?.running == true);
+                if (!transition.Accepted)
+                {
+                    return;
+                }
+
+                powerResumeCancellation?.Cancel();
+                powerResumeCancellation?.Dispose();
+                powerResumeCancellation = null;
+                DS4LightBar.shuttingdown = true;
+
+                if (service == null)
+                {
+                    return;
+                }
+
+                service.suspending = true;
+                if (!transition.StopService)
+                {
+                    return;
+                }
+
+                try
+                {
+                    service.Stop(immediateUnplug: true);
+                }
+                catch (Exception ex)
+                {
+                    LogPowerTransitionFailure(
+                        "stopping the controller service for suspend", ex);
+                }
+            }
+        }
+
+        private void HandlePowerResume()
+        {
+            Task resumeTask = null;
+            lock (powerTransitionLock)
+            {
+                DS4LightBar.shuttingdown = false;
+                ControlService service = App.rootHub;
+                if (service != null)
+                {
+                    service.suspending = false;
+                }
+
+                PowerResumeTransition transition = powerLifecycle.Resume();
+                if (!transition.Accepted || !transition.RestartService ||
+                    service == null)
+                {
+                    return;
+                }
+
+                powerResumeCancellation?.Cancel();
+                powerResumeCancellation?.Dispose();
+                powerResumeCancellation = new CancellationTokenSource();
+                CancellationToken token = powerResumeCancellation.Token;
+                resumeTask = ResumeServiceAfterPowerTransitionAsync(service,
+                    transition.Generation, token);
+            }
+
+            Util.LogAssistBackgroundTask(resumeTask);
+        }
+
+        private async Task ResumeServiceAfterPowerTransitionAsync(
+            ControlService service, long generation, CancellationToken token)
+        {
+            try
+            {
+                // Allow the Bluetooth/HID stacks to recreate their handles after
+                // hibernation before controller enumeration begins.
+                await Task.Delay(5000, token).ConfigureAwait(false);
+                lock (powerTransitionLock)
+                {
+                    if (token.IsCancellationRequested ||
+                        !powerLifecycle.IsCurrent(generation) ||
+                        !ReferenceEquals(service, App.rootHub) ||
+                        service.suspending || service.running)
+                    {
+                        return;
+                    }
+
+                    service.LogDebug(
+                        DS4WinWPF.Translations.Strings.WakeupFromSuspend);
+                    service.Start();
+                }
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                // A new suspend or application shutdown superseded this resume.
+            }
+            catch (Exception ex)
+            {
+                LogPowerTransitionFailure(
+                    "restarting the controller service after resume", ex);
+            }
+        }
+
+        private static void LogPowerTransitionFailure(string operation,
+            Exception ex)
+        {
+            try
+            {
+                App.rootHub?.LogDebug(
+                    $"Power lifecycle error while {operation}: {ex}", true);
+            }
+            catch { }
+        }
+
+        private void DisposePowerLifecycle()
+        {
+            lock (powerTransitionLock)
+            {
+                powerLifecycle.Close();
+                powerResumeCancellation?.Cancel();
+                powerResumeCancellation?.Dispose();
+                powerResumeCancellation = null;
+
+                if (managementEvWatcher != null)
+                {
+                    try { managementEvWatcher.Stop(); }
+                    catch (ManagementException) { }
+                    catch (COMException) { }
+                    managementEvWatcher.EventArrived -= PowerEventArrive;
+                    managementEvWatcher.Dispose();
+                    managementEvWatcher = null;
+                }
+            }
+        }
+
+        internal void PrepareForApplicationShutdown()
+        {
+            DisposePowerLifecycle();
         }
 
         private void ChangeHotkeysStatus(bool state)
@@ -1583,6 +1685,7 @@ Suspend support not enabled.", true);
 
         private void MainDS4Window_Closed(object sender, EventArgs e)
         {
+            DisposePowerLifecycle();
             CancelBoundedHotplugRecovery();
             overviewProfileSaveTimer.Stop();
             overviewStatusRefreshTimer.Stop();

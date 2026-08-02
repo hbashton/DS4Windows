@@ -107,6 +107,7 @@ namespace DS4Windows
         private bool stickMouseFakerInputNoticeShown = false;
         private bool stickMouseFakerInputMissingNoticeShown = false;
         private readonly object outputKbmHandlerLock = new object();
+        private readonly object serviceLifecycleLock = new object();
 
         private ControlServiceDeviceOptions deviceOptions;
         public ControlServiceDeviceOptions DeviceOptions { get => deviceOptions; }
@@ -741,6 +742,28 @@ namespace DS4Windows
         }
 
         public void ShutDown()
+        {
+            lock (serviceLifecycleLock)
+            {
+                ShutDownCore();
+            }
+        }
+
+        public void StopAndShutDown(bool immediateUnplug)
+        {
+            lock (serviceLifecycleLock)
+            {
+                if (running)
+                {
+                    StopCore(showlog: true,
+                        immediateUnplug: immediateUnplug);
+                }
+
+                ShutDownCore();
+            }
+        }
+
+        private void ShutDownCore()
         {
             ReleaseHidHideManagedDevices();
             outputslotMan.ShutDown();
@@ -1784,6 +1807,20 @@ namespace DS4Windows
 
         public bool Start(bool showlog = true)
         {
+            lock (serviceLifecycleLock)
+            {
+                if (running)
+                {
+                    StartupDiag("ControlService.Start ignored because the service is already running");
+                    return true;
+                }
+
+                return StartCore(showlog);
+            }
+        }
+
+        private bool StartCore(bool showlog)
+        {
             StartupDiag($"ControlService.Start enter showlog={showlog} running={running} inServiceTask={inServiceTask} admin={Global.IsAdministrator()}");
             inServiceTask = true;
             {
@@ -2046,6 +2083,14 @@ namespace DS4Windows
         }
 
         public bool Stop(bool showlog = true, bool immediateUnplug = false)
+        {
+            lock (serviceLifecycleLock)
+            {
+                return StopCore(showlog, immediateUnplug);
+            }
+        }
+
+        private bool StopCore(bool showlog, bool immediateUnplug)
         {
             StartupDiag($"ControlService.Stop enter showlog={showlog} immediate={immediateUnplug} running={running}");
             if (running)

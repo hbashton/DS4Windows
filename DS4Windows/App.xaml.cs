@@ -65,6 +65,7 @@ namespace DS4WinWPF
         public static HttpClient requestClient;
         private bool skipSave;
         private bool runShutdown;
+        private int shutdownStarted;
         private bool exitApp;
         private Thread testThread;
         private bool exitComThread = false;
@@ -888,77 +889,139 @@ namespace DS4WinWPF
         {
             if (runShutdown)
             {
-                Logger logger = logHolder.Logger;
-                logger.Info("Request App Shutdown");
+                logHolder?.Logger?.Info("Request App Shutdown");
                 CleanShutdown();
             }
         }
 
         private void Application_SessionEnding(object sender, SessionEndingCancelEventArgs e)
         {
-            Logger logger = logHolder.Logger;
-            logger.Info("User Session Ending");
-            CleanShutdown();
+            // WM_QUERYENDSESSION can arrive while startup is still constructing the
+            // logger and controller service (and WPF can subsequently raise Exit as
+            // well).  Never dereference partially initialized application state from
+            // the window-message callback and never run teardown twice.
+            logHolder?.Logger?.Info("User Session Ending");
+            try
+            {
+                CleanShutdown();
+            }
+            catch (Exception ex)
+            {
+                // An exception escaping this callback is promoted by WPF to
+                // 0xc000041d and terminates the process. Session teardown is
+                // necessarily best-effort, but preserve the failure when logging is
+                // already available.
+                logHolder?.Logger?.Error(ex,
+                    "Unexpected failure while ending the Windows session");
+            }
         }
 
         private void CleanShutdown()
         {
-            if (runShutdown)
+            if (!runShutdown ||
+                Interlocked.CompareExchange(ref shutdownStarted, 1, 0) != 0)
             {
-                bool shutdownTimedOut = false;
-                if (rootHub != null)
+                return;
+            }
+
+            try
+            {
+                (MainWindow as DS4Forms.MainWindow)?
+                    .PrepareForApplicationShutdown();
+            }
+            catch (Exception ex)
+            {
+                logHolder?.Logger?.Warn(ex,
+                    "Could not stop power notifications during application shutdown");
+            }
+
+            bool shutdownTimedOut = false;
+            DS4Windows.ControlService shutdownHub = rootHub;
+            if (shutdownHub != null)
+            {
+                Task shutdownTask = Task.Run(() =>
                 {
-                    Task shutdownTask = Task.Run(() =>
+                    try
                     {
-                        if (rootHub.running)
-                        {
-                            rootHub.Stop(immediateUnplug: true);
-                        }
-
-                        rootHub.ShutDown();
-                    });
-
-                    if (!shutdownTask.Wait(TimeSpan.FromSeconds(8)))
+                        shutdownHub.StopAndShutDown(immediateUnplug: true);
+                    }
+                    catch (Exception ex)
                     {
-                        shutdownTimedOut = true;
-                        try
-                        {
-                            logHolder?.Logger?.Warn("Timed out while stopping controller service during shutdown. Forcing process exit to avoid a stale single-instance lock.");
-                            rootHub.PrepareAbort();
-                        }
+                        logHolder?.Logger?.Error(ex,
+                            "Controller service teardown failed during application shutdown");
+                        try { shutdownHub.PrepareAbort(); }
                         catch { }
                     }
-                }
+                });
 
-                if (!skipSave)
+                if (!shutdownTask.Wait(TimeSpan.FromSeconds(8)))
+                {
+                    shutdownTimedOut = true;
+                    try
+                    {
+                        logHolder?.Logger?.Warn("Timed out while stopping controller service during shutdown. Forcing process exit to avoid a stale single-instance lock.");
+                        shutdownHub.PrepareAbort();
+                    }
+                    catch { }
+                }
+            }
+
+            if (!skipSave)
+            {
+                try
                 {
                     DS4Windows.Global.Save();
                 }
-
-                // Reset timer
-                DS4Windows.Util.timeEndPeriod(1);
-
-                exitComThread = true;
-                if (threadComEvent != null)
+                catch (Exception ex)
                 {
-                    threadComEvent.Set();  // signal the other instance.
+                    logHolder?.Logger?.Error(ex,
+                        "Could not save settings during application shutdown");
+                }
+            }
+
+            // Reset timer
+            try
+            {
+                DS4Windows.Util.timeEndPeriod(1);
+            }
+            catch { }
+
+            exitComThread = true;
+            EventWaitHandle comEvent = Interlocked.Exchange(
+                ref threadComEvent, null);
+            if (comEvent != null)
+            {
+                try
+                {
+                    comEvent.Set();  // signal the other instance.
                     if (testThread != null && !testThread.Join(2000))
                     {
                         shutdownTimedOut = true;
                         logHolder?.Logger?.Warn("Timed out waiting for single-instance worker thread to exit.");
                     }
-                    threadComEvent.Close();
                 }
+                catch (ObjectDisposedException) { }
+                finally
+                {
+                    comEvent.Dispose();
+                }
+            }
 
-                if (ipcClassNameMMF != null) ipcClassNameMMF.Dispose();
+            MemoryMappedFile classNameMmf = Interlocked.Exchange(
+                ref ipcClassNameMMF, null);
+            try { classNameMmf?.Dispose(); }
+            catch (ObjectDisposedException) { }
 
+            try
+            {
                 LogManager.Flush();
                 LogManager.Shutdown();
+            }
+            catch { }
 
-                if (shutdownTimedOut)
-                {
-                    Environment.Exit(0);
-                }
+            if (shutdownTimedOut)
+            {
+                Environment.Exit(0);
             }
         }
     }

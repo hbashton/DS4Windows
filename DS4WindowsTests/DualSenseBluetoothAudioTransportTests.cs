@@ -1005,6 +1005,63 @@ namespace DS4WindowsTests
                     state.Length).ToArray());
         }
 
+        [TestMethod]
+        public void PendingGameStatePreservesRumbleStopAcrossUnrelatedUpdate()
+        {
+            byte[] pending = new byte[
+                DualSensePendingGameStateComposer.StateLength];
+            pending[0] = 0x03;
+            pending[2] = 0;
+            pending[3] = 0;
+
+            byte[] unrelated = new byte[pending.Length];
+            unrelated[4] = 0x22;
+            unrelated[5] = 0x33;
+            DualSensePendingGameStateComposer.Merge(pending, unrelated, 0);
+
+            Assert.AreEqual((byte)0x03, (byte)(pending[0] & 0x03),
+                "An unrelated coalesced report erased the pending rumble stop.");
+            Assert.AreEqual((byte)0, pending[2]);
+            Assert.AreEqual((byte)0, pending[3]);
+            Assert.AreEqual((byte)0x22, pending[4],
+                "The newest locally owned audio state was not retained.");
+            Assert.AreEqual((byte)0x33, pending[5]);
+        }
+
+        [TestMethod]
+        public void PendingGameStateUsesNewestValidValuesAndLedOwnership()
+        {
+            byte[] pending = new byte[
+                DualSensePendingGameStateComposer.StateLength];
+            pending[0] = 0x07;
+            pending[2] = 0x70;
+            pending[3] = 0x60;
+            pending[10] = 0x21;
+            pending[1] = 0x14;
+            pending[43] = 0x0A;
+            pending[44] = 0xFF;
+            pending[45] = 0xFF;
+            pending[46] = 0xFF;
+
+            byte[] stop = new byte[pending.Length];
+            stop[0] = 0x03;
+            stop[2] = 0;
+            stop[3] = 0;
+            DualSensePendingGameStateComposer.Merge(pending, stop, 0);
+
+            Assert.AreEqual((byte)0, pending[2]);
+            Assert.AreEqual((byte)0, pending[3]);
+            Assert.AreEqual((byte)0x04, (byte)(pending[0] & 0x0C),
+                "An unrelated report erased a pending adaptive-trigger update.");
+            Assert.AreEqual((byte)0x14, (byte)(pending[1] & 0x1C));
+
+            byte[] release = new byte[pending.Length];
+            release[1] = 0x08;
+            DualSensePendingGameStateComposer.Merge(pending, release, 0);
+            Assert.AreEqual((byte)0x08, (byte)(pending[1] & 0x1C),
+                "A newer LED release did not supersede pending visible state.");
+        }
+
         private static byte[] CreateSpeakerReport(byte haptics,
             byte audio, byte sequence, byte packetSequence = 0)
         {

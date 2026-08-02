@@ -255,6 +255,10 @@ namespace DS4Windows.InputDevices
             DualSenseBluetoothPhysicalOutputSequence.
                 ControllerStatePayloadLength];
         private bool latestControllerStateAvailable;
+        private readonly byte[] accumulatedGameState = new byte[
+            DualSenseBluetoothPhysicalOutputSequence.
+                ControllerStatePayloadLength];
+        private bool accumulatedGameStateAvailable;
         private long latestTemplateHapticsExpiryQpc;
         private long nextReportId;
         private long acknowledgedReports;
@@ -1128,17 +1132,32 @@ namespace DS4Windows.InputDevices
                     ControllerStatePayloadLength;
             byte[] payload = new byte[stateLength + sizeof(long) +
                 ReportLength];
-            Buffer.BlockCopy(gameStateReport,
-                DualSenseBluetoothPhysicalOutputSequence.
-                    ControllerStateSourceOffset,
-                payload, 0, stateLength);
-            BinaryPrimitives.WriteInt64LittleEndian(
-                payload.AsSpan(stateLength, sizeof(long)), hapticsExpiryQpc);
-            Buffer.BlockCopy(quiescentTemplate, 0, payload,
-                stateLength + sizeof(long), ReportLength);
 
             lock (stateLock)
             {
+                if (!accumulatedGameStateAvailable)
+                {
+                    Buffer.BlockCopy(gameStateReport,
+                        DualSenseBluetoothPhysicalOutputSequence.
+                            ControllerStateSourceOffset,
+                        accumulatedGameState, 0, stateLength);
+                    accumulatedGameStateAvailable = true;
+                }
+                else
+                {
+                    DualSensePendingGameStateComposer.Merge(
+                        accumulatedGameState, gameStateReport,
+                        DualSenseBluetoothPhysicalOutputSequence.
+                            ControllerStateSourceOffset);
+                }
+
+                Buffer.BlockCopy(accumulatedGameState, 0, payload, 0,
+                    stateLength);
+                BinaryPrimitives.WriteInt64LittleEndian(
+                    payload.AsSpan(stateLength, sizeof(long)),
+                    hapticsExpiryQpc);
+                Buffer.BlockCopy(quiescentTemplate, 0, payload,
+                    stateLength + sizeof(long), ReportLength);
                 if (!outboundCommands.TryReplaceNewestOrEnqueue(
                     command => command.Kind ==
                         MessageKind.UpdateGameStateAndTemplate,
@@ -1171,6 +1190,9 @@ namespace DS4Windows.InputDevices
 
             lock (stateLock)
             {
+                Array.Clear(accumulatedGameState, 0,
+                    accumulatedGameState.Length);
+                accumulatedGameStateAvailable = false;
                 var reset = new OutboundCommand(
                     MessageKind.ResetControllerStateTransitions,
                     Array.Empty<byte>());
@@ -4920,6 +4942,93 @@ namespace DS4Windows.InputDevices
             }
 
             return Math.Max(1, interval);
+        }
+    }
+
+    /// <summary>
+    /// Composes game-authored validity updates that may be coalesced before
+    /// the helper reaches its next physical media slot. A newer report that
+    /// does not own a field cannot erase an earlier pending update; a newer
+    /// valid value (including zero rumble) replaces it.
+    /// </summary>
+    internal static class DualSensePendingGameStateComposer
+    {
+        internal const int StateLength =
+            DualSenseBluetoothPhysicalOutputSequence.
+                ControllerStatePayloadLength;
+
+        internal static void Merge(byte[] destination, byte[] source,
+            int sourceOffset)
+        {
+            if (destination == null || destination.Length != StateLength)
+            {
+                throw new ArgumentException(
+                    $"Pending state must be exactly {StateLength} bytes.",
+                    nameof(destination));
+            }
+
+            if (source == null || sourceOffset < 0 ||
+                sourceOffset + StateLength > source.Length)
+            {
+                throw new ArgumentOutOfRangeException(nameof(sourceOffset));
+            }
+
+            Span<byte> previous = stackalloc byte[StateLength];
+            destination.AsSpan().CopyTo(previous);
+            source.AsSpan(sourceOffset, StateLength).CopyTo(destination);
+
+            // Rumble validity is one continuous two-motor contract. A later
+            // valid zero is the stop command and must replace the prior value;
+            // an unrelated report must not discard it before presentation.
+            RestoreFieldWhenMissing(destination, previous, 0, 0x03, 2, 2);
+            RestoreFieldWhenMissing(destination, previous, 0, 0x04, 10, 11);
+            RestoreFieldWhenMissing(destination, previous, 0, 0x08, 21, 11);
+
+            RestoreFieldWhenMissing(destination, previous, 1, 0x20, 39, 1);
+            RestoreFieldWhenMissing(destination, previous, 1, 0x40, 36, 1);
+
+            bool incomingRelease = (destination[1] & 0x08) != 0;
+            bool incomingVisibleLedState = (destination[1] & 0x14) != 0;
+            if (incomingRelease)
+            {
+                // A newer release supersedes any unpresented visible LED
+                // update from the same coalescing window.
+                destination[1] &= unchecked((byte)~0x14);
+            }
+            else
+            {
+                RestoreFieldWhenMissing(destination, previous, 1, 0x04,
+                    44, 3);
+                RestoreFieldWhenMissing(destination, previous, 1, 0x10,
+                    43, 1);
+                if (incomingVisibleLedState)
+                {
+                    destination[1] &= unchecked((byte)~0x08);
+                }
+                else if ((previous[1] & 0x08) != 0)
+                {
+                    destination[1] |= 0x08;
+                }
+            }
+
+            RestoreFieldWhenMissing(destination, previous, 38, 0x01, 42, 1);
+            RestoreFieldWhenMissing(destination, previous, 38, 0x02, 41, 1);
+        }
+
+        private static void RestoreFieldWhenMissing(byte[] destination,
+            ReadOnlySpan<byte> previous, int flagOffset, byte validityMask,
+            int payloadOffset, int payloadLength)
+        {
+            if ((destination[flagOffset] & validityMask) != 0 ||
+                (previous[flagOffset] & validityMask) == 0)
+            {
+                return;
+            }
+
+            destination[flagOffset] |=
+                (byte)(previous[flagOffset] & validityMask);
+            previous.Slice(payloadOffset, payloadLength).CopyTo(
+                destination.AsSpan(payloadOffset, payloadLength));
         }
     }
 

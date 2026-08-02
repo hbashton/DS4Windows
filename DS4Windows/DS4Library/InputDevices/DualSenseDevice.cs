@@ -27,6 +27,151 @@ using DS4Windows;
 
 namespace DS4Windows.InputDevices
 {
+    /// <summary>
+    /// USB output validity bits describe fields present in an update. The
+    /// Bluetooth media carrier treats several of those bits as edge-triggered
+    /// commands, so replaying an unchanged USB field can restart LEDs or
+    /// adaptive-trigger programs. Preserve each real state transition while
+    /// consuming redundant stateful strobes. Continuous rumble is deliberately
+    /// excluded because games may use repeated writes as a keepalive.
+    /// </summary>
+    internal sealed class DualSenseNativeStateTransitionFilter
+    {
+        private readonly byte[] latchedState = new byte[47];
+        private byte knownFlag0;
+        private byte knownFlag1;
+        private byte knownFlag2;
+        private bool ledsReleased;
+
+        internal void Reset()
+        {
+            Array.Clear(latchedState, 0, latchedState.Length);
+            knownFlag0 = 0;
+            knownFlag1 = 0;
+            knownFlag2 = 0;
+            ledsReleased = false;
+        }
+
+        internal void Filter(byte[] report, int stateOffset)
+        {
+            if (report == null || stateOffset < 0 ||
+                stateOffset + latchedState.Length > report.Length)
+            {
+                throw new ArgumentOutOfRangeException(nameof(stateOffset));
+            }
+
+            FilterField(report, stateOffset, 0, 0x04, 10, 11,
+                ref knownFlag0);
+            FilterField(report, stateOffset, 0, 0x08, 21, 11,
+                ref knownFlag0);
+
+            FilterField(report, stateOffset, 1, 0x01, 8, 1,
+                ref knownFlag1);
+            FilterField(report, stateOffset, 1, 0x02, 9, 1,
+                ref knownFlag1);
+
+            const byte releaseLedMask = 0x08;
+            int flag1Offset = stateOffset + 1;
+            if ((report[flag1Offset] & releaseLedMask) != 0)
+            {
+                if (ledsReleased)
+                {
+                    report[flag1Offset] &= unchecked((byte)~releaseLedMask);
+                }
+                else
+                {
+                    ledsReleased = true;
+                }
+            }
+
+            bool forceLedState = ledsReleased;
+            bool carriesLedState = (report[flag1Offset] & 0x14) != 0;
+            FilterLedField(report, stateOffset, 0x04, 44, 3,
+                forceLedState);
+            FilterLedField(report, stateOffset, 0x10, 43, 1,
+                forceLedState);
+            if (carriesLedState)
+            {
+                ledsReleased = false;
+            }
+            FilterField(report, stateOffset, 1, 0x20, 39, 1,
+                ref knownFlag1);
+            FilterField(report, stateOffset, 1, 0x40, 36, 1,
+                ref knownFlag1);
+            FilterField(report, stateOffset, 1, 0x80, 37, 1,
+                ref knownFlag1);
+            FilterField(report, stateOffset, 38, 0x01, 42, 1,
+                ref knownFlag2);
+            FilterField(report, stateOffset, 38, 0x02, 41, 1,
+                ref knownFlag2);
+        }
+
+        private void FilterLedField(byte[] report, int stateOffset,
+            byte validityMask, int payloadOffset, int payloadLength,
+            bool forceUpdate)
+        {
+            int flagOffset = stateOffset + 1;
+            if ((report[flagOffset] & validityMask) == 0)
+            {
+                return;
+            }
+
+            bool unchanged = !forceUpdate &&
+                (knownFlag1 & validityMask) != 0 &&
+                PayloadEquals(report, stateOffset, payloadOffset,
+                    payloadLength);
+            CopyPayload(report, stateOffset, payloadOffset, payloadLength);
+            knownFlag1 |= validityMask;
+            if (unchanged)
+            {
+                report[flagOffset] &= unchecked((byte)~validityMask);
+            }
+        }
+
+        private void FilterField(byte[] report, int stateOffset,
+            int flagRelativeOffset, byte validityMask, int payloadOffset,
+            int payloadLength, ref byte knownFlags)
+        {
+            int flagOffset = stateOffset + flagRelativeOffset;
+            if ((report[flagOffset] & validityMask) == 0)
+            {
+                return;
+            }
+
+            bool unchanged = (knownFlags & validityMask) != 0 &&
+                PayloadEquals(report, stateOffset, payloadOffset,
+                    payloadLength);
+            CopyPayload(report, stateOffset, payloadOffset, payloadLength);
+            knownFlags |= validityMask;
+            if (unchanged)
+            {
+                report[flagOffset] &= unchecked((byte)~validityMask);
+            }
+        }
+
+        private bool PayloadEquals(byte[] report, int stateOffset,
+            int payloadOffset, int payloadLength)
+        {
+            for (int index = 0; index < payloadLength; index++)
+            {
+                if (report[stateOffset + payloadOffset + index] !=
+                    latchedState[payloadOffset + index])
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private void CopyPayload(byte[] report, int stateOffset,
+            int payloadOffset, int payloadLength)
+        {
+            Buffer.BlockCopy(report, stateOffset + payloadOffset,
+                latchedState, payloadOffset, payloadLength);
+        }
+    }
+
     public class DualSenseDevice : DS4Device
     {
         public class GyroMouseSensDualSense : GyroMouseSens
@@ -476,6 +621,9 @@ namespace DS4Windows.InputDevices
         private long latestBluetoothCombinedSpeakerReportTimestamp;
         private long latestBluetoothCombinedNativeStateTimestamp;
         private bool nativeGameLightbarOwnershipReleased = true;
+        private readonly DualSenseNativeStateTransitionFilter
+            nativeGameStateTransitionFilter =
+                new DualSenseNativeStateTransitionFilter();
         private long bluetoothCombinedHapticsGeneration;
         private long bluetoothCombinedSubmittedHapticsGeneration;
         private byte bluetoothCombinedSpeakerReportSequence;
@@ -3247,6 +3395,7 @@ namespace DS4Windows.InputDevices
             {
                 latestBluetoothCombinedNativeStateTimestamp = 0;
                 nativeGameLightbarOwnershipReleased = true;
+                nativeGameStateTransitionFilter.Reset();
                 if (bluetoothCombinedSpeakerReportAvailable)
                 {
                     Array.Clear(latestBluetoothCombinedSpeakerReport,
@@ -3395,6 +3544,8 @@ namespace DS4Windows.InputDevices
 
                 Array.Copy(latestBluetoothCombinedSpeakerReport, exactState,
                     exactState.Length);
+                nativeGameStateTransitionFilter.Filter(exactState,
+                    BluetoothCombinedStateOffset);
                 originalFlag0 = latestBluetoothCombinedSpeakerReport[
                     BluetoothCombinedStateOffset];
                 originalFlag1 = latestBluetoothCombinedSpeakerReport[
@@ -3428,6 +3579,7 @@ namespace DS4Windows.InputDevices
             {
                 lock (bluetoothCombinedSpeakerReportLock)
                 {
+                    nativeGameStateTransitionFilter.Reset();
                     latestBluetoothCombinedSpeakerReport[
                         BluetoothCombinedStateOffset] = originalFlag0;
                     latestBluetoothCombinedSpeakerReport[
@@ -3512,6 +3664,10 @@ namespace DS4Windows.InputDevices
                 // profile/custom lightbar and audio routing in that case.
                 if (hasNativeGameState)
                 {
+                    if (latestBluetoothCombinedNativeStateTimestamp == 0)
+                    {
+                        nativeGameStateTransitionFilter.Reset();
+                    }
                     MergeControllerStateIntoV5AudioSnapshot(report,
                         offset + BluetoothCombinedStateOffset,
                         latestBluetoothCombinedSpeakerReport,

@@ -914,6 +914,76 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void NativeStateFilterConsumesOnlyRedundantStatefulStrobes()
+        {
+            const int stateOffset = 7;
+            byte[] first = new byte[stateOffset + 47];
+            first[stateOffset] = 0x0F;
+            first[stateOffset + 1] = 0xF7;
+            first[stateOffset + 38] = 0x03;
+            for (int index = 10; index < 32; index++)
+            {
+                first[stateOffset + index] = (byte)(0x20 + index);
+            }
+            first[stateOffset + 8] = 0x01;
+            first[stateOffset + 9] = 0x02;
+            first[stateOffset + 36] = 0x03;
+            first[stateOffset + 37] = 0x04;
+            first[stateOffset + 39] = 0x05;
+            first[stateOffset + 41] = 0x06;
+            first[stateOffset + 42] = 0x07;
+            first[stateOffset + 43] = 0x0A;
+            first[stateOffset + 44] = 0x11;
+            first[stateOffset + 45] = 0x22;
+            first[stateOffset + 46] = 0x33;
+
+            DualSenseNativeStateTransitionFilter filter = new
+                DualSenseNativeStateTransitionFilter();
+            filter.Filter(first, stateOffset);
+            Assert.AreEqual((byte)0x0F, first[stateOffset]);
+            Assert.AreEqual((byte)0xF7, first[stateOffset + 1]);
+            Assert.AreEqual((byte)0x03, first[stateOffset + 38]);
+
+            byte[] repeated = (byte[])first.Clone();
+            filter.Filter(repeated, stateOffset);
+            Assert.AreEqual((byte)0x03, repeated[stateOffset],
+                "Continuous rumble validity must remain a game keepalive.");
+            Assert.AreEqual((byte)0x00, repeated[stateOffset + 1]);
+            Assert.AreEqual((byte)0x00, repeated[stateOffset + 38]);
+
+            byte[] changedPlayer = (byte[])first.Clone();
+            changedPlayer[stateOffset + 43] = 0x04;
+            filter.Filter(changedPlayer, stateOffset);
+            Assert.AreEqual((byte)0x10, changedPlayer[stateOffset + 1],
+                "A real player-LED change was consumed with duplicate fields.");
+            Assert.AreEqual((byte)0x04, changedPlayer[stateOffset + 43]);
+        }
+
+        [TestMethod]
+        public void NativeStateFilterRearmsLedStateAfterRelease()
+        {
+            byte[] player = new byte[47];
+            player[1] = 0x10;
+            player[43] = 0x0A;
+            DualSenseNativeStateTransitionFilter filter = new
+                DualSenseNativeStateTransitionFilter();
+            filter.Filter(player, 0);
+
+            byte[] release = new byte[47];
+            release[1] = 0x08;
+            filter.Filter(release, 0);
+            Assert.AreEqual((byte)0x08, release[1]);
+            byte[] duplicateRelease = (byte[])release.Clone();
+            filter.Filter(duplicateRelease, 0);
+            Assert.AreEqual((byte)0x00, duplicateRelease[1]);
+
+            byte[] restore = (byte[])player.Clone();
+            filter.Filter(restore, 0);
+            Assert.AreEqual((byte)0x10, restore[1],
+                "The same LED value must be sent again after game release.");
+        }
+
+        [TestMethod]
         public void PendingGameStateReplacesOneNativeMediaGenerationExactly()
         {
             byte[] report = CreateSpeakerReport(0x22, 0x33, 0, 1);

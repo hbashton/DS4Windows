@@ -5044,17 +5044,17 @@ namespace DS4Windows.InputDevices
         private const int HapticsDataLength = 64;
 
         /// <summary>
-        /// Merges a queued audio report with the newest template. When a
-        /// template exists, its matching haptics expiry always wins over the
-        /// queued report's older expiry. The queued expiry is only a fallback
-        /// for a protocol-startup report received before any template.
+        /// Merges current controller state into one queued media generation.
+        /// The queued report's haptics block and matching expiry remain
+        /// inseparable from that generation. Replacing those bytes with the
+        /// newest template collapses brief ordered effects whenever more than
+        /// one source generation is waiting in the host reservoir.
         /// </summary>
         public static void PatchForPresentation(byte[] queuedReport,
             long queuedHapticsExpiryQpc, byte[] latestTemplate,
             long latestTemplateHapticsExpiryQpc, long nowQpc)
         {
-            long effectiveExpiryQpc = latestTemplate != null ?
-                latestTemplateHapticsExpiryQpc : queuedHapticsExpiryQpc;
+            long effectiveExpiryQpc = queuedHapticsExpiryQpc;
             PatchForPresentation(queuedReport, latestTemplate,
                 effectiveExpiryQpc, nowQpc);
         }
@@ -5079,13 +5079,15 @@ namespace DS4Windows.InputDevices
                 }
 
                 // Preserve queued byte 1 (Sony sequence), bytes 5-9 (speaker
-                // buffer depths), byte 10 (packet counter), and bytes 142-343
-                // (speaker TLV + 200-byte Opus frame). A live control-only
-                // template uses the low-latency depth of 16; copying that over
-                // a queued speaker report would replace its independent audio
-                // playback reserve immediately before presentation.
+                // buffer depths), byte 10 (packet counter), bytes 78-141 (the
+                // ordered 0x92 haptics generation), and bytes 142-343 (speaker
+                // TLV + 200-byte Opus frame). A live control-only template uses
+                // the low-latency depth of 16; copying that over a queued
+                // speaker report would replace its independent audio reserve.
+                // Controller state remains newest-wins, but media never does.
                 Buffer.BlockCopy(latestTemplate, 2, queuedReport, 2, 3);
-                Buffer.BlockCopy(latestTemplate, 11, queuedReport, 11, 131);
+                Buffer.BlockCopy(latestTemplate, 11, queuedReport, 11,
+                    HapticsDataOffset - 11);
             }
 
             if (hapticsExpiryQpc <= nowQpc)

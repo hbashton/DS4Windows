@@ -617,6 +617,8 @@ namespace DS4Windows.InputDevices
             new byte[BluetoothCombinedOutputReportLength];
         private readonly byte[] bluetoothCombinedGameStateWorkingReport =
             new byte[BluetoothCombinedOutputReportLength];
+        private readonly byte[] bluetoothCombinedNativeStateScratch =
+            new byte[BluetoothCombinedNativeStateLength];
         private bool bluetoothCombinedSpeakerReportAvailable;
         private long latestBluetoothCombinedSpeakerReportTimestamp;
         private long latestBluetoothCombinedNativeStateTimestamp;
@@ -1015,6 +1017,8 @@ namespace DS4Windows.InputDevices
                     bluetoothCombinedSpeakerReportAvailable = true;
                     latestBluetoothCombinedSpeakerReportTimestamp = 0;
                     latestBluetoothCombinedNativeStateTimestamp = 0;
+                    Array.Clear(bluetoothCombinedNativeStateScratch, 0,
+                        bluetoothCombinedNativeStateScratch.Length);
                     bluetoothCombinedHapticsGeneration = 0;
                     bluetoothCombinedSubmittedHapticsGeneration = 0;
                     bluetoothCombinedSpeakerSequenceInitialized = true;
@@ -1067,7 +1071,32 @@ namespace DS4Windows.InputDevices
         internal bool SetBluetoothSpeakerAudioFrame(byte[] frame, int length,
             long speakerSession, long speakerGeneration)
         {
+            return SetBluetoothSpeakerAudioFrame(frame, length,
+                speakerSession, speakerGeneration,
+                synchronizedHaptics: null, synchronizedHapticsOffset: 0);
+        }
+
+        /// <summary>
+        /// Queues one encoded speaker generation with the exact ordered
+        /// advanced-haptics interval selected by the V5 media reframer. The
+        /// two lanes are copied under the unified transport lock so a newer
+        /// source callback cannot replace a brief haptics pulse before this
+        /// report reaches the physical FIFO.
+        /// </summary>
+        internal bool SetBluetoothSpeakerAudioFrame(byte[] frame, int length,
+            long speakerSession, long speakerGeneration,
+            byte[] synchronizedHaptics, int synchronizedHapticsOffset)
+        {
             if (frame == null || length <= 0)
+            {
+                return false;
+            }
+
+            if (synchronizedHaptics != null &&
+                (synchronizedHapticsOffset < 0 ||
+                    synchronizedHapticsOffset +
+                        BluetoothCombinedHapticsDataLength >
+                            synchronizedHaptics.Length))
             {
                 return false;
             }
@@ -1107,6 +1136,26 @@ namespace DS4Windows.InputDevices
                     bluetoothActiveSpeakerSession != speakerSession)
                 {
                     return false;
+                }
+
+                if (synchronizedHaptics != null)
+                {
+                    lock (bluetoothCombinedSpeakerReportLock)
+                    {
+                        latestBluetoothCombinedSpeakerReport[
+                            BluetoothCombinedHapticsOffset] = 0x92;
+                        latestBluetoothCombinedSpeakerReport[
+                            BluetoothCombinedHapticsOffset + 1] =
+                            BluetoothCombinedHapticsDataLength;
+                        Buffer.BlockCopy(synchronizedHaptics,
+                            synchronizedHapticsOffset,
+                            latestBluetoothCombinedSpeakerReport,
+                            BluetoothCombinedHapticsDataOffset,
+                            BluetoothCombinedHapticsDataLength);
+                        latestBluetoothCombinedSpeakerReportTimestamp =
+                            Stopwatch.GetTimestamp();
+                        bluetoothCombinedHapticsGeneration++;
+                    }
                 }
 
                 lock (bluetoothSpeakerFrameLock)
@@ -3392,6 +3441,8 @@ namespace DS4Windows.InputDevices
             {
                 latestBluetoothCombinedNativeStateTimestamp = 0;
                 nativeGameLightbarOwnershipReleased = true;
+                Array.Clear(bluetoothCombinedNativeStateScratch, 0,
+                    bluetoothCombinedNativeStateScratch.Length);
                 if (bluetoothCombinedSpeakerReportAvailable)
                 {
                     Array.Clear(latestBluetoothCombinedSpeakerReport,
@@ -3662,10 +3713,11 @@ namespace DS4Windows.InputDevices
                 // profile/custom lightbar and audio routing in that case.
                 if (hasNativeGameState)
                 {
-                    MergeControllerStateIntoV5AudioSnapshot(report,
+                    MergeControllerStateDeltaIntoV5AudioSnapshot(report,
                         offset + BluetoothCombinedStateOffset,
                         latestBluetoothCombinedSpeakerReport,
-                        BluetoothCombinedStateOffset);
+                        BluetoothCombinedStateOffset,
+                        bluetoothCombinedNativeStateScratch);
                     latestBluetoothCombinedNativeStateTimestamp =
                         Stopwatch.GetTimestamp();
                     // Sony's release-LED bit is itself game-authored state: it
@@ -3802,9 +3854,10 @@ namespace DS4Windows.InputDevices
                     return false;
                 }
 
-                MergeControllerStateIntoV5AudioSnapshot(report,
+                MergeControllerStateDeltaIntoV5AudioSnapshot(report,
                     offset + 1, latestBluetoothCombinedSpeakerReport,
-                    BluetoothCombinedStateOffset);
+                    BluetoothCombinedStateOffset,
+                    bluetoothCombinedNativeStateScratch);
                 latestBluetoothCombinedNativeStateTimestamp =
                     Stopwatch.GetTimestamp();
                 nativeGameLightbarOwnershipReleased = false;
@@ -3941,6 +3994,56 @@ namespace DS4Windows.InputDevices
                 (source[sourceOffset] & 0x0F) | audioFlag0);
             destination[destinationOffset + 1] = (byte)(
                 (source[sourceOffset + 1] & 0x7C) | audioFlag1);
+            destination[destinationOffset + 4] = headphoneVolume;
+            destination[destinationOffset + 5] = speakerVolumeSnapshot;
+            destination[destinationOffset + 6] = microphoneVolumeSnapshot;
+            destination[destinationOffset + 7] = audioControl;
+            destination[destinationOffset + 8] = muteLed;
+            destination[destinationOffset + 9] = powerSaveControl;
+            destination[destinationOffset + 37] = audioControl2;
+        }
+
+        internal static void MergeControllerStateDeltaIntoV5AudioSnapshot(
+            byte[] source, int sourceOffset, byte[] destination,
+            int destinationOffset, byte[] scratch)
+        {
+            if (source == null || sourceOffset < 0 ||
+                sourceOffset + BluetoothCombinedNativeStateLength >
+                    source.Length || destination == null ||
+                destinationOffset < 0 || destinationOffset +
+                    BluetoothCombinedNativeStateLength > destination.Length ||
+                scratch == null || scratch.Length !=
+                    BluetoothCombinedNativeStateLength)
+            {
+                throw new ArgumentOutOfRangeException();
+            }
+
+            // Native USB output reports are validity-masked deltas. Keep the
+            // last valid game value for every field that this update does not
+            // mention; copying the 47-byte payload wholesale makes an
+            // unrelated audio or rumble report erase the game's lightbar,
+            // player LEDs, and trigger programs.
+            DualSensePendingGameStateComposer.Merge(scratch, source,
+                sourceOffset);
+
+            // The physical PlayStation audio route remains locally owned even
+            // while every game-authored controller field is accumulated.
+            byte audioFlag0 = (byte)(destination[destinationOffset] & 0xF0);
+            byte audioFlag1 = (byte)(destination[destinationOffset + 1] & 0x83);
+            byte headphoneVolume = destination[destinationOffset + 4];
+            byte speakerVolumeSnapshot = destination[destinationOffset + 5];
+            byte microphoneVolumeSnapshot = destination[destinationOffset + 6];
+            byte audioControl = destination[destinationOffset + 7];
+            byte muteLed = destination[destinationOffset + 8];
+            byte powerSaveControl = destination[destinationOffset + 9];
+            byte audioControl2 = destination[destinationOffset + 37];
+
+            Buffer.BlockCopy(scratch, 0, destination, destinationOffset,
+                BluetoothCombinedNativeStateLength);
+            destination[destinationOffset] = (byte)(
+                (destination[destinationOffset] & 0x0F) | audioFlag0);
+            destination[destinationOffset + 1] = (byte)(
+                (destination[destinationOffset + 1] & 0x7C) | audioFlag1);
             destination[destinationOffset + 4] = headphoneVolume;
             destination[destinationOffset + 5] = speakerVolumeSnapshot;
             destination[destinationOffset + 6] = microphoneVolumeSnapshot;

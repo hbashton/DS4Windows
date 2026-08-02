@@ -1510,8 +1510,8 @@ namespace DS4WindowsTests
 
             byte[] usb = new byte[48];
             usb[0] = 0x02;
-            usb[1] = 0x00;
-            usb[2] = 0x08;
+            usb[1] = 0x0C;
+            usb[2] = 0x14;
             usb[3] = 0x00;
             usb[4] = 0x00;
             usb[5] = 0x13;
@@ -1538,12 +1538,12 @@ namespace DS4WindowsTests
 
             byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
                 device);
-            AssertV5AudioContract(cached, expectedFlag0: 0xF0,
-                expectedFlag1: 0x8B);
+            AssertV5AudioContract(cached, expectedFlag0: 0xFC,
+                expectedFlag1: 0x97);
             Assert.AreEqual((byte)0x00, cached[15]);
             Assert.AreEqual((byte)0x00, cached[16]);
             Assert.AreEqual((byte)0x00, cached[21]);
-            for (int relativeIndex = 10; relativeIndex <= 36;
+            for (int relativeIndex = 10; relativeIndex <= 31;
                 relativeIndex++)
             {
                 int combinedIndex = 13 + relativeIndex;
@@ -1715,6 +1715,76 @@ namespace DS4WindowsTests
             Assert.AreEqual(1,
                 DualSenseDevice.GetNativeGameLedOwnershipUpdate(state, 0),
                 "A black lightbar remains an authoritative game state.");
+        }
+
+        [TestMethod]
+        public void UnrelatedNativeGameDeltaPreservesLastValidLightbarColor()
+        {
+            byte[] combined = BuildCombinedControlReport(0, 0, false);
+            byte[] scratch = new byte[47];
+            byte[] lightbar = new byte[48];
+            lightbar[0] = 0x02;
+            lightbar[2] = 0x04;
+            lightbar[45] = 0x21;
+            lightbar[46] = 0x43;
+            lightbar[47] = 0x65;
+
+            DualSenseDevice.MergeControllerStateDeltaIntoV5AudioSnapshot(
+                lightbar, 1, combined, 13, scratch);
+
+            byte[] unrelated = new byte[48];
+            unrelated[0] = 0x02;
+            unrelated[2] = 0x40;
+            unrelated[37] = 0x5A;
+            DualSenseDevice.MergeControllerStateDeltaIntoV5AudioSnapshot(
+                unrelated, 1, combined, 13, scratch);
+
+            Assert.AreEqual((byte)0x04,
+                (byte)(combined[14] & 0x04),
+                "An unrelated update erased game lightbar ownership.");
+            Assert.AreEqual((byte)0,
+                (byte)(combined[14] & 0x08),
+                "An unrelated update spuriously released game LEDs.");
+            Assert.AreEqual((byte)0x21, combined[57]);
+            Assert.AreEqual((byte)0x43, combined[58]);
+            Assert.AreEqual((byte)0x65, combined[59]);
+
+            byte[] release = new byte[48];
+            release[0] = 0x02;
+            release[2] = 0x08;
+            DualSenseDevice.MergeControllerStateDeltaIntoV5AudioSnapshot(
+                release, 1, combined, 13, scratch);
+            Assert.AreEqual((byte)0x08,
+                (byte)(combined[14] & 0x1C),
+                "An explicit game release did not end lightbar ownership.");
+        }
+
+        [TestMethod]
+        public void NativeCombinedCarrierRetainsGameLightbarAcrossUnrelatedState()
+        {
+            DualSenseDevice device = CreateBluetoothDevice();
+            byte[] lightbar = BuildCombinedControlReport(0, 0, false);
+            lightbar[13] = 0x00;
+            lightbar[14] = 0x04;
+            lightbar[57] = 0x31;
+            lightbar[58] = 0x52;
+            lightbar[59] = 0x73;
+            device.WriteBluetoothCombinedHapticsAudioOutputReport(lightbar, 0,
+                lightbar.Length, hasNativeGameState: true);
+
+            byte[] unrelated = BuildCombinedControlReport(0, 0, false);
+            unrelated[13] = 0x00;
+            unrelated[14] = 0x40;
+            unrelated[50] = 0x4A;
+            device.WriteBluetoothCombinedHapticsAudioOutputReport(unrelated,
+                0, unrelated.Length, hasNativeGameState: true);
+
+            byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
+                device);
+            Assert.AreEqual((byte)0x04, (byte)(cached[14] & 0x04));
+            Assert.AreEqual((byte)0x31, cached[57]);
+            Assert.AreEqual((byte)0x52, cached[58]);
+            Assert.AreEqual((byte)0x73, cached[59]);
         }
 
         [TestMethod]

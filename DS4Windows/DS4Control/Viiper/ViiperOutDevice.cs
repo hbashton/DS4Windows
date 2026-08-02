@@ -3936,16 +3936,6 @@ namespace DS4Windows
                     feedback[0]);
             }
 
-            if (!hasNativeGameState && !audioOnlySidecar &&
-                feedback.Length >= DualSenseNativeOutputReportOffset +
-                    DualSenseNativeOutputReportLength &&
-                feedback[DualSenseNativeOutputReportOffset] == 0x02)
-            {
-                // Atomic speaker/haptics frames carry the persistent native
-                // snapshot. They are not new SET_REPORT updates, but they do
-                // prove that the same game-owned output session is alive.
-                TouchNativeGameOutputSession();
-            }
             return dualSenseDevice.WriteBluetoothCombinedHapticsAudioOutputReport(report,
                 DualSenseCombinedBluetoothReportOffset,
                 DualSenseCombinedBluetoothReportLength,
@@ -3974,15 +3964,6 @@ namespace DS4Windows
                         $"DualSense native game-output session started: report={Convert.ToHexString(lastNativeGameOutputReport)}",
                         false);
                 }
-            }
-        }
-
-        private void TouchNativeGameOutputSession()
-        {
-            lock (nativeGameOutputTraceLock)
-            {
-                nativeGameOutputSessionActive = 1;
-                lastNativeGameOutputTimestamp = Stopwatch.GetTimestamp();
             }
         }
 

@@ -998,6 +998,10 @@ namespace DS4WindowsTests
             typeof(DualSenseDevice).GetField(
                 "latestBluetoothCombinedNativeStateTimestamp",
                 BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo HapticsGenerationField =
+            typeof(DualSenseDevice).GetField(
+                "bluetoothCombinedHapticsGeneration",
+                BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo NativeLightbarReleasedField =
             typeof(DualSenseDevice).GetField(
                 "nativeGameLightbarOwnershipReleased",
@@ -1314,6 +1318,39 @@ namespace DS4WindowsTests
             Assert.AreEqual((byte)92, cached[13 + 46]);
             Assert.IsTrue(GetFieldValue<long>(NativeStateTimestampField,
                 device) > 0);
+        }
+
+        [TestMethod]
+        public void NativeGameStateCarrierDoesNotReplaceFreshMediaHaptics()
+        {
+            DualSenseDevice device = CreateBluetoothDevice();
+            byte[] media = BuildCombinedControlReport(0, 0, false);
+            for (int index = 0; index < 64; index++)
+            {
+                media[78 + index] = (byte)(index + 1);
+            }
+            device.WriteBluetoothCombinedHapticsAudioOutputReport(media, 0,
+                media.Length, hasNativeGameState: false);
+            long mediaGeneration = GetFieldValue<long>(
+                HapticsGenerationField, device);
+
+            byte[] state = BuildCombinedControlReport(0, 0, false);
+            state[13] = 0x0D;
+            state[14] = 0x17;
+            Array.Clear(state, 78, 64);
+            device.WriteBluetoothCombinedHapticsAudioOutputReport(state, 0,
+                state.Length, hasNativeGameState: true);
+
+            byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
+                device);
+            for (int index = 0; index < 64; index++)
+            {
+                Assert.AreEqual((byte)(index + 1), cached[78 + index],
+                    $"State-only output replaced media haptics byte {index}.");
+            }
+            Assert.AreEqual(mediaGeneration, GetFieldValue<long>(
+                HapticsGenerationField, device),
+                "State-only output advanced the rear-channel media clock.");
         }
 
         [TestMethod]

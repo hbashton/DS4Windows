@@ -3555,22 +3555,29 @@ namespace DS4Windows.InputDevices
                         currentHap.lightbarState.LightBarColor.blue;
                     latestBluetoothCombinedNativeStateTimestamp = 0;
                 }
-                latestBluetoothCombinedSpeakerReport[BluetoothCombinedHapticsOffset] =
-                    0x92;
-                latestBluetoothCombinedSpeakerReport[
-                    BluetoothCombinedHapticsOffset + 1] =
-                    BluetoothCombinedHapticsDataLength;
-                long now = Stopwatch.GetTimestamp();
-                // Audio-only sidecars can carry DS4Windows audio haptics even
-                // without a native virtual-DualSense game-state report. Treat
-                // the 0x92 lane as authoritative independently of state origin.
-                Array.Copy(report,
-                    offset + BluetoothCombinedHapticsDataOffset,
-                    latestBluetoothCombinedSpeakerReport,
-                    BluetoothCombinedHapticsDataOffset,
-                    BluetoothCombinedHapticsDataLength);
-                latestBluetoothCombinedSpeakerReportTimestamp = now;
-                bluetoothCombinedHapticsGeneration++;
+                // A native HID SET_REPORT is state-only. VIIPER attaches the
+                // current media snapshot so state and media can share one
+                // carrier, but that snapshot is not a new rear-channel audio
+                // interval. Recaching it here lets a high-rate game HID stream
+                // repeatedly replace the independently clocked haptics lane
+                // with stale (often silent) data. Only the atomic audio
+                // callback is allowed to advance media ownership.
+                if (!hasNativeGameState)
+                {
+                    latestBluetoothCombinedSpeakerReport[
+                        BluetoothCombinedHapticsOffset] = 0x92;
+                    latestBluetoothCombinedSpeakerReport[
+                        BluetoothCombinedHapticsOffset + 1] =
+                        BluetoothCombinedHapticsDataLength;
+                    Array.Copy(report,
+                        offset + BluetoothCombinedHapticsDataOffset,
+                        latestBluetoothCombinedSpeakerReport,
+                        BluetoothCombinedHapticsDataOffset,
+                        BluetoothCombinedHapticsDataLength);
+                    latestBluetoothCombinedSpeakerReportTimestamp =
+                        Stopwatch.GetTimestamp();
+                    bluetoothCombinedHapticsGeneration++;
+                }
 
                 bluetoothCombinedSpeakerReportAvailable = true;
                 hapticsGeneration = bluetoothCombinedHapticsGeneration;

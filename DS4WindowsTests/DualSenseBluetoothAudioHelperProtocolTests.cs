@@ -9,7 +9,7 @@ namespace DS4WindowsTests
     {
         private const string HelperArgument =
             "--dualsense-bt-audio-pacer-helper";
-        private const int ProtocolVersion = 13;
+        private const int ProtocolVersion = 14;
 
         private static readonly MethodInfo TryParseHelperArgumentsMethod =
             typeof(DualSenseBluetoothAudioPacer).GetMethod(
@@ -102,6 +102,23 @@ namespace DS4WindowsTests
                 out string version12HandleError));
             Assert.AreEqual("Invalid pacer hello payload length.",
                 version12HandleError);
+        }
+
+        [TestMethod]
+        public void AtomicGameStatePayloadFitsTheHelperReceiveContract()
+        {
+            Assert.AreEqual(
+                DualSensePendingGameStateComposer.StateLength +
+                    sizeof(long) +
+                    DualSenseBluetoothAudioPacer.ReportLength,
+                DualSenseBluetoothAudioPacer.
+                    GameStateAndTemplatePayloadLength);
+            Assert.IsTrue(
+                DualSenseBluetoothAudioPacer.
+                    GameStateAndTemplatePayloadLength >
+                sizeof(long) + sizeof(int) + sizeof(long) +
+                    DualSenseBluetoothAudioPacer.ReportLength,
+                "The native game command must not regress to the smaller queued-report buffer contract.");
         }
 
         private static string[] BuildValidHelperArguments(Guid token,

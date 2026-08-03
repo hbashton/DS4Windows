@@ -37,6 +37,15 @@ namespace DS4Windows.InputDevices
     /// </summary>
     internal sealed class DualSenseNativeStateTransitionFilter
     {
+        internal sealed class Snapshot
+        {
+            internal readonly byte[] LatchedState = new byte[47];
+            internal byte KnownFlag0;
+            internal byte KnownFlag1;
+            internal byte KnownFlag2;
+            internal bool LedsReleased;
+        }
+
         private readonly byte[] latchedState = new byte[47];
         private byte knownFlag0;
         private byte knownFlag1;
@@ -50,6 +59,36 @@ namespace DS4Windows.InputDevices
             knownFlag1 = 0;
             knownFlag2 = 0;
             ledsReleased = false;
+        }
+
+        internal void Capture(Snapshot snapshot)
+        {
+            if (snapshot == null)
+            {
+                throw new ArgumentNullException(nameof(snapshot));
+            }
+
+            Buffer.BlockCopy(latchedState, 0, snapshot.LatchedState, 0,
+                latchedState.Length);
+            snapshot.KnownFlag0 = knownFlag0;
+            snapshot.KnownFlag1 = knownFlag1;
+            snapshot.KnownFlag2 = knownFlag2;
+            snapshot.LedsReleased = ledsReleased;
+        }
+
+        internal void Restore(Snapshot snapshot)
+        {
+            if (snapshot == null)
+            {
+                throw new ArgumentNullException(nameof(snapshot));
+            }
+
+            Buffer.BlockCopy(snapshot.LatchedState, 0, latchedState, 0,
+                latchedState.Length);
+            knownFlag0 = snapshot.KnownFlag0;
+            knownFlag1 = snapshot.KnownFlag1;
+            knownFlag2 = snapshot.KnownFlag2;
+            ledsReleased = snapshot.LedsReleased;
         }
 
         internal void Filter(byte[] report, int stateOffset)

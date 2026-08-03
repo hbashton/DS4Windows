@@ -11,6 +11,116 @@ namespace DS4Windows.Tests
         private const int HapticsLength = 64;
 
         [TestMethod]
+        public void RealtimeHapticsPreserveAttackAndZeroTailInOrder()
+        {
+            var queue = new DualSenseRealtimeHapticsPresentationQueue(
+                capacity: 2, HapticsOffset, HapticsLength);
+            byte[] attack = CreateHapticsGeneration(0x31);
+            byte[] release = new byte[HapticsLength];
+            byte[] report = CreateReport(0x70);
+
+            queue.Enqueue(attack, 0, long.MaxValue);
+            queue.Enqueue(release, 0, long.MaxValue);
+
+            Assert.IsTrue(queue.PrepareForPresentation(report, 100));
+            CollectionAssert.AreEqual(attack,
+                CopyRange(report, HapticsOffset, HapticsLength));
+            queue.CommitPrepared();
+
+            FillHaptics(report, 0x7A);
+            Assert.IsTrue(queue.PrepareForPresentation(report, 200));
+            CollectionAssert.AreEqual(release,
+                CopyRange(report, HapticsOffset, HapticsLength),
+                "The real zero-tail generation was replaced by stale attack samples.");
+            queue.CommitPrepared();
+
+            FillHaptics(report, 0x55);
+            Assert.IsFalse(queue.PrepareForPresentation(report, 300));
+            CollectionAssert.AreEqual(release,
+                CopyRange(report, HapticsOffset, HapticsLength),
+                "A drained waveform was replayed after its zero boundary.");
+        }
+
+        [TestMethod]
+        public void RealtimeHapticsRetryRetainsBoundGeneration()
+        {
+            var queue = new DualSenseRealtimeHapticsPresentationQueue(
+                capacity: 3, HapticsOffset, HapticsLength);
+            byte[] first = CreateHapticsGeneration(0x11);
+            byte[] second = CreateHapticsGeneration(0x22);
+            byte[] newest = CreateHapticsGeneration(0x33);
+            byte[] report = CreateReport(0x60);
+
+            queue.Enqueue(first, 0, long.MaxValue);
+            queue.Enqueue(second, 0, long.MaxValue);
+            Assert.IsTrue(queue.PrepareForPresentation(report, 100));
+            CollectionAssert.AreEqual(first,
+                CopyRange(report, HapticsOffset, HapticsLength));
+
+            // A rejected HID write keeps the bound head while later source
+            // generations remain queued behind it.
+            queue.Enqueue(newest, 0, long.MaxValue);
+            FillHaptics(report, 0x70);
+            Assert.IsTrue(queue.PrepareForPresentation(report, 200));
+            CollectionAssert.AreEqual(first,
+                CopyRange(report, HapticsOffset, HapticsLength));
+            queue.CommitPrepared();
+
+            Assert.IsTrue(queue.PrepareForPresentation(report, 300));
+            CollectionAssert.AreEqual(second,
+                CopyRange(report, HapticsOffset, HapticsLength));
+            queue.CommitPrepared();
+            Assert.IsTrue(queue.PrepareForPresentation(report, 400));
+            CollectionAssert.AreEqual(newest,
+                CopyRange(report, HapticsOffset, HapticsLength));
+        }
+
+        [TestMethod]
+        public void RealtimeHapticsOverflowDoesNotReplaceQueuedMedia()
+        {
+            var queue = new DualSenseRealtimeHapticsPresentationQueue(
+                capacity: 2, HapticsOffset, HapticsLength);
+            byte[] old = CreateHapticsGeneration(0x10);
+            byte[] middle = CreateHapticsGeneration(0x20);
+            byte[] newest = CreateHapticsGeneration(0x30);
+            byte[] report = CreateReport(0x50);
+
+            queue.Enqueue(old, 0, long.MaxValue);
+            queue.Enqueue(middle, 0, long.MaxValue);
+            Assert.ThrowsException<InvalidOperationException>(() =>
+                queue.Enqueue(newest, 0, long.MaxValue));
+
+            Assert.IsTrue(queue.PrepareForPresentation(report, 100));
+            CollectionAssert.AreEqual(old,
+                CopyRange(report, HapticsOffset, HapticsLength));
+            queue.CommitPrepared();
+            Assert.IsTrue(queue.PrepareForPresentation(report, 200));
+            CollectionAssert.AreEqual(middle,
+                CopyRange(report, HapticsOffset, HapticsLength));
+        }
+
+        [TestMethod]
+        public void RealtimeHapticsLifecycleResetSilencesStaleTemplate()
+        {
+            var queue = new DualSenseRealtimeHapticsPresentationQueue(
+                capacity: 2, HapticsOffset, HapticsLength);
+            byte[] pulse = CreateHapticsGeneration(0x41);
+            byte[] report = CreateReport(0x20);
+            queue.Enqueue(pulse, 0, long.MaxValue);
+
+            queue.Reset(silenceFutureReports: true);
+            FillHaptics(report, 0x66);
+
+            Assert.IsFalse(queue.PrepareForPresentation(report, 100));
+            CollectionAssert.AreEqual(new byte[HapticsLength],
+                CopyRange(report, HapticsOffset, HapticsLength),
+                "A pre-lifecycle haptics snapshot crossed the reset boundary.");
+            Assert.AreEqual((byte)0x92, report[HapticsOffset - 2]);
+            Assert.AreEqual((byte)HapticsLength,
+                report[HapticsOffset - 1]);
+        }
+
+        [TestMethod]
         public void FreshLatestTemplateHapticsSurviveOldQueuedAudioFrame()
         {
             const long qpcFrequency = 10_000_000;
@@ -1038,6 +1148,16 @@ namespace DS4Windows.Tests
         {
             byte[] result = new byte[count];
             Buffer.BlockCopy(source, offset, result, 0, count);
+            return result;
+        }
+
+        private static byte[] CreateHapticsGeneration(byte seed)
+        {
+            byte[] result = new byte[HapticsLength];
+            for (int index = 0; index < result.Length; index++)
+            {
+                result[index] = (byte)(seed + index);
+            }
             return result;
         }
 

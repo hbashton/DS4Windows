@@ -1,5 +1,6 @@
 using System;
 using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -21,6 +22,9 @@ namespace DS4Windows.InputDevices
     internal sealed class DualSenseBluetoothAudioPacer : IDisposable
     {
         internal const int ReportLength = 398;
+        internal const int GameStateAndTemplatePayloadLength =
+            DualSenseBluetoothPhysicalOutputSequence.
+                ControllerStatePayloadLength + sizeof(long) + ReportLength;
         // Keep media on the hardware-validated MeasuredTransport-sized carrier: one
         // complete speaker/haptics generation per 10.667 ms. The 547-byte
         // paired carrier is valid on the combined-report reference's raw L2CAP stack, but Windows
@@ -51,6 +55,10 @@ namespace DS4Windows.InputDevices
         internal const int SingleAudioTransportSlotCount = 32;
         internal const int SingleAudioInFlightLimit = 32;
         internal const int HostReservoirCapacity = 64;
+        internal const int RealtimeHapticsQueueCapacity =
+            HostReservoirCapacity;
+        internal const int RealtimeHapticsDataOffset = 78;
+        internal const int RealtimeHapticsDataLength = 64;
         // The paired path is source-driven like CombinedReportReference. It must not replay
         // 398-era startup phases after a normal two-frame queue boundary.
         internal const int ControllerLinkWarmupIntervals = 0;
@@ -155,7 +163,7 @@ namespace DS4Windows.InputDevices
         }
 
         private const string HelperArgument = "--dualsense-bt-audio-pacer-helper";
-        private const int ProtocolVersion = 13;
+        private const int ProtocolVersion = 14;
         private const int PipeConnectTimeoutMilliseconds = 5000;
         private const int HelperReadyTimeoutMilliseconds = 5000;
         private const int HelperStopTimeoutMilliseconds = 3000;
@@ -190,6 +198,7 @@ namespace DS4Windows.InputDevices
             UpdateControllerMediaBuffer = 9,
             UpdateGameStateAndTemplate = 10,
             ResetControllerStateTransitions = 11,
+            QueueRealtimeHaptics = 12,
             Ready = 0x80,
             ReportAcknowledged = 0x81,
             Stopped = 0x82,
@@ -239,6 +248,8 @@ namespace DS4Windows.InputDevices
         private readonly DualSenseBluetoothAudioPacerRing<OutboundCommand>
             outboundCommands = new DualSenseBluetoothAudioPacerRing<OutboundCommand>(
                 OutboundCommandCapacity);
+        private readonly ConcurrentQueue<OutboundCommand>
+            realtimeHapticsCommands = new();
         private readonly Dictionary<long, byte> outstandingReports =
             new Dictionary<long, byte>(HostReservoirCapacity);
         private readonly Dictionary<long, PendingReportCompletion>
@@ -903,7 +914,7 @@ namespace DS4Windows.InputDevices
             long hapticsExpiryQpc)
         {
             return UpdateTemplateCore(latestCombinedReport,
-                hapticsExpiryQpc, realtimeHaptics: false);
+                hapticsExpiryQpc);
         }
 
         /// <summary>
@@ -915,12 +926,41 @@ namespace DS4Windows.InputDevices
         public bool UpdateRealtimeHapticsTemplate(
             byte[] latestCombinedReport, long hapticsExpiryQpc)
         {
-            return UpdateTemplateCore(latestCombinedReport,
-                hapticsExpiryQpc, realtimeHaptics: true);
+            if (latestCombinedReport == null ||
+                latestCombinedReport.Length != ReportLength || !IsRunning)
+            {
+                return false;
+            }
+
+            lock (stateLock)
+            {
+                byte[] payload = BuildRealtimeHapticsPayload(
+                    latestCombinedReport, currentEpoch, hapticsExpiryQpc);
+
+                // This callback owns only one completed rear-channel
+                // generation. Never replace the full state template with its
+                // asynchronous snapshot: a newer HID/lightbar/trigger update
+                // may already have arrived on the independent control lane.
+                if (latestTemplate != null)
+                {
+                    Buffer.BlockCopy(latestCombinedReport,
+                        RealtimeHapticsDataOffset, latestTemplate,
+                        RealtimeHapticsDataOffset,
+                        RealtimeHapticsDataLength);
+                }
+                latestTemplateHapticsExpiryQpc = hapticsExpiryQpc;
+
+                var command = new OutboundCommand(
+                    MessageKind.QueueRealtimeHaptics, payload);
+                realtimeHapticsCommands.Enqueue(command);
+            }
+
+            outboundAvailable.Set();
+            return true;
         }
 
         private bool UpdateTemplateCore(byte[] latestCombinedReport,
-            long hapticsExpiryQpc, bool realtimeHaptics)
+            long hapticsExpiryQpc)
         {
             if (latestCombinedReport == null ||
                 latestCombinedReport.Length != ReportLength || !IsRunning)
@@ -941,9 +981,7 @@ namespace DS4Windows.InputDevices
 
                 var command = new OutboundCommand(MessageKind.UpdateTemplate,
                     BuildTemplatePayload(copy, hapticsExpiryQpc));
-                bool queued = realtimeHaptics ?
-                    outboundCommands.TryEnqueueFront(command) :
-                    outboundCommands.TryEnqueue(command);
+                bool queued = outboundCommands.TryEnqueue(command);
                 if (!queued)
                 {
                     return false;
@@ -1065,8 +1103,7 @@ namespace DS4Windows.InputDevices
                 };
                 if (!outboundCommands.TryReplaceWhereWithGroup(command =>
                         command.Kind == MessageKind.UpdateMicrophoneStatus ||
-                        command.Kind == MessageKind.UpdateTemplate ||
-                        command.Kind == MessageKind.UpdateControllerState,
+                        command.Kind == MessageKind.UpdateTemplate,
                     transition))
                 {
                     return false;
@@ -1075,7 +1112,10 @@ namespace DS4Windows.InputDevices
                 // Intent is deliberately first: the helper freezes the
                 // physical media header in its committed mode before the new
                 // template can reach presentation. Native 0x32 then consumes
-                // one ordered media interval at the reserved boundary.
+                // one ordered media interval at the reserved boundary. An
+                // independently queued controller-state transition remains in
+                // FIFO order; microphone reconfiguration must never delete a
+                // pending rumble stop, trigger, or LED update.
                 latestTemplate = template;
                 latestTemplateHapticsExpiryQpc = hapticsExpiryQpc;
             }
@@ -1149,8 +1189,7 @@ namespace DS4Windows.InputDevices
             const int stateLength =
                 DualSenseBluetoothPhysicalOutputSequence.
                     ControllerStatePayloadLength;
-            byte[] payload = new byte[stateLength + sizeof(long) +
-                ReportLength];
+            byte[] payload = new byte[GameStateAndTemplatePayloadLength];
 
             lock (stateLock)
             {
@@ -1169,11 +1208,12 @@ namespace DS4Windows.InputDevices
                     hapticsExpiryQpc);
                 Buffer.BlockCopy(quiescentTemplate, 0, payload,
                     stateLength + sizeof(long), ReportLength);
-                if (!outboundCommands.TryReplaceNewestOrEnqueue(
-                    command => command.Kind ==
-                        MessageKind.UpdateGameStateAndTemplate,
-                    new OutboundCommand(
-                        MessageKind.UpdateGameStateAndTemplate, payload)))
+                // Do not replace an older game delta in the parent FIFO. The
+                // helper composes validity-masked fields at the physical
+                // boundary; replacing here could erase a rumble stop,
+                // trigger transition, or LED release before it was observed.
+                if (!outboundCommands.TryEnqueue(new OutboundCommand(
+                    MessageKind.UpdateGameStateAndTemplate, payload)))
                 {
                     return false;
                 }
@@ -1201,6 +1241,8 @@ namespace DS4Windows.InputDevices
 
             lock (stateLock)
             {
+                realtimeHapticsCommands.Clear();
+                latestControllerStateAvailable = false;
                 var reset = new OutboundCommand(
                     MessageKind.ResetControllerStateTransitions,
                     Array.Empty<byte>());
@@ -1237,6 +1279,8 @@ namespace DS4Windows.InputDevices
             bool queued = false;
             lock (stateLock)
             {
+                realtimeHapticsCommands.Clear();
+                latestControllerStateAvailable = false;
                 currentEpoch = unchecked(currentEpoch + 1);
                 if (currentEpoch == 0)
                 {
@@ -1250,6 +1294,15 @@ namespace DS4Windows.InputDevices
                     TakePendingCompletionLocked(removed.ReportId,
                         ref completions);
                 }
+
+                // Clear is a lifecycle boundary, not merely an audio-reservoir
+                // flush. Unsent state/reset commands from the old epoch must
+                // not arrive after it and resurrect game-owned effects.
+                outboundCommands.RemoveWhere(command =>
+                    command.Kind == MessageKind.UpdateControllerState ||
+                    command.Kind == MessageKind.UpdateGameStateAndTemplate ||
+                    command.Kind ==
+                        MessageKind.ResetControllerStateTransitions);
 
                 byte[] payload = new byte[sizeof(int)];
                 BinaryPrimitives.WriteInt32LittleEndian(payload, currentEpoch);
@@ -1288,6 +1341,7 @@ namespace DS4Windows.InputDevices
             }
 
             outboundCommands.Clear();
+            realtimeHapticsCommands.Clear();
             List<PendingReportCompletion> completions = null;
             lock (stateLock)
             {
@@ -1338,13 +1392,52 @@ namespace DS4Windows.InputDevices
                 while (Volatile.Read(ref disposed) == 0)
                 {
                     bool sentAny = false;
-                    while (outboundCommands.TryDequeue(out OutboundCommand command))
+                    while (true)
                     {
-                        sentAny = true;
-                        SendFrame(command.Kind, command.Payload);
-                        if (command.Kind == MessageKind.Stop)
+                        OutboundCommand realtimeCommand = null;
+                        OutboundCommand command = null;
+                        lock (stateLock)
                         {
-                            return;
+                            bool lifecycleBarrierQueued = outboundCommands.Any(
+                                candidate => candidate.Kind ==
+                                        MessageKind.Clear ||
+                                    candidate.Kind ==
+                                        MessageKind.
+                                            ResetControllerStateTransitions);
+                            if (!lifecycleBarrierQueued)
+                            {
+                                realtimeHapticsCommands.TryDequeue(
+                                    out realtimeCommand);
+                            }
+                            outboundCommands.TryDequeue(out command);
+                        }
+
+                        if (realtimeCommand != null)
+                        {
+                            SendFrame(realtimeCommand.Kind,
+                                realtimeCommand.Payload);
+                            sentAny = true;
+                        }
+
+                        // Guarantee forward progress for speaker reports and
+                        // HID/lightbar/trigger state even if a producer
+                        // continuously fills the tactile lane. Lifecycle
+                        // barriers go first so a new-epoch generation cannot
+                        // overtake the reset that makes it valid; otherwise
+                        // one haptics command goes first each pass.
+                        if (command != null)
+                        {
+                            SendFrame(command.Kind, command.Payload);
+                            sentAny = true;
+                            if (command.Kind == MessageKind.Stop)
+                            {
+                                return;
+                            }
+                        }
+
+                        if (realtimeCommand == null && command == null)
+                        {
+                            break;
                         }
                     }
 
@@ -1696,6 +1789,21 @@ namespace DS4Windows.InputDevices
             return payload;
         }
 
+        private static byte[] BuildRealtimeHapticsPayload(byte[] template,
+            int epoch, long hapticsExpiryQpc)
+        {
+            byte[] payload = new byte[sizeof(int) + sizeof(long) +
+                RealtimeHapticsDataLength];
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0,
+                sizeof(int)), epoch);
+            BinaryPrimitives.WriteInt64LittleEndian(
+                payload.AsSpan(sizeof(int), sizeof(long)),
+                hapticsExpiryQpc);
+            Buffer.BlockCopy(template, RealtimeHapticsDataOffset, payload,
+                sizeof(int) + sizeof(long), RealtimeHapticsDataLength);
+            return payload;
+        }
+
         private static bool TryParseHelperArguments(string[] args,
             out string commandPipeName, out string responsePipeName,
             out Guid authenticationToken,
@@ -1768,6 +1876,7 @@ namespace DS4Windows.InputDevices
             }
 
             outboundCommands.Clear();
+            realtimeHapticsCommands.Clear();
             List<PendingReportCompletion> completions = null;
             lock (stateLock)
             {
@@ -2174,8 +2283,12 @@ namespace DS4Windows.InputDevices
             private readonly Thread acknowledgementThread;
             private readonly byte[] commandHeader =
                 new byte[sizeof(byte) + sizeof(int)];
+            // QueueReport is 418 bytes, but the atomic native-game command is
+            // 47-byte state + expiry + 398-byte template (453 bytes). The old
+            // QueueReport-sized buffer rejected every complete game command
+            // before it reached the unified physical compositor.
             private readonly byte[] commandPayload = new byte[
-                sizeof(long) + sizeof(int) + sizeof(long) + ReportLength];
+                GameStateAndTemplatePayloadLength];
 
             private readonly byte[] latestTemplate = new byte[ReportLength];
             private readonly byte[] previousTemplate = new byte[ReportLength];
@@ -2192,8 +2305,21 @@ namespace DS4Windows.InputDevices
             private readonly byte[] pendingControllerState = new byte[
                 DualSenseBluetoothPhysicalOutputSequence.
                     ControllerStatePayloadLength];
+            private readonly byte[] controllerStatePresentation = new byte[
+                DualSenseBluetoothPhysicalOutputSequence.
+                    ControllerStatePayloadLength];
             private readonly DualSenseNativeStateTransitionFilter
                 physicalStateTransitionFilter = new();
+            private readonly DualSenseNativeStateTransitionFilter.Snapshot
+                physicalStateTransitionBackup = new();
+            private readonly byte[] physicalStatePayloadBackup = new byte[
+                DualSenseBluetoothPhysicalOutputSequence.
+                    ControllerStatePayloadLength];
+            private readonly DualSenseRealtimeHapticsPresentationQueue
+                realtimeHaptics = new(
+                    RealtimeHapticsQueueCapacity,
+                    RealtimeHapticsDataOffset,
+                    RealtimeHapticsDataLength);
             private readonly bool useMeasuredTransportAudioTransport;
             private readonly bool useCompactCombinedHapticsTransport;
             private readonly bool useNativeAudioTransport;
@@ -2358,6 +2484,10 @@ namespace DS4Windows.InputDevices
                                 break;
                             case MessageKind.UpdateTemplate:
                                 ReceiveTemplate(commandPayload, payloadLength);
+                                break;
+                            case MessageKind.QueueRealtimeHaptics:
+                                ReceiveRealtimeHaptics(commandPayload,
+                                    payloadLength);
                                 break;
                             case MessageKind.Clear:
                                 ReceiveClear(commandPayload, payloadLength);
@@ -2541,6 +2671,37 @@ namespace DS4Windows.InputDevices
                 }
             }
 
+            private void ReceiveRealtimeHaptics(byte[] payload,
+                int payloadLength)
+            {
+                int expectedLength = sizeof(int) + sizeof(long) +
+                    RealtimeHapticsDataLength;
+                if (payloadLength != expectedLength)
+                {
+                    throw new InvalidDataException(
+                        "Invalid realtime DualSense haptics payload length.");
+                }
+
+                int epoch = BinaryPrimitives.ReadInt32LittleEndian(
+                    payload.AsSpan(0, sizeof(int)));
+                long hapticsExpiryQpc =
+                    BinaryPrimitives.ReadInt64LittleEndian(
+                        payload.AsSpan(sizeof(int), sizeof(long)));
+                lock (stateLock)
+                {
+                    if (epoch != currentEpoch)
+                    {
+                        return;
+                    }
+
+                    realtimeHaptics.Enqueue(payload,
+                        sizeof(int) + sizeof(long),
+                        hapticsExpiryQpc);
+                }
+
+                reservoirChanged.Set();
+            }
+
             private void ReceiveClear(byte[] payload, int payloadLength)
             {
                 if (payloadLength != sizeof(int))
@@ -2551,6 +2712,11 @@ namespace DS4Windows.InputDevices
                 int epoch = BinaryPrimitives.ReadInt32LittleEndian(payload);
                 lock (stateLock)
                 {
+                    realtimeHaptics.Reset(silenceFutureReports: true);
+                    physicalStateTransitionFilter.Reset();
+                    pendingControllerStateAvailable = false;
+                    controllerStateReportsAhead = 0;
+                    lastControllerStateSubmissionQpc = 0;
                     currentEpoch = epoch;
                     primeRequired = true;
                     Volatile.Write(ref controllerMediaBufferLevel, -1);
@@ -2574,10 +2740,6 @@ namespace DS4Windows.InputDevices
                         !useNativeAudioTransport)
                     {
                         microphoneStatusReportsAhead = 0;
-                    }
-                    if (pendingControllerStateAvailable)
-                    {
-                        controllerStateReportsAhead = 0;
                     }
                 }
 
@@ -2765,8 +2927,16 @@ namespace DS4Windows.InputDevices
                                 microphoneStatusReportsAhead);
                         }
                     }
-                    Buffer.BlockCopy(payload, 0, pendingControllerState, 0,
-                        payloadLength);
+                    if (pendingControllerStateAvailable)
+                    {
+                        DualSensePendingGameStateComposer.Merge(
+                            pendingControllerState, payload, 0);
+                    }
+                    else
+                    {
+                        Buffer.BlockCopy(payload, 0, pendingControllerState,
+                            0, payloadLength);
+                    }
                     pendingControllerStateAvailable = true;
                 }
 
@@ -2924,9 +3094,16 @@ namespace DS4Windows.InputDevices
                                 }
                                 else
                                 {
+                                    Buffer.BlockCopy(pendingControllerState, 0,
+                                        controllerStatePresentation, 0,
+                                        controllerStatePresentation.Length);
+                                    physicalStateTransitionFilter.Capture(
+                                        physicalStateTransitionBackup);
+                                    physicalStateTransitionFilter.Filter(
+                                        controllerStatePresentation, 0);
                                     physicalOutputSequence.
                                         PrepareControllerState(
-                                            pendingControllerState,
+                                            controllerStatePresentation,
                                             initializationTemplate,
                                             controllerStateReport);
                                     accepted = writer.TryWrite(
@@ -2944,6 +3121,14 @@ namespace DS4Windows.InputDevices
                                         RecordPresentationTrace(
                                             controllerStateReport, nowQpc,
                                             reservoir.Count);
+                                    }
+                                    else
+                                    {
+                                        // The candidate was not accepted by
+                                        // HidBth, so none of its validity
+                                        // transitions have been consumed.
+                                        physicalStateTransitionFilter.Restore(
+                                            physicalStateTransitionBackup);
                                     }
                                 }
                             }
@@ -3377,6 +3562,16 @@ namespace DS4Windows.InputDevices
                                     // transition rather than stale producer state.
                                     ApplyCommittedMicrophoneMode(item.Report,
                                         presentationMicrophoneEnabled);
+
+                                    // Rear-channel audio is a sequence of
+                                    // complete 512-frame waveforms, not a
+                                    // mutable state bit. Bind the oldest live
+                                    // generation to this exact physical media
+                                    // interval after template/state composition.
+                                    // A rejected HID write retains both this
+                                    // report and this haptics generation.
+                                    realtimeHaptics.PrepareForPresentation(
+                                        item.Report, presentedAt);
                                 }
 
                                 // Filter at the last mutable boundary, after
@@ -3386,6 +3581,13 @@ namespace DS4Windows.InputDevices
                                 // template patch to resurrect validity strobes
                                 // for player LEDs, triggers, and other stateful
                                 // commands on every media frame.
+                                physicalStateTransitionFilter.Capture(
+                                    physicalStateTransitionBackup);
+                                Buffer.BlockCopy(item.Report,
+                                    DualSenseBluetoothPhysicalOutputSequence.
+                                        ControllerStateSourceOffset,
+                                    physicalStatePayloadBackup, 0,
+                                    physicalStatePayloadBackup.Length);
                                 physicalStateTransitionFilter.Filter(
                                     item.Report,
                                     DualSenseBluetoothPhysicalOutputSequence.
@@ -3472,11 +3674,32 @@ namespace DS4Windows.InputDevices
                                         pairedItem != null, controlOnly,
                                         accepted, transportFault);
 
+                                if (!accepted)
+                                {
+                                    // Filtering is a transaction against the
+                                    // physical write. A rejected or deliberately
+                                    // skipped report did not consume any LED,
+                                    // trigger, lightbar, or effect transition.
+                                    physicalStateTransitionFilter.Restore(
+                                        physicalStateTransitionBackup);
+                                    Buffer.BlockCopy(
+                                        physicalStatePayloadBackup, 0,
+                                        item.Report,
+                                        DualSenseBluetoothPhysicalOutputSequence.
+                                            ControllerStateSourceOffset,
+                                        physicalStatePayloadBackup.Length);
+                                }
+
                                 if (accepted ||
                                     skippedSaturatedAudio)
                                 {
                                     physicalOutputSequence.Commit(
                                         pairedItem != null || !controlOnly);
+                                }
+                                if (accepted && pairedItem == null &&
+                                    !controlOnly)
+                                {
+                                    realtimeHaptics.CommitPrepared();
                                 }
 
                                 if (accepted && controllerStatePiggybacked)
@@ -3667,7 +3890,7 @@ namespace DS4Windows.InputDevices
                     DualSenseBluetoothPhysicalOutputSequence.
                         ControllerStatePayloadLength;
                 const int templateOffset = stateLength + sizeof(long);
-                if (payloadLength != templateOffset + ReportLength)
+                if (payloadLength != GameStateAndTemplatePayloadLength)
                 {
                     throw new InvalidDataException(
                         "Invalid atomic DualSense game-state/template payload length.");
@@ -3684,8 +3907,16 @@ namespace DS4Windows.InputDevices
                     latestTemplateHapticsExpiryQpc = hapticsExpiryQpc;
                     latestTemplateAvailable = true;
 
-                    Buffer.BlockCopy(payload, 0, pendingControllerState, 0,
-                        stateLength);
+                    if (pendingControllerStateAvailable)
+                    {
+                        DualSensePendingGameStateComposer.Merge(
+                            pendingControllerState, payload, 0);
+                    }
+                    else
+                    {
+                        Buffer.BlockCopy(payload, 0,
+                            pendingControllerState, 0, stateLength);
+                    }
                     pendingControllerStateAvailable = true;
                     // A V5 media generation consumes this state atomically on
                     // its next due slot. With no media pending, the normal
@@ -3707,6 +3938,7 @@ namespace DS4Windows.InputDevices
 
                 lock (stateLock)
                 {
+                    realtimeHaptics.Reset(silenceFutureReports: true);
                     physicalStateTransitionFilter.Reset();
                     pendingControllerStateAvailable = false;
                     controllerStateReportsAhead = 0;
@@ -4424,6 +4656,27 @@ namespace DS4Windows.InputDevices
             }
         }
 
+        public bool Any(Predicate<T> predicate)
+        {
+            if (predicate == null)
+            {
+                throw new ArgumentNullException(nameof(predicate));
+            }
+
+            lock (syncRoot)
+            {
+                for (int index = 0; index < count; index++)
+                {
+                    if (predicate(entries[(head + index) % entries.Length]))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        }
+
         public List<T> Clear()
         {
             lock (syncRoot)
@@ -4992,6 +5245,18 @@ namespace DS4Windows.InputDevices
             RestoreFieldWhenMissing(destination, previous, 0, 0x04, 10, 11);
             RestoreFieldWhenMissing(destination, previous, 0, 0x08, 21, 11);
 
+            // Locally owned PlayStation audio and status controls are also
+            // validity-masked state. They are normally refreshed on every
+            // media report, but retaining an already pending change makes the
+            // accumulator correct for control-only and startup transitions.
+            RestoreFieldWhenMissing(destination, previous, 0, 0x10, 4, 1);
+            RestoreFieldWhenMissing(destination, previous, 0, 0x20, 5, 1);
+            RestoreFieldWhenMissing(destination, previous, 0, 0x40, 6, 1);
+            RestoreFieldWhenMissing(destination, previous, 0, 0x80, 7, 1);
+            RestoreFieldWhenMissing(destination, previous, 1, 0x01, 8, 1);
+            RestoreFieldWhenMissing(destination, previous, 1, 0x02, 9, 1);
+            RestoreFieldWhenMissing(destination, previous, 1, 0x80, 37, 1);
+
             RestoreFieldWhenMissing(destination, previous, 1, 0x20, 39, 1);
             RestoreFieldWhenMissing(destination, previous, 1, 0x40, 36, 1);
 
@@ -5037,6 +5302,153 @@ namespace DS4Windows.InputDevices
                 (byte)(previous[flagOffset] & validityMask);
             previous.Slice(payloadOffset, payloadLength).CopyTo(
                 destination.AsSpan(payloadOffset, payloadLength));
+        }
+    }
+
+    /// <summary>
+    /// Keeps completed rear-channel generations ordered until the exact
+    /// physical media report that will carry them is accepted. Its capacity
+    /// matches the speaker reservoir, so both media lanes survive the same
+    /// bounded host scheduling pause without dropping, duplicating, or
+    /// reordering a tactile generation.
+    /// </summary>
+    internal sealed class DualSenseRealtimeHapticsPresentationQueue
+    {
+        private readonly byte[] frames;
+        private readonly long[] expiryQpc;
+        private readonly int capacity;
+        private readonly int reportOffset;
+        private readonly int frameLength;
+        private int head;
+        private int count;
+        private bool prepared;
+        private bool hasReceivedGeneration;
+
+        internal int Count => count;
+        internal bool HasPreparedGeneration => prepared;
+
+        internal DualSenseRealtimeHapticsPresentationQueue(int capacity,
+            int reportOffset, int frameLength)
+        {
+            if (capacity <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(capacity));
+            }
+            if (reportOffset < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(reportOffset));
+            }
+            if (frameLength <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(frameLength));
+            }
+
+            this.capacity = capacity;
+            this.reportOffset = reportOffset;
+            this.frameLength = frameLength;
+            frames = new byte[capacity * frameLength];
+            expiryQpc = new long[capacity];
+        }
+
+        internal void Enqueue(byte[] source, int offset,
+            long hapticsExpiryQpc)
+        {
+            if (source == null || offset < 0 ||
+                offset + frameLength > source.Length)
+            {
+                throw new ArgumentException(
+                    "Realtime haptics source does not contain one complete generation.",
+                    nameof(source));
+            }
+
+            hasReceivedGeneration = true;
+            int destination;
+            if (count == capacity)
+            {
+                // The haptics clock and speaker clock produce one generation
+                // per physical interval and share the same reservoir bound.
+                // Overflow therefore proves a broken media contract; never
+                // conceal it by deleting or replacing tactile samples.
+                throw new InvalidOperationException(
+                    "Realtime haptics exceeded the unified media reservoir.");
+            }
+            else
+            {
+                destination = (head + count) % capacity;
+                count++;
+            }
+
+            Buffer.BlockCopy(source, offset, frames,
+                destination * frameLength, frameLength);
+            expiryQpc[destination] = hapticsExpiryQpc;
+        }
+
+        internal bool PrepareForPresentation(byte[] report, long nowQpc)
+        {
+            if (report == null || reportOffset + frameLength > report.Length)
+            {
+                throw new ArgumentException(
+                    "Physical report cannot carry the realtime haptics generation.",
+                    nameof(report));
+            }
+
+            if (reportOffset < 2 || frameLength > byte.MaxValue)
+            {
+                throw new InvalidOperationException(
+                    "Realtime haptics layout cannot encode its TLV header.");
+            }
+
+            if (count == 0)
+            {
+                prepared = false;
+                if (hasReceivedGeneration)
+                {
+                    // Never replay the previous waveform after its ordered
+                    // zero/release boundary has drained.
+                    report[reportOffset - 2] = 0x92;
+                    report[reportOffset - 1] = (byte)frameLength;
+                    Array.Clear(report, reportOffset, frameLength);
+                }
+                return false;
+            }
+
+            prepared = true;
+            report[reportOffset - 2] = 0x92;
+            report[reportOffset - 1] = (byte)frameLength;
+            if (expiryQpc[head] <= nowQpc)
+            {
+                Array.Clear(report, reportOffset, frameLength);
+            }
+            else
+            {
+                Buffer.BlockCopy(frames, head * frameLength, report,
+                    reportOffset, frameLength);
+            }
+            return true;
+        }
+
+        internal void CommitPrepared()
+        {
+            if (!prepared || count == 0)
+            {
+                return;
+            }
+
+            Array.Clear(frames, head * frameLength, frameLength);
+            expiryQpc[head] = 0;
+            head = (head + 1) % capacity;
+            count--;
+            prepared = false;
+        }
+
+        internal void Reset(bool silenceFutureReports = false)
+        {
+            Array.Clear(frames, 0, frames.Length);
+            Array.Clear(expiryQpc, 0, expiryQpc.Length);
+            head = 0;
+            count = 0;
+            prepared = false;
+            hasReceivedGeneration = silenceFutureReports;
         }
     }
 

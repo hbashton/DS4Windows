@@ -183,6 +183,23 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void RingDetectsQueuedLifecycleBarrierWithoutChangingOrder()
+        {
+            var ring = new DualSenseBluetoothAudioPacerRing<int>(4);
+            Assert.IsTrue(ring.TryEnqueue(10));
+            Assert.IsTrue(ring.TryEnqueue(20));
+            Assert.IsTrue(ring.TryEnqueue(30));
+
+            Assert.IsTrue(ring.Any(value => value == 20));
+            Assert.IsFalse(ring.Any(value => value == 40));
+            foreach (int expected in new[] { 10, 20, 30 })
+            {
+                Assert.IsTrue(ring.TryDequeue(out int actual));
+                Assert.AreEqual(expected, actual);
+            }
+        }
+
+        [TestMethod]
         public void PairedReportPreservesBothSequentialAudioFrames()
         {
             byte[] first = CreateSpeakerReport(0x11, 0x21, 0x31);
@@ -981,6 +998,44 @@ namespace DS4WindowsTests
             filter.Filter(restore, 0);
             Assert.AreEqual((byte)0x10, restore[1],
                 "The same LED value must be sent again after game release.");
+        }
+
+        [TestMethod]
+        public void NativeStateFilterRollbackPreservesRejectedTransition()
+        {
+            byte[] triggerAndLed = new byte[47];
+            triggerAndLed[0] = 0x04;
+            triggerAndLed[1] = 0x14;
+            triggerAndLed[10] = 0x26;
+            triggerAndLed[11] = 0x10;
+            triggerAndLed[43] = 0x04;
+            triggerAndLed[44] = 0x12;
+            triggerAndLed[45] = 0x34;
+            triggerAndLed[46] = 0x56;
+
+            var filter = new DualSenseNativeStateTransitionFilter();
+            var snapshot = new
+                DualSenseNativeStateTransitionFilter.Snapshot();
+            filter.Capture(snapshot);
+            byte[] rejected = (byte[])triggerAndLed.Clone();
+            filter.Filter(rejected, 0);
+
+            // The physical writer rejected this candidate. Restore the
+            // pre-filter latch before composing the retained retry.
+            filter.Restore(snapshot);
+            byte[] retry = (byte[])triggerAndLed.Clone();
+            filter.Filter(retry, 0);
+
+            Assert.AreEqual((byte)0x04, retry[0],
+                "Rejected adaptive-trigger state was consumed before retry.");
+            Assert.AreEqual((byte)0x14, retry[1],
+                "Rejected player/lightbar state was consumed before retry.");
+
+            byte[] duplicateAfterAcceptance =
+                (byte[])triggerAndLed.Clone();
+            filter.Filter(duplicateAfterAcceptance, 0);
+            Assert.AreEqual((byte)0x00, duplicateAfterAcceptance[0]);
+            Assert.AreEqual((byte)0x00, duplicateAfterAcceptance[1]);
         }
 
         [TestMethod]

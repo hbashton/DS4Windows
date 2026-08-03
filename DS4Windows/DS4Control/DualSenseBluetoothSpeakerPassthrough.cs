@@ -1059,11 +1059,14 @@ namespace DS4Windows
                         return;
                     }
 
-                    Buffer.BlockCopy(payload, feedbackOffset, atomicFeedback,
-                        0, feedbackLength);
-                    source.ApplyAtomicAudioHapticsFeedback(atomicFeedback,
-                        feedbackLength, targetDeviceIndex);
-                    Interlocked.Increment(ref atomicFeedbackApplied);
+                    if (!source.SupportsRealtimeHaptics)
+                    {
+                        Buffer.BlockCopy(payload, feedbackOffset,
+                            atomicFeedback, 0, feedbackLength);
+                        source.ApplyAtomicAudioHapticsFeedback(atomicFeedback,
+                            feedbackLength, targetDeviceIndex);
+                        Interlocked.Increment(ref atomicFeedbackApplied);
+                    }
                     ProcessDirectSpeakerPcmLocked(source, payload,
                         speakerPcmOffset, speakerPcmLength, callbackEntered);
                 }

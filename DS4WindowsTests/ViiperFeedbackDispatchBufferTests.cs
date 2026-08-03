@@ -291,6 +291,10 @@ namespace DS4Windows.Tests
             Assert.IsFalse(ViiperOutDevice.CanDispatchVirtualSpeaker(
                 streamUsesAtomicFrames: false, hasPcmSubscriber: false,
                 hasAtomicSubscriber: true));
+            Assert.IsTrue(ViiperOutDevice.CanDispatchVirtualSpeaker(
+                streamUsesAtomicFrames: true, hasPcmSubscriber: false,
+                hasAtomicSubscriber: false, hasRealtimeHaptics: true),
+                "A completed game-haptics generation must not wait for a speaker subscriber.");
         }
 
         [TestMethod]

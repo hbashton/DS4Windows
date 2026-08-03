@@ -151,10 +151,12 @@ namespace DS4Windows
         private const byte ViiperStreamFrameOutputState = 0x81;
         private const byte ViiperStreamFrameSpeakerPcm = 0x82;
         private const byte ViiperStreamFrameAtomicAudioHaptics = 0x83;
+        private const byte ViiperStreamFrameRealtimeHaptics = 0x84;
         private const byte ViiperStreamFrameVersionV3 = 0x03;
         private const byte ViiperStreamFrameVersionV5 = 0x05;
         private const byte FeedbackSpeakerKindPcm = 0;
         private const byte FeedbackSpeakerKindAtomicAudioHaptics = 1;
+        private const byte FeedbackSpeakerKindRealtimeHaptics = 2;
         private const int AtomicAudioHapticsFeedbackLengthPrefix = 2;
         private const int MaxStreamRecoveryAttempts = 8;
         private const int InitialStreamRecoveryBackoffMilliseconds = 50;
@@ -282,6 +284,7 @@ namespace DS4Windows
         private bool activeStreamSupportsMicrophone;
         private bool activeStreamSupportsDirectSpeaker;
         private bool activeStreamSupportsAtomicAudioHaptics;
+        private bool activeStreamSupportsRealtimeHaptics;
         private bool activeStreamUsesV5AudioSource;
         private bool activeStreamUsesAudioOnlyDescriptor;
         private byte activeStreamFrameVersion;
@@ -455,10 +458,13 @@ namespace DS4Windows
 
         internal static bool CanDispatchVirtualSpeaker(
             bool streamUsesAtomicFrames, bool hasPcmSubscriber,
-            bool hasAtomicSubscriber)
+            bool hasAtomicSubscriber,
+            bool hasRealtimeHaptics = false)
         {
-            return streamUsesAtomicFrames ?
-                hasAtomicSubscriber || hasPcmSubscriber : hasPcmSubscriber;
+            return hasRealtimeHaptics ||
+                (streamUsesAtomicFrames ?
+                    hasAtomicSubscriber || hasPcmSubscriber :
+                    hasPcmSubscriber);
         }
 
         internal static bool TryGetAtomicAudioHapticsLayout(byte[] payload,
@@ -558,6 +564,9 @@ namespace DS4Windows
 
         internal bool SupportsAtomicAudioHaptics =>
             connected && activeStreamSupportsAtomicAudioHaptics;
+
+        internal bool SupportsRealtimeHaptics =>
+            connected && activeStreamSupportsRealtimeHaptics;
 
         /// <summary>
         /// V5 carries untouched 48 kHz front-channel PCM in exact 480-frame
@@ -736,6 +745,7 @@ namespace DS4Windows
             activeStreamSupportsMicrophone = false;
             activeStreamSupportsDirectSpeaker = false;
             activeStreamSupportsAtomicAudioHaptics = false;
+            activeStreamSupportsRealtimeHaptics = false;
             activeStreamUsesV5AudioSource = false;
             activeStreamUsesAudioOnlyDescriptor = false;
             activeStreamFrameVersion = 0;
@@ -753,6 +763,7 @@ namespace DS4Windows
                 activeStreamSupportsMicrophone = !gamepadOnly;
                 activeStreamSupportsDirectSpeaker = !gamepadOnly;
                 activeStreamSupportsAtomicAudioHaptics = !gamepadOnly;
+                activeStreamSupportsRealtimeHaptics = !gamepadOnly;
                 activeStreamUsesV5AudioSource = !gamepadOnly;
                 activeStreamUsesAudioOnlyDescriptor = audioOnlySidecar;
                 activeStreamFrameVersion = ViiperStreamFrameVersionV5;
@@ -769,6 +780,7 @@ namespace DS4Windows
                 activeStreamSupportsMicrophone = !gamepadOnly;
                 activeStreamSupportsDirectSpeaker = !gamepadOnly;
                 activeStreamSupportsAtomicAudioHaptics = !gamepadOnly;
+                activeStreamSupportsRealtimeHaptics = !gamepadOnly;
                 activeStreamUsesV5AudioSource = !gamepadOnly;
                 activeStreamFrameVersion = ViiperStreamFrameVersionV5;
                 return stream;
@@ -1351,7 +1363,8 @@ namespace DS4Windows
                         GetVirtualAtomicAudioHapticsSubscriber();
                     bool subscriberAvailable = CanDispatchVirtualSpeaker(
                         activeStreamSupportsAtomicAudioHaptics,
-                        subscriber != null, atomicSubscriber != null);
+                        subscriber != null, atomicSubscriber != null,
+                        activeStreamSupportsRealtimeHaptics);
                     if (!subscriberAvailable)
                     {
                         if (feedbackDispatchBuffer.PendingSpeakerCount > 0)
@@ -1443,8 +1456,35 @@ namespace DS4Windows
                                         speakerPcmLength);
                                 }
                             }
+                            else if (speakerKind ==
+                                FeedbackSpeakerKindRealtimeHaptics)
+                            {
+                                if (!activeStreamSupportsRealtimeHaptics ||
+                                    length !=
+                                        DualSenseCombinedExtendedFeedbackLength)
+                                {
+                                    Interlocked.Increment(
+                                        ref feedbackSpeakerStale);
+                                    continue;
+                                }
+
+                                // This frame is already one complete native
+                                // rear-channel generation. Publish it straight
+                                // into the physical compositor template; the
+                                // helper merges it atomically into the next
+                                // controller-clocked report immediately before
+                                // CRC and the single HID write.
+                                ApplyAtomicAudioHapticsFeedback(payload,
+                                    length, targetDeviceIndex);
+                            }
                             else
                             {
+                                if (subscriber == null)
+                                {
+                                    Interlocked.Increment(
+                                        ref feedbackSpeakerStale);
+                                    continue;
+                                }
                                 subscriber(this, payload, length);
                             }
                             Interlocked.Increment(ref feedbackSpeakerDelivered);
@@ -2833,6 +2873,24 @@ namespace DS4Windows
                                     AppLogger.LogToGui(
                                         $"VIIPER atomic media rejected: bus={stream.BusId} device={stream.DevId} sidecar={audioOnlySidecar} payload={payloadLength} feedback={atomicFeedbackLength} pcm={speakerPcmLength} pending={feedbackDispatchBuffer.PendingSpeakerCount}",
                                         true);
+                                }
+                            }
+                            else if (frameType ==
+                                    ViiperStreamFrameRealtimeHaptics &&
+                                activeStreamSupportsRealtimeHaptics &&
+                                payloadLength ==
+                                    DualSenseCombinedExtendedFeedbackLength &&
+                                framedPayload[
+                                    DualSenseCombinedBluetoothReportOffset] ==
+                                    0x36)
+                            {
+                                if (feedbackDispatchBuffer.TryEnqueueSpeaker(
+                                    framedPayload, payloadLength,
+                                    readStreamGeneration,
+                                    FeedbackSpeakerKindRealtimeHaptics,
+                                    Volatile.Read(ref lastInputDeviceIndex)))
+                                {
+                                    feedbackSpeakerSignal.Set();
                                 }
                             }
                         }

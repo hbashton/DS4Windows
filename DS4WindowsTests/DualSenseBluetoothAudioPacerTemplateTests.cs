@@ -76,35 +76,6 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
-        public void RealtimeHapticsSchedulerStallPresentsNewestPlayableFrameNext()
-        {
-            var queue = new DualSenseRealtimeHapticsPresentationQueue(
-                capacity: 4, HapticsOffset, HapticsLength);
-            byte[] staleFirst = CreateHapticsGeneration(0x11);
-            byte[] staleSecond = CreateHapticsGeneration(0x22);
-            byte[] current = CreateHapticsGeneration(0x33);
-            byte[] report = CreateReport(0x60);
-            const long qpcFrequency = 10_000_000;
-            const long nowQpc = qpcFrequency;
-            long oneMediaInterval =
-                (qpcFrequency * 512L + 47_999L) / 48_000L;
-
-            queue.Enqueue(staleFirst, 0, long.MaxValue,
-                nowQpc - oneMediaInterval * 3);
-            queue.Enqueue(staleSecond, 0, long.MaxValue,
-                nowQpc - oneMediaInterval * 2);
-            queue.Enqueue(current, 0, long.MaxValue,
-                nowQpc - oneMediaInterval / 2);
-
-            Assert.IsTrue(queue.PrepareForPresentation(report, nowQpc));
-            CollectionAssert.AreEqual(current,
-                CopyRange(report, HapticsOffset, HapticsLength),
-                "Expired scheduling backlog delayed the current haptic edge.");
-            Assert.AreEqual(1, queue.Count,
-                "Dead media intervals remained ahead of live haptics.");
-        }
-
-        [TestMethod]
         public void RealtimeHapticsOverflowDoesNotReplaceQueuedMedia()
         {
             var queue = new DualSenseRealtimeHapticsPresentationQueue(

@@ -902,6 +902,26 @@ namespace DS4Windows.InputDevices
         public bool UpdateTemplate(byte[] latestCombinedReport,
             long hapticsExpiryQpc)
         {
+            return UpdateTemplateCore(latestCombinedReport,
+                hapticsExpiryQpc, realtimeHaptics: false);
+        }
+
+        /// <summary>
+        /// Publishes a completed rear-channel generation ahead of already
+        /// queued speaker commands. The helper still patches it only at the
+        /// physical presentation boundary, preserving one atomic HID writer,
+        /// but the haptics edge no longer waits behind the host reservoir.
+        /// </summary>
+        public bool UpdateRealtimeHapticsTemplate(
+            byte[] latestCombinedReport, long hapticsExpiryQpc)
+        {
+            return UpdateTemplateCore(latestCombinedReport,
+                hapticsExpiryQpc, realtimeHaptics: true);
+        }
+
+        private bool UpdateTemplateCore(byte[] latestCombinedReport,
+            long hapticsExpiryQpc, bool realtimeHaptics)
+        {
             if (latestCombinedReport == null ||
                 latestCombinedReport.Length != ReportLength || !IsRunning)
             {
@@ -919,9 +939,12 @@ namespace DS4Windows.InputDevices
                     // Template commands do not consume report credits.
                 }
 
-                if (!outboundCommands.TryEnqueue(new OutboundCommand(
-                    MessageKind.UpdateTemplate,
-                    BuildTemplatePayload(copy, hapticsExpiryQpc))))
+                var command = new OutboundCommand(MessageKind.UpdateTemplate,
+                    BuildTemplatePayload(copy, hapticsExpiryQpc));
+                bool queued = realtimeHaptics ?
+                    outboundCommands.TryEnqueueFront(command) :
+                    outboundCommands.TryEnqueue(command);
+                if (!queued)
                 {
                     return false;
                 }

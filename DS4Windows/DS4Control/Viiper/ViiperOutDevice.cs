@@ -2884,14 +2884,14 @@ namespace DS4Windows
                                     DualSenseCombinedBluetoothReportOffset] ==
                                     0x36)
                             {
-                                if (feedbackDispatchBuffer.TryEnqueueSpeaker(
-                                    framedPayload, payloadLength,
-                                    readStreamGeneration,
-                                    FeedbackSpeakerKindRealtimeHaptics,
-                                    Volatile.Read(ref lastInputDeviceIndex)))
-                                {
-                                    feedbackSpeakerSignal.Set();
-                                }
+                                // This is a complete 512-frame rear-channel
+                                // generation, not ordinary control or speaker
+                                // work. Apply it on the framed reader boundary
+                                // so it cannot age behind the 480-frame media
+                                // queue before the physical compositor sees it.
+                                ApplyAtomicAudioHapticsFeedback(framedPayload,
+                                    payloadLength,
+                                    Volatile.Read(ref lastInputDeviceIndex));
                             }
                         }
                         finally

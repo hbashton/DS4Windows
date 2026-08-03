@@ -1660,7 +1660,8 @@ namespace DS4Windows.InputDevices
         }
 
         private bool TryUpdateBluetoothAudioPacerTemplate(byte[] template,
-            long hapticsExpiryQpc, out bool pacerOwnsTransport)
+            long hapticsExpiryQpc, out bool pacerOwnsTransport,
+            bool realtimeHaptics = false)
         {
             pacerOwnsTransport = false;
             lock (bluetoothAudioPacerLock)
@@ -1683,8 +1684,11 @@ namespace DS4Windows.InputDevices
 
                 // The complete mutable controller state lives in the native
                 // 0x36 snapshot. Never create a second physical 0x31 lane.
-                return bluetoothAudioPacer.UpdateTemplate(template,
-                    hapticsExpiryQpc);
+                return realtimeHaptics ?
+                    bluetoothAudioPacer.UpdateRealtimeHapticsTemplate(
+                        template, hapticsExpiryQpc) :
+                    bluetoothAudioPacer.UpdateTemplate(template,
+                        hapticsExpiryQpc);
             }
         }
 
@@ -1793,7 +1797,8 @@ namespace DS4Windows.InputDevices
             return presented;
         }
 
-        private bool RefreshBluetoothAudioPacerTemplateFromCache()
+        private bool RefreshBluetoothAudioPacerTemplateFromCache(
+            bool realtimeHaptics = false)
         {
             lock (bluetoothCombinedTransportWriteLock)
             {
@@ -1816,7 +1821,8 @@ namespace DS4Windows.InputDevices
                     speakerVolume, headsetOnlyAudio, headphoneVolume);
                 ApplyBluetoothMicrophoneStreamingRequest(template);
                 bool updated = TryUpdateBluetoothAudioPacerTemplate(template,
-                    hapticsExpiryQpc, out bool pacerOwnsTransport);
+                    hapticsExpiryQpc, out bool pacerOwnsTransport,
+                    realtimeHaptics);
                 if (!pacerOwnsTransport || !updated)
                 {
                     RequestUnifiedBluetoothOutputTransportRecovery();
@@ -1863,7 +1869,8 @@ namespace DS4Windows.InputDevices
 
         private bool TryPublishCachedBluetoothCombinedState(
             bool includeNativeHaptics, string activeStatus,
-            string idleReportDescription, out bool deferredToSpeakerClock)
+            string idleReportDescription, out bool deferredToSpeakerClock,
+            bool realtimeHaptics = false)
         {
             lock (bluetoothCombinedTransportWriteLock)
             {
@@ -1875,7 +1882,8 @@ namespace DS4Windows.InputDevices
                 {
                     deferredToSpeakerClock = true;
                     bool refreshed =
-                        RefreshBluetoothAudioPacerTemplateFromCache();
+                        RefreshBluetoothAudioPacerTemplateFromCache(
+                            realtimeHaptics);
                     LastBluetoothHapticsWriteStatus = refreshed ? activeStatus :
                         $"Could not publish {idleReportDescription} to the active Bluetooth speaker clock.";
                     return refreshed;
@@ -3511,7 +3519,8 @@ namespace DS4Windows.InputDevices
                 activeStatus:
                     "Converted Bluetooth haptics to the next combined speaker-clocked report.",
                 idleReportDescription: "converted haptics",
-                out bool deferredToSpeakerClock);
+                out bool deferredToSpeakerClock,
+                realtimeHaptics: true);
             if (written && !deferredToSpeakerClock)
             {
                 MarkBluetoothCombinedHapticsSubmitted(hapticsGeneration);
@@ -3569,7 +3578,8 @@ namespace DS4Windows.InputDevices
                     activeStatus:
                         "Cached native Bluetooth haptics for the next speaker-clocked frame.",
                     idleReportDescription: "combined haptics/audio",
-                    out bool deferredToSpeakerClock);
+                    out bool deferredToSpeakerClock,
+                    realtimeHaptics: true);
                 if (written && !deferredToSpeakerClock)
                 {
                     MarkBluetoothCombinedHapticsSubmitted(hapticsGeneration);

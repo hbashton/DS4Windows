@@ -336,8 +336,28 @@ namespace DS4Windows
             if (owner != null && owner.IsLoaded)
             {
                 prompt.Owner = owner;
+                prompt.ShowInTaskbar = false;
                 prompt.WindowStartupLocation =
                     WindowStartupLocation.CenterOwner;
+            }
+            else
+            {
+                // Startup prerequisite checks run before MainWindow exists.
+                // In particular, a scheduled "-m" launch has no visible
+                // owner that can surface this modal. Give an unowned prompt
+                // its own taskbar presence and explicitly activate it so the
+                // application cannot appear to have vanished while ShowDialog
+                // waits for input.
+                prompt.ShowInTaskbar = true;
+                prompt.WindowStartupLocation =
+                    WindowStartupLocation.CenterScreen;
+                prompt.ContentRendered += (_, _) =>
+                {
+                    prompt.Topmost = true;
+                    prompt.Activate();
+                    prompt.Topmost = false;
+                    prompt.Focus();
+                };
             }
 
             prompt.ShowDialog();

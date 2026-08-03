@@ -7,7 +7,7 @@
         MaxHeight="720"
         ResizeMode="NoResize"
         WindowStyle="None"
-        ShowInTaskbar="False"
+        ShowInTaskbar="True"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource SurfaceBackgroundColor}"
         Foreground="{DynamicResource ForegroundColor}">

@@ -1644,7 +1644,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void NativeReleaseLedReportRemainsGameOwnedUntilSessionDetach()
+        public void NativeReleaseLedReportReturnsOnlyVisualOwnershipToProfile()
         {
             DualSenseDevice device = CreateBluetoothDevice();
             byte[] native = BuildCombinedControlReport(0, 0, false);
@@ -1675,11 +1675,11 @@ namespace DS4WindowsTests
                 "Profile LED recovery replaced the game's right trigger.");
             Assert.AreEqual((byte)0x22, cached[34],
                 "Profile LED recovery replaced the game's left trigger.");
-            Assert.AreEqual((byte)0xA1, cached[57]);
-            Assert.AreEqual((byte)0xA2, cached[58]);
-            Assert.AreEqual((byte)0xA3, cached[59]);
-            Assert.AreEqual((byte)0x08, (byte)(cached[14] & 0x08),
-                "DS4Windows replaced Sony's game-authored release command before the virtual output session detached.");
+            Assert.AreEqual((byte)0x11, cached[57]);
+            Assert.AreEqual((byte)0x22, cached[58]);
+            Assert.AreEqual((byte)0x33, cached[59]);
+            Assert.AreEqual((byte)0x14, (byte)(cached[14] & 0x1C),
+                "An explicit Sony release did not return visual ownership to the profile.");
         }
 
         [TestMethod]
@@ -1724,7 +1724,12 @@ namespace DS4WindowsTests
             byte[] scratch = new byte[47];
             byte[] lightbar = new byte[48];
             lightbar[0] = 0x02;
+            lightbar[1] = 0x0D;
             lightbar[2] = 0x04;
+            lightbar[3] = 0x66;
+            lightbar[4] = 0x77;
+            lightbar[11] = 0x21;
+            lightbar[22] = 0x22;
             lightbar[45] = 0x21;
             lightbar[46] = 0x43;
             lightbar[47] = 0x65;
@@ -1748,6 +1753,15 @@ namespace DS4WindowsTests
             Assert.AreEqual((byte)0x21, combined[57]);
             Assert.AreEqual((byte)0x43, combined[58]);
             Assert.AreEqual((byte)0x65, combined[59]);
+            Assert.AreEqual((byte)0,
+                (byte)(combined[13] & 0x0F),
+                "An unrelated report replayed stale rumble/trigger validity.");
+            Assert.AreEqual((byte)0, combined[15],
+                "An unrelated report replayed stale rumble strength.");
+            Assert.AreEqual((byte)0, combined[23],
+                "An unrelated report replayed the old right-trigger effect.");
+            Assert.AreEqual((byte)0, combined[34],
+                "An unrelated report replayed the old left-trigger effect.");
 
             byte[] release = new byte[48];
             release[0] = 0x02;

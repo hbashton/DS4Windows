@@ -255,10 +255,6 @@ namespace DS4Windows.InputDevices
             DualSenseBluetoothPhysicalOutputSequence.
                 ControllerStatePayloadLength];
         private bool latestControllerStateAvailable;
-        private readonly byte[] accumulatedGameState = new byte[
-            DualSenseBluetoothPhysicalOutputSequence.
-                ControllerStatePayloadLength];
-        private bool accumulatedGameStateAvailable;
         private long latestTemplateHapticsExpiryQpc;
         private long nextReportId;
         private long acknowledgedReports;
@@ -1135,24 +1131,16 @@ namespace DS4Windows.InputDevices
 
             lock (stateLock)
             {
-                if (!accumulatedGameStateAvailable)
-                {
-                    Buffer.BlockCopy(gameStateReport,
-                        DualSenseBluetoothPhysicalOutputSequence.
-                            ControllerStateSourceOffset,
-                        accumulatedGameState, 0, stateLength);
-                    accumulatedGameStateAvailable = true;
-                }
-                else
-                {
-                    DualSensePendingGameStateComposer.Merge(
-                        accumulatedGameState, gameStateReport,
-                        DualSenseBluetoothPhysicalOutputSequence.
-                            ControllerStateSourceOffset);
-                }
-
-                Buffer.BlockCopy(accumulatedGameState, 0, payload, 0,
-                    stateLength);
+                // The virtual DualSense SET_REPORT is already one complete
+                // validity-masked transition. Never merge it with an older
+                // session-wide command: that resurrects stale rumble and
+                // adaptive-trigger validity when an unrelated report arrives.
+                // The helper's final-boundary transition filter removes only
+                // redundant replays after this exact newest transition lands.
+                Buffer.BlockCopy(gameStateReport,
+                    DualSenseBluetoothPhysicalOutputSequence.
+                        ControllerStateSourceOffset,
+                    payload, 0, stateLength);
                 BinaryPrimitives.WriteInt64LittleEndian(
                     payload.AsSpan(stateLength, sizeof(long)),
                     hapticsExpiryQpc);
@@ -1190,9 +1178,6 @@ namespace DS4Windows.InputDevices
 
             lock (stateLock)
             {
-                Array.Clear(accumulatedGameState, 0,
-                    accumulatedGameState.Length);
-                accumulatedGameStateAvailable = false;
                 var reset = new OutboundCommand(
                     MessageKind.ResetControllerStateTransitions,
                     Array.Empty<byte>());
@@ -5044,17 +5029,17 @@ namespace DS4Windows.InputDevices
         private const int HapticsDataLength = 64;
 
         /// <summary>
-        /// Merges current controller state into one queued media generation.
-        /// The queued report's haptics block and matching expiry remain
-        /// inseparable from that generation. Replacing those bytes with the
-        /// newest template collapses brief ordered effects whenever more than
-        /// one source generation is waiting in the host reservoir.
+        /// Merges a queued audio report with the newest template. When a
+        /// template exists, its matching haptics expiry always wins over the
+        /// queued report's older expiry. The queued expiry is only a fallback
+        /// for a protocol-startup report received before any template.
         /// </summary>
         public static void PatchForPresentation(byte[] queuedReport,
             long queuedHapticsExpiryQpc, byte[] latestTemplate,
             long latestTemplateHapticsExpiryQpc, long nowQpc)
         {
-            long effectiveExpiryQpc = queuedHapticsExpiryQpc;
+            long effectiveExpiryQpc = latestTemplate != null ?
+                latestTemplateHapticsExpiryQpc : queuedHapticsExpiryQpc;
             PatchForPresentation(queuedReport, latestTemplate,
                 effectiveExpiryQpc, nowQpc);
         }
@@ -5079,15 +5064,13 @@ namespace DS4Windows.InputDevices
                 }
 
                 // Preserve queued byte 1 (Sony sequence), bytes 5-9 (speaker
-                // buffer depths), byte 10 (packet counter), bytes 78-141 (the
-                // ordered 0x92 haptics generation), and bytes 142-343 (speaker
-                // TLV + 200-byte Opus frame). A live control-only template uses
-                // the low-latency depth of 16; copying that over a queued
-                // speaker report would replace its independent audio reserve.
-                // Controller state remains newest-wins, but media never does.
+                // buffer depths), byte 10 (packet counter), and bytes 142-343
+                // (speaker TLV + 200-byte Opus frame). A live control-only
+                // template uses the low-latency depth of 16; copying that over
+                // a queued speaker report would replace its independent audio
+                // playback reserve immediately before presentation.
                 Buffer.BlockCopy(latestTemplate, 2, queuedReport, 2, 3);
-                Buffer.BlockCopy(latestTemplate, 11, queuedReport, 11,
-                    HapticsDataOffset - 11);
+                Buffer.BlockCopy(latestTemplate, 11, queuedReport, 11, 131);
             }
 
             if (hapticsExpiryQpc <= nowQpc)

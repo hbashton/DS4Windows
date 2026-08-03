@@ -3713,6 +3713,9 @@ namespace DS4Windows.InputDevices
                 // profile/custom lightbar and audio routing in that case.
                 if (hasNativeGameState)
                 {
+                    int ledOwnershipUpdate =
+                        GetNativeGameLedOwnershipUpdate(report,
+                            offset + BluetoothCombinedStateOffset);
                     MergeControllerStateDeltaIntoV5AudioSnapshot(report,
                         offset + BluetoothCombinedStateOffset,
                         latestBluetoothCombinedSpeakerReport,
@@ -3720,13 +3723,14 @@ namespace DS4Windows.InputDevices
                         bluetoothCombinedNativeStateScratch);
                     latestBluetoothCombinedNativeStateTimestamp =
                         Stopwatch.GetTimestamp();
-                    // Sony's release-LED bit is itself game-authored state: it
-                    // asks the physical controller to release its LEDs, not
-                    // DS4Windows to begin alternating profile state with the
-                    // game's next report. Once a virtual game-output session
-                    // has produced native state, preserve that complete state
-                    // until the virtual output device is detached.
-                    nativeGameLightbarOwnershipReleased = false;
+                    if (ledOwnershipUpdate > 0)
+                    {
+                        nativeGameLightbarOwnershipReleased = false;
+                    }
+                    else if (ledOwnershipUpdate < 0)
+                    {
+                        nativeGameLightbarOwnershipReleased = true;
+                    }
                 }
                 else if (outputReport != null &&
                     outputReport.Length >= 2 +
@@ -3854,13 +3858,22 @@ namespace DS4Windows.InputDevices
                     return false;
                 }
 
+                int ledOwnershipUpdate =
+                    GetNativeGameLedOwnershipUpdate(report, offset + 1);
                 MergeControllerStateDeltaIntoV5AudioSnapshot(report,
                     offset + 1, latestBluetoothCombinedSpeakerReport,
                     BluetoothCombinedStateOffset,
                     bluetoothCombinedNativeStateScratch);
                 latestBluetoothCombinedNativeStateTimestamp =
                     Stopwatch.GetTimestamp();
-                nativeGameLightbarOwnershipReleased = false;
+                if (ledOwnershipUpdate > 0)
+                {
+                    nativeGameLightbarOwnershipReleased = false;
+                }
+                else if (ledOwnershipUpdate < 0)
+                {
+                    nativeGameLightbarOwnershipReleased = true;
+                }
                 return true;
             }
         }
@@ -4018,13 +4031,53 @@ namespace DS4Windows.InputDevices
                 throw new ArgumentOutOfRangeException();
             }
 
-            // Native USB output reports are validity-masked deltas. Keep the
-            // last valid game value for every field that this update does not
-            // mention; copying the 47-byte payload wholesale makes an
-            // unrelated audio or rumble report erase the game's lightbar,
-            // player LEDs, and trigger programs.
-            DualSensePendingGameStateComposer.Merge(scratch, source,
-                sourceOffset);
+            // Native USB output reports are validity-masked deltas, but only
+            // the visible LED state is persistent here. Rumble and adaptive
+            // trigger validity bits are commands: retaining them across an
+            // unrelated report replays an old effect and can make the
+            // physical controls feel stuck. Preserve the last game-authored
+            // lightbar/player LEDs while every other field remains the exact
+            // current game report.
+            byte previousFlag1 = scratch[1];
+            byte previousPlayerLeds = scratch[43];
+            byte previousRed = scratch[44];
+            byte previousGreen = scratch[45];
+            byte previousBlue = scratch[46];
+            Buffer.BlockCopy(source, sourceOffset, scratch, 0,
+                BluetoothCombinedNativeStateLength);
+
+            bool incomingRelease = (scratch[1] & 0x08) != 0;
+            bool incomingLightbar = (scratch[1] & 0x04) != 0;
+            bool incomingPlayerLeds = (scratch[1] & 0x10) != 0;
+            if (incomingRelease)
+            {
+                scratch[1] &= unchecked((byte)~0x14);
+            }
+            else
+            {
+                if (!incomingLightbar && (previousFlag1 & 0x04) != 0)
+                {
+                    scratch[1] |= 0x04;
+                    scratch[44] = previousRed;
+                    scratch[45] = previousGreen;
+                    scratch[46] = previousBlue;
+                }
+
+                if (!incomingPlayerLeds && (previousFlag1 & 0x10) != 0)
+                {
+                    scratch[1] |= 0x10;
+                    scratch[43] = previousPlayerLeds;
+                }
+
+                if (incomingLightbar || incomingPlayerLeds)
+                {
+                    scratch[1] &= unchecked((byte)~0x08);
+                }
+                else if ((previousFlag1 & 0x08) != 0)
+                {
+                    scratch[1] |= 0x08;
+                }
+            }
 
             // The physical PlayStation audio route remains locally owned even
             // while every game-authored controller field is accumulated.

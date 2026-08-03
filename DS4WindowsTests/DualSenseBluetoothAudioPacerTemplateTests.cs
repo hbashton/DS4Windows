@@ -11,61 +11,34 @@ namespace DS4Windows.Tests
         private const int HapticsLength = 64;
 
         [TestMethod]
-        public void V5ReframerSkipsOnlyTheSynthetic512FrameShortage()
-        {
-            const int combinedOffset = 76;
-            const int combinedHapticsOffset = combinedOffset + HapticsOffset;
-            byte[] feedback = new byte[474];
-            feedback[combinedOffset] = 0x36;
-            feedback[combinedOffset + 76] = 0x92;
-            feedback[combinedOffset + 77] = HapticsLength;
-
-            feedback[combinedOffset + 10] = 0x20;
-            Assert.IsTrue(DualSenseBluetoothSpeakerPassthrough.
-                IsV5HapticsPlaceholder(feedback, feedback.Length),
-                "The empty first 480/512 boundary must not consume a physical haptics slot.");
-
-            feedback[combinedOffset + 10] = 0x21;
-            Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
-                IsV5HapticsPlaceholder(feedback, feedback.Length),
-                "A real silent 512-frame generation must retain its ordered slot.");
-
-            feedback[combinedOffset + 10] = 0x30;
-            feedback[combinedHapticsOffset + 7] = 1;
-            Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
-                IsV5HapticsPlaceholder(feedback, feedback.Length),
-                "A non-zero generation at the common boundary is real media.");
-        }
-
-        [TestMethod]
-        public void OrderedQueuedHapticsSurviveNewerTemplate()
+        public void FreshLatestTemplateHapticsSurviveOldQueuedAudioFrame()
         {
             const long qpcFrequency = 10_000_000;
             const long nowQpc = qpcFrequency * 10;
-            long queuedHapticsExpiryQpc = nowQpc +
+            long queuedAtQpc = nowQpc - qpcFrequency * 85 / 1000;
+            long oldQueuedHapticsExpiryQpc = queuedAtQpc +
                 qpcFrequency * 30 / 1000;
             long latestTemplateHapticsExpiryQpc = nowQpc +
                 qpcFrequency * 30 / 1000;
+            Assert.IsTrue(oldQueuedHapticsExpiryQpc < nowQpc,
+                "The fixture must represent an 85 ms-old queued audio frame.");
 
             byte[] queued = CreateReport(0x31);
-            FillHaptics(queued, 0x18);
             byte[] latestTemplate = CreateReport(0x72);
             FillHaptics(latestTemplate, 0x40);
-            byte[] expectedHaptics = CopyRange(queued, HapticsOffset,
-                HapticsLength);
             byte expectedSequence = queued[1];
             byte expectedPacketCounter = queued[10];
             byte[] expectedSpeaker = CopyRange(queued, 142, 202);
 
             DualSenseBluetoothAudioReportPatcher.PatchForPresentation(
-                queued, queuedHapticsExpiryQpc, latestTemplate,
+                queued, oldQueuedHapticsExpiryQpc, latestTemplate,
                 latestTemplateHapticsExpiryQpc, nowQpc);
 
             for (int index = 0; index < HapticsLength; index++)
             {
-                Assert.AreEqual(expectedHaptics[index],
+                Assert.AreEqual(latestTemplate[HapticsOffset + index],
                     queued[HapticsOffset + index],
-                    $"Ordered queued haptics changed at byte {index}.");
+                    $"Fresh latest-template haptics changed at byte {index}.");
             }
 
             Assert.AreEqual(expectedSequence, queued[1]);
@@ -76,44 +49,43 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
-        public void ExpiredQueuedHapticsAreZeroedEvenWhenTemplateIsFresh()
+        public void StaleLatestTemplateHapticsAreZeroed()
         {
             const long nowQpc = 50_000_000;
             byte[] queued = CreateReport(0x28);
             byte[] latestTemplate = CreateReport(0x63);
             FillHaptics(latestTemplate, 0x55);
-            long expiredQueuedHapticsExpiryQpc = nowQpc - 1;
+            long stillFreshQueuedHapticsExpiryQpc = nowQpc + 1_000_000;
 
             DualSenseBluetoothAudioReportPatcher.PatchForPresentation(
-                queued, expiredQueuedHapticsExpiryQpc, latestTemplate,
-                nowQpc + 1_000_000, nowQpc);
+                queued, stillFreshQueuedHapticsExpiryQpc, latestTemplate,
+                nowQpc - 1, nowQpc);
 
             for (int index = 0; index < HapticsLength; index++)
             {
                 Assert.AreEqual((byte)0, queued[HapticsOffset + index],
-                    $"Expired queued haptics survived at byte {index}.");
+                    $"Stale latest-template haptics survived at byte {index}.");
             }
 
             AssertCrcIsValid(queued);
         }
 
         [TestMethod]
-        public void PersistentQueuedNativeHapticsRemainUntilGameSendsSilence()
+        public void NativeLatestTemplateHapticsRemainUntilGameSendsSilence()
         {
             const long nowQpc = 500_000_000;
             byte[] queued = CreateReport(0x34);
-            FillHaptics(queued, 0x2C);
             byte[] latestTemplate = CreateReport(0x79);
-            FillHaptics(latestTemplate, 0x61);
+            FillHaptics(latestTemplate, 0x2C);
 
             DualSenseBluetoothAudioReportPatcher.PatchForPresentation(
                 queued, latestTemplate, long.MaxValue, nowQpc);
 
             for (int index = 0; index < HapticsLength; index++)
             {
-                Assert.AreEqual((byte)(0x2C + index),
+                Assert.AreEqual(latestTemplate[HapticsOffset + index],
                     queued[HapticsOffset + index],
-                    $"Ordered native haptics changed at byte {index}.");
+                    $"Native haptics were muted by wall-clock age at byte {index}.");
             }
 
             AssertCrcIsValid(queued);
@@ -127,7 +99,6 @@ namespace DS4Windows.Tests
             const long nowQpc = 50_000_000;
             byte[] queued = CreateReport(0x28);
             byte[] latestTemplate = CreateReport(0x63);
-            byte expectedFinalHapticsByte = queued[141];
             for (int index = 5; index <= 9; index++)
             {
                 queued[index] = speakerBufferDepth;
@@ -146,7 +117,7 @@ namespace DS4Windows.Tests
             Assert.AreEqual(latestTemplate[3], queued[3]);
             Assert.AreEqual(latestTemplate[4], queued[4]);
             Assert.AreEqual(latestTemplate[11], queued[11]);
-            Assert.AreEqual(expectedFinalHapticsByte, queued[141]);
+            Assert.AreEqual(latestTemplate[141], queued[141]);
             AssertCrcIsValid(queued);
         }
 

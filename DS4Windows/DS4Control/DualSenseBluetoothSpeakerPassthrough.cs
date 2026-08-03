@@ -421,18 +421,6 @@ namespace DS4Windows
         private const int FrameSamples = 480;
         private const int SourcePullFrames = 512;
         private const int OpusBytes = 200;
-        private const int V5CombinedFeedbackOffset = 76;
-        private const int V5CombinedPacketCounterOffset =
-            V5CombinedFeedbackOffset + 10;
-        private const int V5CombinedHapticsTypeOffset =
-            V5CombinedFeedbackOffset + 76;
-        private const int V5CombinedHapticsDataOffset =
-            V5CombinedFeedbackOffset + 78;
-        private const int V5HapticsFrameLength = 64;
-        // DS5Dongle deliberately bounds its completed 512-frame haptics FIFO
-        // to two generations. That keeps the lane ordered without allowing a
-        // host pause to turn tactile feedback into stale latency.
-        private const int V5HapticsQueueCapacity = 2;
         internal const int LowLatencyCaptureBufferMs = 5;
         // Ownership recovery is bounded by helper process-exit plus startup
         // waits. Retain source history for the entire bounded transition
@@ -489,7 +477,6 @@ namespace DS4Windows
 
         private readonly object syncRoot = new object();
         private readonly object directPcmSync = new object();
-        private readonly object directV5HapticsSync = new object();
         private readonly DualSenseDevice device;
         private readonly bool headsetOnlyAudio;
         private readonly string sourceEndpointId;
@@ -521,10 +508,6 @@ namespace DS4Windows
             DirectPcmMaximumOutputFrames * Channels];
         private readonly byte[] atomicFeedback = new byte[
             ViiperOutDevice.DualSenseAtomicFeedbackLength];
-        private readonly byte[] directV5HapticsQueue = new byte[
-            V5HapticsQueueCapacity * V5HapticsFrameLength];
-        private readonly byte[] directV5PresentedHaptics = new byte[
-            V5HapticsFrameLength];
         private readonly float[] frame = new float[FrameSamples * Channels];
         private readonly float[] speakerResampleInput = new float[
             DualSenseSpeakerFrameResampler.MaximumInputFrames * Channels];
@@ -590,13 +573,6 @@ namespace DS4Windows
         private long atomicCallbacksEntered;
         private long atomicCallbacksRejected;
         private long atomicFeedbackApplied;
-        private long directV5HapticsQueued;
-        private long directV5HapticsPresented;
-        private long directV5HapticsPlaceholdersSkipped;
-        private long directV5HapticsOverflowDrops;
-        private long directV5HapticsUnderflows;
-        private int directV5HapticsQueueHead;
-        private int directV5HapticsQueueCount;
         private long directPcmInputFrames;
         private long directPcmOutputFrames;
         private long directPcmConsumedFrames;
@@ -1088,8 +1064,6 @@ namespace DS4Windows
                     source.ApplyAtomicAudioHapticsFeedback(atomicFeedback,
                         feedbackLength, targetDeviceIndex);
                     Interlocked.Increment(ref atomicFeedbackApplied);
-                    QueueDirectV5HapticsGeneration(atomicFeedback,
-                        feedbackLength);
                     ProcessDirectSpeakerPcmLocked(source, payload,
                         speakerPcmOffset, speakerPcmLength, callbackEntered);
                 }
@@ -1549,92 +1523,6 @@ namespace DS4Windows
             }
         }
 
-        private void QueueDirectV5HapticsGeneration(byte[] feedback,
-            int feedbackLength)
-        {
-            if (!directSpeakerUsesV5Source || feedback == null ||
-                feedbackLength < V5CombinedHapticsDataOffset +
-                    V5HapticsFrameLength ||
-                feedback[V5CombinedFeedbackOffset] != 0x36 ||
-                feedback[V5CombinedHapticsTypeOffset] != 0x92 ||
-                feedback[V5CombinedHapticsTypeOffset + 1] !=
-                    V5HapticsFrameLength)
-            {
-                return;
-            }
-
-            int hapticsOffset = V5CombinedHapticsDataOffset;
-            // VIIPER publishes front stereo every 480 USB frames while rear
-            // haptics completes every 512. At the first boundary in each
-            // 7,680-frame common period there is intentionally no completed
-            // rear generation, so V5 emits a zero placeholder. Do not put
-            // that 100 Hz placeholder into the physical 93.75 Hz FIFO. A real
-            // all-zero haptics generation at any other boundary is retained.
-            if (IsV5HapticsPlaceholder(feedback, feedbackLength))
-            {
-                Interlocked.Increment(
-                    ref directV5HapticsPlaceholdersSkipped);
-                return;
-            }
-
-            lock (directV5HapticsSync)
-            {
-                if (directV5HapticsQueueCount == V5HapticsQueueCapacity)
-                {
-                    directV5HapticsQueueHead =
-                        (directV5HapticsQueueHead + 1) %
-                            V5HapticsQueueCapacity;
-                    directV5HapticsQueueCount--;
-                    Interlocked.Increment(
-                        ref directV5HapticsOverflowDrops);
-                }
-
-                int tail = (directV5HapticsQueueHead +
-                    directV5HapticsQueueCount) % V5HapticsQueueCapacity;
-                Buffer.BlockCopy(feedback, hapticsOffset,
-                    directV5HapticsQueue, tail * V5HapticsFrameLength,
-                    V5HapticsFrameLength);
-                directV5HapticsQueueCount++;
-            }
-
-            Interlocked.Increment(ref directV5HapticsQueued);
-        }
-
-        internal static bool IsV5HapticsPlaceholder(byte[] feedback,
-            int feedbackLength)
-        {
-            return feedback != null &&
-                feedbackLength >= V5CombinedHapticsDataOffset +
-                    V5HapticsFrameLength &&
-                feedback[V5CombinedFeedbackOffset] == 0x36 &&
-                feedback[V5CombinedHapticsTypeOffset] == 0x92 &&
-                feedback[V5CombinedHapticsTypeOffset + 1] ==
-                    V5HapticsFrameLength &&
-                (feedback[V5CombinedPacketCounterOffset] & 0x0F) == 0 &&
-                IsAllZero(feedback, V5CombinedHapticsDataOffset,
-                    V5HapticsFrameLength);
-        }
-
-        internal static bool IsAllZero(byte[] buffer, int offset, int length)
-        {
-            if (buffer == null || offset < 0 || length < 0 ||
-                offset + length > buffer.Length)
-            {
-                return false;
-            }
-
-            int end = offset + length;
-            for (int index = offset; index < end; index++)
-            {
-                if (buffer[index] != 0)
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
         private void ResetCapturePipelineAtSegmentBoundary()
         {
             if (directSpeakerSource != null)
@@ -1664,20 +1552,6 @@ namespace DS4Windows
             ResetDirectPcmBalanceWindowLocked();
             directPcmRateConverter?.Reset();
             ResetSpeakerResamplingLocked();
-            ResetDirectV5HapticsQueue();
-        }
-
-        private void ResetDirectV5HapticsQueue()
-        {
-            lock (directV5HapticsSync)
-            {
-                Array.Clear(directV5HapticsQueue, 0,
-                    directV5HapticsQueue.Length);
-                Array.Clear(directV5PresentedHaptics, 0,
-                    directV5PresentedHaptics.Length);
-                directV5HapticsQueueHead = 0;
-                directV5HapticsQueueCount = 0;
-            }
         }
 
         private void UpdateCaptureClockRatioLocked()
@@ -2909,11 +2783,6 @@ namespace DS4Windows
                          $"atomicCallbacks={Interlocked.Read(ref atomicCallbacksEntered)} " +
                          $"atomicRejected={Interlocked.Read(ref atomicCallbacksRejected)} " +
                          $"atomicApplied={Interlocked.Read(ref atomicFeedbackApplied)} " +
-                         $"orderedHaptics={Interlocked.Read(ref directV5HapticsQueued)}/" +
-                         $"{Interlocked.Read(ref directV5HapticsPresented)} " +
-                         $"hapticsPlaceholders={Interlocked.Read(ref directV5HapticsPlaceholdersSkipped)} " +
-                         $"hapticsOverflow={Interlocked.Read(ref directV5HapticsOverflowDrops)} " +
-                         $"hapticsUnderflow={Interlocked.Read(ref directV5HapticsUnderflows)} " +
                          $"directPcmFrames={Interlocked.Read(ref directPcmInputFrames)}/" +
                          $"{Interlocked.Read(ref directPcmOutputFrames)} " +
                          $"directPcmConsumedFrames={Interlocked.Read(ref directPcmConsumedFrames)} " +
@@ -3227,61 +3096,10 @@ namespace DS4Windows
         {
             try
             {
-                bool accepted;
-                if (!stopping && directSpeakerUsesV5Source)
-                {
-                    bool hadHaptics;
-                    lock (directV5HapticsSync)
-                    {
-                        hadHaptics = directV5HapticsQueueCount != 0;
-                        if (hadHaptics)
-                        {
-                            Buffer.BlockCopy(directV5HapticsQueue,
-                                directV5HapticsQueueHead *
-                                    V5HapticsFrameLength,
-                                directV5PresentedHaptics, 0,
-                                V5HapticsFrameLength);
-                        }
-                        else
-                        {
-                            Array.Clear(directV5PresentedHaptics, 0,
-                                directV5PresentedHaptics.Length);
-                        }
-
-                        accepted = device.SetBluetoothSpeakerAudioFrame(
-                            opusFrame, OpusBytes, speakerSessionId,
-                            Interlocked.Read(ref speakerGeneration),
-                            directV5PresentedHaptics, 0);
-                        if (accepted && hadHaptics)
-                        {
-                            directV5HapticsQueueHead =
-                                (directV5HapticsQueueHead + 1) %
-                                    V5HapticsQueueCapacity;
-                            directV5HapticsQueueCount--;
-                        }
-                    }
-
-                    if (accepted && hadHaptics)
-                    {
-                        Interlocked.Increment(
-                            ref directV5HapticsPresented);
-                    }
-                    else if (accepted &&
-                        Interlocked.Read(ref atomicCallbacksEntered) != 0 &&
-                        HasRecentSourcePcm(Stopwatch.GetTimestamp(),
-                            TransientCaptureShortageLeaseMs))
-                    {
-                        Interlocked.Increment(
-                            ref directV5HapticsUnderflows);
-                    }
-                }
-                else
-                {
-                    accepted = !stopping &&
-                        device.SetBluetoothSpeakerAudioFrame(opusFrame,
-                            OpusBytes, speakerSessionId,
-                            Interlocked.Read(ref speakerGeneration));
-                }
+                bool accepted = !stopping &&
+                    device.SetBluetoothSpeakerAudioFrame(opusFrame, OpusBytes,
+                        speakerSessionId,
+                        Interlocked.Read(ref speakerGeneration));
                 if (!accepted && !stopping)
                 {
                     ResetDirectPcmBalanceWindow();

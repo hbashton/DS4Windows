@@ -3971,24 +3971,22 @@ namespace DS4Windows
         {
             lock (nativeGameOutputTraceLock)
             {
-                if (nativeGameOutputSessionActive == 0 ||
-                    lastNativeGameOutputTimestamp <= 0 ||
-                    Stopwatch.GetTimestamp() -
-                        lastNativeGameOutputTimestamp < Stopwatch.Frequency)
+                long now = Stopwatch.GetTimestamp();
+                if (nativeGameOutputSessionActive != 0 &&
+                    lastNativeGameOutputTimestamp > 0 &&
+                    now - lastNativeGameOutputTimestamp >=
+                        Stopwatch.Frequency)
                 {
-                    return;
+                    nativeGameOutputSessionActive = 0;
+                    lastNativeGameOutputTimestamp = 0;
+                    AppLogger.LogToGui(
+                        $"DualSense native game-output stream idle for 1 second: finalReport={Convert.ToHexString(lastNativeGameOutputReport)}",
+                        false);
+                    // A quiet HID interval is not an ownership release. Games
+                    // commonly latch their LED and trigger state, then stop
+                    // writing until it changes.
                 }
 
-                nativeGameOutputSessionActive = 0;
-                lastNativeGameOutputTimestamp = 0;
-                AppLogger.LogToGui(
-                    $"DualSense native game-output stream idle for 1 second: finalReport={Convert.ToHexString(lastNativeGameOutputReport)}",
-                    false);
-                // Keep the session transition and physical ownership release
-                // under one ordering lock. A newly arriving game report can
-                // only merge after this release, so an old idle callback can
-                // never clear a newer report that raced it.
-                ReleaseNativeDualSenseFeedbackOwnership();
             }
         }
 

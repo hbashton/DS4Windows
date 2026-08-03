@@ -5316,6 +5316,7 @@ namespace DS4Windows.InputDevices
     {
         private readonly byte[] frames;
         private readonly long[] expiryQpc;
+        private readonly long[] arrivalQpc;
         private readonly int capacity;
         private readonly int reportOffset;
         private readonly int frameLength;
@@ -5348,10 +5349,18 @@ namespace DS4Windows.InputDevices
             this.frameLength = frameLength;
             frames = new byte[capacity * frameLength];
             expiryQpc = new long[capacity];
+            arrivalQpc = new long[capacity];
         }
 
         internal void Enqueue(byte[] source, int offset,
             long hapticsExpiryQpc)
+        {
+            Enqueue(source, offset, hapticsExpiryQpc,
+                Stopwatch.GetTimestamp());
+        }
+
+        internal void Enqueue(byte[] source, int offset,
+            long hapticsExpiryQpc, long receivedAtQpc)
         {
             if (source == null || offset < 0 ||
                 offset + frameLength > source.Length)
@@ -5359,6 +5368,10 @@ namespace DS4Windows.InputDevices
                 throw new ArgumentException(
                     "Realtime haptics source does not contain one complete generation.",
                     nameof(source));
+            }
+            if (receivedAtQpc < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(receivedAtQpc));
             }
 
             hasReceivedGeneration = true;
@@ -5381,6 +5394,7 @@ namespace DS4Windows.InputDevices
             Buffer.BlockCopy(source, offset, frames,
                 destination * frameLength, frameLength);
             expiryQpc[destination] = hapticsExpiryQpc;
+            arrivalQpc[destination] = receivedAtQpc;
         }
 
         internal bool PrepareForPresentation(byte[] report, long nowQpc)
@@ -5396,6 +5410,22 @@ namespace DS4Windows.InputDevices
             {
                 throw new InvalidOperationException(
                     "Realtime haptics layout cannot encode its TLV header.");
+            }
+
+            // Rear-channel generations describe the next 512-sample media
+            // interval; they are not a recoverable playback reservoir. If a
+            // host scheduling pause leaves more than one interval queued,
+            // replaying those old generations makes a fresh menu/action edge
+            // arrive tens or hundreds of milliseconds late. Retire only
+            // generations whose complete 10.667 ms presentation window has
+            // already elapsed, retaining the newest generation and normal
+            // FIFO ordering while the producer and consumer remain in phase.
+            long maximumPresentationAgeQpc = Math.Max(1,
+                (Stopwatch.Frequency * 512L + 47_999L) / 48_000L);
+            while (count > 1 && arrivalQpc[head] > 0 &&
+                nowQpc - arrivalQpc[head] >= maximumPresentationAgeQpc)
+            {
+                DropHead();
             }
 
             if (count == 0)
@@ -5434,8 +5464,15 @@ namespace DS4Windows.InputDevices
                 return;
             }
 
+            DropHead();
+            prepared = false;
+        }
+
+        private void DropHead()
+        {
             Array.Clear(frames, head * frameLength, frameLength);
             expiryQpc[head] = 0;
+            arrivalQpc[head] = 0;
             head = (head + 1) % capacity;
             count--;
             prepared = false;
@@ -5445,6 +5482,7 @@ namespace DS4Windows.InputDevices
         {
             Array.Clear(frames, 0, frames.Length);
             Array.Clear(expiryQpc, 0, expiryQpc.Length);
+            Array.Clear(arrivalQpc, 0, arrivalQpc.Length);
             head = 0;
             count = 0;
             prepared = false;

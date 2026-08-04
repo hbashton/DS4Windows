@@ -51,6 +51,8 @@
 
         <Style x:Key="OverviewSettingsComboBoxStyle" TargetType="ComboBox"
                BasedOn="{StaticResource BridgeProfileComboBoxStyle}">
+            <EventSetter Event="PreviewMouseWheel"
+                         Handler="ComboBox_PreviewMouseWheel" />
             <Setter Property="Width" Value="Auto" />
             <!-- Keep the chrome on whole device pixels at common Windows DPI
                  scales. 38 DIP becomes 47.5 px at 125%, which clipped the
@@ -109,8 +111,23 @@
                                     </RepeatButton>
                                 </Track.IncreaseRepeatButton>
                             </Track>
+                            <TickBar x:Name="SliderTicks"
+                                     Visibility="Collapsed"
+                                     IsHitTestVisible="False"
+                                     Margin="9,0,9,3"
+                                     Height="5"
+                                     VerticalAlignment="Bottom"
+                                     Placement="Bottom"
+                                     Fill="{DynamicResource MutedForegroundColor}"
+                                     Minimum="{TemplateBinding Minimum}"
+                                     Maximum="{TemplateBinding Maximum}"
+                                     TickFrequency="{TemplateBinding TickFrequency}"
+                                     Ticks="{TemplateBinding Ticks}" />
                         </Grid>
                         <ControlTemplate.Triggers>
+                            <Trigger Property="TickPlacement" Value="BottomRight">
+                                <Setter TargetName="SliderTicks" Property="Visibility" Value="Visible" />
+                            </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Opacity" Value="0.42" />
                             </Trigger>
@@ -355,7 +372,8 @@
                                         <TextBlock Text="The virtual controller presented to games."
                                                    Margin="0,3,0,11" FontSize="11" TextWrapping="Wrap"
                                                    Foreground="{DynamicResource MutedForegroundColor}" />
-                                        <ComboBox ItemsSource="{Binding OutputControllerChoices}"
+                                        <ComboBox x:Name="outputControllerCombo"
+                                                  ItemsSource="{Binding OutputControllerChoices}"
                                                   SelectedValuePath="Type"
                                                   SelectedValue="{Binding SelectedOutputController, Mode=OneWay}"
                                                   SelectionChanged="OutputControllerCombo_SelectionChanged"
@@ -472,22 +490,28 @@
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="Controller speaker" />
+                                            <TextBlock Text="Controller speaker"
+                                                       IsEnabled="{Binding HeadsetOnlyAudio, Converter={StaticResource InverseBoolConverter}}" />
                                             <TextBlock Grid.Column="1"
                                                        Text="{Binding SpeakerVolumePercent, StringFormat={}{0}%}"
+                                                       IsEnabled="{Binding HeadsetOnlyAudio, Converter={StaticResource InverseBoolConverter}}"
                                                        Foreground="{DynamicResource AccentColor}" />
                                             <Slider Grid.Row="1" Grid.ColumnSpan="2" Margin="0,7,0,14"
                                                     Style="{StaticResource OverviewQuickSliderStyle}"
                                                     Minimum="0" Maximum="100" TickFrequency="1"
+                                                    IsEnabled="{Binding HeadsetOnlyAudio, Converter={StaticResource InverseBoolConverter}}"
                                                     Value="{Binding SpeakerVolumePercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
                                             <TextBlock Grid.Row="2" Text="Headset / AUX"
+                                                       IsEnabled="{Binding HeadsetOnlyAudio}"
                                                        ToolTip="Controls the controller headset jack independently from its built-in speaker." />
                                             <TextBlock Grid.Row="2" Grid.Column="1"
                                                        Text="{Binding HeadphoneVolumePercent, StringFormat={}{0}%}"
+                                                       IsEnabled="{Binding HeadsetOnlyAudio}"
                                                        Foreground="{DynamicResource AccentColor}" />
                                             <Slider Grid.Row="3" Grid.ColumnSpan="2" Margin="0,7,0,0"
                                                     Style="{StaticResource OverviewQuickSliderStyle}"
                                                     Minimum="0" Maximum="100" TickFrequency="1"
+                                                    IsEnabled="{Binding HeadsetOnlyAudio}"
                                                     Value="{Binding HeadphoneVolumePercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
                                         </Grid>
                                     </StackPanel>
@@ -521,7 +545,9 @@
                                                 <TextBlock DockPanel.Dock="Right" Margin="10,0,0,0"
                                                            MinWidth="34" TextAlignment="Right"
                                                            Text="{Binding SpeakerBassBoostDb, StringFormat={}{0} dB}" />
-                                                <Slider Minimum="0" Maximum="6" TickFrequency="1"
+                                                <Slider Style="{StaticResource OverviewQuickSliderStyle}"
+                                                        Minimum="0" Maximum="6" TickFrequency="1"
+                                                        TickPlacement="BottomRight"
                                                         IsSnapToTickEnabled="True"
                                                         Value="{Binding SpeakerBassBoostDb, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
                                             </DockPanel>

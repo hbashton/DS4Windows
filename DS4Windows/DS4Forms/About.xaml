@@ -13,7 +13,7 @@
 
         <TabControl>
             <TabItem Header="Hotkeys">
-                <TextBlock TextWrapping="Wrap" xml:space="preserve">Hide DS4 Controller: Hides the DS4's regular input (Dinput) from other programs, check if you are getting double input in games or R2 pauses games
+                <TextBlock TextWrapping="Wrap" xml:space="preserve">Use HidHide to Prevent Double Input: Hides the physical controller from games while DS4Windows continues using it, preventing duplicate inputs
 Click left side of touchpad: Left Touch
 Click right side of touchpad: Right Touch
 Click touchpad with 2 fingers: Multitouch

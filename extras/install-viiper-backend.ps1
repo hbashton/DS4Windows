@@ -6,7 +6,8 @@ param(
     [string]$TargetUserName,
     [string]$TargetDs4WindowsPath,
     [string]$PackageExtrasRoot,
-    [int]$InstallerHostPid = 0
+    [int]$InstallerHostPid = 0,
+    [switch]$PortableInstallation
 )
 
 # DS4Windows normally streams this script from an embedded resource into the
@@ -27,6 +28,10 @@ if ($env:DS4W_SETUP_TARGET_EXE) {
 }
 if ($env:DS4W_SETUP_NO_PAUSE -eq '1') {
     $NoPause = $true
+}
+$script:PortableInstallation = [bool]$PortableInstallation
+if ($env:DS4W_SETUP_PORTABLE_INSTALLATION -eq '1') {
+    $script:PortableInstallation = $true
 }
 $script:InstallerHostPid = $InstallerHostPid
 if ($env:DS4W_SETUP_HOST_PID) {
@@ -101,7 +106,12 @@ $script:TargetUserSid = $TargetUserSid
 $script:TargetUserName = $TargetUserName
 $script:TargetRunKeyPath = "Registry::HKEY_USERS\$TargetUserSid\Software\Microsoft\Windows\CurrentVersion\Run"
 $script:ManagedRoot = Join-Path $programFilesRoot "DS4Windows"
-$script:InstallDir = Join-Path $script:ManagedRoot "VIIPER"
+$script:InstallDir = if ($script:PortableInstallation) {
+    Join-Path $TargetLocalAppData "VIIPER"
+}
+else {
+    Join-Path $script:ManagedRoot "VIIPER"
+}
 $script:Ds4WindowsInstallDir = $script:ManagedRoot
 $script:LogPath = Join-Path $script:InstallDir "install.log"
 $script:UsbipReplacementStatePath = Join-Path $script:InstallDir `
@@ -1053,8 +1063,27 @@ function Get-ForeignViiperProcesses {
     })
 }
 
+function Get-PortableViiperDirectory {
+    return [IO.Path]::GetFullPath(
+        (Join-Path $TargetLocalAppData "VIIPER")).TrimEnd('\', '/')
+}
+
+function Test-KnownPortableViiperPath([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+    try {
+        $expected = Join-Path (Get-PortableViiperDirectory) "viiper.exe"
+        return [string]::Equals([IO.Path]::GetFullPath($path), $expected,
+            [StringComparison]::OrdinalIgnoreCase)
+    }
+    catch { return $false }
+}
+
 function Remove-ForeignViiperInstallations {
-    $foreign = @(Get-ForeignViiperProcesses)
+    $foreign = @(Get-ForeignViiperProcesses | Where-Object {
+        $script:PortableInstallation -or
+            -not (Test-KnownPortableViiperPath `
+                ($_.ExecutablePath -as [string]))
+    })
     if ($foreign.Count -eq 0) { return }
 
     Write-SetupLog (
@@ -1135,6 +1164,220 @@ function Remove-ForeignViiperInstallations {
                 "managed VIIPER was started."
         }
         Write-SetupLog "Removed foreign VIIPER executable: $path" Green
+    }
+}
+
+function Remove-PortableViiperInstallationForStandardMode {
+    if ($script:PortableInstallation) { return }
+
+    $portableDirectory = Get-PortableViiperDirectory
+    if (-not (Test-Path -LiteralPath $portableDirectory)) { return }
+
+    $expectedParent = [IO.Path]::GetFullPath(
+        $TargetLocalAppData).TrimEnd('\', '/')
+    $actualParent = [IO.Path]::GetFullPath(
+        (Split-Path -Parent $portableDirectory)).TrimEnd('\', '/')
+    if (-not [string]::Equals($actualParent, $expectedParent,
+            [StringComparison]::OrdinalIgnoreCase) -or
+            -not [string]::Equals((Split-Path -Leaf $portableDirectory),
+                "VIIPER", [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to remove an unexpected portable VIIPER path."
+    }
+
+    $portableDirectory = Assert-SafeManagedDirectory $portableDirectory `
+        "portable VIIPER installation" -RequireExisting
+    $installerOwnedFiles = @(
+        "viiper.exe",
+        "viiper.exe.previous",
+        "install.log",
+        "usbip-replacement-pending.json"
+    )
+    foreach ($fileName in $installerOwnedFiles) {
+        $path = [IO.Path]::GetFullPath(
+            (Join-Path $portableDirectory $fileName))
+        $expectedParent = [IO.Path]::GetFullPath(
+            (Split-Path -Parent $path)).TrimEnd('\', '/')
+        if (-not [string]::Equals($expectedParent, $portableDirectory,
+                [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Refusing to remove an installer-owned VIIPER file outside " +
+                "the verified portable directory: $fileName"
+        }
+        if (-not (Test-Path -LiteralPath $path)) { continue }
+
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+        if ($item.PSIsContainer -or (($item.Attributes -band
+                    [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+            throw "Refusing to remove an unexpected installer-owned VIIPER " +
+                "path: $path"
+        }
+        Remove-Item -LiteralPath $path -Force -ErrorAction Stop
+    }
+
+    $portableViiperPath = Join-Path $portableDirectory "viiper.exe"
+    if (Test-Path -LiteralPath $portableViiperPath) {
+        throw "The old portable VIIPER executable could not be removed."
+    }
+
+    if (@(Get-ChildItem -LiteralPath $portableDirectory -Force `
+                -ErrorAction Stop).Count -eq 0) {
+        Remove-Item -LiteralPath $portableDirectory -Force -ErrorAction Stop
+        Write-SetupLog (
+            "Removed the empty old portable VIIPER folder after selecting " +
+            "Standard: $portableDirectory"
+        ) Green
+    }
+    else {
+        Write-SetupLog (
+            "Removed only installer-owned portable VIIPER files. Preserved " +
+            "unrecognized files in: $portableDirectory"
+        ) Yellow
+    }
+}
+
+function Stop-InstallerHostForStandardMigration {
+    if ($script:PortableInstallation -or $script:InstallerHostPid -le 0) {
+        return
+    }
+
+    $sourceDirectory = [IO.Path]::GetFullPath(
+        (Split-Path -Parent $TargetDs4WindowsPath)).TrimEnd('\', '/')
+    $managedDirectory = [IO.Path]::GetFullPath(
+        $script:Ds4WindowsInstallDir).TrimEnd('\', '/')
+    if ([string]::Equals($sourceDirectory, $managedDirectory,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        return
+    }
+
+    $hostProcess = Get-CimInstance Win32_Process -Filter (
+        "ProcessId=$script:InstallerHostPid") -ErrorAction SilentlyContinue
+    if (-not $hostProcess) { return }
+
+    $expectedPath = [IO.Path]::GetFullPath($TargetDs4WindowsPath)
+    $actualPath = if ($hostProcess.ExecutablePath) {
+        [IO.Path]::GetFullPath([string]$hostProcess.ExecutablePath)
+    }
+    else { $null }
+    if ($hostProcess.Name -ine "DS4Windows.exe" -or
+            -not $actualPath -or
+            -not [string]::Equals($actualPath, $expectedPath,
+                [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to terminate an unverified installer-host process."
+    }
+
+    Write-SetupLog (
+        "Closing the old portable DS4Windows installer host before cleanup: " +
+        "PID $script:InstallerHostPid"
+    ) Yellow
+    Stop-Process -Id $script:InstallerHostPid -Force -ErrorAction Stop
+    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        if (-not (Get-Process -Id $script:InstallerHostPid `
+                -ErrorAction SilentlyContinue)) {
+            return
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    throw "The old portable DS4Windows installer host did not exit."
+}
+
+function Remove-PortableDs4WindowsPackageForStandardMode {
+    if ($script:PortableInstallation) { return }
+
+    $portableDirectory = [IO.Path]::GetFullPath(
+        (Split-Path -Parent $TargetDs4WindowsPath)).TrimEnd('\', '/')
+    $managedDirectory = [IO.Path]::GetFullPath(
+        $script:Ds4WindowsInstallDir).TrimEnd('\', '/')
+    if ([string]::Equals($portableDirectory, $managedDirectory,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        return
+    }
+
+    $portableDirectory = Assert-SafeManagedDirectory $portableDirectory `
+        "portable DS4Windows package" -RequireExisting
+    $manifestPath = Join-Path $portableDirectory `
+        ".ds4windows-managed-files.txt"
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw "The old portable DS4Windows package has no managed-file " +
+            "manifest, so setup will not guess which files are safe to remove."
+    }
+
+    $portablePrefix = $portableDirectory.TrimEnd('\') + '\'
+    $managedFiles = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+    $managedDirectories = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+    foreach ($entry in Get-Content -LiteralPath $manifestPath) {
+        $relative = ([string]$entry).Trim().Replace('/', '\')
+        if ([string]::IsNullOrWhiteSpace($relative) -or
+                [IO.Path]::IsPathRooted($relative) -or
+                $relative.Split([char]'\') -contains '..' -or
+                -not $managedFiles.Add($relative)) {
+            throw "The old portable DS4Windows manifest contains an unsafe " +
+                "or duplicate path: '$entry'."
+        }
+    }
+    if (-not $managedFiles.Contains("DS4Windows.exe")) {
+        throw "The old portable package manifest does not own DS4Windows.exe."
+    }
+
+    foreach ($relative in $managedFiles) {
+        $path = [IO.Path]::GetFullPath(
+            (Join-Path $portableDirectory $relative))
+        if (-not $path.StartsWith($portablePrefix,
+                [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Refusing to remove a managed file outside the portable " +
+                "DS4Windows folder: $relative"
+        }
+
+        $parentDirectory = [IO.Path]::GetFullPath(
+            (Split-Path -Parent $path)).TrimEnd('\', '/')
+        while (-not [string]::Equals($parentDirectory, $portableDirectory,
+                [StringComparison]::OrdinalIgnoreCase)) {
+            if (-not ($parentDirectory + '\').StartsWith($portablePrefix,
+                    [StringComparison]::OrdinalIgnoreCase)) {
+                throw "Refusing to clean a package directory outside the " +
+                    "portable DS4Windows folder: $parentDirectory"
+            }
+            [void]$managedDirectories.Add($parentDirectory)
+            $parentDirectory = [IO.Path]::GetFullPath(
+                (Split-Path -Parent $parentDirectory)).TrimEnd('\', '/')
+        }
+
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+            if (($item.Attributes -band
+                    [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "Refusing to remove a reparse-point package file: $path"
+            }
+            Remove-Item -LiteralPath $path -Force -ErrorAction Stop
+        }
+    }
+    Remove-Item -LiteralPath $manifestPath -Force -ErrorAction Stop
+
+    if (Test-Path -LiteralPath (Join-Path $portableDirectory "DS4Windows.exe")) {
+        throw "The old portable DS4Windows executable could not be removed."
+    }
+
+    $directories = @($managedDirectories | Sort-Object Length -Descending)
+    foreach ($directory in $directories) {
+        if ((Test-Path -LiteralPath $directory -PathType Container) -and
+                @(Get-ChildItem -LiteralPath $directory -Force `
+                    -ErrorAction Stop).Count -eq 0) {
+            Remove-Item -LiteralPath $directory -Force -ErrorAction Stop
+        }
+    }
+
+    if (@(Get-ChildItem -LiteralPath $portableDirectory -Force `
+                -ErrorAction Stop).Count -eq 0) {
+        Remove-Item -LiteralPath $portableDirectory -Force -ErrorAction Stop
+        Write-SetupLog (
+            "Removed the old portable DS4Windows folder: $portableDirectory"
+        ) Green
+    }
+    else {
+        Write-SetupLog (
+            "Removed the old portable DS4Windows executable and package " +
+            "files. Preserved non-package user files in: $portableDirectory"
+        ) Yellow
     }
 }
 
@@ -1560,6 +1803,13 @@ try {
     Write-Host ""
     Write-Host "DS4Windows VIIPER virtual controller setup" `
         -ForegroundColor Green
+    $installationMode = if ($script:PortableInstallation) {
+        "Portable: keep DS4Windows in place; install VIIPER in LocalAppData."
+    }
+    else {
+        "Standard: install DS4Windows and VIIPER in Program Files."
+    }
+    Write-Host $installationMode -ForegroundColor Cyan
     Write-Host "Planned order:" -ForegroundColor Cyan
     Write-Host "  1. Install VIIPER and register both elevated startup tasks." `
         -ForegroundColor Cyan
@@ -1585,14 +1835,25 @@ try {
 
     $script:InstallDir = Assert-SafeManagedDirectory $script:InstallDir `
         "VIIPER installation"
-    $script:Ds4WindowsInstallDir = Assert-SafeManagedDirectory `
-        $script:Ds4WindowsInstallDir "managed DS4Windows installation"
-    New-Item -ItemType Directory -Path $script:Ds4WindowsInstallDir `
-        -Force | Out-Null
-    Protect-ElevatedTaskTargetDirectory $script:Ds4WindowsInstallDir `
-        "DS4Windows"
+    if (-not $script:PortableInstallation) {
+        $script:Ds4WindowsInstallDir = Assert-SafeManagedDirectory `
+            $script:Ds4WindowsInstallDir "managed DS4Windows installation"
+        New-Item -ItemType Directory -Path $script:Ds4WindowsInstallDir `
+            -Force | Out-Null
+        Protect-ElevatedTaskTargetDirectory $script:Ds4WindowsInstallDir `
+            "DS4Windows"
+    }
     New-Item -ItemType Directory -Path $script:InstallDir -Force | Out-Null
-    Protect-ElevatedTaskTargetDirectory $script:InstallDir "VIIPER"
+    if (-not $script:PortableInstallation) {
+        Protect-ElevatedTaskTargetDirectory $script:InstallDir "VIIPER"
+    }
+    else {
+        Write-SetupLog (
+            "Portable mode selected: VIIPER will run elevated from the " +
+            "user-writable path $script:InstallDir. Program Files provides " +
+            "stronger tamper protection."
+        ) Yellow
+    }
     New-Item -ItemType Directory -Path $script:TempDir -Force | Out-Null
     Write-SetupLog ""
     Write-SetupLog "Setup authorized; beginning verified installation." Green
@@ -1633,6 +1894,7 @@ try {
         throw "Unable to stop the existing VIIPER backend before replacement."
     }
     Disable-ViiperStartup
+    Remove-PortableViiperInstallationForStandardMode
     Install-ViiperAtomically $candidatePath $viiperPath
     Write-SetupLog "VIIPER installed to $viiperPath" Green
 
@@ -1648,10 +1910,8 @@ try {
                 -PathType Leaf)) {
         throw "DS4Windows.exe could not be located for the elevated startup task."
     }
-    # The protected package snapshot is what gets copied into Program Files,
-    # but portable users deliberately keep the executable that launched this
-    # setup as their startup target. The normal startup path also repairs this
-    # exact choice whenever a different portable copy is opened.
+    # Verify that the executable which launched setup belongs to this package
+    # before copying the protected snapshot into Program Files.
     $sourceDs4WindowsDirectory = [IO.Path]::GetFullPath(
         (Split-Path -Parent $script:PackageExtrasRoot)).TrimEnd('\', '/')
     $sourceDs4WindowsPath = Join-Path $sourceDs4WindowsDirectory `
@@ -1670,12 +1930,24 @@ try {
             "and run Install / Repair again."
     }
 
-    $managedDs4WindowsPath = Install-Ds4WindowsPackage `
-        $sourceDs4WindowsDirectory $script:Ds4WindowsInstallDir
-    Write-SetupLog (
-        "Managed DS4Windows copy: $managedDs4WindowsPath; startup target: " +
-        $script:Ds4WindowsRestartPath
-    ) Green
+    if ($script:PortableInstallation) {
+        # Keep the exact package executable that initiated setup. No
+        # DS4Windows files are copied into Program Files in portable mode.
+        Write-SetupLog (
+            "Portable DS4Windows retained; elevated startup target: " +
+            $script:Ds4WindowsRestartPath
+        ) Yellow
+    }
+    else {
+        $managedDs4WindowsPath = Install-Ds4WindowsPackage `
+            $sourceDs4WindowsDirectory $script:Ds4WindowsInstallDir
+        # Standard Install / Repair promotes the verified managed copy.
+        $script:Ds4WindowsRestartPath = $managedDs4WindowsPath
+        Write-SetupLog (
+            "Managed DS4Windows copy and elevated startup target: " +
+            $script:Ds4WindowsRestartPath
+        ) Green
+    }
 
     # Register both tasks before any driver operation can require a reboot.
     # VIIPER itself fails closed until its exact USBIP ABI probe succeeds.
@@ -1940,6 +2212,10 @@ try {
         if ($script:Ds4WindowsRestartPath) {
             Write-SetupLog "SUCCESSFUL: restarting DS4Windows in 2 seconds." Green
             Start-Sleep -Seconds 2
+            if (-not $script:PortableInstallation) {
+                Stop-InstallerHostForStandardMigration
+                Remove-PortableDs4WindowsPackageForStandardMode
+            }
             Start-ScheduledTask -TaskPath "\" -TaskName "RunDS4Windows" `
                 -ErrorAction Stop
         }

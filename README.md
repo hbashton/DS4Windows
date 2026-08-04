@@ -302,7 +302,7 @@ rejects its own VIIPER outputs to prevent recursive virtual controllers.
 2. In **Settings > Device Options**, enable any additional controller families you intend to use.
 3. Connect the controller by USB or Bluetooth.
 4. Create a profile or apply a preset.
-5. Keep **Hide DS4 Controller** enabled when a game would otherwise see both the real and virtual devices.
+5. Keep **Use HidHide to Prevent Double Input** enabled when a game would otherwise see both the real and virtual devices.
 6. Disable overlapping PlayStation or Xbox remapping in Steam for games managed entirely by DS4Windows.
 
 Xbox Game Bar companion support requires DS4Windows to run elevated. VIIPER and

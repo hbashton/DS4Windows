@@ -424,6 +424,44 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void ExtensibleFloatLoopbackIsDecodedAsFloatPcm()
+        {
+            var extensible = new NAudio.Wave.WaveFormatExtensible(48000,
+                32, 2);
+
+            Assert.AreEqual(NAudio.Wave.WaveFormatEncoding.Extensible,
+                extensible.Encoding);
+            Assert.IsTrue(AudioHapticsService.SlotRuntime
+                .IsIeeeFloatCaptureFormat(extensible),
+                "Processed app routes expose float PCM through an extensible header.");
+            Assert.IsTrue(AudioHapticsService.SlotRuntime
+                .IsIeeeFloatCaptureFormat(
+                    NAudio.Wave.WaveFormat.CreateIeeeFloatWaveFormat(
+                        48000, 2)));
+            Assert.IsFalse(AudioHapticsService.SlotRuntime
+                .IsIeeeFloatCaptureFormat(new NAudio.Wave.WaveFormat(
+                    48000, 16, 2)));
+        }
+
+        [TestMethod]
+        public void AudibleProcessedRouteRecoversOnlyAfterCallbackStall()
+        {
+            long threshold = Stopwatch.Frequency *
+                ProcessLoopbackWaveCapture.ProcessedRouteStallMilliseconds /
+                1000;
+
+            Assert.IsFalse(ProcessLoopbackWaveCapture
+                .ShouldRecoverProcessedRoute(
+                    100, 100 + threshold - 1, targetRouteAudible: true));
+            Assert.IsFalse(ProcessLoopbackWaveCapture
+                .ShouldRecoverProcessedRoute(
+                    100, 100 + threshold, targetRouteAudible: false));
+            Assert.IsTrue(ProcessLoopbackWaveCapture
+                .ShouldRecoverProcessedRoute(
+                    100, 100 + threshold, targetRouteAudible: true));
+        }
+
+        [TestMethod]
         public void LiveProcessCaptureCanActivateApplicationLoopback()
         {
             string processIdText = Environment.GetEnvironmentVariable(
@@ -435,9 +473,20 @@ namespace DS4WindowsTests
                     "Set DS4W_TEST_PROCESS_LOOPBACK_PID for this opt-in integration test.");
             }
 
-            using var capture = new ProcessLoopbackWaveCapture(processId);
+            using var capture = new ProcessLoopbackWaveCapture(processId,
+                followExclusiveRenderRoute: true);
+            using var received = new ManualResetEventSlim(false);
+            capture.DataAvailable += (_, eventArgs) =>
+            {
+                if (eventArgs.BytesRecorded > 0)
+                {
+                    received.Set();
+                }
+            };
             capture.StartRecording();
             Assert.IsTrue(capture.CurrentProcessId > 0);
+            Assert.IsTrue(received.Wait(TimeSpan.FromSeconds(3)),
+                "The selected application produced no captured PCM.");
         }
 
         [TestMethod]
@@ -451,5 +500,6 @@ namespace DS4WindowsTests
             Assert.AreEqual(0,
                 ProcessLoopbackWaveCapture.ResolveCaptureRootProcessId(0));
         }
+
     }
 }

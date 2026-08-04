@@ -1024,7 +1024,9 @@ namespace DS4WinWPF.DS4Forms
                 frameIndex++)
             {
                 AssignOutputRasterFrame(stickButtons[frameIndex], stickAtlas,
-                    frameIndex);
+                    frameIndex, frameIndex == 0 || frameIndex == 5,
+                    frameIndex is > 0 and < 5 ? 0 :
+                    frameIndex is > 5 and < 10 ? 5 : -1);
             }
 
             if (outputType == OutContType.ViiperSwitch2Pro)
@@ -1066,17 +1068,42 @@ namespace DS4WinWPF.DS4Forms
                     atlas, frameIndex, 630, 247);
                 Geometry mask = RasterHighlightAtlas.Mask(atlas, frameIndex,
                     630, 247);
+                if (frameIndex == 11 || frameIndex == 16)
+                {
+                    mask = RasterHighlightAtlas.CenterPressMask(mask);
+                }
+                else if (frameIndex is >= 12 and <= 15)
+                {
+                    mask = RasterHighlightAtlas.DirectionalHitMask(mask,
+                        RasterHighlightAtlas.Mask(atlas, 11, 630, 247));
+                }
+                else if (frameIndex is >= 17 and <= 20)
+                {
+                    mask = RasterHighlightAtlas.DirectionalHitMask(mask,
+                        RasterHighlightAtlas.Mask(atlas, 16, 630, 247));
+                }
                 AssignOutputCanvasGeometry(button, mask);
             }
         }
 
         private void AssignOutputRasterFrame(Button button, string resourceName,
-            int frameIndex)
+            int frameIndex, bool centerPress = false,
+            int directionSurfaceFrame = -1)
         {
             outputButtonRasterHighlights[button] = RasterHighlightAtlas.Frame(
                 resourceName, frameIndex);
-            AssignOutputRasterGeometry(button,
-                RasterHighlightAtlas.Mask(resourceName, frameIndex));
+            Geometry mask = RasterHighlightAtlas.Mask(resourceName, frameIndex);
+            if (centerPress)
+            {
+                mask = RasterHighlightAtlas.CenterPressMask(mask);
+            }
+            else if (directionSurfaceFrame >= 0)
+            {
+                mask = RasterHighlightAtlas.DirectionalHitMask(mask,
+                    RasterHighlightAtlas.Mask(resourceName,
+                        directionSurfaceFrame));
+            }
+            AssignOutputRasterGeometry(button, mask);
         }
 
         private void AssignOutputCombinedRasterFrames(Button button,

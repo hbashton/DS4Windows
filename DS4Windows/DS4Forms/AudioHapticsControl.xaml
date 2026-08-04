@@ -110,7 +110,6 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
             <Grid Margin="0,0,0,18">
@@ -430,64 +429,6 @@
                 </Border>
             </Grid>
 
-            <Border Grid.Row="2" Style="{StaticResource FeatureCard}" Margin="0,16,0,0"
-                    Padding="20,16">
-                <StackPanel>
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                        <TextBlock Text="?" FontSize="18" Foreground="{DynamicResource AccentColor}"
-                                   FontWeight="SemiBold" Margin="0,0,10,0" />
-                        <TextBlock Text="Tips" FontSize="16" FontWeight="SemiBold" />
-                    </StackPanel>
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition />
-                            <ColumnDefinition Width="24" />
-                            <ColumnDefinition />
-                        </Grid.ColumnDefinitions>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="14" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="&#xE767;" FontFamily="Segoe MDL2 Assets" FontSize="18"
-                                       Foreground="{DynamicResource AccentColor}" Width="32" />
-                            <StackPanel>
-                                <TextBlock Text="Choose a source" FontWeight="SemiBold" />
-                                <TextBlock Text="System audio follows the full Windows mix; App Session follows only one running app."
-                                           TextWrapping="Wrap" Foreground="{DynamicResource MutedForegroundColor}" />
-                            </StackPanel>
-                        </StackPanel>
-                        <StackPanel Grid.Column="2" Orientation="Horizontal">
-                            <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="18"
-                                       Foreground="{DynamicResource AccentColor}" Width="32" />
-                            <StackPanel>
-                                <TextBlock Text="Unavailable sources" FontWeight="SemiBold" />
-                                <TextBlock Text="Start the app, then refresh the session list. Saved profiles reacquire restarted apps by identity."
-                                           TextWrapping="Wrap" Foreground="{DynamicResource MutedForegroundColor}" />
-                            </StackPanel>
-                        </StackPanel>
-                        <StackPanel Grid.Row="2" Orientation="Horizontal">
-                            <TextBlock Text="&#xE945;" FontFamily="Segoe MDL2 Assets" FontSize="18"
-                                       Foreground="{DynamicResource AccentColor}" Width="32" />
-                            <StackPanel>
-                                <TextBlock Text="Audio Haptics" FontWeight="SemiBold" />
-                                <TextBlock Text="Audio energy is filtered, gated, and soft-clipped into the native DualSense haptic lane."
-                                           TextWrapping="Wrap" Foreground="{DynamicResource MutedForegroundColor}" />
-                            </StackPanel>
-                        </StackPanel>
-                        <StackPanel Grid.Row="2" Grid.Column="2" Orientation="Horizontal">
-                            <TextBlock Text="&#xE9D9;" FontFamily="Segoe MDL2 Assets" FontSize="18"
-                                       Foreground="{DynamicResource AccentColor}" Width="32" />
-                            <StackPanel>
-                                <TextBlock Text="Mix / Replace" FontWeight="SemiBold" />
-                                <TextBlock Text="Mix preserves game haptics and adds audio detail; Replace uses only the derived audio feel."
-                                           TextWrapping="Wrap" Foreground="{DynamicResource MutedForegroundColor}" />
-                            </StackPanel>
-                        </StackPanel>
-                    </Grid>
-                </StackPanel>
-            </Border>
         </Grid>
     </ScrollViewer>
 </UserControl>

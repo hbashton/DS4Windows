@@ -355,7 +355,6 @@ namespace DS4Windows
             lock (bluetoothStartGates[slot])
             {
                 SlotPlayback usbPlayback;
-                DualSenseBluetoothSpeakerPassthrough previous;
                 lock (syncRoot)
                 {
                     if (disposed)
@@ -378,14 +377,17 @@ namespace DS4Windows
                         StopCapture();
                     }
 
-                    previous = bluetoothSlots[slot];
-                    bluetoothSlots[slot] = null;
+                    // Keep the current Bluetooth playback alive until its
+                    // replacement has activated a newer speaker-session token
+                    // and published successfully. Retiring it first let its
+                    // deferred End/Clear path own the unified transport while
+                    // the replacement waited behind the same lock, producing
+                    // multi-second silence after app-source changes.
                     generation = ++bluetoothStartGeneration[slot];
                     bluetoothStartPending[slot] = true;
                 }
 
                 usbPlayback?.Dispose();
-                previous?.Dispose();
             }
 
             _ = Task.Run(() => StartBluetoothWithRetry(slot, device, speakerVolume,
@@ -450,6 +452,8 @@ namespace DS4Windows
             out Exception lastError)
         {
             lastError = null;
+            DualSenseBluetoothSpeakerPassthrough playbackToDispose = null;
+            bool started = false;
             // At most one actual transport construction may own this physical
             // slot. The short gate spans start/publish, never retry sleeps.
             lock (bluetoothStartGates[slot])
@@ -506,27 +510,31 @@ namespace DS4Windows
                             generation != bluetoothStartGeneration[slot];
                         if (!superseded)
                         {
+                            playbackToDispose = bluetoothSlots[slot];
                             bluetoothSlots[slot] = bluetoothPlayback;
                             bluetoothStartPending[slot] = false;
                             startFailed[slot] = false;
+                            started = true;
                         }
                     }
 
                     if (superseded)
                     {
-                        bluetoothPlayback.Dispose();
-                        return false;
+                        playbackToDispose = bluetoothPlayback;
                     }
-
-                    return true;
                 }
                 catch (Exception ex)
                 {
                     lastError = ex;
-                    bluetoothPlayback.Dispose();
-                    return false;
+                    playbackToDispose = bluetoothPlayback;
                 }
             }
+
+            // Dispose only after the replacement has atomically become the
+            // active session. The old worker can no longer clear or reset the
+            // new session, and teardown never holds the per-slot start gate.
+            playbackToDispose?.Dispose();
+            return started;
         }
 
         private static ViiperOutDevice ResolveDirectSpeakerSource(

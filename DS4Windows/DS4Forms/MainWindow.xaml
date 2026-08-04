@@ -45,7 +45,7 @@
             </DockPanel>
         </StackPanel>
         <TabControl x:Name="mainTabCon" DockPanel.Dock="Top" SelectionChanged="MainTabCon_SelectionChanged" Style="{StaticResource BridgeMainTabControlStyle}">
-            <TabItem x:Name="overviewTab" Header="Overview" Tag="&#xE80F;" ToolTip="At-a-glance status and quick profile controls for the selected controller." IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">
+            <TabItem x:Name="overviewTab" Header="Overview" Tag="&#xE80F;" IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">
                 <local:ControllerOverviewControl x:Name="controllerOverviewControl"
                                                  EditProfileRequested="ControllerOverview_EditProfileRequested"
                                                  ControllerDetailsRequested="ControllerOverview_ControllerDetailsRequested"
@@ -53,7 +53,7 @@
                                                  DisconnectRequested="ControllerOverview_DisconnectRequested" />
             </TabItem>
 
-            <TabItem x:Name="controllersTab" Header="{lex:Loc Controllers}" Tag="&#xE7FC;" ToolTip="Connected devices, active profiles, battery state, and lightbar controls." IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">
+            <TabItem x:Name="controllersTab" Header="{lex:Loc Controllers}" Tag="&#xE7FC;" IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">
                 <Grid>
                     <Label x:Name="noContLb" Visibility="Hidden" Content="{lex:Loc NoControllersConnected}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" />
                     <ListView x:Name="controllerLV" ItemsSource="{Binding ControllerCol}" SelectionMode="Single"
@@ -172,15 +172,15 @@
                 </Grid>
             </TabItem>
 
-            <TabItem x:Name="audioHapticsTab" Header="Audio Haptics" Tag="&#xE767;" ToolTip="Turn system or app audio into advanced haptic feedback for the selected controller." IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">
+            <TabItem x:Name="audioHapticsTab" Header="Audio Haptics" Tag="&#xE767;" IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">
                 <local:AudioHapticsControl x:Name="audioHapticsControl" SettingsChanged="ProfileFeatureControl_SettingsChanged" />
             </TabItem>
 
-            <TabItem x:Name="triggerLabTab" Header="Trigger Lab" Tag="TriggerPair" ToolTip="Build adaptive-trigger effects in the selected controller's active profile." IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">
+            <TabItem x:Name="triggerLabTab" Header="Trigger Lab" Tag="TriggerPair" IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">
                 <local:TriggerLabControl x:Name="triggerLabControl" SettingsChanged="ProfileFeatureControl_SettingsChanged" />
             </TabItem>
 
-            <TabItem x:Name="profilesTab" Header="{lex:Loc Profiles}" Tag="&#xE8A5;" ToolTip="Create and manage complete controller configurations.">
+            <TabItem x:Name="profilesTab" Header="{lex:Loc Profiles}" Tag="&#xE8A5;">
                 <Grid x:Name="profDockPanel">
                     <Grid x:Name="profilesBrowserPanel">
                         <Grid.RowDefinitions>
@@ -440,17 +440,17 @@
                     </Border>
                 </Grid>
             </TabItem>
-            <TabItem Header="{lex:Loc AutoProfiles}" Tag="&#xE823;" ToolTip="Switch profiles automatically when a game or application starts." IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">
+            <TabItem Header="{lex:Loc AutoProfiles}" Tag="&#xE823;" IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">
                 <local:AutoProfiles x:Name="autoProfControl">
 
                 </local:AutoProfiles>
             </TabItem>
-            <TabItem Header="{lex:Loc OutputSlots}" Tag="&#xE950;" ToolTip="Inspect and control virtual controller slots and output devices." IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">
+            <TabItem Header="{lex:Loc OutputSlots}" Tag="&#xE950;" IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">
                 <local:OutputSlotManagerControl x:Name="slotManControl">
 
                 </local:OutputSlotManagerControl>
             </TabItem>
-            <TabItem x:Name="settingsTab" Header="{lex:Loc Settings}" Tag="&#xE713;" ToolTip="Everyday preferences first; diagnostics, networking, and compatibility tools under Advanced." IsEnabled="{Binding ViewEnabled,Mode=OneWay}">
+            <TabItem x:Name="settingsTab" Header="{lex:Loc Settings}" Tag="&#xE713;" IsEnabled="{Binding ViewEnabled,Mode=OneWay}">
                 <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Background="{DynamicResource SurfaceBackgroundColor}">
                     <StackPanel Margin="0,0,14,8" MaxWidth="900" HorizontalAlignment="Left">
                         <StackPanel.Resources>
@@ -766,7 +766,7 @@
                 </ScrollViewer>
 
             </TabItem>
-            <TabItem x:Name="logTab" Header="{lex:Loc Log}" Tag="&#xE9D9;" ToolTip="Live service events and diagnostic messages.">
+            <TabItem x:Name="logTab" Header="{lex:Loc Log}" Tag="&#xE9D9;">
                 <DockPanel>
                     <DockPanel Height="20" DockPanel.Dock="Bottom" Margin="4,8">
                         <Button x:Name="exportLogBtn" Content="{lex:Loc Export}" HorizontalAlignment="Left" Padding="20,1" Click="ExportLogBtn_Click" />

@@ -99,11 +99,21 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     DualSenseAudioPassthrough.DefaultSystemAudioEndpointId),
             };
 
+            var appEndpointIds = new HashSet<string>(StringComparer.Ordinal);
             foreach (AppAudioSnapshot app in AppAudioSessions)
             {
+                int rootProcessId = ProcessLoopbackWaveCapture
+                    .ResolveCaptureRootProcessId(app.ProcessId);
+                string endpointId = ProcessLoopbackWaveCapture
+                    .BuildEndpointId(rootProcessId > 0 ? rootProcessId :
+                        app.ProcessId);
+                if (!appEndpointIds.Add(endpointId))
+                {
+                    continue;
+                }
                 choices.Add(new AudioEndpointChoice(
                     $"{app.Name} · app only",
-                    ProcessLoopbackWaveCapture.BuildEndpointId(app.ProcessId)));
+                    endpointId));
             }
 
             foreach (AudioEndpointSnapshot endpoint in RenderEndpoints)

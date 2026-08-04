@@ -20,21 +20,29 @@ namespace DS4Windows
         public const string AutomaticEndpointPrefix =
             "DS4Windows:AudioHapticsAuto:";
         private const int CapturePollMilliseconds = 4;
+        internal const int ProcessedRouteStallMilliseconds = 750;
+        private const int ProcessedRouteWatchdogPollMilliseconds = 100;
+        private const int FixedRouteReconnectMilliseconds = 250;
         private const int DetectionIntervalMilliseconds = 500;
         private readonly int fixedProcessId;
+        private readonly string fixedProcessedRouteEndpointId = string.Empty;
         private readonly int automaticSlot = -1;
         private readonly AudioHapticsProfileSettings automaticSettings;
         private readonly AutomaticGameAudioDetector automaticDetector;
         private readonly object sessionLock = new();
         private readonly ManualResetEvent stopped = new(false);
+        private readonly AutoResetEvent reconnectRequested = new(false);
         private ProcessCaptureLease session;
         private Thread monitorThread;
         private int currentProcessId;
         private string currentSourceDisplayName = string.Empty;
         private int started;
         private int disposed;
+        private long lastSessionCallbackTimestamp;
+        private int fixedRouteRecoveryCount;
 
-        public ProcessLoopbackWaveCapture(int processId)
+        public ProcessLoopbackWaveCapture(int processId,
+            bool followExclusiveRenderRoute = false)
         {
             if (processId <= 0)
             {
@@ -42,6 +50,23 @@ namespace DS4Windows
             }
 
             fixedProcessId = ResolveCaptureRootProcessId(processId);
+            using MMDevice processedRoute = followExclusiveRenderRoute ?
+                ProcessedAppAudioRouteResolver.FindExclusiveRoute(processId) :
+                null;
+            if (processedRoute != null)
+            {
+                fixedProcessedRouteEndpointId = processedRoute.ID;
+                // NAudio normalizes an extensible IEEE-float endpoint to the
+                // concrete float WaveFormat that its DataAvailable buffers
+                // actually contain. Preserve that exact contract; treating
+                // Sonar's float samples as signed Int32 makes both speaker and
+                // Audio Haptics substantially quieter and malformed.
+                using var formatProbe = new WasapiLoopbackCapture(
+                    processedRoute);
+                WaveFormat = formatProbe.WaveFormat;
+                return;
+            }
+
             // The controller speaker and haptics pipelines both run at
             // 48 kHz. Request that format from the shared audio engine so app
             // capture does not take a needless 44.1 -> 48 kHz detour.
@@ -114,6 +139,13 @@ namespace DS4Windows
             {
                 SwitchToProcess(fixedProcessId,
                     DescribeProcess(fixedProcessId), "selected app");
+                monitorThread = new Thread(FixedProcessMonitorLoop)
+                {
+                    IsBackground = true,
+                    Name = $"DS4W app audio recovery {fixedProcessId}",
+                    Priority = ThreadPriority.AboveNormal,
+                };
+                monitorThread.Start();
             }
         }
 
@@ -149,6 +181,7 @@ namespace DS4Windows
         public void Dispose()
         {
             StopRecording();
+            reconnectRequested.Dispose();
             stopped.Dispose();
         }
 
@@ -166,6 +199,17 @@ namespace DS4Windows
         public static bool IsAutomaticEndpointId(string endpointId) =>
             endpointId?.StartsWith(AutomaticEndpointPrefix,
                 StringComparison.Ordinal) == true;
+
+        internal static bool ShouldRecoverProcessedRoute(
+            long lastCallbackTimestamp, long currentTimestamp,
+            bool targetRouteAudible)
+        {
+            return targetRouteAudible && lastCallbackTimestamp > 0 &&
+                currentTimestamp >= lastCallbackTimestamp &&
+                currentTimestamp - lastCallbackTimestamp >=
+                    Stopwatch.Frequency *
+                        ProcessedRouteStallMilliseconds / 1000;
+        }
 
         public static bool TryParseAutomaticEndpointId(string endpointId,
             out int slot)
@@ -323,6 +367,83 @@ namespace DS4Windows
             }
         }
 
+        private void FixedProcessMonitorLoop()
+        {
+            WaitHandle[] waits = { stopped, reconnectRequested };
+            while (Volatile.Read(ref disposed) == 0)
+            {
+                ProcessCaptureLease current;
+                lock (sessionLock)
+                {
+                    current = session;
+                }
+
+                if (current == null)
+                {
+                    try
+                    {
+                        SwitchToProcess(fixedProcessId,
+                            DescribeProcess(fixedProcessId),
+                            fixedRouteRecoveryCount == 0 ?
+                                "selected app" : "recovered app");
+                    }
+                    catch (Exception exception)
+                    {
+                        if (fixedRouteRecoveryCount == 0 ||
+                            fixedRouteRecoveryCount % 20 == 0)
+                        {
+                            AppLogger.LogToGui(
+                                $"Per-app audio capture is waiting to reconnect process {fixedProcessId}: {exception.Message}",
+                                true);
+                        }
+                        fixedRouteRecoveryCount++;
+                    }
+                }
+                else
+                {
+                    long last = Volatile.Read(
+                        ref lastSessionCallbackTimestamp);
+                    long now = Stopwatch.GetTimestamp();
+                    bool callbackStalled = last > 0 && now >= last &&
+                        now - last >= Stopwatch.Frequency *
+                            ProcessedRouteStallMilliseconds / 1000;
+                    if (callbackStalled &&
+                        ProcessedAppAudioRouteResolver
+                            .IsTargetAudiblyActiveAnywhere(fixedProcessId))
+                    {
+                        RetireCurrentFixedSession();
+                        int recovery = Interlocked.Increment(
+                            ref fixedRouteRecoveryCount);
+                        AppLogger.LogToGui(
+                            $"Per-app audio capture recovered a stalled loopback for process {fixedProcessId} (recovery {recovery}).",
+                            false);
+                    }
+                }
+
+                int signaled = WaitHandle.WaitAny(waits,
+                    current == null ? FixedRouteReconnectMilliseconds :
+                        ProcessedRouteWatchdogPollMilliseconds);
+                if (signaled == 0)
+                {
+                    break;
+                }
+            }
+        }
+
+        private void RetireCurrentFixedSession()
+        {
+            ProcessCaptureLease oldSession;
+            lock (sessionLock)
+            {
+                oldSession = session;
+                session = null;
+                currentProcessId = 0;
+                currentSourceDisplayName = string.Empty;
+                Volatile.Write(ref lastSessionCallbackTimestamp, 0);
+            }
+            oldSession?.Dispose();
+        }
+
         private void SwitchToProcess(int processId, string displayName,
             string evidence)
         {
@@ -336,6 +457,8 @@ namespace DS4Windows
             ProcessCaptureLease replacement = null;
             replacement = ProcessCaptureRegistry.Acquire(processId,
                 WaveFormat,
+                automaticSlot < 0 ? fixedProcessedRouteEndpointId :
+                    string.Empty,
                 (buffer, count) => OnSessionData(replacement, buffer, count),
                 (_, exception) => OnSessionStopped(replacement, exception));
             ProcessCaptureLease oldSession;
@@ -355,6 +478,8 @@ namespace DS4Windows
                 currentProcessId = processId;
                 currentSourceDisplayName = string.IsNullOrWhiteSpace(
                     displayName) ? DescribeProcess(processId) : displayName;
+                Volatile.Write(ref lastSessionCallbackTimestamp,
+                    Stopwatch.GetTimestamp());
             }
             try
             {
@@ -406,6 +531,8 @@ namespace DS4Windows
         {
             if (ReferenceEquals(session, source))
             {
+                Volatile.Write(ref lastSessionCallbackTimestamp,
+                    Stopwatch.GetTimestamp());
                 DataAvailable?.Invoke(this,
                     new WaveInEventArgs(buffer, byteCount));
             }
@@ -435,8 +562,18 @@ namespace DS4Windows
             }
             else if (wasCurrent)
             {
-                RecordingStopped?.Invoke(this,
-                    new StoppedEventArgs(exception));
+                // Keep the IWaveIn owner and controller media pacer alive.
+                // Browser/game audio sessions can rebuild underneath a valid
+                // process without ending the selected source. Reacquire the
+                // shared application-loopback client in place instead of
+                // reporting a terminal stop to every consumer.
+                reconnectRequested.Set();
+                if (exception != null)
+                {
+                    AppLogger.LogToGui(
+                        $"Per-app audio capture stopped for process {fixedProcessId}; reconnecting: {exception.Message}",
+                        true);
+                }
             }
         }
 
@@ -589,10 +726,12 @@ namespace DS4Windows
                 sessions = new(StringComparer.Ordinal);
 
             public static ProcessCaptureLease Acquire(int processId,
-                WaveFormat waveFormat, Action<byte[], int> dataAvailable,
+                WaveFormat waveFormat, string processedRouteEndpointId,
+                Action<byte[], int> dataAvailable,
                 Action<int, Exception> recordingStopped)
             {
-                string key = BuildKey(processId, waveFormat);
+                string key = BuildKey(processId, waveFormat,
+                    processedRouteEndpointId);
                 lock (syncRoot)
                 {
                     if (!sessions.TryGetValue(key,
@@ -600,7 +739,7 @@ namespace DS4Windows
                         captureSession.IsDisposed)
                     {
                         captureSession = new ProcessCaptureSession(processId,
-                            waveFormat, key);
+                            waveFormat, processedRouteEndpointId, key);
                         sessions[key] = captureSession;
                     }
 
@@ -624,10 +763,11 @@ namespace DS4Windows
             }
 
             private static string BuildKey(int processId,
-                WaveFormat waveFormat) =>
+                WaveFormat waveFormat, string processedRouteEndpointId) =>
                 $"{processId}:{waveFormat.SampleRate}:" +
                 $"{waveFormat.Channels}:{waveFormat.BitsPerSample}:" +
-                $"{(int)waveFormat.Encoding}";
+                $"{(int)waveFormat.Encoding}:" +
+                $"{processedRouteEndpointId ?? string.Empty}";
         }
 
         private sealed class ProcessCaptureLease : IDisposable
@@ -670,10 +810,13 @@ namespace DS4Windows
         {
             private readonly AudioClient audioClient;
             private readonly AudioCaptureClient captureClient;
+            private readonly MMDevice processedRouteEndpoint;
+            private readonly WasapiCapture processedRouteCapture;
             private readonly EventWaitHandle captureEvent = new(false,
                 EventResetMode.AutoReset);
             private readonly ManualResetEvent stopped = new(false);
             private readonly Thread captureThread;
+            private readonly Thread processedRouteWatchdogThread;
             private readonly WaveFormat waveFormat;
             private readonly string registryKey;
             private readonly object subscriberLock = new();
@@ -683,13 +826,58 @@ namespace DS4Windows
             private int started;
             private int disposed;
             private int loggedPollingRecovery;
+            private int captureFailureSignaled;
+            private long lastProcessedRouteCallbackTimestamp;
 
             public ProcessCaptureSession(int processId, WaveFormat waveFormat,
-                string registryKey)
+                string processedRouteEndpointId, string registryKey)
             {
                 ProcessId = processId;
                 this.waveFormat = waveFormat;
                 this.registryKey = registryKey;
+                if (!string.IsNullOrWhiteSpace(processedRouteEndpointId))
+                {
+                    using var enumerator = new MMDeviceEnumerator();
+                    processedRouteEndpoint = enumerator.GetDevice(
+                        processedRouteEndpointId);
+                    if (processedRouteEndpoint.State != DeviceState.Active)
+                    {
+                        processedRouteEndpoint.Dispose();
+                        processedRouteEndpoint = null;
+                        throw new InvalidOperationException(
+                            "The selected application's processed audio route is no longer active.");
+                    }
+
+                    processedRouteCapture =
+                        new ProcessedRouteLoopbackCapture(
+                            processedRouteEndpoint);
+                    if (!FormatsMatch(waveFormat,
+                            processedRouteCapture.WaveFormat))
+                    {
+                        processedRouteCapture.Dispose();
+                        processedRouteEndpoint.Dispose();
+                        processedRouteCapture = null;
+                        processedRouteEndpoint = null;
+                        throw new InvalidOperationException(
+                            "The selected application's processed audio route changed format while capture was starting.");
+                    }
+                    processedRouteCapture.DataAvailable +=
+                        ProcessedRouteCapture_DataAvailable;
+                    processedRouteCapture.RecordingStopped +=
+                        ProcessedRouteCapture_RecordingStopped;
+                    processedRouteWatchdogThread = new Thread(
+                        ProcessedRouteWatchdogLoop)
+                    {
+                        IsBackground = true,
+                        Name = $"DS4W app route watchdog {processId}",
+                        Priority = ThreadPriority.AboveNormal,
+                    };
+                    AppLogger.LogToGui(
+                        $"Per-app audio capture is following processed route '{processedRouteEndpoint.FriendlyName}'.",
+                        false);
+                    return;
+                }
+
                 audioClient = ProcessLoopbackAudioClient.Activate(processId,
                     TimeSpan.FromSeconds(5));
                 // Match Microsoft's ApplicationLoopback contract: shared,
@@ -736,6 +924,14 @@ namespace DS4Windows
             {
                 if (Interlocked.Exchange(ref started, 1) != 0)
                 {
+                    return;
+                }
+                if (processedRouteCapture != null)
+                {
+                    Volatile.Write(ref lastProcessedRouteCallbackTimestamp,
+                        Stopwatch.GetTimestamp());
+                    processedRouteCapture.StartRecording();
+                    processedRouteWatchdogThread.Start();
                     return;
                 }
                 // Arm the engine before dispatching the event consumer, as in
@@ -907,10 +1103,111 @@ namespace DS4Windows
                 }
             }
 
+            private void ProcessedRouteCapture_DataAvailable(object sender,
+                WaveInEventArgs eventArgs)
+            {
+                if (Volatile.Read(ref disposed) == 0 &&
+                    eventArgs.BytesRecorded > 0)
+                {
+                    Volatile.Write(ref lastProcessedRouteCallbackTimestamp,
+                        Stopwatch.GetTimestamp());
+                    NotifyDataAvailable(eventArgs.Buffer,
+                        eventArgs.BytesRecorded);
+                }
+            }
+
+            private void ProcessedRouteWatchdogLoop()
+            {
+                while (Volatile.Read(ref disposed) == 0 &&
+                    !stopped.WaitOne(ProcessedRouteWatchdogPollMilliseconds))
+                {
+                    long now = Stopwatch.GetTimestamp();
+                    long last = Volatile.Read(
+                        ref lastProcessedRouteCallbackTimestamp);
+                    if (!ShouldRecoverProcessedRoute(last, now,
+                            IsProcessedRouteAudiblyActive()))
+                    {
+                        continue;
+                    }
+
+                    SignalProcessedRouteStopped(new InvalidOperationException(
+                        "The selected application's audio route stopped delivering loopback samples while its session remained audible."));
+                    return;
+                }
+            }
+
+            private bool IsProcessedRouteAudiblyActive()
+            {
+                try
+                {
+                    return ProcessedAppAudioRouteResolver
+                        .IsTargetRouteAudiblyActive(processedRouteEndpoint,
+                            ProcessId);
+                }
+                catch
+                {
+                    // Endpoint graphs are rebuilt asynchronously. A failed
+                    // meter query is not proof that capture stalled.
+                    return false;
+                }
+            }
+
+            private void SignalProcessedRouteStopped(Exception exception)
+            {
+                if (Interlocked.Exchange(ref captureFailureSignaled, 1) != 0)
+                {
+                    return;
+                }
+
+                ProcessCaptureRegistry.Remove(registryKey, this);
+                NotifyStopped(exception);
+            }
+
+            private void ProcessedRouteCapture_RecordingStopped(object sender,
+                StoppedEventArgs eventArgs)
+            {
+                if (Volatile.Read(ref disposed) != 0)
+                {
+                    return;
+                }
+
+                SignalProcessedRouteStopped(eventArgs.Exception);
+            }
+
+            private static bool FormatsMatch(WaveFormat left,
+                WaveFormat right)
+            {
+                return left != null && right != null &&
+                    left.SampleRate == right.SampleRate &&
+                    left.Channels == right.Channels &&
+                    left.BitsPerSample == right.BitsPerSample &&
+                    left.Encoding == right.Encoding &&
+                    left.BlockAlign == right.BlockAlign;
+            }
+
             public void Dispose()
             {
                 if (Interlocked.Exchange(ref disposed, 1) != 0) return;
                 stopped.Set();
+                if (processedRouteCapture != null)
+                {
+                    processedRouteCapture.DataAvailable -=
+                        ProcessedRouteCapture_DataAvailable;
+                    processedRouteCapture.RecordingStopped -=
+                        ProcessedRouteCapture_RecordingStopped;
+                    try { processedRouteCapture.StopRecording(); } catch { }
+                    processedRouteCapture.Dispose();
+                    processedRouteEndpoint?.Dispose();
+                    if (processedRouteWatchdogThread?.IsAlive == true &&
+                        !ReferenceEquals(Thread.CurrentThread,
+                            processedRouteWatchdogThread))
+                    {
+                        processedRouteWatchdogThread.Join(1200);
+                    }
+                    captureEvent.Dispose();
+                    stopped.Dispose();
+                    return;
+                }
                 try { audioClient.Stop(); } catch { }
                 captureEvent.Set();
                 if (captureThread.IsAlive &&
@@ -920,6 +1217,20 @@ namespace DS4Windows
                 audioClient.Dispose();
                 captureEvent.Dispose();
                 stopped.Dispose();
+            }
+
+            private sealed class ProcessedRouteLoopbackCapture :
+                WasapiCapture
+            {
+                public ProcessedRouteLoopbackCapture(MMDevice endpoint) :
+                    base(endpoint, false, CapturePollMilliseconds)
+                {
+                }
+
+                protected override AudioClientStreamFlags
+                    GetAudioClientStreamFlags() =>
+                    AudioClientStreamFlags.Loopback |
+                    base.GetAudioClientStreamFlags();
             }
         }
 

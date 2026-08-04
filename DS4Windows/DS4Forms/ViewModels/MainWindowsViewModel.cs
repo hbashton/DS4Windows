@@ -398,16 +398,32 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public string ControllerAudioSourceId
         {
-            get => HasValidSelectedDevice
-                ? Global.DualSenseAudioCaptureEndpointId[
-                    selectedController.DevIndex]
-                : string.Empty;
+            get
+            {
+                if (!HasValidSelectedDevice)
+                {
+                    return string.Empty;
+                }
+
+                int deviceIndex = selectedController.DevIndex;
+                string endpointId = Global.DualSenseAudioCaptureEndpointId[
+                    deviceIndex] ?? string.Empty;
+                string normalized = NormalizeAppAudioEndpointId(endpointId);
+                if (!string.Equals(endpointId, normalized,
+                        StringComparison.Ordinal))
+                {
+                    Global.DualSenseAudioCaptureEndpointId[deviceIndex] =
+                        normalized;
+                }
+                return normalized;
+            }
             set
             {
                 if (!HasValidSelectedDevice) return;
 
                 int deviceIndex = selectedController.DevIndex;
-                string normalized = value ?? string.Empty;
+                string normalized = NormalizeAppAudioEndpointId(
+                    value ?? string.Empty);
                 if (AudioEndpointChoiceCache.RenderEndpoints.Any(
                         endpoint => endpoint.IsControllerAudio &&
                             string.Equals(endpoint.EndpointId, normalized,
@@ -439,6 +455,20 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     EventArgs.Empty);
                 RaiseQuickProfileSettingChanged(deviceIndex);
             }
+        }
+
+        private static string NormalizeAppAudioEndpointId(string endpointId)
+        {
+            if (!ProcessLoopbackWaveCapture.TryParseEndpointId(endpointId,
+                    out int processId))
+            {
+                return endpointId ?? string.Empty;
+            }
+
+            int rootProcessId = ProcessLoopbackWaveCapture
+                .ResolveCaptureRootProcessId(processId);
+            return ProcessLoopbackWaveCapture.BuildEndpointId(
+                rootProcessId > 0 ? rootProcessId : processId);
         }
 
         public bool AudioHapticsSpeakerOverrideActive =>

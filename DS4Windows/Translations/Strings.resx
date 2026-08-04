@@ -635,7 +635,7 @@ Disabled:
     <value>Flash Lightbar at High Latency</value>
   </data>
   <data name="HideDS4Controller" xml:space="preserve">
-    <value>Hide DS4 Controller</value>
+    <value>Use HidHide to Prevent Double Input</value>
   </data>
   <data name="HotkeysAbout" xml:space="preserve">
     <value>Hotkeys/About</value>

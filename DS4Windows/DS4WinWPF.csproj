@@ -290,6 +290,7 @@
 		<None Include="Resources\DualShock4-Mapping-Lightbar.png" />
 		<None Include="Resources\DualSenseEdge-Mapping_Highlights.png" />
 		<None Include="Resources\DualSenseEdge-Mapping-Stick_Highlights.png" />
+		<None Include="Resources\DualSenseEdge-Mapping-Lightbar.png" />
 		<None Include="Resources\Switch2Pro-Mapping_Highlights.png" />
 		<None Include="Resources\Switch2Pro-Mapping-Stick_Highlights.png" />
 		<None Include="Resources\Xbox360-Action_Highlights.png" />
@@ -400,6 +401,7 @@
 		<Resource Include="Resources\DualShock4-Mapping-Lightbar.png" />
 		<Resource Include="Resources\DualSenseEdge-Mapping_Highlights.png" />
 		<Resource Include="Resources\DualSenseEdge-Mapping-Stick_Highlights.png" />
+		<Resource Include="Resources\DualSenseEdge-Mapping-Lightbar.png" />
 		<Resource Include="Resources\Switch2Pro-Mapping_Highlights.png" />
 		<Resource Include="Resources\Switch2Pro-Mapping-Stick_Highlights.png" />
 		<Resource Include="Resources\Xbox360-Action_Highlights.png" />

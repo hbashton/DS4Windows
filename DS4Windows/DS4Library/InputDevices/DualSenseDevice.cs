@@ -1292,7 +1292,8 @@ namespace DS4Windows.InputDevices
                 {
                     // The next already-clocked media generation applies the
                     // route atomically without inserting a control report.
-                    published = RefreshBluetoothAudioPacerTemplateFromCache();
+                    published = RefreshBluetoothAudioPacerTemplateFromCache(
+                        waitForCapacity: true);
                 }
                 else
                 {
@@ -1700,7 +1701,7 @@ namespace DS4Windows.InputDevices
 
         private bool TryUpdateBluetoothAudioPacerTemplate(byte[] template,
             long hapticsExpiryQpc, out bool pacerOwnsTransport,
-            bool realtimeHaptics = false)
+            bool realtimeHaptics = false, bool waitForCapacity = false)
         {
             pacerOwnsTransport = false;
             lock (bluetoothAudioPacerLock)
@@ -1726,8 +1727,11 @@ namespace DS4Windows.InputDevices
                 return realtimeHaptics ?
                     bluetoothAudioPacer.UpdateRealtimeHapticsTemplate(
                         template, hapticsExpiryQpc) :
-                    bluetoothAudioPacer.UpdateTemplate(template,
-                        hapticsExpiryQpc);
+                    (waitForCapacity ?
+                        bluetoothAudioPacer.UpdateTemplateAndWaitForCapacity(
+                            template, hapticsExpiryQpc) :
+                        bluetoothAudioPacer.UpdateTemplate(template,
+                            hapticsExpiryQpc));
             }
         }
 
@@ -1837,7 +1841,7 @@ namespace DS4Windows.InputDevices
         }
 
         private bool RefreshBluetoothAudioPacerTemplateFromCache(
-            bool realtimeHaptics = false)
+            bool realtimeHaptics = false, bool waitForCapacity = false)
         {
             lock (bluetoothCombinedTransportWriteLock)
             {
@@ -1861,7 +1865,7 @@ namespace DS4Windows.InputDevices
                 ApplyBluetoothMicrophoneStreamingRequest(template);
                 bool updated = TryUpdateBluetoothAudioPacerTemplate(template,
                     hapticsExpiryQpc, out bool pacerOwnsTransport,
-                    realtimeHaptics);
+                    realtimeHaptics, waitForCapacity);
                 if (!pacerOwnsTransport || !updated)
                 {
                     RequestUnifiedBluetoothOutputTransportRecovery();

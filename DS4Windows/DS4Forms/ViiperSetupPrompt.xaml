@@ -33,7 +33,8 @@
                                FontSize="14"
                                FontWeight="SemiBold"
                                VerticalAlignment="Center" />
-                    <Button HorizontalAlignment="Right"
+                    <Button x:Name="closeButton"
+                            HorizontalAlignment="Right"
                             VerticalAlignment="Center"
                             Width="30"
                             Height="30"
@@ -135,12 +136,25 @@
                               Style="{StaticResource BridgeDescribedCheckBoxStyle}"
                               Margin="0,0,0,20" />
 
+                    <Border x:Name="portableWarningPanel"
+                            Background="{DynamicResource RaisedBackgroundColor}"
+                            BorderBrush="{DynamicResource BorderColor}"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="12"
+                            Margin="0,0,0,16">
+                        <TextBlock Text="Portable installation keeps this DS4Windows executable in place and installs VIIPER under LocalAppData. Its elevated startup target has less tamper protection than Program Files; choose it only if you accept that tradeoff. Choosing Standard removes only installer-owned LocalAppData VIIPER files and manifest-owned portable DS4Windows package files; profiles, settings, and unrecognized files are preserved."
+                                   Foreground="{DynamicResource MutedForegroundColor}"
+                                   TextWrapping="Wrap" />
+                    </Border>
+
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <Button Content="Not now"
+                        <Button x:Name="notNowButton"
+                                Content="Not now"
                                 MinWidth="94"
                                 Style="{StaticResource BridgeSecondaryButtonStyle}"
                                 HorizontalAlignment="Left"
@@ -153,8 +167,14 @@
                                     Visibility="Collapsed"
                                     Style="{StaticResource BridgeSecondaryButtonStyle}"
                                     Click="UseExistingButton_Click" />
+                            <Button x:Name="installPortableButton"
+                                    Content="Install portably"
+                                    MinWidth="132"
+                                    Margin="0,0,10,0"
+                                    Style="{StaticResource BridgeSecondaryButtonStyle}"
+                                    Click="InstallPortableButton_Click" />
                             <Button x:Name="installButton"
-                                    Content="Install standard VIIPER"
+                                    Content="Install standard"
                                     MinWidth="164"
                                     Style="{StaticResource BridgePrimaryButtonStyle}"
                                     Click="InstallButton_Click" />

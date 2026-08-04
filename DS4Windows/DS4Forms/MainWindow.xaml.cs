@@ -2318,7 +2318,8 @@ Suspend support not enabled.", true);
 
         private void ViiperSetupBtn_Click(object sender, RoutedEventArgs e)
         {
-            ViiperSetupManager.LaunchInstaller(ViiperSetupManager.GetStatus(), this);
+            ViiperSetupManager.EnsureReadyWithPrompt(this,
+                forcePrompt: true);
         }
 
         private void ViiperRefreshBtn_Click(object sender, RoutedEventArgs e)

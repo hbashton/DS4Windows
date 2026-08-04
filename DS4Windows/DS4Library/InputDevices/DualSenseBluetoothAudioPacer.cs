@@ -183,6 +183,7 @@ namespace DS4Windows.InputDevices
         private const long InputClockTimestampOffset = 8;
         private const long InputClockSequenceOffset = 16;
         private const int OutboundCommandCapacity = HostReservoirCapacity + 16;
+        private const int ControlTemplateQueueWaitMilliseconds = 250;
         private const int InitialEpoch = 1;
 
         private enum MessageKind : byte
@@ -914,7 +915,14 @@ namespace DS4Windows.InputDevices
             long hapticsExpiryQpc)
         {
             return UpdateTemplateCore(latestCombinedReport,
-                hapticsExpiryQpc);
+                hapticsExpiryQpc, waitForCapacity: false);
+        }
+
+        public bool UpdateTemplateAndWaitForCapacity(
+            byte[] latestCombinedReport, long hapticsExpiryQpc)
+        {
+            return UpdateTemplateCore(latestCombinedReport,
+                hapticsExpiryQpc, waitForCapacity: true);
         }
 
         /// <summary>
@@ -960,7 +968,7 @@ namespace DS4Windows.InputDevices
         }
 
         private bool UpdateTemplateCore(byte[] latestCombinedReport,
-            long hapticsExpiryQpc)
+            long hapticsExpiryQpc, bool waitForCapacity)
         {
             if (latestCombinedReport == null ||
                 latestCombinedReport.Length != ReportLength || !IsRunning)
@@ -969,27 +977,46 @@ namespace DS4Windows.InputDevices
             }
 
             byte[] copy = (byte[])latestCombinedReport.Clone();
-            lock (stateLock)
+            var command = new OutboundCommand(MessageKind.UpdateTemplate,
+                BuildTemplatePayload(copy, hapticsExpiryQpc));
+            long deadline = Stopwatch.GetTimestamp() +
+                Stopwatch.Frequency * ControlTemplateQueueWaitMilliseconds /
+                    1000;
+            do
             {
-                latestTemplate = copy;
-                latestTemplateHapticsExpiryQpc = hapticsExpiryQpc;
-                foreach (OutboundCommand removed in outboundCommands.RemoveWhere(
-                    command => command.Kind == MessageKind.UpdateTemplate))
+                lock (stateLock)
                 {
-                    // Template commands do not consume report credits.
+                    if (!IsRunning)
+                    {
+                        return false;
+                    }
+
+                    if (outboundCommands.TryReplaceWhereWithGroup(
+                            candidate => candidate.Kind ==
+                                MessageKind.UpdateTemplate,
+                            new[] { command }))
+                    {
+                        latestTemplate = copy;
+                        latestTemplateHapticsExpiryQpc = hapticsExpiryQpc;
+                        outboundAvailable.Set();
+                        return true;
+                    }
                 }
 
-                var command = new OutboundCommand(MessageKind.UpdateTemplate,
-                    BuildTemplatePayload(copy, hapticsExpiryQpc));
-                bool queued = outboundCommands.TryEnqueue(command);
-                if (!queued)
+                if (!waitForCapacity)
                 {
                     return false;
                 }
-            }
 
-            outboundAvailable.Set();
-            return true;
+                // Wake the sender and yield without holding either queue
+                // lock. Game-authored deltas keep FIFO order while this rare
+                // UI control transition waits for one command slot.
+                outboundAvailable.Set();
+                Thread.Sleep(1);
+            }
+            while (Stopwatch.GetTimestamp() < deadline);
+
+            return false;
         }
 
         /// <summary>

@@ -62,7 +62,8 @@ namespace DS4WinWPF.DS4Forms
                 return;
             }
 
-            bool launched = DS4Windows.ViiperSetupManager.LaunchInstaller(status, this);
+            bool launched = DS4Windows.ViiperSetupManager.
+                EnsureReadyWithPrompt(this, forcePrompt: true);
             viiperInstallBtn.Content = launched
                 ? "Setup opened — finish it, then click here to verify"
                 : "VIIPER setup needs attention";

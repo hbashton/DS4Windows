@@ -11,6 +11,7 @@ the Free Software Foundation, either version 3 of the License, or
 using DS4Windows.InputDevices;
 using NAudio.CoreAudioApi;
 using NAudio.CoreAudioApi.Interfaces;
+using NAudio.Dmo;
 using NAudio.Wave;
 using System;
 using System.Buffers.Binary;
@@ -432,7 +433,8 @@ namespace DS4Windows
                         throw new InvalidOperationException(
                             "The selected application is not currently producing an audio session.");
                     }
-                    processCapture = new ProcessLoopbackWaveCapture(processId);
+                    processCapture = new ProcessLoopbackWaveCapture(processId,
+                        followExclusiveRenderRoute: true);
                     sourceDisplayName = string.IsNullOrWhiteSpace(
                         activeSettings.DisplayName) ? $"process {processId}" :
                         activeSettings.DisplayName;
@@ -1197,7 +1199,7 @@ namespace DS4Windows
                 {
                     return 0.0f;
                 }
-                if (format.Encoding == WaveFormatEncoding.IeeeFloat &&
+                if (IsIeeeFloatCaptureFormat(format) &&
                     format.BitsPerSample == 32 && offset + 3 < byteCount)
                 {
                     return Math.Clamp(BitConverter.ToSingle(buffer, offset),
@@ -1216,6 +1218,13 @@ namespace DS4Windows
                     _ => 0.0f,
                 };
             }
+
+            internal static bool IsIeeeFloatCaptureFormat(
+                WaveFormat format) =>
+                format?.Encoding == WaveFormatEncoding.IeeeFloat ||
+                format is WaveFormatExtensible extensible &&
+                extensible.SubFormat ==
+                    AudioMediaSubtypes.MEDIASUBTYPE_IEEE_FLOAT;
 
             private static int ReadInt24(byte[] buffer, int offset)
             {

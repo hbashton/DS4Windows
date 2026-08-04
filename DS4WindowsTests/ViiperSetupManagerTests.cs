@@ -137,6 +137,72 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
+        public void PortableInstallerViiperPathUsesLocalAppData()
+        {
+            string localApplicationData = Path.Combine("C:\\Users", "Tester",
+                "AppData", "Local");
+
+            string path = ViiperSetupManager.GetPortableViiperExePath(
+                localApplicationData);
+
+            Assert.AreEqual(Path.Combine(localApplicationData, "VIIPER",
+                "viiper.exe"), path);
+        }
+
+        [TestMethod]
+        public void ViiperBinaryRequiresExactBundledHash()
+        {
+            string directory = Path.Combine(Path.GetTempPath(),
+                $"viiper-hash-{Guid.NewGuid():N}");
+            string bundled = Path.Combine(directory, "bundled.exe");
+            string matching = Path.Combine(directory, "matching.exe");
+            string different = Path.Combine(directory, "different.exe");
+            try
+            {
+                Directory.CreateDirectory(directory);
+                byte[] expected = { 0x56, 0x49, 0x49, 0x50, 0x45, 0x52 };
+                File.WriteAllBytes(bundled, expected);
+                File.WriteAllBytes(matching, expected);
+                File.WriteAllBytes(different,
+                    new byte[] { 0x56, 0x49, 0x49, 0x50, 0x45, 0x53 });
+
+                Assert.IsTrue(ViiperSetupManager.FilesHaveSameSha256(
+                    matching, bundled));
+                Assert.IsFalse(ViiperSetupManager.FilesHaveSameSha256(
+                    different, bundled));
+                Assert.IsFalse(ViiperSetupManager.FilesHaveSameSha256(
+                    Path.Combine(directory, "missing.exe"), bundled));
+            }
+            finally
+            {
+                if (Directory.Exists(directory))
+                {
+                    Directory.Delete(directory, recursive: true);
+                }
+            }
+        }
+
+        [TestMethod]
+        public void InstalledHashMismatchRequiresVerifiedUpdate()
+        {
+            ViiperPrerequisiteStatus status = new ViiperPrerequisiteStatus
+            {
+                ViiperInstalled = true,
+                ViiperPackageCurrent = false,
+            };
+
+            Assert.IsTrue(ViiperSetupManager.
+                RequiresVerifiedViiperUpdate(status));
+            status.ViiperPackageCurrent = true;
+            Assert.IsFalse(ViiperSetupManager.
+                RequiresVerifiedViiperUpdate(status));
+            status.ViiperInstalled = false;
+            status.ViiperPackageCurrent = false;
+            Assert.IsFalse(ViiperSetupManager.
+                RequiresVerifiedViiperUpdate(status));
+        }
+
+        [TestMethod]
         public void ReadyRejectsUnsafeCitrixUsbMonitor()
         {
             ViiperPrerequisiteStatus status = new ViiperPrerequisiteStatus

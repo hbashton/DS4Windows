@@ -7,21 +7,29 @@ namespace DS4WinWPF.DS4Forms
     {
         NotNow,
         InstallStandard,
+        InstallPortable,
         UseExisting,
     }
 
     public partial class ViiperSetupPrompt : Window
     {
+        private readonly bool verifiedUpdateRequired;
+
         public ViiperSetupPromptDecision Decision { get; private set; } =
             ViiperSetupPromptDecision.NotNow;
 
         public bool SuppressFuturePrompts =>
             suppressPromptCheck.IsChecked == true;
 
+        public bool ExitApplicationRequested => verifiedUpdateRequired &&
+            Decision == ViiperSetupPromptDecision.NotNow;
+
         public ViiperSetupPrompt(string currentStatus,
             string existingViiperPath, bool citrixUsbMonitorConflict = false,
-            bool portableMigration = false)
+            bool portableMigration = false,
+            bool verifiedUpdateRequired = false)
         {
+            this.verifiedUpdateRequired = verifiedUpdateRequired;
             InitializeComponent();
             statusText.Text = currentStatus;
 
@@ -34,6 +42,8 @@ namespace DS4WinWPF.DS4Forms
                     "• Disable Citrix generic USB redirection only\n" +
                     "• Restart Windows before VIIPER starts again";
                 installButton.Content = "Disable conflicting USB monitor";
+                installPortableButton.Visibility = Visibility.Collapsed;
+                portableWarningPanel.Visibility = Visibility.Collapsed;
                 return;
             }
 
@@ -46,21 +56,43 @@ namespace DS4WinWPF.DS4Forms
 
             if (portableMigration)
             {
+                // A verified portable backend is usable. This is only a
+                // security recommendation, so the user may dismiss it
+                // permanently. Hash failures override this below.
+                suppressPromptCheck.Visibility = Visibility.Visible;
                 headingText.Text = "Move VIIPER to its safer home?";
                 summaryText.Text =
                     "Your portable DS4Windows can stay exactly where it is.";
                 requirementsHeadingText.Text = "Recommended setup";
                 requirementsText.Text =
-                    "• Keep DS4Windows portable\n" +
-                    "• Install only VIIPER in Program Files\n" +
-                    "• Let DS4Windows own the VIIPER startup task";
+                    "• Standard: install DS4Windows and VIIPER in Program Files\n" +
+                    "• Portable: keep DS4Windows here and put VIIPER in LocalAppData\n" +
+                    "• Keep both startup tasks aligned with your choice";
                 existingViiperHeadingText.Text = "Current portable VIIPER";
                 existingViiperDescriptionText.Text =
                     "It is working and will remain usable if you keep it. " +
                     "The standard location is safer for updates and prevents " +
                     "two VIIPER copies from competing.";
                 useExistingButton.Content = "Keep portable VIIPER";
-                installButton.Content = "Move VIIPER to Program Files";
+                installPortableButton.Content = "Repair portable install";
+                installButton.Content = "Install standard";
+            }
+
+            if (verifiedUpdateRequired)
+            {
+                headingText.Text = "VIIPER verification failed";
+                summaryText.Text =
+                    "The installed VIIPER does not match this DS4Windows package.";
+                requirementsHeadingText.Text = "Verified update required";
+                requirementsText.Text =
+                    "• Install the exact bundled VIIPER build\n" +
+                    "• Choose Standard or Portable installation\n" +
+                    "• The unverified backend will not be started";
+                existingViiperPanel.Visibility = Visibility.Collapsed;
+                useExistingButton.Visibility = Visibility.Collapsed;
+                suppressPromptCheck.Visibility = Visibility.Collapsed;
+                notNowButton.Content = "Exit DS4Windows";
+                closeButton.ToolTip = "Exit DS4Windows";
             }
         }
 
@@ -76,6 +108,13 @@ namespace DS4WinWPF.DS4Forms
         private void InstallButton_Click(object sender, RoutedEventArgs e)
         {
             Decision = ViiperSetupPromptDecision.InstallStandard;
+            DialogResult = true;
+        }
+
+        private void InstallPortableButton_Click(object sender,
+            RoutedEventArgs e)
+        {
+            Decision = ViiperSetupPromptDecision.InstallPortable;
             DialogResult = true;
         }
 

@@ -75,6 +75,49 @@ namespace DS4WinWPF.DS4Forms
             }
         }
 
+        internal static Geometry CenterPressMask(Geometry surface)
+        {
+            Rect bounds = surface.Bounds;
+            if (bounds.IsEmpty)
+            {
+                return Geometry.Empty;
+            }
+
+            double diameter = Math.Min(bounds.Width, bounds.Height) * 0.44;
+            var center = new EllipseGeometry(new Point(
+                bounds.Left + bounds.Width / 2.0,
+                bounds.Top + bounds.Height / 2.0), diameter / 2.0,
+                diameter / 2.0);
+            var result = new CombinedGeometry(GeometryCombineMode.Intersect,
+                surface, center);
+            result.Freeze();
+            return result;
+        }
+
+        internal static Geometry DirectionalHitMask(Geometry direction,
+            Geometry fullSurface)
+        {
+            Rect bounds = fullSurface.Bounds;
+            if (direction.Bounds.IsEmpty || bounds.IsEmpty)
+            {
+                return Geometry.Empty;
+            }
+
+            // Direction visuals fill their complete cap quadrant. Keep the
+            // center pointer lane free so it always activates L3/R3 instead.
+            // Derive the center from the complete raster surface; inferring it
+            // from a quadrant misplaces the lane on asymmetric artwork.
+            double diameter = Math.Min(bounds.Width, bounds.Height) * 0.44;
+            var center = new EllipseGeometry(new Point(
+                bounds.Left + bounds.Width / 2.0,
+                bounds.Top + bounds.Height / 2.0),
+                diameter / 2.0, diameter / 2.0);
+            var result = new CombinedGeometry(GeometryCombineMode.Exclude,
+                direction, center);
+            result.Freeze();
+            return result;
+        }
+
         private static BitmapSource LoadAtlas(string resourceName)
         {
             if (atlasCache.TryGetValue(resourceName, out BitmapSource cached))

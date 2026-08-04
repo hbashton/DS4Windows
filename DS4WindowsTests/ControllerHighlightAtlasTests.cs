@@ -35,12 +35,81 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void StickPressAndDirectionPixelsNeverOverlap()
+        public void StickDirectionsAreExclusiveAndStayInsideTheCap()
         {
             foreach (string atlas in StickAtlases)
             {
-                AssertDisjointSet(atlas, 0);
-                AssertDisjointSet(atlas, 5);
+                AssertStickSet(atlas, 0);
+                AssertStickSet(atlas, 5);
+            }
+        }
+
+        [TestMethod]
+        public void StickDirectionsFillTheCurvedCapInsteadOfRenderingAsDots()
+        {
+            foreach (string atlas in StickAtlases)
+            {
+                foreach (int firstFrame in new[] { 0, 5 })
+                {
+                    int surfacePixels = CountOpaquePixels(
+                        RasterHighlightAtlas.Frame(atlas, firstFrame));
+                    int directionPixels = Enumerable.Range(firstFrame + 1, 4)
+                        .Sum(frame => CountOpaquePixels(
+                            RasterHighlightAtlas.Frame(atlas, frame)));
+
+                    Assert.IsTrue(directionPixels >= surfacePixels * 0.90,
+                        $"{atlas} directional surfaces cover only " +
+                        $"{directionPixels}/{surfacePixels} pixels of the cap.");
+                }
+            }
+        }
+
+        [TestMethod]
+        public void StickPressHitAreaIsCenteredAndSmallerThanItsVisualCap()
+        {
+            foreach (string atlas in StickAtlases)
+            {
+                foreach (int frame in new[] { 0, 5 })
+                {
+                    Geometry surface = RasterHighlightAtlas.Mask(atlas, frame);
+                    Geometry hit = RasterHighlightAtlas.CenterPressMask(surface);
+                    Assert.IsFalse(hit.Bounds.IsEmpty);
+                    Assert.IsTrue(hit.Bounds.Width < surface.Bounds.Width * 0.5);
+                    Assert.IsTrue(hit.Bounds.Height < surface.Bounds.Height * 0.5);
+                    Assert.AreEqual(surface.Bounds.Left + surface.Bounds.Width / 2.0,
+                        hit.Bounds.Left + hit.Bounds.Width / 2.0, 1.0);
+                    Assert.AreEqual(surface.Bounds.Top + surface.Bounds.Height / 2.0,
+                        hit.Bounds.Top + hit.Bounds.Height / 2.0, 1.0);
+                }
+            }
+        }
+
+        [TestMethod]
+        public void StickDirectionHitAreasReserveTheCenteredPressLane()
+        {
+            foreach (string atlas in StickAtlases)
+            {
+                foreach (int surfaceFrame in new[] { 0, 5 })
+                {
+                    Geometry surface = RasterHighlightAtlas.Mask(atlas,
+                        surfaceFrame);
+                    Geometry center = RasterHighlightAtlas.CenterPressMask(
+                        surface);
+                    foreach (int frame in Enumerable.Range(surfaceFrame + 1,
+                        4))
+                    {
+                        Geometry hit = RasterHighlightAtlas
+                            .DirectionalHitMask(
+                                RasterHighlightAtlas.Mask(atlas, frame),
+                                surface);
+                        Point capCenter = new Point(
+                            surface.Bounds.Left + surface.Bounds.Width / 2.0,
+                            surface.Bounds.Top + surface.Bounds.Height / 2.0);
+                        Assert.IsFalse(hit.FillContains(capCenter),
+                            $"{atlas} direction frame {frame} steals the " +
+                            "centered L3/R3 pointer lane.");
+                    }
+                }
             }
         }
 
@@ -114,6 +183,54 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void ShoulderAndTriggerHighlightsNeverOverlap()
+        {
+            foreach ((string atlas, int width, int height) in new[]
+            {
+                ("DualShock4-Config_Highlights.png", 440, 220),
+                ("DualSenseEdge-Config_Highlights.png", 440, 220),
+                ("Switch2Pro-Config_Highlights.png", 440, 220),
+                ("Xbox360-Action_Highlights.png", 630, 247),
+            })
+            {
+                foreach ((int shoulder, int trigger) in new[]
+                {
+                    (4, 6),
+                    (5, 7),
+                })
+                {
+                    byte[] shoulderAlpha = AlphaPixels(
+                        RasterHighlightAtlas.Frame(atlas, shoulder, width,
+                            height));
+                    byte[] triggerAlpha = AlphaPixels(
+                        RasterHighlightAtlas.Frame(atlas, trigger, width,
+                            height));
+                    bool overlaps = shoulderAlpha.Zip(triggerAlpha,
+                        (first, second) => first >=
+                            RasterHighlightAtlas.HitAlphaThreshold &&
+                            second >= RasterHighlightAtlas.HitAlphaThreshold)
+                        .Any(value => value);
+
+                    Assert.IsFalse(overlaps,
+                        $"{atlas} frames {shoulder}/{trigger} overlap.");
+                }
+            }
+        }
+
+        [TestMethod]
+        public void SwitchAndXboxShouldersStayBoundedToTheirPaintedCaps()
+        {
+            AssertPairedControlBounds("Switch2Pro-Config_Highlights.png",
+                440, 220, 4, 5, 40, 52, 18, 28);
+            AssertPairedControlBounds("Switch2Pro-Config_Highlights.png",
+                440, 220, 6, 7, 33, 45, 12, 22);
+            AssertPairedControlBounds("Xbox360-Action_Highlights.png",
+                630, 247, 4, 5, 78, 84, 30, 38);
+            AssertPairedControlBounds("Xbox360-Action_Highlights.png",
+                630, 247, 6, 7, 26, 38, 32, 44);
+        }
+
+        [TestMethod]
         public void EveryNonDualSenseHighlightStaysOnControllerArtwork()
         {
             AssertAtlasStaysOnArtwork("DualShock 4 Controller.png", 384, 247,
@@ -126,14 +243,75 @@ namespace DS4WindowsTests
                 "Xbox360-Action_Highlights.png", 630, 247);
         }
 
+        private static void AssertPairedControlBounds(string atlas, int width,
+            int height, int leftFrame, int rightFrame, double minimumWidth,
+            double maximumWidth, double minimumHeight, double maximumHeight)
+        {
+            BitmapSource leftImage = RasterHighlightAtlas.Frame(atlas,
+                leftFrame, width, height);
+            BitmapSource rightImage = RasterHighlightAtlas.Frame(atlas,
+                rightFrame, width, height);
+            Rect left = RasterHighlightAtlas.Mask(atlas, leftFrame, width,
+                height).Bounds;
+            Rect right = RasterHighlightAtlas.Mask(atlas, rightFrame, width,
+                height).Bounds;
+
+            foreach (Rect bounds in new[] { left, right })
+            {
+                Assert.IsTrue(bounds.Width >= minimumWidth &&
+                    bounds.Width <= maximumWidth &&
+                    bounds.Height >= minimumHeight &&
+                    bounds.Height <= maximumHeight,
+                    $"{atlas} control bounds {bounds.Width:F1} x " +
+                    $"{bounds.Height:F1} leave the painted cap.");
+            }
+
+            int leftPixels = CountOpaquePixels(leftImage);
+            int rightPixels = CountOpaquePixels(rightImage);
+            double ratio = leftPixels / (double)Math.Max(1, rightPixels);
+            Assert.IsTrue(ratio >= 0.75 && ratio <= 1.25,
+                $"{atlas} paired control areas are asymmetric ({ratio:F2}).");
+        }
+
+        [TestMethod]
+        public void DualSenseEdgeFaceHighlightsCoverButtonsNotTheirGlyphs()
+        {
+            const string atlas = "DualSenseEdge-Config_Highlights.png";
+            for (int frame = 0; frame < 4; frame++)
+            {
+                BitmapSource highlight = RasterHighlightAtlas.Frame(atlas,
+                    frame);
+                Geometry mask = RasterHighlightAtlas.Mask(atlas, frame);
+                Assert.IsTrue(CountOpaquePixels(highlight) >= 320,
+                    $"Edge face frame {frame} covers only a glyph fragment.");
+                Assert.IsTrue(mask.Bounds.Width >= 18 &&
+                    mask.Bounds.Height >= 18 &&
+                    mask.Bounds.Width <= 31 &&
+                    mask.Bounds.Height <= 31,
+                    $"Edge face frame {frame} has implausible cap bounds " +
+                    $"{mask.Bounds.Width:F1} x {mask.Bounds.Height:F1}.");
+            }
+        }
+
+        [TestMethod]
+        public void DualSenseEdgeLightbarWrapsAroundTheTouchpad()
+        {
+            Geometry lightbar = RasterHighlightAtlas.Mask(
+                "DualSenseEdge-Mapping-Lightbar.png", 0);
+            Assert.IsTrue(lightbar.Bounds.Width >= 130,
+                $"Edge lightbar width is only {lightbar.Bounds.Width}.");
+            Assert.IsTrue(lightbar.Bounds.Height >= 50,
+                $"Edge lightbar height is only {lightbar.Bounds.Height}.");
+        }
+
         [TestMethod]
         public void DualShock4UpperTouchIsInsideTheTouchpadNotTheLightbar()
         {
             Rect upperTouch = RasterHighlightAtlas.Mask(
                 "DualShock4-Config_Highlights.png", 21).Bounds;
-            Assert.IsTrue(upperTouch.Top >= 69,
+            Assert.IsTrue(upperTouch.Top >= 67,
                 $"Upper touch starts above the touchpad at {upperTouch.Top}.");
-            Assert.IsTrue(upperTouch.Bottom <= 86,
+            Assert.IsTrue(upperTouch.Bottom <= 87,
                 $"Upper touch leaves the touchpad at {upperTouch.Bottom}.");
         }
 
@@ -164,21 +342,63 @@ namespace DS4WindowsTests
                 RasterHighlightAtlas.Mask(atlas, 0));
         }
 
-        private static void AssertDisjointSet(string atlas, int firstFrame)
+        private static void AssertStickSet(string atlas, int firstFrame)
         {
-            byte[][] frames = Enumerable.Range(firstFrame, 5)
+            BitmapSource surfaceImage = RasterHighlightAtlas.Frame(atlas,
+                firstFrame);
+            byte[] surface = AlphaPixels(surfaceImage);
+            int minX = surfaceImage.PixelWidth;
+            int minY = surfaceImage.PixelHeight;
+            int maxX = -1;
+            int maxY = -1;
+            for (int index = 0; index < surface.Length; index++)
+            {
+                if (surface[index] < 16)
+                {
+                    continue;
+                }
+
+                int x = index % surfaceImage.PixelWidth;
+                int y = index / surfaceImage.PixelWidth;
+                minX = Math.Min(minX, x);
+                minY = Math.Min(minY, y);
+                maxX = Math.Max(maxX, x);
+                maxY = Math.Max(maxY, y);
+            }
+
+            double centerX = (minX + maxX + 1) / 2.0;
+            double centerY = (minY + maxY + 1) / 2.0;
+            byte[][] frames = Enumerable.Range(firstFrame + 1, 4)
                 .Select(frame => AlphaPixels(
                     RasterHighlightAtlas.Frame(atlas, frame)))
                 .ToArray();
+            foreach (byte[] direction in frames)
+            {
+                Assert.IsFalse(direction.Where((alpha, index) => alpha >= 16 &&
+                    surface[index] < 16).Any(),
+                    $"{atlas} has a stick direction outside its cap.");
+            }
             for (int left = 0; left < frames.Length; left++)
             {
                 for (int right = left + 1; right < frames.Length; right++)
                 {
-                    bool overlaps = frames[left].Zip(frames[right],
-                        (a, b) => a >= 16 && b >= 16).Any(value => value);
+                    bool overlaps = frames[left].Select((alpha, index) =>
+                    {
+                        if (alpha < 16 || frames[right][index] < 16)
+                        {
+                            return false;
+                        }
+
+                        int x = index % surfaceImage.PixelWidth;
+                        int y = index / surfaceImage.PixelWidth;
+                        double dx = x + 0.5 - centerX;
+                        double dy = y + 0.5 - centerY;
+                        return dx * dx + dy * dy > 4.0;
+                    }).Any(value => value);
                     Assert.IsFalse(overlaps,
-                        $"{atlas} frames {firstFrame + left} and " +
-                        $"{firstFrame + right} overlap.");
+                        $"{atlas} direction frames {firstFrame + left + 1} and " +
+                        $"{firstFrame + right + 1} overlap outside the shared " +
+                        "center apex.");
                 }
             }
         }

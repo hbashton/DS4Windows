@@ -94,7 +94,7 @@
                                 <ComboBox x:Name="controllerDiagramSelector" Grid.Column="1"
                                           Width="218" MinHeight="38" VerticalAlignment="Center"
                                           SelectionChanged="ControllerDiagramSelector_SelectionChanged"
-                                          ToolTip="Choose the controller artwork used by the remapping diagram">
+                                          >
                                     <ComboBoxItem>
                                         <StackPanel Orientation="Horizontal">
                                             <Image Source="/DS4Windows;component/Resources/DualShock 4 Controller.png"
@@ -184,7 +184,8 @@
                             </ContextMenu>
                         </Canvas.Resources>
 
-                        <Image x:Name="controllerDiagram" Source="{Binding Source={StaticResource resourcesPaths}, Path=DS4ConfigPNG}" Width="440" Height="220" Stretch="Uniform"/>
+                        <Image x:Name="controllerDiagram" Source="{Binding Source={StaticResource resourcesPaths}, Path=DS4ConfigPNG}" Width="440" Height="220" Stretch="Uniform"
+                               RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True" UseLayoutRounding="True"/>
 
                         <Path x:Name="controllerVectorHighlight" Visibility="Collapsed"
                               Fill="{DynamicResource AccentColor}" Stroke="{DynamicResource AccentColor}"
@@ -218,7 +219,8 @@
                             </Rectangle>
                         </Button>
 
-                        <Image x:Name="picBoxHover" IsEnabled="False" Source="{Binding Source={StaticResource resourcesPaths}, Path=DS4ConfigRSPNG}" Height="48" Width="48" Canvas.Left="447" Canvas.Top="5" />
+                        <Image x:Name="picBoxHover" IsEnabled="False" Source="{Binding Source={StaticResource resourcesPaths}, Path=DS4ConfigRSPNG}" Height="48" Width="48" Canvas.Left="447" Canvas.Top="5"
+                               RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True" UseLayoutRounding="True" />
                         <Image x:Name="picBoxHover2" IsEnabled="False" Source="{Binding Source={StaticResource resourcesPaths}, Path=DS4ConfigRSPNG}" Height="48" Width="48" Canvas.Left="0" Canvas.Top="0" Stretch="Fill" />
 
                         <Button Content="Cross" x:Name="crossConBtn" Canvas.Left="330" Canvas.Top="125" Width="26" Height="26" Click="HoverConBtn_Click" Style="{StaticResource NoBGHoverBtn}" MouseEnter="ContBtn_MouseEnter" MouseLeave="ContBtn_MouseLeave" MouseRightButtonUp="ConBtn_MouseRightButtonUp" />

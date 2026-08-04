@@ -189,6 +189,7 @@ namespace DS4WinWPF.DS4Forms
             lightbarRect.OpacityMask = null;
             lightbarRect.RadiusX = 2;
             lightbarRect.RadiusY = 2;
+            ds4LightbarColorBtn.Clip = null;
 
             if (updateSelector)
             {
@@ -274,6 +275,11 @@ namespace DS4WinWPF.DS4Forms
             controllerHoverImages[topTouchConBtn] =
                 LoadResourceImage("DualSense-Config_TouchUpper.png");
             PopulateDualSenseHitGeometries();
+            // The painted mute highlight is correct, so use that same raster
+            // surface as its input target. The old hand-authored rectangle sat
+            // below the visible button and made hover/click feel disconnected.
+            AssignControllerRasterHitGeometry(muteConBtn,
+                "DualSense-Config_Highlights.png", 11);
             PopulateControllerStickAtlas("DualSense-Stick_Highlights.png");
             ApplyControllerButtonClips();
         }
@@ -382,7 +388,22 @@ namespace DS4WinWPF.DS4Forms
             fnlConBtn.Visibility = Visibility.Visible;
             fnrConBtn.Visibility = Visibility.Visible;
 
-            SetControllerElementBounds(ds4LightbarColorBtn, 139, 43, 163, 8);
+            // The Edge light pipe wraps around the top and both sides of the
+            // touchpad. A short rectangle represented only its top center and
+            // painted over transparent space. Use the complete raster mask as
+            // both the colored surface and its exact pointer boundary.
+            Canvas.SetLeft(ds4LightbarColorBtn, 0);
+            Canvas.SetTop(ds4LightbarColorBtn, 0);
+            ds4LightbarColorBtn.Width = 440;
+            ds4LightbarColorBtn.Height = 220;
+            lightbarRect.RadiusX = 0;
+            lightbarRect.RadiusY = 0;
+            const string edgeLightbar =
+                "DualSenseEdge-Mapping-Lightbar.png";
+            lightbarRect.OpacityMask = new ImageBrush(
+                LoadResourceImage(edgeLightbar));
+            ds4LightbarColorBtn.Clip = RasterHighlightAtlas.Mask(
+                edgeLightbar, 0);
 
             PopulateDualSenseEdgeVectorHighlights();
             PopulateControllerHoverAtlas("DualSenseEdge-Config_Highlights.png",
@@ -451,7 +472,7 @@ namespace DS4WinWPF.DS4Forms
             double sourceWidth, double sourceHeight)
         {
             controllerDiagram.Source = LoadResourceImage(resourceName);
-            controllerDiagram.ToolTip = toolTip;
+            controllerDiagram.ToolTip = null;
             controllerDiagram.Width = 440;
             controllerDiagram.Height = 220;
             controllerDiagram.Stretch = Stretch.Uniform;
@@ -817,14 +838,27 @@ namespace DS4WinWPF.DS4Forms
                 controllerHoverImages[button] = RasterHighlightAtlas.Frame(
                     resourceName, frameIndex);
                 AssignControllerRasterHitGeometry(button, resourceName,
-                    frameIndex);
+                    frameIndex, frameIndex == 0 || frameIndex == 5,
+                    frameIndex is > 0 and < 5 ? 0 :
+                    frameIndex is > 5 and < 10 ? 5 : -1);
             }
         }
 
         private void AssignControllerRasterHitGeometry(Button button,
-            string resourceName, int frameIndex)
+            string resourceName, int frameIndex, bool centerPress = false,
+            int directionSurfaceFrame = -1)
         {
             Geometry mask = RasterHighlightAtlas.Mask(resourceName, frameIndex);
+            if (centerPress)
+            {
+                mask = RasterHighlightAtlas.CenterPressMask(mask);
+            }
+            else if (directionSurfaceFrame >= 0)
+            {
+                mask = RasterHighlightAtlas.DirectionalHitMask(mask,
+                    RasterHighlightAtlas.Mask(resourceName,
+                        directionSurfaceFrame));
+            }
             Rect bounds = mask.Bounds;
             if (bounds.IsEmpty)
             {

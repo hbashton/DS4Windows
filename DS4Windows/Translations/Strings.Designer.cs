@@ -1720,7 +1720,7 @@ namespace DS4WinWPF.Translations {
         }
         
         /// <summary>
-        ///   Looks up a localized string similar to Hide DS4 Controller.
+        ///   Looks up a localized string similar to Use HidHide to Prevent Double Input.
         /// </summary>
         public static string HideDS4Controller {
             get {

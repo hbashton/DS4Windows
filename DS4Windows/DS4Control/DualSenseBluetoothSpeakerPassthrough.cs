@@ -489,7 +489,6 @@ namespace DS4Windows
         private readonly object syncRoot = new object();
         private readonly object directPcmSync = new object();
         private readonly DualSenseDevice device;
-        private readonly bool headsetOnlyAudio;
         private readonly string sourceEndpointId;
         private readonly ControllerAudioEndpointKind sourceEndpointKind;
         private readonly byte speakerVolume;
@@ -629,7 +628,6 @@ namespace DS4Windows
             ViiperOutDevice directSpeakerSource = null)
         {
             this.device = device ?? throw new ArgumentNullException(nameof(device));
-            headsetOnlyAudio = device.HeadsetOnlyAudio;
             speakerSessionId = this.device.CreateBluetoothSpeakerSession();
             this.speakerVolume = speakerVolume;
             this.speakerCompression = (DualSenseSpeakerCompression)Math.Clamp(
@@ -738,7 +736,6 @@ namespace DS4Windows
             ViiperOutDevice candidateDirectSpeakerSource = null)
         {
             return !stopping && ReferenceEquals(device, candidateDevice) &&
-                headsetOnlyAudio == candidateDevice.HeadsetOnlyAudio &&
                 speakerVolume == candidateVolume &&
                 speakerCompression == (DualSenseSpeakerCompression)Math.Clamp(
                     (int)candidateCompression, (int)DualSenseSpeakerCompression.Off,

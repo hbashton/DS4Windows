@@ -419,7 +419,7 @@
     <value>Auto-Disable BT when connecting to USB</value>
   </data>
   <data name="QuitOtherPrograms" xml:space="preserve">
-    <value>You must quit other applications like UWP apps (Netflix), Steam, Uplay, Edge, NVIDIA IN-GAME before activating the 'Hide DS4 Controller' option. For more info check https://github.com/Ryochan7/DS4Windows/wiki/Exclusive-Mode-(Hide-DS4-Controller-config-option)-tips-and-issues</value>
+    <value>Close applications that are currently holding the physical controller before enabling 'Use HidHide to Prevent Double Input'.</value>
   </data>
   <data name="RecordText" xml:space="preserve">
     <value>Record</value>

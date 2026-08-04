@@ -2794,6 +2794,8 @@ namespace DS4Windows
                 dualsense.SpeakerVolume = DualSenseSpeakerVolume[ind];
                 dualsense.HeadphoneVolume = DualSenseHeadphoneVolume[ind];
                 bool headsetOnlyAudio = IsControllerHeadsetOnlyAudio(ind);
+                bool headsetOutputRouteChanged =
+                    dualsense.HeadsetOnlyAudio != headsetOnlyAudio;
                 dualsense.HeadsetOnlyAudio = headsetOnlyAudio;
                 bool useViiperControllerMicrophone =
                     ControllerMicrophoneRoutePolicy.CanRouteDirectViiperMicrophone(
@@ -2816,6 +2818,19 @@ namespace DS4Windows
                         DualSenseAudioSpeakerEndpointId[ind],
                         playStationFeatureOutputType,
                         playStationFeatureOutput);
+
+                    // Speaker/AUX selection is an atomic state update on the
+                    // active combined transport. Restarting the capture and
+                    // media pacer here loses the live stream and can leave the
+                    // replacement generation waiting indefinitely. Keep the
+                    // existing pipeline and publish only the new route bits.
+                    if (headsetOutputRouteChanged &&
+                        !dualsense.RearmBluetoothHeadsetOutputRoute())
+                    {
+                        AppLogger.LogToGui(
+                            $"DualSense audio output route update failed for controller {ind + 1}: {dualsense.LastBluetoothHapticsWriteStatus}",
+                            true);
+                    }
                 }
                 else
                 {

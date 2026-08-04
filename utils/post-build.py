@@ -3,10 +3,52 @@ from pathlib import Path
 import sys
 import shutil
 import subprocess
+import hashlib
 
 target_dir = Path(sys.argv[1])
 project_dir = Path(sys.argv[2])
 version = sys.argv[3]
+
+
+# A published DS4Windows build is an offline installer. Fail package
+# composition if any required runtime or installer payload is absent instead
+# of producing an archive that later needs a network recovery path.
+required_offline_files = (
+    "DS4Windows.exe",
+    "coreclr.dll",
+    "hostfxr.dll",
+    "extras/install-viiper-backend.ps1",
+    "extras/VIIPER-0.0.6-x64.exe",
+    "extras/USBip-0.9.7.7-x64.exe",
+    "extras/HidHide_1.5.230_x64.exe",
+    "extras/FakerInput_0.1.0_x64.msi",
+)
+missing_offline_files = [
+    relative_path
+    for relative_path in required_offline_files
+    if not (target_dir / relative_path).is_file()
+]
+if missing_offline_files:
+    missing = ", ".join(missing_offline_files)
+    raise FileNotFoundError(
+        f"Cannot compose the offline DS4Windows package; missing: {missing}"
+    )
+
+
+# Bind setup to the exact VIIPER executable copied by this publish. This
+# sidecar is regenerated for every artifact, so no hand-maintained hash can
+# drift when the bundled executable changes.
+viiper_name = "VIIPER-0.0.6-x64.exe"
+viiper_path = target_dir / "extras" / viiper_name
+viiper_hasher = hashlib.sha256()
+with viiper_path.open("rb") as viiper_stream:
+    for chunk in iter(lambda: viiper_stream.read(1024 * 1024), b""):
+        viiper_hasher.update(chunk)
+viiper_hash_path = viiper_path.with_name(viiper_name + ".sha256")
+viiper_hash_path.write_text(
+    f"{viiper_hasher.hexdigest()} *{viiper_name}\n",
+    encoding="ascii",
+)
 
 # move l18n assemblies to a separate directory
 lang_dir = target_dir / "Lang"
@@ -66,7 +108,15 @@ target_zip_path = target_dir.parent / f"{zip_name}.zip"
 if target_zip_path.exists():
     os.remove(target_zip_path)
 
-zip_dir = shutil.make_archive(zip_name, "zip", target_dir.parent)
+# Archive only the newly composed DS4Windows directory. Using the whole
+# Release directory could recursively include an older ZIP from a prior local
+# build and silently double the artifact size.
+zip_dir = shutil.make_archive(
+    zip_name,
+    "zip",
+    root_dir=renamed_dir.parent,
+    base_dir=renamed_dir.name,
+)
 
 # move the zip to the build directory
 shutil.move(zip_dir, target_zip_path)

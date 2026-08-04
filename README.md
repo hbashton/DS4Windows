@@ -84,6 +84,10 @@ tasks. They launch the managed VIIPER binary and the user's selected
 DS4Windows executable directly without recurring console or UAC popups.
 DS4Windows checks the backend at startup and
 opens a guided, self-elevating repair flow when VIIPER or usbip-win2 is missing.
+The release ZIP is a complete offline setup bundle: VIIPER, usbip-win2,
+HidHide, FakerInput, and the .NET runtime are packaged together. Setup never
+downloads a replacement dependency; package composition fails if one is
+missing, and the VIIPER checksum is generated from the exact bundled binary.
 Setup copies DS4Windows and VIIPER into the dedicated
 `%ProgramFiles%\DS4Windows` application tree and protects the managed VIIPER
 task target and recovery copy from unelevated replacement. It never changes permissions on the folder

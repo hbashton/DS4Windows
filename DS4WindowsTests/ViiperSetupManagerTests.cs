@@ -22,15 +22,6 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
-        public void UsbipRecoveryLinkCannotDriftToLatestRelease()
-        {
-            StringAssert.EndsWith(ViiperSetupManager.UsbipWin2ReleasesUrl,
-                "/releases/tag/v.0.9.7.7");
-            StringAssert.EndsWith(ViiperSetupManager.ViiperReleasesUrl,
-                "/releases/tag/v0.0.6");
-        }
-
-        [TestMethod]
         public void InstallerFailureMessageExpandsTheLogPath()
         {
             const string logPath =

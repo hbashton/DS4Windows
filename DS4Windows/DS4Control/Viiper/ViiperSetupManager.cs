@@ -140,8 +140,6 @@ namespace DS4Windows
     {
         public const string ApiHost = "127.0.0.1";
         public const int ApiPort = 3242;
-        public const string UsbipWin2ReleasesUrl = "https://github.com/vadimgrn/usbip-win2/releases/tag/v.0.9.7.7";
-        public const string ViiperReleasesUrl = "https://github.com/hbashton/VIIPER/releases/tag/v0.0.6";
         internal static readonly Version RequiredUsbipVersion = new Version(0, 9, 7, 7);
 
         private const string InstallerScriptName = "install-viiper-backend.ps1";
@@ -150,6 +148,13 @@ namespace DS4Windows
         private const string InstallerResourceName =
             "DS4Windows.install-viiper-backend.ps1";
         private const string BundledViiperName = "VIIPER-0.0.6-x64.exe";
+        private const string BundledViiperHashName =
+            BundledViiperName + ".sha256";
+        private const string BundledUsbipName = "USBip-0.9.7.7-x64.exe";
+        private const string BundledHidHideName =
+            "HidHide_1.5.230_x64.exe";
+        private const string BundledFakerInputName =
+            "FakerInput_0.1.0_x64.msi";
         private const string TerminateForeignViiperArgument =
             "--terminate-foreign-viiper";
         private const string RegisterViiperTaskArgument =
@@ -434,8 +439,10 @@ namespace DS4Windows
             if (!status.SetupScriptFound)
             {
                 string message =
-                    "DS4Windows could not find the bundled VIIPER setup script.\n\n" +
-                    "Opening the VIIPER and usbip-win2 release pages instead.";
+                    "This DS4Windows package is incomplete: the bundled " +
+                    "VIIPER setup script is missing.\n\nDownload or extract " +
+                    "the complete DS4Windows package, then try again. " +
+                    "Setup does not download missing components.";
                 if (owner != null)
                 {
                     MessageBox.Show(owner, message, "VIIPER setup", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -444,9 +451,6 @@ namespace DS4Windows
                 {
                     MessageBox.Show(message, "VIIPER setup", MessageBoxButton.OK, MessageBoxImage.Warning);
                 }
-
-                Util.StartProcessHelper(ViiperReleasesUrl);
-                Util.StartProcessHelper(UsbipWin2ReleasesUrl);
                 return false;
             }
 
@@ -879,12 +883,24 @@ namespace DS4Windows
                 target.Flush(flushToDisk: true);
             }
 
-            if (!File.Exists(Path.Combine(stagedRoot, "DS4Windows.exe")) ||
-                !File.Exists(Path.Combine(stagedRoot, "extras",
-                    BundledViiperName)))
+            string stagedExtras = Path.Combine(stagedRoot, "extras");
+            string[] requiredOfflineFiles =
+            {
+                Path.Combine(stagedRoot, "DS4Windows.exe"),
+                Path.Combine(stagedExtras, InstallerScriptName),
+                Path.Combine(stagedExtras, BundledViiperName),
+                Path.Combine(stagedExtras, BundledViiperHashName),
+                Path.Combine(stagedExtras, BundledUsbipName),
+                Path.Combine(stagedExtras, BundledHidHideName),
+                Path.Combine(stagedExtras, BundledFakerInputName),
+            };
+            string missingOfflineFile = Array.Find(requiredOfflineFiles,
+                path => !File.Exists(path));
+            if (missingOfflineFile != null)
             {
                 throw new InvalidOperationException(
-                    "The staged DS4Windows package is incomplete.");
+                    "The staged offline DS4Windows package is incomplete: " +
+                    Path.GetFileName(missingOfflineFile) + " is missing.");
             }
 
             return stagedRoot;

@@ -69,7 +69,30 @@
 	<!-- A raw `dotnet publish` must be a complete installable package too.
 	     The release post-build script rewrites this after reorganizing language
 	     files, but local/test publishes previously omitted it entirely. -->
-	<Target Name="GenerateManagedFileManifest" AfterTargets="Publish">
+	<!-- Generate the VIIPER checksum from the binary in this exact publish.
+	     The installer consumes the sidecar instead of a hand-maintained hash. -->
+	<Target Name="GenerateViiperPackageChecksum"
+		AfterTargets="Publish"
+		BeforeTargets="GenerateManagedFileManifest">
+		<PropertyGroup>
+			<_BundledViiperName>VIIPER-0.0.6-x64.exe</_BundledViiperName>
+			<_BundledViiperPath>$(PublishDir)extras\$(_BundledViiperName)</_BundledViiperPath>
+			<_BundledViiperHashPath>$(_BundledViiperPath).sha256</_BundledViiperHashPath>
+		</PropertyGroup>
+		<Error Condition="!Exists('$(_BundledViiperPath)')"
+			Text="The offline package is missing $(_BundledViiperPath)." />
+		<GetFileHash Files="$(_BundledViiperPath)" Algorithm="SHA256">
+			<Output TaskParameter="Items" ItemName="_BundledViiperHash" />
+		</GetFileHash>
+		<WriteLinesToFile
+			File="$(_BundledViiperHashPath)"
+			Lines="@(_BundledViiperHash->'%(FileHash) *$(_BundledViiperName)')"
+			Overwrite="true"
+			Encoding="ASCII" />
+	</Target>
+
+	<Target Name="GenerateManagedFileManifest" AfterTargets="Publish"
+		DependsOnTargets="GenerateViiperPackageChecksum">
 		<ItemGroup>
 			<_ManagedPackageFile Include="$(PublishDir)**\*"
 				Exclude="$(PublishDir).ds4windows-managed-files.txt" />

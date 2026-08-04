@@ -59,8 +59,6 @@ $script:SafetyRestartPending = $false
 $script:UsbipReplacementPhaseOne = $false
 $script:SetupMutex = $null
 $script:RequiredUsbipVersion = [Version]"0.9.7.7"
-$script:UsbipInstallerUrl =
-    "https://github.com/vadimgrn/usbip-win2/releases/download/v.0.9.7.7/USBip-0.9.7.7-x64.exe"
 $script:UsbipInstallerSha256 =
     "51620fa5f9f8be5932bc9d786deee557ce06d5407a99cab490dcfac71f185fea"
 $script:UsbipUdeDriverSha256 =
@@ -69,8 +67,7 @@ $script:UsbipFilterDriverSha256 =
     "c290299ff4d0f6a597db5ce03e15b29a5349cdce7c587ebfbd9ecaeca04f73ed"
 $script:BundledViiperPath = Join-Path $script:PackageExtrasRoot `
     "VIIPER-0.0.6-x64.exe"
-$script:BundledViiperSha256 =
-    "ae03b04db7a59075706fb13dcbfcf5bc58ff986191e3b0c56e4221f556542016"
+$script:BundledViiperSha256Path = $script:BundledViiperPath + ".sha256"
 $script:BundledUsbipInstallerPath = Join-Path $script:PackageExtrasRoot `
     "USBip-0.9.7.7-x64.exe"
 $programFilesRoot = if ($env:ProgramW6432) {
@@ -817,7 +814,7 @@ function Assert-FileSha256([string]$path, [string]$expectedHash) {
     $actualHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
     if (-not [string]::Equals($actualHash, $expectedHash,
             [StringComparison]::OrdinalIgnoreCase)) {
-        throw "Downloaded usbip-win2 installer failed SHA256 verification. " +
+        throw "Packaged usbip-win2 installer failed SHA256 verification. " +
             "Expected $expectedHash; received $actualHash."
     }
 
@@ -833,6 +830,30 @@ function Assert-ViiperFileSha256([string]$path, [string]$expectedHash) {
     }
 
     Write-SetupLog "Verified packaged VIIPER SHA256: $actualHash" Green
+}
+
+function Read-PackagedSha256([string]$manifestPath,
+        [string]$expectedFileName) {
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw "The offline DS4Windows package is incomplete: missing " +
+            "$(Split-Path -Leaf $manifestPath)."
+    }
+
+    $lines = @(Get-Content -LiteralPath $manifestPath -ErrorAction Stop |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($lines.Count -ne 1 -or
+        $lines[0] -notmatch '^\s*([0-9A-Fa-f]{64})\s+\*?(.+?)\s*$') {
+        throw "The packaged VIIPER SHA256 manifest is malformed."
+    }
+
+    $manifestFileName = [IO.Path]::GetFileName($Matches[2])
+    if (-not [string]::Equals($manifestFileName, $expectedFileName,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw "The packaged VIIPER SHA256 manifest names '$manifestFileName' " +
+            "instead of '$expectedFileName'."
+    }
+
+    return $Matches[1]
 }
 
 function Test-UsbipRuntime([string]$usbipPath) {
@@ -971,67 +992,6 @@ function ConvertTo-VersionFromObject([object]$value) {
     }
 
     return $null
-}
-
-function Invoke-Download([string]$url, [string]$outFile) {
-    $lastError = $null
-    for ($attempt = 1; $attempt -le 3; $attempt++) {
-        try {
-            Write-SetupLog "Downloading $url (attempt $attempt of 3)"
-            Invoke-WebRequest -Uri $url -OutFile $outFile -UseBasicParsing `
-                -TimeoutSec 60 -Headers @{ "User-Agent" =
-                    "DS4Windows-VIIPER-Setup" }
-            if (-not (Test-Path -LiteralPath $outFile) -or
-                (Get-Item -LiteralPath $outFile).Length -le 0) {
-                throw "The downloaded file was empty."
-            }
-            return
-        }
-        catch {
-            $lastError = $_.Exception
-            if ($attempt -lt 3) { Start-Sleep -Seconds $attempt }
-        }
-    }
-
-    throw "Download failed after three attempts: $($lastError.Message)"
-}
-
-function Get-ViiperAssetUrl {
-    return "https://github.com/hbashton/VIIPER/releases/download/" +
-        "v0.0.6/viiper-windows-amd64.zip"
-}
-
-function Expand-ViiperAsset([string]$assetUrl, [string]$candidatePath) {
-    $extension = [IO.Path]::GetExtension(([Uri]$assetUrl).AbsolutePath)
-    $downloadPath = Join-Path $script:TempDir ("viiper-download" + $extension)
-    Invoke-Download $assetUrl $downloadPath
-
-    if ($extension -ieq ".exe") {
-        Copy-Item -LiteralPath $downloadPath -Destination $candidatePath -Force
-    }
-    elseif ($extension -ieq ".zip") {
-        $extractDir = Join-Path $script:TempDir "viiper-extract"
-        Expand-Archive -LiteralPath $downloadPath -DestinationPath $extractDir `
-            -Force
-        $executable = Get-ChildItem -LiteralPath $extractDir -Recurse `
-            -Filter "viiper.exe" | Select-Object -First 1
-        if (-not $executable) {
-            throw "The VIIPER archive did not contain viiper.exe."
-        }
-        Copy-Item -LiteralPath $executable.FullName `
-            -Destination $candidatePath -Force
-    }
-    else {
-        throw "Unsupported VIIPER asset type '$extension'."
-    }
-
-    $candidate = Get-Item -LiteralPath $candidatePath
-    if ($candidate.Length -lt 65536) {
-        throw "The downloaded VIIPER executable is unexpectedly small."
-    }
-    if ($candidate.Extension -ine ".exe") {
-        throw "The downloaded VIIPER payload is not a Windows executable."
-    }
 }
 
 function Install-ViiperAtomically([string]$candidatePath,
@@ -1653,21 +1613,19 @@ try {
     Remove-ForeignViiperInstallations
     $viiperPath = Join-Path $script:InstallDir "viiper.exe"
     $candidatePath = Join-Path $script:TempDir "viiper.exe"
-    if (Test-Path -LiteralPath $script:BundledViiperPath -PathType Leaf) {
-        Write-SetupLog "Using packaged VIIPER 0.0.6 x64 binary." Green
-        Assert-ViiperFileSha256 $script:BundledViiperPath `
-            $script:BundledViiperSha256
-        Copy-Item -LiteralPath $script:BundledViiperPath `
-            -Destination $candidatePath -Force
+    if (-not (Test-Path -LiteralPath $script:BundledViiperPath `
+            -PathType Leaf)) {
+        throw "The offline DS4Windows package is incomplete: missing " +
+            "$(Split-Path -Leaf $script:BundledViiperPath)."
     }
-    else {
-        Write-SetupLog (
-            "Packaged VIIPER is unavailable; using the GitHub recovery " +
-            "download."
-        ) Yellow
-        Expand-ViiperAsset (Get-ViiperAssetUrl) $candidatePath
-    }
-    Assert-ViiperFileSha256 $candidatePath $script:BundledViiperSha256
+    $bundledViiperSha256 = Read-PackagedSha256 `
+        $script:BundledViiperSha256Path `
+        (Split-Path -Leaf $script:BundledViiperPath)
+    Write-SetupLog "Using packaged VIIPER 0.0.6 x64 binary." Green
+    Assert-ViiperFileSha256 $script:BundledViiperPath $bundledViiperSha256
+    Copy-Item -LiteralPath $script:BundledViiperPath `
+        -Destination $candidatePath -Force
+    Assert-ViiperFileSha256 $candidatePath $bundledViiperSha256
     if (-not (Stop-Ds4WindowsProcesses "VIIPER backend replacement")) {
         throw "Unable to quiesce DS4Windows before replacing VIIPER."
     }
@@ -1854,22 +1812,20 @@ try {
         else {
             $usbipInstaller = Join-Path $script:TempDir `
                 "USBip-0.9.7.7-x64.exe"
-            if (Test-Path -LiteralPath $script:BundledUsbipInstallerPath) {
-                Write-SetupLog (
-                    "Using the bundled usbip-win2 0.9.7.7 installer."
-                ) Green
-                Assert-FileSha256 $script:BundledUsbipInstallerPath `
-                    $script:UsbipInstallerSha256
-                Copy-Item -LiteralPath $script:BundledUsbipInstallerPath `
-                    -Destination $usbipInstaller -Force
+            if (-not (Test-Path -LiteralPath `
+                    $script:BundledUsbipInstallerPath -PathType Leaf)) {
+                $missingUsbipName = Split-Path -Leaf `
+                    $script:BundledUsbipInstallerPath
+                throw "The offline DS4Windows package is incomplete: " +
+                    "missing $missingUsbipName."
             }
-            else {
-                Write-SetupLog (
-                    "Bundled usbip-win2 installer is unavailable; using " +
-                    "the verified upstream recovery download."
-                ) Yellow
-                Invoke-Download $script:UsbipInstallerUrl $usbipInstaller
-            }
+            Write-SetupLog (
+                "Using the bundled usbip-win2 0.9.7.7 installer."
+            ) Green
+            Assert-FileSha256 $script:BundledUsbipInstallerPath `
+                $script:UsbipInstallerSha256
+            Copy-Item -LiteralPath $script:BundledUsbipInstallerPath `
+                -Destination $usbipInstaller -Force
             Assert-FileSha256 $usbipInstaller $script:UsbipInstallerSha256
 
             Write-SetupLog "Windows may briefly restart USB hub devices." Yellow

@@ -21,20 +21,14 @@ namespace DS4WinWPF.DS4Forms
     {
         private const string HidHideInstallerFileName =
             "HidHide_1.5.230_x64.exe";
-        private const string HidHideInstallerUrl =
-            "https://github.com/nefarius/HidHide/releases/download/v1.5.230.0/HidHide_1.5.230_x64.exe";
         private const string HidHideInstallerSha256 =
             "F4BBBCB82E6258641B887C74BC81C4C5F66E4AA811808DFC304347687B7605F6";
         private const string FakerInputX64FileName =
             "FakerInput_0.1.0_x64.msi";
-        private const string FakerInputX64Url =
-            "https://github.com/Ryochan7/FakerInput/releases/download/v0.1.0/FakerInput_0.1.0_x64.msi";
         private const string FakerInputX64Sha256 =
             "30CF218B624740A91BE4FCCA3ADFB4550BA8CC8F31AC9625FE39D238E64D13EA";
         private const string FakerInputX86FileName =
             "FakerInput_0.1.0_x86.msi";
-        private const string FakerInputX86Url =
-            "https://github.com/Ryochan7/FakerInput/releases/download/v0.1.0/FakerInput_0.1.0_x86.msi";
         private const string FakerInputX86Sha256 =
             "0C0A01EEF8C57C9B3DB917131995A10ADB3599CC643D2F27AD28D9511B96DEC1";
 
@@ -76,61 +70,46 @@ namespace DS4WinWPF.DS4Forms
 
         private async void HidHideInstall_Click(object sender, RoutedEventArgs e)
         {
-            await DownloadAndRunInstallerAsync(HidHideInstallerUrl,
-                hidHideInstallBtn, "HidHide", HidHideInstallerFileName,
+            await RunBundledInstallerAsync(hidHideInstallBtn, "HidHide",
+                HidHideInstallerFileName,
                 HidHideInstallerSha256);
         }
 
         private async void FakerInputInstallBtn_Click(object sender, RoutedEventArgs e)
         {
             bool useX64 = Environment.Is64BitOperatingSystem;
-            string url = useX64 ? FakerInputX64Url : FakerInputX86Url;
             string fileName = useX64 ? FakerInputX64FileName :
                 FakerInputX86FileName;
             string sha256 = useX64 ? FakerInputX64Sha256 :
                 FakerInputX86Sha256;
-            await DownloadAndRunInstallerAsync(url, fakerInputInstallBtn,
+            await RunBundledInstallerAsync(fakerInputInstallBtn,
                 "FakerInput", fileName, sha256);
         }
 
-        private async Task DownloadAndRunInstallerAsync(string url,
+        private async Task RunBundledInstallerAsync(
             System.Windows.Controls.Button button, string componentName,
-            string bundledFileName = null, string expectedSha256 = null)
+            string bundledFileName, string expectedSha256)
         {
-            string bundledTarget = string.IsNullOrWhiteSpace(bundledFileName) ?
-                null : Path.Combine(AppContext.BaseDirectory, "extras",
-                    bundledFileName);
-            string target = null;
-            bool deleteTarget = false;
+            string target = Path.Combine(AppContext.BaseDirectory, "extras",
+                bundledFileName);
             try
             {
                 SetInstallerControlsEnabled(false);
 
-                if (bundledTarget != null && File.Exists(bundledTarget))
+                if (!File.Exists(target))
                 {
-                    button.Content = $"Verifying bundled {componentName}…";
-                    if (await InstallerMatchesSha256Async(bundledTarget,
-                        expectedSha256))
-                    {
-                        target = bundledTarget;
-                    }
+                    throw new FileNotFoundException(
+                        $"The offline DS4Windows package is incomplete: " +
+                        $"{bundledFileName} is missing.", target);
                 }
 
-                if (target == null)
+                button.Content = $"Verifying bundled {componentName}…";
+                if (!await InstallerMatchesSha256Async(target,
+                    expectedSha256))
                 {
-                    target = Path.Combine(Path.GetTempPath(),
-                        $"{Guid.NewGuid():N}-{Path.GetFileName(new Uri(url).AbsolutePath)}");
-                    deleteTarget = true;
-                    button.Content = $"Downloading {componentName}…";
-                    byte[] payload = await App.requestClient.GetByteArrayAsync(url);
-                    await File.WriteAllBytesAsync(target, payload);
-
-                    if (!await InstallerMatchesSha256Async(target,
-                        expectedSha256))
-                    {
-                        throw new InvalidDataException(
-                            $"The downloaded {componentName} installer failed its SHA-256 integrity check.");
-                    }
+                    throw new InvalidDataException(
+                        $"The bundled {componentName} installer failed its " +
+                        "SHA-256 integrity check.");
                 }
 
                 button.Content = $"Installing {componentName}…";
@@ -181,15 +160,6 @@ namespace DS4WinWPF.DS4Forms
             }
             finally
             {
-                try
-                {
-                    if (deleteTarget && target != null && File.Exists(target))
-                    {
-                        File.Delete(target);
-                    }
-                }
-                catch { }
-
                 SetInstallerControlsEnabled(true);
             }
         }

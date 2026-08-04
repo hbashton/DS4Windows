@@ -523,6 +523,7 @@ namespace DS4Windows
         private Thread worker;
         private Thread capturePump;
         private Thread pacerLifecycleWorker;
+        private ManagedAudioLatencyLease managedAudioLatencyLease;
         private IOpusEncoder opusEncoder;
         private volatile bool stopping;
         private int captureRingReadIndex;
@@ -764,6 +765,11 @@ namespace DS4Windows
 
             try
             {
+                // MMCSS protects the producer from ordinary scheduler load,
+                // but it cannot run while a process-wide blocking GC has
+                // suspended managed threads. Keep full collections concurrent
+                // for the lifetime of every active controller audio stream.
+                managedAudioLatencyLease = ManagedAudioLatencyLease.Acquire();
                 opusEncoder = CreateSpeakerOpusEncoder();
                 // Start the physical 0x36 lane before an application produces
                 // sound. A continuous valid Opus-silence carrier lets the
@@ -3293,6 +3299,8 @@ namespace DS4Windows
             preOpusPcmTrace = null;
             postOpusPcmTrace = null;
             traceOpusDecoder = null;
+            managedAudioLatencyLease?.Dispose();
+            managedAudioLatencyLease = null;
         }
     }
 }

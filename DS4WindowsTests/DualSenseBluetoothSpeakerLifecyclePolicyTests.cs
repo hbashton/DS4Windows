@@ -346,6 +346,46 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void ReusedPacerPrimesEachSpeakerSourceFromItsOwnBoundary()
+        {
+            const long previousSourcePresented = 12521;
+
+            Assert.AreEqual(0,
+                DualSenseBluetoothSpeakerPassthrough.
+                    CalculatePacerPresentedReportsSinceBaseline(
+                        previousSourcePresented, previousSourcePresented));
+            Assert.AreEqual(1,
+                DualSenseBluetoothSpeakerPassthrough.
+                    CalculatePacerPresentedReportsSinceBaseline(
+                        previousSourcePresented + 1,
+                        previousSourcePresented));
+            Assert.AreEqual(
+                DualSenseBluetoothAudioPacer.NativePrimeReportCount,
+                DualSenseBluetoothSpeakerPassthrough.
+                    CalculatePacerPresentedReportsSinceBaseline(
+                        previousSourcePresented +
+                            DualSenseBluetoothAudioPacer.NativePrimeReportCount,
+                        previousSourcePresented));
+        }
+
+        [TestMethod]
+        public void ReplacementPacerUsesItsResetPresentationCounter()
+        {
+            const long retiredPacerBaseline = 12521;
+
+            Assert.AreEqual(0,
+                DualSenseBluetoothSpeakerPassthrough.
+                    CalculatePacerPresentedReportsSinceBaseline(
+                        presentedReports: 0,
+                        baseline: retiredPacerBaseline));
+            Assert.AreEqual(7,
+                DualSenseBluetoothSpeakerPassthrough.
+                    CalculatePacerPresentedReportsSinceBaseline(
+                        presentedReports: 7,
+                        baseline: retiredPacerBaseline));
+        }
+
+        [TestMethod]
         public void V5SourceCatchesUpSevenGenerationsAfterSeventyTwoMillisecondStall()
         {
             const int retainedGenerations = 7;

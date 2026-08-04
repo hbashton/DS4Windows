@@ -615,6 +615,12 @@ namespace DS4Windows
         private int deferredDisposeCleanupScheduled;
         private int disposeCleanupCompleted;
         private long startupWarmupReportsSent;
+        // PresentedReports belongs to the reusable physical pacer and is
+        // cumulative for its lifetime. Every speaker source/session reset,
+        // however, clears the native media FIFO and therefore requires its own
+        // complete prime. Track the presentation boundary at that reset rather
+        // than mistaking reports from the previous source for this generation.
+        private long pacerPresentedReportsBaseline;
         private bool directPcmRecoveryWindowInvalidated;
 
         public DualSenseBluetoothSpeakerPassthrough(DualSenseDevice device, byte speakerVolume,
@@ -1885,6 +1891,18 @@ namespace DS4Windows
             return pendingFrames >= target;
         }
 
+        internal static long CalculatePacerPresentedReportsSinceBaseline(
+            long presentedReports, long baseline)
+        {
+            presentedReports = Math.Max(0, presentedReports);
+            baseline = Math.Max(0, baseline);
+
+            // A recovered helper starts its counter at zero. In that case its
+            // current count already is the generation-relative count.
+            return presentedReports >= baseline ?
+                presentedReports - baseline : presentedReports;
+        }
+
         internal static bool ShouldMaintainIdleCarrierDuringV5Prime(
             bool usesV5Source, bool sourcePrimePending,
             bool captureReady, bool sourceRecentlyActive)
@@ -2186,6 +2204,9 @@ namespace DS4Windows
                             // physically commits any pending microphone transition
                             // before speaker traffic is released again.
                             device.ResetBluetoothSpeakerSession(speakerSessionId);
+                            Interlocked.Exchange(
+                                ref pacerPresentedReportsBaseline,
+                                device.BluetoothAudioPacerPresentedReports);
                         }
                         catch (Exception ex)
                         {
@@ -2360,7 +2381,10 @@ namespace DS4Windows
                         device.BluetoothAudioPacerActive,
                         device.PendingBluetoothSpeakerFrames,
                         directSpeakerUsesV5Source,
-                        device.BluetoothAudioPacerPresentedReports))
+                        CalculatePacerPresentedReportsSinceBaseline(
+                            device.BluetoothAudioPacerPresentedReports,
+                            Interlocked.Read(
+                                ref pacerPresentedReportsBaseline))))
                     {
                         nextTick = Stopwatch.GetTimestamp();
                         captureFramesAvailable.WaitOne(1);

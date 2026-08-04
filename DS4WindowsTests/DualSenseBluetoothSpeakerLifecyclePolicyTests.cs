@@ -193,6 +193,38 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void RealtimeCaptureDropsOnlyStaleHistoryAfterCeiling()
+        {
+            int targetFrames = 48000 *
+                DualSenseBluetoothSpeakerPassthrough.TargetBufferMs / 1000;
+            int retainFrames = 48000 *
+                DualSenseBluetoothSpeakerPassthrough.
+                    RealtimeCaptureRetainMs / 1000;
+            int ceilingFrames = 48000 *
+                DualSenseBluetoothSpeakerPassthrough.
+                    RealtimeCaptureLatencyCeilingMs / 1000;
+            const int callbackFrames = 480;
+
+            Assert.AreEqual(0,
+                DualSenseBluetoothSpeakerPassthrough.
+                    CalculateRealtimeCaptureFramesToDiscard(
+                        targetFrames, callbackFrames));
+            Assert.AreEqual(0,
+                DualSenseBluetoothSpeakerPassthrough.
+                    CalculateRealtimeCaptureFramesToDiscard(
+                        ceilingFrames - callbackFrames, callbackFrames));
+
+            int bufferedFrames = ceilingFrames - callbackFrames + 1;
+            int discarded = DualSenseBluetoothSpeakerPassthrough.
+                CalculateRealtimeCaptureFramesToDiscard(
+                    bufferedFrames, callbackFrames);
+            Assert.AreEqual(bufferedFrames -
+                (retainFrames - callbackFrames), discarded);
+            Assert.AreEqual(retainFrames,
+                bufferedFrames - discarded + callbackFrames);
+        }
+
+        [TestMethod]
         public void CaptureClockCorrectionSlewsWithoutPitchStep()
         {
             Assert.AreEqual(1.000002,
@@ -284,27 +316,33 @@ namespace DS4WindowsTests
         {
             int target = DualSenseBluetoothSpeakerPassthrough.
                 PacerReservoirTargetFrames;
+            int prime = DualSenseBluetoothAudioPacer.NativePrimeReportCount;
 
             Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
                 ShouldBackpressurePacerProducer(true, target - 1,
-                    usesV5Source: false, presentedReports: 1));
+                    usesV5Source: false, presentedReports: prime));
             Assert.IsTrue(DualSenseBluetoothSpeakerPassthrough.
                 ShouldBackpressurePacerProducer(true, target,
-                    usesV5Source: false, presentedReports: 1));
+                    usesV5Source: false, presentedReports: prime));
             Assert.IsTrue(DualSenseBluetoothSpeakerPassthrough.
                 ShouldBackpressurePacerProducer(true, target + 40,
-                    usesV5Source: false, presentedReports: 1));
+                    usesV5Source: false, presentedReports: prime));
             Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
                 ShouldBackpressurePacerProducer(false, target,
-                    usesV5Source: false, presentedReports: 1));
+                    usesV5Source: false, presentedReports: prime));
 
-            int prime = DualSenseBluetoothAudioPacer.NativePrimeReportCount;
             Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
                 ShouldBackpressurePacerProducer(true, prime - 1,
                     usesV5Source: false, presentedReports: 0));
+            Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
+                ShouldBackpressurePacerProducer(true, prime - 1,
+                    usesV5Source: false, presentedReports: 1));
+            Assert.IsFalse(DualSenseBluetoothSpeakerPassthrough.
+                ShouldBackpressurePacerProducer(true, prime - 1,
+                    usesV5Source: false, presentedReports: prime - 1));
             Assert.IsTrue(DualSenseBluetoothSpeakerPassthrough.
                 ShouldBackpressurePacerProducer(true, prime,
-                    usesV5Source: false, presentedReports: 0));
+                    usesV5Source: false, presentedReports: prime - 1));
         }
 
         [TestMethod]

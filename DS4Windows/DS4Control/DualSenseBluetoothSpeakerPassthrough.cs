@@ -431,6 +431,17 @@ namespace DS4Windows
         // prebuffer duplicated that protection and made game audio feel late.
         internal const int InitialBufferMs = 20;
         internal const int TargetBufferMs = 20;
+        // Per-app/system loopback is a live monitor, not a recording. If the
+        // host is paused, WASAPI can deliver the missed PCM in a later burst.
+        // Replaying that history makes A/V latency grow forever, so cross the
+        // discontinuity once and retain only a small fresh tail. Direct
+        // VIIPER PCM keeps its separate recovery reservoir unchanged.
+        internal const int RealtimeCaptureLatencyCeilingMs = 40;
+        internal const int RealtimeCaptureRetainMs = 30;
+        private const int RealtimeCaptureLatencyCeilingFrames =
+            SampleRate * RealtimeCaptureLatencyCeilingMs / 1000;
+        private const int RealtimeCaptureRetainFrames =
+            SampleRate * RealtimeCaptureRetainMs / 1000;
         // Legacy capture sources retain the existing stop-and-wait policy.
         // The native V5 source owns a bounded eight-generation FIFO and
         // drains every complete retained generation into its strict writer
@@ -570,6 +581,7 @@ namespace DS4Windows
         private long transientCaptureDeferrals;
         private long captureDriftAdjustments;
         private long captureOverflowFrames;
+        private long captureLatencyDiscardFrames;
         private long directPcmCallbacks;
         private long atomicCallbacksEntered;
         private long atomicCallbacksRejected;
@@ -1252,10 +1264,19 @@ namespace DS4Windows
 
         private void AppendCaptureSamples(float[] samples, int sampleCount)
         {
-            int frames = Math.Min(sampleCount / Channels, CaptureRingFrames);
+            int sourceFrames = sampleCount / Channels;
+            int frames = Math.Min(sourceFrames, CaptureRingFrames);
             if (frames <= 0)
             {
                 return;
+            }
+
+            if (directSpeakerSource == null &&
+                frames > RealtimeCaptureRetainFrames)
+            {
+                Interlocked.Add(ref captureLatencyDiscardFrames,
+                    frames - RealtimeCaptureRetainFrames);
+                frames = RealtimeCaptureRetainFrames;
             }
 
             // Source presence is defined by produced PCM, not amplitude.
@@ -1307,9 +1328,25 @@ namespace DS4Windows
                 }
             }
 
-            int sourceFrameOffset = (sampleCount / Channels) - frames;
+            int sourceFrameOffset = sourceFrames - frames;
             lock (syncRoot)
             {
+                int staleFrames = directSpeakerSource == null ?
+                    CalculateRealtimeCaptureFramesToDiscard(
+                        captureRingBufferedFrames, frames) : 0;
+                if (staleFrames > 0)
+                {
+                    captureRingReadIndex = (captureRingReadIndex +
+                        staleFrames) % CaptureRingFrames;
+                    captureRingBufferedFrames -= staleFrames;
+                    capturePrimed = false;
+                    ResetCaptureClockLocked(resetSourceClock: false);
+                    ResetSpeakerResamplingLocked();
+                    fadeInAfterCaptureUnderrun = true;
+                    Interlocked.Add(ref captureLatencyDiscardFrames,
+                        staleFrames);
+                }
+
                 int overflowFrames = Math.Max(0,
                     captureRingBufferedFrames + frames - CaptureRingFrames);
                 if (overflowFrames > 0)
@@ -1339,6 +1376,32 @@ namespace DS4Windows
             }
 
             captureFramesAvailable.Set();
+        }
+
+        internal static int CalculateRealtimeCaptureFramesToDiscard(
+            int bufferedFrames, int incomingFrames)
+        {
+            if (bufferedFrames < 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(bufferedFrames));
+            }
+            if (incomingFrames < 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(incomingFrames));
+            }
+
+            if ((long)bufferedFrames + incomingFrames <=
+                RealtimeCaptureLatencyCeilingFrames)
+            {
+                return 0;
+            }
+
+            int desiredBufferedBeforeAppend = Math.Max(0,
+                RealtimeCaptureRetainFrames - incomingFrames);
+            return Math.Max(0, bufferedFrames -
+                desiredBufferedBeforeAppend);
         }
 
         private bool TryFillOutputFrame(out int consumedSourceFrames)
@@ -1799,7 +1862,17 @@ namespace DS4Windows
             }
 
             int target;
-            if (presentedReports <= 0)
+            // The isolated writer does not release speaker media until its
+            // complete native eight-report prime is available.  Treating the
+            // first acknowledgement as steady state reduced the non-V5
+            // producer allowance to one while the helper still needed reports
+            // two through eight.  Per-app/system capture then filled its ring
+            // forever while both sides waited on each other.  Keep admitting
+            // the bounded prime until every required report has crossed the
+            // presentation boundary; only then apply the one-frame steady
+            // latency reservoir.
+            if (presentedReports <
+                DualSenseBluetoothAudioPacer.NativePrimeReportCount)
             {
                 target = DualSenseBluetoothAudioPacer.NativePrimeReportCount;
             }
@@ -2775,6 +2848,7 @@ namespace DS4Windows
                          $"activeCaptureUnderruns={Interlocked.Read(ref activeCaptureUnderruns)} " +
                          $"transientCaptureDeferrals={Interlocked.Read(ref transientCaptureDeferrals)} " +
                          $"captureOverflowFrames={Interlocked.Read(ref captureOverflowFrames)} " +
+                         $"captureLatencyDiscardFrames={Interlocked.Read(ref captureLatencyDiscardFrames)} " +
                          $"driftAdjustments={Interlocked.Read(ref captureDriftAdjustments)} " +
                          $"clockMode={(directSpeakerSource != null ? "controller-locked" : "adaptive-controller-locked")} " +
                          $"clockRatio={GetCaptureCurrentClockRatio():F7}/" +

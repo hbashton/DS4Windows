@@ -45,7 +45,7 @@ jobs:
         echo "PACKAGE_VERSION=$PACKAGE_VERSION" >> $GITHUB_ENV
       shell: bash
     - name: Build X64
-      run: dotnet publish .\DS4Windows\DS4WinWPF.csproj -c Release /p:platform=x64 /p:AssemblyVersion=${{ env.BINARY_VERSION }} /p:FileVersion=${{ env.BINARY_VERSION }} /p:Version=${{ env.PACKAGE_VERSION }} /p:InformationalVersion=${{ env.VERSION }} -o .\bin\x64\Release\output
+      run: dotnet publish .\DS4Windows\DS4WinWPF.csproj -c Release /p:platform=x64 -r win-x64 --self-contained true /p:AssemblyVersion=${{ env.BINARY_VERSION }} /p:FileVersion=${{ env.BINARY_VERSION }} /p:Version=${{ env.PACKAGE_VERSION }} /p:InformationalVersion=${{ env.VERSION }} -o .\bin\x64\Release\output
     - name: Post-Build script X64
       run: python .\utils\post-build.py .\bin\x64\Release\output . ${{env.VERSION}}
     - name: Name release asset

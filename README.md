@@ -269,18 +269,19 @@ and backend tools remain available under the advanced sections.
 
 - Windows 10 or Windows 11. VIIPER requires 64-bit Windows and the x64
   DS4Windows build. It is not compatible with x86 Windows.
-- [Microsoft .NET 8 Desktop Runtime](https://dotnet.microsoft.com/en-us/download/dotnet/8.0).
 - [Microsoft Visual C++ 2015-2022 Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe).
 - [HidHide](https://github.com/nefarius/HidHide) is strongly recommended to
   prevent games from seeing both the physical and virtual controllers. The
   pinned HidHide installer is included in the DS4Windows package, so first-run
   HidHide setup does not need to download it.
-- `usbip-win2` and [hbashton/VIIPER](https://github.com/hbashton/VIIPER), installed through the built-in guided setup.
+- `usbip-win2` and [hbashton/VIIPER](https://github.com/hbashton/VIIPER),
+  bundled with DS4Windows and installed through the built-in guided setup.
 - FakerInput is optional. Its runtime bridge DLLs and pinned x64/x86 driver
   installers ship with DS4Windows, so its first-run driver setup works offline.
 
-The .NET and Visual C++ runtimes remain system prerequisites and are not
-included in the DS4Windows ZIP.
+GitHub CI and release ZIPs include the x64 .NET 8 runtime and do not require a
+separate .NET installation. The Visual C++ runtime remains a system
+prerequisite and is not included in the DS4Windows ZIP.
 
 Supported physical inputs include first-party DualShock 4, DualSense,
 DualSense Edge, DualShock 3, Switch Pro, and Joy-Con controllers. Some compatible
@@ -346,10 +347,10 @@ PayPal](https://www.paypal.com/paypalme/hbashton).
 
 ## Development
 
-The solution targets .NET 8 and publishes x64 GitHub Actions builds. Pull
-requests should keep stable behavior intact when adding preview backends and
-should include focused tests for profile persistence, controller state, or
-transport changes where practical.
+The solution targets .NET 8 and publishes self-contained x64 GitHub Actions
+builds. Pull requests should keep stable behavior intact when adding preview
+backends and should include focused tests for profile persistence, controller
+state, or transport changes where practical.
 
 ## License
 

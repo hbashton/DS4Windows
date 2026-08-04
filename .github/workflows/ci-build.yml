@@ -72,7 +72,7 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Build ${{ matrix.platform }}
-        run: dotnet publish .\DS4Windows\DS4WinWPF.csproj -c Release /p:platform=${{ matrix.platform }} -o .\bin\${{ matrix.platform }}\Release\output
+        run: dotnet publish .\DS4Windows\DS4WinWPF.csproj -c Release /p:platform=${{ matrix.platform }} -r win-${{ matrix.platform }} --self-contained true -o .\bin\${{ matrix.platform }}\Release\output
 
       - name: Package ${{ matrix.platform }}
         run: python .\utils\post-build.py .\bin\${{ matrix.platform }}\Release\output . ${{ env.VERSION }}

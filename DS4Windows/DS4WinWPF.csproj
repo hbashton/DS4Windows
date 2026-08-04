@@ -14,7 +14,14 @@
 		<NeutralLanguage>en</NeutralLanguage>
 		<RunAnalyzersDuringBuild>true</RunAnalyzersDuringBuild>
 		<EnableNETAnalyzers>false</EnableNETAnalyzers>
-		<ServerGarbageCollection>true</ServerGarbageCollection>
+		<!-- DS4Windows is a latency-sensitive desktop/media client. Server GC
+		     runs one high-throughput heap per logical CPU and a background Gen2
+		     can contend with every managed audio producer during an all-core
+		     launch spike. Concurrent workstation GC keeps that collection on a
+		     client-sized scheduling footprint; active controller audio also holds
+		     a SustainedLowLatency lease in the process. -->
+		<ServerGarbageCollection>false</ServerGarbageCollection>
+		<ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
 		<AssemblyVersion>5.0.0.0</AssemblyVersion>
 		<FileVersion>5.0.0.0</FileVersion>
 		<Version>5.0.0.0-dualsense-beta</Version>

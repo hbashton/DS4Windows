@@ -5591,12 +5591,7 @@ namespace DS4Windows.InputDevices
         internal const int ControllerStateReportLength = 78;
         internal const int ControllerStatePayloadLength = 47;
         internal const int ControllerStateSourceOffset = 13;
-        // In a full 0x36/0x32 packet-0x11 header, bytes 5-8 are captured
-        // auxiliary values while byte 9 alone controls physical playout
-        // depth. Keep the reference header stable and request the documented
-        // low-latency depth without retiming or reordering media.
-        private const byte NativeAudioHeaderValue = 0x80;
-        private const byte NativeAudioPlaybackBufferLength = 32;
+        private const byte NativeAudioBufferLength = 0x80;
         private bool initialized;
         private bool mediaPacketSequenceInitialized;
         private byte nextReportSequence;
@@ -5660,11 +5655,10 @@ namespace DS4Windows.InputDevices
                     nameof(report));
             }
 
-            for (int index = 5; index <= 8; index++)
+            for (int index = 5; index <= 9; index++)
             {
-                report[index] = NativeAudioHeaderValue;
+                report[index] = NativeAudioBufferLength;
             }
-            report[9] = NativeAudioPlaybackBufferLength;
             PrepareSingleAudio(report);
         }
 
@@ -5679,14 +5673,13 @@ namespace DS4Windows.InputDevices
                     nameof(report));
             }
 
-            // Speaker-only and microphone-enabled playback share the same
-            // physical playout depth so a microphone transition cannot
-            // momentarily re-expand the controller queue.
-            for (int index = 5; index <= 8; index++)
+            // the native transport's clean Windows duplex stream keeps all five native
+            // 0x36 media-lane depths at 0x80 for both FE speaker-only and FF
+            // microphone-enabled playback.
+            for (int index = 5; index <= 9; index++)
             {
-                report[index] = NativeAudioHeaderValue;
+                report[index] = NativeAudioBufferLength;
             }
-            report[9] = NativeAudioPlaybackBufferLength;
 
             PrepareSingleAudio(report);
         }
@@ -5747,11 +5740,10 @@ namespace DS4Windows.InputDevices
             destination[2] = 0x91;
             destination[3] = 0x07;
             destination[4] = enabled ? (byte)0xFF : (byte)0xFE;
-            for (int index = 5; index <= 8; index++)
+            for (int index = 5; index <= 9; index++)
             {
-                destination[index] = NativeAudioHeaderValue;
+                destination[index] = NativeAudioBufferLength;
             }
-            destination[9] = NativeAudioPlaybackBufferLength;
             destination[10] = preparedMediaPacketSequence;
             WriteSonyCrc(destination);
         }

@@ -588,15 +588,10 @@ namespace DS4Windows.InputDevices
         private const int BluetoothCombinedStateLength = 63;
         private const int BluetoothCombinedNativeStateLength = USB_OUTPUT_CHANGE_LENGTH - 1;
         private const byte BluetoothCombinedLowLatencyBufferLength = 16;
-        // Full 0x36 packet-0x11 headers use bytes 5-8 as fixed auxiliary
-        // values. Reference transport testing found that changing those four
-        // bytes has no effect; byte 9 alone controls the controller's audio
-        // playout depth. Preserve the captured 0x80 header exactly and use the
-        // documented 32-unit low-latency depth for both FE and FF reports.
-        // This advances speaker/haptics playout without changing the proven
-        // 10.667 ms cadence, packet counter, FIFO, or physical writer.
-        private const byte BluetoothCombinedSpeakerHeaderValue = 0x80;
-        private const byte BluetoothCombinedSpeakerPlaybackBufferLength = 32;
+        // the native transport's clean Windows speaker and duplex traces keep every 0x36
+        // media-lane depth at 0x80. Use the same native contract for both FE
+        // and FF reports; cadence remains one frame per 10.667 ms.
+        private const byte BluetoothCombinedSpeakerBufferLength = 0x80;
         // The game, not a wall-clock timeout in DS4Windows, owns the end of a
         // native DualSense effect by publishing an explicit silent haptics
         // block. Expiring the newest block between otherwise valid virtual-
@@ -4456,11 +4451,11 @@ namespace DS4Windows.InputDevices
             // Preserve the proven controller-side speaker configuration on
             // every audio report. This is protocol state, not a host-side
             // startup prefill; presentation still starts immediately.
-            combined[5] = BluetoothCombinedSpeakerHeaderValue;
-            combined[6] = BluetoothCombinedSpeakerHeaderValue;
-            combined[7] = BluetoothCombinedSpeakerHeaderValue;
-            combined[8] = BluetoothCombinedSpeakerHeaderValue;
-            combined[9] = BluetoothCombinedSpeakerPlaybackBufferLength;
+            combined[5] = BluetoothCombinedSpeakerBufferLength;
+            combined[6] = BluetoothCombinedSpeakerBufferLength;
+            combined[7] = BluetoothCombinedSpeakerBufferLength;
+            combined[8] = BluetoothCombinedSpeakerBufferLength;
+            combined[9] = BluetoothCombinedSpeakerBufferLength;
             combined[BluetoothCombinedSpeakerOffset] =
                 GetBluetoothCombinedSpeakerPacketType(headsetOnlyAudio);
             combined[BluetoothCombinedSpeakerOffset + 1] =

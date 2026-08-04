@@ -280,12 +280,10 @@ namespace DS4WindowsTests
             Assert.AreEqual((byte)0x91, microphoneStatus[2]);
             Assert.AreEqual((byte)0x07, microphoneStatus[3]);
             Assert.AreEqual((byte)0xFF, microphoneStatus[4]);
-            for (int index = 5; index <= 8; index++)
+            for (int index = 5; index <= 9; index++)
             {
                 Assert.AreEqual((byte)0x80, microphoneStatus[index]);
             }
-            Assert.AreEqual((byte)32, microphoneStatus[9],
-                "The native 0x32 did not preserve the low-latency playout depth.");
             Assert.AreEqual((byte)0x23, microphoneStatus[10],
                 "The native 0x32 did not consume one media interval.");
             uint expectedCrc =
@@ -487,7 +485,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void MicrophoneEnabledAudioPreservesHeaderAndLowLatencyDepth()
+        public void MicrophoneEnabledAudioUsesV5128ByteDepths()
         {
             var sequence = new DualSenseBluetoothPhysicalOutputSequence();
             byte[] duplex = CreateSpeakerReport(
@@ -506,11 +504,10 @@ namespace DS4WindowsTests
 
             Assert.AreEqual((byte)0x36, duplex[0]);
             Assert.AreEqual((byte)0xFF, duplex[4]);
-            for (int index = 5; index <= 8; index++)
+            for (int index = 5; index <= 9; index++)
             {
                 Assert.AreEqual((byte)0x80, duplex[index]);
             }
-            Assert.AreEqual((byte)32, duplex[9]);
             Assert.AreEqual((byte)0x90, duplex[11]);
             Assert.AreEqual((byte)63, duplex[12]);
             Assert.AreEqual((byte)0xD2, duplex[76]);
@@ -529,7 +526,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void NativeAudioPreparationPreservesHeaderAndLowLatencyDepth()
+        public void NativeAudioPreparationNormalizesEveryMediaLaneDepth()
         {
             var sequence = new DualSenseBluetoothPhysicalOutputSequence();
             byte[] duplex = CreateSpeakerReport(0x31, 0x41, 0x90, 1);
@@ -540,11 +537,10 @@ namespace DS4WindowsTests
             }
 
             sequence.PrepareNativeAudio(duplex);
-            for (int index = 5; index <= 8; index++)
+            for (int index = 5; index <= 9; index++)
             {
                 Assert.AreEqual((byte)0x80, duplex[index]);
             }
-            Assert.AreEqual((byte)32, duplex[9]);
 
             byte[] speakerOnly = CreateSpeakerReport(0x32, 0x42, 0xA0, 2);
             speakerOnly[4] = 0xFE;
@@ -554,11 +550,10 @@ namespace DS4WindowsTests
             }
 
             sequence.PrepareNativeAudio(speakerOnly);
-            for (int index = 5; index <= 8; index++)
+            for (int index = 5; index <= 9; index++)
             {
                 Assert.AreEqual((byte)0x80, speakerOnly[index]);
             }
-            Assert.AreEqual((byte)32, speakerOnly[9]);
         }
 
         [TestMethod]

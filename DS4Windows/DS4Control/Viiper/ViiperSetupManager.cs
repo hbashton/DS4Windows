@@ -1209,6 +1209,8 @@ namespace DS4Windows
                         definition.Principal.RunLevel != TaskRunLevel.Highest ||
                         definition.Principal.LogonType !=
                             TaskLogonType.InteractiveToken ||
+                        definition.Settings.Priority !=
+                            ProcessPriorityClass.High ||
                         definition.Actions[0] is not ExecAction action ||
                         definition.Triggers[0] is not LogonTrigger trigger)
                     {
@@ -1427,6 +1429,11 @@ namespace DS4Windows
             definition.Settings.MultipleInstances =
                 Microsoft.Win32.TaskScheduler.TaskInstancesPolicy.IgnoreNew;
             definition.Settings.AllowDemandStart = true;
+            // Priority 7 is Task Scheduler's default and maps to below-normal
+            // CPU priority plus low I/O and memory priority.  The virtual USB
+            // audio producer must not be starved by unrelated foreground CPU
+            // work, so give the backend a high (never realtime) task priority.
+            definition.Settings.Priority = ProcessPriorityClass.High;
             service.RootFolder.RegisterTaskDefinition(
                 ViiperStartupTaskName, definition);
         }

@@ -225,6 +225,11 @@ namespace DS4WinWPF
             td.Settings.ExecutionTimeLimit = TimeSpan.Zero;
             td.Settings.MultipleInstances = TaskInstancesPolicy.IgnoreNew;
             td.Settings.AllowDemandStart = true;
+            // Task Scheduler defaults new tasks to BELOW_NORMAL (priority 7),
+            // including low I/O and memory priority.  That can starve the
+            // controller media producer during a CPU spike before DS4Windows
+            // has a chance to raise its own process priority.
+            td.Settings.Priority = ProcessPriorityClass.High;
             ts.RootFolder.RegisterTaskDefinition("RunDS4Windows", td);
         }
 
@@ -322,6 +327,7 @@ namespace DS4WinWPF
                 definition.Settings.ExecutionTimeLimit == TimeSpan.Zero &&
                 definition.Settings.MultipleInstances ==
                     TaskInstancesPolicy.IgnoreNew &&
+                definition.Settings.Priority == ProcessPriorityClass.High &&
                 !definition.Settings.StopIfGoingOnBatteries &&
                 !definition.Settings.DisallowStartIfOnBatteries &&
                 PathsEqual(action.Path, DS4Windows.Global.exelocation) &&

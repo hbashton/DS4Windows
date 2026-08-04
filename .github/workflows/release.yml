@@ -48,6 +48,16 @@ jobs:
       run: dotnet publish .\DS4Windows\DS4WinWPF.csproj -c Release /p:platform=x64 -r win-x64 --self-contained true /p:AssemblyVersion=${{ env.BINARY_VERSION }} /p:FileVersion=${{ env.BINARY_VERSION }} /p:Version=${{ env.PACKAGE_VERSION }} /p:InformationalVersion=${{ env.VERSION }} -o .\bin\x64\Release\output
     - name: Post-Build script X64
       run: python .\utils\post-build.py .\bin\x64\Release\output . ${{env.VERSION}}
+    - name: Build standard installer X64
+      shell: pwsh
+      run: |
+        .\installer\build-installer.ps1 `
+          -PublishRoot ".\bin\x64\Release\DS4Windows" `
+          -ProductVersion "${{ env.BINARY_VERSION }}" `
+          -BundleVersion "${{ env.BINARY_VERSION }}" `
+          -DisplayVersion "${{ env.VERSION }}" `
+          -OutputDirectory ".\bin\x64\Release\installer" `
+          -SkipApplicationPublish
     - name: Name release asset
       shell: pwsh
       run: |
@@ -61,7 +71,8 @@ jobs:
           Move-Item -LiteralPath $source -Destination $asset -Force
         }
         "RELEASE_ASSET=$asset" >> $env:GITHUB_ENV
+        "INSTALLER_ASSET=.\bin\x64\Release\installer\DS4Windows_${{ env.VERSION }}_Setup_x64.exe" >> $env:GITHUB_ENV
     - name: Publish release Build X64
-      run: gh release upload ${{github.event.release.tag_name}} ${{ env.RELEASE_ASSET }} --clobber
+      run: gh release upload ${{github.event.release.tag_name}} ${{ env.RELEASE_ASSET }} ${{ env.INSTALLER_ASSET }} --clobber
       env:
         GITHUB_TOKEN: ${{ github.TOKEN }}

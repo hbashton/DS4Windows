@@ -68,7 +68,12 @@ jobs:
         shell: bash
         run: |
           VERSION="$(date +%Y.%m.%d)-ci-${GITHUB_SHA::7}"
+          PRODUCT_VERSION="$(python -c "import xml.etree.ElementTree as ET; print(ET.parse('DS4Windows/DS4WinWPF.csproj').find('.//AssemblyVersion').text)")"
+          BUNDLE_BASE="$(echo "$PRODUCT_VERSION" | awk -F. '{print $1"."$2"."$3}')"
+          BUNDLE_VERSION="${BUNDLE_BASE}-ci.${GITHUB_RUN_NUMBER}"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "PRODUCT_VERSION=$PRODUCT_VERSION" >> "$GITHUB_ENV"
+          echo "BUNDLE_VERSION=$BUNDLE_VERSION" >> "$GITHUB_ENV"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Build ${{ matrix.platform }}
@@ -77,19 +82,46 @@ jobs:
       - name: Package ${{ matrix.platform }}
         run: python .\utils\post-build.py .\bin\${{ matrix.platform }}\Release\output . ${{ env.VERSION }}
 
-      - name: Stage ${{ matrix.platform }} artifact folder
+      - name: Build standard installer
         shell: pwsh
         run: |
-          $artifactRoot = ".\bin\${{ matrix.platform }}\Release\artifact"
-          New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
-          Copy-Item -Path ".\bin\${{ matrix.platform }}\Release\DS4Windows" -Destination $artifactRoot -Recurse -Force
+          .\installer\build-installer.ps1 `
+            -PublishRoot ".\bin\${{ matrix.platform }}\Release\DS4Windows" `
+            -ProductVersion "${{ env.PRODUCT_VERSION }}" `
+            -BundleVersion "${{ env.BUNDLE_VERSION }}" `
+            -DisplayVersion "${{ env.VERSION }}" `
+            -OutputDirectory ".\bin\${{ matrix.platform }}\Release\installer" `
+            -SkipApplicationPublish
 
-      - name: Upload ${{ matrix.platform }} artifact
-        id: upload
+      - name: Validate offline installer layout plan
+        shell: pwsh
+        run: |
+          $installer = ".\bin\${{ matrix.platform }}\Release\installer\DS4Windows_${{ env.VERSION }}_Setup_${{ matrix.platform }}.exe"
+          $layout = ".\bin\${{ matrix.platform }}\Release\installer-layout"
+          $process = Start-Process -FilePath $installer `
+            -ArgumentList "/layout `"$layout`" /quiet" `
+            -PassThru -Wait
+          if ($process.ExitCode -ne 0) {
+            throw "Installer layout planning failed with exit code $($process.ExitCode)."
+          }
+          if (-not (Test-Path $layout) -or -not (Get-ChildItem $layout -File -Recurse)) {
+            throw "Installer layout planning produced no offline payloads."
+          }
+
+      - name: Upload portable ZIP
+        id: upload_portable
         uses: actions/upload-artifact@v4
         with:
-          name: DS4Windows_${{ env.VERSION }}_${{ matrix.platform }}
-          path: .\bin\${{ matrix.platform }}\Release\artifact
+          name: DS4Windows_${{ env.VERSION }}_${{ matrix.platform }}_Portable
+          path: .\bin\${{ matrix.platform }}\Release\DS4Windows_${{ env.VERSION }}_${{ matrix.platform }}.zip
+          if-no-files-found: error
+
+      - name: Upload standard installer EXE
+        id: upload_installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: DS4Windows_${{ env.VERSION }}_Setup_${{ matrix.platform }}
+          path: .\bin\${{ matrix.platform }}\Release\installer\DS4Windows_${{ env.VERSION }}_Setup_${{ matrix.platform }}.exe
           if-no-files-found: error
 
       - name: Publish artifact link to run summary
@@ -99,5 +131,6 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Version: \`${{ env.VERSION }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "[Download DS4Windows_${{ env.VERSION }}_${{ matrix.platform }} (contains DS4Windows folder)](${{ steps.upload.outputs.artifact-url }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "- [Portable ZIP](${{ steps.upload_portable.outputs.artifact-url }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "- [Standard installer EXE](${{ steps.upload_installer.outputs.artifact-url }})" >> "$GITHUB_STEP_SUMMARY"
 

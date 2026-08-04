@@ -7,7 +7,8 @@ param(
     [string]$TargetDs4WindowsPath,
     [string]$PackageExtrasRoot,
     [int]$InstallerHostPid = 0,
-    [switch]$PortableInstallation
+    [switch]$PortableInstallation,
+    [switch]$InstallerMode
 )
 
 # DS4Windows normally streams this script from an embedded resource into the
@@ -30,6 +31,7 @@ if ($env:DS4W_SETUP_NO_PAUSE -eq '1') {
     $NoPause = $true
 }
 $script:PortableInstallation = [bool]$PortableInstallation
+$script:InstallerMode = [bool]$InstallerMode
 if ($env:DS4W_SETUP_PORTABLE_INSTALLATION -eq '1') {
     $script:PortableInstallation = $true
 }
@@ -1910,25 +1912,49 @@ try {
                 -PathType Leaf)) {
         throw "DS4Windows.exe could not be located for the elevated startup task."
     }
-    # Verify that the executable which launched setup belongs to this package
-    # before copying the protected snapshot into Program Files.
-    $sourceDs4WindowsDirectory = [IO.Path]::GetFullPath(
-        (Split-Path -Parent $script:PackageExtrasRoot)).TrimEnd('\', '/')
-    $sourceDs4WindowsPath = Join-Path $sourceDs4WindowsDirectory `
-        "DS4Windows.exe"
-    if (-not (Test-Path -LiteralPath $sourceDs4WindowsPath -PathType Leaf)) {
-        throw "The protected DS4Windows package snapshot is incomplete."
+    # A Burn/MSI install has already atomically placed and verified the managed
+    # application payload. The legacy in-app installer still promotes its
+    # protected package snapshot itself, so retain that verification there.
+    if ($script:InstallerMode) {
+        $expectedManagedPath = Join-Path $script:Ds4WindowsInstallDir `
+            "DS4Windows.exe"
+        $resolvedRestartPath = [IO.Path]::GetFullPath(
+            $script:Ds4WindowsRestartPath)
+        $resolvedManagedPath = [IO.Path]::GetFullPath($expectedManagedPath)
+        if (-not [string]::Equals($resolvedRestartPath,
+                $resolvedManagedPath,
+                [StringComparison]::OrdinalIgnoreCase) -or
+                -not (Test-Path -LiteralPath $resolvedManagedPath `
+                    -PathType Leaf)) {
+            throw "The Windows Installer managed DS4Windows payload is " +
+                "missing or outside the protected Program Files location."
+        }
+        $script:Ds4WindowsRestartPath = $resolvedManagedPath
+        Write-SetupLog (
+            "Windows Installer managed DS4Windows copy and startup target: " +
+            $script:Ds4WindowsRestartPath
+        ) Green
     }
-    $taskTargetHash = (Get-FileHash -LiteralPath `
-        $script:Ds4WindowsRestartPath -Algorithm SHA256).Hash
-    $sourceTargetHash = (Get-FileHash -LiteralPath `
-        $sourceDs4WindowsPath -Algorithm SHA256).Hash
-    if (-not [string]::Equals($taskTargetHash, $sourceTargetHash,
-            [StringComparison]::OrdinalIgnoreCase)) {
-        throw "The currently running DS4Windows executable changed while " +
-            "setup was starting. Close it, extract a complete release ZIP, " +
-            "and run Install / Repair again."
-    }
+    else {
+        # Verify that the executable which launched setup belongs to this
+        # package before copying the protected snapshot into Program Files.
+        $sourceDs4WindowsDirectory = [IO.Path]::GetFullPath(
+            (Split-Path -Parent $script:PackageExtrasRoot)).TrimEnd('\', '/')
+        $sourceDs4WindowsPath = Join-Path $sourceDs4WindowsDirectory `
+            "DS4Windows.exe"
+        if (-not (Test-Path -LiteralPath $sourceDs4WindowsPath -PathType Leaf)) {
+            throw "The protected DS4Windows package snapshot is incomplete."
+        }
+        $taskTargetHash = (Get-FileHash -LiteralPath `
+            $script:Ds4WindowsRestartPath -Algorithm SHA256).Hash
+        $sourceTargetHash = (Get-FileHash -LiteralPath `
+            $sourceDs4WindowsPath -Algorithm SHA256).Hash
+        if (-not [string]::Equals($taskTargetHash, $sourceTargetHash,
+                [StringComparison]::OrdinalIgnoreCase)) {
+            throw "The currently running DS4Windows executable changed " +
+                "while setup was starting. Close it, extract a complete " +
+                "release ZIP, and run Install / Repair again."
+        }
 
     if ($script:PortableInstallation) {
         # Keep the exact package executable that initiated setup. No
@@ -1947,6 +1973,7 @@ try {
             "Managed DS4Windows copy and elevated startup target: " +
             $script:Ds4WindowsRestartPath
         ) Green
+    }
     }
 
     # Register both tasks before any driver operation can require a reboot.
@@ -2209,7 +2236,7 @@ try {
     }
     if ($script:UsbipRuntimeReady -and -not $script:RebootRecommended) {
         Write-SetupLog $finish Green
-        if ($script:Ds4WindowsRestartPath) {
+        if ($script:Ds4WindowsRestartPath -and -not $script:InstallerMode) {
             Write-SetupLog "SUCCESSFUL: restarting DS4Windows in 2 seconds." Green
             Start-Sleep -Seconds 2
             if (-not $script:PortableInstallation) {

@@ -37,21 +37,28 @@ VIIPER integration on this page refer to the hbashton repositories.
 
 ## Download and install
 
-### Stable release — recommended
+### Standard installer — recommended
 
-Most users should start with the stable build.
+Most users should download `DS4Windows_<version>_Setup_x64.exe` from the
+[latest release](https://github.com/hbashton/DS4Windows/releases/latest). The
+single offline installer:
 
-1. Open the [latest stable release](https://github.com/hbashton/DS4Windows/releases/latest).
-2. Download `DS4Windows_<version>_x64.zip`. This VIIPER-based fork supports x64 Windows only.
-3. Extract the entire `DS4Windows` folder to a permanent location such as
-   `%LOCALAPPDATA%\DS4Windows` or `C:\Tools\DS4Windows`.
-4. Run `DS4Windows.exe`. Do not run it from inside the ZIP archive.
-5. Complete the first-run driver prompts, connect a controller, and select or create a profile.
+- installs DS4Windows and VIIPER under `%ProgramFiles%\DS4Windows`;
+- verifies and installs USB-IP 0.9.7.7 only when required;
+- offers optional HidHide and FakerInput checkboxes;
+- creates a desktop shortcut by default; and
+- detects install, update, repair, and restart/resume scenarios automatically.
 
-For a one-file stable installer, download and run
-[`ds4w.bat`](https://raw.githubusercontent.com/hbashton/DS4Windows/main/ds4w.bat).
-It installs the latest stable hbashton release to `%LOCALAPPDATA%\DS4Windows`
-and creates a desktop shortcut.
+The installer requests administrator permission once and contains every
+required payload; it does not open a command window or download dependencies.
+
+### Portable ZIP
+
+Portable users can instead download `DS4Windows_<version>_x64.zip`, extract the
+entire `DS4Windows` folder to a permanent writable location, and run
+`DS4Windows.exe`. Do not run it from inside the ZIP archive. The standard
+installer itself intentionally does not expose a portable mode or destination
+selector.
 
 ### DS4Windows 5 release candidates
 

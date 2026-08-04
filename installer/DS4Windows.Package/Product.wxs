@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="DS4Windows"
+      Manufacturer="DS4Windows"
+      Version="$(var.ProductVersion)"
+      UpgradeCode="65E808E3-D35A-4825-AE11-8D9415F16446"
+      Scope="perMachine"
+      InstallerVersion="500"
+      Compressed="yes">
+    <SummaryInformation Description="DS4Windows controller configuration and VIIPER frontend" />
+    <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of DS4Windows is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Property Id="DESKTOP_SHORTCUT" Value="1" Secure="yes" />
+    <Icon Id="DS4WindowsIcon" SourceFile="$(var.PublishRoot)\DS4Windows.exe" />
+    <Property Id="ARPPRODUCTICON" Value="DS4WindowsIcon" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/hbashton/DS4Windows" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/hbashton/DS4Windows" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="DS4Windows" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="DS4WindowsProgramMenu" Name="DS4Windows" />
+    </StandardDirectory>
+    <StandardDirectory Id="DesktopFolder" />
+
+    <Component Id="ManagedInstallRegistration" Directory="INSTALLFOLDER" Guid="7BB57999-6B69-4A38-B0E3-B5AD0E25E35C">
+      <RegistryValue Root="HKLM" Key="Software\DS4Windows" Name="InstallPath" Value="[INSTALLFOLDER]" Type="string" KeyPath="yes" />
+      <RegistryValue Root="HKLM" Key="Software\DS4Windows" Name="Version" Value="[ProductVersion]" Type="string" />
+    </Component>
+
+    <Component Id="StartMenuShortcut" Directory="DS4WindowsProgramMenu" Guid="56A4ECED-4172-45CE-80CD-C8A7F3EA2623">
+      <Shortcut Id="StartMenuDS4Windows" Name="DS4Windows" Description="Configure and use PlayStation controllers on Windows" Target="[INSTALLFOLDER]DS4Windows.exe" WorkingDirectory="INSTALLFOLDER" Icon="DS4WindowsIcon" Advertise="no" />
+      <RemoveFolder Id="RemoveDS4WindowsProgramMenu" On="uninstall" />
+      <RegistryValue Root="HKCU" Key="Software\DS4Windows\Installer" Name="StartMenuShortcut" Value="1" Type="integer" KeyPath="yes" />
+    </Component>
+
+    <Component Id="DesktopShortcut" Directory="DesktopFolder" Guid="B3E39E54-E6C7-466B-9E59-290666FB0A42" Condition="DESKTOP_SHORTCUT = 1">
+      <Shortcut Id="DesktopDS4Windows" Name="DS4Windows" Description="Configure and use PlayStation controllers on Windows" Target="[INSTALLFOLDER]DS4Windows.exe" WorkingDirectory="INSTALLFOLDER" Icon="DS4WindowsIcon" Advertise="no" />
+      <RegistryValue Root="HKCU" Key="Software\DS4Windows\Installer" Name="DesktopShortcut" Value="1" Type="integer" KeyPath="yes" />
+    </Component>
+
+    <Feature Id="MainFeature" Title="DS4Windows" Level="1">
+      <ComponentGroupRef Id="PublishedFiles" />
+      <ComponentRef Id="ManagedInstallRegistration" />
+      <ComponentRef Id="StartMenuShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+  </Package>
+</Wix>

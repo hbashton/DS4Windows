@@ -1,0 +1,17 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+  <PropertyGroup>
+    <OutputType>Bundle</OutputType>
+    <Platform>x64</Platform>
+    <BundleVersion Condition="'$(BundleVersion)' == ''">5.0.0.0</BundleVersion>
+    <DisplayVersion Condition="'$(DisplayVersion)' == ''">$(BundleVersion)</DisplayVersion>
+    <OutputName>DS4Windows_$(DisplayVersion)_Setup_x64</OutputName>
+    <MsiPath Condition="'$(MsiPath)' == ''">$(MSBuildThisFileDirectory)..\DS4Windows.Package\bin\x64\Release\DS4Windows_$(BundleVersion)_x64.msi</MsiPath>
+    <BootstrapperRoot Condition="'$(BootstrapperRoot)' == ''">$(MSBuildThisFileDirectory)..\DS4Windows.Bootstrapper\bin\x64\Release\net48\win-x64</BootstrapperRoot>
+    <SetupActionsPath Condition="'$(SetupActionsPath)' == ''">$(MSBuildThisFileDirectory)..\DS4Windows.SetupActions\bin\x64\Release\net48\DS4Windows.SetupActions.exe</SetupActionsPath>
+    <ExtrasRoot Condition="'$(ExtrasRoot)' == ''">$(MSBuildThisFileDirectory)..\..\extras</ExtrasRoot>
+    <DefineConstants>BundleVersion=$(BundleVersion);DisplayVersion=$(DisplayVersion);MsiPath=$(MsiPath);BootstrapperRoot=$(BootstrapperRoot);SetupActionsPath=$(SetupActionsPath);ExtrasRoot=$(ExtrasRoot)</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Util.wixext" Version="5.0.2" />
+  </ItemGroup>
+</Project>

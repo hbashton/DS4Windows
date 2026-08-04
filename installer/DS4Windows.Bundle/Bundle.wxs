@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Bundle
+      Name="DS4Windows"
+      Manufacturer="DS4Windows"
+      Version="$(var.BundleVersion)"
+      UpgradeCode="BC70CCB1-AD65-42A0-B468-8A7278A37A62"
+      IconSourceFile="$(var.ExtrasRoot)\..\DS4Windows\DS4W.ico"
+      Compressed="yes"
+      AboutUrl="https://github.com/hbashton/DS4Windows"
+      HelpUrl="https://github.com/hbashton/DS4Windows/issues">
+
+    <BootstrapperApplication SourceFile="$(var.BootstrapperRoot)\DS4Windows.Bootstrapper.exe">
+      <Payload SourceFile="$(var.BootstrapperRoot)\DS4Windows.Bootstrapper.exe.config" />
+      <Payload SourceFile="$(var.BootstrapperRoot)\mbanative.dll" />
+      <Payload SourceFile="$(var.BootstrapperRoot)\WixToolset.BootstrapperApplicationApi.dll" />
+    </BootstrapperApplication>
+
+    <Variable Name="CreateDesktopShortcut" Type="numeric" Value="1" />
+    <Variable Name="InstallHidHide" Type="numeric" Value="1" />
+    <Variable Name="InstallFakerInput" Type="numeric" Value="0" />
+
+    <util:RegistrySearch
+        Id="InfrastructureMarkerSearch"
+        Variable="InfrastructureInstalled"
+        Root="HKLM"
+        Key="SOFTWARE\DS4Windows"
+        Value="InfrastructureVersion"
+        Result="value"
+        Bitness="always64" />
+    <util:RegistrySearch
+        Id="HidHideSearch"
+        Variable="HidHideInstalled"
+        Root="HKLM"
+        Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{01E0AB21-D1CC-42B4-9DFF-84FFE4F26DAF}"
+        Value="DisplayVersion"
+        Result="value"
+        Bitness="always64" />
+
+    <Chain>
+      <ExePackage
+          Id="CloseRunningApplications"
+          CacheId="DS4WindowsSetupActionsPreflight"
+          Name="DS4Windows.SetupActions.Preflight.exe"
+          SourceFile="$(var.SetupActionsPath)"
+          PerMachine="yes"
+          Permanent="yes"
+          Vital="yes"
+          DetectCondition="0"
+          InstallArguments="preflight">
+        <ExitCode Value="0" Behavior="success" />
+        <ExitCode Behavior="error" />
+      </ExePackage>
+
+      <MsiPackage
+          Id="DS4WindowsMsi"
+          SourceFile="$(var.MsiPath)"
+          Visible="no"
+          Vital="yes">
+        <MsiProperty Name="DESKTOP_SHORTCUT" Value="[CreateDesktopShortcut]" />
+      </MsiPackage>
+
+      <ExePackage
+          Id="ViiperUsbipSetup"
+          CacheId="DS4WindowsSetupActionsInfrastructure"
+          SourceFile="$(var.SetupActionsPath)"
+          PerMachine="yes"
+          Vital="yes"
+          DetectCondition="InfrastructureInstalled = &quot;VIIPER-0.0.6+USBIP-0.9.7.7&quot;"
+          InstallArguments="install --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot; --bundle-source &quot;[WixBundleOriginalSource]&quot;"
+          RepairArguments="repair --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot; --bundle-source &quot;[WixBundleOriginalSource]&quot;"
+          UninstallArguments="uninstall --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot;">
+        <ExitCode Value="0" Behavior="success" />
+        <ExitCode Value="3010" Behavior="scheduleReboot" />
+        <ExitCode Behavior="error" />
+      </ExePackage>
+
+      <ExePackage
+          Id="HidHide"
+          SourceFile="$(var.ExtrasRoot)\HidHide_1.5.230_x64.exe"
+          PerMachine="yes"
+          Permanent="yes"
+          Vital="no"
+          DetectCondition="HidHideInstalled"
+          InstallCondition="InstallHidHide"
+          InstallArguments="/quiet /norestart">
+        <ExitCode Value="0" Behavior="success" />
+        <ExitCode Value="3010" Behavior="scheduleReboot" />
+        <ExitCode Behavior="error" />
+      </ExePackage>
+
+      <MsiPackage
+          Id="FakerInput"
+          SourceFile="$(var.ExtrasRoot)\FakerInput_0.1.0_x64.msi"
+          Permanent="yes"
+          Vital="no"
+          InstallCondition="InstallFakerInput"
+          Visible="no" />
+    </Chain>
+  </Bundle>
+</Wix>

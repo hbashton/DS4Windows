@@ -232,6 +232,35 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
+        public void SteadyMediaTemplateDoesNotReplayRegularRumbleCommand()
+        {
+            const long nowQpc = 50_000_000;
+            byte[] queued = CreateReport(0x28);
+            byte[] latestTemplate = CreateReport(0x63);
+            latestTemplate[13] = 0xF3;
+            latestTemplate[15] = 0x44;
+            latestTemplate[16] = 0x55;
+
+            DualSenseBluetoothAudioReportPatcher.PatchForPresentation(
+                queued, latestTemplate, nowQpc + 1, nowQpc);
+
+            Assert.AreEqual((byte)0xF1, queued[13],
+                "A steady 0x36 carrier replayed the second main-motor validity strobe.");
+            Assert.AreEqual((byte)0x44, queued[15]);
+            Assert.AreEqual((byte)0x55, queued[16]);
+            AssertCrcIsValid(queued);
+
+            byte[] gameState = new byte[
+                DualSenseBluetoothPhysicalOutputSequence.
+                    ControllerStatePayloadLength];
+            gameState[0] = 0x03;
+            DualSenseBluetoothAudioReportPatcher.
+                ApplyControllerStateForPresentation(queued, gameState);
+            Assert.AreEqual((byte)0x03, queued[13],
+                "The media guard consumed an explicitly composed game rumble transition.");
+        }
+
+        [TestMethod]
         public void LatestV5SnapshotReplacesQueuedAudioStateAtomically()
         {
             const long nowQpc = 50_000_000;

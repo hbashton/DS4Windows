@@ -5462,6 +5462,8 @@ namespace DS4Windows.InputDevices
         private const int CrcLength = sizeof(uint);
         private const int HapticsDataOffset = 78;
         private const int HapticsDataLength = 64;
+        private const int StateFlag0Offset = 13;
+        private const byte MainMotorSecondValidity = 0x02;
 
         /// <summary>
         /// Merges a queued audio report with the newest template. When a
@@ -5506,6 +5508,15 @@ namespace DS4Windows.InputDevices
                 // playback reserve immediately before presentation.
                 Buffer.BlockCopy(latestTemplate, 2, queuedReport, 2, 3);
                 Buffer.BlockCopy(latestTemplate, 11, queuedReport, 11, 131);
+
+                // Do not turn every steady media generation into another
+                // regular-rumble command. A live game transition is composed
+                // after this patch and therefore retains both motor validity
+                // bits. PadSense-v0.1.0 and physical A/B traces showed that
+                // repeating the template's second motor strobe drained the
+                // controller media queue and produced periodic 50-80 ms gaps.
+                queuedReport[StateFlag0Offset] &= unchecked(
+                    (byte)~MainMotorSecondValidity);
             }
 
             if (hapticsExpiryQpc <= nowQpc)

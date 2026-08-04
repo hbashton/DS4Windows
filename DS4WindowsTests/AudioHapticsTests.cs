@@ -424,6 +424,44 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void QuietProcessAudioGetsHapticsOnlyLevelParity()
+        {
+            var matcher = new ProcessLoopbackHapticsLevelMatcher();
+
+            float gain = matcher.Update(0.02 * 0.02, 0.05f,
+                frameCount: 480, sampleRate: 48000);
+
+            Assert.AreEqual(4.0f, gain, 0.001f);
+            Assert.AreEqual(4.0f, matcher.CurrentMakeupGain, 0.001f);
+        }
+
+        [TestMethod]
+        public void FullLevelProcessAudioIsNotAmplifiedOrClipped()
+        {
+            var matcher = new ProcessLoopbackHapticsLevelMatcher();
+
+            float gain = matcher.Update(0.30 * 0.30, 0.95f,
+                frameCount: 480, sampleRate: 48000);
+
+            Assert.AreEqual(1.0f, gain, 0.001f);
+            Assert.AreEqual(1.0f, matcher.CurrentMakeupGain, 0.001f);
+        }
+
+        [TestMethod]
+        public void ProcessHapticsParityPreservesTransientHeadroom()
+        {
+            var matcher = new ProcessLoopbackHapticsLevelMatcher();
+            matcher.Update(0.01 * 0.01, 0.02f,
+                frameCount: 480, sampleRate: 48000);
+
+            float gain = matcher.Update(0.01 * 0.01, 0.90f,
+                frameCount: 480, sampleRate: 48000);
+
+            Assert.IsTrue(gain <= 0.98f / 0.90f + 0.0001f);
+            Assert.IsTrue(gain >= 1.0f);
+        }
+
+        [TestMethod]
         public void AppCaptureDoesNotClimbIntoADifferentExecutableParent()
         {
             int currentProcessId = Environment.ProcessId;

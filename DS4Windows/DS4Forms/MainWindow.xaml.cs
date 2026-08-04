@@ -2812,7 +2812,6 @@ Suspend support not enabled.", true);
 
         private void ProcessPriorityComboBox_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            using var process = Process.GetCurrentProcess();
             var s = (ComboBox)sender;
             var selectedPriority = (ProcessPriorityClass)s.SelectedItem;
             if (!Global.IsAdministrator() && selectedPriority == ProcessPriorityClass.RealTime)
@@ -2821,7 +2820,8 @@ Suspend support not enabled.", true);
                 selectedPriority = ProcessPriorityClass.High;
                 settingsWrapVM.ProcessPriorityIndex = ProcessPriorityClasses.IndexOf(ProcessPriorityClass.High);
             }
-            process.PriorityClass = selectedPriority;
+            ManagedAudioLatencyLease.ApplyRequestedProcessPriority(
+                selectedPriority);
         }
     }
 

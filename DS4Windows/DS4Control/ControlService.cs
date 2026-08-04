@@ -2015,9 +2015,10 @@ namespace DS4Windows
             ServiceStarted?.Invoke(this, EventArgs.Empty);
             RunningChanged?.Invoke(this, EventArgs.Empty);
             StartupDiag("ControlService.Start after RunningChanged");
-            using var process = Process.GetCurrentProcess();
-            process.PriorityClass = MainWindow.ProcessPriorityClasses[Global.ProcessPriority];
-            StartupDiag($"ControlService.Start exit priority={process.PriorityClass}");
+            ProcessPriorityClass appliedPriority =
+                ManagedAudioLatencyLease.ApplyRequestedProcessPriority(
+                    MainWindow.ProcessPriorityClasses[Global.ProcessPriority]);
+            StartupDiag($"ControlService.Start exit priority={appliedPriority}");
             return true;
         }
 

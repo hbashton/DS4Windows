@@ -211,8 +211,6 @@ namespace DS4Windows
             private ProcessLoopbackWaveCapture processCapture;
             private Thread writerThread;
             private AudioHapticsProcessor processor;
-            private ProcessLoopbackHapticsLevelMatcher
-                processHapticsLevelMatcher;
             private WaveFormat captureFormat;
             private MMDevice captureEndpoint;
             private MMDevice usbOutputEndpoint;
@@ -407,7 +405,6 @@ namespace DS4Windows
                 captureFormat = capture.WaveFormat;
                 processor = new AudioHapticsProcessor(activeSettings,
                     captureFormat.SampleRate);
-                processHapticsLevelMatcher = null;
                 capture.DataAvailable += Capture_DataAvailable;
                 capture.RecordingStopped += Capture_RecordingStopped;
                 capture.StartRecording();
@@ -443,8 +440,6 @@ namespace DS4Windows
                 captureFormat = processCapture.WaveFormat;
                 processor = new AudioHapticsProcessor(activeSettings,
                     captureFormat.SampleRate);
-                processHapticsLevelMatcher =
-                    new ProcessLoopbackHapticsLevelMatcher();
                 processCapture.DataAvailable += Capture_DataAvailable;
                 processCapture.RecordingStopped += Capture_RecordingStopped;
                 processCapture.SourceChanged += ProcessCapture_SourceChanged;
@@ -812,30 +807,6 @@ namespace DS4Windows
                 int frameCount = byteCount / frameBytes;
                 double outputPerInput = TargetSampleRate /
                     (double)format.SampleRate;
-                float processHapticsInputGain = 1.0f;
-                ProcessLoopbackHapticsLevelMatcher levelMatcher =
-                    Volatile.Read(ref processHapticsLevelMatcher);
-                if (activeSettings.Source ==
-                        AudioHapticsSourceKind.AppSession &&
-                    levelMatcher != null && frameCount > 0)
-                {
-                    double inputEnergy = 0.0;
-                    float inputPeak = 0.0f;
-                    for (int frame = 0; frame < frameCount; frame++)
-                    {
-                        int offset = frame * frameBytes;
-                        float left = ReadSample(buffer, byteCount, offset,
-                            format);
-                        float right = channels > 1 ? ReadSample(buffer,
-                            byteCount, offset + bytesPerSample, format) : left;
-                        inputEnergy += (left * left + right * right) * 0.5;
-                        inputPeak = Math.Max(inputPeak,
-                            Math.Max(Math.Abs(left), Math.Abs(right)));
-                    }
-                    processHapticsInputGain = levelMatcher.Update(
-                        inputEnergy / frameCount, inputPeak, frameCount,
-                        format.SampleRate);
-                }
                 bool preserveCapturedNativeHaptics =
                     device.ConnectionType != ConnectionType.BT &&
                     activeSettings.Source ==
@@ -849,8 +820,6 @@ namespace DS4Windows
                     float left = ReadSample(buffer, byteCount, offset, format);
                     float right = channels > 1 ? ReadSample(buffer, byteCount,
                         offset + bytesPerSample, format) : left;
-                    left *= processHapticsInputGain;
-                    right *= processHapticsInputGain;
                     activeProcessor.Process(left, right, out float hapticLeft,
                         out float hapticRight);
 

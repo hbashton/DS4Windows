@@ -424,41 +424,20 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void QuietProcessAudioGetsHapticsOnlyLevelParity()
+        public void LiveProcessCaptureCanActivateApplicationLoopback()
         {
-            var matcher = new ProcessLoopbackHapticsLevelMatcher();
+            string processIdText = Environment.GetEnvironmentVariable(
+                "DS4W_TEST_PROCESS_LOOPBACK_PID");
+            if (!int.TryParse(processIdText, out int processId) ||
+                processId <= 0)
+            {
+                Assert.Inconclusive(
+                    "Set DS4W_TEST_PROCESS_LOOPBACK_PID for this opt-in integration test.");
+            }
 
-            float gain = matcher.Update(0.02 * 0.02, 0.05f,
-                frameCount: 480, sampleRate: 48000);
-
-            Assert.AreEqual(4.0f, gain, 0.001f);
-            Assert.AreEqual(4.0f, matcher.CurrentMakeupGain, 0.001f);
-        }
-
-        [TestMethod]
-        public void FullLevelProcessAudioIsNotAmplifiedOrClipped()
-        {
-            var matcher = new ProcessLoopbackHapticsLevelMatcher();
-
-            float gain = matcher.Update(0.30 * 0.30, 0.95f,
-                frameCount: 480, sampleRate: 48000);
-
-            Assert.AreEqual(1.0f, gain, 0.001f);
-            Assert.AreEqual(1.0f, matcher.CurrentMakeupGain, 0.001f);
-        }
-
-        [TestMethod]
-        public void ProcessHapticsParityPreservesTransientHeadroom()
-        {
-            var matcher = new ProcessLoopbackHapticsLevelMatcher();
-            matcher.Update(0.01 * 0.01, 0.02f,
-                frameCount: 480, sampleRate: 48000);
-
-            float gain = matcher.Update(0.01 * 0.01, 0.90f,
-                frameCount: 480, sampleRate: 48000);
-
-            Assert.IsTrue(gain <= 0.98f / 0.90f + 0.0001f);
-            Assert.IsTrue(gain >= 1.0f);
+            using var capture = new ProcessLoopbackWaveCapture(processId);
+            capture.StartRecording();
+            Assert.IsTrue(capture.CurrentProcessId > 0);
         }
 
         [TestMethod]

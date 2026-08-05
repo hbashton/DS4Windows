@@ -511,6 +511,69 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void LiveProcessCaptureKeepsDeliveringApplicationAudio()
+        {
+            string processIdText = Environment.GetEnvironmentVariable(
+                "DS4W_TEST_PROCESS_LOOPBACK_PID");
+            if (!int.TryParse(processIdText, out int processId) ||
+                processId <= 0)
+            {
+                Assert.Inconclusive(
+                    "Set DS4W_TEST_PROCESS_LOOPBACK_PID for this opt-in integration test.");
+            }
+
+            using var capture = new ProcessLoopbackWaveCapture(processId,
+                followExclusiveRenderRoute: true);
+            using var received = new ManualResetEventSlim(false);
+            long callbackCount = 0;
+            long lastCallback = 0;
+            long maximumGap = 0;
+            capture.DataAvailable += (_, eventArgs) =>
+            {
+                if (eventArgs.BytesRecorded <= 0)
+                {
+                    return;
+                }
+
+                long now = Stopwatch.GetTimestamp();
+                long previous = Interlocked.Exchange(ref lastCallback, now);
+                if (previous > 0)
+                {
+                    long gap = now - previous;
+                    long observed;
+                    do
+                    {
+                        observed = Volatile.Read(ref maximumGap);
+                        if (gap <= observed) break;
+                    }
+                    while (Interlocked.CompareExchange(ref maximumGap, gap,
+                        observed) != observed);
+                }
+                Interlocked.Increment(ref callbackCount);
+                received.Set();
+            };
+
+            capture.StartRecording();
+            Assert.IsTrue(received.Wait(TimeSpan.FromSeconds(3)),
+                "The selected application produced no captured PCM.");
+            Thread.Sleep(TimeSpan.FromSeconds(5));
+
+            long now = Stopwatch.GetTimestamp();
+            long last = Volatile.Read(ref lastCallback);
+            double lastAgeMilliseconds = (now - last) * 1000.0 /
+                Stopwatch.Frequency;
+            double maximumGapMilliseconds =
+                Volatile.Read(ref maximumGap) * 1000.0 /
+                Stopwatch.Frequency;
+            Assert.IsTrue(Interlocked.Read(ref callbackCount) >= 50,
+                $"Only {callbackCount} callbacks arrived during live capture.");
+            Assert.IsTrue(lastAgeMilliseconds < 1000.0,
+                $"Live capture stopped {lastAgeMilliseconds:F1} ms before validation.");
+            Assert.IsTrue(maximumGapMilliseconds < 1500.0,
+                $"Live capture stalled for {maximumGapMilliseconds:F1} ms.");
+        }
+
+        [TestMethod]
         public void AppCaptureDoesNotClimbIntoADifferentExecutableParent()
         {
             int currentProcessId = Environment.ProcessId;

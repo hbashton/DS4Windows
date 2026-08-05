@@ -60,6 +60,10 @@ def main() -> int:
         'UninstallArguments="uninstall ',
         'InstallCondition="InstallHidHide"',
         'InstallCondition="InstallFakerInput"',
+        'Name="TargetUserSid"',
+        '--target-roaming-appdata',
+        'Variable="ManagedInstallRegistered"',
+        'Variable="ManagedViiperPresent"',
     ]
     for contract in required_contracts:
         if contract not in bundle:
@@ -71,6 +75,44 @@ def main() -> int:
     for contract in ['<MajorUpgrade', 'Id="DESKTOP_SHORTCUT"', 'Scope="perMachine"']:
         if contract not in product:
             raise SystemExit("MSI upgrade contract missing: " + contract)
+
+    installer_root = args.bundle_source.parent.parent
+    setup_actions = (installer_root / "DS4Windows.SetupActions" / "Program.cs").read_text(encoding="utf-8")
+    for contract in [
+        r'@"Global\DS4Windows-VIIPER-Setup"',
+        'SetupResumeShortcut',
+        'KillProcessTree(process)',
+        'IsInfrastructureCommitted()',
+        'ValidateSuppliedInteractiveUser',
+        '=== DS4Windows setup invocation ',
+    ]:
+        if contract not in setup_actions:
+            raise SystemExit("Setup action safety contract missing: " + contract)
+    if 'SetValue("DS4WindowsSetupResume"' in setup_actions:
+        raise SystemExit("Setup must not create a custom HKLM RunOnce entry.")
+
+    bootstrapper = (installer_root / "DS4Windows.Bootstrapper" / "InstallerApplication.cs").read_text(encoding="utf-8")
+    for contract in [
+        'command.Resume == ResumeType.Reboot',
+        r'@"Global\DS4Windows-Installer-Transaction"',
+        'if (command.Resume != ResumeType.Reboot)',
+        'result = 3010;',
+        'CloseWithCurrentResult()',
+        'packageStates.Clear()',
+        'InfrastructureFailureSummary()',
+        'SetupActionsLogPath',
+    ]:
+        if contract not in bootstrapper:
+            raise SystemExit("Bootstrapper lifecycle contract missing: " + contract)
+
+    probe = (installer_root / "DS4Windows.Bootstrapper" / "InfrastructureProbe.cs").read_text(encoding="utf-8")
+    for contract in [
+        '"InfrastructureState"',
+        'BeginOutputReadLine()',
+        'BeginErrorReadLine()',
+    ]:
+        if contract not in probe:
+            raise SystemExit("Infrastructure probe contract missing: " + contract)
     return 0
 
 

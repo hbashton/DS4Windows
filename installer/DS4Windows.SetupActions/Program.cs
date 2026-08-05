@@ -4,19 +4,31 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Management;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text;
+using System.Threading;
 
 namespace DS4Windows.SetupActions
 {
     internal static class Program
     {
         private const string RegistryKeyPath = @"SOFTWARE\DS4Windows";
-        private const string InfrastructureVersion = "VIIPER-0.0.7+USBIP-0.9.7.7";
+        private const string InfrastructureVersion =
+            "VIIPER-0.0.7+USBIP-0.9.7.7";
+        private static readonly string InstallerLogRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "DS4Windows", "Installer");
+        private static readonly string InfrastructureLogPath = Path.Combine(
+            InstallerLogRoot, "infrastructure-actions.log");
 
         [STAThread]
         private static int Main(string[] args)
         {
+            var invocationId = Guid.NewGuid().ToString("N");
+            WriteFallbackLog("=== DS4Windows setup invocation " +
+                invocationId + " started ===");
             try
             {
                 var action = args.FirstOrDefault()?.Trim().ToLowerInvariant() ?? "install";
@@ -30,7 +42,7 @@ namespace DS4Windows.SetupActions
                         return Preflight();
                     case "install":
                     case "repair":
-                        return InstallOrRepair(installRoot, bundleSource);
+                        return InstallOrRepair(installRoot, bundleSource, args);
                     case "uninstall":
                         return Uninstall(installRoot);
                     case "probe":
@@ -41,12 +53,14 @@ namespace DS4Windows.SetupActions
             }
             catch (Exception ex)
             {
-                WriteFallbackLog(ex.ToString());
+                WriteFallbackLog("=== DS4Windows setup invocation " +
+                    invocationId + " failed ===" + Environment.NewLine + ex);
                 return 1;
             }
         }
 
-        private static int InstallOrRepair(string installRoot, string bundleSource)
+        private static int InstallOrRepair(string installRoot,
+            string bundleSource, string[] args)
         {
             var ds4Path = Path.Combine(installRoot, "DS4Windows.exe");
             var extrasRoot = Path.Combine(installRoot, "extras");
@@ -56,28 +70,78 @@ namespace DS4Windows.SetupActions
                 throw new FileNotFoundException("The managed DS4Windows installation is incomplete.", scriptPath);
             }
 
-            var targetUser = ResolveInteractiveUser();
+            var targetUser = ResolveInteractiveUser(args);
+            return RunWithSetupMutex(() => InstallOrRepairLocked(ds4Path,
+                extrasRoot, scriptPath, bundleSource, targetUser));
+        }
+
+        private static int InstallOrRepairLocked(string ds4Path,
+            string extrasRoot, string scriptPath, string bundleSource,
+            InteractiveUser targetUser)
+        {
+            ResetInfrastructureLog(targetUser);
+            WriteFallbackLog("Infrastructure setup starting for interactive user " +
+                targetUser.Name + " (" + targetUser.Sid + ").");
             var arguments = new StringBuilder();
             arguments.Append("-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ");
             arguments.Append(Quote(scriptPath));
-            arguments.Append(" -NoPause -Yes -InstallerMode");
+            arguments.Append(" -NoPause -Yes -InstallerMode -SetupMutexAlreadyHeld");
             arguments.Append(" -TargetDs4WindowsPath ").Append(Quote(ds4Path));
             arguments.Append(" -PackageExtrasRoot ").Append(Quote(extrasRoot));
             arguments.Append(" -TargetLocalAppData ").Append(Quote(targetUser.LocalAppData));
             arguments.Append(" -TargetUserSid ").Append(Quote(targetUser.Sid));
             arguments.Append(" -TargetUserName ").Append(Quote(targetUser.Name));
 
-            var result = RunHidden("powershell.exe", arguments.ToString(), TimeSpan.FromMinutes(12));
-            if (result == 0 || result == 3010)
+            var elevatedSid = WindowsIdentity.GetCurrent().User?.Value;
+            var alternateAdministrator = !string.Equals(elevatedSid,
+                targetUser.Sid, StringComparison.OrdinalIgnoreCase);
+            if (alternateAdministrator)
             {
-                using (var key = Registry.LocalMachine.CreateSubKey(RegistryKeyPath))
-                {
-                    key?.SetValue("InfrastructureVersion", InfrastructureVersion, RegistryValueKind.String);
-                }
+                // Alternate administrator credentials are valid for a
+                // per-machine install, but Windows cannot register a
+                // highest-interactive task for a different standard user
+                // without storing credentials. Install everything and defer
+                // those two optional startup tasks instead of failing Burn.
+                arguments.Append(" -SkipStartupTasks");
+                WriteFallbackLog("Setup is elevated as " +
+                    (WindowsIdentity.GetCurrent().Name ?? elevatedSid) +
+                    "; startup task registration for " + targetUser.Name +
+                    " is deferred.");
+            }
+
+            var result = RunCaptured("powershell.exe", arguments.ToString(),
+                Timeout.InfiniteTimeSpan, out var scriptOutput);
+            WriteInfrastructureLog(scriptOutput);
+            WriteFallbackLog("Infrastructure setup exited with code " + result +
+                ". Detailed log: " + InfrastructureLogPath);
+            if (result == 0 && !IsInfrastructureCommitted())
+            {
+                WriteFallbackLog("Infrastructure script returned success without " +
+                    "atomically committing the verified readiness marker.");
+                result = 1;
             }
             if (result == 3010)
             {
-                StageRebootResume(bundleSource);
+                // Burn owns normal reboot resume. Its per-machine RunOnce entry
+                // does not execute for a standard user's logon, so add one
+                // target-user Startup shortcut only when setup was elevated
+                // with alternate administrator credentials.
+                if (alternateAdministrator)
+                {
+                    try
+                    {
+                        StageRebootResume(bundleSource, targetUser);
+                    }
+                    catch (Exception ex)
+                    {
+                        // A reboot boundary has already been reached. Do not
+                        // turn optional auto-resume staging into a fatal error
+                        // that makes Burn roll back the installed application.
+                        WriteFallbackLog("Automatic standard-user resume could " +
+                            "not be staged: " + ex.Message +
+                            ". Burn remains resumable when setup is run again.");
+                    }
+                }
             }
             else if (result == 0)
             {
@@ -122,6 +186,11 @@ namespace DS4Windows.SetupActions
 
         private static int Uninstall(string installRoot)
         {
+            return RunWithSetupMutex(() => UninstallLocked(installRoot));
+        }
+
+        private static int UninstallLocked(string installRoot)
+        {
             StopManagedProcesses(installRoot);
             RemoveOwnedTask("RunVIIPER", Path.Combine(installRoot, "VIIPER", "viiper.exe"));
             RemoveOwnedTask("RunDS4Windows", Path.Combine(installRoot, "DS4Windows.exe"));
@@ -136,6 +205,10 @@ namespace DS4Windows.SetupActions
             using (var key = Registry.LocalMachine.OpenSubKey(RegistryKeyPath, writable: true))
             {
                 key?.DeleteValue("InfrastructureVersion", false);
+                key?.SetValue("InfrastructureState", "Uninstalled",
+                    RegistryValueKind.String);
+                key?.SetValue("InfrastructureStateUtc",
+                    DateTime.UtcNow.ToString("O"), RegistryValueKind.String);
             }
             ClearRebootResume();
 
@@ -144,8 +217,59 @@ namespace DS4Windows.SetupActions
             return 0;
         }
 
-        private static InteractiveUser ResolveInteractiveUser()
+        private static int RunWithSetupMutex(Func<int> action)
         {
+            using (var setupMutex = new Mutex(false,
+                       @"Global\DS4Windows-VIIPER-Setup"))
+            {
+                var mutexOwned = false;
+                try
+                {
+                    try
+                    {
+                        mutexOwned = setupMutex.WaitOne(0);
+                    }
+                    catch (AbandonedMutexException)
+                    {
+                        mutexOwned = true;
+                    }
+                    if (!mutexOwned)
+                    {
+                        throw new InvalidOperationException(
+                            "Another DS4Windows VIIPER setup is already running.");
+                    }
+                    return action();
+                }
+                finally
+                {
+                    if (mutexOwned)
+                    {
+                        try { setupMutex.ReleaseMutex(); } catch { }
+                    }
+                }
+            }
+        }
+
+        private static InteractiveUser ResolveInteractiveUser(string[] args)
+        {
+            var suppliedSid = ReadArgument(args, "--target-user-sid");
+            var suppliedName = ReadArgument(args, "--target-user-name");
+            var suppliedLocal = ReadArgument(args, "--target-local-appdata");
+            var suppliedRoaming = ReadArgument(args,
+                "--target-roaming-appdata");
+            var supplied = new[] { suppliedSid, suppliedName, suppliedLocal,
+                suppliedRoaming };
+            if (supplied.Any(value => !string.IsNullOrWhiteSpace(value)))
+            {
+                if (supplied.Any(string.IsNullOrWhiteSpace))
+                {
+                    throw new InvalidOperationException(
+                        "Installer user context is incomplete.");
+                }
+                return ValidateSuppliedInteractiveUser(suppliedSid,
+                    suppliedName, suppliedLocal, suppliedRoaming);
+            }
+
             try
             {
                 using (var searcher = new ManagementObjectSearcher("SELECT UserName FROM Win32_ComputerSystem"))
@@ -161,7 +285,14 @@ namespace DS4Windows.SetupActions
                         {
                             var profilePath = Environment.ExpandEnvironmentVariables(profile?.GetValue("ProfileImagePath") as string ?? string.Empty);
                             var localAppData = Path.Combine(profilePath, "AppData", "Local");
-                            if (Directory.Exists(localAppData)) return new InteractiveUser(name, sid, localAppData);
+                            var roamingAppData = Path.Combine(profilePath,
+                                "AppData", "Roaming");
+                            if (Directory.Exists(localAppData) &&
+                                Directory.Exists(roamingAppData))
+                            {
+                                return new InteractiveUser(name, sid,
+                                    localAppData, roamingAppData);
+                            }
                         }
                     }
                 }
@@ -171,30 +302,220 @@ namespace DS4Windows.SetupActions
             var identity = WindowsIdentity.GetCurrent();
             return new InteractiveUser(identity.Name ?? Environment.UserName,
                 identity.User?.Value ?? string.Empty,
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData));
         }
 
-        private static void StageRebootResume(string bundleSource)
+        private static InteractiveUser ValidateSuppliedInteractiveUser(
+            string sid, string name, string localAppData,
+            string roamingAppData)
         {
-            if (string.IsNullOrWhiteSpace(bundleSource) || !File.Exists(bundleSource)) return;
+            var securityIdentifier = new SecurityIdentifier(sid);
+            using (var profile = Registry.LocalMachine.OpenSubKey(
+                       @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\" +
+                       securityIdentifier.Value))
+            {
+                var profileValue = profile?.GetValue("ProfileImagePath") as string;
+                if (string.IsNullOrWhiteSpace(profileValue))
+                {
+                    throw new InvalidOperationException(
+                        "Windows could not validate the installer user's profile.");
+                }
+
+                var profilePath = Environment.ExpandEnvironmentVariables(
+                    profileValue);
+                var expectedLocal = Path.GetFullPath(Path.Combine(profilePath,
+                    "AppData", "Local"));
+                var expectedRoaming = Path.GetFullPath(Path.Combine(profilePath,
+                    "AppData", "Roaming"));
+                if (!PathsEqual(expectedLocal, localAppData) ||
+                    !PathsEqual(expectedRoaming, roamingAppData))
+                {
+                    throw new InvalidOperationException(
+                        "Installer user folders did not match the registered " +
+                        "Windows profile.");
+                }
+
+                var registeredName = ((NTAccount)securityIdentifier.Translate(
+                    typeof(NTAccount))).Value;
+                if (!string.Equals(registeredName, name,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        "Installer user identity did not match its Windows SID.");
+                }
+                return new InteractiveUser(registeredName,
+                    securityIdentifier.Value, expectedLocal, expectedRoaming);
+            }
+        }
+
+        private static bool PathsEqual(string expected, string actual)
+        {
+            if (string.IsNullOrWhiteSpace(actual)) return false;
+            return string.Equals(Path.GetFullPath(expected)
+                    .TrimEnd(Path.DirectorySeparatorChar),
+                Path.GetFullPath(actual).TrimEnd(Path.DirectorySeparatorChar),
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void StageRebootResume(string bundleSource,
+            InteractiveUser targetUser)
+        {
+            if (string.IsNullOrWhiteSpace(bundleSource) ||
+                !File.Exists(bundleSource))
+            {
+                throw new FileNotFoundException(
+                    "The original installer is unavailable for reboot resume.",
+                    bundleSource);
+            }
             var resumeRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "DS4Windows", "Installer", "resume");
             Directory.CreateDirectory(resumeRoot);
             var stagedBundle = Path.Combine(resumeRoot, "DS4Windows_Setup_x64.exe");
-            File.Copy(bundleSource, stagedBundle, true);
-            using (var runOnce = Registry.LocalMachine.CreateSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce"))
+            if (!string.Equals(Path.GetFullPath(bundleSource),
+                    Path.GetFullPath(stagedBundle),
+                    StringComparison.OrdinalIgnoreCase))
             {
-                runOnce?.SetValue("DS4WindowsSetupResume", Quote(stagedBundle) + " /repair", RegistryValueKind.String);
+                File.Copy(bundleSource, stagedBundle, true);
+            }
+
+            var startupDirectory = Path.Combine(targetUser.RoamingAppData,
+                "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
+            Directory.CreateDirectory(startupDirectory);
+            var shortcutPath = Path.Combine(startupDirectory,
+                "DS4Windows Setup Resume.lnk");
+            try
+            {
+                CreateShortcut(shortcutPath, stagedBundle, "/repair",
+                    resumeRoot);
+                using (var key = Registry.LocalMachine.CreateSubKey(
+                           RegistryKeyPath))
+                {
+                    key?.SetValue("SetupResumeShortcut", shortcutPath,
+                        RegistryValueKind.String);
+                }
+            }
+            catch
+            {
+                try
+                {
+                    if (File.Exists(shortcutPath)) File.Delete(shortcutPath);
+                }
+                catch { }
+                throw;
             }
         }
 
         private static void ClearRebootResume()
         {
-            using (var runOnce = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce", writable: true))
+            // Remove the obsolete custom RunOnce value from earlier builds.
+            // Burn owns its own GUID-named resume entry.
+            try
             {
-                runOnce?.DeleteValue("DS4WindowsSetupResume", false);
+                using (var runOnce = Registry.LocalMachine.OpenSubKey(
+                           @"SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce",
+                           writable: true))
+                {
+                    runOnce?.DeleteValue("DS4WindowsSetupResume", false);
+                }
             }
+            catch (Exception ex)
+            {
+                WriteFallbackLog("Could not remove the legacy resume value: " +
+                    ex.Message);
+            }
+
+            string shortcutPath = null;
+            try
+            {
+                using (var key = Registry.LocalMachine.OpenSubKey(
+                           RegistryKeyPath, writable: true))
+                {
+                    shortcutPath = key?.GetValue("SetupResumeShortcut") as string;
+                    key?.DeleteValue("SetupResumeShortcut", false);
+                }
+            }
+            catch (Exception ex)
+            {
+                WriteFallbackLog("Could not clear the resume shortcut marker: " +
+                    ex.Message);
+            }
+            try
+            {
+                if (IsOwnedResumeShortcut(shortcutPath) &&
+                    File.Exists(shortcutPath))
+                {
+                    File.Delete(shortcutPath);
+                }
+            }
+            catch { }
+
             var stagedBundle = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "DS4Windows", "Installer", "resume", "DS4Windows_Setup_x64.exe");
             try { if (File.Exists(stagedBundle)) File.Delete(stagedBundle); } catch { }
+        }
+
+        private static bool IsOwnedResumeShortcut(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path) ||
+                !string.Equals(Path.GetFileName(path),
+                    "DS4Windows Setup Resume.lnk",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            var directory = Path.GetDirectoryName(Path.GetFullPath(path))?
+                .TrimEnd(Path.DirectorySeparatorChar);
+            var expectedSuffix = Path.Combine("Microsoft", "Windows",
+                "Start Menu", "Programs", "Startup");
+            return directory != null && directory.EndsWith(expectedSuffix,
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void CreateShortcut(string shortcutPath,
+            string targetPath, string arguments, string workingDirectory)
+        {
+            object shell = null;
+            object shortcut = null;
+            try
+            {
+                var shellType = Type.GetTypeFromProgID("WScript.Shell", true);
+                shell = Activator.CreateInstance(shellType);
+                shortcut = shellType.InvokeMember("CreateShortcut",
+                    BindingFlags.InvokeMethod, null, shell,
+                    new object[] { shortcutPath });
+                var shortcutType = shortcut.GetType();
+                shortcutType.InvokeMember("TargetPath",
+                    BindingFlags.SetProperty, null, shortcut,
+                    new object[] { targetPath });
+                shortcutType.InvokeMember("Arguments",
+                    BindingFlags.SetProperty, null, shortcut,
+                    new object[] { arguments });
+                shortcutType.InvokeMember("WorkingDirectory",
+                    BindingFlags.SetProperty, null, shortcut,
+                    new object[] { workingDirectory });
+                shortcutType.InvokeMember("Save", BindingFlags.InvokeMethod,
+                    null, shortcut, null);
+            }
+            finally
+            {
+                if (shortcut != null && Marshal.IsComObject(shortcut))
+                    Marshal.FinalReleaseComObject(shortcut);
+                if (shell != null && Marshal.IsComObject(shell))
+                    Marshal.FinalReleaseComObject(shell);
+            }
+        }
+
+        private static bool IsInfrastructureCommitted()
+        {
+            using (var key = Registry.LocalMachine.OpenSubKey(RegistryKeyPath))
+            {
+                return string.Equals(
+                           key?.GetValue("InfrastructureVersion") as string,
+                           InfrastructureVersion, StringComparison.Ordinal) &&
+                       string.Equals(
+                           key?.GetValue("InfrastructureState") as string,
+                           "Ready", StringComparison.Ordinal);
+            }
         }
 
         private static void StopManagedProcesses(string installRoot)
@@ -241,6 +562,8 @@ namespace DS4Windows.SetupActions
         {
             using (var process = new Process())
             {
+                var stdout = new StringBuilder();
+                var stderr = new StringBuilder();
                 process.StartInfo = new ProcessStartInfo(fileName, arguments)
                 {
                     UseShellExecute = false,
@@ -249,18 +572,69 @@ namespace DS4Windows.SetupActions
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                 };
-                process.Start();
-                var stdout = process.StandardOutput.ReadToEnd();
-                var stderr = process.StandardError.ReadToEnd();
-                if (!process.WaitForExit((int)timeout.TotalMilliseconds))
+                process.OutputDataReceived += (_, eventArgs) =>
                 {
-                    try { process.Kill(); } catch { }
+                    if (eventArgs.Data != null) stdout.AppendLine(eventArgs.Data);
+                };
+                process.ErrorDataReceived += (_, eventArgs) =>
+                {
+                    if (eventArgs.Data != null) stderr.AppendLine(eventArgs.Data);
+                };
+                process.Start();
+                process.BeginOutputReadLine();
+                process.BeginErrorReadLine();
+                var completed = timeout == Timeout.InfiniteTimeSpan
+                    ? WaitWithoutTimeout(process)
+                    : process.WaitForExit((int)timeout.TotalMilliseconds);
+                if (!completed)
+                {
+                    KillProcessTree(process);
                     throw new TimeoutException(fileName + " did not finish within " + timeout + ".");
                 }
-                output = stdout + Environment.NewLine + stderr;
+                // Flush the final asynchronous output events after process exit.
+                process.WaitForExit();
+                output = stdout.ToString() + Environment.NewLine +
+                    stderr.ToString();
                 WriteFallbackLog(output);
                 return process.ExitCode;
             }
+        }
+
+        private static bool WaitWithoutTimeout(Process process)
+        {
+            // Infrastructure setup may be waiting inside a signed kernel-driver
+            // installer. Keep this process and the global setup mutex alive
+            // until it exits; automatically killing that tree is unsafe.
+            process.WaitForExit();
+            return true;
+        }
+
+        private static void KillProcessTree(Process process)
+        {
+            try
+            {
+                using (var taskkill = Process.Start(new ProcessStartInfo(
+                    "taskkill.exe", "/PID " + process.Id + " /T /F")
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden,
+                }))
+                {
+                    taskkill?.WaitForExit(10000);
+                }
+            }
+            catch { }
+
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill();
+                    process.WaitForExit(5000);
+                }
+            }
+            catch { }
         }
 
         private static string ReadArgument(string[] args, string name)
@@ -281,25 +655,52 @@ namespace DS4Windows.SetupActions
         {
             try
             {
-                var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "DS4Windows", "Installer");
-                Directory.CreateDirectory(root);
-                File.AppendAllText(Path.Combine(root, "setup-actions.log"), DateTime.Now.ToString("O") + " " + message + Environment.NewLine);
+                Directory.CreateDirectory(InstallerLogRoot);
+                File.AppendAllText(Path.Combine(InstallerLogRoot, "setup-actions.log"), DateTime.Now.ToString("O") + " " + message + Environment.NewLine);
+            }
+            catch { }
+        }
+
+        private static void WriteInfrastructureLog(string message)
+        {
+            if (string.IsNullOrWhiteSpace(message)) return;
+            try
+            {
+                Directory.CreateDirectory(InstallerLogRoot);
+                File.AppendAllText(InfrastructureLogPath,
+                    Environment.NewLine + message + Environment.NewLine);
+            }
+            catch { }
+        }
+
+        private static void ResetInfrastructureLog(InteractiveUser targetUser)
+        {
+            try
+            {
+                Directory.CreateDirectory(InstallerLogRoot);
+                File.WriteAllText(InfrastructureLogPath,
+                    DateTime.Now.ToString("O") +
+                    " Infrastructure setup started for " + targetUser.Name +
+                    " (" + targetUser.Sid + ")." + Environment.NewLine);
             }
             catch { }
         }
 
         private sealed class InteractiveUser
         {
-            internal InteractiveUser(string name, string sid, string localAppData)
+            internal InteractiveUser(string name, string sid,
+                string localAppData, string roamingAppData)
             {
                 Name = name;
                 Sid = sid;
                 LocalAppData = localAppData;
+                RoamingAppData = roamingAppData;
             }
 
             internal string Name { get; }
             internal string Sid { get; }
             internal string LocalAppData { get; }
+            internal string RoamingAppData { get; }
         }
     }
 }

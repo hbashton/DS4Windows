@@ -21,8 +21,8 @@ namespace DS4Windows.Bootstrapper
             Closing += (_, e) =>
             {
                 if (applying) e.Cancel = true;
-                else application.Close();
             };
+            Closed += (_, __) => application.OnWindowClosed();
         }
 
         internal void ShowConfirmation(InstallerMode detectedMode, IReadOnlyDictionary<string, PackageState> packages, bool infrastructureHealthy)
@@ -30,6 +30,7 @@ namespace DS4Windows.Bootstrapper
             mode = detectedMode;
             HidePages();
             ConfirmationPage.Visibility = Visibility.Visible;
+            OptionsCard.Visibility = Visibility.Visible;
             applying = false;
 
             switch (mode)
@@ -102,6 +103,7 @@ namespace DS4Windows.Bootstrapper
         {
             HidePages();
             CompletePage.Visibility = Visibility.Visible;
+            LaunchCheckBox.Visibility = Visibility.Visible;
             applying = false;
             if (action == LaunchAction.Uninstall)
             {
@@ -115,6 +117,8 @@ namespace DS4Windows.Bootstrapper
         {
             HidePages();
             RestartPage.Visibility = Visibility.Visible;
+            RestartDescription.Text = "Windows must restart before setup can safely continue. Setup will resume after you sign in.";
+            RestartNowButton.IsEnabled = true;
             applying = false;
         }
 
@@ -135,11 +139,30 @@ namespace DS4Windows.Bootstrapper
         }
 
         private void Cancel_Click(object sender, RoutedEventArgs e) => application.Close(1223);
+        private void CloseFailure_Click(object sender, RoutedEventArgs e) => application.CloseWithCurrentResult();
         private void Retry_Click(object sender, RoutedEventArgs e) { HidePages(); DetectingPage.Visibility = Visibility.Visible; application.Retry(); }
         private void OpenLog_Click(object sender, RoutedEventArgs e) => application.OpenLog();
-        private void CopyDiagnostics_Click(object sender, RoutedEventArgs e) => Clipboard.SetText(application.Diagnostics());
+        private void CopyDiagnostics_Click(object sender, RoutedEventArgs e)
+        {
+            try { Clipboard.SetText(application.Diagnostics()); }
+            catch
+            {
+                FailureMessage.Text += "\r\n\r\nWindows could not access the clipboard. Use Open log instead.";
+            }
+        }
         private void RestartLater_Click(object sender, RoutedEventArgs e) => application.Close(3010);
-        private void RestartNow_Click(object sender, RoutedEventArgs e) { application.RestartWindows(); application.Close(3010); }
+        private void RestartNow_Click(object sender, RoutedEventArgs e)
+        {
+            if (application.RestartWindows())
+            {
+                application.Close(3010);
+            }
+            else
+            {
+                RestartDescription.Text = "Windows could not start the restart automatically. Restart manually; setup will resume after you sign in.";
+                RestartNowButton.IsEnabled = false;
+            }
+        }
         private void Finish_Click(object sender, RoutedEventArgs e)
         {
             if (LaunchCheckBox.Visibility == Visibility.Visible && LaunchCheckBox.IsChecked == true) application.LaunchDs4Windows();

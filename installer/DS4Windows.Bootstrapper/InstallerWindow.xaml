@@ -156,10 +156,10 @@
       <Grid x:Name="RestartPage" Visibility="Collapsed">
         <StackPanel VerticalAlignment="Center">
           <TextBlock Text="Restart required" FontSize="25" FontWeight="SemiBold" HorizontalAlignment="Center" />
-          <TextBlock Text="USB-IP was installed or repaired safely. Restart Windows to activate the verified driver, then DS4Windows and VIIPER will start automatically." TextWrapping="Wrap" TextAlignment="Center" Foreground="{DynamicResource MutedBrush}" Margin="50,12,50,26" />
+          <TextBlock x:Name="RestartDescription" Text="USB-IP was installed or repaired safely. Restart Windows to activate the verified driver, then DS4Windows and VIIPER will start automatically." TextWrapping="Wrap" TextAlignment="Center" Foreground="{DynamicResource MutedBrush}" Margin="50,12,50,26" />
           <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
             <Button Style="{StaticResource SecondaryButton}" Content="Restart later" Margin="0,0,10,0" Click="RestartLater_Click" />
-            <Button Style="{StaticResource PrimaryButton}" Content="Restart now" Click="RestartNow_Click" />
+            <Button x:Name="RestartNowButton" Style="{StaticResource PrimaryButton}" Content="Restart now" Click="RestartNow_Click" />
           </StackPanel>
         </StackPanel>
       </Grid>
@@ -173,7 +173,7 @@
             <Button Style="{StaticResource SecondaryButton}" Content="Copy diagnostics" Margin="0,0,10,0" Click="CopyDiagnostics_Click" />
             <Button Style="{StaticResource PrimaryButton}" Content="Retry" Click="Retry_Click" />
           </StackPanel>
-          <Button Content="Close" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource MutedBrush}" Cursor="Hand" Margin="0,18,0,0" Click="Cancel_Click" />
+          <Button Content="Close" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource MutedBrush}" Cursor="Hand" Margin="0,18,0,0" Click="CloseFailure_Click" />
         </StackPanel>
       </Grid>
     </Grid>

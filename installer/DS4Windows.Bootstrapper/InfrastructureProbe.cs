@@ -37,7 +37,10 @@ namespace DS4Windows.Bootstrapper
 
                 using (var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\DS4Windows"))
                 {
-                    if (!string.Equals(key?.GetValue("InfrastructureVersion") as string, ExpectedMarker, StringComparison.Ordinal))
+                    if (!string.Equals(key?.GetValue("InfrastructureVersion") as string,
+                            ExpectedMarker, StringComparison.Ordinal) ||
+                        !string.Equals(key?.GetValue("InfrastructureState") as string,
+                            "Ready", StringComparison.Ordinal))
                     {
                         return false;
                     }
@@ -52,11 +55,22 @@ namespace DS4Windows.Bootstrapper
                     RedirectStandardError = true,
                 }))
                 {
-                    if (process == null || !process.WaitForExit(10000) || process.ExitCode != 0)
+                    if (process == null) return false;
+
+                    // usbip can emit enough diagnostics to fill a redirected
+                    // pipe. Drain both streams while it runs so health probing
+                    // cannot deadlock the installer UI.
+                    process.OutputDataReceived += (_, __) => { };
+                    process.ErrorDataReceived += (_, __) => { };
+                    process.BeginOutputReadLine();
+                    process.BeginErrorReadLine();
+                    if (!process.WaitForExit(10000))
                     {
-                        try { process?.Kill(); } catch { }
+                        try { process.Kill(); } catch { }
                         return false;
                     }
+                    process.WaitForExit();
+                    if (process.ExitCode != 0) return false;
                 }
                 return true;
             }

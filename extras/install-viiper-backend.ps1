@@ -9,6 +9,7 @@ param(
     [int]$InstallerHostPid = 0,
     [switch]$PortableInstallation,
     [switch]$SkipStartupTasks,
+    [switch]$SetupMutexAlreadyHeld,
     [switch]$InstallerMode
 )
 
@@ -67,6 +68,8 @@ $script:RebootBoundaryPending = $false
 $script:SafetyRestartPending = $false
 $script:UsbipReplacementPhaseOne = $false
 $script:SetupMutex = $null
+$script:SetupMutexOwned = $false
+$script:SetupTransactionStarted = $false
 $script:RequiredUsbipVersion = [Version]"0.9.7.7"
 $script:UsbipInstallerSha256 =
     "51620fa5f9f8be5932bc9d786deee557ce06d5407a99cab490dcfac71f185fea"
@@ -117,11 +120,19 @@ else {
     Join-Path $script:ManagedRoot "VIIPER"
 }
 $script:Ds4WindowsInstallDir = $script:ManagedRoot
-$script:LogPath = Join-Path $script:InstallDir "install.log"
+$script:InstallerLogRoot = Join-Path $env:ProgramData "DS4Windows\Installer"
+$script:LogPath = if ($script:InstallerMode) {
+    Join-Path $script:InstallerLogRoot "infrastructure-actions.log"
+}
+else {
+    Join-Path $script:InstallDir "install.log"
+}
 $script:UsbipReplacementStatePath = Join-Path $script:InstallDir `
     "usbip-replacement-pending.json"
 $script:UsbipUninstallKeyName = `
     "{199505b0-b93d-4521-a8c7-897818e0205a}_is1"
+$script:InfrastructureRegistryPath = "HKLM:\SOFTWARE\DS4Windows"
+$script:InfrastructureVersion = "VIIPER-0.0.7+USBIP-0.9.7.7"
 $script:TempDir = Join-Path ([IO.Path]::GetTempPath()) (
     "DS4Windows-VIIPER-Setup-" + [Guid]::NewGuid().ToString("N"))
 
@@ -146,6 +157,48 @@ function Test-Administrator {
     $principal = [Security.Principal.WindowsPrincipal]::new($identity)
     return $principal.IsInRole(
         [Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Format-NativeFailure([object[]]$output) {
+    return (@($output) | ForEach-Object { [string]$_ } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join "; "
+}
+
+function Clear-InfrastructureReadiness {
+    if ($script:PortableInstallation) { return }
+    New-Item -Path $script:InfrastructureRegistryPath -Force | Out-Null
+    if (Get-ItemProperty -LiteralPath $script:InfrastructureRegistryPath `
+            -Name "InfrastructureVersion" -ErrorAction SilentlyContinue) {
+        Remove-ItemProperty -LiteralPath $script:InfrastructureRegistryPath `
+            -Name "InfrastructureVersion" -ErrorAction Stop
+    }
+    Set-InfrastructureState "Installing"
+}
+
+function Commit-InfrastructureReadiness {
+    if ($script:PortableInstallation) { return }
+    New-Item -Path $script:InfrastructureRegistryPath -Force | Out-Null
+    New-ItemProperty -LiteralPath $script:InfrastructureRegistryPath `
+        -Name "InfrastructureVersion" `
+        -Value $script:InfrastructureVersion -PropertyType String -Force `
+        -ErrorAction Stop | Out-Null
+    Set-InfrastructureState "Ready"
+    Write-SetupLog (
+        "Committed verified infrastructure readiness: " +
+        $script:InfrastructureVersion
+    ) Green
+}
+
+function Set-InfrastructureState([string]$state) {
+    if ($script:PortableInstallation) { return }
+    New-Item -Path $script:InfrastructureRegistryPath -Force | Out-Null
+    New-ItemProperty -LiteralPath $script:InfrastructureRegistryPath `
+        -Name "InfrastructureState" -Value $state -PropertyType String `
+        -Force -ErrorAction Stop | Out-Null
+    New-ItemProperty -LiteralPath $script:InfrastructureRegistryPath `
+        -Name "InfrastructureStateUtc" `
+        -Value ([DateTime]::UtcNow.ToString("O")) -PropertyType String `
+        -Force -ErrorAction Stop | Out-Null
 }
 
 function Get-CitrixUsbMonitorState {
@@ -1104,15 +1157,24 @@ function Remove-ForeignViiperInstallations {
         ) Yellow
     }
 
-    # This destructive choice is always interactive, even when -Yes was used
-    # for unattended confirmation of the normal managed setup.
-    $answer = Read-Host (
-        "Stop these foreign VIIPER processes with administrator rights and " +
-        "remove their viiper.exe files? [Y/N]")
-    if ($answer -notmatch '^(?i:y|yes)$') {
-        $script:UserCanceled = $true
-        throw "Setup canceled because a foreign VIIPER instance is running. " +
-            "Close or remove it, then run Install / Repair again."
+    if (-not $script:InstallerMode) {
+        # The built-in repair flow can ask directly. The all-in-one installer
+        # already received one explicit confirmation and runs this child with
+        # -NonInteractive, so it follows the standard-install choice instead.
+        $answer = Read-Host (
+            "Stop these foreign VIIPER processes with administrator rights " +
+            "and remove their viiper.exe files? [Y/N]")
+        if ($answer -notmatch '^(?i:y|yes)$') {
+            $script:UserCanceled = $true
+            throw "Setup canceled because a foreign VIIPER instance is " +
+                "running. Close or remove it, then run Install / Repair again."
+        }
+    }
+    else {
+        Write-SetupLog (
+            "The standard installer will replace the foreign VIIPER instance " +
+            "with its verified Program Files copy."
+        ) Yellow
     }
 
     $unknownPath = @($foreign | Where-Object {
@@ -1770,29 +1832,23 @@ function Protect-ElevatedTaskTargetDirectory([string]$directory,
     $administrators = '*S-1-5-32-544'
     $system = '*S-1-5-18'
     $targetUser = "*$script:TargetUserSid"
-    & icacls.exe $resolved /reset /Q | Out-Null
+    $aclOutput = @(& icacls.exe $resolved /reset /Q 2>&1)
     if ($LASTEXITCODE -ne 0) {
-        throw "Could not reset access controls for the $label directory."
+        throw "Could not reset access controls for the $label directory: " +
+            (Format-NativeFailure $aclOutput)
     }
-    & icacls.exe $resolved /inheritance:r /grant:r `
+    $aclOutput = @(& icacls.exe $resolved /inheritance:r /grant:r `
         "${system}:(OI)(CI)(F)" `
         "${administrators}:(OI)(CI)(F)" `
-        "${targetUser}:(OI)(CI)(RX)" /Q | Out-Null
+        "${targetUser}:(OI)(CI)(RX)" /Q 2>&1)
     if ($LASTEXITCODE -ne 0) {
-        throw "Could not protect the elevated $label startup target."
+        throw "Could not protect the elevated $label startup target: " +
+            (Format-NativeFailure $aclOutput)
     }
-
-    $children = @(Get-ChildItem -LiteralPath $resolved -Force `
-        -ErrorAction Stop)
-    if ($children.Count -gt 0) {
-        & icacls.exe (Join-Path $resolved '*') /reset /T /C /Q | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            throw "Could not apply protected inheritance inside $label."
-        }
-    }
-    & icacls.exe $resolved /setowner $administrators /T /C /Q | Out-Null
+    $aclOutput = @(& icacls.exe $resolved /setowner $administrators /Q 2>&1)
     if ($LASTEXITCODE -ne 0) {
-        throw "Could not assign protected ownership for $label."
+        throw "Could not assign protected ownership for ${label}: " +
+            (Format-NativeFailure $aclOutput)
     }
 
     Write-SetupLog (
@@ -1801,7 +1857,37 @@ function Protect-ElevatedTaskTargetDirectory([string]$directory,
     ) Green
 }
 
+function Protect-ElevatedTaskTargetFile([string]$filePath, [string]$label) {
+    $resolved = [IO.Path]::GetFullPath($filePath)
+    if (-not (Test-Path -LiteralPath $resolved -PathType Leaf)) {
+        throw "$label startup target is missing: $resolved"
+    }
+    $item = Get-Item -LiteralPath $resolved -Force -ErrorAction Stop
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "$label startup target is a reparse point: $resolved"
+    }
+
+    $administrators = '*S-1-5-32-544'
+    $system = '*S-1-5-18'
+    $targetUser = "*$script:TargetUserSid"
+    $aclOutput = @(& icacls.exe $resolved /inheritance:r /grant:r `
+        "${system}:(F)" "${administrators}:(F)" "${targetUser}:(RX)" `
+        /Q 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not protect the elevated $label startup executable: " +
+            (Format-NativeFailure $aclOutput)
+    }
+    $aclOutput = @(& icacls.exe $resolved /setowner $administrators /Q 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not assign protected ownership for the $label startup " +
+            "executable: " + (Format-NativeFailure $aclOutput)
+    }
+    Write-SetupLog "Protected elevated $label startup executable: $resolved" Green
+}
+
 try {
+    New-Item -ItemType Directory -Path $script:InstallerLogRoot -Force |
+        Out-Null
     if (-not (Test-Administrator)) {
         throw "Administrator permission is required. Launch setup from DS4Windows so Windows can request it automatically."
     }
@@ -1809,20 +1895,34 @@ try {
     if (-not [string]::Equals($elevatedIdentity.User.Value,
             $script:TargetUserSid,
             [StringComparison]::OrdinalIgnoreCase)) {
-        throw "The signed-in Windows account must itself be an administrator " +
-            "to receive highest-privilege startup tasks. Setup will not " +
-            "register those tasks under alternate administrator credentials."
+        $script:RunAtStartupEnabled = $false
+        Write-SetupLog (
+            "Setup was elevated with alternate administrator credentials. " +
+            "Installation will continue safely, but startup tasks for " +
+            "$script:TargetUserName will be deferred until that user launches " +
+            "DS4Windows and grants elevation."
+        ) Yellow
     }
 
-    try {
-        $script:SetupMutex = [Threading.Mutex]::new(
-            $false, "Local\DS4Windows-VIIPER-Setup")
-        if (-not $script:SetupMutex.WaitOne(0)) {
-            throw "Another DS4Windows VIIPER setup is already running."
+    if (-not $SetupMutexAlreadyHeld) {
+        try {
+            $script:SetupMutex = [Threading.Mutex]::new(
+                $false, "Global\DS4Windows-VIIPER-Setup")
+            if (-not $script:SetupMutex.WaitOne(0)) {
+                throw "Another DS4Windows VIIPER setup is already running."
+            }
+            $script:SetupMutexOwned = $true
+        }
+        catch [Threading.AbandonedMutexException] {
+            # An abandoned mutex is acquired by this thread.
+            $script:SetupMutexOwned = $true
         }
     }
-    catch [Threading.AbandonedMutexException] {
-        # An abandoned mutex is acquired by this thread.
+    else {
+        Write-SetupLog (
+            "The all-in-one installer owns the cross-session setup mutex " +
+            "through child verification and reboot-resume staging."
+        ) Green
     }
 
     Write-Host ""
@@ -1858,6 +1958,13 @@ try {
         }
     }
 
+    # Readiness is a transaction commit marker. Start the transaction only
+    # after confirmation and while holding the cross-session mutex. It remains
+    # absent through mutation, failures, and reboot boundaries, and is
+    # republished only after this mutex owner verifies the complete runtime.
+    Clear-InfrastructureReadiness
+    $script:SetupTransactionStarted = $true
+
     $script:InstallDir = Assert-SafeManagedDirectory $script:InstallDir `
         "VIIPER installation"
     if (-not $script:PortableInstallation) {
@@ -1865,12 +1972,34 @@ try {
             $script:Ds4WindowsInstallDir "managed DS4Windows installation"
         New-Item -ItemType Directory -Path $script:Ds4WindowsInstallDir `
             -Force | Out-Null
-        Protect-ElevatedTaskTargetDirectory $script:Ds4WindowsInstallDir `
-            "DS4Windows"
+        try {
+            Protect-ElevatedTaskTargetDirectory $script:Ds4WindowsInstallDir `
+                "DS4Windows"
+        }
+        catch {
+            if (-not $script:InstallerMode) { throw }
+            # MSI already created this directory under Program Files with
+            # Windows Installer ownership. A third-party filesystem filter can
+            # reject redundant directory ACL normalization; the exact task
+            # executable is protected and verified below before registration.
+            Write-SetupLog (
+                "Windows Installer directory ACL normalization was skipped: " +
+                $_.Exception.Message
+            ) Yellow
+        }
     }
     New-Item -ItemType Directory -Path $script:InstallDir -Force | Out-Null
     if (-not $script:PortableInstallation) {
-        Protect-ElevatedTaskTargetDirectory $script:InstallDir "VIIPER"
+        try {
+            Protect-ElevatedTaskTargetDirectory $script:InstallDir "VIIPER"
+        }
+        catch {
+            if (-not $script:InstallerMode) { throw }
+            Write-SetupLog (
+                "VIIPER directory ACL normalization was skipped: " +
+                $_.Exception.Message
+            ) Yellow
+        }
     }
     else {
         Write-SetupLog (
@@ -1997,6 +2126,16 @@ try {
             $script:Ds4WindowsRestartPath
         ) Green
     }
+    }
+
+    if (-not $script:PortableInstallation) {
+        # Program Files inheritance protects the package tree. Lock the two
+        # executable task targets explicitly instead of recursively rewriting
+        # thousands of self-contained runtime files, which is slow and can
+        # fail on otherwise healthy systems with security-filter drivers.
+        Protect-ElevatedTaskTargetFile $viiperPath "VIIPER"
+        Protect-ElevatedTaskTargetFile $script:Ds4WindowsRestartPath `
+            "DS4Windows"
     }
 
     # Preserve the setting that launched the built-in installer. The standard
@@ -2306,6 +2445,7 @@ try {
         "Setup complete. VIIPER is ready for DS4Windows."
     }
     if ($script:UsbipRuntimeReady -and -not $script:RebootRecommended) {
+        Commit-InfrastructureReadiness
         Write-SetupLog $finish Green
         if ($script:Ds4WindowsRestartPath -and -not $script:InstallerMode) {
             Write-SetupLog "SUCCESSFUL: restarting DS4Windows in 2 seconds." Green
@@ -2328,6 +2468,9 @@ try {
         }
     }
     else {
+        if ($script:SetupTransactionStarted) {
+            Set-InfrastructureState "RebootPending"
+        }
         Write-SetupLog $finish Yellow
         if ($script:ExitCode -eq 0) {
             $script:ExitCode = 3010
@@ -2347,12 +2490,18 @@ catch {
     elseif ($script:RebootBoundaryPending -or
             $script:SafetyRestartPending) {
         $script:ExitCode = 3010
+        if ($script:SetupTransactionStarted) {
+            try { Set-InfrastructureState "RebootPending" } catch { }
+        }
         Write-SetupLog $_.Exception.Message Yellow
         Write-SetupLog "Restart required; no install changes were made." Yellow
         Write-SetupLog "Details were saved to $script:LogPath" Yellow
     }
     else {
         $script:ExitCode = 1
+        if ($script:SetupTransactionStarted) {
+            try { Set-InfrastructureState "Failed" } catch { }
+        }
         Write-SetupLog "Setup could not finish: $($_.Exception.Message)" Red
         Write-SetupLog "Details were saved to $script:LogPath" Yellow
     }
@@ -2366,8 +2515,10 @@ finally {
         Write-Host ""
         Read-Host "Press Enter to close"
     }
-    if ($script:SetupMutex) {
+    if ($script:SetupMutexOwned -and $script:SetupMutex) {
         try { $script:SetupMutex.ReleaseMutex() } catch { }
+    }
+    if ($script:SetupMutex) {
         try { $script:SetupMutex.Dispose() } catch { }
     }
 }

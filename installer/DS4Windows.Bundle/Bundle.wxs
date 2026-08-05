@@ -20,6 +20,10 @@
     <Variable Name="CreateDesktopShortcut" Type="numeric" Value="1" />
     <Variable Name="InstallHidHide" Type="numeric" Value="1" />
     <Variable Name="InstallFakerInput" Type="numeric" Value="0" />
+    <Variable Name="TargetUserSid" Type="string" Value="" Persisted="yes" />
+    <Variable Name="TargetUserName" Type="string" Value="" Persisted="yes" />
+    <Variable Name="TargetLocalAppData" Type="string" Value="" Persisted="yes" />
+    <Variable Name="TargetRoamingAppData" Type="string" Value="" Persisted="yes" />
 
     <util:RegistrySearch
         Id="InfrastructureMarkerSearch"
@@ -29,6 +33,19 @@
         Value="InfrastructureVersion"
         Result="value"
         Bitness="always64" />
+    <util:RegistrySearch
+        Id="ManagedInstallRegistrationSearch"
+        Variable="ManagedInstallRegistered"
+        Root="HKLM"
+        Key="SOFTWARE\DS4Windows"
+        Value="InstallPath"
+        Result="exists"
+        Bitness="always64" />
+    <util:FileSearch
+        Id="ManagedViiperExecutableSearch"
+        Variable="ManagedViiperPresent"
+        Path="[ProgramFiles64Folder]DS4Windows\VIIPER\viiper.exe"
+        Result="exists" />
     <util:RegistrySearch
         Id="HidHideSearch"
         Variable="HidHideInstalled"
@@ -67,9 +84,9 @@
           SourceFile="$(var.SetupActionsPath)"
           PerMachine="yes"
           Vital="yes"
-          DetectCondition="InfrastructureInstalled = &quot;VIIPER-0.0.7+USBIP-0.9.7.7&quot;"
-          InstallArguments="install --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot; --bundle-source &quot;[WixBundleOriginalSource]&quot;"
-          RepairArguments="repair --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot; --bundle-source &quot;[WixBundleOriginalSource]&quot;"
+          DetectCondition="InfrastructureInstalled = &quot;VIIPER-0.0.7+USBIP-0.9.7.7&quot; OR ManagedInstallRegistered OR ManagedViiperPresent"
+          InstallArguments="install --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot; --bundle-source &quot;[WixBundleOriginalSource]&quot; --target-user-sid &quot;[TargetUserSid]&quot; --target-user-name &quot;[TargetUserName]&quot; --target-local-appdata &quot;[TargetLocalAppData]&quot; --target-roaming-appdata &quot;[TargetRoamingAppData]&quot;"
+          RepairArguments="repair --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot; --bundle-source &quot;[WixBundleOriginalSource]&quot; --target-user-sid &quot;[TargetUserSid]&quot; --target-user-name &quot;[TargetUserName]&quot; --target-local-appdata &quot;[TargetLocalAppData]&quot; --target-roaming-appdata &quot;[TargetRoamingAppData]&quot;"
           UninstallArguments="uninstall --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot;">
         <ExitCode Value="0" Behavior="success" />
         <ExitCode Value="3010" Behavior="scheduleReboot" />

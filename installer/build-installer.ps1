@@ -49,16 +49,17 @@ $manifestPath = Join-Path $publishPath "package-manifest.json"
 if ($LASTEXITCODE -ne 0) { throw "Installer manifest generation failed." }
 
 & dotnet build (Join-Path $repoRoot "installer\DS4Windows.SetupActions\DS4Windows.SetupActions.csproj") `
-    -c Release -p:Platform=x64
+    -c Release -p:Platform=x64 -p:Version=$ProductVersion
 if ($LASTEXITCODE -ne 0) { throw "Setup action host build failed." }
 
 & dotnet build (Join-Path $repoRoot "installer\DS4Windows.Bootstrapper\DS4Windows.Bootstrapper.csproj") `
-    -c Release -p:Platform=x64
+    -c Release -p:Platform=x64 -p:Version=$ProductVersion
 if ($LASTEXITCODE -ne 0) { throw "Bootstrapper UI build failed." }
 
 $packageProject = Join-Path $repoRoot "installer\DS4Windows.Package\DS4Windows.Package.wixproj"
 & dotnet build $packageProject -t:Rebuild -c Release -p:Platform=x64 `
-    -p:ProductVersion=$ProductVersion -p:PublishRoot=$publishPath
+    -p:Version=$ProductVersion -p:ProductVersion=$ProductVersion `
+    -p:PublishRoot=$publishPath
 if ($LASTEXITCODE -ne 0) { throw "DS4Windows MSI build failed." }
 
 $msiPath = Join-Path $repoRoot "installer\DS4Windows.Package\bin\x64\Release\DS4Windows_${ProductVersion}_x64.msi"
@@ -67,7 +68,8 @@ $setupActions = Join-Path $repoRoot "installer\DS4Windows.SetupActions\bin\x64\R
 $extrasRoot = Join-Path $repoRoot "extras"
 $bundleProject = Join-Path $repoRoot "installer\DS4Windows.Bundle\DS4Windows.Bundle.wixproj"
 & dotnet build $bundleProject -t:Rebuild -c Release -p:Platform=x64 `
-    -p:BundleVersion=$BundleVersion -p:DisplayVersion=$DisplayVersion `
+    -p:Version=$ProductVersion -p:BundleVersion=$BundleVersion `
+    -p:DisplayVersion=$DisplayVersion `
     -p:MsiPath=$msiPath -p:BootstrapperRoot=$baRoot `
     -p:SetupActionsPath=$setupActions -p:ExtrasRoot=$extrasRoot
 if ($LASTEXITCODE -ne 0) { throw "DS4Windows Burn bundle build failed." }

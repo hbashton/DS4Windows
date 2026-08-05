@@ -39,8 +39,8 @@ VIIPER integration on this page refer to the hbashton repositories.
 
 ### Standard installer — recommended
 
-Most users should download `DS4Windows_<version>_Setup_x64.exe` from the
-[latest release](https://github.com/hbashton/DS4Windows/releases/latest). The
+Most users should download `DS4Windows_5.0.0.0_Setup_x64.exe` from the
+[newest release candidate](https://github.com/hbashton/DS4Windows/releases). The
 single offline installer:
 
 - installs DS4Windows and VIIPER under `%ProgramFiles%\DS4Windows`;
@@ -54,7 +54,7 @@ required payload; it does not open a command window or download dependencies.
 
 ### Portable ZIP
 
-Portable users can instead download `DS4Windows_<version>_x64.zip`, extract the
+Portable users can instead download `DS4Windows_VIIPER_x64.zip`, extract the
 entire `DS4Windows` folder to a permanent writable location, and run
 `DS4Windows.exe`. Do not run it from inside the ZIP archive. The standard
 installer itself intentionally does not expose a portable mode or destination
@@ -85,10 +85,11 @@ After installing a VIIPER-capable DS4Windows build:
    **Xbox 360**, or **Switch 2 Pro**. VIIPER is the backend for every virtual
    controller type; it is not repeated in the device names.
 
-Before any driver step can require a restart, the installer registers and
-verifies enabled, highest-privilege `RunVIIPER` and `RunDS4Windows` sign-in
-tasks. They launch the managed VIIPER binary and the user's selected
-DS4Windows executable directly without recurring console or UAC popups.
+When **Run at Startup** is enabled, setup registers and verifies the
+highest-privilege `RunVIIPER` and `RunDS4Windows` sign-in tasks before a driver
+step can require a restart. When the setting is disabled, setup removes both
+tasks and performs only the requested one-time launch. This policy is preserved
+across standard and portable repairs without recurring console or UAC popups.
 DS4Windows checks the backend at startup and
 opens a guided, self-elevating repair flow when VIIPER or usbip-win2 is missing.
 The release ZIP is a complete offline setup bundle: VIIPER, usbip-win2,
@@ -146,8 +147,14 @@ correctly.
 VIIPER preview builds expose Windows audio interfaces that match the virtual
 DualSense or DualShock 4 selected by the profile. Supported paths include:
 
-- Game or desktop audio sent to a physical DualSense or DualShock 4 speaker over
-  Bluetooth, even when the emulated Sony controller is the other model.
+- Game, desktop, or selected-app audio sent to a physical DualSense or
+  DualShock 4 speaker over Bluetooth, even while emulating Xbox, Switch, or the
+  other PlayStation model.
+- Separate speaker and headset-only modes with independent volume controls,
+  clean AUX switching, and automatic recovery after profile changes,
+  controller reconnects, or DS4Windows service restarts.
+- One persistent playback/recording endpoint per physical controller, avoiding
+  endpoint churn when the profile changes its emulated output.
 - A virtual recording endpoint fed by the physical DualSense or DualShock 4
   microphone, with automatic conversion to the emulated controller's native
   capture format.
@@ -156,7 +163,7 @@ DualSense or DualShock 4 selected by the profile. Supported paths include:
   microphone while keeping the recording stream active.
 
 Audio, microphone, and advanced haptics support require matching DS4Windows 5
-and VIIPER 0.0.6 builds.
+and VIIPER 0.0.7 builds.
 
 ### Quality of life
 
@@ -180,7 +187,7 @@ adjust rumble, output type, speaker routing, and microphone input without openin
 the full profile editor.
 
 <p align="center">
-  <img src="docs/images/tour/overview.png" width="1000" alt="DS4Windows Overview showing a connected DualShock 4 and quick profile controls">
+  <img src="docs/images/tour/overview.png" width="1000" alt="DS4Windows Overview showing a connected DualSense and quick PlayStation audio controls">
 </p>
 
 ### Controllers
@@ -190,7 +197,7 @@ active profile, HidHide state, battery level, lightbar color, and profile-linkin
 controls.
 
 <p align="center">
-  <img src="docs/images/tour/controllers.png" width="1000" alt="DS4Windows Controllers screen with a connected DualShock 4">
+  <img src="docs/images/tour/controllers.png" width="1000" alt="DS4Windows Controllers screen with a connected DualSense">
 </p>
 
 ### Audio Haptics
@@ -243,7 +250,7 @@ matches the profile's emulated controller, and hovering a control highlights the
 exact button target directly on the controller.
 
 <p align="center">
-  <img src="docs/images/tour/remapping-dialog.png" width="900" alt="DS4Windows remapping dialog with the Cross button highlighted on a DualShock 4">
+  <img src="docs/images/tour/remapping-dialog.png" width="900" alt="DS4Windows remapping dialog with the Cross button highlighted on a DualSense">
 </p>
 
 ### Auto Profiles

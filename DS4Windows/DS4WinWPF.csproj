@@ -82,7 +82,7 @@
 		AfterTargets="Publish"
 		BeforeTargets="GenerateManagedFileManifest">
 		<PropertyGroup>
-			<_BundledViiperName>VIIPER-0.0.6-x64.exe</_BundledViiperName>
+			<_BundledViiperName>VIIPER-0.0.7-x64.exe</_BundledViiperName>
 			<_BundledViiperPath>$(PublishDir)extras\$(_BundledViiperName)</_BundledViiperPath>
 			<_BundledViiperHashPath>$(_BundledViiperPath).sha256</_BundledViiperHashPath>
 		</PropertyGroup>
@@ -127,8 +127,8 @@
 		<EmbeddedResource Include="..\extras\install-viiper-backend.ps1">
 			<LogicalName>DS4Windows.install-viiper-backend.ps1</LogicalName>
 		</EmbeddedResource>
-		<Content Include="..\extras\VIIPER-0.0.6-x64.exe">
-			<Link>extras\VIIPER-0.0.6-x64.exe</Link>
+		<Content Include="..\extras\VIIPER-0.0.7-x64.exe">
+			<Link>extras\VIIPER-0.0.7-x64.exe</Link>
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
 		</Content>

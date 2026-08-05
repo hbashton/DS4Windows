@@ -1,32 +1,33 @@
 {
   "latest_version": "5.0.0.0",
   "latest_version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 0},
-  "updated_at": "2026-07-31T00:00:00+0000",
+  "updated_at": "2026-08-04T00:00:00+0000",
   "changelog": {
     "versions": [
     {
       "version_str": "5.0.0.0",
       "version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 0},
-      "base_header": "Version 5.0.0.0",
-      "release_date": "2026-07-31T00:00:00+0000",
+      "base_header": "Version 5.0.0.0 - Release Candidate 4",
+      "release_date": "2026-08-04T00:00:00+0000",
       "locales": [
         {
           "code": "en",
-          "header": "Version 5.0.0.0 - VIIPER",
+          "header": "Version 5.0.0.0 - Release Candidate 4",
           "log_text": [
-            "* **A whole new DS4Windows** - modern navigation, live controller Overview, quick profile controls, search, and a faster full-screen profile editor",
-            "* **One powerful backend** - VIIPER now drives Xbox 360, DualShock 4, DualSense, DualSense Edge, and Switch 2 Pro output; old profiles migrate automatically",
-            "* **PlayStation audio, perfected** - low-latency Bluetooth speaker, headset, microphone, haptics, lightbar, trigger, gyro, and HID support for DualSense and DualShock 4",
-            "* **Features that follow your physical controller** - PlayStation audio, haptics, lightbar, and adaptive triggers keep working while games see Xbox, Switch, DS4, or DualSense output",
-            "* **Audio Haptics + Trigger Lab** - per-app/system capture, automatic game detection, Mix/Replace, trigger presets, split editing, full-pull actions, and rumble-to-trigger effects",
-            "* **Controller-accurate remapping** - polished artwork and precise interactive controls for DualSense, Edge, DS4, Xbox 360, and Switch 2 Pro",
-            "* **Smoother compatibility** - safer Game Bar switching, improved Moonlight/Sunshine input, live profile state, and faster controller recovery",
-            "* **Foolproof setup** - bundled VIIPER 0.0.6, usbip-win2 0.9.7.7, HidHide, and FakerInput with guided repair, verified startup tasks, and portable-copy support",
-            "* **Hundreds of fixes** - cleaner reconnects, steadier audio and haptics, reliable lightbar ownership, better microphone gain, unstuck triggers, and safer updates"
+            "* **New all-in-one installer** - the offline 5.0.0.0 setup EXE installs or updates DS4Windows, VIIPER 0.0.7, and usbip-win2 0.9.7.7, with optional HidHide and FakerInput checkboxes, payload verification, repair support, and restart recovery",
+            "* **One production backend** - VIIPER drives Xbox 360, DualShock 4, DualSense, DualSense Edge, and Switch 2 Pro output; legacy profile selections migrate automatically",
+            "* **PlayStation speaker and AUX fixes** - rebuilt Bluetooth media scheduling, separate speaker/headset routing, clean reconnect and source-switch recovery, persistent per-controller endpoints, and low-latency operation across every emulated output",
+            "* **Native DualSense game parity** - game input, advanced haptics, speaker data, adaptive triggers, lightbar, player LEDs, rumble, and DS4Windows overrides are merged atomically without replaying stale state",
+            "* **Microphone and lifecycle reliability** - microphone capture, duplex playback, controller reconnects, service restarts, suspend/resume, and hibernation recovery no longer strand audio lanes or virtual devices",
+            "* **Audio Haptics made independent** - system and per-app capture can stay active without audible speaker playback, automatically recover from process/session changes, and Mix or Replace native game haptics per profile",
+            "* **Trigger Lab completed** - linked or split L2/R2 effects, presets, per-trigger arming, full-pull actions, previews, and optional game-rumble-to-trigger vibration are saved with the active profile",
+            "* **Redesigned interface** - live Overview controls, searchable Profiles and Auto Profiles, a focused profile editor, improved PlayStation audio controls, controller-accurate remapping, refreshed artwork, and responsive layouts",
+            "* **Profile and compatibility fixes** - stable emulated-device selection, real-time quick controls, safer Game Bar companions, improved gyro, swipe-profile, Moonlight/Sunshine, Xbox 360, and output-slot behavior",
+            "* **Safer startup and updates** - exact VIIPER hash/version enforcement, guided standard or portable repair, startup tasks that respect Run at Startup, scoped cleanup, Citrix/USB-IP safeguards, and self-contained x64 packaging"
           ],
           "editor": "hbashton",
-          "editors_note": ["The VIIPER 5.0 controller, audio, haptics, and interface release"],
-          "updated_at": "2026-07-31T00:00:00+0000"
+          "editors_note": ["Release Candidate 4 pairs DS4Windows 5.0.0.0 with VIIPER 0.0.7 and the new all-in-one installer."],
+          "updated_at": "2026-08-04T00:00:00+0000"
         }
       ]
     },

@@ -70,8 +70,13 @@ jobs:
         if ($asset -ne $source) {
           Move-Item -LiteralPath $source -Destination $asset -Force
         }
+        $installerSource = ".\bin\x64\Release\installer\DS4Windows_${{ env.VERSION }}_Setup_x64.exe"
+        $installerAsset = ".\bin\x64\Release\installer\DS4Windows_${{ env.BINARY_VERSION }}_Setup_x64.exe"
+        if ($installerAsset -ne $installerSource) {
+          Move-Item -LiteralPath $installerSource -Destination $installerAsset -Force
+        }
         "RELEASE_ASSET=$asset" >> $env:GITHUB_ENV
-        "INSTALLER_ASSET=.\bin\x64\Release\installer\DS4Windows_${{ env.VERSION }}_Setup_x64.exe" >> $env:GITHUB_ENV
+        "INSTALLER_ASSET=$installerAsset" >> $env:GITHUB_ENV
     - name: Publish release Build X64
       run: gh release upload ${{github.event.release.tag_name}} ${{ env.RELEASE_ASSET }} ${{ env.INSTALLER_ASSET }} --clobber
       env:

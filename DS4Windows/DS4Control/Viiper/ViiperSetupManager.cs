@@ -147,7 +147,7 @@ namespace DS4Windows
             "--run-embedded-viiper-installer";
         private const string InstallerResourceName =
             "DS4Windows.install-viiper-backend.ps1";
-        private const string BundledViiperName = "VIIPER-0.0.6-x64.exe";
+        private const string BundledViiperName = "VIIPER-0.0.7-x64.exe";
         private const string BundledViiperHashName =
             BundledViiperName + ".sha256";
         private const string BundledUsbipName = "USBip-0.9.7.7-x64.exe";
@@ -1317,7 +1317,7 @@ namespace DS4Windows
             {
                 ShowInstallerMessage(owner,
                     "The selected VIIPER executable is missing or does not " +
-                    "match the supported VIIPER 0.0.6 contract.",
+                    "match the supported VIIPER 0.0.7 contract.",
                     "VIIPER could not be selected", MessageBoxImage.Warning);
                 return false;
             }

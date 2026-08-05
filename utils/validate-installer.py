@@ -12,8 +12,8 @@ from pathlib import Path
 REQUIRED_PUBLISH_FILES = {
     "DS4Windows.exe",
     "extras/install-viiper-backend.ps1",
-    "extras/VIIPER-0.0.6-x64.exe",
-    "extras/VIIPER-0.0.6-x64.exe.sha256",
+    "extras/VIIPER-0.0.7-x64.exe",
+    "extras/VIIPER-0.0.7-x64.exe.sha256",
     "extras/USBip-0.9.7.7-x64.exe",
     "extras/HidHide_1.5.230_x64.exe",
     "extras/FakerInput_0.1.0_x64.msi",

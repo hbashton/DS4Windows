@@ -67,7 +67,7 @@
           SourceFile="$(var.SetupActionsPath)"
           PerMachine="yes"
           Vital="yes"
-          DetectCondition="InfrastructureInstalled = &quot;VIIPER-0.0.6+USBIP-0.9.7.7&quot;"
+          DetectCondition="InfrastructureInstalled = &quot;VIIPER-0.0.7+USBIP-0.9.7.7&quot;"
           InstallArguments="install --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot; --bundle-source &quot;[WixBundleOriginalSource]&quot;"
           RepairArguments="repair --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot; --bundle-source &quot;[WixBundleOriginalSource]&quot;"
           UninstallArguments="uninstall --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot;">

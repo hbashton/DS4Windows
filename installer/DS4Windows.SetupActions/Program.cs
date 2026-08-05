@@ -12,7 +12,7 @@ namespace DS4Windows.SetupActions
     internal static class Program
     {
         private const string RegistryKeyPath = @"SOFTWARE\DS4Windows";
-        private const string InfrastructureVersion = "VIIPER-0.0.6+USBIP-0.9.7.7";
+        private const string InfrastructureVersion = "VIIPER-0.0.7+USBIP-0.9.7.7";
 
         [STAThread]
         private static int Main(string[] args)

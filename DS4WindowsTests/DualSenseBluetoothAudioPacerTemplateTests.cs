@@ -1,5 +1,7 @@
 using DS4Windows.InputDevices;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System;
+using System.Threading.Tasks;
 
 namespace DS4Windows.Tests
 {
@@ -13,111 +15,157 @@ namespace DS4Windows.Tests
         [TestMethod]
         public void RealtimeHapticsPreserveAttackAndZeroTailInOrder()
         {
-            var queue = new DualSenseRealtimeHapticsPresentationQueue(
-                capacity: 2, HapticsOffset, HapticsLength);
-            byte[] attack = CreateHapticsGeneration(0x31);
-            byte[] release = new byte[HapticsLength];
-            byte[] report = CreateReport(0x70);
+            using DualSenseRealtimeHapticsSharedRing producer =
+                CreateSharedRing(2, out DualSenseRealtimeHapticsSharedRing queue);
+            using (queue)
+            {
+                byte[] attack = CreateHapticsGeneration(0x31);
+                byte[] release = new byte[HapticsLength];
+                byte[] report = CreateReport(0x70);
+                Assert.IsTrue(producer.Publish(attack, 0, 1,
+                    long.MaxValue, 1));
+                Assert.IsTrue(producer.Publish(release, 0, 1,
+                    long.MaxValue, 2));
 
-            queue.Enqueue(attack, 0, long.MaxValue);
-            queue.Enqueue(release, 0, long.MaxValue);
-
-            Assert.IsTrue(queue.PrepareForPresentation(report, 100));
-            CollectionAssert.AreEqual(attack,
-                CopyRange(report, HapticsOffset, HapticsLength));
-            queue.CommitPrepared();
-
-            FillHaptics(report, 0x7A);
-            Assert.IsTrue(queue.PrepareForPresentation(report, 200));
-            CollectionAssert.AreEqual(release,
-                CopyRange(report, HapticsOffset, HapticsLength),
-                "The real zero-tail generation was replaced by stale attack samples.");
-            queue.CommitPrepared();
-
-            FillHaptics(report, 0x55);
-            Assert.IsFalse(queue.PrepareForPresentation(report, 300));
-            CollectionAssert.AreEqual(release,
-                CopyRange(report, HapticsOffset, HapticsLength),
-                "A drained waveform was replayed after its zero boundary.");
+                Assert.IsTrue(queue.PrepareForPresentation(report, 100));
+                CollectionAssert.AreEqual(attack,
+                    CopyRange(report, HapticsOffset, HapticsLength));
+                queue.CommitPrepared();
+                FillHaptics(report, 0x7A);
+                Assert.IsTrue(queue.PrepareForPresentation(report, 200));
+                CollectionAssert.AreEqual(release,
+                    CopyRange(report, HapticsOffset, HapticsLength));
+                queue.CommitPrepared();
+                FillHaptics(report, 0x55);
+                Assert.IsFalse(queue.PrepareForPresentation(report, 300));
+                CollectionAssert.AreEqual(release,
+                    CopyRange(report, HapticsOffset, HapticsLength));
+            }
         }
 
         [TestMethod]
         public void RealtimeHapticsRetryRetainsBoundGeneration()
         {
-            var queue = new DualSenseRealtimeHapticsPresentationQueue(
-                capacity: 3, HapticsOffset, HapticsLength);
-            byte[] first = CreateHapticsGeneration(0x11);
-            byte[] second = CreateHapticsGeneration(0x22);
-            byte[] newest = CreateHapticsGeneration(0x33);
-            byte[] report = CreateReport(0x60);
-
-            queue.Enqueue(first, 0, long.MaxValue);
-            queue.Enqueue(second, 0, long.MaxValue);
-            Assert.IsTrue(queue.PrepareForPresentation(report, 100));
-            CollectionAssert.AreEqual(first,
-                CopyRange(report, HapticsOffset, HapticsLength));
-
-            // A rejected HID write keeps the bound head while later source
-            // generations remain queued behind it.
-            queue.Enqueue(newest, 0, long.MaxValue);
-            FillHaptics(report, 0x70);
-            Assert.IsTrue(queue.PrepareForPresentation(report, 200));
-            CollectionAssert.AreEqual(first,
-                CopyRange(report, HapticsOffset, HapticsLength));
-            queue.CommitPrepared();
-
-            Assert.IsTrue(queue.PrepareForPresentation(report, 300));
-            CollectionAssert.AreEqual(second,
-                CopyRange(report, HapticsOffset, HapticsLength));
-            queue.CommitPrepared();
-            Assert.IsTrue(queue.PrepareForPresentation(report, 400));
-            CollectionAssert.AreEqual(newest,
-                CopyRange(report, HapticsOffset, HapticsLength));
+            using DualSenseRealtimeHapticsSharedRing producer =
+                CreateSharedRing(4, out DualSenseRealtimeHapticsSharedRing queue);
+            using (queue)
+            {
+                byte[] first = CreateHapticsGeneration(0x11);
+                byte[] second = CreateHapticsGeneration(0x22);
+                byte[] newest = CreateHapticsGeneration(0x33);
+                byte[] report = CreateReport(0x60);
+                Assert.IsTrue(producer.Publish(first, 0, 1,
+                    long.MaxValue, 1));
+                Assert.IsTrue(producer.Publish(second, 0, 1,
+                    long.MaxValue, 2));
+                Assert.IsTrue(queue.PrepareForPresentation(report, 100));
+                Assert.IsTrue(producer.Publish(newest, 0, 1,
+                    long.MaxValue, 3));
+                FillHaptics(report, 0x70);
+                Assert.IsTrue(queue.PrepareForPresentation(report, 200));
+                CollectionAssert.AreEqual(first,
+                    CopyRange(report, HapticsOffset, HapticsLength));
+                queue.CommitPrepared();
+                Assert.IsTrue(queue.PrepareForPresentation(report, 300));
+                CollectionAssert.AreEqual(second,
+                    CopyRange(report, HapticsOffset, HapticsLength));
+                queue.CommitPrepared();
+                Assert.IsTrue(queue.PrepareForPresentation(report, 400));
+                CollectionAssert.AreEqual(newest,
+                    CopyRange(report, HapticsOffset, HapticsLength));
+            }
         }
 
         [TestMethod]
-        public void RealtimeHapticsOverflowDoesNotReplaceQueuedMedia()
+        public void RealtimeHapticsMetricsObserveLatencyWithoutChangingFifo()
         {
-            var queue = new DualSenseRealtimeHapticsPresentationQueue(
-                capacity: 2, HapticsOffset, HapticsLength);
-            byte[] old = CreateHapticsGeneration(0x10);
-            byte[] middle = CreateHapticsGeneration(0x20);
-            byte[] newest = CreateHapticsGeneration(0x30);
-            byte[] report = CreateReport(0x50);
-
-            queue.Enqueue(old, 0, long.MaxValue);
-            queue.Enqueue(middle, 0, long.MaxValue);
-            Assert.ThrowsException<InvalidOperationException>(() =>
-                queue.Enqueue(newest, 0, long.MaxValue));
-
-            Assert.IsTrue(queue.PrepareForPresentation(report, 100));
-            CollectionAssert.AreEqual(old,
-                CopyRange(report, HapticsOffset, HapticsLength));
-            queue.CommitPrepared();
-            Assert.IsTrue(queue.PrepareForPresentation(report, 200));
-            CollectionAssert.AreEqual(middle,
-                CopyRange(report, HapticsOffset, HapticsLength));
+            using DualSenseRealtimeHapticsSharedRing producer =
+                CreateSharedRing(4, out DualSenseRealtimeHapticsSharedRing queue);
+            using (queue)
+            {
+                byte[] first = CreateHapticsGeneration(0x21);
+                byte[] second = CreateHapticsGeneration(0x42);
+                byte[] report = CreateReport(0x60);
+                Assert.IsTrue(producer.Publish(first, 0, 1,
+                    long.MaxValue, 100));
+                Assert.IsTrue(producer.Publish(second, 0, 1,
+                    long.MaxValue, 120));
+                Assert.AreEqual(2, queue.Count);
+                Assert.IsTrue(queue.PrepareForPresentation(report, 175));
+                Assert.AreEqual(2, queue.MaximumQueueDepth);
+                Assert.AreEqual(75L, queue.MaximumQueueAgeTicks);
+                CollectionAssert.AreEqual(first,
+                    CopyRange(report, HapticsOffset, HapticsLength));
+                queue.CommitPrepared();
+                Assert.AreEqual(1L, queue.PresentedCount);
+                Assert.AreEqual(1, queue.Count);
+            }
         }
 
         [TestMethod]
-        public void RealtimeHapticsLifecycleResetSilencesStaleTemplate()
+        public void RealtimeHapticsFullRingBackpressuresWithoutReplacement()
         {
-            var queue = new DualSenseRealtimeHapticsPresentationQueue(
-                capacity: 2, HapticsOffset, HapticsLength);
-            byte[] pulse = CreateHapticsGeneration(0x41);
-            byte[] report = CreateReport(0x20);
-            queue.Enqueue(pulse, 0, long.MaxValue);
+            using DualSenseRealtimeHapticsSharedRing producer =
+                CreateSharedRing(2, out DualSenseRealtimeHapticsSharedRing queue);
+            using (queue)
+            {
+                byte[] old = CreateHapticsGeneration(0x10);
+                byte[] middle = CreateHapticsGeneration(0x20);
+                byte[] newest = CreateHapticsGeneration(0x30);
+                byte[] report = CreateReport(0x50);
+                Assert.IsTrue(producer.Publish(old, 0, 1,
+                    long.MaxValue, 1));
+                Assert.IsTrue(producer.Publish(middle, 0, 1,
+                    long.MaxValue, 2));
+                Task<bool> blocked = Task.Run(() => producer.Publish(newest,
+                    0, 1, long.MaxValue, 3));
+                Assert.IsFalse(blocked.Wait(30));
+                Assert.IsTrue(queue.PrepareForPresentation(report, 100));
+                CollectionAssert.AreEqual(old,
+                    CopyRange(report, HapticsOffset, HapticsLength));
+                queue.CommitPrepared();
+                Assert.IsTrue(blocked.Wait(500));
+                Assert.IsTrue(blocked.Result);
+                Assert.IsTrue(queue.PrepareForPresentation(report, 200));
+                CollectionAssert.AreEqual(middle,
+                    CopyRange(report, HapticsOffset, HapticsLength));
+            }
+        }
 
-            queue.Reset(silenceFutureReports: true);
-            FillHaptics(report, 0x66);
+        [TestMethod]
+        public void RealtimeHapticsLifecycleResetSilencesStaleGeneration()
+        {
+            using DualSenseRealtimeHapticsSharedRing producer =
+                CreateSharedRing(2, out DualSenseRealtimeHapticsSharedRing queue);
+            using (queue)
+            {
+                byte[] pulse = CreateHapticsGeneration(0x41);
+                byte[] report = CreateReport(0x20);
+                Assert.IsTrue(producer.Publish(pulse, 0, 1,
+                    long.MaxValue, 1));
+                queue.AcceptGeneration(2, silenceFutureReports: true);
+                FillHaptics(report, 0x66);
+                Assert.IsFalse(queue.PrepareForPresentation(report, 100));
+                CollectionAssert.AreEqual(new byte[HapticsLength],
+                    CopyRange(report, HapticsOffset, HapticsLength));
+                Assert.AreEqual((byte)0x92, report[HapticsOffset - 2]);
+                Assert.AreEqual((byte)HapticsLength,
+                    report[HapticsOffset - 1]);
+            }
+        }
 
-            Assert.IsFalse(queue.PrepareForPresentation(report, 100));
-            CollectionAssert.AreEqual(new byte[HapticsLength],
-                CopyRange(report, HapticsOffset, HapticsLength),
-                "A pre-lifecycle haptics snapshot crossed the reset boundary.");
-            Assert.AreEqual((byte)0x92, report[HapticsOffset - 2]);
-            Assert.AreEqual((byte)HapticsLength,
-                report[HapticsOffset - 1]);
+        private static DualSenseRealtimeHapticsSharedRing CreateSharedRing(
+            int capacity, out DualSenseRealtimeHapticsSharedRing consumer)
+        {
+            string prefix = "DS4Windows.Tests.Haptics." +
+                Guid.NewGuid().ToString("N");
+            DualSenseRealtimeHapticsSharedRing producer =
+                DualSenseRealtimeHapticsSharedRing.CreateOwner(prefix,
+                    capacity);
+            consumer = DualSenseRealtimeHapticsSharedRing.OpenConsumer(
+                producer.MapName, producer.SpaceAvailableName,
+                producer.StopRequestedName, producer.Capacity);
+            return producer;
         }
 
         [TestMethod]

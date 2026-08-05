@@ -2930,9 +2930,13 @@ namespace DS4Windows
                          $"helperCompletionMaxMs={device.BluetoothAudioPacerMaximumCompletionMilliseconds:F2} " +
                          $"helperLateSubmissions={device.BluetoothAudioPacerLateSubmissions} " +
                          $"helperSubmissionGapMaxMs={device.BluetoothAudioPacerMaximumSubmissionGapMilliseconds:F2} " +
-                         $"helperSlowNativeSubmissions={device.BluetoothAudioPacerSlowNativeSubmissions} " +
-                         $"helperNativeSubmissionMaxMs={device.BluetoothAudioPacerMaximumNativeSubmissionMilliseconds:F2} " +
-                         $"pacerError='{device.BluetoothAudioPacerLastError}' " +
+                          $"helperSlowNativeSubmissions={device.BluetoothAudioPacerSlowNativeSubmissions} " +
+                          $"helperNativeSubmissionMaxMs={device.BluetoothAudioPacerMaximumNativeSubmissionMilliseconds:F2} " +
+                          $"hapticsQueueDepth={device.BluetoothAudioPacerRealtimeHapticsQueueDepth} " +
+                          $"hapticsQueueHighWater={device.BluetoothAudioPacerRealtimeHapticsQueueHighWater} " +
+                          $"hapticsQueueAgeMaxMs={device.BluetoothAudioPacerRealtimeHapticsMaximumQueueAgeMilliseconds:F2} " +
+                          $"hapticsPresented={device.BluetoothAudioPacerRealtimeHapticsPresentedCount} " +
+                          $"pacerError='{device.BluetoothAudioPacerLastError}' " +
                         $"speakerWrites={device.BluetoothCombinedSpeakerReportsWritten} " +
                         $"speakerWriteFailures={device.BluetoothCombinedSpeakerWriteFailures} " +
                         $"hapticsPairedWrites={device.BluetoothCombinedHapticsPairedWrites} " +

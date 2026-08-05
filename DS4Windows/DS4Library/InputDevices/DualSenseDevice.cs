@@ -956,6 +956,54 @@ namespace DS4Windows.InputDevices
                 }
             }
         }
+
+        public long BluetoothAudioPacerRealtimeHapticsQueueDepth
+        {
+            get
+            {
+                lock (bluetoothAudioPacerLock)
+                {
+                    return bluetoothAudioPacer?.
+                        HelperRealtimeHapticsQueueDepth ?? 0;
+                }
+            }
+        }
+
+        public long BluetoothAudioPacerRealtimeHapticsQueueHighWater
+        {
+            get
+            {
+                lock (bluetoothAudioPacerLock)
+                {
+                    return bluetoothAudioPacer?.
+                        HelperRealtimeHapticsQueueHighWater ?? 0;
+                }
+            }
+        }
+
+        public double BluetoothAudioPacerRealtimeHapticsMaximumQueueAgeMilliseconds
+        {
+            get
+            {
+                lock (bluetoothAudioPacerLock)
+                {
+                    return bluetoothAudioPacer?.
+                        HelperRealtimeHapticsMaximumQueueAgeMilliseconds ?? 0.0;
+                }
+            }
+        }
+
+        public long BluetoothAudioPacerRealtimeHapticsPresentedCount
+        {
+            get
+            {
+                lock (bluetoothAudioPacerLock)
+                {
+                    return bluetoothAudioPacer?.
+                        HelperRealtimeHapticsPresentedCount ?? 0;
+                }
+            }
+        }
         public string BluetoothAudioPacerLastError
         {
             get

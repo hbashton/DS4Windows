@@ -1,6 +1,5 @@
 using System;
 using System.Buffers.Binary;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -163,7 +162,7 @@ namespace DS4Windows.InputDevices
         }
 
         private const string HelperArgument = "--dualsense-bt-audio-pacer-helper";
-        private const int ProtocolVersion = 14;
+        private const int ProtocolVersion = 15;
         private const int PipeConnectTimeoutMilliseconds = 5000;
         private const int HelperReadyTimeoutMilliseconds = 5000;
         private const int HelperStopTimeoutMilliseconds = 3000;
@@ -199,7 +198,6 @@ namespace DS4Windows.InputDevices
             UpdateControllerMediaBuffer = 9,
             UpdateGameStateAndTemplate = 10,
             ResetControllerStateTransitions = 11,
-            QueueRealtimeHaptics = 12,
             Ready = 0x80,
             ReportAcknowledged = 0x81,
             Stopped = 0x82,
@@ -245,12 +243,11 @@ namespace DS4Windows.InputDevices
         private readonly EventWaitHandle inputArrivalSignal;
         private readonly MemoryMappedFile inputClockMap;
         private readonly MemoryMappedViewAccessor inputClockView;
+        private readonly DualSenseRealtimeHapticsSharedRing realtimeHaptics;
         private readonly bool usesV5PresentationCadence;
         private readonly DualSenseBluetoothAudioPacerRing<OutboundCommand>
             outboundCommands = new DualSenseBluetoothAudioPacerRing<OutboundCommand>(
                 OutboundCommandCapacity);
-        private readonly ConcurrentQueue<OutboundCommand>
-            realtimeHapticsCommands = new();
         private readonly Dictionary<long, byte> outstandingReports =
             new Dictionary<long, byte>(HostReservoirCapacity);
         private readonly Dictionary<long, PendingReportCompletion>
@@ -288,9 +285,14 @@ namespace DS4Windows.InputDevices
         private long helperMaximumSubmissionGapTicks;
         private long helperSlowNativeSubmissionCount;
         private long helperMaximumNativeSubmissionTicks;
+        private long helperRealtimeHapticsQueueDepth;
+        private long helperRealtimeHapticsQueueHighWater;
+        private long helperRealtimeHapticsMaximumQueueAgeTicks;
+        private long helperRealtimeHapticsPresentedCount;
         private long clearedReports;
         private long transportFaultReports;
         private int currentEpoch = InitialEpoch;
+        private int realtimeHapticsGeneration = InitialEpoch;
         private int stopping;
         private int disposed;
         private long inputClockVersion;
@@ -303,6 +305,7 @@ namespace DS4Windows.InputDevices
             EventWaitHandle inputArrivalSignal,
             MemoryMappedFile inputClockMap,
             MemoryMappedViewAccessor inputClockView,
+            DualSenseRealtimeHapticsSharedRing realtimeHaptics,
             bool usesV5PresentationCadence)
         {
             this.commandPipe = commandPipe;
@@ -311,6 +314,8 @@ namespace DS4Windows.InputDevices
             this.inputArrivalSignal = inputArrivalSignal;
             this.inputClockMap = inputClockMap;
             this.inputClockView = inputClockView;
+            this.realtimeHaptics = realtimeHaptics ??
+                throw new ArgumentNullException(nameof(realtimeHaptics));
             this.usesV5PresentationCadence =
                 usesV5PresentationCadence;
             senderThread = new Thread(SenderLoop)
@@ -377,6 +382,15 @@ namespace DS4Windows.InputDevices
         public double HelperMaximumNativeSubmissionMilliseconds =>
             Interlocked.Read(ref helperMaximumNativeSubmissionTicks) * 1000.0 /
             Stopwatch.Frequency;
+        public long HelperRealtimeHapticsQueueDepth =>
+            Interlocked.Read(ref helperRealtimeHapticsQueueDepth);
+        public long HelperRealtimeHapticsQueueHighWater =>
+            Interlocked.Read(ref helperRealtimeHapticsQueueHighWater);
+        public double HelperRealtimeHapticsMaximumQueueAgeMilliseconds =>
+            Interlocked.Read(ref helperRealtimeHapticsMaximumQueueAgeTicks) *
+            1000.0 / Stopwatch.Frequency;
+        public long HelperRealtimeHapticsPresentedCount =>
+            Interlocked.Read(ref helperRealtimeHapticsPresentedCount);
         public long ClearedReports => Interlocked.Read(ref clearedReports);
         public long TransportFaultReports =>
             Interlocked.Read(ref transportFaultReports);
@@ -471,14 +485,21 @@ namespace DS4Windows.InputDevices
                 out string responsePipeName, out Guid authenticationToken,
                 out int parentProcessId,
                 out string inputArrivalSignalName,
-                out string inputClockMapName, out string devicePath))
+                out string inputClockMapName,
+                out string realtimeHapticsMapName,
+                out string realtimeHapticsSpaceName,
+                out string realtimeHapticsStopName,
+                out int realtimeHapticsCapacity,
+                out string devicePath))
             {
                 return false;
             }
 
             RunHelper(commandPipeName, responsePipeName,
                 authenticationToken, parentProcessId, inputArrivalSignalName,
-                inputClockMapName, devicePath);
+                inputClockMapName, realtimeHapticsMapName,
+                realtimeHapticsSpaceName, realtimeHapticsStopName,
+                realtimeHapticsCapacity, devicePath);
             return true;
         }
 
@@ -554,6 +575,7 @@ namespace DS4Windows.InputDevices
             EventWaitHandle inputSignal = null;
             MemoryMappedFile inputMap = null;
             MemoryMappedViewAccessor inputView = null;
+            DualSenseRealtimeHapticsSharedRing realtimeHaptics = null;
 
             try
             {
@@ -573,6 +595,9 @@ namespace DS4Windows.InputDevices
                     InputClockMapLength, MemoryMappedFileAccess.ReadWrite);
                 inputView = inputMap.CreateViewAccessor(0,
                     InputClockMapLength, MemoryMappedFileAccess.ReadWrite);
+                realtimeHaptics =
+                    DualSenseRealtimeHapticsSharedRing.CreateOwner(pipeName,
+                        RealtimeHapticsQueueCapacity);
 
                 ProcessStartInfo startInfo = new ProcessStartInfo
                 {
@@ -590,6 +615,10 @@ namespace DS4Windows.InputDevices
                 startInfo.ArgumentList.Add(Process.GetCurrentProcess().Id.ToString());
                 startInfo.ArgumentList.Add(inputArrivalSignalName);
                 startInfo.ArgumentList.Add(inputClockMapName);
+                startInfo.ArgumentList.Add(realtimeHaptics.MapName);
+                startInfo.ArgumentList.Add(realtimeHaptics.SpaceAvailableName);
+                startInfo.ArgumentList.Add(realtimeHaptics.StopRequestedName);
+                startInfo.ArgumentList.Add(realtimeHaptics.Capacity.ToString());
                 startInfo.ArgumentList.Add(devicePath);
                 child = Process.Start(startInfo);
                 if (child == null)
@@ -600,6 +629,7 @@ namespace DS4Windows.InputDevices
                     inputSignal.Dispose();
                     inputView.Dispose();
                     inputMap.Dispose();
+                    realtimeHaptics.Dispose();
                     return false;
                 }
 
@@ -622,6 +652,7 @@ namespace DS4Windows.InputDevices
                     inputSignal.Dispose();
                     inputView.Dispose();
                     inputMap.Dispose();
+                    realtimeHaptics.Dispose();
                     TryTerminateUninitializedHelper(child);
                     return false;
                 }
@@ -629,10 +660,12 @@ namespace DS4Windows.InputDevices
                 connections.GetAwaiter().GetResult();
                 candidate = new DualSenseBluetoothAudioPacer(commandServer,
                     responseServer, child, inputSignal, inputMap, inputView,
+                    realtimeHaptics,
                     usesV5PresentationCadence: true);
                 inputSignal = null;
                 inputMap = null;
                 inputView = null;
+                realtimeHaptics = null;
                 candidate.latestTemplate = (byte[])initialTemplate.Clone();
                 candidate.latestTemplateHapticsExpiryQpc = hapticsExpiryQpc;
                 candidate.receiverThread.Start();
@@ -683,6 +716,7 @@ namespace DS4Windows.InputDevices
                     inputSignal?.Dispose();
                     inputView?.Dispose();
                     inputMap?.Dispose();
+                    realtimeHaptics?.Dispose();
                     if (child != null)
                     {
                         TryTerminateUninitializedHelper(child);
@@ -942,9 +976,6 @@ namespace DS4Windows.InputDevices
 
             lock (stateLock)
             {
-                byte[] payload = BuildRealtimeHapticsPayload(
-                    latestCombinedReport, currentEpoch, hapticsExpiryQpc);
-
                 // This callback owns only one completed rear-channel
                 // generation. Never replace the full state template with its
                 // asynchronous snapshot: a newer HID/lightbar/trigger update
@@ -957,14 +988,11 @@ namespace DS4Windows.InputDevices
                         RealtimeHapticsDataLength);
                 }
                 latestTemplateHapticsExpiryQpc = hapticsExpiryQpc;
-
-                var command = new OutboundCommand(
-                    MessageKind.QueueRealtimeHaptics, payload);
-                realtimeHapticsCommands.Enqueue(command);
+                return realtimeHaptics.Publish(latestCombinedReport,
+                    RealtimeHapticsDataOffset,
+                    realtimeHapticsGeneration, hapticsExpiryQpc,
+                    Stopwatch.GetTimestamp());
             }
-
-            outboundAvailable.Set();
-            return true;
         }
 
         private bool UpdateTemplateCore(byte[] latestCombinedReport,
@@ -1268,11 +1296,15 @@ namespace DS4Windows.InputDevices
 
             lock (stateLock)
             {
-                realtimeHapticsCommands.Clear();
                 latestControllerStateAvailable = false;
+                realtimeHapticsGeneration = NextGeneration(
+                    realtimeHapticsGeneration);
+                byte[] payload = new byte[sizeof(int)];
+                BinaryPrimitives.WriteInt32LittleEndian(payload,
+                    realtimeHapticsGeneration);
                 var reset = new OutboundCommand(
                     MessageKind.ResetControllerStateTransitions,
-                    Array.Empty<byte>());
+                    payload);
                 if (!outboundCommands.TryReplaceWhereWithGroup(command =>
                         command.Kind == MessageKind.UpdateGameStateAndTemplate ||
                         command.Kind == MessageKind.UpdateControllerState ||
@@ -1306,13 +1338,10 @@ namespace DS4Windows.InputDevices
             bool queued = false;
             lock (stateLock)
             {
-                realtimeHapticsCommands.Clear();
                 latestControllerStateAvailable = false;
-                currentEpoch = unchecked(currentEpoch + 1);
-                if (currentEpoch == 0)
-                {
-                    currentEpoch = 1;
-                }
+                currentEpoch = NextGeneration(currentEpoch);
+                realtimeHapticsGeneration = NextGeneration(
+                    realtimeHapticsGeneration);
 
                 foreach (OutboundCommand removed in outboundCommands.RemoveWhere(
                     command => command.Kind == MessageKind.QueueReport))
@@ -1331,8 +1360,11 @@ namespace DS4Windows.InputDevices
                     command.Kind ==
                         MessageKind.ResetControllerStateTransitions);
 
-                byte[] payload = new byte[sizeof(int)];
+                byte[] payload = new byte[sizeof(int) * 2];
                 BinaryPrimitives.WriteInt32LittleEndian(payload, currentEpoch);
+                BinaryPrimitives.WriteInt32LittleEndian(
+                    payload.AsSpan(sizeof(int), sizeof(int)),
+                    realtimeHapticsGeneration);
                 if (!outboundCommands.TryEnqueue(new OutboundCommand(
                     MessageKind.Clear, payload)))
                 {
@@ -1367,8 +1399,8 @@ namespace DS4Windows.InputDevices
                 return;
             }
 
+            realtimeHaptics.RequestStop();
             outboundCommands.Clear();
-            realtimeHapticsCommands.Clear();
             List<PendingReportCompletion> completions = null;
             lock (stateLock)
             {
@@ -1421,37 +1453,14 @@ namespace DS4Windows.InputDevices
                     bool sentAny = false;
                     while (true)
                     {
-                        OutboundCommand realtimeCommand = null;
                         OutboundCommand command = null;
                         lock (stateLock)
                         {
-                            bool lifecycleBarrierQueued = outboundCommands.Any(
-                                candidate => candidate.Kind ==
-                                        MessageKind.Clear ||
-                                    candidate.Kind ==
-                                        MessageKind.
-                                            ResetControllerStateTransitions);
-                            if (!lifecycleBarrierQueued)
-                            {
-                                realtimeHapticsCommands.TryDequeue(
-                                    out realtimeCommand);
-                            }
                             outboundCommands.TryDequeue(out command);
                         }
 
-                        if (realtimeCommand != null)
-                        {
-                            SendFrame(realtimeCommand.Kind,
-                                realtimeCommand.Payload);
-                            sentAny = true;
-                        }
-
-                        // Guarantee forward progress for speaker reports and
-                        // HID/lightbar/trigger state even if a producer
-                        // continuously fills the tactile lane. Lifecycle
-                        // barriers go first so a new-epoch generation cannot
-                        // overtake the reset that makes it valid; otherwise
-                        // one haptics command goes first each pass.
+                        // Realtime haptics no longer shares this queue. This
+                        // pipe now carries only speaker/control/lifecycle work.
                         if (command != null)
                         {
                             SendFrame(command.Kind, command.Payload);
@@ -1462,7 +1471,7 @@ namespace DS4Windows.InputDevices
                             }
                         }
 
-                        if (realtimeCommand == null && command == null)
+                        if (command == null)
                         {
                             break;
                         }
@@ -1556,7 +1565,7 @@ namespace DS4Windows.InputDevices
 
         private void ProcessAcknowledgement(byte[] payload)
         {
-            const int writerMetricCount = 13;
+            const int writerMetricCount = 17;
             int metricOffset = sizeof(long) + sizeof(byte) + sizeof(long);
             if (payload.Length != metricOffset +
                 writerMetricCount * sizeof(long))
@@ -1620,6 +1629,22 @@ namespace DS4Windows.InputDevices
                     metricOffset, sizeof(long))));
             metricOffset += sizeof(long);
             Interlocked.Exchange(ref helperMaximumNativeSubmissionTicks,
+                BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
+                    metricOffset, sizeof(long))));
+            metricOffset += sizeof(long);
+            Interlocked.Exchange(ref helperRealtimeHapticsQueueDepth,
+                BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
+                    metricOffset, sizeof(long))));
+            metricOffset += sizeof(long);
+            Interlocked.Exchange(ref helperRealtimeHapticsQueueHighWater,
+                BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
+                    metricOffset, sizeof(long))));
+            metricOffset += sizeof(long);
+            Interlocked.Exchange(ref helperRealtimeHapticsMaximumQueueAgeTicks,
+                BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
+                    metricOffset, sizeof(long))));
+            metricOffset += sizeof(long);
+            Interlocked.Exchange(ref helperRealtimeHapticsPresentedCount,
                 BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
                     metricOffset, sizeof(long))));
 
@@ -1768,6 +1793,9 @@ namespace DS4Windows.InputDevices
 
         private void SetError(string error)
         {
+            // Wake a producer that may be losslessly backpressured on a full
+            // ring after the helper has exited.
+            realtimeHaptics.RequestStop();
             List<PendingReportCompletion> completions = null;
             lock (stateLock)
             {
@@ -1816,26 +1844,16 @@ namespace DS4Windows.InputDevices
             return payload;
         }
 
-        private static byte[] BuildRealtimeHapticsPayload(byte[] template,
-            int epoch, long hapticsExpiryQpc)
-        {
-            byte[] payload = new byte[sizeof(int) + sizeof(long) +
-                RealtimeHapticsDataLength];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0,
-                sizeof(int)), epoch);
-            BinaryPrimitives.WriteInt64LittleEndian(
-                payload.AsSpan(sizeof(int), sizeof(long)),
-                hapticsExpiryQpc);
-            Buffer.BlockCopy(template, RealtimeHapticsDataOffset, payload,
-                sizeof(int) + sizeof(long), RealtimeHapticsDataLength);
-            return payload;
-        }
-
         private static bool TryParseHelperArguments(string[] args,
             out string commandPipeName, out string responsePipeName,
             out Guid authenticationToken,
             out int parentProcessId, out string inputArrivalSignalName,
-            out string inputClockMapName, out string devicePath)
+            out string inputClockMapName,
+            out string realtimeHapticsMapName,
+            out string realtimeHapticsSpaceName,
+            out string realtimeHapticsStopName,
+            out int realtimeHapticsCapacity,
+            out string devicePath)
         {
             commandPipeName = string.Empty;
             responsePipeName = string.Empty;
@@ -1843,8 +1861,12 @@ namespace DS4Windows.InputDevices
             parentProcessId = 0;
             inputArrivalSignalName = string.Empty;
             inputClockMapName = string.Empty;
+            realtimeHapticsMapName = string.Empty;
+            realtimeHapticsSpaceName = string.Empty;
+            realtimeHapticsStopName = string.Empty;
+            realtimeHapticsCapacity = 0;
             devicePath = string.Empty;
-            return args != null && args.Length >= 8 &&
+            return args != null && args.Length >= 12 &&
                 string.Equals(args[0], HelperArgument,
                     StringComparison.OrdinalIgnoreCase) &&
                 !string.IsNullOrWhiteSpace(commandPipeName = args[1]) &&
@@ -1854,7 +1876,12 @@ namespace DS4Windows.InputDevices
                 parentProcessId > 0 &&
                 !string.IsNullOrWhiteSpace(inputArrivalSignalName = args[5]) &&
                 !string.IsNullOrWhiteSpace(inputClockMapName = args[6]) &&
-                !string.IsNullOrWhiteSpace(devicePath = args[7]);
+                !string.IsNullOrWhiteSpace(realtimeHapticsMapName = args[7]) &&
+                !string.IsNullOrWhiteSpace(realtimeHapticsSpaceName = args[8]) &&
+                !string.IsNullOrWhiteSpace(realtimeHapticsStopName = args[9]) &&
+                int.TryParse(args[10], out realtimeHapticsCapacity) &&
+                realtimeHapticsCapacity > 0 &&
+                !string.IsNullOrWhiteSpace(devicePath = args[11]);
         }
 
         private static string GetExactCurrentExecutablePath()
@@ -1874,6 +1901,12 @@ namespace DS4Windows.InputDevices
             {
                 return string.Empty;
             }
+        }
+
+        private static int NextGeneration(int generation)
+        {
+            int next = unchecked(generation + 1);
+            return next == 0 ? InitialEpoch : next;
         }
 
         private static void TryTerminateUninitializedHelper(Process child)
@@ -1902,8 +1935,8 @@ namespace DS4Windows.InputDevices
                 return;
             }
 
+            realtimeHaptics.RequestStop();
             outboundCommands.Clear();
-            realtimeHapticsCommands.Clear();
             List<PendingReportCompletion> completions = null;
             lock (stateLock)
             {
@@ -1951,6 +1984,7 @@ namespace DS4Windows.InputDevices
             inputArrivalSignal.Dispose();
             inputClockView.Dispose();
             inputClockMap.Dispose();
+            realtimeHaptics.Dispose();
             outboundAvailable.Dispose();
             readyEvent.Dispose();
             stoppedEvent.Dispose();
@@ -2017,7 +2051,10 @@ namespace DS4Windows.InputDevices
         private static void RunHelper(string commandPipeName,
             string responsePipeName, Guid authenticationToken,
             int parentProcessId, string inputArrivalSignalName,
-            string inputClockMapName, string devicePath)
+            string inputClockMapName, string realtimeHapticsMapName,
+            string realtimeHapticsSpaceName,
+            string realtimeHapticsStopName,
+            int realtimeHapticsCapacity, string devicePath)
         {
             using var commandPipe = new NamedPipeClientStream(".",
                 commandPipeName, PipeDirection.In, PipeOptions.WriteThrough |
@@ -2038,6 +2075,11 @@ namespace DS4Windows.InputDevices
                 using MemoryMappedViewAccessor inputView =
                     inputMap.CreateViewAccessor(0, InputClockMapLength,
                         MemoryMappedFileAccess.Read);
+                using DualSenseRealtimeHapticsSharedRing realtimeHaptics =
+                    DualSenseRealtimeHapticsSharedRing.OpenConsumer(
+                        realtimeHapticsMapName, realtimeHapticsSpaceName,
+                        realtimeHapticsStopName,
+                        realtimeHapticsCapacity);
                 ReadFrame(commandPipe, out MessageKind kind,
                     out byte[] payload);
                 string helloError = string.Empty;
@@ -2078,7 +2120,8 @@ namespace DS4Windows.InputDevices
 
                 using (writer)
                 using (var host = new HelperHost(commandPipe, responsePipe,
-                    writer, parentProcessId, inputSignal, inputView))
+                    writer, parentProcessId, inputSignal, inputView,
+                    realtimeHaptics))
                 {
                     WriteFrame(responsePipe, MessageKind.Ready,
                         Array.Empty<byte>());
@@ -2342,11 +2385,8 @@ namespace DS4Windows.InputDevices
             private readonly byte[] physicalStatePayloadBackup = new byte[
                 DualSenseBluetoothPhysicalOutputSequence.
                     ControllerStatePayloadLength];
-            private readonly DualSenseRealtimeHapticsPresentationQueue
-                realtimeHaptics = new(
-                    RealtimeHapticsQueueCapacity,
-                    RealtimeHapticsDataOffset,
-                    RealtimeHapticsDataLength);
+            private readonly DualSenseRealtimeHapticsSharedRing
+                realtimeHaptics;
             private readonly bool useMeasuredTransportAudioTransport;
             private readonly bool useCompactCombinedHapticsTransport;
             private readonly bool useNativeAudioTransport;
@@ -2396,7 +2436,8 @@ namespace DS4Windows.InputDevices
             public HelperHost(Stream commandPipe, Stream responsePipe,
                 DualSenseBluetoothRealtimeWriter writer,
                 int parentProcessId, EventWaitHandle inputArrivalSignal,
-                MemoryMappedViewAccessor inputClockView)
+                MemoryMappedViewAccessor inputClockView,
+                DualSenseRealtimeHapticsSharedRing realtimeHaptics)
             {
                 this.commandPipe = commandPipe;
                 this.responsePipe = responsePipe;
@@ -2406,6 +2447,8 @@ namespace DS4Windows.InputDevices
                     throw new ArgumentNullException(nameof(inputArrivalSignal));
                 this.inputClockView = inputClockView ??
                     throw new ArgumentNullException(nameof(inputClockView));
+                this.realtimeHaptics = realtimeHaptics ??
+                    throw new ArgumentNullException(nameof(realtimeHaptics));
                 useMeasuredTransportAudioTransport = false;
                 useCompactCombinedHapticsTransport = false;
                 useNativeAudioTransport = true;
@@ -2512,10 +2555,6 @@ namespace DS4Windows.InputDevices
                             case MessageKind.UpdateTemplate:
                                 ReceiveTemplate(commandPayload, payloadLength);
                                 break;
-                            case MessageKind.QueueRealtimeHaptics:
-                                ReceiveRealtimeHaptics(commandPayload,
-                                    payloadLength);
-                                break;
                             case MessageKind.Clear:
                                 ReceiveClear(commandPayload, payloadLength);
                                 break;
@@ -2540,7 +2579,7 @@ namespace DS4Windows.InputDevices
                                 break;
                             case MessageKind.ResetControllerStateTransitions:
                                 ReceiveResetControllerStateTransitions(
-                                    payloadLength);
+                                    commandPayload, payloadLength);
                                 break;
                             case MessageKind.Stop:
                                 if (payloadLength != 0)
@@ -2698,48 +2737,21 @@ namespace DS4Windows.InputDevices
                 }
             }
 
-            private void ReceiveRealtimeHaptics(byte[] payload,
-                int payloadLength)
-            {
-                int expectedLength = sizeof(int) + sizeof(long) +
-                    RealtimeHapticsDataLength;
-                if (payloadLength != expectedLength)
-                {
-                    throw new InvalidDataException(
-                        "Invalid realtime DualSense haptics payload length.");
-                }
-
-                int epoch = BinaryPrimitives.ReadInt32LittleEndian(
-                    payload.AsSpan(0, sizeof(int)));
-                long hapticsExpiryQpc =
-                    BinaryPrimitives.ReadInt64LittleEndian(
-                        payload.AsSpan(sizeof(int), sizeof(long)));
-                lock (stateLock)
-                {
-                    if (epoch != currentEpoch)
-                    {
-                        return;
-                    }
-
-                    realtimeHaptics.Enqueue(payload,
-                        sizeof(int) + sizeof(long),
-                        hapticsExpiryQpc);
-                }
-
-                reservoirChanged.Set();
-            }
-
             private void ReceiveClear(byte[] payload, int payloadLength)
             {
-                if (payloadLength != sizeof(int))
+                if (payloadLength != sizeof(int) * 2)
                 {
                     throw new InvalidDataException("Invalid pacer Clear payload.");
                 }
 
                 int epoch = BinaryPrimitives.ReadInt32LittleEndian(payload);
+                int hapticsGeneration =
+                    BinaryPrimitives.ReadInt32LittleEndian(
+                        payload.AsSpan(sizeof(int), sizeof(int)));
                 lock (stateLock)
                 {
-                    realtimeHaptics.Reset(silenceFutureReports: true);
+                    realtimeHaptics.AcceptGeneration(hapticsGeneration,
+                        silenceFutureReports: true);
                     physicalStateTransitionFilter.Reset();
                     pendingControllerStateAvailable = false;
                     controllerStateReportsAhead = 0;
@@ -3955,9 +3967,9 @@ namespace DS4Windows.InputDevices
             }
 
             private void ReceiveResetControllerStateTransitions(
-                int payloadLength)
+                byte[] payload, int payloadLength)
             {
-                if (payloadLength != 0)
+                if (payloadLength != sizeof(int))
                 {
                     throw new InvalidDataException(
                         "Invalid controller-state transition reset payload.");
@@ -3965,7 +3977,10 @@ namespace DS4Windows.InputDevices
 
                 lock (stateLock)
                 {
-                    realtimeHaptics.Reset(silenceFutureReports: true);
+                    int hapticsGeneration =
+                        BinaryPrimitives.ReadInt32LittleEndian(payload);
+                    realtimeHaptics.AcceptGeneration(hapticsGeneration,
+                        silenceFutureReports: true);
                     physicalStateTransitionFilter.Reset();
                     pendingControllerStateAvailable = false;
                     controllerStateReportsAhead = 0;
@@ -4012,7 +4027,7 @@ namespace DS4Windows.InputDevices
             {
                 using global::DS4Windows.MultimediaThreadRegistration mmcss =
                     global::DS4Windows.MultimediaThreadRegistration.EnterProAudio();
-                const int writerMetricCount = 13;
+                const int writerMetricCount = 17;
                 byte[] payload = new byte[
                     sizeof(long) + sizeof(byte) + sizeof(long) +
                     writerMetricCount * sizeof(long)];
@@ -4088,6 +4103,22 @@ namespace DS4Windows.InputDevices
                         BinaryPrimitives.WriteInt64LittleEndian(
                             payload.AsSpan(metricOffset, sizeof(long)),
                             writer.MaximumNativeSubmissionTicks);
+                        metricOffset += sizeof(long);
+                        BinaryPrimitives.WriteInt64LittleEndian(
+                            payload.AsSpan(metricOffset, sizeof(long)),
+                            realtimeHaptics.Count);
+                        metricOffset += sizeof(long);
+                        BinaryPrimitives.WriteInt64LittleEndian(
+                            payload.AsSpan(metricOffset, sizeof(long)),
+                            realtimeHaptics.MaximumQueueDepth);
+                        metricOffset += sizeof(long);
+                        BinaryPrimitives.WriteInt64LittleEndian(
+                            payload.AsSpan(metricOffset, sizeof(long)),
+                            realtimeHaptics.MaximumQueueAgeTicks);
+                        metricOffset += sizeof(long);
+                        BinaryPrimitives.WriteInt64LittleEndian(
+                            payload.AsSpan(metricOffset, sizeof(long)),
+                            realtimeHaptics.PresentedCount);
                         lock (pipeWriteLock)
                         {
                             WriteFrame(responsePipe,
@@ -5343,6 +5374,7 @@ namespace DS4Windows.InputDevices
     {
         private readonly byte[] frames;
         private readonly long[] expiryQpc;
+        private readonly long[] enqueuedAtQpc;
         private readonly int capacity;
         private readonly int reportOffset;
         private readonly int frameLength;
@@ -5350,9 +5382,15 @@ namespace DS4Windows.InputDevices
         private int count;
         private bool prepared;
         private bool hasReceivedGeneration;
+        private int maximumQueueDepth;
+        private long maximumQueueAgeTicks;
+        private long presentedCount;
 
         internal int Count => count;
         internal bool HasPreparedGeneration => prepared;
+        internal int MaximumQueueDepth => maximumQueueDepth;
+        internal long MaximumQueueAgeTicks => maximumQueueAgeTicks;
+        internal long PresentedCount => presentedCount;
 
         internal DualSenseRealtimeHapticsPresentationQueue(int capacity,
             int reportOffset, int frameLength)
@@ -5375,10 +5413,11 @@ namespace DS4Windows.InputDevices
             this.frameLength = frameLength;
             frames = new byte[capacity * frameLength];
             expiryQpc = new long[capacity];
+            enqueuedAtQpc = new long[capacity];
         }
 
         internal void Enqueue(byte[] source, int offset,
-            long hapticsExpiryQpc)
+            long hapticsExpiryQpc, long queuedAtQpc = 0)
         {
             if (source == null || offset < 0 ||
                 offset + frameLength > source.Length)
@@ -5403,11 +5442,16 @@ namespace DS4Windows.InputDevices
             {
                 destination = (head + count) % capacity;
                 count++;
+                if (count > maximumQueueDepth)
+                {
+                    maximumQueueDepth = count;
+                }
             }
 
             Buffer.BlockCopy(source, offset, frames,
                 destination * frameLength, frameLength);
             expiryQpc[destination] = hapticsExpiryQpc;
+            enqueuedAtQpc[destination] = queuedAtQpc;
         }
 
         internal bool PrepareForPresentation(byte[] report, long nowQpc)
@@ -5440,6 +5484,14 @@ namespace DS4Windows.InputDevices
             }
 
             prepared = true;
+            if (enqueuedAtQpc[head] > 0)
+            {
+                long age = Math.Max(0, nowQpc - enqueuedAtQpc[head]);
+                if (age > maximumQueueAgeTicks)
+                {
+                    maximumQueueAgeTicks = age;
+                }
+            }
             report[reportOffset - 2] = 0x92;
             report[reportOffset - 1] = (byte)frameLength;
             if (expiryQpc[head] <= nowQpc)
@@ -5463,15 +5515,18 @@ namespace DS4Windows.InputDevices
 
             Array.Clear(frames, head * frameLength, frameLength);
             expiryQpc[head] = 0;
+            enqueuedAtQpc[head] = 0;
             head = (head + 1) % capacity;
             count--;
             prepared = false;
+            presentedCount++;
         }
 
         internal void Reset(bool silenceFutureReports = false)
         {
             Array.Clear(frames, 0, frames.Length);
             Array.Clear(expiryQpc, 0, expiryQpc.Length);
+            Array.Clear(enqueuedAtQpc, 0, enqueuedAtQpc.Length);
             head = 0;
             count = 0;
             prepared = false;

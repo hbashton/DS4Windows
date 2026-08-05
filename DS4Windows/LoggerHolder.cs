@@ -17,13 +17,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+using System.IO;
 using System.Threading;
-using System.Threading.Tasks;
 using DS4Windows;
 using NLog;
+using NLog.Config;
+using NLog.Targets;
 using NLog.Targets.Wrappers;
 
 namespace DS4WinWPF
@@ -36,18 +35,61 @@ namespace DS4WinWPF
 
         public LoggerHolder(DS4Windows.ControlService service)
         {
-            var configuration = LogManager.Configuration;
-            var wrapTarget = configuration.FindTargetByName<WrapperTargetBase>("logfile") as WrapperTargetBase;
-            var fileTarget = wrapTarget.WrappedTarget as NLog.Targets.FileTarget;
-            fileTarget.FileName = $@"{DS4Windows.Global.appdatapath}\Logs\ds4windows_log.txt";
-            fileTarget.ArchiveFileName = $@"{DS4Windows.Global.appdatapath}\Logs\ds4windows_log_{{#}}.txt";
+            string dataPath = DS4Windows.Global.appdatapath;
+            if (string.IsNullOrWhiteSpace(dataPath))
+            {
+                dataPath = Path.Combine(Environment.GetFolderPath(
+                    Environment.SpecialFolder.LocalApplicationData),
+                    "DS4Windows");
+            }
+
+            string logDirectory = Path.Combine(
+                dataPath, "Logs");
+            Directory.CreateDirectory(logDirectory);
+
+            LoggingConfiguration configuration =
+                LogManager.Configuration ?? new LoggingConfiguration();
+            FileTarget fileTarget = FindFileTarget(configuration);
+            if (fileTarget == null)
+            {
+                // A partial extraction, antivirus quarantine, or packaging error
+                // can leave NLog.config absent. Logging must never be the reason
+                // the application silently fails to start.
+                fileTarget = new FileTarget("logfile")
+                {
+                    Layout = "${longdate}|${level:uppercase=true}|${message}",
+                    MaxArchiveFiles = 7,
+                };
+                configuration.AddRule(LogLevel.Info, LogLevel.Fatal,
+                    fileTarget);
+            }
+
+            fileTarget.FileName = Path.Combine(logDirectory,
+                "ds4windows_log.txt");
+            fileTarget.ArchiveFileName = Path.Combine(logDirectory,
+                "ds4windows_log_{#}.txt");
             LogManager.Configuration = configuration;
             LogManager.ReconfigExistingLoggers();
 
             logger = LogManager.GetCurrentClassLogger();
 
-            service.Debug += WriteToLog;
+            if (service != null)
+            {
+                service.Debug += WriteToLog;
+            }
             DS4Windows.AppLogger.GuiLog += WriteToLog;
+        }
+
+        internal static FileTarget FindFileTarget(
+            LoggingConfiguration configuration)
+        {
+            Target target = configuration?.FindTargetByName("logfile");
+            while (target is WrapperTargetBase wrapper)
+            {
+                target = wrapper.WrappedTarget;
+            }
+
+            return target as FileTarget;
         }
 
         private void WriteToLog(object sender, DS4Windows.DebugEventArgs e)

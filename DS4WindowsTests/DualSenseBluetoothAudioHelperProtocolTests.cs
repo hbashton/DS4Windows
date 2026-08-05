@@ -9,7 +9,7 @@ namespace DS4WindowsTests
     {
         private const string HelperArgument =
             "--dualsense-bt-audio-pacer-helper";
-        private const int ProtocolVersion = 14;
+        private const int ProtocolVersion = 15;
 
         private static readonly MethodInfo TryParseHelperArgumentsMethod =
             typeof(DualSenseBluetoothAudioPacer).GetMethod(
@@ -25,25 +25,37 @@ namespace DS4WindowsTests
         {
             Guid token = new Guid("01ad84ef-2c70-46ff-b3d4-48a412985d69");
             const string devicePath =
-                @"\\?\hid#vid_054c&pid_0ce6&mi_03#protocol-v13";
+                @"\\?\hid#vid_054c&pid_0ce6&mi_03#protocol-v15";
             string[] args = BuildValidHelperArguments(token, devicePath);
 
             Assert.IsTrue(TryParseHelperArguments(args,
                 out string commandPipeName, out string responsePipeName,
                 out Guid parsedToken,
                 out int parentProcessId, out string inputArrivalSignalName,
-                out string inputClockMapName, out string parsedDevicePath));
+                out string inputClockMapName,
+                out string realtimeHapticsMapName,
+                out string realtimeHapticsSpaceName,
+                out string realtimeHapticsStopName,
+                out int realtimeHapticsCapacity,
+                out string parsedDevicePath));
 
-            Assert.AreEqual("DS4Windows.ProtocolV12.Commands",
+            Assert.AreEqual("DS4Windows.ProtocolV15.Commands",
                 commandPipeName);
-            Assert.AreEqual("DS4Windows.ProtocolV12.Responses",
+            Assert.AreEqual("DS4Windows.ProtocolV15.Responses",
                 responsePipeName);
             Assert.AreEqual(token, parsedToken);
             Assert.AreEqual(4242, parentProcessId);
-            Assert.AreEqual("DS4Windows.ProtocolV12.InputArrival",
+            Assert.AreEqual("DS4Windows.ProtocolV15.InputArrival",
                 inputArrivalSignalName);
-            Assert.AreEqual("DS4Windows.ProtocolV12.InputClock",
+            Assert.AreEqual("DS4Windows.ProtocolV15.InputClock",
                 inputClockMapName);
+            Assert.AreEqual("DS4Windows.ProtocolV15.Haptics",
+                realtimeHapticsMapName);
+            Assert.AreEqual("DS4Windows.ProtocolV15.HapticsSpace",
+                realtimeHapticsSpaceName);
+            Assert.AreEqual("DS4Windows.ProtocolV15.HapticsStop",
+                realtimeHapticsStopName);
+            Assert.AreEqual(256, realtimeHapticsCapacity);
             Assert.AreEqual(devicePath, parsedDevicePath,
                 "The helper must reopen the exact HID path supplied by the parent.");
         }
@@ -54,22 +66,24 @@ namespace DS4WindowsTests
             Guid token = new Guid("09efc966-9ed5-49b0-a2ca-709e52688cf5");
             string[] valid = BuildValidHelperArguments(token,
                 @"\\?\hid#vid_054c&pid_0ce6#required-path");
-            string[] missing = valid.Take(7).ToArray();
+            string[] missing = valid.Take(11).ToArray();
 
             Assert.IsFalse(TryParseHelperArguments(missing,
-                out _, out _, out _, out _, out _, out _,
+                out _, out _, out _, out _, out _, out _, out _, out _,
+                out _, out _,
                 out string missingPath));
             Assert.AreEqual(string.Empty, missingPath);
 
-            valid[7] = " \t ";
+            valid[11] = " \t ";
             Assert.IsFalse(TryParseHelperArguments(valid,
-                out _, out _, out _, out _, out _, out _,
+                out _, out _, out _, out _, out _, out _, out _, out _,
+                out _, out _,
                 out string blankPath));
             Assert.IsTrue(string.IsNullOrWhiteSpace(blankPath));
         }
 
         [TestMethod]
-        public void Protocol12HelloContainsOnlyVersionAndAuthenticationToken()
+        public void Protocol15HelloContainsOnlyVersionAndAuthenticationToken()
         {
             Guid token = new Guid("8c264fb4-ebc7-4e9d-b79b-0911497418d2");
             byte[] payload = BuildCurrentHello(ProtocolVersion, token);
@@ -80,7 +94,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void Protocol12RejectsVersion11AndHandleBearingHelloForms()
+        public void Protocol15RejectsVersion11AndHandleBearingHelloForms()
         {
             Guid token = new Guid("ba637939-7cca-47b8-b410-56f743c6ab00");
 
@@ -127,12 +141,16 @@ namespace DS4WindowsTests
             return new[]
             {
                 HelperArgument,
-                "DS4Windows.ProtocolV12.Commands",
-                "DS4Windows.ProtocolV12.Responses",
+                "DS4Windows.ProtocolV15.Commands",
+                "DS4Windows.ProtocolV15.Responses",
                 token.ToString("N"),
                 "4242",
-                "DS4Windows.ProtocolV12.InputArrival",
-                "DS4Windows.ProtocolV12.InputClock",
+                "DS4Windows.ProtocolV15.InputArrival",
+                "DS4Windows.ProtocolV15.InputClock",
+                "DS4Windows.ProtocolV15.Haptics",
+                "DS4Windows.ProtocolV15.HapticsSpace",
+                "DS4Windows.ProtocolV15.HapticsStop",
+                "256",
                 devicePath,
             };
         }
@@ -160,13 +178,19 @@ namespace DS4WindowsTests
             out string commandPipeName, out string responsePipeName,
             out Guid authenticationToken,
             out int parentProcessId, out string inputArrivalSignalName,
-            out string inputClockMapName, out string devicePath)
+            out string inputClockMapName,
+            out string realtimeHapticsMapName,
+            out string realtimeHapticsSpaceName,
+            out string realtimeHapticsStopName,
+            out int realtimeHapticsCapacity,
+            out string devicePath)
         {
             Assert.IsNotNull(TryParseHelperArgumentsMethod);
             object[] invocation =
             {
                 args, string.Empty, string.Empty, Guid.Empty, 0, string.Empty,
-                string.Empty, string.Empty,
+                string.Empty, string.Empty, string.Empty, string.Empty, 0,
+                string.Empty,
             };
             bool parsed = (bool)TryParseHelperArgumentsMethod.Invoke(null,
                 invocation);
@@ -176,7 +200,11 @@ namespace DS4WindowsTests
             parentProcessId = (int)invocation[4];
             inputArrivalSignalName = (string)invocation[5];
             inputClockMapName = (string)invocation[6];
-            devicePath = (string)invocation[7];
+            realtimeHapticsMapName = (string)invocation[7];
+            realtimeHapticsSpaceName = (string)invocation[8];
+            realtimeHapticsStopName = (string)invocation[9];
+            realtimeHapticsCapacity = (int)invocation[10];
+            devicePath = (string)invocation[11];
             return parsed;
         }
 

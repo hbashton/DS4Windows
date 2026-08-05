@@ -66,6 +66,7 @@ namespace DS4WinWPF
         private bool skipSave;
         private bool runShutdown;
         private int shutdownStarted;
+        private int startupFailureShown;
         private bool exitApp;
         private Thread testThread;
         private bool exitComThread = false;
@@ -87,6 +88,26 @@ namespace DS4WinWPF
         public event EventHandler ThemeChanged;
 
         private void Application_Startup(object sender, StartupEventArgs e)
+        {
+            // Install the safety net before configuration discovery, service
+            // construction, or logger setup. Failures in those phases used to
+            // terminate the WinExe without a console, dialog, or diagnostic file.
+            DispatcherUnhandledException += App_DispatcherUnhandledException;
+            AppDomain.CurrentDomain.UnhandledException +=
+                CurrentDomain_UnhandledException;
+
+            try
+            {
+                ApplicationStartupCore(sender, e);
+            }
+            catch (Exception ex)
+            {
+                ReportStartupFailure(ex, "application startup");
+                Current.Shutdown(1);
+            }
+        }
+
+        private void ApplicationStartupCore(object sender, StartupEventArgs e)
         {
             runShutdown = true;
             skipSave = true;
@@ -204,7 +225,9 @@ namespace DS4WinWPF
             catch (System.UnauthorizedAccessException)
             {
                 // An existing elevated instance can deny this process access if it was
-                // started by an older build. Do not continue into a second mapper.
+                // started by an older build. Do not continue into a second mapper,
+                // but never make the new process appear to do nothing.
+                ShowSingleInstanceAccessError();
                 runShutdown = false;
                 Current.Shutdown();
                 return;
@@ -221,6 +244,7 @@ namespace DS4WinWPF
             catch (UnauthorizedAccessException)
             {
                 // Another elevated instance can win the race with older event security.
+                ShowSingleInstanceAccessError();
                 runShutdown = false;
                 Current.Shutdown();
                 return;
@@ -245,7 +269,7 @@ namespace DS4WinWPF
             {
                 DS4Forms.SaveWhere savewh =
                     new DS4Forms.SaveWhere(DS4Windows.Global.multisavespots);
-                savewh.ShowDialog();
+                ShowStartupDialog(savewh);
                 if (!savewh.ChoiceMade)
                 {
                     runShutdown = false;
@@ -264,8 +288,6 @@ namespace DS4WinWPF
             }
 
             logHolder = new LoggerHolder(rootHub);
-            DispatcherUnhandledException += App_DispatcherUnhandledException;
-            AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
             Logger logger = logHolder.Logger;
             string version = DS4Windows.Global.exeDisplayVersion;
             logger.Info($"DS4Windows version {version}");
@@ -294,7 +316,7 @@ namespace DS4WinWPF
             {
                 DS4Forms.FirstLaunchUtilWindow firstLaunchUtilWin =
                     new DS4Forms.FirstLaunchUtilWindow(DS4Windows.Global.DeviceOptions);
-                firstLaunchUtilWin.ShowDialog();
+                ShowStartupDialog(firstLaunchUtilWin);
                 DS4Windows.Global.Save();
             }
 
@@ -327,6 +349,11 @@ namespace DS4WinWPF
                 DS4Windows.ViiperSetupManager.
                     RefreshSelectedStartupTaskOnLaunch();
                 DS4Windows.ViiperSetupManager.EnsureReadyWithPrompt(null);
+                if (Dispatcher.HasShutdownStarted ||
+                    Dispatcher.HasShutdownFinished)
+                {
+                    return;
+                }
             }
             else
             {
@@ -389,6 +416,33 @@ namespace DS4WinWPF
             StartupDiag(logger, "MainWindow.LateChecks returned");
         }
 
+        private static void ShowStartupDialog(Window dialog)
+        {
+            dialog.ShowInTaskbar = true;
+            dialog.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+            dialog.ContentRendered += (_, _) =>
+            {
+                dialog.Topmost = true;
+                dialog.Activate();
+                dialog.Topmost = false;
+                dialog.Focus();
+            };
+            dialog.ShowDialog();
+        }
+
+        private static void ShowSingleInstanceAccessError()
+        {
+            try
+            {
+                MessageBox.Show(
+                    "Another DS4Windows instance is already running under a different permission level. " +
+                    "Open it from the notification area, or close the existing DS4Windows.exe in Task Manager and try again.",
+                    "DS4Windows is already running", MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+            catch { }
+        }
+
         private static void StartupDiag(Logger logger, string message)
         {
             if (!DS4Windows.Global.VerboseStartupLogging)
@@ -402,35 +456,36 @@ namespace DS4WinWPF
 
         private void CurrentDomain_UnhandledException(object sender, UnhandledExceptionEventArgs e)
         {
-            if (!Current.Dispatcher.CheckAccess())
+            Exception exception = e.ExceptionObject as Exception ??
+                new InvalidOperationException(
+                    $"Unhandled non-Exception object: {e.ExceptionObject}");
+            Logger logger = logHolder?.Logger;
+            if (MainWindow == null)
             {
-                Logger logger = logHolder.Logger;
-                Exception exp = e.ExceptionObject as Exception;
-                logger.Error($"Thread App Crashed with message {exp.Message}");
-                logger.Error(exp.ToString());
-                //LogManager.Flush();
-                //LogManager.Shutdown();
-                if (e.IsTerminating)
-                {
-                    Dispatcher.Invoke(() =>
-                    {
-                        rootHub?.PrepareAbort();
-                        CleanShutdown();
-                    });
-                }
+                // Do not marshal synchronously to the dispatcher here. During
+                // ControlService construction the UI thread is intentionally
+                // waiting for this worker to finish, so Dispatcher.Invoke would
+                // deadlock the exact startup failure we are trying to report.
+                ReportStartupFailure(exception,
+                    "background startup thread");
+            }
+            else if (logger != null)
+            {
+                logger.Error(exception,
+                    $"Unhandled application exception: {exception.Message}");
+                LogManager.Flush(TimeSpan.FromSeconds(1));
             }
             else
             {
-                Logger logger = logHolder.Logger;
-                Exception exp = e.ExceptionObject as Exception;
-                if (e.IsTerminating)
-                {
-                    logger.Error($"Thread Crashed with message {exp.Message}");
-                    logger.Error(exp.ToString());
+                StartupFailureReporter.Write(exception,
+                    "background startup thread",
+                    DS4Windows.Global.appdatapath);
+            }
 
-                    rootHub?.PrepareAbort();
-                    CleanShutdown();
-                }
+            if (e.IsTerminating)
+            {
+                try { rootHub?.PrepareAbort(); }
+                catch { }
             }
         }
 
@@ -459,13 +514,40 @@ namespace DS4WinWPF
 
         private void App_DispatcherUnhandledException(object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
         {
-            //Debug.WriteLine("App Crashed");
-            //Debug.WriteLine(e.Exception.StackTrace);
-            Logger logger = logHolder.Logger;
-            logger.Error($"Thread Crashed with message {e.Exception.Message}");
-            logger.Error(e.Exception.ToString());
-            //LogManager.Flush();
-            //LogManager.Shutdown();
+            ReportStartupFailure(e.Exception, "WPF dispatcher");
+            e.Handled = true;
+            Current.Shutdown(1);
+        }
+
+        private void ReportStartupFailure(Exception exception, string phase)
+        {
+            try
+            {
+                logHolder?.Logger?.Fatal(exception,
+                    $"DS4Windows failed during {phase}");
+                LogManager.Flush(TimeSpan.FromSeconds(1));
+            }
+            catch { }
+
+            string logPath = StartupFailureReporter.Write(exception, phase,
+                DS4Windows.Global.appdatapath);
+            if (Interlocked.Exchange(ref startupFailureShown, 1) != 0)
+            {
+                return;
+            }
+
+            try
+            {
+                MessageBox.Show(
+                    StartupFailureReporter.BuildUserMessage(logPath),
+                    "DS4Windows startup failed", MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+            catch
+            {
+                // The synchronous fallback log remains available even if WPF
+                // is too damaged to display a final error window.
+            }
         }
 
         private bool CreateConfDirSkeleton()
@@ -697,12 +779,58 @@ namespace DS4WinWPF
                     {
                         Dispatcher.BeginInvoke((Action)(() =>
                         {
-                            MainWindow.Show();
-                            MainWindow.WindowState = WindowState.Normal;
+                            ActivateBestApplicationWindow();
                         }));
                     }
                 }
             }
+        }
+
+        private void ActivateBestApplicationWindow()
+        {
+            Window target = MainWindow;
+            if (target == null || !target.IsLoaded)
+            {
+                foreach (Window candidate in Windows)
+                {
+                    if (candidate != null && candidate.IsVisible)
+                    {
+                        target = candidate;
+                        if (candidate.IsActive)
+                        {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (target == null)
+            {
+                // Startup has the single-instance handle but has not produced
+                // any UI yet. Record this rare state instead of throwing from
+                // a null MainWindow dereference and killing the hidden process.
+                StartupFailureReporter.Write(
+                    new InvalidOperationException(
+                        "A second launch signaled DS4Windows before any startup window existed."),
+                    "single-instance activation",
+                    DS4Windows.Global.appdatapath);
+                return;
+            }
+
+            if (!target.IsVisible)
+            {
+                target.Show();
+            }
+
+            if (target.WindowState == WindowState.Minimized)
+            {
+                target.WindowState = WindowState.Normal;
+            }
+
+            target.Activate();
+            target.Topmost = true;
+            target.Topmost = false;
+            target.Focus();
         }
 
         public void CreateIPCClassNameMMF(IntPtr hWnd)

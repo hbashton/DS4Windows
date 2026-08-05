@@ -446,22 +446,37 @@
                                         <StackPanel Grid.Row="3">
                                             <TextBlock Text="Audio source" Margin="0,0,0,7" FontWeight="SemiBold"
                                                        ToolTip="Default captures the normal endpoint mix. Choose an app to stream only that app." />
-                                            <ComboBox ItemsSource="{Binding ControllerAudioSourceChoices}"
-                                                      SelectedValuePath="EndpointId"
-                                                      SelectedValue="{Binding ControllerAudioSourceId, Mode=OneWay}"
-                                                      SelectionChanged="ControllerAudioSourceCombo_SelectionChanged"
-                                                      DropDownOpened="ControllerAudioSourceCombo_DropDownOpened"
-                                                      DropDownClosed="ControllerAudioSourceCombo_DropDownClosed"
-                                                      PreviewKeyDown="ControllerAudioSourceCombo_PreviewKeyDown"
-                                                      IsEnabled="{Binding AudioHapticsSpeakerOverrideActive, Converter={StaticResource InverseBoolConverter}}"
-                                                      Style="{StaticResource OverviewSettingsComboBoxStyle}"
-                                                      ToolTip="{Binding SelectedItem.Name, RelativeSource={RelativeSource Self}}">
-                                                <ComboBox.ItemTemplate>
-                                                    <DataTemplate>
-                                                        <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
-                                                    </DataTemplate>
-                                                </ComboBox.ItemTemplate>
-                                            </ComboBox>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <ComboBox x:Name="controllerAudioSourceCombo"
+                                                          ItemsSource="{Binding ControllerAudioSourceChoices}"
+                                                          SelectedValuePath="EndpointId"
+                                                          SelectedValue="{Binding ControllerAudioSourceId, Mode=OneWay}"
+                                                          SelectionChanged="ControllerAudioSourceCombo_SelectionChanged"
+                                                          DropDownOpened="ControllerAudioSourceCombo_DropDownOpened"
+                                                          DropDownClosed="ControllerAudioSourceCombo_DropDownClosed"
+                                                          PreviewKeyDown="ControllerAudioSourceCombo_PreviewKeyDown"
+                                                          IsEnabled="{Binding AudioHapticsSpeakerOverrideActive, Converter={StaticResource InverseBoolConverter}}"
+                                                          Style="{StaticResource OverviewSettingsComboBoxStyle}"
+                                                          ToolTip="{Binding SelectedItem.Name, RelativeSource={RelativeSource Self}}">
+                                                    <ComboBox.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                                        </DataTemplate>
+                                                    </ComboBox.ItemTemplate>
+                                                </ComboBox>
+                                                <Button x:Name="refreshControllerAudioSourcesButton"
+                                                        Grid.Column="1"
+                                                        Width="42" Height="42" Margin="8,0,0,0"
+                                                        Content="&#xE72C;"
+                                                        FontFamily="Segoe MDL2 Assets"
+                                                        FontSize="15"
+                                                        ToolTip="Refresh running audio sources"
+                                                        Click="RefreshControllerAudioSources_Click" />
+                                            </Grid>
                                         </StackPanel>
                                         <Border Grid.Row="4" Margin="0,10,0,0" Padding="9,7"
                                                 CornerRadius="4" Background="#26FFB020"

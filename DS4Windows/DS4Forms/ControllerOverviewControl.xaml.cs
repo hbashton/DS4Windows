@@ -214,6 +214,34 @@ namespace DS4WinWPF.DS4Forms
             viewModel.ControllerAudioSourceId = endpointId;
         }
 
+        private async void RefreshControllerAudioSources_Click(object sender,
+            RoutedEventArgs e)
+        {
+            if (DataContext is not MainWindowsViewModel viewModel ||
+                sender is not Button button)
+            {
+                return;
+            }
+
+            button.IsEnabled = false;
+            try
+            {
+                await viewModel.ForceRefreshControllerAudioChoicesAsync();
+
+                // The selector is intentionally one-way so an ItemsSource
+                // rebuild cannot accidentally serialize WPF's temporary first
+                // item. Reapply the saved selection after the forced refresh.
+                controllerAudioSourceCombo.GetBindingExpression(
+                    ItemsControl.ItemsSourceProperty)?.UpdateTarget();
+                controllerAudioSourceCombo.GetBindingExpression(
+                    ComboBox.SelectedValueProperty)?.UpdateTarget();
+            }
+            finally
+            {
+                button.IsEnabled = true;
+            }
+        }
+
         private void OutputControllerCombo_SelectionChanged(object sender,
             SelectionChangedEventArgs e)
         {

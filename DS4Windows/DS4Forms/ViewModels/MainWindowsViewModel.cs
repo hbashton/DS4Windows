@@ -924,13 +924,17 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public string NvidiaNoiseSuppressionAvailability =>
             NvidiaAudioNoiseSuppressor.RuntimeAvailability;
 
-        private async Task RefreshControllerAudioChoicesAsync()
+        private async Task RefreshControllerAudioChoicesAsync(
+            bool forceRefresh = false)
         {
-            await AudioEndpointChoiceCache.RefreshAsync();
+            await AudioEndpointChoiceCache.RefreshAsync(forceRefresh);
             ControllerAudioSourceChoicesChanged?.Invoke(this,
                 EventArgs.Empty);
             ControllerAudioSourceIdChanged?.Invoke(this, EventArgs.Empty);
         }
+
+        public Task ForceRefreshControllerAudioChoicesAsync() =>
+            RefreshControllerAudioChoicesAsync(forceRefresh: true);
 
         private void RaiseQuickProfileSettingChanged(int deviceIndex,
             bool requiresProfileReload = false,

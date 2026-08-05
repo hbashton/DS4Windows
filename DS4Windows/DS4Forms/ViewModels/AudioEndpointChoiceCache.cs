@@ -142,7 +142,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             return choices;
         }
 
-        public static Task RefreshAsync()
+        public static Task RefreshAsync(bool forceRefresh = false)
         {
             lock (syncRoot)
             {
@@ -151,7 +151,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     return refreshTask;
                 }
 
-                if (DateTime.UtcNow - refreshedAtUtc < cacheLifetime)
+                if (!forceRefresh &&
+                    DateTime.UtcNow - refreshedAtUtc < cacheLifetime)
                 {
                     return Task.CompletedTask;
                 }
@@ -193,57 +194,73 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         private static void CopyAppAudioSessions(MMDeviceEnumerator enumerator,
             List<AppAudioSnapshot> destination)
         {
-            using MMDevice endpoint = enumerator.GetDefaultAudioEndpoint(
-                DataFlow.Render, Role.Multimedia);
-            AudioSessionManager manager = endpoint.AudioSessionManager;
-            try
+            MMDeviceCollection endpoints = enumerator.EnumerateAudioEndPoints(
+                DataFlow.Render, DeviceState.Active);
+            var seen = new HashSet<int>();
+            foreach (MMDevice endpoint in endpoints)
             {
-                SessionCollection sessions = manager.Sessions;
-                var seen = new HashSet<int>();
-                for (int index = 0; index < sessions.Count; index++)
+                try
                 {
-                    using AudioSessionControl session = sessions[index];
-                    if (session.State ==
-                        AudioSessionState.AudioSessionStateExpired)
-                    {
-                        continue;
-                    }
-
-                    int processId = checked((int)session.GetProcessID);
-                    if (processId <= 0 || !seen.Add(processId))
-                    {
-                        continue;
-                    }
-
-                    string displayName = session.DisplayName;
+                    AudioSessionManager manager = endpoint.AudioSessionManager;
                     try
                     {
-                        using Process process = Process.GetProcessById(
-                            processId);
-                        if (string.IsNullOrWhiteSpace(displayName))
+                        SessionCollection sessions = manager.Sessions;
+                        for (int index = 0; index < sessions.Count; index++)
                         {
-                            displayName = process.MainWindowTitle;
-                        }
-                        if (string.IsNullOrWhiteSpace(displayName))
-                        {
-                            displayName = process.ProcessName;
+                            using AudioSessionControl session = sessions[index];
+                            if (session.State ==
+                                AudioSessionState.AudioSessionStateExpired)
+                            {
+                                continue;
+                            }
+
+                            int processId = checked((int)session.GetProcessID);
+                            if (processId <= 0 || !seen.Add(processId))
+                            {
+                                continue;
+                            }
+
+                            string displayName = session.DisplayName;
+                            try
+                            {
+                                using Process process = Process.GetProcessById(
+                                    processId);
+                                if (string.IsNullOrWhiteSpace(displayName))
+                                {
+                                    displayName = process.MainWindowTitle;
+                                }
+                                if (string.IsNullOrWhiteSpace(displayName))
+                                {
+                                    displayName = process.ProcessName;
+                                }
+                            }
+                            catch { }
+
+                            destination.Add(new AppAudioSnapshot(
+                                string.IsNullOrWhiteSpace(displayName)
+                                    ? $"Process {processId}"
+                                    : displayName.Trim(), processId));
                         }
                     }
-                    catch { }
-
-                    destination.Add(new AppAudioSnapshot(
-                        string.IsNullOrWhiteSpace(displayName)
-                            ? $"Process {processId}"
-                            : displayName.Trim(), processId));
+                    finally
+                    {
+                        manager.Dispose();
+                    }
                 }
+                catch
+                {
+                    // An application can move between render endpoints while
+                    // this snapshot is being built. Keep sessions from the
+                    // remaining active endpoints and let Refresh retry later.
+                }
+                finally
+                {
+                    endpoint?.Dispose();
+                }
+            }
 
-                destination.Sort((left, right) => string.Compare(left.Name,
-                    right.Name, StringComparison.CurrentCultureIgnoreCase));
-            }
-            finally
-            {
-                manager.Dispose();
-            }
+            destination.Sort((left, right) => string.Compare(left.Name,
+                right.Name, StringComparison.CurrentCultureIgnoreCase));
         }
 
         private static void CopyEndpoints(MMDeviceEnumerator enumerator,

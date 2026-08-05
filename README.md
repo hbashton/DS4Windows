@@ -39,7 +39,7 @@ VIIPER integration on this page refer to the hbashton repositories.
 
 ### Standard installer — recommended
 
-Most users should download `DS4Windows_5.0.0.0_Setup_x64.exe` from the
+Most users should download `DS4Windows_5.0.1.0_Setup_x64.exe` from the
 [newest release candidate](https://github.com/hbashton/DS4Windows/releases). The
 single offline installer:
 
@@ -64,8 +64,9 @@ selector.
 
 DS4Windows 5 release candidates include virtual DualSense output, advanced
 haptics, controller audio, microphone capture, and the redesigned interface.
-Release Candidate 4, **The Parity Patch**, adds the all-in-one installer and
-unifies native game feedback, PlayStation audio, and cross-output features.
+Release Candidate 4.1, **The Parity Patch Update**, lowers media-path latency,
+improves per-app audio recovery, and hardens the all-in-one installer while
+retaining RC4's native game feedback and cross-output features.
 They appear as pre-releases on the
 [DS4Windows Releases page](https://github.com/hbashton/DS4Windows/releases).
 Choose the newest release-candidate build when you want to test these features.

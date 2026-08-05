@@ -10,9 +10,9 @@ portable ZIP remains a separate CI artifact.
 ```powershell
 .\installer\build-installer.ps1 `
   -PublishRoot .\bin\x64\Release\output `
-  -ProductVersion 5.0.0.0 `
-  -BundleVersion 5.0.0.0 `
-  -DisplayVersion 5.0.0.0 `
+  -ProductVersion 5.0.1.0 `
+  -BundleVersion 5.0.1.0 `
+  -DisplayVersion 5.0.1.0 `
   -SkipApplicationPublish
 ```
 

@@ -1,9 +1,34 @@
 {
-  "latest_version": "5.0.0.0",
-  "latest_version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 0},
-  "updated_at": "2026-08-04T00:00:00+0000",
+  "latest_version": "5.0.1.0",
+  "latest_version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 1},
+  "updated_at": "2026-08-05T00:00:00+0000",
   "changelog": {
     "versions": [
+    {
+      "version_str": "5.0.1.0",
+      "version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 1},
+      "base_header": "Version 5.0.1.0 - The Parity Patch Update",
+      "release_date": "2026-08-05T00:00:00+0000",
+      "locales": [
+        {
+          "code": "en",
+          "header": "Version 5.0.1.0 - The Parity Patch Update (Release Candidate 4.1)",
+          "log_text": [
+            "* **Lower-latency controller media** - DualSense game haptics, Audio Haptics, speaker audio, and state updates now share a lossless real-time path that removes redundant queue handoffs and prevents deadline-based frame loss",
+            "* **Cleaner haptic response under load** - media work is prioritized without starving controller input, preserving subtle game effects while reducing long-tail haptic and audio delays during CPU spikes",
+            "* **Reliable per-app audio capture** - application sessions recover after source changes, process restarts, headset/speaker switches, and stalled loopback capture; the source list also includes a manual refresh action",
+            "* **Installer failures are actionable** - the all-in-one setup now reports the exact failing infrastructure step and preserves detailed child-process diagnostics instead of rolling back with a generic error",
+            "* **Safe, single-owner installation** - bundle-wide and VIIPER setup mutexes prevent concurrent repair, update, and uninstall races while verified transaction markers reject partial success",
+            "* **Stronger update and restart recovery** - standard-user and alternate-administrator installs retain the correct user context, resume safely after required restarts, and avoid registering startup tasks for the wrong account",
+            "* **Safer process and file handling** - setup closes recognized processes predictably, restricts cleanup to installer-owned paths, avoids recursive Program Files ACL rewrites, and preserves user profiles and settings",
+            "* **True Windows upgrade package** - RC4.1 advances the application and MSI version to 5.0.1.0 so existing RC4 installations receive a deterministic upgrade rather than an ambiguous same-version repair"
+          ],
+          "editor": "hbashton",
+          "editors_note": ["RC4.1 focuses on the two things users feel immediately: faster controller feedback and an installer that explains and recovers from failures."],
+          "updated_at": "2026-08-05T00:00:00+0000"
+        }
+      ]
+    },
     {
       "version_str": "5.0.0.0",
       "version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 0},

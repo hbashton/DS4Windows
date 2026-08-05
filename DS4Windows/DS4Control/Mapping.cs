@@ -122,6 +122,12 @@ namespace DS4Windows
             new object(), new object(), new object(), new object(),
         };
 
+        private static readonly object[] profileMutationLocks = new object[Global.MAX_DS4_CONTROLLER_COUNT]
+        {
+            new object(), new object(), new object(), new object(),
+            new object(), new object(), new object(), new object(),
+        };
+
         private static readonly ProfileSwitchRequest[] profileSwitchRequests = new ProfileSwitchRequest[Global.MAX_DS4_CONTROLLER_COUNT]
         {
             new ProfileSwitchRequest(), new ProfileSwitchRequest(), new ProfileSwitchRequest(), new ProfileSwitchRequest(),
@@ -906,6 +912,21 @@ namespace DS4Windows
                 ctrl, afterLoad);
         }
 
+        public static void ExecuteSerializedProfileMutation(int device,
+            Action mutation)
+        {
+            if (mutation == null || device < 0 ||
+                device >= Global.MAX_DS4_CONTROLLER_COUNT)
+            {
+                return;
+            }
+
+            lock (profileMutationLocks[device])
+            {
+                mutation();
+            }
+        }
+
         private static void RunProfileSwitchRequests(int device, ControlService ctrl)
         {
             while (true)
@@ -935,9 +956,13 @@ namespace DS4Windows
                 bool loaded = false;
                 try
                 {
-                    loaded = tempProfile ?
-                        LoadTempProfile(device, profileName, launchProgram, ctrl) :
-                        LoadProfile(device, launchProgram, ctrl);
+                    lock (profileMutationLocks[device])
+                    {
+                        loaded = tempProfile ?
+                            LoadTempProfile(device, profileName, launchProgram,
+                                ctrl) :
+                            LoadProfile(device, launchProgram, ctrl);
+                    }
                 }
                 catch (Exception ex)
                 {

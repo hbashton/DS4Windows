@@ -8,6 +8,7 @@ param(
     [string]$PackageExtrasRoot,
     [int]$InstallerHostPid = 0,
     [switch]$PortableInstallation,
+    [switch]$SkipStartupTasks,
     [switch]$InstallerMode
 )
 
@@ -32,6 +33,7 @@ if ($env:DS4W_SETUP_NO_PAUSE -eq '1') {
 }
 $script:PortableInstallation = [bool]$PortableInstallation
 $script:InstallerMode = [bool]$InstallerMode
+$script:RunAtStartupEnabled = -not [bool]$SkipStartupTasks
 if ($env:DS4W_SETUP_PORTABLE_INSTALLATION -eq '1') {
     $script:PortableInstallation = $true
 }
@@ -1478,6 +1480,27 @@ function Start-AndVerifyViiper([string]$taskName) {
     return $false
 }
 
+function Start-AndVerifyViiperDirectly([string]$viiperPath) {
+    if (Test-ViiperApi) { return $true }
+    try {
+        Start-Process -FilePath $viiperPath -ArgumentList "server" `
+            -WorkingDirectory (Split-Path -Parent $viiperPath) `
+            -WindowStyle Hidden -ErrorAction Stop | Out-Null
+    }
+    catch {
+        Write-SetupLog (
+            "Could not start VIIPER for this session: " +
+            $_.Exception.Message
+        ) Red
+        return $false
+    }
+    for ($attempt = 0; $attempt -lt 10; $attempt++) {
+        Start-Sleep -Milliseconds 500
+        if (Test-ViiperApi) { return $true }
+    }
+    return $false
+}
+
 function Convert-AccountToSid([string]$identity) {
     if ([string]::IsNullOrWhiteSpace($identity)) { return $null }
     try {
@@ -1976,21 +1999,37 @@ try {
     }
     }
 
-    # Register both tasks before any driver operation can require a reboot.
-    # VIIPER itself fails closed until its exact USBIP ABI probe succeeds.
-    if (-not (Register-ViiperRunTask $viiperPath "RunVIIPER")) {
-        throw "Could not create the elevated RunVIIPER startup task."
+    # Preserve the setting that launched the built-in installer. The standard
+    # Burn installer retains its existing startup-enabled default because it
+    # does not pass -SkipStartupTasks.
+    if ($script:RunAtStartupEnabled) {
+        if (-not (Register-ViiperRunTask $viiperPath "RunVIIPER")) {
+            throw "Could not create the elevated RunVIIPER startup task."
+        }
+        if (-not (Register-Ds4WindowsRunTask `
+                $script:Ds4WindowsRestartPath)) {
+            Unregister-ScheduledTask -TaskPath "\" -TaskName "RunVIIPER" `
+                -Confirm:$false `
+                -ErrorAction SilentlyContinue
+            throw "Could not register the elevated RunDS4Windows startup task."
+        }
+        Write-SetupLog (
+            "Registered and verified enabled elevated RunVIIPER and " +
+            "RunDS4Windows tasks for $script:TargetUserName before driver setup."
+        ) Green
     }
-    if (-not (Register-Ds4WindowsRunTask $script:Ds4WindowsRestartPath)) {
+    else {
         Unregister-ScheduledTask -TaskPath "\" -TaskName "RunVIIPER" `
             -Confirm:$false `
             -ErrorAction SilentlyContinue
-        throw "Could not register the elevated RunDS4Windows startup task."
+        Unregister-ScheduledTask -TaskPath "\" -TaskName "RunDS4Windows" `
+            -Confirm:$false `
+            -ErrorAction SilentlyContinue
+        Write-SetupLog (
+            "Run at Startup is disabled; no DS4Windows or VIIPER logon " +
+            "task was retained."
+        ) Green
     }
-    Write-SetupLog (
-        "Registered and verified enabled elevated RunVIIPER and " +
-        "RunDS4Windows tasks for $script:TargetUserName before driver setup."
-    ) Green
 
     Write-Step "Step 2 of 4 - Checking usbip-win2 0.9.7.7"
     $requiredUsbipVersion = $script:RequiredUsbipVersion
@@ -2183,33 +2222,65 @@ try {
         ) Yellow
     }
     else {
-    Write-Step "Step 3 of 4 - Verifying startup tasks"
+    Write-Step "Step 3 of 4 - Verifying launch policy"
     if ($script:UsbipRuntimeReady -and -not $script:RebootRecommended) {
         if (-not (Stop-ViiperProcesses "install registration")) {
             throw "VIIPER registration could not proceed because a VIIPER process could not be closed automatically. Please close viiper.exe manually, then run Install / Repair again."
         }
 
-        if (-not (Test-HighestLogonTask "RunVIIPER" $viiperPath "server" `
-                    (Split-Path -Parent $viiperPath)) -or
-                -not (Test-HighestLogonTask "RunDS4Windows" `
-                    $script:Ds4WindowsRestartPath "-m" `
-                    (Split-Path -Parent $script:Ds4WindowsRestartPath))) {
-            throw "A verified startup task changed during setup."
+        if ($script:RunAtStartupEnabled) {
+            if (-not (Test-HighestLogonTask "RunVIIPER" $viiperPath `
+                        "server" (Split-Path -Parent $viiperPath)) -or
+                    -not (Test-HighestLogonTask "RunDS4Windows" `
+                        $script:Ds4WindowsRestartPath "-m" `
+                        (Split-Path -Parent $script:Ds4WindowsRestartPath))) {
+                throw "A verified startup task changed during setup."
+            }
+            Write-SetupLog "Both elevated startup tasks remain verified." Green
         }
-        Write-SetupLog "Both elevated startup tasks remain verified." Green
+        else {
+            $unexpectedTasks = @(
+                Get-ScheduledTask -TaskPath "\" -ErrorAction SilentlyContinue |
+                    Where-Object { $_.TaskName -in @(
+                        "RunVIIPER", "RunDS4Windows") }
+            )
+            if ($unexpectedTasks.Count -gt 0) {
+                throw "A startup task was recreated while Run at Startup is disabled."
+            }
+            Write-SetupLog (
+                "Run at Startup remains disabled; one-time launch only."
+            ) Green
+        }
     }
     else {
         [void](Stop-ViiperProcesses "pending usbip-win2 reboot")
-        Write-SetupLog (
-            "Both startup tasks are registered for the next sign-in. " +
-            "VIIPER startup is deferred in this session until usbip-win2 " +
-            "passes its runtime ABI check."
-        ) Yellow
+        if ($script:RunAtStartupEnabled) {
+            Write-SetupLog (
+                "Both startup tasks are registered for the next sign-in. " +
+                "VIIPER startup is deferred in this session until usbip-win2 " +
+                "passes its runtime ABI check."
+            ) Yellow
+        }
+        else {
+            Write-SetupLog (
+                "Run at Startup remains disabled. Restart Windows, then " +
+                "launch DS4Windows manually to finish readiness checks."
+            ) Yellow
+        }
     }
 
     Write-Step "Step 4 of 4 - Verifying runtime readiness"
+    $viiperStarted = $false
+    if ($script:UsbipRuntimeReady -and -not $script:RebootRecommended) {
+        $viiperStarted = if ($script:RunAtStartupEnabled) {
+            Start-AndVerifyViiper "RunVIIPER"
+        }
+        else {
+            Start-AndVerifyViiperDirectly $viiperPath
+        }
+    }
     if ($script:UsbipRuntimeReady -and -not $script:RebootRecommended -and
-            (Start-AndVerifyViiper "RunVIIPER")) {
+            $viiperStarted) {
         Write-SetupLog "VIIPER API is ready." Green
         $backupPath = "$viiperPath.previous"
         if (Test-Path -LiteralPath $backupPath) {
@@ -2243,8 +2314,17 @@ try {
                 Stop-InstallerHostForStandardMigration
                 Remove-PortableDs4WindowsPackageForStandardMode
             }
-            Start-ScheduledTask -TaskPath "\" -TaskName "RunDS4Windows" `
-                -ErrorAction Stop
+            if ($script:RunAtStartupEnabled) {
+                Start-ScheduledTask -TaskPath "\" `
+                    -TaskName "RunDS4Windows" -ErrorAction Stop
+            }
+            else {
+                Start-Process -FilePath $script:Ds4WindowsRestartPath `
+                    -ArgumentList "-m" `
+                    -WorkingDirectory (Split-Path -Parent `
+                        $script:Ds4WindowsRestartPath) `
+                    -WindowStyle Hidden -ErrorAction Stop | Out-Null
+            }
         }
     }
     else {

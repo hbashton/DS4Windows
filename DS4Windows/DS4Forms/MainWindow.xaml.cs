@@ -88,6 +88,14 @@ namespace DS4WinWPF.DS4Forms
         private readonly HashSet<int> overviewDirtyControllerIndices = new();
         private readonly HashSet<int> overviewProfileReloadControllerIndices =
             new();
+        private readonly Dictionary<int, OutContType>
+            overviewRequestedOutputControllers = new();
+        private readonly Dictionary<int, bool>
+            overviewRequestedSpeakerOutputStates = new();
+        private readonly Dictionary<int, string>
+            overviewRequestedAudioSourceIds = new();
+        private readonly HashSet<int>
+            overviewAudioHapticsOverrideReleaseRequests = new();
         private DispatcherTimer overviewProfileSaveTimer;
         private DispatcherTimer overviewStatusRefreshTimer;
         private bool preserveSize = true;
@@ -1296,6 +1304,26 @@ Suspend support not enabled.", true);
             if (e.RequiresProfileReload)
             {
                 overviewProfileReloadControllerIndices.Add(e.DeviceIndex);
+                if (e.RequestedOutputController != OutContType.None)
+                {
+                    overviewRequestedOutputControllers[e.DeviceIndex] =
+                        e.RequestedOutputController.Normalize();
+                }
+            }
+            if (e.RequestedSpeakerOutputEnabled.HasValue)
+            {
+                overviewRequestedSpeakerOutputStates[e.DeviceIndex] =
+                    e.RequestedSpeakerOutputEnabled.Value;
+            }
+            if (e.RequestedAudioSourceId != null)
+            {
+                overviewRequestedAudioSourceIds[e.DeviceIndex] =
+                    e.RequestedAudioSourceId;
+            }
+            if (e.ReleaseAudioHapticsSpeakerOverride)
+            {
+                overviewAudioHapticsOverrideReleaseRequests.Add(
+                    e.DeviceIndex);
             }
             overviewProfileSaveTimer.Stop();
             // Save after the current binding pass, before the next status
@@ -1357,6 +1385,17 @@ Suspend support not enabled.", true);
                         deviceIndex);
                 bool requiresProfileReload = reloadProfile &&
                     outputControllerChanged;
+                overviewRequestedOutputControllers.TryGetValue(deviceIndex,
+                    out OutContType requestedOutputController);
+                bool hasRequestedSpeakerState =
+                    overviewRequestedSpeakerOutputStates.TryGetValue(
+                        deviceIndex, out bool requestedSpeakerState);
+                bool hasRequestedAudioSource =
+                    overviewRequestedAudioSourceIds.TryGetValue(deviceIndex,
+                        out string requestedAudioSourceId);
+                bool releaseAudioHapticsOverride =
+                    overviewAudioHapticsOverrideReleaseRequests.Contains(
+                        deviceIndex);
                 if (!overviewDirtyControllerIndices.Remove(deviceIndex) ||
                     deviceIndex < 0 || deviceIndex >= ControlService.CURRENT_DS4_CONTROLLER_LIMIT)
                 {
@@ -1369,20 +1408,67 @@ Suspend support not enabled.", true);
                     continue;
                 }
 
-                ProfileEntity profile = profileListHolder.ProfileListCol
-                    .SingleOrDefault(item => item.Name == profileName);
-                if (profile != null)
+                Mapping.ExecuteSerializedProfileMutation(deviceIndex, () =>
                 {
-                    profile.SaveProfile(deviceIndex);
-                    if (requiresProfileReload)
+                    // A profile reload can finish between the ComboBox setter
+                    // and this deferred save. Reassert the user's latest
+                    // selection while holding the same lock used by profile
+                    // parsing so stale XML can never win the race.
+                    if (requestedOutputController != OutContType.None)
                     {
-                        profile.FireSaved();
+                        Global.OutContType[deviceIndex] =
+                            requestedOutputController;
+                        Global.outDevTypeTemp[deviceIndex] =
+                            requestedOutputController;
                     }
-                }
-                else
+                    if (hasRequestedSpeakerState)
+                    {
+                        Global.DualSenseEnableSpeakerOutput[deviceIndex] =
+                            requestedSpeakerState;
+                    }
+                    if (hasRequestedAudioSource)
+                    {
+                        Global.DualSenseAudioCaptureEndpointId[deviceIndex] =
+                            requestedAudioSourceId ?? string.Empty;
+                    }
+                    if (releaseAudioHapticsOverride)
+                    {
+                        AudioHapticsProfileSettings audioHaptics =
+                            Global.store.audioHapticsSettings[deviceIndex];
+                        if (audioHaptics != null)
+                        {
+                            audioHaptics.StreamAppAudioToController = false;
+                            audioHaptics.StreamAppAudioToHeadsetOnly = false;
+                        }
+                    }
+
+                    ProfileEntity profile = profileListHolder.ProfileListCol
+                        .SingleOrDefault(item => item.Name == profileName);
+                    if (profile != null)
+                    {
+                        profile.SaveProfile(deviceIndex);
+                    }
+                    else
+                    {
+                        Global.SaveProfile(deviceIndex, profileName);
+                    }
+                });
+
+                overviewRequestedOutputControllers.Remove(deviceIndex);
+                overviewRequestedSpeakerOutputStates.Remove(deviceIndex);
+                overviewRequestedAudioSourceIds.Remove(deviceIndex);
+                overviewAudioHapticsOverrideReleaseRequests.Remove(
+                    deviceIndex);
+
+                ProfileEntity savedProfile = profileListHolder.ProfileListCol
+                    .SingleOrDefault(item => item.Name == profileName);
+                if (requiresProfileReload)
                 {
-                    Global.SaveProfile(deviceIndex, profileName);
-                    if (requiresProfileReload)
+                    if (savedProfile != null)
+                    {
+                        savedProfile.FireSaved();
+                    }
+                    else
                     {
                         Mapping.RequestRegularProfileReload(deviceIndex, false,
                             App.rootHub);

@@ -27,17 +27,20 @@ namespace DS4Windows
             MMDeviceCollection endpoints = enumerator.EnumerateAudioEndPoints(
                 DataFlow.Render, DeviceState.Active);
             MMDevice selected = null;
+            float selectedPeak = -1.0f;
             foreach (MMDevice endpoint in endpoints)
             {
                 try
                 {
-                    if (!HasExclusiveTargetSession(endpoint, targetRoot))
+                    if (!TryGetExclusiveTargetPeak(endpoint, targetRoot,
+                            out float targetPeak) ||
+                        targetPeak <= selectedPeak)
                     {
                         continue;
                     }
 
                     selected = endpoint;
-                    break;
+                    selectedPeak = targetPeak;
                 }
                 catch
                 {
@@ -149,9 +152,10 @@ namespace DS4Windows
             return audible;
         }
 
-        private static bool HasExclusiveTargetSession(MMDevice endpoint,
-            int targetRoot)
+        private static bool TryGetExclusiveTargetPeak(MMDevice endpoint,
+            int targetRoot, out float targetPeak)
         {
+            targetPeak = 0.0f;
             AudioSessionManager manager = endpoint.AudioSessionManager;
             try
             {
@@ -179,6 +183,8 @@ namespace DS4Windows
                     if (sessionRoot == targetRoot)
                     {
                         targetActive = true;
+                        targetPeak = Math.Max(targetPeak,
+                            session.AudioMeterInformation.MasterPeakValue);
                     }
                     else
                     {

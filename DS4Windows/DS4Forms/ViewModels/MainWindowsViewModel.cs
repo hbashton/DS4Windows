@@ -46,14 +46,27 @@ namespace DS4WinWPF.DS4Forms.ViewModels
     public sealed class QuickProfileSettingChangedEventArgs : EventArgs
     {
         public QuickProfileSettingChangedEventArgs(int deviceIndex,
-            bool requiresProfileReload)
+            bool requiresProfileReload,
+            OutContType requestedOutputController = OutContType.None,
+            bool? requestedSpeakerOutputEnabled = null,
+            string requestedAudioSourceId = null,
+            bool releaseAudioHapticsSpeakerOverride = false)
         {
             DeviceIndex = deviceIndex;
             RequiresProfileReload = requiresProfileReload;
+            RequestedOutputController = requestedOutputController.Normalize();
+            RequestedSpeakerOutputEnabled = requestedSpeakerOutputEnabled;
+            RequestedAudioSourceId = requestedAudioSourceId;
+            ReleaseAudioHapticsSpeakerOverride =
+                releaseAudioHapticsSpeakerOverride;
         }
 
         public int DeviceIndex { get; }
         public bool RequiresProfileReload { get; }
+        public OutContType RequestedOutputController { get; }
+        public bool? RequestedSpeakerOutputEnabled { get; }
+        public string RequestedAudioSourceId { get; }
+        public bool ReleaseAudioHapticsSpeakerOverride { get; }
     }
 
     public class MainWindowsViewModel
@@ -250,7 +263,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 SelectedOutputControllerNameChanged?.Invoke(this, EventArgs.Empty);
                 RaiseMicrophoneCapabilityChanged();
                 RaiseQuickProfileSettingChanged(deviceIndex,
-                    requiresProfileReload: true);
+                    requiresProfileReload: true,
+                    requestedOutputController: value);
             }
         }
 
@@ -332,7 +346,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 int deviceIndex = selectedController.DevIndex;
                 Global.DualSenseEnableSpeakerOutput[deviceIndex] = value;
                 SpeakerOutputEnabledChanged?.Invoke(this, EventArgs.Empty);
-                RaiseQuickProfileSettingChanged(deviceIndex);
+                RaiseQuickProfileSettingChanged(deviceIndex,
+                    requestedSpeakerOutputEnabled: value);
             }
         }
 
@@ -453,7 +468,9 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
                 ControllerAudioSourceIdChanged?.Invoke(this,
                     EventArgs.Empty);
-                RaiseQuickProfileSettingChanged(deviceIndex);
+                RaiseQuickProfileSettingChanged(deviceIndex,
+                    requestedAudioSourceId: normalized,
+                    releaseAudioHapticsSpeakerOverride: releasedOverride);
             }
         }
 
@@ -916,11 +933,17 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         }
 
         private void RaiseQuickProfileSettingChanged(int deviceIndex,
-            bool requiresProfileReload = false)
+            bool requiresProfileReload = false,
+            OutContType requestedOutputController = OutContType.None,
+            bool? requestedSpeakerOutputEnabled = null,
+            string requestedAudioSourceId = null,
+            bool releaseAudioHapticsSpeakerOverride = false)
         {
             QuickProfileSettingChanged?.Invoke(this,
                 new QuickProfileSettingChangedEventArgs(deviceIndex,
-                    requiresProfileReload));
+                    requiresProfileReload, requestedOutputController,
+                    requestedSpeakerOutputEnabled, requestedAudioSourceId,
+                    releaseAudioHapticsSpeakerOverride));
         }
 
         private static int ByteToPercent(byte value) =>

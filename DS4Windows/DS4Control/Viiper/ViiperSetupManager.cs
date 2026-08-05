@@ -159,6 +159,8 @@ namespace DS4Windows
             "--terminate-foreign-viiper";
         private const string RegisterViiperTaskArgument =
             "--register-viiper-startup-task";
+        private const string RemoveViiperTaskArgument =
+            "--remove-viiper-startup-task";
         private const string ViiperStartupTaskName = "RunVIIPER";
         private const int ForeignViiperHelperTimeoutMilliseconds = 15000;
         private const string UsbipRelativePath = @"USBip\usbip.exe";
@@ -256,8 +258,10 @@ namespace DS4Windows
             // exact VIIPER executable bundled with this DS4Windows build.
             bool viiperPackageCurrent = FilesHaveSameSha256(viiperPath,
                 bundledViiperPath);
-            bool viiperStartupTaskReady = IsViiperStartupTaskValid(
-                viiperPath, out _);
+            bool startupEnabled = DS4WinWPF.StartupMethods.
+                IsRunAtStartupEnabled();
+            bool viiperStartupTaskReady = !startupEnabled ||
+                IsViiperStartupTaskValid(viiperPath, out _);
             bool canonicalViiperRunning;
             string viiperProcessConflictMessage;
             bool viiperProcessOwnershipReady = InspectViiperProcessOwnership(
@@ -425,6 +429,12 @@ namespace DS4Windows
 
         public static void RefreshSelectedStartupTaskOnLaunch()
         {
+            if (!DS4WinWPF.StartupMethods.IsRunAtStartupEnabled())
+            {
+                RemoveViiperStartupTask(requestElevation: true);
+                return;
+            }
+
             string canonicalPath = GetCanonicalViiperExePath();
             string selectedPath = ResolveRuntimeViiperPath(canonicalPath,
                 Global.PreferredViiperPath);
@@ -493,6 +503,8 @@ namespace DS4Windows
                 WindowsIdentity identity = WindowsIdentity.GetCurrent();
                 string targetUserSid = identity.User?.Value ?? string.Empty;
                 string targetUserName = identity.Name ?? string.Empty;
+                bool runAtStartup = DS4WinWPF.StartupMethods.
+                    IsRunAtStartupEnabled();
 
                 if (string.IsNullOrWhiteSpace(targetLocalAppData) ||
                     string.IsNullOrWhiteSpace(targetUserSid) ||
@@ -525,6 +537,10 @@ namespace DS4Windows
                 if (portableInstallation)
                 {
                     startInfo.ArgumentList.Add("--portable-installation");
+                }
+                if (!runAtStartup)
+                {
+                    startInfo.ArgumentList.Add("--skip-startup-tasks");
                 }
                 Process process = Process.Start(startInfo);
                 if (process == null)
@@ -591,7 +607,7 @@ namespace DS4Windows
                 {
                     Interlocked.Exchange(ref promptShownThisSession, 0);
                     AppLogger.LogToGui(
-                        "SUCCESSFUL: VIIPER setup finished successfully. The managed startup task owns the DS4Windows restart.",
+                        "SUCCESSFUL: VIIPER setup finished successfully. DS4Windows restart was requested.",
                         false, false);
                     return;
                 }
@@ -628,34 +644,51 @@ namespace DS4Windows
             out int exitCode)
         {
             exitCode = 1;
-            if (args == null || args.Length != 3 ||
-                !string.Equals(args[0], RegisterViiperTaskArgument,
-                    StringComparison.Ordinal))
+            bool register = args != null && args.Length == 3 &&
+                string.Equals(args[0], RegisterViiperTaskArgument,
+                    StringComparison.Ordinal);
+            bool remove = args != null && args.Length == 2 &&
+                string.Equals(args[0], RemoveViiperTaskArgument,
+                    StringComparison.Ordinal);
+            if (!register && !remove)
             {
                 return false;
             }
 
             try
             {
-                string viiperPath = Encoding.UTF8.GetString(
-                    Convert.FromBase64String(args[1]));
                 string targetUserSid = Encoding.UTF8.GetString(
-                    Convert.FromBase64String(args[2]));
+                    Convert.FromBase64String(args[register ? 2 : 1]));
                 string currentUserSid = WindowsIdentity.GetCurrent().User?.
                     Value;
                 if (!Global.IsAdministrator() ||
                     !string.Equals(currentUserSid, targetUserSid,
-                        StringComparison.OrdinalIgnoreCase) ||
-                    !IsSelectableViiperExecutable(viiperPath))
+                        StringComparison.OrdinalIgnoreCase))
                 {
                     exitCode = 5;
                     return true;
                 }
 
-                RegisterViiperStartupTask(viiperPath);
-                exitCode = IsViiperStartupTaskValid(viiperPath, out _)
-                    ? 0
-                    : 1;
+                if (remove)
+                {
+                    DeleteViiperStartupTask();
+                    exitCode = ViiperStartupTaskExists() ? 1 : 0;
+                }
+                else
+                {
+                    string viiperPath = Encoding.UTF8.GetString(
+                        Convert.FromBase64String(args[1]));
+                    if (!IsSelectableViiperExecutable(viiperPath))
+                    {
+                        exitCode = 5;
+                        return true;
+                    }
+
+                    RegisterViiperStartupTask(viiperPath);
+                    exitCode = IsViiperStartupTaskValid(viiperPath, out _)
+                        ? 0
+                        : 1;
+                }
             }
             catch (FormatException)
             {
@@ -703,6 +736,9 @@ namespace DS4Windows
                     "--package-extras");
                 bool portableInstallation = Array.Exists(args, argument =>
                     string.Equals(argument, "--portable-installation",
+                        StringComparison.Ordinal));
+                bool skipStartupTasks = Array.Exists(args, argument =>
+                    string.Equals(argument, "--skip-startup-tasks",
                         StringComparison.Ordinal));
 
                 string setupRoot = Path.Combine(
@@ -771,6 +807,10 @@ namespace DS4Windows
                     if (portableInstallation)
                     {
                         startInfo.ArgumentList.Add("-PortableInstallation");
+                    }
+                    if (skipStartupTasks)
+                    {
+                        startInfo.ArgumentList.Add("-SkipStartupTasks");
                     }
 
                     using Process process = Process.Start(startInfo);
@@ -1291,7 +1331,8 @@ namespace DS4Windows
                 return false;
             }
 
-            if (!EnsureViiperStartupTask(viiperPath,
+            if (DS4WinWPF.StartupMethods.IsRunAtStartupEnabled() &&
+                !EnsureViiperStartupTask(viiperPath,
                     requestElevation: true))
             {
                 ShowInstallerMessage(owner,
@@ -1336,8 +1377,10 @@ namespace DS4Windows
                     true);
             }
 
-            bool taskReady = EnsureViiperStartupTask(viiperPath,
-                requestElevation: true);
+            bool startupEnabled = DS4WinWPF.StartupMethods.
+                IsRunAtStartupEnabled();
+            bool taskReady = !startupEnabled || EnsureViiperStartupTask(
+                viiperPath, requestElevation: true);
             if (!taskReady)
             {
                 ShowInstallerMessage(owner,
@@ -1414,6 +1457,84 @@ namespace DS4Windows
             catch
             {
                 return false;
+            }
+        }
+
+        private static bool RemoveViiperStartupTask(bool requestElevation)
+        {
+            if (!ViiperStartupTaskExists())
+            {
+                return true;
+            }
+
+            try
+            {
+                if (Global.IsAdministrator())
+                {
+                    DeleteViiperStartupTask();
+                    return !ViiperStartupTaskExists();
+                }
+
+                if (!requestElevation ||
+                    string.IsNullOrWhiteSpace(Global.exelocation))
+                {
+                    return false;
+                }
+
+                string currentUserSid = WindowsIdentity.GetCurrent().User?.
+                    Value;
+                if (string.IsNullOrWhiteSpace(currentUserSid))
+                {
+                    return false;
+                }
+
+                ProcessStartInfo startInfo = new ProcessStartInfo
+                {
+                    FileName = Global.exelocation,
+                    UseShellExecute = true,
+                    Verb = "runas",
+                };
+                startInfo.ArgumentList.Add(RemoveViiperTaskArgument);
+                startInfo.ArgumentList.Add(Convert.ToBase64String(
+                    Encoding.UTF8.GetBytes(currentUserSid)));
+                using Process process = Process.Start(startInfo);
+                return process != null && process.WaitForExit(15000) &&
+                    process.ExitCode == 0 && !ViiperStartupTaskExists();
+            }
+            catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
+            {
+                return false;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool ViiperStartupTaskExists()
+        {
+            try
+            {
+                using TaskService service = new TaskService();
+                using Microsoft.Win32.TaskScheduler.Task task =
+                    service.GetTask(@"\" + ViiperStartupTaskName);
+                return task != null;
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        private static void DeleteViiperStartupTask()
+        {
+            using TaskService service = new TaskService();
+            Microsoft.Win32.TaskScheduler.Task task =
+                service.GetTask(@"\" + ViiperStartupTaskName);
+            if (task != null)
+            {
+                task.Dispose();
+                service.RootFolder.DeleteTask(ViiperStartupTaskName);
             }
         }
 
@@ -2299,26 +2420,52 @@ namespace DS4Windows
         {
             try
             {
-                // Setup owns one verified, highest-privilege RunVIIPER task.
-                // Never fall back to launching an arbitrary or unelevated
-                // backend process from DS4Windows.
-                if (!IsViiperStartupTaskValid(viiperPath, out _))
+                // When startup is enabled, use its verified elevated task.
+                // With startup explicitly disabled, launch the already hash-
+                // verified selected backend once for this interactive session.
+                bool taskReady = IsViiperStartupTaskValid(viiperPath,
+                    out _);
+                if (!taskReady && DS4WinWPF.StartupMethods.
+                        IsRunAtStartupEnabled())
                 {
                     return false;
                 }
 
-                ProcessStartInfo startInfo = new ProcessStartInfo
+                ProcessStartInfo startInfo;
+                if (taskReady)
                 {
-                    FileName = Path.Combine(Environment.SystemDirectory,
-                        "schtasks.exe"),
-                    Arguments = $"/Run /TN \"\\{ViiperStartupTaskName}\"",
-                    CreateNoWindow = true,
-                    WindowStyle = ProcessWindowStyle.Hidden,
-                    UseShellExecute = false,
-                };
+                    startInfo = new ProcessStartInfo
+                    {
+                        FileName = Path.Combine(Environment.SystemDirectory,
+                            "schtasks.exe"),
+                        Arguments = $"/Run /TN \"\\{ViiperStartupTaskName}\"",
+                        CreateNoWindow = true,
+                        WindowStyle = ProcessWindowStyle.Hidden,
+                        UseShellExecute = false,
+                    };
+                }
+                else
+                {
+                    startInfo = new ProcessStartInfo
+                    {
+                        FileName = Path.GetFullPath(viiperPath),
+                        Arguments = "server",
+                        WorkingDirectory = Path.GetDirectoryName(
+                            Path.GetFullPath(viiperPath)),
+                        UseShellExecute = true,
+                        Verb = Global.IsAdministrator() ? string.Empty :
+                            "runas",
+                        WindowStyle = ProcessWindowStyle.Hidden,
+                    };
+                }
                 using Process process = Process.Start(startInfo);
-                if (process == null || !process.WaitForExit(5000) ||
-                    process.ExitCode != 0)
+                if (process == null)
+                {
+                    return false;
+                }
+
+                if (taskReady && (!process.WaitForExit(5000) ||
+                    process.ExitCode != 0))
                 {
                     return false;
                 }

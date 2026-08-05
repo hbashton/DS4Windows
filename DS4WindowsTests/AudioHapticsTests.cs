@@ -10,6 +10,27 @@ namespace DS4WindowsTests
     public class AudioHapticsTests
     {
         [TestMethod]
+        public void BluetoothHapticsCarrierIsIndependentFromAudibleSpeaker()
+        {
+            Assert.IsTrue(ControlService.RequiresDualSenseBluetoothMediaCarrier(
+                ConnectionType.BT, speakerEnabled: false,
+                audioHapticsEnabled: true, OutContType.X360));
+            Assert.IsTrue(ControlService.RequiresDualSenseBluetoothMediaCarrier(
+                ConnectionType.BT, speakerEnabled: false,
+                audioHapticsEnabled: false, OutContType.ViiperDualSense));
+            Assert.IsTrue(ControlService.RequiresDualSenseBluetoothMediaCarrier(
+                ConnectionType.BT, speakerEnabled: false,
+                audioHapticsEnabled: false,
+                OutContType.ViiperDualSenseEdge));
+            Assert.IsFalse(ControlService.RequiresDualSenseBluetoothMediaCarrier(
+                ConnectionType.BT, speakerEnabled: false,
+                audioHapticsEnabled: false, OutContType.X360));
+            Assert.IsFalse(ControlService.RequiresDualSenseBluetoothMediaCarrier(
+                ConnectionType.USB, speakerEnabled: false,
+                audioHapticsEnabled: true, OutContType.ViiperDualSense));
+        }
+
+        [TestMethod]
         public void SustainedAudioProducesBoundedHapticOutput()
         {
             AudioHapticsProcessor processor = new AudioHapticsProcessor(

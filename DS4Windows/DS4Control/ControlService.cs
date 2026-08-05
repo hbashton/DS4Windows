@@ -1699,10 +1699,16 @@ namespace DS4Windows
             }
         }
 
-        public void PluginOutDev(int index, DS4Device device)
+        public void PluginOutDev(int index, DS4Device device,
+            OutContType requestedContType = OutContType.None)
         {
-            OutContType contType = Global.OutContType[index].Normalize();
-            Global.OutContType[index] = contType;
+            OutContType contType = requestedContType == OutContType.None ?
+                Global.OutContType[index].Normalize() :
+                requestedContType.Normalize();
+            if (requestedContType == OutContType.None)
+            {
+                Global.OutContType[index] = contType;
+            }
             Global.outDevTypeTemp[index] = Global.outDevTypeTemp[index].Normalize();
             StartupDiag($"PluginOutDev enter index={index} contType={contType} useDInputOnly={useDInputOnly[index]} profileDInputOnly={getDInputOnly(index)}");
 
@@ -2788,12 +2794,25 @@ namespace DS4Windows
                 }
                 dualsense.HapticPowerLevel = DualSenseHapticPowerLevel[ind];
                 bool speakerEnabled = IsControllerSpeakerEnabled(ind);
+                bool audioHapticsEnabled =
+                    Global.store.audioHapticsSettings[ind]?.Enabled == true;
+                bool silentHapticsCarrier =
+                    RequiresDualSenseBluetoothMediaCarrier(
+                        dualsense.ConnectionType, speakerEnabled,
+                        audioHapticsEnabled, playStationFeatureOutputType);
+                bool mediaCarrierEnabled = speakerEnabled ||
+                    silentHapticsCarrier;
                 string speakerCaptureEndpointId =
                     GetControllerSpeakerCaptureEndpointId(ind);
-                dualsense.EnableSpeakerOutput = speakerEnabled;
-                dualsense.SpeakerVolume = DualSenseSpeakerVolume[ind];
-                dualsense.HeadphoneVolume = DualSenseHeadphoneVolume[ind];
-                bool headsetOnlyAudio = IsControllerHeadsetOnlyAudio(ind);
+                byte activeSpeakerVolume = speakerEnabled ?
+                    DualSenseSpeakerVolume[ind] : (byte)0;
+                byte activeHeadphoneVolume = speakerEnabled ?
+                    DualSenseHeadphoneVolume[ind] : (byte)0;
+                dualsense.EnableSpeakerOutput = mediaCarrierEnabled;
+                dualsense.SpeakerVolume = activeSpeakerVolume;
+                dualsense.HeadphoneVolume = activeHeadphoneVolume;
+                bool headsetOnlyAudio = speakerEnabled &&
+                    IsControllerHeadsetOnlyAudio(ind);
                 bool headsetOutputRouteChanged =
                     dualsense.HeadsetOnlyAudio != headsetOnlyAudio;
                 dualsense.HeadsetOnlyAudio = headsetOnlyAudio;
@@ -2809,15 +2828,24 @@ namespace DS4Windows
                 dualsense.MicrophoneVolume = useViiperControllerMicrophone ?
                     byte.MaxValue : DualSenseMicrophoneVolume[ind];
 
-                if (speakerEnabled)
+                if (mediaCarrierEnabled)
                 {
-                    dualSenseAudioPassthrough.Start(ind, dualsense, DualSenseSpeakerVolume[ind],
+                    // Audio Haptics and native game haptics use the same
+                    // proven continuous 0x36 media carrier as speaker audio.
+                    // Turning off audible speaker streaming therefore mutes
+                    // this carrier at the controller instead of disposing it.
+                    // The capture/encoder remains clocked, while a zero
+                    // hardware volume guarantees that no speaker or AUX audio
+                    // leaks from the disabled UI setting.
+                    dualSenseAudioPassthrough.Start(ind, dualsense,
+                        activeSpeakerVolume,
                         (DualSenseSpeakerCompression)Global.DualSenseSpeakerCompression[ind],
                         Global.DualSenseSpeakerBassBoost[ind],
                         speakerCaptureEndpointId,
                         DualSenseAudioSpeakerEndpointId[ind],
                         playStationFeatureOutputType,
-                        playStationFeatureOutput);
+                        playStationFeatureOutput,
+                        () => GetPlayStationFeatureOutput(ind));
 
                     // Speaker/AUX selection is an atomic state update on the
                     // active combined transport. Restarting the capture and
@@ -2889,7 +2917,8 @@ namespace DS4Windows
                         speakerCaptureEndpointId,
                         playStationFeatureOutputType,
                         playStationFeatureOutput,
-                        headsetOnlyAudio);
+                        headsetOnlyAudio,
+                        () => GetPlayStationFeatureOutput(ind));
                 }
                 else
                 {
@@ -2941,6 +2970,21 @@ namespace DS4Windows
         private static bool IsControllerSpeakerEnabled(int index) =>
             Global.DualSenseEnableSpeakerOutput[index] ||
             IsAudioHapticsSpeakerOverrideActive(index);
+
+        internal static bool RequiresDualSenseBluetoothMediaCarrier(
+            ConnectionType connectionType, bool speakerEnabled,
+            bool audioHapticsEnabled, OutContType outputType)
+        {
+            if (connectionType != ConnectionType.BT || speakerEnabled)
+            {
+                return false;
+            }
+
+            outputType = outputType.Normalize();
+            return audioHapticsEnabled ||
+                outputType == OutContType.ViiperDualSense ||
+                outputType == OutContType.ViiperDualSenseEdge;
+        }
 
         private static bool IsControllerHeadsetOnlyAudio(int index)
         {

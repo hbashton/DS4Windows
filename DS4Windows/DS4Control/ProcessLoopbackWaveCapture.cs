@@ -828,6 +828,7 @@ namespace DS4Windows
             private int loggedPollingRecovery;
             private int captureFailureSignaled;
             private long lastProcessedRouteCallbackTimestamp;
+            private long processedRouteMovedTimestamp;
 
             public ProcessCaptureSession(int processId, WaveFormat waveFormat,
                 string processedRouteEndpointId, string registryKey)
@@ -1124,14 +1125,44 @@ namespace DS4Windows
                     long now = Stopwatch.GetTimestamp();
                     long last = Volatile.Read(
                         ref lastProcessedRouteCallbackTimestamp);
-                    if (!ShouldRecoverProcessedRoute(last, now,
-                            IsProcessedRouteAudiblyActive()))
+                    bool currentRouteAudible =
+                        IsProcessedRouteAudiblyActive();
+                    bool callbackStalled = ShouldRecoverProcessedRoute(last,
+                        now, currentRouteAudible);
+
+                    // Audio routers and browsers can move an active session
+                    // to another endpoint while the old endpoint continues
+                    // returning silent callbacks. Callback freshness alone
+                    // therefore cannot prove that this is still the selected
+                    // app's live waveform. Require a short, stable relocation
+                    // before reacquiring the best exclusive route.
+                    bool movedElsewhere = !currentRouteAudible &&
+                        ProcessedAppAudioRouteResolver
+                            .IsTargetAudiblyActiveAnywhere(ProcessId);
+                    if (movedElsewhere)
+                    {
+                        if (processedRouteMovedTimestamp == 0)
+                        {
+                            processedRouteMovedTimestamp = now;
+                        }
+                    }
+                    else
+                    {
+                        processedRouteMovedTimestamp = 0;
+                    }
+                    bool routeMoved = processedRouteMovedTimestamp > 0 &&
+                        now - processedRouteMovedTimestamp >=
+                            Stopwatch.Frequency *
+                                ProcessedRouteStallMilliseconds / 1000;
+                    if (!callbackStalled && !routeMoved)
                     {
                         continue;
                     }
 
                     SignalProcessedRouteStopped(new InvalidOperationException(
-                        "The selected application's audio route stopped delivering loopback samples while its session remained audible."));
+                        routeMoved
+                            ? "The selected application's live audio moved to another render route."
+                            : "The selected application's audio route stopped delivering loopback samples while its session remained audible."));
                     return;
                 }
             }

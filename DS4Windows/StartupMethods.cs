@@ -144,6 +144,25 @@ namespace DS4WinWPF
             return tasker != null && TaskTargetsCurrentExecutable(tasker);
         }
 
+        public static bool IsRunAtStartupEnabled()
+        {
+            if (HasStartProgEntry())
+            {
+                return true;
+            }
+
+            try
+            {
+                return HasTaskEntry();
+            }
+            catch
+            {
+                // A Task Scheduler failure must not be interpreted as an
+                // affirmative startup preference by setup.
+                return false;
+            }
+        }
+
         public static void WriteStartProgEntry()
         {
             Type t = Type.GetTypeFromCLSID(new Guid("72C24DD5-D70A-438B-8A42-98424B88AFB8")); // Windows Script Host Shell Object

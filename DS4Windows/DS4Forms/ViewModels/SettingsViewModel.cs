@@ -646,6 +646,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             {
                 StartupMethods.DeleteStartProgEntry();
                 StartupMethods.DeleteTaskEntry();
+                ViiperSetupManager.
+                    RefreshSelectedStartupTaskAfterRunAtStartupChange();
             }
         }
 

@@ -10830,6 +10830,7 @@ namespace DS4Windows
         {
             DS4Device tempDev = control.DS4Controllers[device];
             OutContType oldContType = Global.activeOutDevType[device];
+            OutContType requestedContType = outputDevType[device].Normalize();
             if (tempDev != null && tempDev.isSynced())
             {
                 tempDev.queueEvent(() =>
@@ -10838,12 +10839,24 @@ namespace DS4Windows
                     //tempDev.setBTPollRate(btPollRate[device]);
                     if (xinputStatus && tempDev.PrimaryDevice)
                     {
+                        // This callback runs on the controller queue after the
+                        // profile loader returns. A newer quick-setting change
+                        // may already have superseded it; never let an old
+                        // callback unplug or recreate the newly requested pad.
+                        if (outputDevType[device].Normalize() !=
+                            requestedContType)
+                        {
+                            ControlService.StartupDiag(
+                                $"Profile output transition skipped stale index={device} requested={requestedContType} current={outputDevType[device].Normalize()}");
+                            return;
+                        }
+
                         if (xinputPlug)
                         {
                             bool shouldPlugin = !dinputOnly[device] && tempDev.isSynced();
                             try
                             {
-                                ControlService.StartupDiag($"Profile output transition begin index={device} oldType={oldContType} newType={outputDevType[device]}");
+                                ControlService.StartupDiag($"Profile output transition begin index={device} oldType={oldContType} newType={requestedContType}");
                                 OutputDevice tempOutDev = control.outputDevices[device];
                                 if (tempOutDev != null)
                                 {
@@ -10862,10 +10875,18 @@ namespace DS4Windows
                             {
                                 if (shouldPlugin)
                                 {
-                                    ControlService.StartupDiag($"Profile output transition plugin begin index={device} type={outputDevType[device]}");
+                                    if (outputDevType[device].Normalize() !=
+                                        requestedContType)
+                                    {
+                                        ControlService.StartupDiag(
+                                            $"Profile output transition plug skipped stale index={device} requested={requestedContType} current={outputDevType[device].Normalize()}");
+                                        return;
+                                    }
+                                    ControlService.StartupDiag($"Profile output transition plugin begin index={device} type={requestedContType}");
                                     Global.useDInputOnly[device] = true;
-                                    control.PluginOutDev(device, tempDev);
-                                    ControlService.StartupDiag($"Profile output transition plugin end index={device} type={outputDevType[device]}");
+                                    control.PluginOutDev(device, tempDev,
+                                        requestedContType);
+                                    ControlService.StartupDiag($"Profile output transition plugin end index={device} type={requestedContType}");
                                 }
                                 else
                                 {

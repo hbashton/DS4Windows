@@ -54,11 +54,10 @@
             <EventSetter Event="PreviewMouseWheel"
                          Handler="ComboBox_PreviewMouseWheel" />
             <Setter Property="Width" Value="Auto" />
-            <!-- Keep the chrome on whole device pixels at common Windows DPI
-                 scales. 38 DIP becomes 47.5 px at 125%, which clipped the
-                 lower one-pixel border and rounded corners. -->
-            <Setter Property="Height" Value="40" />
-            <Setter Property="MinHeight" Value="40" />
+            <!-- The shared template is designed around 42 DIP. Compressing it
+                 here clips the lower border/content at fractional DPI. -->
+            <Setter Property="Height" Value="42" />
+            <Setter Property="MinHeight" Value="42" />
             <Setter Property="SnapsToDevicePixels" Value="True" />
             <Setter Property="UseLayoutRounding" Value="True" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />

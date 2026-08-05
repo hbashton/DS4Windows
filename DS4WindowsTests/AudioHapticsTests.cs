@@ -3,12 +3,44 @@ using System.IO;
 using System.Xml.Serialization;
 using DS4Windows;
 using DS4WinWPF.DS4Control.DTOXml;
+using DS4WinWPF.DS4Forms.ViewModels;
 
 namespace DS4WindowsTests
 {
     [TestClass]
     public class AudioHapticsTests
     {
+        [TestMethod]
+        public void AutomaticGameAudioLabelUsesSelectedVirtualEndpoint()
+        {
+            var endpoints = new List<AudioEndpointSnapshot>
+            {
+                new("Speakers (Wireless Controller)", "ds4", true,
+                    ControllerAudioEndpointKind.DualShock4, 7),
+                new("Speakers (DualSense Wireless Controller)", "ds5", true,
+                    ControllerAudioEndpointKind.DualSense, 9),
+            };
+
+            string label = AudioEndpointChoiceCache
+                .BuildAutomaticControllerAudioName(
+                    OutContType.ViiperDualSense, 9, endpoints);
+
+            Assert.AreEqual(
+                "Game Audio (Speakers (DualSense Wireless Controller))",
+                label);
+        }
+
+        [TestMethod]
+        public void AutomaticGameAudioLabelFallsBackBeforeEndpointExists()
+        {
+            string label = AudioEndpointChoiceCache
+                .BuildAutomaticControllerAudioName(
+                    OutContType.ViiperDualSense, -1,
+                    Array.Empty<AudioEndpointSnapshot>());
+
+            Assert.AreEqual("Game Audio (virtual controller endpoint)", label);
+        }
+
         [TestMethod]
         public void BluetoothHapticsCarrierIsIndependentFromAudibleSpeaker()
         {
@@ -480,6 +512,24 @@ namespace DS4WindowsTests
             Assert.IsTrue(ProcessLoopbackWaveCapture
                 .ShouldRecoverProcessedRoute(
                     100, 100 + threshold, targetRouteAudible: true));
+        }
+
+        [TestMethod]
+        public void ProcessLoopbackRecoversFromMissingPacketsEvenWhenSilent()
+        {
+            long threshold = Stopwatch.Frequency *
+                ProcessLoopbackWaveCapture.ProcessLoopbackStallMilliseconds /
+                1000;
+
+            Assert.IsFalse(ProcessLoopbackWaveCapture
+                .ShouldRecoverProcessLoopback(100,
+                    100 + threshold - 1));
+            Assert.IsTrue(ProcessLoopbackWaveCapture
+                .ShouldRecoverProcessLoopback(100,
+                    100 + threshold));
+            Assert.IsFalse(ProcessLoopbackWaveCapture
+                .ShouldRecoverProcessLoopback(0,
+                    100 + threshold));
         }
 
         [TestMethod]

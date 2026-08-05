@@ -58,7 +58,7 @@
     <Chain>
       <ExePackage
           Id="CloseRunningApplications"
-          CacheId="DS4WindowsSetupActionsPreflight"
+          CacheId="DS4WindowsSetupActionsPreflight-$(var.SetupActionsHash)"
           Name="DS4Windows.SetupActions.Preflight.exe"
           SourceFile="$(var.SetupActionsPath)"
           PerMachine="yes"
@@ -80,11 +80,11 @@
 
       <ExePackage
           Id="ViiperUsbipSetup"
-          CacheId="DS4WindowsSetupActionsInfrastructure"
+          CacheId="DS4WindowsSetupActionsInfrastructure-$(var.SetupActionsHash)"
           SourceFile="$(var.SetupActionsPath)"
           PerMachine="yes"
           Vital="yes"
-          DetectCondition="InfrastructureInstalled = &quot;VIIPER-0.0.7+USBIP-0.9.7.7&quot; OR ManagedInstallRegistered OR ManagedViiperPresent"
+          DetectCondition="InfrastructureInstalled = &quot;VIIPER-0.0.8+USBIP-0.9.7.7&quot; OR ManagedInstallRegistered OR ManagedViiperPresent"
           InstallArguments="install --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot; --bundle-source &quot;[WixBundleOriginalSource]&quot; --target-user-sid &quot;[TargetUserSid]&quot; --target-user-name &quot;[TargetUserName]&quot; --target-local-appdata &quot;[TargetLocalAppData]&quot; --target-roaming-appdata &quot;[TargetRoamingAppData]&quot;"
           RepairArguments="repair --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot; --bundle-source &quot;[WixBundleOriginalSource]&quot; --target-user-sid &quot;[TargetUserSid]&quot; --target-user-name &quot;[TargetUserName]&quot; --target-local-appdata &quot;[TargetLocalAppData]&quot; --target-roaming-appdata &quot;[TargetRoamingAppData]&quot;"
           UninstallArguments="uninstall --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot;">
@@ -98,7 +98,7 @@
           SourceFile="$(var.ExtrasRoot)\HidHide_1.5.230_x64.exe"
           PerMachine="yes"
           Permanent="yes"
-          Vital="no"
+          Vital="yes"
           DetectCondition="HidHideInstalled"
           InstallCondition="InstallHidHide"
           InstallArguments="/quiet /norestart">
@@ -111,9 +111,27 @@
           Id="FakerInput"
           SourceFile="$(var.ExtrasRoot)\FakerInput_0.1.0_x64.msi"
           Permanent="yes"
-          Vital="no"
+          Vital="yes"
           InstallCondition="InstallFakerInput"
           Visible="no" />
+
+      <!-- Burn removes packages in reverse chain order. Keep a second,
+           install-only invocation of the verified preflight helper at the
+           tail so uninstall quiesces DS4Windows and VIIPER before any owned
+           package is removed. The BA plans exactly one of the two preflights. -->
+      <ExePackage
+          Id="CloseRunningApplicationsForUninstall"
+          CacheId="DS4WindowsSetupActionsUninstallPreflight-$(var.SetupActionsHash)"
+          Name="DS4Windows.SetupActions.UninstallPreflight.exe"
+          SourceFile="$(var.SetupActionsPath)"
+          PerMachine="yes"
+          Permanent="yes"
+          Vital="yes"
+          DetectCondition="0"
+          InstallArguments="preflight">
+        <ExitCode Value="0" Behavior="success" />
+        <ExitCode Behavior="error" />
+      </ExePackage>
     </Chain>
   </Bundle>
 </Wix>

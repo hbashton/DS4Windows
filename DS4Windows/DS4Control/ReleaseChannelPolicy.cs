@@ -11,13 +11,21 @@ namespace DS4Windows
         public const string InstalledReleaseFileName = "DS4Windows.release";
 
         private static readonly Regex prereleaseNameRegex = new(
-            @"(?i)(alpha|beta|preview|pre[- ]?release|prerelease|release candidate|(?:^|[^a-z])rc(?:\d|[^a-z]|$))",
+            @"(?i)(alpha|beta|preview|pre[- ]?release|prerelease|release candidate|viiperrc|(?:^|[^a-z])rc(?:\d|[^a-z]|$))",
             RegexOptions.Compiled);
 
         public static bool IsPrereleaseBuild(string versionText)
         {
             return !string.IsNullOrWhiteSpace(versionText) &&
                 prereleaseNameRegex.IsMatch(versionText);
+        }
+
+        public static bool IsPrereleaseInstall(
+            string versionText,
+            string installedReleaseTag)
+        {
+            return IsPrereleaseBuild(versionText) ||
+                IsPrereleaseBuild(installedReleaseTag);
         }
 
         public static bool IsPrerelease(GithubRelease release)

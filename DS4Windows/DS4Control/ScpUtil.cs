@@ -639,6 +639,8 @@ namespace DS4Windows
         public static string[] tempprofilename = new string[TEST_PROFILE_ITEM_COUNT] { string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty };
         public static bool[] useTempProfile = new bool[TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
         public static bool[] tempprofileDistance = new bool[TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
+        private static readonly long[] profileSwitchRevisions =
+            new long[MAX_DS4_CONTROLLER_COUNT];
         public static bool[] useDInputOnly = new bool[TEST_PROFILE_ITEM_COUNT] { true, true, true, true, true, true, true, true, true };
         public static bool[] linkedProfileCheck = new bool[MAX_DS4_CONTROLLER_COUNT] { false, false, false, false, false, false, false, false };
         public static bool[] touchpadActive = new bool[TEST_PROFILE_ITEM_COUNT] { true, true, true, true, true, true, true, true, true };
@@ -3006,10 +3008,34 @@ namespace DS4Windows
         //public static bool Load() => m_Config.Load();
         public static bool Load() => m_Config.Load();
 
-        public static bool LoadProfile(int device, bool launchprogram, ControlService control,
-            bool xinputChange = true, bool postLoad = true)
+        internal static long BeginProfileSwitchRevision(int device)
         {
-            bool result = m_Config.LoadProfileNew(device, launchprogram, control, "", xinputChange, postLoad);
+            if (device < 0 || device >= MAX_DS4_CONTROLLER_COUNT)
+            {
+                return 0;
+            }
+
+            return Interlocked.Increment(ref profileSwitchRevisions[device]);
+        }
+
+        internal static bool IsCurrentProfileSwitchRevision(int device,
+            long revision)
+        {
+            return device >= 0 && device < MAX_DS4_CONTROLLER_COUNT &&
+                revision > 0 &&
+                Interlocked.Read(ref profileSwitchRevisions[device]) == revision;
+        }
+
+        public static bool LoadProfile(int device, bool launchprogram, ControlService control,
+            bool xinputChange = true, bool postLoad = true,
+            long transitionRevision = 0)
+        {
+            if (transitionRevision <= 0)
+            {
+                transitionRevision = BeginProfileSwitchRevision(device);
+            }
+            bool result = m_Config.LoadProfileNew(device, launchprogram,
+                control, "", xinputChange, postLoad, transitionRevision);
             //bool result = m_Config.LoadProfile(device, launchprogram, control, "", xinputChange, postLoad);
             tempprofilename[device] = string.Empty;
             useTempProfile[device] = false;
@@ -3019,9 +3045,16 @@ namespace DS4Windows
         }
 
         public static bool LoadTempProfile(int device, string name, bool launchprogram,
-            ControlService control, bool xinputChange = true)
+            ControlService control, bool xinputChange = true,
+            long transitionRevision = 0)
         {
-            bool result = m_Config.LoadProfileNew(device, launchprogram, control, Path.Combine(appdatapath, "Profiles", $"{name}.xml"));
+            if (transitionRevision <= 0)
+            {
+                transitionRevision = BeginProfileSwitchRevision(device);
+            }
+            bool result = m_Config.LoadProfileNew(device, launchprogram,
+                control, Path.Combine(appdatapath, "Profiles", $"{name}.xml"),
+                transitionRevision: transitionRevision);
             //bool result = m_Config.LoadProfile(device, launchprogram, control, Path.Combine(appdatapath, "Profiles", $"{name}.xml"));
             if (result)
             {
@@ -3505,29 +3538,11 @@ namespace DS4Windows
             var task = request.Result.Content.ReadFromJsonAsync<GithubRelease[]>();
             task.Wait();
 
-            bool currentBuildIsPrerelease = ReleaseChannelPolicy.IsPrereleaseBuild(
-                Global.exeDisplayVersion);
+            string installedReleaseTag = ReadInstalledReleaseTag();
+            bool currentBuildIsPrerelease = ReleaseChannelPolicy.IsPrereleaseInstall(
+                Global.exeDisplayVersion, installedReleaseTag);
             GithubRelease selectedRelease = ReleaseChannelPolicy.SelectPreferredRelease(
                 task.Result, currentBuildIsPrerelease);
-
-            string installedReleaseTag = string.Empty;
-            string markerPath = Path.Combine(
-                Global.exedirpath,
-                ReleaseChannelPolicy.InstalledReleaseFileName);
-            try
-            {
-                if (File.Exists(markerPath))
-                {
-                    installedReleaseTag = File.ReadAllText(markerPath).Trim();
-                }
-            }
-            catch (IOException)
-            {
-                // A missing marker only means this build predates channel-aware updates.
-            }
-            catch (UnauthorizedAccessException)
-            {
-            }
 
             bool updateAvailable = ReleaseChannelPolicy.ShouldUpdate(
                 selectedRelease,
@@ -3541,6 +3556,28 @@ namespace DS4Windows
             _newerVersionAvailable = updateAvailable;
             releaseTag = _latestReleaseTag;
             return updateAvailable;
+        }
+
+        private static string ReadInstalledReleaseTag()
+        {
+            string markerPath = Path.Combine(
+                Global.exedirpath,
+                ReleaseChannelPolicy.InstalledReleaseFileName);
+            try
+            {
+                return File.Exists(markerPath)
+                    ? File.ReadAllText(markerPath).Trim()
+                    : string.Empty;
+            }
+            catch (IOException)
+            {
+                // A missing marker only means this build predates channel-aware updates.
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+
+            return string.Empty;
         }
 
         // Much more compact and elegant way of checking if there is a new update available than the
@@ -3583,6 +3620,44 @@ namespace DS4Windows
 
         public static async Task<string> GetChangelogMarkdown(bool allVersions = false)
         {
+            StringBuilder sb = new();
+
+            // The Settings changelog asks for all versions. Stable releases
+            // are collected below by numeric version, but release-candidate
+            // tags such as VIIPERRC4.1 intentionally do not map to the app's
+            // 5.x file version. Include the exact running prerelease first so
+            // its release notes are visible from Settings.
+            string installedReleaseTag = ReadInstalledReleaseTag();
+            if (allVersions && ReleaseChannelPolicy.IsPrereleaseInstall(
+                Global.exeDisplayVersion, installedReleaseTag))
+            {
+                string currentReleaseTag = string.IsNullOrWhiteSpace(
+                    installedReleaseTag)
+                    ? Global.exeDisplayVersion
+                    : installedReleaseTag;
+                var request = await App.requestClient.GetAsync(GITHUB_RELEASES_API_URI);
+                if (request.IsSuccessStatusCode)
+                {
+                    GithubRelease[] releases = await request.Content
+                        .ReadFromJsonAsync<GithubRelease[]>();
+                    GithubRelease currentRelease = releases?.FirstOrDefault(release =>
+                        !release.Draft &&
+                        ReleaseChannelPolicy.IsPrerelease(release) &&
+                        string.Equals(release.TagName, currentReleaseTag,
+                            StringComparison.OrdinalIgnoreCase));
+                    string currentChangelog = ParseChangelogString(
+                        currentRelease?.Body);
+                    if (!string.IsNullOrWhiteSpace(currentChangelog))
+                    {
+                        sb.Append("## ");
+                        sb.Append(currentRelease.TagName);
+                        sb.AppendLine();
+                        sb.AppendLine();
+                        sb.Append(currentChangelog);
+                    }
+                }
+            }
+
             if (!allVersions &&
                 ReleaseChannelPolicy.IsPrereleaseBuild(Global.exeDisplayVersion) &&
                 !string.IsNullOrWhiteSpace(_latestReleaseTag))
@@ -3605,8 +3680,6 @@ namespace DS4Windows
             }
 
             var versions = await GetChangelog(allVersions);
-
-            StringBuilder sb = new();
             foreach (var version in versions)
             {
                 var parsedChangelog = ParseChangelogString(version.Value);
@@ -5558,7 +5631,8 @@ namespace DS4Windows
         }
 
         public bool LoadProfileNew(int device, bool launchprogram, ControlService control,
-            string propath = "", bool xinputChange = true, bool postLoad = true)
+            string propath = "", bool xinputChange = true, bool postLoad = true,
+            long transitionRevision = 0)
         {
             bool loaded = true;
 
@@ -5739,7 +5813,8 @@ namespace DS4Windows
                 // options to device instance
                 if (postLoad && device < Global.MAX_DS4_CONTROLLER_COUNT)
                 {
-                    PostLoadSnippet(device, control, xinputStatus, xinputPlug);
+                    PostLoadSnippet(device, control, xinputStatus, xinputPlug,
+                        transitionRevision);
                 }
 
                 // Migration was performed. Save new XML schema in file
@@ -10826,8 +10901,18 @@ namespace DS4Windows
             }
         }
 
-        private void PostLoadSnippet(int device, ControlService control, bool xinputStatus, bool xinputPlug)
+        private void PostLoadSnippet(int device, ControlService control,
+            bool xinputStatus, bool xinputPlug, long transitionRevision = 0)
         {
+            if (transitionRevision > 0 &&
+                !Global.IsCurrentProfileSwitchRevision(device,
+                    transitionRevision))
+            {
+                ControlService.StartupDiag(
+                    $"Profile output transition not queued because revision {transitionRevision} is stale for index={device}");
+                return;
+            }
+
             DS4Device tempDev = control.DS4Controllers[device];
             OutContType oldContType = Global.activeOutDevType[device];
             OutContType requestedContType = outputDevType[device].Normalize();
@@ -10835,6 +10920,15 @@ namespace DS4Windows
             {
                 tempDev.queueEvent(() =>
                 {
+                    if (transitionRevision > 0 &&
+                        !Global.IsCurrentProfileSwitchRevision(device,
+                            transitionRevision))
+                    {
+                        ControlService.StartupDiag(
+                            $"Profile output transition skipped stale revision index={device} revision={transitionRevision}");
+                        return;
+                    }
+
                     //tempDev.setIdleTimeout(idleDisconnectTimeout[device]);
                     //tempDev.setBTPollRate(btPollRate[device]);
                     if (xinputStatus && tempDev.PrimaryDevice)
@@ -10875,6 +10969,14 @@ namespace DS4Windows
                             {
                                 if (shouldPlugin)
                                 {
+                                    if (transitionRevision > 0 &&
+                                        !Global.IsCurrentProfileSwitchRevision(
+                                            device, transitionRevision))
+                                    {
+                                        ControlService.StartupDiag(
+                                            $"Profile output transition plug skipped stale revision index={device} revision={transitionRevision}");
+                                        return;
+                                    }
                                     if (outputDevType[device].Normalize() !=
                                         requestedContType)
                                     {
@@ -10910,7 +11012,12 @@ namespace DS4Windows
                     //tempDev.RumbleAutostopTime = rumbleAutostopTime[device];
                     //tempDev.setRumble(0, 0);
                     //tempDev.LightBarColor = Global.getMainColor(device);
-                    control.CheckProfileOptions(device, tempDev, true);
+                    if (transitionRevision <= 0 ||
+                        Global.IsCurrentProfileSwitchRevision(device,
+                            transitionRevision))
+                    {
+                        control.CheckProfileOptions(device, tempDev, true);
+                    }
                 });
 
                 //Program.rootHub.touchPad[device]?.ResetTrackAccel(trackballFriction[device]);

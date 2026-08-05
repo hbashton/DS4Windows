@@ -27,6 +27,10 @@ namespace DS4Windows.Bootstrapper
         private bool closingProgrammatically;
         private bool applyCompleted;
         private bool failureShown;
+        private bool relatedUpgradeDetected;
+        private string newerRelatedBundleVersion;
+        private bool deferInfrastructureUntilUpgradeCompletes;
+        private bool infrastructureRecoveryPass;
         private Mutex bundleMutex;
         private bool bundleMutexOwned;
 
@@ -42,24 +46,38 @@ namespace DS4Windows.Bootstrapper
         {
             try
             {
-                HookEvents();
-                // Burn restores persisted variables when it resumes after a
-                // package-requested reboot. Preserve the user who started the
-                // transaction instead of replacing that identity with whichever
-                // account happens to sign in first after Windows restarts.
-                if (command.Resume != ResumeType.Reboot)
+                try
                 {
-                    SetInteractiveUserVariables();
-                }
-                window = new InstallerWindow(this);
-                if (command.Display == Display.Full || command.Display == Display.Passive)
-                {
-                    window.Show();
-                }
+                    HookEvents();
+                    // Burn restores persisted variables when it resumes after a
+                    // package-requested reboot. Preserve the user who started the
+                    // transaction instead of replacing that identity with whichever
+                    // account happens to sign in first after Windows restarts.
+                    if (command.Resume != ResumeType.Reboot)
+                    {
+                        SetInteractiveUserVariables();
+                    }
+                    window = new InstallerWindow(this);
+                    if (command.Display == Display.Full || command.Display == Display.Passive)
+                    {
+                        window.Show();
+                    }
 
-                engine.CloseSplashScreen();
-                engine.Detect();
-                Dispatcher.Run();
+                    engine.CloseSplashScreen();
+                    engine.Detect();
+                    Dispatcher.Run();
+                }
+                catch (Exception ex)
+                {
+                    result = 1;
+                    try
+                    {
+                        engine.Log(LogLevel.Error,
+                            "Unhandled bootstrapper failure: " + ex);
+                    }
+                    catch { }
+                    try { engine.CloseSplashScreen(); } catch { }
+                }
             }
             finally
             {
@@ -87,8 +105,26 @@ namespace DS4Windows.Bootstrapper
 
         internal void Begin(LaunchAction action, bool desktopShortcut, bool hidHide, bool fakerInput)
         {
-            if (!EnsureBundleMutex()) return;
+            // The incoming Burn engine owns the transaction mutex for its
+            // complete package chain, including related-bundle removal. An
+            // outgoing bundle launched by that engine must not compete with
+            // its parent for the same lock; all top-level invocations still
+            // have to acquire it before planning anything.
+            var parentOwnedRelatedUninstall =
+                command.Relation == RelationType.Upgrade &&
+                action == LaunchAction.Uninstall;
+            if (!parentOwnedRelatedUninstall && !EnsureBundleMutex()) return;
             plannedAction = action;
+            deferInfrastructureUntilUpgradeCompletes =
+                !infrastructureRecoveryPass &&
+                (action == LaunchAction.Install ||
+                 action == LaunchAction.Repair) &&
+                relatedUpgradeDetected;
+            if (deferInfrastructureUntilUpgradeCompletes)
+            {
+                engine.Log(LogLevel.Standard,
+                    "Deferring shared infrastructure until older related bundles are removed.");
+            }
             engine.SetVariableNumeric("CreateDesktopShortcut", desktopShortcut ? 1 : 0);
             engine.SetVariableNumeric("InstallHidHide", hidHide ? 1 : 0);
             engine.SetVariableNumeric("InstallFakerInput", fakerInput ? 1 : 0);
@@ -99,7 +135,7 @@ namespace DS4Windows.Bootstrapper
             engine.Plan(action);
         }
 
-        private bool EnsureBundleMutex()
+        private bool TryAcquireBundleMutex(int waitMilliseconds)
         {
             if (bundleMutexOwned) return true;
             try
@@ -108,7 +144,7 @@ namespace DS4Windows.Bootstrapper
                     @"Global\DS4Windows-Installer-Transaction");
                 try
                 {
-                    bundleMutexOwned = bundleMutex.WaitOne(0);
+                    bundleMutexOwned = bundleMutex.WaitOne(waitMilliseconds);
                 }
                 catch (AbandonedMutexException)
                 {
@@ -123,9 +159,17 @@ namespace DS4Windows.Bootstrapper
                 bundleMutexOwned = false;
             }
 
-            if (bundleMutexOwned) return true;
-            bundleMutex?.Dispose();
-            bundleMutex = null;
+            if (!bundleMutexOwned)
+            {
+                bundleMutex?.Dispose();
+                bundleMutex = null;
+            }
+            return bundleMutexOwned;
+        }
+
+        private bool EnsureBundleMutex(int waitMilliseconds = 0)
+        {
+            if (TryAcquireBundleMutex(waitMilliseconds)) return true;
             ShowFailure(1618,
                 "Another DS4Windows installation or repair is already running. Close it, then choose Retry.");
             return false;
@@ -147,6 +191,8 @@ namespace DS4Windows.Bootstrapper
             result = 0;
             lastError = null;
             infrastructureFailed = false;
+            infrastructureRecoveryPass = false;
+            deferInfrastructureUntilUpgradeCompletes = false;
             applyCompleted = false;
             failureShown = false;
             engine.Detect();
@@ -302,13 +348,47 @@ namespace DS4Windows.Bootstrapper
             {
                 registrationType = e.RegistrationType;
                 packageStates.Clear();
+                relatedUpgradeDetected = false;
+                newerRelatedBundleVersion = null;
+            };
+            DetectRelatedBundle += (_, e) =>
+            {
+                if (e.RelationType == RelationType.Upgrade)
+                {
+                    var currentVersion = engine.GetVariableVersion(
+                        "WixBundleVersion");
+                    if (IsRelatedBundleNewer(e.Version, currentVersion))
+                    {
+                        newerRelatedBundleVersion = e.Version;
+                    }
+                    else
+                    {
+                        relatedUpgradeDetected = true;
+                    }
+                }
             };
             DetectPackageComplete += (_, e) => packageStates[e.PackageId] = e.State;
             DetectComplete += OnDetectComplete;
             PlanPackageBegin += OnPlanPackageBegin;
+            PlanRelatedBundle += (_, e) =>
+            {
+                if (infrastructureRecoveryPass ||
+                    (command.Relation == RelationType.Upgrade &&
+                     plannedAction == LaunchAction.Uninstall))
+                {
+                    // The incoming primary engine owns related-bundle
+                    // ordering. An outgoing bundle only removes itself, and
+                    // the isolated recovery pass only repairs infrastructure;
+                    // neither may recursively launch sibling bundle engines.
+                    e.State = RequestState.None;
+                }
+            };
             PlanComplete += OnPlanComplete;
             ApplyBegin += (_, __) => Ui(() => window.ShowApplying());
-            ExecutePackageBegin += (_, e) => Ui(() => window.SetCurrentPackage(e.PackageId));
+            ExecutePackageBegin += (_, e) =>
+            {
+                Ui(() => window.SetCurrentPackage(e.PackageId));
+            };
             ExecutePackageComplete += (_, e) =>
             {
                 if (string.Equals(e.PackageId, "ViiperUsbipSetup",
@@ -334,13 +414,44 @@ namespace DS4Windows.Bootstrapper
                 return;
             }
 
+            if (!string.IsNullOrWhiteSpace(newerRelatedBundleVersion))
+            {
+                ShowFailure(1638,
+                    "A newer DS4Windows installer (" +
+                    newerRelatedBundleVersion +
+                    ") is already installed. This older package will not " +
+                    "remove or replace it.");
+                return;
+            }
+
             infrastructureHealthy = InfrastructureProbe.IsHealthy();
+
+            // Burn removes related bundles after it executes this bundle's
+            // package chain. Older DS4Windows bundles own older infrastructure
+            // helpers, so installing VIIPER before those bundles are removed
+            // lets their uninstall overwrite or delete the new helper. Finish
+            // the app upgrade first, then run one isolated infrastructure
+            // recovery pass against the final machine state.
+            if (infrastructureRecoveryPass)
+            {
+                if (!EnsureBundleMutex()) return;
+                plannedAction = LaunchAction.Repair;
+                Ui(() => window.ShowPlanning());
+                engine.Plan(LaunchAction.Repair);
+                return;
+            }
+
             var mode = registrationType == RegistrationType.Full ? InstallerMode.Repair : InstallerMode.Install;
             if (command.Action == LaunchAction.Uninstall)
             {
                 mode = InstallerMode.Uninstall;
             }
             else if (registrationType == RegistrationType.None && packageStates.TryGetValue("DS4WindowsMsi", out var msiState) && msiState == PackageState.Present)
+            {
+                mode = InstallerMode.Update;
+            }
+            else if (registrationType == RegistrationType.None &&
+                     relatedUpgradeDetected)
             {
                 mode = InstallerMode.Update;
             }
@@ -379,10 +490,87 @@ namespace DS4Windows.Bootstrapper
 
         private void OnPlanPackageBegin(object sender, PlanPackageBeginEventArgs e)
         {
-            if (string.Equals(e.PackageId, "ViiperUsbipSetup", StringComparison.OrdinalIgnoreCase) &&
-                plannedAction != LaunchAction.Uninstall && plannedAction != LaunchAction.Layout &&
-                !infrastructureHealthy)
+            if (string.Equals(e.PackageId, "CloseRunningApplications",
+                    StringComparison.OrdinalIgnoreCase))
             {
+                // Quiesce managed processes before forward install/repair
+                // execution. Uninstall uses the dedicated tail preflight
+                // below because Burn unwinds its package chain in reverse.
+                e.State = !infrastructureRecoveryPass &&
+                    (plannedAction == LaunchAction.Install ||
+                     plannedAction == LaunchAction.Repair)
+                    ? RequestState.Present
+                    : RequestState.None;
+                return;
+            }
+
+            if (string.Equals(e.PackageId,
+                    "CloseRunningApplicationsForUninstall",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                // Burn uninstalls in reverse chain order. This tail package
+                // is therefore the first executable action during direct or
+                // related-bundle uninstall, before infrastructure or MSI
+                // ownership is removed.
+                e.State = !infrastructureRecoveryPass &&
+                    plannedAction == LaunchAction.Uninstall
+                    ? RequestState.Present
+                    : RequestState.None;
+                return;
+            }
+
+            if (command.Relation == RelationType.Upgrade &&
+                plannedAction == LaunchAction.Uninstall &&
+                string.Equals(e.PackageId, "ViiperUsbipSetup",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                // Burn is removing this bundle as part of an upgrade. Shared
+                // VIIPER/USB-IP belongs to the incoming bundle, so an outgoing
+                // bundle must never tear it down or replace it with its older
+                // payload. A direct Add/Remove Programs uninstall still runs
+                // the infrastructure uninstaller normally.
+                e.State = RequestState.None;
+                return;
+            }
+
+            if (infrastructureRecoveryPass)
+            {
+                if (string.Equals(e.PackageId, "ViiperUsbipSetup",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    e.State = e.CurrentState == PackageState.Present
+                        ? RequestState.Repair
+                        : RequestState.Present;
+                }
+                else
+                {
+                    // The MSI and optional drivers already completed in the
+                    // primary transaction. The recovery pass is deliberately
+                    // limited to the shared VIIPER/USB-IP contract.
+                    e.State = RequestState.None;
+                }
+                return;
+            }
+
+            if (string.Equals(e.PackageId, "ViiperUsbipSetup",
+                    StringComparison.OrdinalIgnoreCase) &&
+                deferInfrastructureUntilUpgradeCompletes)
+            {
+                e.State = RequestState.None;
+                return;
+            }
+
+            if (string.Equals(e.PackageId, "ViiperUsbipSetup",
+                    StringComparison.OrdinalIgnoreCase) &&
+                (plannedAction == LaunchAction.Install ||
+                 plannedAction == LaunchAction.Repair))
+            {
+                // Preflight intentionally stops both output owners before MSI
+                // mutation. Always run the lightweight infrastructure helper
+                // afterwards so it can verify exact hashes/ABI, restore the
+                // startup contract, and restart the API in this transaction.
+                // The helper itself skips replacement when VIIPER and USB-IP
+                // are already the exact healthy versions.
                 e.State = e.CurrentState == PackageState.Present ? RequestState.Repair : RequestState.Present;
             }
         }
@@ -414,17 +602,49 @@ namespace DS4Windows.Bootstrapper
                 return;
             }
 
+            var restartRequired =
+                e.Restart == ApplyRestart.RestartRequired ||
+                e.Restart == ApplyRestart.RestartInitiated;
+            if (restartRequired)
+            {
+                // Quiet/passive callers must receive the same reboot contract
+                // as the full UI rather than a misleading zero exit code.
+                result = 3010;
+            }
+
+            if (!restartRequired &&
+                (plannedAction == LaunchAction.Install ||
+                 plannedAction == LaunchAction.Repair) &&
+                !InfrastructureProbe.IsHealthy())
+            {
+                if (infrastructureRecoveryPass)
+                {
+                    ShowFailure(1,
+                        "DS4Windows installed, but VIIPER/USB-IP did not pass " +
+                        "the final post-upgrade health check.");
+                    return;
+                }
+
+                infrastructureRecoveryPass = true;
+                applyCompleted = false;
+                infrastructureFailed = false;
+                engine.Log(LogLevel.Standard,
+                    "Starting isolated post-upgrade infrastructure recovery pass.");
+                Ui(() => window.ShowPlanning());
+                engine.Detect();
+                return;
+            }
+
             if (command.Display != Display.Full)
             {
-                Close(e.Status);
+                Close(result);
                 return;
             }
 
             Ui(() =>
             {
-                if (e.Restart == ApplyRestart.RestartRequired || e.Restart == ApplyRestart.RestartInitiated)
+                if (restartRequired)
                 {
-                    result = 3010;
                     window.ShowRestart();
                 }
                 else
@@ -457,6 +677,16 @@ namespace DS4Windows.Bootstrapper
         private static int NormalizeExitCode(int exitCode)
         {
             return (exitCode & unchecked((int)0xFFFF0000)) == unchecked((int)0x80070000) ? exitCode & 0xFFFF : exitCode;
+        }
+
+        internal static bool IsRelatedBundleNewer(string relatedVersion,
+            string currentVersion)
+        {
+            Version related;
+            Version current;
+            return Version.TryParse(relatedVersion, out related) &&
+                   Version.TryParse(currentVersion, out current) &&
+                   related > current;
         }
 
         private static string InstallerActionLogPath => Path.Combine(

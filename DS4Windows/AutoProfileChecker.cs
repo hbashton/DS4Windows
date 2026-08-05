@@ -46,7 +46,7 @@ namespace DS4WinWPF
         private int autoProfileDebugLogLevel = 0;
         private bool turnOffTemp;
         private AutoProfileEntity tempAutoProfile;
-        private bool running;
+        private volatile bool running;
 
         public int AutoProfileDebugLogLevel { get => autoProfileDebugLogLevel; set => autoProfileDebugLogLevel = value; }
         public bool Running { get => running; set => running = value; }
@@ -71,9 +71,10 @@ namespace DS4WinWPF
             {
                 // Find a profile match based on autoprofile program path and wnd title list.
                 // The same program may set different profiles for each of the controllers, so we need an array of newProfileName[controllerIdx] values.
-                for (int i = 0, pathsLen = profileHolder.AutoProfileColl.Count; i < pathsLen; i++)
+                AutoProfileEntity[] profileSnapshot = profileHolder.GetSnapshot();
+                for (int i = 0; i < profileSnapshot.Length; i++)
                 {
-                    AutoProfileEntity tempEntity = profileHolder.AutoProfileColl[i];
+                    AutoProfileEntity tempEntity = profileSnapshot[i];
                     if (tempEntity.IsMatch(topProcessName, topWindowTitle))
                     {
                         if (autoProfileDebugLogLevel > 0)
@@ -88,6 +89,11 @@ namespace DS4WinWPF
                     for (int j = 0; j < ControlService.CURRENT_DS4_CONTROLLER_LIMIT; j++)
                     {
                         DS4Device device = Program.rootHub.DS4Controllers[j];
+                        if (device == null)
+                        {
+                            continue;
+                        }
+
                         AutoProfileEntity tempEntity = SelectProfileEntityForController(matchedProfileEntities, device);
                         matchedControllerProfileEntities[j] = tempEntity;
                         if (tempEntity != null)
@@ -95,6 +101,16 @@ namespace DS4WinWPF
                             matchedProfileEntity = matchedProfileEntity ?? tempEntity;
                             turnOffDS4WinApp = turnOffDS4WinApp || tempEntity.Turnoff;
                         }
+                    }
+
+                    // Rules applying to every device still own their lifecycle even
+                    // when no controller is currently connected. Do not, however,
+                    // preload temporary state into empty controller slots.
+                    if (matchedProfileEntity == null)
+                    {
+                        matchedProfileEntity = matchedProfileEntities.FirstOrDefault(
+                            entity => entity.DeviceOption == AutoProfileDeviceOption.Any);
+                        turnOffDS4WinApp = matchedProfileEntity?.Turnoff == true;
                     }
                 }
 
@@ -143,14 +159,14 @@ namespace DS4WinWPF
                                     int tempInd = j;
                                     device.HaltReportingRunAction(() =>
                                     {
-                                        Global.LoadTempProfile(tempInd, tempname, true, Program.rootHub); // j is controller index, i is filename
-                                                                                                            // if (LaunchProgram[j] != string.Empty) Process.Start(LaunchProgram[j]);
+                                        if (!Global.LoadTempProfile(tempInd, tempname, true,
+                                                Program.rootHub))
+                                        {
+                                            AppLogger.LogToGui(
+                                                $"Auto-Profile could not load '{tempname}' for controller {tempInd + 1}.",
+                                                false, true);
+                                        }
                                     });
-                                }
-                                else
-                                {
-                                    Global.LoadTempProfile(j, tempname, true, Program.rootHub); // j is controller index, i is filename
-                                                                                                    // if (LaunchProgram[j] != string.Empty) Process.Start(LaunchProgram[j]);
                                 }
                             }
                             else
@@ -374,9 +390,8 @@ namespace DS4WinWPF
                 sw.Start();
                 while (App.rootHub.running != serviceRunningStatus && sw.Elapsed.TotalSeconds < 10)
                 {
-                    Thread.SpinWait(1000);
+                    Thread.Sleep(10);
                 }
-                Thread.SpinWait(1000);
             }
         }
 

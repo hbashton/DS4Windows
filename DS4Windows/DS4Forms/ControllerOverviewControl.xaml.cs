@@ -317,29 +317,6 @@ namespace DS4WinWPF.DS4Forms
             RefreshOutputControllerSelection();
         }
 
-        private void ComboBox_PreviewMouseWheel(object sender,
-            MouseWheelEventArgs e)
-        {
-            if (sender is not ComboBox comboBox || comboBox.IsDropDownOpen)
-            {
-                return;
-            }
-
-            // Closed dropdowns must not cycle settings under the pointer.
-            // Re-raise the bubbling wheel event from the parent so the page
-            // continues scrolling normally.
-            e.Handled = true;
-            if (comboBox.Parent is UIElement parent)
-            {
-                parent.RaiseEvent(new MouseWheelEventArgs(e.MouseDevice,
-                    e.Timestamp, e.Delta)
-                {
-                    RoutedEvent = System.Windows.Input.Mouse.MouseWheelEvent,
-                    Source = comboBox,
-                });
-            }
-        }
-
         private void OutputControllerCombo_PreviewKeyDown(object sender,
             KeyEventArgs e)
         {

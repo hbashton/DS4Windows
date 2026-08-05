@@ -79,6 +79,9 @@ namespace DS4WinWPF.DS4Forms
         private bool hotkeysTimerSubscribed;
         private bool hotkeysTimerEnabled;
         private NonFormTimer autoProfilesTimer;
+        private readonly object autoProfilesTimerLock = new();
+        private bool autoProfilesTimerSubscribed;
+        private int autoProfilesTimerTickActive;
         private AutoProfileChecker autoprofileChecker;
         private ProfileEditor editor;
         private int shutdownRequested;
@@ -242,8 +245,22 @@ namespace DS4WinWPF.DS4Forms
             {
                 ControlService.StartupDiag("MainWindow.LateChecks task begin");
                 ControlService.StartupDiag("MainWindow.CheckDrivers begin");
-                mainWinVM.CheckDrivers();
+                bool driversReady = mainWinVM.CheckDrivers();
                 ControlService.StartupDiag("MainWindow.CheckDrivers end");
+                if (!driversReady)
+                {
+                    // Prerequisite state changed after the startup gate. The
+                    // repair UI belongs to the STA dispatcher, and controller
+                    // services must not start until a fresh probe is ready.
+                    bool repaired = Dispatcher.Invoke(() =>
+                        ViiperSetupManager.EnsureReadyWithPrompt(this));
+                    if (!repaired)
+                    {
+                        ControlService.StartupDiag(
+                            "MainWindow.CheckDrivers blocked service startup");
+                        return;
+                    }
+                }
                 if (!parser.Stop)
                 {
                     Dispatcher.BeginInvoke((Action)(() =>
@@ -566,7 +583,10 @@ Suspend support not enabled.", true);
         {
             Dispatcher.BeginInvoke((Action)(() =>
             {
-                ChangeService();
+                if (App.rootHub.running != state)
+                {
+                    ChangeService();
+                }
             }));
         }
 
@@ -1081,17 +1101,27 @@ Suspend support not enabled.", true);
 
         private void ChangeAutoProfilesStatus(bool state)
         {
-            if (state)
+            lock (autoProfilesTimerLock)
             {
-                autoProfilesTimer.Elapsed += AutoProfilesTimer_Elapsed;
-                autoProfilesTimer.Start();
-                autoprofileChecker.Running = true;
-            }
-            else
-            {
-                autoProfilesTimer.Stop();
-                autoProfilesTimer.Elapsed -= AutoProfilesTimer_Elapsed;
-                autoprofileChecker.Running = false;
+                autoprofileChecker.Running = state;
+                if (state)
+                {
+                    if (!autoProfilesTimerSubscribed)
+                    {
+                        autoProfilesTimer.Elapsed += AutoProfilesTimer_Elapsed;
+                        autoProfilesTimerSubscribed = true;
+                    }
+                    autoProfilesTimer.Start();
+                }
+                else
+                {
+                    autoProfilesTimer.Stop();
+                    if (autoProfilesTimerSubscribed)
+                    {
+                        autoProfilesTimer.Elapsed -= AutoProfilesTimer_Elapsed;
+                        autoProfilesTimerSubscribed = false;
+                    }
+                }
             }
         }
 
@@ -1111,13 +1141,35 @@ Suspend support not enabled.", true);
 
         private void AutoProfilesTimer_Elapsed(object sender, System.Timers.ElapsedEventArgs e)
         {
-            autoProfilesTimer.Stop();
-            //Console.WriteLine("Event triggered");
-            autoprofileChecker.Process();
-
-            if (autoprofileChecker.Running)
+            if (Interlocked.Exchange(ref autoProfilesTimerTickActive, 1) != 0)
             {
-                autoProfilesTimer.Start();
+                return;
+            }
+
+            try
+            {
+                if (autoprofileChecker.Running)
+                {
+                    autoprofileChecker.Process();
+                }
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogToGui(
+                    $"Auto-Profile watcher recovered from an error: {ex.Message}",
+                    false, true);
+            }
+            finally
+            {
+                Interlocked.Exchange(ref autoProfilesTimerTickActive, 0);
+                lock (autoProfilesTimerLock)
+                {
+                    if (autoprofileChecker.Running &&
+                        autoProfilesTimerSubscribed)
+                    {
+                        autoProfilesTimer.Start();
+                    }
+                }
             }
         }
 

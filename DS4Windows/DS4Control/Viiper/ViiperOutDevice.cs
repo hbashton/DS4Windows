@@ -1075,7 +1075,8 @@ namespace DS4Windows
                     }
                 }
                 catch (Exception ex) when (ex is IOException ||
-                    ex is SocketException || ex is JsonException)
+                    ex is SocketException || ex is JsonException ||
+                    ex is ObjectDisposedException)
                 {
                     if (workerGeneration != Interlocked.Read(
                         ref microphoneWorkerGeneration))
@@ -2902,6 +2903,15 @@ namespace DS4Windows
                     else
                     {
                         stream.ReadExactly(buffer, 0, feedbackLength);
+                        long frameNumber = Interlocked.Increment(
+                            ref feedbackFramesRead);
+                        if (Interlocked.CompareExchange(
+                                ref feedbackFirstFrameLogged, 1, 0) == 0)
+                        {
+                            AppLogger.LogToGui(
+                                $"VIIPER feedback stream active: bus={stream.BusId} device={stream.DevId} port={stream.UsbipPort} sidecar={audioOnlySidecar} gamepadOnly={gamepadOnly} rawPayload={feedbackLength} sequenceCount={frameNumber}",
+                                false);
+                        }
                         if (connected && readStreamGeneration ==
                             Volatile.Read(ref streamGeneration) &&
                             ReferenceEquals(deviceStream, stream))
@@ -4869,21 +4879,35 @@ namespace DS4Windows
                 ReceiveTimeout = receiveTimeout,
             };
 
-            IAsyncResult result = tcp.BeginConnect(host, port, null, null);
-            if (!result.AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(3)))
-            {
-                tcp.Dispose();
-                throw new IOException($"Could not connect to VIIPER at {host}:{port}. Start VIIPER server with its API listening on port {port}.");
-            }
-
             try
             {
-                tcp.EndConnect(result);
+                // The legacy BeginConnect AsyncWaitHandle can be disposed by
+                // the socket completion path while a profile transition is
+                // simultaneously retiring the virtual device. Waiting on that
+                // handle caused an unhandled ObjectDisposedException in the
+                // microphone monitor. The cancellable socket API has no shared
+                // wait handle and gives every request its own timeout owner.
+                using var timeout = new CancellationTokenSource(
+                    TimeSpan.FromSeconds(3));
+                tcp.ConnectAsync(host, port, timeout.Token).AsTask()
+                    .GetAwaiter().GetResult();
+            }
+            catch (OperationCanceledException ex)
+            {
+                tcp.Dispose();
+                throw new IOException(
+                    $"Could not connect to VIIPER at {host}:{port} within 3 seconds. Start VIIPER server with its API listening on port {port}.",
+                    ex);
             }
             catch (SocketException ex)
             {
                 tcp.Dispose();
                 throw new IOException($"Could not connect to VIIPER at {host}:{port}: {ex.Message}", ex);
+            }
+            catch
+            {
+                tcp.Dispose();
+                throw;
             }
 
             return tcp;

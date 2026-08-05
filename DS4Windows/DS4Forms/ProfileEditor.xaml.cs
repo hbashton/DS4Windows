@@ -103,12 +103,8 @@ namespace DS4WinWPF.DS4Forms
             InitializeComponent();
 
             deviceNum = device;
-            triggerPreviewDeviceIndex = controllerContextDevice >= 0 &&
-                controllerContextDevice < ControlService.CURRENT_DS4_CONTROLLER_LIMIT
-                    ? controllerContextDevice
-                    : device >= 0 && device < ControlService.CURRENT_DS4_CONTROLLER_LIMIT
-                        ? device
-                        : -1;
+            triggerPreviewDeviceIndex = ResolveControllerContextIndex(
+                device, controllerContextDevice);
             emptyColorGB.Visibility = Visibility.Collapsed;
             DS4Device physicalController = ResolveControllerContext(
                 device, controllerContextDevice);
@@ -876,31 +872,31 @@ namespace DS4WinWPF.DS4Forms
         private static DS4Device ResolveControllerContext(int profileDevice,
             int preferredControllerDevice)
         {
+            int index = ResolveControllerContextIndex(profileDevice,
+                preferredControllerDevice);
+            return index >= 0 ? App.rootHub.DS4Controllers[index] : null;
+        }
+
+        private static int ResolveControllerContextIndex(int profileDevice,
+            int preferredControllerDevice)
+        {
             if (App.rootHub == null)
             {
-                return null;
+                return -1;
             }
 
             if (preferredControllerDevice >= 0 &&
-                preferredControllerDevice < ControlService.CURRENT_DS4_CONTROLLER_LIMIT)
+                preferredControllerDevice < ControlService.CURRENT_DS4_CONTROLLER_LIMIT &&
+                App.rootHub.DS4Controllers[preferredControllerDevice] != null)
             {
-                DS4Device selectedController =
-                    App.rootHub.DS4Controllers[preferredControllerDevice];
-                if (selectedController != null)
-                {
-                    return selectedController;
-                }
+                return preferredControllerDevice;
             }
 
             if (profileDevice >= 0 &&
-                profileDevice < ControlService.CURRENT_DS4_CONTROLLER_LIMIT)
+                profileDevice < ControlService.CURRENT_DS4_CONTROLLER_LIMIT &&
+                App.rootHub.DS4Controllers[profileDevice] != null)
             {
-                DS4Device profileController =
-                    App.rootHub.DS4Controllers[profileDevice];
-                if (profileController != null)
-                {
-                    return profileController;
-                }
+                return profileDevice;
             }
 
             // Offline/test-slot profile editing has no physical slot of its own.
@@ -908,14 +904,13 @@ namespace DS4WinWPF.DS4Forms
             // MainWindow normally supplies the explicitly selected controller.
             for (int i = 0; i < ControlService.CURRENT_DS4_CONTROLLER_LIMIT; i++)
             {
-                DS4Device connectedController = App.rootHub.DS4Controllers[i];
-                if (connectedController != null)
+                if (App.rootHub.DS4Controllers[i] != null)
                 {
-                    return connectedController;
+                    return i;
                 }
             }
 
-            return null;
+            return -1;
         }
 
         private void SetCanvasButtonBounds(Button button, double left, double top,
@@ -1929,10 +1924,7 @@ namespace DS4WinWPF.DS4Forms
 
         private void CancelBtn_Click(object sender, RoutedEventArgs e)
         {
-            if (profileSettingsVM.FuncDevNum < ControlService.CURRENT_DS4_CONTROLLER_LIMIT)
-            {
-                App.rootHub.setRumble(0, 0, profileSettingsVM.FuncDevNum);
-            }
+            ClearRumblePreview();
 
             Global.outDevTypeTemp[deviceNum] = OutContType.ViiperX360;
             profileTriggerLabControl.RestorePhysicalProfileEffects();
@@ -2119,10 +2111,7 @@ namespace DS4WinWPF.DS4Forms
         private bool ApplyProfileStep(bool fullSave = true)
         {
             bool result = false;
-            if (profileSettingsVM.FuncDevNum < ControlService.CURRENT_DS4_CONTROLLER_LIMIT)
-            {
-                App.rootHub.setRumble(0, 0, profileSettingsVM.FuncDevNum);
-            }
+            ClearRumblePreview();
 
             if (profileSettingsVM.HasDebouncingMsChanged)
             {
@@ -2188,10 +2177,7 @@ namespace DS4WinWPF.DS4Forms
 
         public void Close()
         {
-            if (profileSettingsVM.FuncDevNum < ControlService.CURRENT_DS4_CONTROLLER_LIMIT)
-            {
-                App.rootHub.setRumble(0, 0, profileSettingsVM.FuncDevNum);
-            }
+            ClearRumblePreview();
 
             profileTriggerLabControl.RestorePhysicalProfileEffects();
             Closed?.Invoke(this, EventArgs.Empty);
@@ -2251,15 +2237,17 @@ namespace DS4WinWPF.DS4Forms
 
         private void RumbleTestBtn_Click(object sender, RoutedEventArgs e)
         {
-            int deviceNum = profileSettingsVM.FuncDevNum;
-            if (deviceNum < ControlService.CURRENT_DS4_CONTROLLER_LIMIT)
+            int deviceNum = ResolveControllerContextIndex(
+                profileSettingsVM.Device, triggerPreviewDeviceIndex);
+            if (deviceNum >= 0 &&
+                deviceNum < ControlService.CURRENT_DS4_CONTROLLER_LIMIT)
             {
                 DS4Device d = App.rootHub.DS4Controllers[deviceNum];
                 if (d != null)
                 {
                     RumbleType type;
                     var btn = sender as Button;
-                    if (!Global.InverseRumbleMotors[deviceNum])
+                    if (!profileSettingsVM.InverseRumbleMotors)
                     {
                         type = btn.Name == "heavyRumbleTestBtn" ? RumbleType.Heavy : RumbleType.Light;
                     }
@@ -2290,27 +2278,18 @@ namespace DS4WinWPF.DS4Forms
                         else
                             profileSettingsVM.LightRumbleActive = true;
 
-                        if (type == RumbleType.Heavy)
-                        {
-                            d.setRumble(d.RightLightFastRumble,
-                                (byte)Math.Min(255, 255 * rumbleBoost / 100));
-                        }
-                        else
-                        {
-                            d.setRumble((byte)Math.Min(255, 255 * rumbleBoost / 100),
-                                d.LeftHeavySlowRumble);
-                        }
+                        PublishRumblePreview(d, rumbleBoost);
 
                         if (type == RumbleType.Heavy)
                         {
-                            if (!Global.InverseRumbleMotors[deviceNum])
+                            if (!profileSettingsVM.InverseRumbleMotors)
                                 heavyRumbleTestBtn.Content = Properties.Resources.StopHText;
                             else
                                 lightRumbleTestBtn.Content = Properties.Resources.StopLText;
                         }
                         else
                         {
-                            if (!Global.InverseRumbleMotors[deviceNum])
+                            if (!profileSettingsVM.InverseRumbleMotors)
                                 lightRumbleTestBtn.Content = Properties.Resources.StopLText;
                             else
                                 heavyRumbleTestBtn.Content = Properties.Resources.StopHText;
@@ -2321,8 +2300,9 @@ namespace DS4WinWPF.DS4Forms
                         if (type == RumbleType.Heavy)
                         {
                             profileSettingsVM.HeavyRumbleActive = false;
-                            d.setRumble(d.RightLightFastRumble, 0);
-                            if (!Global.InverseRumbleMotors[deviceNum])
+                            PublishRumblePreview(d,
+                                ResolvePreviewRumbleBoost(d));
+                            if (!profileSettingsVM.InverseRumbleMotors)
                                 heavyRumbleTestBtn.Content = Properties.Resources.TestHText;
                             else
                                 lightRumbleTestBtn.Content = Properties.Resources.TestLText;
@@ -2330,8 +2310,9 @@ namespace DS4WinWPF.DS4Forms
                         else
                         {
                             profileSettingsVM.LightRumbleActive = false;
-                            d.setRumble(0, d.LeftHeavySlowRumble);
-                            if (!Global.InverseRumbleMotors[deviceNum])
+                            PublishRumblePreview(d,
+                                ResolvePreviewRumbleBoost(d));
+                            if (!profileSettingsVM.InverseRumbleMotors)
                                 lightRumbleTestBtn.Content = Properties.Resources.TestLText;
                             else
                                 heavyRumbleTestBtn.Content = Properties.Resources.TestHText;
@@ -2339,6 +2320,38 @@ namespace DS4WinWPF.DS4Forms
                     }
                 }
             }
+        }
+
+        private void PublishRumblePreview(DS4Device device, int rumbleBoost)
+        {
+            byte strength = (byte)Math.Min(255,
+                255 * Math.Max(0, rumbleBoost) / 100);
+            device.SetRumblePreview(
+                profileSettingsVM.LightRumbleActive, strength,
+                profileSettingsVM.HeavyRumbleActive, strength);
+        }
+
+        private int ResolvePreviewRumbleBoost(DS4Device device)
+        {
+            return device is DualSenseDevice &&
+                !profileSettingsVM.
+                    EnableGenericRumbleStrRescaleForDualSenseDevices ?
+                100 : profileSettingsVM.RumbleBoost;
+        }
+
+        private void ClearRumblePreview()
+        {
+            int controllerIndex = ResolveControllerContextIndex(
+                profileSettingsVM.Device, triggerPreviewDeviceIndex);
+            if (controllerIndex >= 0 &&
+                controllerIndex < ControlService.CURRENT_DS4_CONTROLLER_LIMIT)
+            {
+                App.rootHub.DS4Controllers[controllerIndex]?.
+                    ClearRumblePreview();
+            }
+
+            profileSettingsVM.HeavyRumbleActive = false;
+            profileSettingsVM.LightRumbleActive = false;
         }
 
     private void UpdateDualSenseRumble(DS4Windows.InputDevices.DualSenseDevice dualsense)

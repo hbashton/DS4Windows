@@ -105,7 +105,7 @@
               <StackPanel>
                 <TextBlock Text="Installation status" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,11" />
                 <Grid Margin="0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="DS4Windows" FontWeight="SemiBold"/><TextBlock x:Name="Ds4Status" Grid.Column="1" Foreground="{StaticResource AccentBrush}"/></Grid>
-                <Grid Margin="0,7,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="VIIPER 0.0.7" FontWeight="SemiBold"/><TextBlock x:Name="ViiperStatus" Grid.Column="1" Foreground="{StaticResource AccentBrush}"/></Grid>
+                <Grid Margin="0,7,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="VIIPER 0.0.8" FontWeight="SemiBold"/><TextBlock x:Name="ViiperStatus" Grid.Column="1" Foreground="{StaticResource AccentBrush}"/></Grid>
                 <Grid Margin="0,7,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="USB-IP 0.9.7.7" FontWeight="SemiBold"/><TextBlock x:Name="UsbipStatus" Grid.Column="1" Foreground="{StaticResource AccentBrush}"/></Grid>
               </StackPanel>
             </Border>

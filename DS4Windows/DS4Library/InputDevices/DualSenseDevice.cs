@@ -489,6 +489,8 @@ namespace DS4Windows.InputDevices
                 DualSenseBluetoothAudioPacerScheduler.MaximumRateRatio);
         private bool outputDirty = false;
         private DS4HapticState previousHapticState = new DS4HapticState();
+        private long preparedLocalRumbleGeneration;
+        private long submittedLocalRumbleGeneration;
         private byte[] outputBTCrc32Head = new byte[] { 0xA2 };
         //private byte outputPendCount = 0;
         private new GyroMouseSensDualSense gyroMouseSensSettings;
@@ -1770,16 +1772,29 @@ namespace DS4Windows.InputDevices
                     return false;
                 }
 
-                // The complete mutable controller state lives in the native
-                // 0x36 snapshot. Never create a second physical 0x31 lane.
-                return realtimeHaptics ?
-                    bluetoothAudioPacer.UpdateRealtimeHapticsTemplate(
+                if (realtimeHaptics)
+                {
+                    return bluetoothAudioPacer.UpdateRealtimeHapticsTemplate(
+                        template, hapticsExpiryQpc);
+                }
+
+                bool templateUpdated = waitForCapacity ?
+                    bluetoothAudioPacer.UpdateTemplateAndWaitForCapacity(
                         template, hapticsExpiryQpc) :
-                    (waitForCapacity ?
-                        bluetoothAudioPacer.UpdateTemplateAndWaitForCapacity(
-                            template, hapticsExpiryQpc) :
-                        bluetoothAudioPacer.UpdateTemplate(template,
-                            hapticsExpiryQpc));
+                    bluetoothAudioPacer.UpdateTemplate(template,
+                        hapticsExpiryQpc);
+                if (!templateUpdated)
+                {
+                    return false;
+                }
+
+                // A steady media template must not replay regular rumble, but
+                // removing either of Sony's two required validity bits also
+                // prevents the command from ever reaching the controller.
+                // Publish the motor pair through the compositor's ordered
+                // one-shot state mailbox; it is atomically overlaid on the
+                // next physical frame and consumed only after write acceptance.
+                return bluetoothAudioPacer.UpdateLocalRumbleState(template);
             }
         }
 
@@ -3122,7 +3137,8 @@ namespace DS4Windows.InputDevices
 
         private unsafe void PrepareOutReport()
         {
-            MergeStates();
+            preparedLocalRumbleGeneration =
+                MergeStatesAndGetRumbleGeneration();
 
             bool change = false;
             bool rumbleSet = currentHap.IsRumbleSet();
@@ -3975,6 +3991,9 @@ namespace DS4Windows.InputDevices
                 {
                     nativeGameLightbarOwnershipReleased = true;
                 }
+                ApplyActiveRumblePreviewToV5AudioSnapshot(
+                    latestBluetoothCombinedSpeakerReport,
+                    BluetoothCombinedStateOffset);
                 return true;
             }
         }
@@ -4014,6 +4033,8 @@ namespace DS4Windows.InputDevices
                 }
 
                 previousHapticState = currentHap;
+                submittedLocalRumbleGeneration =
+                    preparedLocalRumbleGeneration;
             }
 
             outputDirty = false;
@@ -4071,14 +4092,72 @@ namespace DS4Windows.InputDevices
                             latestBluetoothCombinedSpeakerReport,
                             BluetoothCombinedStateOffset);
                     }
+
+                    // Native game ownership is state ownership, not a veto on
+                    // later local feedback. XInput/compact HID rumble and the
+                    // profile editor arrive through DS4Device rather than as
+                    // native USB output reports. Previously this early return
+                    // silently discarded those motor transitions forever
+                    // after the first native game report. Overlay only a new
+                    // local motor generation; unrelated profile/light/audio
+                    // writes continue to leave the game's state untouched.
+                    if (preparedLocalRumbleGeneration !=
+                        submittedLocalRumbleGeneration)
+                    {
+                        MergeLocalRumbleIntoV5AudioSnapshot(report, 2,
+                            latestBluetoothCombinedSpeakerReport,
+                            BluetoothCombinedStateOffset);
+                    }
+
+                    ApplyActiveRumblePreviewToV5AudioSnapshot(
+                        latestBluetoothCombinedSpeakerReport,
+                        BluetoothCombinedStateOffset);
                     return true;
                 }
 
                 MergeControllerStateIntoV5AudioSnapshot(report, 2,
                     latestBluetoothCombinedSpeakerReport,
                     BluetoothCombinedStateOffset);
+                ApplyActiveRumblePreviewToV5AudioSnapshot(
+                    latestBluetoothCombinedSpeakerReport,
+                    BluetoothCombinedStateOffset);
                 return true;
             }
+        }
+
+        internal static void MergeLocalRumbleIntoV5AudioSnapshot(
+            byte[] source, int sourceOffset, byte[] destination,
+            int destinationOffset)
+        {
+            const byte mainMotorValidity = 0x03;
+            destination[destinationOffset] = (byte)(
+                destination[destinationOffset] | mainMotorValidity);
+            destination[destinationOffset + 2] = source[sourceOffset + 2];
+            destination[destinationOffset + 3] = source[sourceOffset + 3];
+
+            // Improved-rumble mode is part of the motor contract. Copy only
+            // that bit; the game retains ownership of the other fields in
+            // this byte.
+            destination[destinationOffset + 38] = (byte)(
+                (destination[destinationOffset + 38] & ~0x04) |
+                (source[sourceOffset + 38] & 0x04));
+        }
+
+        private void ApplyActiveRumblePreviewToV5AudioSnapshot(
+            byte[] destination, int destinationOffset)
+        {
+            if (!TryGetRumblePreview(out bool lightActive,
+                    out byte lightStrength, out bool heavyActive,
+                    out byte heavyStrength))
+            {
+                return;
+            }
+
+            destination[destinationOffset] |= 0x03;
+            destination[destinationOffset + 2] = lightActive ?
+                lightStrength : (byte)0;
+            destination[destinationOffset + 3] = heavyActive ?
+                heavyStrength : (byte)0;
         }
 
         private static void MergeControllerStateIntoV5AudioSnapshot(

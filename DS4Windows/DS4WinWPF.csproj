@@ -76,13 +76,22 @@
 	<!-- A raw `dotnet publish` must be a complete installable package too.
 	     The release post-build script rewrites this after reorganizing language
 	     files, but local/test publishes previously omitted it entirely. -->
+	<Target Name="GenerateReleaseChannelMarker" AfterTargets="Publish"
+		BeforeTargets="GenerateManagedFileManifest">
+		<WriteLinesToFile
+			File="$(PublishDir)DS4Windows.release"
+			Lines="$(InformationalVersion)"
+			Overwrite="true"
+			Encoding="ASCII" />
+	</Target>
+
 	<!-- Generate the VIIPER checksum from the binary in this exact publish.
 	     The installer consumes the sidecar instead of a hand-maintained hash. -->
 	<Target Name="GenerateViiperPackageChecksum"
 		AfterTargets="Publish"
 		BeforeTargets="GenerateManagedFileManifest">
 		<PropertyGroup>
-			<_BundledViiperName>VIIPER-0.0.7-x64.exe</_BundledViiperName>
+			<_BundledViiperName>VIIPER-0.0.8-x64.exe</_BundledViiperName>
 			<_BundledViiperPath>$(PublishDir)extras\$(_BundledViiperName)</_BundledViiperPath>
 			<_BundledViiperHashPath>$(_BundledViiperPath).sha256</_BundledViiperHashPath>
 		</PropertyGroup>
@@ -99,7 +108,7 @@
 	</Target>
 
 	<Target Name="GenerateManagedFileManifest" AfterTargets="Publish"
-		DependsOnTargets="GenerateViiperPackageChecksum">
+		DependsOnTargets="GenerateReleaseChannelMarker;GenerateViiperPackageChecksum">
 		<ItemGroup>
 			<_ManagedPackageFile Include="$(PublishDir)**\*"
 				Exclude="$(PublishDir).ds4windows-managed-files.txt" />
@@ -127,8 +136,8 @@
 		<EmbeddedResource Include="..\extras\install-viiper-backend.ps1">
 			<LogicalName>DS4Windows.install-viiper-backend.ps1</LogicalName>
 		</EmbeddedResource>
-		<Content Include="..\extras\VIIPER-0.0.7-x64.exe">
-			<Link>extras\VIIPER-0.0.7-x64.exe</Link>
+		<Content Include="..\extras\VIIPER-0.0.8-x64.exe">
+			<Link>extras\VIIPER-0.0.8-x64.exe</Link>
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
 		</Content>

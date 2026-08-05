@@ -534,7 +534,9 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public bool SynchronizeRuntimeProfile()
         {
-            string runtimeProfile = Global.ProfilePath[devIndex] ?? string.Empty;
+            string runtimeProfile = Global.useTempProfile[devIndex]
+                ? Global.tempprofilename[devIndex] ?? string.Empty
+                : Global.ProfilePath[devIndex] ?? string.Empty;
             if (SelectedProfile == runtimeProfile &&
                 ((string.IsNullOrEmpty(runtimeProfile) &&
                     selectedEntity == null && selectedIndex == -1) ||

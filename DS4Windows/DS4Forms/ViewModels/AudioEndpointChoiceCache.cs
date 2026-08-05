@@ -14,13 +14,20 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public string Name { get; }
         public string EndpointId { get; }
         public bool IsControllerAudio { get; }
+        public ControllerAudioEndpointKind ControllerKind { get; }
+        public int UsbipPort { get; }
 
         public AudioEndpointSnapshot(string name, string endpointId,
-            bool isControllerAudio)
+            bool isControllerAudio,
+            ControllerAudioEndpointKind controllerKind =
+                ControllerAudioEndpointKind.Any,
+            int usbipPort = -1)
         {
             Name = name ?? string.Empty;
             EndpointId = endpointId ?? string.Empty;
             IsControllerAudio = isControllerAudio;
+            ControllerKind = controllerKind;
+            UsbipPort = usbipPort;
         }
     }
 
@@ -90,11 +97,14 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         }
 
         public static List<AudioEndpointChoice> BuildControllerAudioChoices(
-            string savedEndpointId)
+            string savedEndpointId,
+            OutContType automaticOutputType = OutContType.None,
+            int automaticUsbipPort = -1)
         {
             var choices = new List<AudioEndpointChoice>
             {
-                new("Automatic for emulated controller", string.Empty),
+                new(BuildAutomaticControllerAudioName(automaticOutputType,
+                    automaticUsbipPort), string.Empty),
                 new("Default · all system audio",
                     DualSenseAudioPassthrough.DefaultSystemAudioEndpointId),
             };
@@ -140,6 +150,28 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             }
 
             return choices;
+        }
+
+        internal static string BuildAutomaticControllerAudioName(
+            OutContType outputType, int preferredUsbipPort,
+            IReadOnlyList<AudioEndpointSnapshot> endpoints = null)
+        {
+            endpoints ??= RenderEndpoints;
+            ControllerAudioEndpointKind preferredKind =
+                DualSenseAudioPassthrough.GetEndpointKind(outputType);
+
+            AudioEndpointSnapshot endpoint = endpoints
+                .Where(item => item.IsControllerAudio)
+                .OrderByDescending(item => preferredUsbipPort >= 0 &&
+                    item.UsbipPort == preferredUsbipPort)
+                .ThenByDescending(item => preferredKind ==
+                        ControllerAudioEndpointKind.Any ||
+                    item.ControllerKind == preferredKind)
+                .FirstOrDefault();
+
+            return endpoint == null || string.IsNullOrWhiteSpace(endpoint.Name)
+                ? "Game Audio (virtual controller endpoint)"
+                : $"Game Audio ({endpoint.Name})";
         }
 
         public static Task RefreshAsync(bool forceRefresh = false)
@@ -276,8 +308,17 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     string id = endpoint.ID ?? string.Empty;
                     bool controllerAudio = flow == DataFlow.Render &&
                         DualSenseAudioPassthrough.IsControllerAudioEndpoint(endpoint);
+                    ControllerAudioEndpointKind controllerKind = controllerAudio
+                        ? DualSenseAudioPassthrough.ClassifyEndpointIdentity(
+                            $"{name} {id}")
+                        : ControllerAudioEndpointKind.Any;
+                    int usbipPort = controllerAudio &&
+                        DualSenseAudioPassthrough.TryGetEndpointUsbipPort(
+                            endpoint, out int resolvedUsbipPort)
+                        ? resolvedUsbipPort
+                        : -1;
                     destination.Add(new AudioEndpointSnapshot(name, id,
-                        controllerAudio));
+                        controllerAudio, controllerKind, usbipPort));
                 }
                 catch
                 {

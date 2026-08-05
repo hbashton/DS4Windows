@@ -3,10 +3,16 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:xctk="http://schemas.xceed.com/wpf/xaml/toolkit"
              mc:Ignorable="d"
              d:DesignHeight="720" d:DesignWidth="940">
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+        <!-- Keep converters used by this control local. The dark theme also
+             exposes this key, but a fresh install starts with DefaultTheme;
+             relying on a theme-specific resource made the main window fail
+             during first-run XAML construction. -->
+        <xctk:InverseBoolConverter x:Key="InverseBoolConverter" />
 
         <Style x:Key="OverviewCardStyle" TargetType="Border">
             <Setter Property="Background" Value="{DynamicResource CardBackgroundColor}" />
@@ -51,8 +57,6 @@
 
         <Style x:Key="OverviewSettingsComboBoxStyle" TargetType="ComboBox"
                BasedOn="{StaticResource BridgeProfileComboBoxStyle}">
-            <EventSetter Event="PreviewMouseWheel"
-                         Handler="ComboBox_PreviewMouseWheel" />
             <Setter Property="Width" Value="Auto" />
             <!-- The shared template is designed around 42 DIP. Compressing it
                  here clips the lower border/content at fractional DPI. -->

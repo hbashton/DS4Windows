@@ -4,10 +4,28 @@ import sys
 import shutil
 import subprocess
 import hashlib
+import re
+import stat
 
-target_dir = Path(sys.argv[1])
-project_dir = Path(sys.argv[2])
-version = sys.argv[3]
+
+def is_reparse_point(path: Path) -> bool:
+    attributes = getattr(path.lstat(), "st_file_attributes", 0)
+    return bool(attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
+
+
+if len(sys.argv) != 4:
+    raise SystemExit("Usage: post-build.py <publish-dir> <project-dir> <version>")
+
+target_dir = Path(sys.argv[1]).absolute()
+project_dir = Path(sys.argv[2]).absolute()
+version = sys.argv[3].strip()
+if not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z._-]{0,79}", version):
+    raise SystemExit(
+        "Version must be a filename-safe release identifier using only "
+        "letters, numbers, periods, underscores, and hyphens."
+    )
+if not target_dir.is_dir() or is_reparse_point(target_dir):
+    raise SystemExit(f"Publish directory is missing or unsafe: {target_dir}")
 
 
 # A published DS4Windows build is an offline installer. Fail package
@@ -18,7 +36,7 @@ required_offline_files = (
     "coreclr.dll",
     "hostfxr.dll",
     "extras/install-viiper-backend.ps1",
-    "extras/VIIPER-0.0.7-x64.exe",
+    "extras/VIIPER-0.0.8-x64.exe",
     "extras/USBip-0.9.7.7-x64.exe",
     "extras/HidHide_1.5.230_x64.exe",
     "extras/FakerInput_0.1.0_x64.msi",
@@ -38,7 +56,7 @@ if missing_offline_files:
 # Bind setup to the exact VIIPER executable copied by this publish. This
 # sidecar is regenerated for every artifact, so no hand-maintained hash can
 # drift when the bundled executable changes.
-viiper_name = "VIIPER-0.0.7-x64.exe"
+viiper_name = "VIIPER-0.0.8-x64.exe"
 viiper_path = target_dir / "extras" / viiper_name
 viiper_hasher = hashlib.sha256()
 with viiper_path.open("rb") as viiper_stream:
@@ -75,28 +93,51 @@ lang_script = project_dir.parent / "utils" / "inject_deps_path.py"
 deps_json_path = target_dir / "DS4Windows.deps.json"
 subprocess.run([sys.executable, str(lang_script), str(deps_json_path)], check=True)
 
+# Preserve the exact GitHub release channel in both portable and managed
+# packages. The numeric Windows file version cannot distinguish an RC from a
+# stable build, so Settings and the updater use this marker to include the
+# installed prerelease notes without exposing prereleases to stable users.
+release_marker = target_dir / "DS4Windows.release"
+release_marker.write_text(version.strip() + "\n", encoding="utf-8")
+
 # Record every file owned by this package. DS4Updater uses this manifest on the
 # next update to remove package files that no longer ship, without touching
 # profiles, settings, plugins, or other user-created content.
 manifest_name = ".ds4windows-managed-files.txt"
 manifest_path = target_dir / manifest_name
+package_entries = list(target_dir.rglob("*"))
+reparse_entry = next(
+    (entry for entry in package_entries if is_reparse_point(entry)), None
+)
+if reparse_entry is not None:
+    raise SystemExit(
+        "Published package contains a reparse point: "
+        + reparse_entry.relative_to(target_dir).as_posix()
+    )
 managed_files = sorted(
     file.relative_to(target_dir).as_posix()
-    for file in target_dir.rglob("*")
+    for file in package_entries
     if file.is_file() and file.name != manifest_name
 )
+if len({path.casefold() for path in managed_files}) != len(managed_files):
+    raise SystemExit("Published package contains case-insensitive duplicate paths.")
 manifest_path.write_text("\n".join(managed_files) + "\n", encoding="utf-8")
-
-
-# write the version to newest.txt
-newest_txt = project_dir / "newest.txt"
-with open(newest_txt, 'w') as file:
-    file.write(version)
 
 
 # rename target dir (net8.0-windows) to DS4Windows
 renamed_dir = target_dir.parent / "DS4Windows"
 if renamed_dir.exists():
+    if is_reparse_point(renamed_dir):
+        raise SystemExit(f"Refusing to replace reparse-point output: {renamed_dir}")
+    prior_entries = list(renamed_dir.rglob("*"))
+    prior_reparse = next(
+        (entry for entry in prior_entries if is_reparse_point(entry)), None
+    )
+    if prior_reparse is not None:
+        raise SystemExit(
+            "Refusing to replace output containing a reparse point: "
+            + str(prior_reparse)
+        )
     shutil.rmtree(renamed_dir)
 
 os.rename(target_dir, renamed_dir)

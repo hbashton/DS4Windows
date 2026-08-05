@@ -100,6 +100,15 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void InstalledPrereleaseMarkerKeepsChangelogOnPrereleaseChannel()
+        {
+            Assert.IsTrue(ReleaseChannelPolicy.IsPrereleaseInstall(
+                "5.0.1.0", "VIIPERRC4.1"));
+            Assert.IsFalse(ReleaseChannelPolicy.IsPrereleaseInstall(
+                "5.0.1.0", "v5.0.1"));
+        }
+
+        [TestMethod]
         public void DraftReleasesAreNeverSelected()
         {
             GithubRelease draft = Prerelease(

@@ -65,6 +65,7 @@ namespace DS4Windows.Tests
                 ViiperStartupTaskReady = true,
                 ServerRunning = true,
                 UsbipInstalled = true,
+                UsbipExecutableSafe = true,
                 UsbipDriverFilesSafe = true,
                 UsbipRuntimeReady = false,
             };
@@ -96,6 +97,7 @@ namespace DS4Windows.Tests
                 ViiperPackageCurrent = true,
                 ServerRunning = true,
                 UsbipInstalled = true,
+                UsbipExecutableSafe = true,
                 UsbipDriverFilesSafe = true,
                 UsbipRuntimeReady = true,
                 UsingExternalViiper = true,
@@ -203,6 +205,57 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
+        public void UnsupportedUsbipVersionForcesGuidedRepair()
+        {
+            ViiperPrerequisiteStatus status = new ViiperPrerequisiteStatus
+            {
+                UsbipVersion = "0.9.7.8",
+                UsbipInstalled = false,
+            };
+
+            Assert.IsTrue(ViiperSetupManager.RequiresUsbipReplacement(status));
+            Assert.IsTrue(ViiperSetupManager.
+                RequiresVerifiedViiperUpdate(status));
+
+            status.UsbipVersion = "0.9.7.7";
+            status.UsbipInstalled = true;
+            status.UsbipExecutableSafe = true;
+            status.UsbipDriverFilesSafe = true;
+            Assert.IsFalse(ViiperSetupManager.RequiresUsbipReplacement(status));
+            Assert.IsFalse(ViiperSetupManager.
+                RequiresVerifiedViiperUpdate(status));
+        }
+
+        [TestMethod]
+        public void UnsafeUsbipRuntimeAndCitrixBypassPromptSuppression()
+        {
+            ViiperPrerequisiteStatus status = new ViiperPrerequisiteStatus
+            {
+                UsbipVersion = "0.9.7.7",
+                UsbipInstalled = true,
+                UsbipExecutableSafe = true,
+                UsbipDriverFilesSafe = false,
+            };
+            Assert.IsTrue(ViiperSetupManager.
+                RequiresVerifiedViiperUpdate(status));
+
+            status.UsbipDriverFilesSafe = true;
+            status.UsbipExecutableSafe = false;
+            Assert.IsTrue(ViiperSetupManager.
+                RequiresVerifiedViiperUpdate(status));
+
+            status.UsbipExecutableSafe = true;
+            status.UsbipRebootOrRepairRequired = true;
+            Assert.IsTrue(ViiperSetupManager.
+                RequiresVerifiedViiperUpdate(status));
+
+            status.UsbipRebootOrRepairRequired = false;
+            status.CitrixUsbMonitorConflict = true;
+            Assert.IsTrue(ViiperSetupManager.
+                RequiresVerifiedViiperUpdate(status));
+        }
+
+        [TestMethod]
         public void ReadyRejectsUnsafeCitrixUsbMonitor()
         {
             ViiperPrerequisiteStatus status = new ViiperPrerequisiteStatus
@@ -211,6 +264,7 @@ namespace DS4Windows.Tests
                 ViiperPackageCurrent = true,
                 ServerRunning = true,
                 UsbipInstalled = true,
+                UsbipExecutableSafe = true,
                 UsbipDriverFilesSafe = true,
                 UsbipRuntimeReady = true,
                 CitrixUsbMonitorConflict = true,
@@ -264,6 +318,7 @@ namespace DS4Windows.Tests
                 ViiperPackageCurrent = true,
                 ServerRunning = true,
                 UsbipInstalled = true,
+                UsbipExecutableSafe = true,
                 UsbipDriverFilesSafe = true,
                 UsbipRuntimeReady = true,
                 ViiperProcessConflict = true,
@@ -284,6 +339,7 @@ namespace DS4Windows.Tests
                 ViiperPackageCurrent = true,
                 ServerRunning = true,
                 UsbipInstalled = true,
+                UsbipExecutableSafe = true,
                 UsbipDriverFilesSafe = false,
                 UsbipDriverIntegrityMessage =
                     "Unsafe or mixed usbip-win2 driver files detected",
@@ -295,8 +351,31 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
+        public void ReadyRejectsModifiedUsbipExecutableEvenWithMatchingVersion()
+        {
+            ViiperPrerequisiteStatus status = new ViiperPrerequisiteStatus
+            {
+                ViiperInstalled = true,
+                ViiperPackageCurrent = true,
+                ServerRunning = true,
+                UsbipInstalled = true,
+                UsbipExecutableSafe = false,
+                UsbipDriverFilesSafe = true,
+                UsbipRuntimeReady = true,
+            };
+
+            Assert.IsFalse(status.Ready);
+            StringAssert.Contains(status.DisplayText,
+                "executable verification failed");
+            Assert.IsTrue(ViiperSetupManager.
+                RequiresVerifiedViiperUpdate(status));
+        }
+
+        [TestMethod]
         public void UsbipDriverHashesMustMatchBothPinnedFiles()
         {
+            Assert.AreEqual(64,
+                ViiperSetupManager.SupportedUsbipExecutableSha256.Length);
             Assert.AreEqual(64,
                 ViiperSetupManager.SupportedUsbipUdeSha256.Length);
             Assert.AreEqual(64,

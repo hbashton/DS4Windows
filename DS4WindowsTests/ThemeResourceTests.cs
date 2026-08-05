@@ -1,7 +1,9 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using DS4WinWPF.DS4Forms;
 using System;
 using System.Threading;
 using System.Windows;
+using System.Windows.Controls;
 
 namespace DS4WindowsTests
 {
@@ -37,6 +39,42 @@ namespace DS4WindowsTests
                         "BridgeProfileComboBoxStyle"));
                     Assert.IsNotNull(application.TryFindResource(
                         "BridgeDescribedCheckBoxStyle"));
+
+                    // This is the same construction path used by MainWindow
+                    // on a clean install. It must not depend on a converter
+                    // that exists only in DarkTheme or in a parent window.
+                    var overview = new ControllerOverviewControl();
+                    Assert.IsNotNull(overview.Resources[
+                        "InverseBoolConverter"]);
+
+                    var repairPrompt = new ViiperSetupPrompt(
+                        "usbip-win2 0.9.7.8 must be replaced with supported 0.9.7.7",
+                        null, verifiedUpdateRequired: true,
+                        usbipReplacementRequired: true,
+                        mandatoryRepairRequired: true);
+                    Assert.AreEqual("USB-IP version must be replaced",
+                        ((TextBlock)repairPrompt.FindName(
+                            "headingText")).Text);
+                    Assert.AreEqual("Repair VIIPER + USB-IP",
+                        ((Button)repairPrompt.FindName(
+                            "installButton")).Content);
+                    Assert.AreEqual(Visibility.Collapsed,
+                        ((CheckBox)repairPrompt.FindName(
+                            "suppressPromptCheck")).Visibility);
+                    Assert.IsTrue(repairPrompt.ExitApplicationRequested,
+                        "Mandatory USB-IP repair must not be dismissible into an unsafe runtime.");
+
+                    var missingPrompt = new ViiperSetupPrompt(
+                        "VIIPER and usbip-win2 need setup", null,
+                        mandatoryRepairRequired: true);
+                    Assert.AreEqual("VIIPER setup required",
+                        ((TextBlock)missingPrompt.FindName(
+                            "headingText")).Text);
+                    Assert.AreEqual("Exit DS4Windows",
+                        ((Button)missingPrompt.FindName(
+                            "notNowButton")).Content);
+                    Assert.IsTrue(missingPrompt.ExitApplicationRequested,
+                        "Missing prerequisites must not be suppressible into a backend-less runtime.");
                 }
                 catch (Exception ex)
                 {

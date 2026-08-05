@@ -31,6 +31,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using WPFLocalizeExtension.Engine;
@@ -43,6 +45,37 @@ namespace DS4WinWPF
     [System.Security.SuppressUnmanagedCodeSecurity]
     public partial class App : Application
     {
+        static App()
+        {
+            EventManager.RegisterClassHandler(typeof(ComboBox),
+                UIElement.PreviewMouseWheelEvent,
+                new MouseWheelEventHandler(ComboBox_PreviewMouseWheel),
+                handledEventsToo: true);
+        }
+
+        private static void ComboBox_PreviewMouseWheel(object sender,
+            MouseWheelEventArgs eventArgs)
+        {
+            if (sender is not ComboBox comboBox || comboBox.IsDropDownOpen)
+            {
+                return;
+            }
+
+            // A closed dropdown is a setting, not a scroll target. Preserve
+            // normal page scrolling without changing its selected value.
+            eventArgs.Handled = true;
+            if (comboBox.Parent is UIElement parent)
+            {
+                parent.RaiseEvent(new MouseWheelEventArgs(
+                    eventArgs.MouseDevice, eventArgs.Timestamp,
+                    eventArgs.Delta)
+                {
+                    RoutedEvent = Mouse.MouseWheelEvent,
+                    Source = comboBox,
+                });
+            }
+        }
+
         [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
         private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
 
@@ -348,10 +381,16 @@ namespace DS4WinWPF
             {
                 DS4Windows.ViiperSetupManager.
                     RefreshSelectedStartupTaskOnLaunch();
-                DS4Windows.ViiperSetupManager.EnsureReadyWithPrompt(null);
-                if (Dispatcher.HasShutdownStarted ||
+                bool viiperReady = DS4Windows.ViiperSetupManager.
+                    EnsureReadyWithPrompt(null);
+                if (!viiperReady || Dispatcher.HasShutdownStarted ||
                     Dispatcher.HasShutdownFinished)
                 {
+                    if (!Dispatcher.HasShutdownStarted &&
+                        !Dispatcher.HasShutdownFinished)
+                    {
+                        Shutdown();
+                    }
                     return;
                 }
             }
@@ -768,10 +807,21 @@ namespace DS4WinWPF
         {
             while (!exitComThread)
             {
-                // check for a signal.
-                if (threadComEvent.WaitOne())
+                EventWaitHandle comEvent = Volatile.Read(ref threadComEvent);
+                if (comEvent == null)
                 {
-                    threadComEvent.Reset();
+                    return;
+                }
+
+                // check for a signal.
+                try
+                {
+                    if (!comEvent.WaitOne())
+                    {
+                        continue;
+                    }
+
+                    comEvent.Reset();
                     // The user tried to start another instance. We can't allow that,
                     // so bring the other instance back into view and enable that one.
                     // That form is created in another thread, so we need some thread sync magic.
@@ -782,6 +832,10 @@ namespace DS4WinWPF
                             ActivateBestApplicationWindow();
                         }));
                     }
+                }
+                catch (ObjectDisposedException)
+                {
+                    return;
                 }
             }
         }

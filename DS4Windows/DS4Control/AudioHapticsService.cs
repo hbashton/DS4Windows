@@ -408,7 +408,20 @@ namespace DS4Windows
                     captureFormat.SampleRate);
                 capture.DataAvailable += Capture_DataAvailable;
                 capture.RecordingStopped += Capture_RecordingStopped;
-                capture.StartRecording();
+                try
+                {
+                    capture.StartRecording();
+                }
+                catch
+                {
+                    // A source can disappear between endpoint discovery and
+                    // StartRecording. Never leave that half-started object in
+                    // the field: EnsureCapture treats a non-null field as a
+                    // healthy stream and would otherwise never retry.
+                    RetireCapture(stopRecording: true);
+                    Volatile.Write(ref processor, null);
+                    throw;
+                }
                 UpdateRuntimeStatus();
             }
 
@@ -445,7 +458,20 @@ namespace DS4Windows
                 processCapture.DataAvailable += Capture_DataAvailable;
                 processCapture.RecordingStopped += Capture_RecordingStopped;
                 processCapture.SourceChanged += ProcessCapture_SourceChanged;
-                processCapture.StartRecording();
+                try
+                {
+                    processCapture.StartRecording();
+                }
+                catch
+                {
+                    // Process loopback activation races app-session and route
+                    // changes during a fast source switch. Roll back every
+                    // partially assigned field so the 250 ms recovery loop
+                    // can acquire a fresh Windows capture client.
+                    RetireProcessCapture(stopRecording: true);
+                    Volatile.Write(ref processor, null);
+                    throw;
+                }
                 UpdateRuntimeStatus();
             }
 
@@ -509,6 +535,9 @@ namespace DS4Windows
                     {
                         status = new AudioHapticsRuntimeStatus(false,
                             $"Waiting for audio source: {exception.Message}");
+                        AppLogger.LogToGui(
+                            $"Audio Haptics source start failed for controller {slot + 1}; retrying: {exception.Message}",
+                            true);
                     }
                 }
             }

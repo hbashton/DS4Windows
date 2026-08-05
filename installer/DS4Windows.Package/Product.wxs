@@ -37,7 +37,7 @@
       <RegistryValue Root="HKCU" Key="Software\DS4Windows\Installer" Name="StartMenuShortcut" Value="1" Type="integer" KeyPath="yes" />
     </Component>
 
-    <Component Id="DesktopShortcut" Directory="DesktopFolder" Guid="B3E39E54-E6C7-466B-9E59-290666FB0A42" Condition="DESKTOP_SHORTCUT = 1">
+    <Component Id="DesktopShortcut" Directory="DesktopFolder" Guid="B3E39E54-E6C7-466B-9E59-290666FB0A42" Condition="DESKTOP_SHORTCUT = 1" Transitive="yes">
       <Shortcut Id="DesktopDS4Windows" Name="DS4Windows" Description="Configure and use PlayStation controllers on Windows" Target="[INSTALLFOLDER]DS4Windows.exe" WorkingDirectory="INSTALLFOLDER" Icon="DS4WindowsIcon" Advertise="no" />
       <RegistryValue Root="HKCU" Key="Software\DS4Windows\Installer" Name="DesktopShortcut" Value="1" Type="integer" KeyPath="yes" />
     </Component>

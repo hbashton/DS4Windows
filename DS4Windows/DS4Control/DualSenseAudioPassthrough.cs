@@ -923,6 +923,19 @@ namespace DS4Windows
                 return false;
             }
 
+            return TryGetEndpointUsbipPort(endpoint, out int endpointPort) &&
+                endpointPort == preferredUsbipPort;
+        }
+
+        internal static bool TryGetEndpointUsbipPort(MMDevice endpoint,
+            out int endpointPort)
+        {
+            endpointPort = -1;
+            if (endpoint == null)
+            {
+                return false;
+            }
+
             string interfacePath = GetEndpointProperty(endpoint,
                 PropertyKeys.PKEY_Device_InterfaceKey);
             int pathStart = interfacePath.IndexOf(@"\\?\",
@@ -934,8 +947,8 @@ namespace DS4Windows
 
             return !string.IsNullOrEmpty(interfacePath) &&
                 Global.TryResolveUsbIpWin2Device(interfacePath,
-                    out bool usbIpAncestor, out int endpointPort) &&
-                usbIpAncestor && endpointPort == preferredUsbipPort;
+                    out bool usbIpAncestor, out endpointPort) &&
+                usbIpAncestor && endpointPort >= 0;
         }
 
         internal static ControllerAudioEndpointKind GetEndpointKind(OutContType outputType)

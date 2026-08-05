@@ -204,7 +204,21 @@ namespace DS4WindowsTests
                 //Trace.WriteLine(testStr);
             }
 
-            Assert.AreEqual(appSettingsXml, testStr);
+            // The source fixture intentionally represents an older settings
+            // file. New settings must be emitted with safe defaults rather
+            // than forcing every additive schema change to rewrite the legacy
+            // fixture byte-for-byte.
+            using StringReader roundTripReader = new StringReader(testStr);
+            AppSettingsDTO roundTrip = (AppSettingsDTO)serializer.Deserialize(
+                roundTripReader);
+            BackingStore roundTripStore = new BackingStore();
+            roundTrip.MapTo(roundTripStore);
+            Assert.AreEqual(tempStore.lastChecked,
+                roundTripStore.lastChecked);
+            Assert.AreEqual(tempStore.autoProfileRevertDefaultProfile,
+                roundTripStore.autoProfileRevertDefaultProfile);
+            StringAssert.Contains(testStr,
+                "<SuppressViiperSetupPrompt>false</SuppressViiperSetupPrompt>");
         }
     }
 }

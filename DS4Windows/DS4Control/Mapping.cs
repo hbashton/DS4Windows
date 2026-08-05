@@ -114,6 +114,7 @@ namespace DS4Windows
             public bool LaunchProgram;
             public string ProfileName = string.Empty;
             public Action<bool> AfterLoad;
+            public long Revision;
         }
 
         private static readonly object[] profileSwitchRequestLocks = new object[Global.MAX_DS4_CONTROLLER_COUNT]
@@ -870,6 +871,7 @@ namespace DS4Windows
             lock (profileSwitchRequestLocks[device])
             {
                 ProfileSwitchRequest request = profileSwitchRequests[device];
+                request.Revision = Global.BeginProfileSwitchRevision(device);
                 request.Pending = true;
                 request.TempProfile = tempProfile;
                 request.LaunchProgram = launchProgram;
@@ -935,6 +937,7 @@ namespace DS4Windows
                 bool launchProgram;
                 string profileName;
                 Action<bool> afterLoad;
+                long revision;
 
                 lock (profileSwitchRequestLocks[device])
                 {
@@ -950,6 +953,7 @@ namespace DS4Windows
                     launchProgram = request.LaunchProgram;
                     profileName = request.ProfileName;
                     afterLoad = request.AfterLoad;
+                    revision = request.Revision;
                     request.AfterLoad = null;
                 }
 
@@ -960,8 +964,9 @@ namespace DS4Windows
                     {
                         loaded = tempProfile ?
                             LoadTempProfile(device, profileName, launchProgram,
-                                ctrl) :
-                            LoadProfile(device, launchProgram, ctrl);
+                                ctrl, transitionRevision: revision) :
+                            LoadProfile(device, launchProgram, ctrl,
+                                transitionRevision: revision);
                     }
                 }
                 catch (Exception ex)
@@ -971,7 +976,11 @@ namespace DS4Windows
 
                 try
                 {
-                    afterLoad?.Invoke(loaded);
+                    if (Global.IsCurrentProfileSwitchRevision(device,
+                        revision))
+                    {
+                        afterLoad?.Invoke(loaded);
+                    }
                 }
                 catch (Exception ex)
                 {

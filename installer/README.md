@@ -2,7 +2,7 @@
 
 `build-installer.ps1` composes the standard x64 distribution as a WiX 5 Burn
 bundle with a custom WPF interface. It contains the managed DS4Windows MSI,
-VIIPER 0.0.7, USB-IP 0.9.7.7, and optional HidHide/FakerInput packages.
+VIIPER 0.0.8, USB-IP 0.9.7.7, and optional HidHide/FakerInput packages.
 
 The installer intentionally has no portable mode or destination selector. The
 portable ZIP remains a separate CI artifact.
@@ -24,3 +24,7 @@ USB-IP log remains under the managed VIIPER installation.
 Set `DS4W_SIGN_CERT_PATH`, `DS4W_SIGN_CERT_PASSWORD`, and optionally
 `DS4W_SIGN_TIMESTAMP_URL` to Authenticode-sign the final EXE in a protected
 release environment.
+
+The transaction state machine, failure containment, pinned identities, reboot
+boundary, and release gates are documented in
+[`docs/INSTALLER_VALIDATION_STRATEGY.md`](../docs/INSTALLER_VALIDATION_STRATEGY.md).

@@ -264,6 +264,10 @@ namespace DS4Windows.InputDevices
             DualSenseBluetoothPhysicalOutputSequence.
                 ControllerStatePayloadLength];
         private bool latestControllerStateAvailable;
+        private byte latestLocalRumbleLightFast;
+        private byte latestLocalRumbleHeavySlow;
+        private byte latestLocalRumbleMode;
+        private bool latestLocalRumbleAvailable;
         private long latestTemplateHapticsExpiryQpc;
         private long nextReportId;
         private long acknowledgedReports;
@@ -1225,6 +1229,77 @@ namespace DS4Windows.InputDevices
         }
 
         /// <summary>
+        /// Publishes a locally composed regular-rumble transition through the
+        /// same ordered controller-state mailbox as native game state. The
+        /// steady 0x36 template deliberately carries no motor validity strobe;
+        /// both required motor bits are restored only for this next physical
+        /// presentation. This prevents the media clock from either losing the
+        /// command or replaying it every 10.667 ms.
+        /// </summary>
+        public bool UpdateLocalRumbleState(byte[] latestCombinedReport)
+        {
+            if (latestCombinedReport == null ||
+                latestCombinedReport.Length != ReportLength || !IsRunning)
+            {
+                return false;
+            }
+
+            const int stateOffset =
+                DualSenseBluetoothPhysicalOutputSequence.
+                    ControllerStateSourceOffset;
+            const byte mainMotorValidity = 0x03;
+            byte flag0 = latestCombinedReport[stateOffset];
+            if ((flag0 & mainMotorValidity) != mainMotorValidity)
+            {
+                return true;
+            }
+
+            byte lightFast = latestCombinedReport[stateOffset + 2];
+            byte heavySlow = latestCombinedReport[stateOffset + 3];
+            byte rumbleMode = (byte)(latestCombinedReport[
+                stateOffset + 38] & 0x04);
+            byte[] payload = new byte[
+                DualSenseBluetoothPhysicalOutputSequence.
+                    ControllerStatePayloadLength];
+            Buffer.BlockCopy(latestCombinedReport, stateOffset, payload, 0,
+                payload.Length);
+
+            // Preserve the audio-control contract that shares this physical
+            // media interval, but strip every unrelated edge-triggered field.
+            // The exact motor transition and improved-rumble mode are the only
+            // controller effects owned by this command.
+            payload[0] = (byte)((payload[0] & 0xF0) |
+                mainMotorValidity);
+            payload[1] &= 0x83;
+            payload[38] = rumbleMode;
+
+            lock (stateLock)
+            {
+                if (latestLocalRumbleAvailable &&
+                    latestLocalRumbleLightFast == lightFast &&
+                    latestLocalRumbleHeavySlow == heavySlow &&
+                    latestLocalRumbleMode == rumbleMode)
+                {
+                    return true;
+                }
+
+                if (!outboundCommands.TryEnqueue(new OutboundCommand(
+                    MessageKind.UpdateControllerState, payload)))
+                {
+                    return false;
+                }
+
+                latestLocalRumbleLightFast = lightFast;
+                latestLocalRumbleHeavySlow = heavySlow;
+                latestLocalRumbleMode = rumbleMode;
+                latestLocalRumbleAvailable = true;
+            }
+
+            outboundAvailable.Set();
+            return true;
+        }
+
+        /// <summary>
         /// Publishes one exact game-authored common-state update together with
         /// the quiescent media template that follows it. The helper consumes
         /// both under one state lock, so a speaker/haptics frame can never see
@@ -1297,6 +1372,7 @@ namespace DS4Windows.InputDevices
             lock (stateLock)
             {
                 latestControllerStateAvailable = false;
+                latestLocalRumbleAvailable = false;
                 realtimeHapticsGeneration = NextGeneration(
                     realtimeHapticsGeneration);
                 byte[] payload = new byte[sizeof(int)];
@@ -1339,6 +1415,7 @@ namespace DS4Windows.InputDevices
             lock (stateLock)
             {
                 latestControllerStateAvailable = false;
+                latestLocalRumbleAvailable = false;
                 currentEpoch = NextGeneration(currentEpoch);
                 realtimeHapticsGeneration = NextGeneration(
                     realtimeHapticsGeneration);
@@ -2428,6 +2505,8 @@ namespace DS4Windows.InputDevices
             private readonly byte[] presentationTraceSpeakerVolume;
             private readonly byte[] presentationTraceAudioRoute;
             private readonly byte[] presentationTraceAudioGain;
+            private readonly byte[] presentationTraceRumbleLightFast;
+            private readonly byte[] presentationTraceRumbleHeavySlow;
             private readonly uint[] presentationTraceHapticsHash;
             private readonly byte[] presentationTraceMediaBufferLevel;
             private readonly double[] presentationTraceMediaBufferRatio;
@@ -2484,6 +2563,10 @@ namespace DS4Windows.InputDevices
                         presentationTraceAudioRoute = new byte[
                             PresentationTraceCapacity];
                         presentationTraceAudioGain = new byte[
+                            PresentationTraceCapacity];
+                        presentationTraceRumbleLightFast = new byte[
+                            PresentationTraceCapacity];
+                        presentationTraceRumbleHeavySlow = new byte[
                             PresentationTraceCapacity];
                         presentationTraceHapticsHash = new uint[
                             PresentationTraceCapacity];
@@ -4275,6 +4358,8 @@ namespace DS4Windows.InputDevices
                     presentationTraceSpeakerVolume[index] = report[8];
                     presentationTraceAudioRoute[index] = report[10];
                     presentationTraceAudioGain[index] = report[40];
+                    presentationTraceRumbleLightFast[index] = report[5];
+                    presentationTraceRumbleHeavySlow[index] = report[6];
                     uint hash = 2166136261u;
                     for (int offset = 3; offset < 50; offset++)
                     {
@@ -4319,6 +4404,8 @@ namespace DS4Windows.InputDevices
                     presentationTraceSpeakerVolume[index] = 0;
                     presentationTraceAudioRoute[index] = 0;
                     presentationTraceAudioGain[index] = 0;
+                    presentationTraceRumbleLightFast[index] = 0;
+                    presentationTraceRumbleHeavySlow[index] = 0;
                     if (combinedHaptics)
                     {
                         uint hash = 2166136261u;
@@ -4346,6 +4433,8 @@ namespace DS4Windows.InputDevices
                     presentationTraceSpeakerVolume[index] = report[18];
                     presentationTraceAudioRoute[index] = report[20];
                     presentationTraceAudioGain[index] = report[50];
+                    presentationTraceRumbleLightFast[index] = report[15];
+                    presentationTraceRumbleHeavySlow[index] = report[16];
                     uint hash = 2166136261u;
                     for (int offset = 78; offset < 142; offset++)
                     {
@@ -4374,7 +4463,7 @@ namespace DS4Windows.InputDevices
                         new UTF8Encoding(false));
                     output.WriteLine($"qpcFrequency,{Stopwatch.Frequency}");
                     output.WriteLine(
-                        "index,qpc,reportId,reportSequence,packetSequence,packetType,reservoirCount,audioFlags0,audioFlags1,headphoneVolume,speakerVolume,audioRoute,audioGain,hapticsHash,controllerMediaBufferLevel,mediaBufferCadenceRatio");
+                        "index,qpc,reportId,reportSequence,packetSequence,packetType,reservoirCount,audioFlags0,audioFlags1,headphoneVolume,speakerVolume,audioRoute,audioGain,rumbleLightFast,rumbleHeavySlow,hapticsHash,controllerMediaBufferLevel,mediaBufferCadenceRatio");
                     for (int index = 0; index < presentationTraceCount;
                         index++)
                     {
@@ -4403,6 +4492,12 @@ namespace DS4Windows.InputDevices
                         output.Write(presentationTraceAudioRoute[index]);
                         output.Write(',');
                         output.Write(presentationTraceAudioGain[index]);
+                        output.Write(',');
+                        output.Write(
+                            presentationTraceRumbleLightFast[index]);
+                        output.Write(',');
+                        output.Write(
+                            presentationTraceRumbleHeavySlow[index]);
                         output.Write(',');
                         output.Write(presentationTraceHapticsHash[index]);
                         output.Write(',');
@@ -5420,14 +5515,21 @@ namespace DS4Windows.InputDevices
                 Buffer.BlockCopy(latestTemplate, 2, queuedReport, 2, 3);
                 Buffer.BlockCopy(latestTemplate, 11, queuedReport, 11, 131);
 
-                // Do not turn every steady media generation into another
-                // regular-rumble command. A live game transition is composed
-                // after this patch and therefore retains both motor validity
-                // bits. PadSense-v0.1.0 and physical A/B traces showed that
-                // repeating the template's second motor strobe drained the
-                // controller media queue and produced periodic 50-80 ms gaps.
-                queuedReport[StateFlag0Offset] &= unchecked(
-                    (byte)~MainMotorSecondValidity);
+                // Compatible rumble is a continuous mode, not a one-shot
+                // edge. Both Sony bits must remain asserted for as long as
+                // either motor is non-zero; presenting an F1 media frame
+                // immediately after an F3 motor update switches the controller
+                // back to the haptics lane before the motor can be felt. A
+                // zero pair still uses one explicit F3 stop from the ordered
+                // state mailbox, after which the steady carrier returns to F1.
+                bool activeRegularRumble =
+                    queuedReport[StateFlag0Offset + 2] != 0 ||
+                    queuedReport[StateFlag0Offset + 3] != 0;
+                if (!activeRegularRumble)
+                {
+                    queuedReport[StateFlag0Offset] &= unchecked(
+                        (byte)~MainMotorSecondValidity);
+                }
             }
 
             if (hapticsExpiryQpc <= nowQpc)

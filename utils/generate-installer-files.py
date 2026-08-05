@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import stat
 import uuid
 from pathlib import Path
 from xml.sax.saxutils import escape
@@ -29,6 +30,11 @@ def digest(path: Path) -> str:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
             hasher.update(block)
     return hasher.hexdigest().upper()
+
+
+def is_reparse_point(path: Path) -> bool:
+    attributes = getattr(path.lstat(), "st_file_attributes", 0)
+    return bool(attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
 
 
 def emit_directory(lines: list[str], root: Path, directory: Path, files: list[Path], indent: str) -> list[str]:
@@ -61,15 +67,27 @@ def main() -> int:
     parser.add_argument("--version", required=True)
     args = parser.parse_args()
 
-    root = args.publish_root.resolve()
+    root = args.publish_root.absolute()
     if not (root / "DS4Windows.exe").is_file():
         raise SystemExit(f"Publish root is incomplete: {root}")
+    if is_reparse_point(root):
+        raise SystemExit(f"Publish root cannot be a reparse point: {root}")
 
     manifest_path = args.manifest_output.resolve()
+    entries = list(root.rglob("*"))
+    reparse_entries = [path for path in entries if is_reparse_point(path)]
+    if reparse_entries:
+        raise SystemExit(
+            "Publish tree contains a reparse point: " +
+            str(reparse_entries[0].relative_to(root))
+        )
     files = sorted(
-        (path for path in root.rglob("*") if path.is_file() and path.resolve() != manifest_path),
+        (path for path in entries if path.is_file() and path.resolve() != manifest_path),
         key=lambda p: p.relative_to(root).as_posix().lower(),
     )
+    relative_names = [path.relative_to(root).as_posix() for path in files]
+    if len({name.casefold() for name in relative_names}) != len(relative_names):
+        raise SystemExit("Publish tree contains case-insensitive duplicate paths.")
     manifest = {
         "schema": 1,
         "product": "DS4Windows",

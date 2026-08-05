@@ -1829,6 +1829,43 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void LocalRumbleTransitionOverridesStaleNativeOwnershipOnlyForMotors()
+        {
+            byte[] source = new byte[49];
+            byte[] destination = new byte[60];
+            const int sourceOffset = 2;
+            const int destinationOffset = 13;
+
+            destination[destinationOffset] = 0xA0;
+            destination[destinationOffset + 1] = 0x54;
+            destination[destinationOffset + 10] = 0x26;
+            destination[destinationOffset + 21] = 0x27;
+            destination[destinationOffset + 38] = 0x83;
+
+            source[sourceOffset + 2] = 0x72;
+            source[sourceOffset + 3] = 0xC4;
+            source[sourceOffset + 38] = 0x04;
+
+            DualSenseDevice.MergeLocalRumbleIntoV5AudioSnapshot(source,
+                sourceOffset, destination, destinationOffset);
+
+            Assert.AreEqual((byte)0xA3,
+                destination[destinationOffset]);
+            Assert.AreEqual((byte)0x54,
+                destination[destinationOffset + 1]);
+            Assert.AreEqual((byte)0x72,
+                destination[destinationOffset + 2]);
+            Assert.AreEqual((byte)0xC4,
+                destination[destinationOffset + 3]);
+            Assert.AreEqual((byte)0x26,
+                destination[destinationOffset + 10]);
+            Assert.AreEqual((byte)0x27,
+                destination[destinationOffset + 21]);
+            Assert.AreEqual((byte)0x87,
+                destination[destinationOffset + 38]);
+        }
+
+        [TestMethod]
         public void NativeCombinedCarrierRetainsGameLightbarAcrossUnrelatedState()
         {
             DualSenseDevice device = CreateBluetoothDevice();

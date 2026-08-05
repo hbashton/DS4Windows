@@ -407,9 +407,20 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             }
         }
 
-        public List<AudioEndpointChoice> ControllerAudioSourceChoices =>
-            AudioEndpointChoiceCache.BuildControllerAudioChoices(
-                ControllerAudioSourceId);
+        public List<AudioEndpointChoice> ControllerAudioSourceChoices
+        {
+            get
+            {
+                ViiperOutDevice outputDevice = HasValidSelectedDevice
+                    ? App.rootHub?.GetPlayStationFeatureOutput(
+                        selectedController.DevIndex)
+                    : null;
+                return AudioEndpointChoiceCache.BuildControllerAudioChoices(
+                    ControllerAudioSourceId,
+                    outputDevice?.OutputType ?? SelectedOutputController,
+                    outputDevice?.DirectSpeakerUsbipPort ?? -1);
+            }
+        }
 
         public string ControllerAudioSourceId
         {
@@ -1191,16 +1202,10 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             }
         }
 
-        public void CheckDrivers()
+        public bool CheckDrivers()
         {
             ViiperPrerequisiteStatus status = ViiperSetupManager.GetStatus(tryStartServer: true);
-            if (!status.Ready)
-            {
-                // Startup already offered the prerequisite prompt on the STA
-                // UI thread. Respect that session decision here instead of
-                // constructing a second WPF window from this worker thread.
-                ViiperSetupManager.EnsureReadyWithPrompt(null);
-            }
+            return status.Ready;
         }
 
         public bool LauchDS4Updater(string releaseTag = null)

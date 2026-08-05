@@ -6,14 +6,17 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from pathlib import Path
+import re
+import xml.etree.ElementTree as ET
+from pathlib import Path, PurePosixPath
 
 
 REQUIRED_PUBLISH_FILES = {
     "DS4Windows.exe",
+    "DS4Windows.release",
     "extras/install-viiper-backend.ps1",
-    "extras/VIIPER-0.0.7-x64.exe",
-    "extras/VIIPER-0.0.7-x64.exe.sha256",
+    "extras/VIIPER-0.0.8-x64.exe",
+    "extras/VIIPER-0.0.8-x64.exe.sha256",
     "extras/USBip-0.9.7.7-x64.exe",
     "extras/HidHide_1.5.230_x64.exe",
     "extras/FakerInput_0.1.0_x64.msi",
@@ -43,6 +46,54 @@ def main() -> int:
         raise SystemExit(f"Installer EXE was not produced correctly: {args.installer}")
 
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
+    if (
+        manifest.get("schema") != 1
+        or manifest.get("product") != "DS4Windows"
+        or manifest.get("architecture") != "x64"
+        or not isinstance(manifest.get("files"), list)
+    ):
+        raise SystemExit("Installer package manifest metadata is invalid.")
+    release_id = (args.publish_root / "DS4Windows.release").read_text(
+        encoding="utf-8-sig"
+    ).strip()
+    if manifest.get("version") != release_id:
+        raise SystemExit("Package manifest version does not match DS4Windows.release.")
+
+    manifest_paths = [entry.get("path") for entry in manifest["files"]]
+    if any(not isinstance(path, str) or not path for path in manifest_paths):
+        raise SystemExit("Package manifest contains an invalid path.")
+    if len({path.casefold() for path in manifest_paths}) != len(manifest_paths):
+        raise SystemExit("Package manifest contains duplicate Windows paths.")
+    publish_resolved = args.publish_root.resolve()
+    for relative in manifest_paths:
+        parsed = PurePosixPath(relative)
+        resolved = (args.publish_root / Path(*parsed.parts)).resolve()
+        invalid_component = any(
+            re.search(r'[<>:"\\|?*\x00-\x1F]', part)
+            or part.endswith((" ", "."))
+            or re.fullmatch(
+                r"(?i)(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?",
+                part,
+            )
+            for part in parsed.parts
+        )
+        if (
+            parsed.is_absolute()
+            or any(part in {"", ".", ".."} for part in parsed.parts)
+            or "\\" in relative
+            or invalid_component
+            or not resolved.is_relative_to(publish_resolved)
+        ):
+            raise SystemExit(f"Package manifest contains an unsafe path: {relative}")
+    manifest_resolved = args.manifest.resolve()
+    actual_paths = {
+        path.relative_to(args.publish_root).as_posix().casefold()
+        for path in args.publish_root.rglob("*")
+        if path.is_file() and path.resolve() != manifest_resolved
+    }
+    if {path.casefold() for path in manifest_paths} != actual_paths:
+        raise SystemExit("Package manifest does not exactly own the publish tree.")
+
     for entry in manifest["files"]:
         path = args.publish_root / entry["path"]
         if not path.is_file() or path.stat().st_size != entry["size"] or sha256(path) != entry["sha256"]:
@@ -56,6 +107,7 @@ def main() -> int:
         'Id="ViiperUsbipSetup"',
         'Id="DS4WindowsMsi"',
         'Id="CloseRunningApplications"',
+        'Id="CloseRunningApplicationsForUninstall"',
         'RepairArguments="repair ',
         'UninstallArguments="uninstall ',
         'InstallCondition="InstallHidHide"',
@@ -64,19 +116,111 @@ def main() -> int:
         '--target-roaming-appdata',
         'Variable="ManagedInstallRegistered"',
         'Variable="ManagedViiperPresent"',
+        'CacheId="DS4WindowsSetupActionsPreflight-$(var.SetupActionsHash)"',
+        'CacheId="DS4WindowsSetupActionsUninstallPreflight-$(var.SetupActionsHash)"',
+        'CacheId="DS4WindowsSetupActionsInfrastructure-$(var.SetupActionsHash)"',
+        'Id="HidHide"',
+        'Id="FakerInput"',
+        'Vital="yes"',
     ]
     for contract in required_contracts:
         if contract not in bundle:
             raise SystemExit("Bundle contract missing: " + contract)
+
+    wix_namespace = {"w": "http://wixtoolset.org/schemas/v4/wxs"}
+    bundle_xml = ET.fromstring(bundle)
+    packages = {
+        element.get("Id"): element
+        for element in bundle_xml.findall(".//w:Chain/*", wix_namespace)
+    }
+    for package_id in (
+        "CloseRunningApplications",
+        "CloseRunningApplicationsForUninstall",
+        "DS4WindowsMsi",
+        "ViiperUsbipSetup",
+        "HidHide",
+        "FakerInput",
+    ):
+        if package_id not in packages:
+            raise SystemExit(f"Bundle package is missing: {package_id}")
+        if packages[package_id].get("Vital") != "yes":
+            raise SystemExit(f"Bundle package must be vital: {package_id}")
+    if packages["HidHide"].get("InstallCondition") != "InstallHidHide":
+        raise SystemExit("HidHide optional-install condition is invalid.")
+    if packages["FakerInput"].get("InstallCondition") != "InstallFakerInput":
+        raise SystemExit("FakerInput optional-install condition is invalid.")
+    cache_ids = {
+        packages["CloseRunningApplications"].get("CacheId"),
+        packages["CloseRunningApplicationsForUninstall"].get("CacheId"),
+        packages["ViiperUsbipSetup"].get("CacheId"),
+    }
+    if None in cache_ids or len(cache_ids) != 3 or any(
+        "$(var.SetupActionsHash)" not in cache_id for cache_id in cache_ids
+    ):
+        raise SystemExit("Setup helper cache identities are not content-addressed.")
+    chain_ids = [
+        element.get("Id")
+        for element in bundle_xml.findall(".//w:Chain/*", wix_namespace)
+    ]
+    if chain_ids[0] != "CloseRunningApplications" or chain_ids[-1] != "CloseRunningApplicationsForUninstall":
+        raise SystemExit(
+            "Process preflights must bracket the forward/reverse Burn chain."
+        )
+
+    build_script = (args.bundle_source.parent.parent / "build-installer.ps1").read_text(encoding="utf-8")
+    for contract in [
+        'Get-FileHash -LiteralPath $setupActions -Algorithm SHA256',
+        '-p:SetupActionsHash=$setupActionsHash',
+        'Global\\DS4Windows-Installer-Build',
+        'previous orphaned WiX/MSI build',
+        'Publish-InstallerFileAtomically',
+        '$pendingInstaller',
+        '[IO.File]::Replace',
+        '-p:Version=$ProductVersion -p:InformationalVersion=$DisplayVersion',
+        'test-viiper-reboot-boundary.ps1',
+        'test-installer-state-machine.py',
+    ]:
+        if contract not in build_script:
+            raise SystemExit("Installer build identity contract missing: " + contract)
     if "Portable" in bundle or "InstallFolder" in bundle or "destination" in bundle.lower():
         raise SystemExit("The standard installer must not expose a portable or destination-selection path.")
 
     product = (args.bundle_source.parent.parent / "DS4Windows.Package" / "Product.wxs").read_text(encoding="utf-8")
-    for contract in ['<MajorUpgrade', 'Id="DESKTOP_SHORTCUT"', 'Scope="perMachine"']:
+    for contract in [
+        '<MajorUpgrade',
+        'Id="DESKTOP_SHORTCUT"',
+        'Scope="perMachine"',
+        '<StandardDirectory Id="ProgramMenuFolder">',
+        '<StandardDirectory Id="DesktopFolder" />',
+        'Directory="DesktopFolder"',
+        'Root="HKCU" Key="Software\\DS4Windows\\Installer"',
+        'Transitive="yes"',
+    ]:
         if contract not in product:
             raise SystemExit("MSI upgrade contract missing: " + contract)
 
     installer_root = args.bundle_source.parent.parent
+    bootstrapper = (
+        installer_root
+        / "DS4Windows.Bootstrapper"
+        / "InstallerApplication.cs"
+    ).read_text(encoding="utf-8")
+    for contract in [
+        'e.PackageId, "CloseRunningApplications"',
+        '"CloseRunningApplicationsForUninstall"',
+        "plannedAction == LaunchAction.Install",
+        "plannedAction == LaunchAction.Repair",
+        "plannedAction == LaunchAction.Uninstall",
+        "? RequestState.Present",
+        "IsRelatedBundleNewer",
+        "ShowFailure(1638",
+    ]:
+        if contract not in bootstrapper:
+            raise SystemExit(
+                "Bootstrapper process-quiescence contract missing: " +
+                contract
+            )
+
     setup_actions = (installer_root / "DS4Windows.SetupActions" / "Program.cs").read_text(encoding="utf-8")
     for contract in [
         r'@"Global\DS4Windows-VIIPER-Setup"',
@@ -84,12 +228,66 @@ def main() -> int:
         'KillProcessTree(process)',
         'IsInfrastructureCommitted()',
         'ValidateSuppliedInteractiveUser',
+        'RegistryView.Registry64',
+        'return 1618;',
+        'ValidateManagedInstallRoot(installRoot)',
+        'FileAttributes.ReparsePoint',
+        'EnsureDirectoryPathHasNoReparsePoints(resumeRoot)',
+        'ProtectResumeDirectory(resumeRoot, targetUser.Sid)',
+        'HashesEqual(bundleSource, stagedBundle)',
         '=== DS4Windows setup invocation ',
+        'IsRecognizedProductProcess(process, processName',
+        'FileVersionInfo.GetVersionInfo(executablePath)',
+        'EnsureDirectoryPathHasNoReparsePoints(InstallerLogRoot)',
     ]:
         if contract not in setup_actions:
             raise SystemExit("Setup action safety contract missing: " + contract)
     if 'SetValue("DS4WindowsSetupResume"' in setup_actions:
         raise SystemExit("Setup must not create a custom HKLM RunOnce entry.")
+
+    backend_script = (
+        args.bundle_source.parent.parent.parent
+        / "extras"
+        / "install-viiper-backend.ps1"
+    ).read_text(encoding="utf-8")
+    for contract in [
+        '"Global\\DS4Windows-VIIPER-Setup"',
+        "Test-SafePackageRelativePath",
+        "Assert-SafeManagedDirectory",
+        "Install-ViiperAtomically",
+        "Resolve-UsbipReplacementBoundary",
+        "Commit-InfrastructureReadiness",
+        "Test-RecognizedProductExecutable",
+        '$script:InstallerLogRoot = Assert-SafeManagedDirectory',
+        '"VIIPER-0.0.8-x64.exe"',
+        '[Version]"0.9.7.7"',
+        '"USBip-0.9.7.7-x64.exe"',
+        'Start-AndVerifyViiper',
+        'Start-AndVerifyViiperDirectly',
+        'Suspend-StartupTasksUntilInfrastructureReady',
+        'Set-InfrastructureStartupFailClosed',
+        '$script:UsbipExecutableSha256',
+        'pinned USB-IP package and runtime ABI pass after reboot',
+        'registration attempt " +',
+        'retrying the same packaged executable directly',
+    ]:
+        if contract not in backend_script:
+            raise SystemExit(
+                "Backend installer safety contract missing: " + contract
+            )
+    legacy_network_contracts = [
+        "api.github.com/repos/hbashton/VIIPER",
+        "viiper-windows-amd64.zip",
+        "Invoke-WebRequest",
+        "DownloadFile(",
+        "Start-BitsTransfer",
+    ]
+    for contract in legacy_network_contracts:
+        if contract.casefold() in backend_script.casefold():
+            raise SystemExit(
+                "Backend installer must use only verified offline payloads; "
+                "legacy network acquisition found: " + contract
+            )
 
     bootstrapper = (installer_root / "DS4Windows.Bootstrapper" / "InstallerApplication.cs").read_text(encoding="utf-8")
     for contract in [
@@ -101,6 +299,17 @@ def main() -> int:
         'packageStates.Clear()',
         'InfrastructureFailureSummary()',
         'SetupActionsLogPath',
+        'deferInfrastructureUntilUpgradeCompletes',
+        'infrastructureRecoveryPass',
+        'PlanRelatedBundle +=',
+        'e.State = RequestState.None;',
+        'parentOwnedRelatedUninstall',
+        'command.Relation == RelationType.Upgrade &&',
+        'action == LaunchAction.Uninstall',
+        'command.Relation == RelationType.Upgrade',
+        'plannedAction == LaunchAction.Uninstall',
+        'Close(result);',
+        'IsRelatedBundleNewer',
     ]:
         if contract not in bootstrapper:
             raise SystemExit("Bootstrapper lifecycle contract missing: " + contract)
@@ -110,9 +319,96 @@ def main() -> int:
         '"InfrastructureState"',
         'BeginOutputReadLine()',
         'BeginErrorReadLine()',
+        'RegistryView.Registry64',
+        'ViiperApiReady()',
+        'ExpectedUsbipHash',
+        'IsCompatibleUsbipProbe',
     ]:
         if contract not in probe:
             raise SystemExit("Infrastructure probe contract missing: " + contract)
+    expected_hash = re.search(
+        r'ExpectedViiperHash\s*=\s*"([0-9A-F]{64})"', probe
+    )
+    actual_viiper_hash = sha256(
+        args.publish_root / "extras" / "VIIPER-0.0.8-x64.exe"
+    )
+    sidecar_hash = (
+        args.publish_root / "extras" / "VIIPER-0.0.8-x64.exe.sha256"
+    ).read_text(encoding="utf-8").split()[0].upper()
+    if sidecar_hash != actual_viiper_hash:
+        raise SystemExit("Packaged VIIPER hash sidecar is stale.")
+    if not expected_hash or expected_hash.group(1) != actual_viiper_hash:
+        raise SystemExit("Bootstrapper VIIPER identity does not match its packaged binary.")
+
+    setup_manager = (
+        args.bundle_source.parent.parent.parent
+        / "DS4Windows"
+        / "DS4Control"
+        / "Viiper"
+        / "ViiperSetupManager.cs"
+    ).read_text(encoding="utf-8")
+    manager_hash = re.search(
+        r'SupportedViiperSha256\s*=\s*\n?\s*"([0-9A-F]{64})"',
+        setup_manager,
+    )
+    if not manager_hash or manager_hash.group(1) != actual_viiper_hash:
+        raise SystemExit(
+            "Built-in setup VIIPER identity does not match its packaged binary."
+        )
+
+    usbip_hashes = []
+    for pattern, source, label in [
+        (
+            r'ExpectedUsbipHash\s*=\s*"([0-9A-Fa-f]{64})"',
+            probe,
+            "bootstrapper",
+        ),
+        (
+            r'\$script:UsbipExecutableSha256\s*=\s*\r?\n?\s*"([0-9A-Fa-f]{64})"',
+            backend_script,
+            "backend",
+        ),
+        (
+            r'SupportedUsbipExecutableSha256\s*=\s*\r?\n?\s*"([0-9A-Fa-f]{64})"',
+            setup_manager,
+            "runtime",
+        ),
+    ]:
+        match = re.search(pattern, source)
+        if not match:
+            raise SystemExit(
+                f"{label} USB-IP executable identity is missing."
+            )
+        usbip_hashes.append(match.group(1).upper())
+    if len(set(usbip_hashes)) != 1:
+        raise SystemExit(
+            "USB-IP executable identity differs between installer and runtime gates."
+        )
+    for contract in [
+        "EnsurePathDoesNotTraverseReparsePoints(sourceRoot",
+        "EnsurePathDoesNotTraverseReparsePoints(sourcePath",
+        "IsSafeRelativePackagePath(relativePath)",
+        "FileShare.Read",
+    ]:
+        if contract not in setup_manager:
+            raise SystemExit(
+                "Built-in installer staging contract missing: " + contract
+            )
+
+    post_build = (
+        args.bundle_source.parent.parent.parent
+        / "utils"
+        / "post-build.py"
+    ).read_text(encoding="utf-8")
+    for contract in [
+        "is_reparse_point",
+        "Refusing to replace output containing a reparse point",
+        ".ds4windows-managed-files.txt",
+    ]:
+        if contract not in post_build:
+            raise SystemExit(
+                "Portable package ownership contract missing: " + contract
+            )
     return 0
 
 

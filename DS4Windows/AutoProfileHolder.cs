@@ -59,6 +59,33 @@ namespace DS4WinWPF
             BindingOperations.EnableCollectionSynchronization(autoProfileColl, _colLockobj);
         }
 
+        /// <summary>
+        /// Captures a stable rule list for the background auto-profile watcher.
+        /// ObservableCollection is owned by the UI thread and can be edited while
+        /// the watcher is evaluating the foreground process.
+        /// </summary>
+        public AutoProfileEntity[] GetSnapshot()
+        {
+            System.Windows.Threading.Dispatcher dispatcher =
+                System.Windows.Application.Current?.Dispatcher;
+            if (dispatcher != null && !dispatcher.CheckAccess())
+            {
+                if (dispatcher.HasShutdownStarted ||
+                    dispatcher.HasShutdownFinished)
+                {
+                    return Array.Empty<AutoProfileEntity>();
+                }
+
+                return dispatcher.Invoke(() => autoProfileColl.ToArray(),
+                    System.Windows.Threading.DispatcherPriority.DataBind);
+            }
+
+            lock (_colLockobj)
+            {
+                return autoProfileColl.ToArray();
+            }
+        }
+
         private void Load()
         {
             string configFile = Path.Combine(Global.appdatapath, "Auto Profiles.xml");
@@ -172,8 +199,10 @@ namespace DS4WinWPF
 
         public bool IsMatch(string searchPath, string searchTitle)
         {
-            searchPath = searchPath?.Trim() ?? string.Empty;
-            searchTitle = searchTitle?.Trim() ?? string.Empty;
+            searchPath = (searchPath?.Trim() ?? string.Empty)
+                .Replace('/', '\\').ToLowerInvariant();
+            searchTitle = (searchTitle?.Trim() ?? string.Empty)
+                .ToLowerInvariant();
 
             if (string.IsNullOrEmpty(path_lowercase) && string.IsNullOrEmpty(title_lowercase))
             {
@@ -269,7 +298,7 @@ namespace DS4WinWPF
             if (!string.IsNullOrEmpty(pathStr))
             {
                 path = pathStr;
-                path_lowercase = path.ToLower().Replace('/', '\\');
+                path_lowercase = path.ToLowerInvariant().Replace('/', '\\');
 
                 if (path.Length >= 2)
                 {
@@ -288,7 +317,7 @@ namespace DS4WinWPF
             if (!string.IsNullOrEmpty(titleStr))
             {
                 title = titleStr;
-                title_lowercase = title.ToLower();
+                title_lowercase = title.ToLowerInvariant();
 
                 if (title.Length >= 2)
                 {

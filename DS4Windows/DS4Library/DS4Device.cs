@@ -2335,38 +2335,180 @@ namespace DS4Windows
         }
 
         protected DS4HapticState testRumble = new DS4HapticState();
+        // Virtual feedback, profile-editor tests, and the physical output
+        // loop run on independent threads. Treat this state as a single-slot
+        // mailbox: a motor pair and its dirty marker must cross that boundary
+        // atomically or the consumer can observe a torn pair or clear a newer
+        // notification while consuming an older one.
+        private readonly object rumbleStateLock = new object();
+        private bool previewLightRumbleActive;
+        private bool previewHeavyRumbleActive;
+        private byte previewLightRumbleStrength;
+        private byte previewHeavyRumbleStrength;
+        private bool previewRumbleDirty;
+        private long rumbleCommandGeneration;
+
+        protected long RumbleCommandGeneration =>
+            Interlocked.Read(ref rumbleCommandGeneration);
+
+        protected bool TryGetRumblePreview(out bool lightMotorActive,
+            out byte lightMotorStrength, out bool heavyMotorActive,
+            out byte heavyMotorStrength)
+        {
+            lock (rumbleStateLock)
+            {
+                lightMotorActive = previewLightRumbleActive;
+                lightMotorStrength = previewLightRumbleStrength;
+                heavyMotorActive = previewHeavyRumbleActive;
+                heavyMotorStrength = previewHeavyRumbleStrength;
+                return lightMotorActive || heavyMotorActive;
+            }
+        }
 
         public void setRumble(byte rightLightFastMotor, byte leftHeavySlowMotor)
         {
-            testRumble.rumbleState.RumbleMotorStrengthRightLightFast = rightLightFastMotor;
-            testRumble.rumbleState.RumbleMotorStrengthLeftHeavySlow = leftHeavySlowMotor;
-            testRumble.rumbleState.RumbleMotorsExplicitlyOff = rightLightFastMotor == 0 && leftHeavySlowMotor == 0;
-            testRumble.dirty = true;
-
-            // If rumble autostop timer (msecs) is enabled for this device then restart autostop timer everytime rumble is modified (or stop the timer if rumble is set to zero)
-            if (rumbleAutostopTime > 0)
+            lock (rumbleStateLock)
             {
-                if (testRumble.rumbleState.RumbleMotorsExplicitlyOff)
-                    rumbleAutostopTimer.Reset();   // A proper zero-rumble notification arrived; no safety stop is needed.
-                else if (currentHap.rumbleState.RumbleMotorStrengthLeftHeavySlow != leftHeavySlowMotor || currentHap.rumbleState.RumbleMotorStrengthRightLightFast != rightLightFastMotor)
-                    rumbleAutostopTimer.Restart(); // Guard against a lost virtual-output zero-rumble notification.
+                testRumble.rumbleState.RumbleMotorStrengthRightLightFast = rightLightFastMotor;
+                testRumble.rumbleState.RumbleMotorStrengthLeftHeavySlow = leftHeavySlowMotor;
+                testRumble.rumbleState.RumbleMotorsExplicitlyOff = rightLightFastMotor == 0 && leftHeavySlowMotor == 0;
+                testRumble.dirty = true;
+                Interlocked.Increment(ref rumbleCommandGeneration);
+
+                // If rumble autostop timer (msecs) is enabled for this device then restart autostop timer everytime rumble is modified (or stop the timer if rumble is set to zero)
+                if (rumbleAutostopTime > 0)
+                {
+                    if (testRumble.rumbleState.RumbleMotorsExplicitlyOff)
+                        rumbleAutostopTimer.Reset();   // A proper zero-rumble notification arrived; no safety stop is needed.
+                    else if (currentHap.rumbleState.RumbleMotorStrengthLeftHeavySlow != leftHeavySlowMotor || currentHap.rumbleState.RumbleMotorStrengthRightLightFast != rightLightFastMotor)
+                        rumbleAutostopTimer.Restart(); // Guard against a lost virtual-output zero-rumble notification.
+                }
+            }
+        }
+
+        /// <summary>
+        /// Publishes the profile editor's explicit motor preview independently
+        /// from virtual-controller feedback. Output feedback and the UI now run
+        /// on separate threads; treating the preview as ordinary feedback let a
+        /// later neutral game frame erase it before the physical writer could
+        /// present it. Active preview motors override only their own channel,
+        /// while the latest game state continues to update underneath.
+        /// </summary>
+        public void SetRumblePreview(bool lightMotorActive,
+            byte lightMotorStrength, bool heavyMotorActive,
+            byte heavyMotorStrength)
+        {
+            lock (rumbleStateLock)
+            {
+                if (previewLightRumbleActive == lightMotorActive &&
+                    previewHeavyRumbleActive == heavyMotorActive &&
+                    previewLightRumbleStrength == lightMotorStrength &&
+                    previewHeavyRumbleStrength == heavyMotorStrength)
+                {
+                    return;
+                }
+
+                previewLightRumbleActive = lightMotorActive;
+                previewHeavyRumbleActive = heavyMotorActive;
+                previewLightRumbleStrength = lightMotorStrength;
+                previewHeavyRumbleStrength = heavyMotorStrength;
+                previewRumbleDirty = true;
+                if (!lightMotorActive && !heavyMotorActive)
+                {
+                    // Releasing the final preview motor is an explicit stop,
+                    // not merely the absence of an overlay. Publish the zero
+                    // pair through the ordinary ordered rumble mailbox so the
+                    // physical compositor cannot retain the last non-zero
+                    // template indefinitely.
+                    testRumble.rumbleState.
+                        RumbleMotorStrengthRightLightFast = 0;
+                    testRumble.rumbleState.
+                        RumbleMotorStrengthLeftHeavySlow = 0;
+                    testRumble.rumbleState.RumbleMotorsExplicitlyOff = true;
+                    testRumble.dirty = true;
+                }
+                Interlocked.Increment(ref rumbleCommandGeneration);
+            }
+        }
+
+        public void ClearRumblePreview()
+        {
+            lock (rumbleStateLock)
+            {
+                previewLightRumbleActive = false;
+                previewHeavyRumbleActive = false;
+                previewLightRumbleStrength = 0;
+                previewHeavyRumbleStrength = 0;
+                previewRumbleDirty = true;
+                Interlocked.Increment(ref rumbleCommandGeneration);
+
+                // Clearing a preview is also an explicit physical stop. A
+                // later game frame may immediately replace it, but an idle
+                // virtual output must not leave the last preview strength in
+                // currentHap indefinitely.
+                testRumble.rumbleState.
+                    RumbleMotorStrengthRightLightFast = 0;
+                testRumble.rumbleState.
+                    RumbleMotorStrengthLeftHeavySlow = 0;
+                testRumble.rumbleState.RumbleMotorsExplicitlyOff = true;
+                testRumble.dirty = true;
             }
         }
 
         protected void MergeStates()
         {
-            if (testRumble.IsRumbleSet())
+            MergeStatesAndGetRumbleGeneration();
+        }
+
+        /// <summary>
+        /// Atomically consumes the latest rumble mailbox and snapshots the
+        /// generation represented by <see cref="currentHap"/>. Reading the
+        /// generation after releasing <see cref="rumbleStateLock"/> lets a
+        /// producer publish N+1 between those operations, causing the output
+        /// writer to acknowledge N+1 while it actually carries N.
+        /// </summary>
+        protected long MergeStatesAndGetRumbleGeneration()
+        {
+            lock (rumbleStateLock)
             {
-                if (testRumble.rumbleState.RumbleMotorsExplicitlyOff)
-                    testRumble.rumbleState.RumbleMotorsExplicitlyOff = false;
+                if (testRumble.IsRumbleSet())
+                {
+                    if (testRumble.rumbleState.RumbleMotorsExplicitlyOff)
+                        testRumble.rumbleState.RumbleMotorsExplicitlyOff = false;
 
-                //currentHap.rumbleState.RumbleMotorStrengthLeftHeavySlow = testRumble.rumbleState.RumbleMotorStrengthLeftHeavySlow;
-                //currentHap.rumbleState.RumbleMotorStrengthRightLightFast = testRumble.rumbleState.RumbleMotorStrengthRightLightFast;
-                currentHap.rumbleState = testRumble.rumbleState;
+                    //currentHap.rumbleState.RumbleMotorStrengthLeftHeavySlow = testRumble.rumbleState.RumbleMotorStrengthLeftHeavySlow;
+                    //currentHap.rumbleState.RumbleMotorStrengthRightLightFast = testRumble.rumbleState.RumbleMotorStrengthRightLightFast;
+                    currentHap.rumbleState = testRumble.rumbleState;
+                }
+
+                // Dirty is a multi-producer latch. Lightbar, trigger, audio
+                // routing, and rumble can all publish between physical-output
+                // passes; consuming an idle rumble mailbox must never clear a
+                // pending update from one of those other producers.
+                currentHap.dirty |= testRumble.dirty;
+                testRumble.dirty = false;
+
+                if (previewLightRumbleActive)
+                {
+                    currentHap.rumbleState.
+                        RumbleMotorStrengthRightLightFast =
+                            previewLightRumbleStrength;
+                }
+                if (previewHeavyRumbleActive)
+                {
+                    currentHap.rumbleState.
+                        RumbleMotorStrengthLeftHeavySlow =
+                            previewHeavyRumbleStrength;
+                }
+                if (previewLightRumbleActive || previewHeavyRumbleActive)
+                {
+                    currentHap.rumbleState.RumbleMotorsExplicitlyOff = false;
+                }
+
+                currentHap.dirty |= previewRumbleDirty;
+                previewRumbleDirty = false;
+                return Interlocked.Read(ref rumbleCommandGeneration);
             }
-
-            currentHap.dirty = testRumble.dirty;
-            testRumble.dirty = false;
         }
 
         public DS4State getRawCurrentState()

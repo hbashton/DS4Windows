@@ -73,12 +73,14 @@ $script:SetupTransactionStarted = $false
 $script:RequiredUsbipVersion = [Version]"0.9.7.7"
 $script:UsbipInstallerSha256 =
     "51620fa5f9f8be5932bc9d786deee557ce06d5407a99cab490dcfac71f185fea"
+$script:UsbipExecutableSha256 =
+    "fc1660e3759d8af4cede48dbe194285a5a1de85ce6e3216724499afd32be92e8"
 $script:UsbipUdeDriverSha256 =
     "51db440065393e588a6b2585508c50eb3e1510b7b06d9afa6c5bde583751ea7d"
 $script:UsbipFilterDriverSha256 =
     "c290299ff4d0f6a597db5ce03e15b29a5349cdce7c587ebfbd9ecaeca04f73ed"
 $script:BundledViiperPath = Join-Path $script:PackageExtrasRoot `
-    "VIIPER-0.0.7-x64.exe"
+    "VIIPER-0.0.8-x64.exe"
 $script:BundledViiperSha256Path = $script:BundledViiperPath + ".sha256"
 $script:BundledUsbipInstallerPath = Join-Path $script:PackageExtrasRoot `
     "USBip-0.9.7.7-x64.exe"
@@ -132,7 +134,7 @@ $script:UsbipReplacementStatePath = Join-Path $script:InstallDir `
 $script:UsbipUninstallKeyName = `
     "{199505b0-b93d-4521-a8c7-897818e0205a}_is1"
 $script:InfrastructureRegistryPath = "HKLM:\SOFTWARE\DS4Windows"
-$script:InfrastructureVersion = "VIIPER-0.0.7+USBIP-0.9.7.7"
+$script:InfrastructureVersion = "VIIPER-0.0.8+USBIP-0.9.7.7"
 $script:TempDir = Join-Path ([IO.Path]::GetTempPath()) (
     "DS4Windows-VIIPER-Setup-" + [Guid]::NewGuid().ToString("N"))
 
@@ -166,23 +168,71 @@ function Format-NativeFailure([object[]]$output) {
 
 function Clear-InfrastructureReadiness {
     if ($script:PortableInstallation) { return }
-    New-Item -Path $script:InfrastructureRegistryPath -Force | Out-Null
-    if (Get-ItemProperty -LiteralPath $script:InfrastructureRegistryPath `
-            -Name "InfrastructureVersion" -ErrorAction SilentlyContinue) {
-        Remove-ItemProperty -LiteralPath $script:InfrastructureRegistryPath `
-            -Name "InfrastructureVersion" -ErrorAction Stop
+    $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+        [Microsoft.Win32.RegistryHive]::LocalMachine,
+        [Microsoft.Win32.RegistryView]::Registry64)
+    try {
+        $key = $baseKey.CreateSubKey(
+            "SOFTWARE\DS4Windows", $true)
+        try {
+            $key.DeleteValue("InfrastructureVersion", $false)
+            $key.SetValue("InfrastructureState", "Installing",
+                [Microsoft.Win32.RegistryValueKind]::String)
+            $key.SetValue("InfrastructureStateUtc",
+                [DateTime]::UtcNow.ToString("O"),
+                [Microsoft.Win32.RegistryValueKind]::String)
+            $key.Flush()
+        }
+        finally {
+            if ($key) { $key.Dispose() }
+        }
     }
-    Set-InfrastructureState "Installing"
+    finally {
+        $baseKey.Dispose()
+    }
 }
 
 function Commit-InfrastructureReadiness {
     if ($script:PortableInstallation) { return }
-    New-Item -Path $script:InfrastructureRegistryPath -Force | Out-Null
-    New-ItemProperty -LiteralPath $script:InfrastructureRegistryPath `
-        -Name "InfrastructureVersion" `
-        -Value $script:InfrastructureVersion -PropertyType String -Force `
-        -ErrorAction Stop | Out-Null
-    Set-InfrastructureState "Ready"
+    $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+        [Microsoft.Win32.RegistryHive]::LocalMachine,
+        [Microsoft.Win32.RegistryView]::Registry64)
+    try {
+        $key = $baseKey.CreateSubKey(
+            "SOFTWARE\DS4Windows", $true)
+        try {
+            # Publish Ready last. Readers can never observe Ready paired with
+            # an old or missing version from this transaction.
+            $key.SetValue("InfrastructureVersion",
+                $script:InfrastructureVersion,
+                [Microsoft.Win32.RegistryValueKind]::String)
+            $key.SetValue("InfrastructureStateUtc",
+                [DateTime]::UtcNow.ToString("O"),
+                [Microsoft.Win32.RegistryValueKind]::String)
+            $key.SetValue("InfrastructureState", "Ready",
+                [Microsoft.Win32.RegistryValueKind]::String)
+            $key.Flush()
+
+            $actualVersion = [string]$key.GetValue(
+                "InfrastructureVersion", "")
+            $actualState = [string]$key.GetValue(
+                "InfrastructureState", "")
+            if ($actualVersion -cne $script:InfrastructureVersion -or
+                    $actualState -cne "Ready") {
+                throw (
+                    "Infrastructure readiness readback failed: expected " +
+                    "$($script:InfrastructureVersion)/Ready, observed " +
+                    "$actualVersion/$actualState."
+                )
+            }
+        }
+        finally {
+            if ($key) { $key.Dispose() }
+        }
+    }
+    finally {
+        $baseKey.Dispose()
+    }
     Write-SetupLog (
         "Committed verified infrastructure readiness: " +
         $script:InfrastructureVersion
@@ -191,14 +241,27 @@ function Commit-InfrastructureReadiness {
 
 function Set-InfrastructureState([string]$state) {
     if ($script:PortableInstallation) { return }
-    New-Item -Path $script:InfrastructureRegistryPath -Force | Out-Null
-    New-ItemProperty -LiteralPath $script:InfrastructureRegistryPath `
-        -Name "InfrastructureState" -Value $state -PropertyType String `
-        -Force -ErrorAction Stop | Out-Null
-    New-ItemProperty -LiteralPath $script:InfrastructureRegistryPath `
-        -Name "InfrastructureStateUtc" `
-        -Value ([DateTime]::UtcNow.ToString("O")) -PropertyType String `
-        -Force -ErrorAction Stop | Out-Null
+    $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+        [Microsoft.Win32.RegistryHive]::LocalMachine,
+        [Microsoft.Win32.RegistryView]::Registry64)
+    try {
+        $key = $baseKey.CreateSubKey(
+            "SOFTWARE\DS4Windows", $true)
+        try {
+            $key.SetValue("InfrastructureState", $state,
+                [Microsoft.Win32.RegistryValueKind]::String)
+            $key.SetValue("InfrastructureStateUtc",
+                [DateTime]::UtcNow.ToString("O"),
+                [Microsoft.Win32.RegistryValueKind]::String)
+            $key.Flush()
+        }
+        finally {
+            if ($key) { $key.Dispose() }
+        }
+    }
+    finally {
+        $baseKey.Dispose()
+    }
 }
 
 function Get-CitrixUsbMonitorState {
@@ -888,6 +951,21 @@ function Assert-FileSha256([string]$path, [string]$expectedHash) {
     Write-SetupLog "Verified usbip-win2 installer SHA256: $actualHash" Green
 }
 
+function Test-FileSha256([string]$path, [string]$expectedHash) {
+    try {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            return $false
+        }
+        $actualHash = (Get-FileHash -LiteralPath $path `
+            -Algorithm SHA256 -ErrorAction Stop).Hash
+        return [string]::Equals($actualHash, $expectedHash,
+            [StringComparison]::OrdinalIgnoreCase)
+    }
+    catch {
+        return $false
+    }
+}
+
 function Assert-ViiperFileSha256([string]$path, [string]$expectedHash) {
     $actualHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
     if (-not [string]::Equals($actualHash, $expectedHash,
@@ -932,6 +1010,16 @@ function Test-UsbipRuntime([string]$usbipPath) {
         return $false
     }
 
+    if (-not (Test-FileSha256 $usbipPath `
+            $script:UsbipExecutableSha256)) {
+        $script:UsbipRuntimeProbeState = "executable-mismatch"
+        Write-SetupLog (
+            "usbip.exe does not match the verified executable from the " +
+            "bundled 0.9.7.7 package. Repair is required."
+        ) Yellow
+        return $false
+    }
+
     try {
         # Windows PowerShell turns native stderr into ErrorRecord objects. Do
         # not let the script-wide Stop policy hide the text we need to
@@ -946,7 +1034,10 @@ function Test-UsbipRuntime([string]$usbipPath) {
         }
         $probeExitCode = $LASTEXITCODE
         $probeText = ($probeOutput | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
-        $abiMismatch = $probeText -match "(?i)ABI\s+mismatch|unexpected\s+size.*(?:input|structure)"
+        $abiMismatch = $probeText -match (
+            "(?i)ABI\s+mismatch|unexpected\s+size|" +
+            "specified\s+conversion\s+is\s+not\s+valid|" +
+            "invalid\s+structure\s+size")
 
         if ($abiMismatch) {
             $script:UsbipRuntimeProbeState = "abi-mismatch"
@@ -988,6 +1079,21 @@ function Stop-Ds4WindowsProcesses([string]$operation) {
             $_.ProcessId -ne $script:InstallerHostPid
         })
     if ($processes.Count -eq 0) { return $true }
+
+    $unverified = @($processes | Where-Object {
+        -not (Test-RecognizedProductExecutable `
+            ([string]$_.ExecutablePath) "DS4Windows")
+    })
+    if ($unverified.Count -gt 0) {
+        $details = ($unverified | ForEach-Object {
+            "PID=$($_.ProcessId) path=$($_.ExecutablePath)"
+        }) -join "; "
+        Write-SetupLog (
+            "Refusing to terminate an unverified process named " +
+            "DS4Windows.exe: $details. Close it manually before setup."
+        ) Red
+        return $false
+    }
 
     $restartPath = $script:Ds4WindowsRestartPath
     if (-not $restartPath) {
@@ -1095,10 +1201,50 @@ function Install-ViiperAtomically([string]$candidatePath,
 
 function Get-RunningViiperProcesses {
     try {
-        Get-CimInstance Win32_Process -Filter "Name='viiper.exe'" -ErrorAction SilentlyContinue
+        $processes = @(Get-CimInstance Win32_Process `
+            -Filter "Name='viiper.exe'" -ErrorAction SilentlyContinue)
+        $unverified = @($processes | Where-Object {
+            -not (Test-RecognizedProductExecutable `
+                ([string]$_.ExecutablePath) "VIIPER")
+        })
+        if ($unverified.Count -gt 0) {
+            $details = ($unverified | ForEach-Object {
+                "PID=$($_.ProcessId) path=$($_.ExecutablePath)"
+            }) -join "; "
+            throw "A process named viiper.exe is not a verified VIIPER " +
+                "package executable ($details). Close it manually before setup."
+        }
+        return $processes
     }
     catch {
-        @()
+        throw
+    }
+}
+
+function Test-RecognizedProductExecutable([string]$path,
+        [string]$expectedProduct) {
+    if ([string]::IsNullOrWhiteSpace($path) -or
+            -not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        return $false
+    }
+    try {
+        $version = [Diagnostics.FileVersionInfo]::GetVersionInfo(
+            [IO.Path]::GetFullPath($path))
+        if ([string]::Equals($expectedProduct, "DS4Windows",
+                [StringComparison]::OrdinalIgnoreCase)) {
+            return [string]::Equals($version.ProductName, "DS4Windows",
+                       [StringComparison]::OrdinalIgnoreCase) -or
+                [string]::Equals($version.FileDescription, "DS4Windows",
+                    [StringComparison]::OrdinalIgnoreCase)
+        }
+        return [string]::Equals($version.ProductName, "VIIPER",
+                   [StringComparison]::OrdinalIgnoreCase) -or
+            ($version.FileDescription -and
+             $version.FileDescription.StartsWith("VIIPER",
+                 [StringComparison]::OrdinalIgnoreCase))
+    }
+    catch {
+        return $false
     }
 }
 
@@ -1373,9 +1519,7 @@ function Remove-PortableDs4WindowsPackageForStandardMode {
         [StringComparer]::OrdinalIgnoreCase)
     foreach ($entry in Get-Content -LiteralPath $manifestPath) {
         $relative = ([string]$entry).Trim().Replace('/', '\')
-        if ([string]::IsNullOrWhiteSpace($relative) -or
-                [IO.Path]::IsPathRooted($relative) -or
-                $relative.Split([char]'\') -contains '..' -or
+        if (-not (Test-SafePackageRelativePath $relative) -or
                 -not $managedFiles.Add($relative)) {
             throw "The old portable DS4Windows manifest contains an unsafe " +
                 "or duplicate path: '$entry'."
@@ -1512,11 +1656,22 @@ function Test-ViiperApi([int]$timeoutMilliseconds = 1000) {
         $bytes = [Text.Encoding]::UTF8.GetBytes("ping`0")
         $stream.Write($bytes, 0, $bytes.Length)
         $buffer = New-Object byte[] 512
-        $read = $stream.Read($buffer, 0, $buffer.Length)
-        if ($read -le 0) { return $false }
-        $response = [Text.Encoding]::UTF8.GetString($buffer, 0, $read)
-        return $response.IndexOf("VIIPER",
-            [StringComparison]::OrdinalIgnoreCase) -ge 0
+        $total = 0
+        $deadline = [Diagnostics.Stopwatch]::StartNew()
+        while ($total -lt $buffer.Length -and
+                $deadline.ElapsedMilliseconds -lt $timeoutMilliseconds) {
+            $stream.ReadTimeout = [Math]::Max(1,
+                $timeoutMilliseconds - [int]$deadline.ElapsedMilliseconds)
+            $read = $stream.Read($buffer, $total, $buffer.Length - $total)
+            if ($read -le 0) { break }
+            $total += $read
+            $response = [Text.Encoding]::UTF8.GetString($buffer, 0, $total)
+            if ($response.IndexOf("VIIPER",
+                    [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                return $true
+            }
+        }
+        return $false
     }
     catch { return $false }
     finally { if ($client) { $client.Dispose() } }
@@ -1578,7 +1733,7 @@ function Convert-AccountToSid([string]$identity) {
 
 function Test-HighestLogonTask([string]$taskName,
         [string]$executablePath, [string]$arguments,
-        [string]$workingDirectory) {
+        [string]$workingDirectory, [bool]$requireEnabled = $true) {
     $registered = Get-ScheduledTask -TaskPath "\" -TaskName $taskName `
         -ErrorAction Stop
     if (@($registered.Actions).Count -ne 1 -or
@@ -1609,7 +1764,7 @@ function Test-HighestLogonTask([string]$taskName,
         (Convert-AccountToSid ([string]$_.UserId)) -eq $script:TargetUserSid
     }).Count -gt 0
 
-    return $registered.Settings.Enabled -and
+    return (-not $requireEnabled -or $registered.Settings.Enabled) -and
         [string]::Equals(
             [IO.Path]::GetFullPath([string]$registeredAction.Execute),
             [IO.Path]::GetFullPath($executablePath),
@@ -1626,7 +1781,8 @@ function Test-HighestLogonTask([string]$taskName,
 function Register-HighestLogonTask([string]$taskName,
         [string]$executablePath, [string]$arguments,
         [string]$workingDirectory) {
-    try {
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+      try {
         $taskActionParameters = @{
             Execute = $executablePath
             Argument = $arguments
@@ -1655,16 +1811,26 @@ function Register-HighestLogonTask([string]$taskName,
                 $arguments $workingDirectory)) {
             throw "Task registration verification failed."
         }
+        Write-SetupLog (
+            "Verified startup task '$taskName' on registration attempt " +
+            "$attempt."
+        ) Green
         return $true
-    }
-    catch {
-        Write-SetupLog "Failed modern scheduled task registration: $($_.Exception.Message)" Yellow
+      }
+      catch {
+        Write-SetupLog (
+            "Startup task '$taskName' registration attempt $attempt of 3 " +
+            "failed: $($_.Exception.Message)"
+        ) Yellow
         try {
-            Unregister-ScheduledTask -TaskPath "\" -TaskName $taskName `
-                -Confirm:$false `
-                -ErrorAction SilentlyContinue
+          Unregister-ScheduledTask -TaskPath "\" -TaskName $taskName `
+              -Confirm:$false -ErrorAction SilentlyContinue
         }
         catch { }
+        if ($attempt -lt 3) {
+          Start-Sleep -Milliseconds (250 * $attempt)
+        }
+      }
     }
 
     return $false
@@ -1678,6 +1844,112 @@ function Register-ViiperRunTask([string]$viiperPath, [string]$taskName) {
 function Register-Ds4WindowsRunTask([string]$ds4WindowsPath) {
     return Register-HighestLogonTask "RunDS4Windows" $ds4WindowsPath "-m" `
         (Split-Path -Parent $ds4WindowsPath)
+}
+
+function Suspend-StartupTasksUntilInfrastructureReady(
+        [string]$viiperPath, [string]$ds4WindowsPath) {
+    $contracts = @(
+        @("RunVIIPER", $viiperPath, "server",
+            (Split-Path -Parent $viiperPath)),
+        @("RunDS4Windows", $ds4WindowsPath, "-m",
+            (Split-Path -Parent $ds4WindowsPath))
+    )
+
+    # Validate the complete ownership set before mutating either task. This
+    # avoids a half-suspended pair if one task was replaced concurrently.
+    foreach ($contract in $contracts) {
+        $taskName = [string]$contract[0]
+        if (-not (Test-HighestLogonTask $taskName `
+                ([string]$contract[1]) ([string]$contract[2]) `
+                ([string]$contract[3]))) {
+            throw "Refusing to suspend an unverified startup task: $taskName"
+        }
+    }
+
+    foreach ($contract in $contracts) {
+        $taskName = [string]$contract[0]
+        Disable-ScheduledTask -TaskPath "\" -TaskName $taskName `
+            -ErrorAction Stop | Out-Null
+    }
+
+    foreach ($contract in $contracts) {
+        $taskName = [string]$contract[0]
+        $disabled = Get-ScheduledTask -TaskPath "\" -TaskName $taskName `
+            -ErrorAction Stop
+        if ($disabled.Settings.Enabled -or
+                -not (Test-HighestLogonTask $taskName `
+                    ([string]$contract[1]) ([string]$contract[2]) `
+                    ([string]$contract[3]) $false)) {
+            throw "Startup task '$taskName' did not enter the verified disabled state."
+        }
+    }
+
+    Write-SetupLog (
+        "Verified startup tasks are registered but disabled until the " +
+        "pinned USB-IP package and runtime ABI pass after reboot."
+    ) Green
+}
+
+function Set-InfrastructureStartupFailClosed(
+        [string]$viiperPath, [string]$ds4WindowsPath) {
+    $contracts = @(
+        @("RunVIIPER", $viiperPath, "server",
+            (Split-Path -Parent $viiperPath)),
+        @("RunDS4Windows", $ds4WindowsPath, "-m",
+            (Split-Path -Parent $ds4WindowsPath))
+    )
+
+    foreach ($contract in $contracts) {
+        $taskName = [string]$contract[0]
+        try {
+            if (Test-HighestLogonTask $taskName `
+                    ([string]$contract[1]) ([string]$contract[2]) `
+                    ([string]$contract[3]) $false) {
+                Disable-ScheduledTask -TaskPath "\" -TaskName $taskName `
+                    -ErrorAction Stop | Out-Null
+                $observed = Get-ScheduledTask -TaskPath "\" `
+                    -TaskName $taskName -ErrorAction Stop
+                if ($observed.Settings.Enabled) {
+                    throw "task remained enabled"
+                }
+                Write-SetupLog (
+                    "Failure containment verified '$taskName' is disabled."
+                ) Yellow
+            }
+        }
+        catch {
+            Write-SetupLog (
+                "Could not verify failure containment for '$taskName': " +
+                $_.Exception.Message
+            ) Red
+        }
+    }
+}
+
+function Test-SafePackageRelativePath([string]$relative) {
+    if ([string]::IsNullOrWhiteSpace($relative) -or
+            [IO.Path]::IsPathRooted($relative)) {
+        return $false
+    }
+
+    $invalid = [IO.Path]::GetInvalidFileNameChars()
+    $components = $relative.Split([char[]]@('\', '/'),
+        [StringSplitOptions]::None)
+    foreach ($component in $components) {
+        if ([string]::IsNullOrWhiteSpace($component) -or
+                $component -in @('.', '..') -or
+                $component.IndexOfAny($invalid) -ge 0 -or
+                $component.EndsWith(' ') -or $component.EndsWith('.')) {
+            return $false
+        }
+
+        $stem = ($component.Split('.')[0]).ToUpperInvariant()
+        if ($stem -in @('CON', 'PRN', 'AUX', 'NUL') -or
+                $stem -match '^(?:COM|LPT)[1-9]$') {
+            return $false
+        }
+    }
+    return $true
 }
 
 function Assert-SafeManagedDirectory([string]$directory, [string]$label,
@@ -1751,9 +2023,7 @@ function Install-Ds4WindowsPackage([string]$sourceDirectory,
     $copyPlan = [Collections.Generic.List[object]]::new()
     foreach ($entry in Get-Content -LiteralPath $sourceManifest) {
         $relative = ([string]$entry).Trim().Replace('/', '\')
-        if ([string]::IsNullOrWhiteSpace($relative) -or
-                [IO.Path]::IsPathRooted($relative) -or
-                $relative.Split([char]'\') -contains '..') {
+        if (-not (Test-SafePackageRelativePath $relative)) {
             throw "The DS4Windows package manifest contains an unsafe path: '$entry'."
         }
         if (-not $managedFiles.Add($relative)) {
@@ -1788,9 +2058,7 @@ function Install-Ds4WindowsPackage([string]$sourceDirectory,
         if (Test-Path -LiteralPath $oldManifest -PathType Leaf) {
             foreach ($oldEntry in Get-Content -LiteralPath $oldManifest) {
                 $oldRelative = ([string]$oldEntry).Trim().Replace('/', '\')
-                if ([string]::IsNullOrWhiteSpace($oldRelative) -or
-                        [IO.Path]::IsPathRooted($oldRelative) -or
-                        $oldRelative.Split([char]'\') -contains '..' -or
+                if (-not (Test-SafePackageRelativePath $oldRelative) -or
                         $managedFiles.Contains($oldRelative)) {
                     continue
                 }
@@ -1886,8 +2154,12 @@ function Protect-ElevatedTaskTargetFile([string]$filePath, [string]$label) {
 }
 
 try {
+    $script:InstallerLogRoot = Assert-SafeManagedDirectory `
+        $script:InstallerLogRoot "installer log directory"
     New-Item -ItemType Directory -Path $script:InstallerLogRoot -Force |
         Out-Null
+    $script:InstallerLogRoot = Assert-SafeManagedDirectory `
+        $script:InstallerLogRoot "installer log directory" -RequireExisting
     if (-not (Test-Administrator)) {
         throw "Administrator permission is required. Launch setup from DS4Windows so Windows can request it automatically."
     }
@@ -2024,7 +2296,7 @@ try {
     }
     Resolve-UsbipReplacementBoundary
 
-    Write-Step "Step 1 of 4 - Installing VIIPER 0.0.7"
+    Write-Step "Step 1 of 4 - Installing VIIPER 0.0.8"
     Remove-ForeignViiperInstallations
     $viiperPath = Join-Path $script:InstallDir "viiper.exe"
     $candidatePath = Join-Path $script:TempDir "viiper.exe"
@@ -2036,7 +2308,7 @@ try {
     $bundledViiperSha256 = Read-PackagedSha256 `
         $script:BundledViiperSha256Path `
         (Split-Path -Leaf $script:BundledViiperPath)
-    Write-SetupLog "Using packaged VIIPER 0.0.7 x64 binary." Green
+    Write-SetupLog "Using packaged VIIPER 0.0.8 x64 binary." Green
     Assert-ViiperFileSha256 $script:BundledViiperPath $bundledViiperSha256
     Copy-Item -LiteralPath $script:BundledViiperPath `
         -Destination $candidatePath -Force
@@ -2181,6 +2453,9 @@ try {
     }
 
     $canonicalUsbipPresent = Test-Path -LiteralPath $script:CanonicalUsbipPath
+    $usbipExecutableSafe = $canonicalUsbipPresent -and
+        (Test-FileSha256 $script:CanonicalUsbipPath `
+            $script:UsbipExecutableSha256)
     $usbipDriverIntegrity = Get-UsbipDriverIntegrity
     if ($usbipDriverIntegrity.InstalledServiceCount -lt 0) {
         throw "USBIP driver integrity inspection failed: " +
@@ -2204,7 +2479,8 @@ try {
     }
     $usbipVersionReady = $canonicalUsbipPresent -and $usbipVersion -and
         $usbipVersion -eq $requiredUsbipVersion
-    $usbipPackageReady = $usbipVersionReady -and $usbipDriverFilesSafe
+    $usbipPackageReady = $usbipVersionReady -and
+        $usbipExecutableSafe -and $usbipDriverFilesSafe
     if ($usbipPackageReady) {
         $script:UsbipRuntimeReady = Test-UsbipRuntime $script:CanonicalUsbipPath
     }
@@ -2235,6 +2511,9 @@ try {
         elseif ($usbipVersion -ne $requiredUsbipVersion) {
             "unsupported ($usbipVersion)"
         }
+        elseif (-not $usbipExecutableSafe) {
+            "installed with an unverified usbip.exe"
+        }
         elseif (-not $usbipDriverFilesSafe) {
             "installed with unsafe or mixed driver files (" +
                 $usbipDriverIntegrity.Message + ")"
@@ -2249,6 +2528,7 @@ try {
         $uninstallEntry = $null
         if ($usbipVersion -and
                 ($usbipVersion -ne $requiredUsbipVersion -or
+                -not $usbipExecutableSafe -or
                 -not $usbipDriverFilesSafe)) {
             $uninstallEntry = Get-UsbipUninstallEntry $usbipVersion
             if (-not $uninstallEntry) {
@@ -2277,7 +2557,9 @@ try {
             $uninstallEntry $usbipVersion `
             $requiredUsbipVersion `
             -ForceUnsafeReplacement:($usbipVersion -eq `
-                $requiredUsbipVersion -and -not $usbipDriverFilesSafe)
+                $requiredUsbipVersion -and
+                (-not $usbipExecutableSafe -or
+                 -not $usbipDriverFilesSafe))
 
         if ($removedMismatchedPackage) {
             Write-SetupLog (
@@ -2322,12 +2604,15 @@ try {
 
             $usbipVersion = Get-UsbipInstalledVersion
             $canonicalUsbipPresent = Test-Path -LiteralPath $script:CanonicalUsbipPath
+            $usbipExecutableSafe = $canonicalUsbipPresent -and
+                (Test-FileSha256 $script:CanonicalUsbipPath `
+                    $script:UsbipExecutableSha256)
             $usbipDriverIntegrity = Get-UsbipDriverIntegrity
             $usbipDriverFilesSafe = [bool]$usbipDriverIntegrity.Safe
             $usbipVersionReady = $canonicalUsbipPresent -and $usbipVersion -and
                 $usbipVersion -eq $requiredUsbipVersion
             $usbipPackageReady = $usbipVersionReady -and
-                $usbipDriverFilesSafe
+                $usbipExecutableSafe -and $usbipDriverFilesSafe
             if (-not $usbipPackageReady) {
                 $script:RebootRecommended = $true
                 Write-SetupLog (
@@ -2352,6 +2637,11 @@ try {
     }
 
     if ($script:UsbipReplacementPhaseOne) {
+        [void](Stop-ViiperProcesses "pending usbip-win2 replacement reboot")
+        if ($script:RunAtStartupEnabled) {
+            Suspend-StartupTasksUntilInfrastructureReady $viiperPath `
+                $script:Ds4WindowsRestartPath
+        }
         $script:ExitCode = 3010
         Write-Host ""
         Write-SetupLog (
@@ -2394,10 +2684,12 @@ try {
     else {
         [void](Stop-ViiperProcesses "pending usbip-win2 reboot")
         if ($script:RunAtStartupEnabled) {
+            Suspend-StartupTasksUntilInfrastructureReady $viiperPath `
+                $script:Ds4WindowsRestartPath
             Write-SetupLog (
-                "Both startup tasks are registered for the next sign-in. " +
-                "VIIPER startup is deferred in this session until usbip-win2 " +
-                "passes its runtime ABI check."
+                "Both startup tasks are preserved but disabled across the " +
+                "reboot boundary. Repair will re-enable them only after " +
+                "usbip-win2 passes its runtime ABI check."
             ) Yellow
         }
         else {
@@ -2412,7 +2704,17 @@ try {
     $viiperStarted = $false
     if ($script:UsbipRuntimeReady -and -not $script:RebootRecommended) {
         $viiperStarted = if ($script:RunAtStartupEnabled) {
-            Start-AndVerifyViiper "RunVIIPER"
+            $startedFromTask = Start-AndVerifyViiper "RunVIIPER"
+            if (-not $startedFromTask) {
+                Write-SetupLog (
+                    "The verified startup task did not start VIIPER in this " +
+                    "session; retrying the same packaged executable directly."
+                ) Yellow
+                Start-AndVerifyViiperDirectly $viiperPath
+            }
+            else {
+                $true
+            }
         }
         else {
             Start-AndVerifyViiperDirectly $viiperPath
@@ -2479,7 +2781,29 @@ try {
     }
 }
 catch {
+    $setupFailure = $_
     Write-Host ""
+    if ($script:SetupTransactionStarted) {
+        # A failed transaction must never leave an auto-start path capable of
+        # launching VIIPER against an unverified or half-replaced USB/IP ABI.
+        # Only tasks whose complete action/principal contract still belongs
+        # to this package are touched.
+        try {
+            [void](Stop-ViiperProcesses "failed infrastructure transaction")
+        }
+        catch {
+            Write-SetupLog (
+                "Failure containment could not stop VIIPER: " +
+                $_.Exception.Message
+            ) Red
+        }
+        if ($script:RunAtStartupEnabled -and $script:InstallDir -and
+                $script:Ds4WindowsRestartPath) {
+            $failureViiperPath = Join-Path $script:InstallDir "viiper.exe"
+            Set-InfrastructureStartupFailClosed $failureViiperPath `
+                $script:Ds4WindowsRestartPath
+        }
+    }
     if ($script:UserCanceled) {
         $script:ExitCode = 1223
         Write-SetupLog (
@@ -2493,7 +2817,7 @@ catch {
         if ($script:SetupTransactionStarted) {
             try { Set-InfrastructureState "RebootPending" } catch { }
         }
-        Write-SetupLog $_.Exception.Message Yellow
+        Write-SetupLog $setupFailure.Exception.Message Yellow
         Write-SetupLog "Restart required; no install changes were made." Yellow
         Write-SetupLog "Details were saved to $script:LogPath" Yellow
     }
@@ -2502,7 +2826,9 @@ catch {
         if ($script:SetupTransactionStarted) {
             try { Set-InfrastructureState "Failed" } catch { }
         }
-        Write-SetupLog "Setup could not finish: $($_.Exception.Message)" Red
+        Write-SetupLog (
+            "Setup could not finish: " + $setupFailure.Exception.Message
+        ) Red
         Write-SetupLog "Details were saved to $script:LogPath" Yellow
     }
 }

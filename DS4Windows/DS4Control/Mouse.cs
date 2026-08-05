@@ -41,6 +41,9 @@ namespace DS4Windows
         public bool slideleft, slideright;
         public bool priorSlideLeft, priorSlideright;
         private int pendingProfileSwipeDirection;
+        private bool profileSwipeTracking;
+        private int profileSwipeOriginX;
+        private int profileSwipeOriginY;
         // touch area stuff
         public bool leftDown, rightDown, upperDown, multiDown;
         public bool priorLeftDown, priorRightDown, priorUpperDown, priorMultiDown;
@@ -410,6 +413,55 @@ namespace DS4Windows
         internal int ConsumeProfileSwipeDirection()
         {
             return Interlocked.Exchange(ref pendingProfileSwipeDirection, 0);
+        }
+
+        internal static bool TryGetProfileSwipeDirection(int originX,
+            int originY, Touch[] touches, out int direction)
+        {
+            direction = 0;
+            if (touches == null || touches.Length != 2 ||
+                touches[0] == null || touches[1] == null)
+            {
+                return false;
+            }
+
+            // Track the centre of both contacts rather than whichever hardware
+            // slot happens to be first. DualSense and DS4 touch IDs can change
+            // slots as fingers land or lift, which made an otherwise valid
+            // two-finger gesture look stationary or reverse direction.
+            int currentX = (touches[0].HwX + touches[1].HwX) / 2;
+            int currentY = (touches[0].HwY + touches[1].HwY) / 2;
+            int deltaX = currentX - originX;
+            int deltaY = currentY - originY;
+            int horizontalDistance = Math.Abs(deltaX);
+            int verticalDistance = Math.Abs(deltaY);
+
+            // Preserve the historical 200-unit activation distance while
+            // accepting natural diagonal hand motion. Requiring less than 50
+            // units of vertical movement rejected ordinary horizontal swipes.
+            if (horizontalDistance <= 200 ||
+                horizontalDistance * 2 <= verticalDistance * 3)
+            {
+                return false;
+            }
+
+            direction = Math.Sign(deltaX);
+            return direction != 0;
+        }
+
+        private void BeginProfileSwipe(Touch[] touches)
+        {
+            if (touches == null || touches.Length != 2 ||
+                touches[0] == null || touches[1] == null)
+            {
+                profileSwipeTracking = false;
+                return;
+            }
+
+            profileSwipeOriginX = (touches[0].HwX + touches[1].HwX) / 2;
+            profileSwipeOriginY = (touches[0].HwY + touches[1].HwY) / 2;
+            profileSwipeTracking = true;
+            slideleft = slideright = false;
         }
 
         private OneEuroFilterPair filterPair = new OneEuroFilterPair();
@@ -1231,19 +1283,28 @@ namespace DS4Windows
             }
 
             // Slide flags needed for possible profile switching from Touchpad swipes
-            if (Global.SwipeProfiles &&
-                !Global.useTempProfile[deviceNum] &&
-                arg.Touches.Length == 2 &&
-                Math.Abs(firstTouch.HwY - arg.Touches[0].HwY) < 50 &&
-                !(dragging || dragging2))
+            if (arg.Touches.Length != 2)
             {
-                if (arg.Touches[0].HwX - firstTouch.HwX > 200 && !slideleft)
+                profileSwipeTracking = false;
+            }
+            else if (Global.SwipeProfiles &&
+                !Global.useTempProfile[deviceNum] &&
+                profileSwipeTracking &&
+                !(dragging || dragging2) &&
+                TryGetProfileSwipeDirection(profileSwipeOriginX,
+                    profileSwipeOriginY, arg.Touches, out int direction))
+            {
+                // One physical gesture produces exactly one queued profile
+                // transition. It remains latched until the UI consumes it,
+                // even if the fingers lift between timer ticks.
+                profileSwipeTracking = false;
+                if (direction > 0 && !slideleft)
                 {
                     slideright = true;
                     Interlocked.CompareExchange(
                         ref pendingProfileSwipeDirection, 1, 0);
                 }
-                else if (firstTouch.HwX - arg.Touches[0].HwX > 200 && !slideright)
+                else if (direction < 0 && !slideright)
                 {
                     slideleft = true;
                     Interlocked.CompareExchange(
@@ -1285,6 +1346,7 @@ namespace DS4Windows
             pastTime = arg.TimeStamp;
             firstTouch.populate(arg.Touches[0].HwX, arg.Touches[0].HwY, arg.Touches[0].TouchID,
                 arg.Touches[0].PreviousTouch);
+            BeginProfileSwipe(arg.Touches);
 
             if (mouseMode && Global.getDoubleTap(deviceNum))
             {
@@ -1310,6 +1372,7 @@ namespace DS4Windows
 
             s = dev.getCurrentStateRef();
             wasTouched = true;
+            profileSwipeTracking = false;
             slideright = slideleft = false;
             swipeUp = swipeDown = swipeLeft = swipeRight = false;
             swipeUpB = swipeDownB = swipeLeftB = swipeRightB = 0;

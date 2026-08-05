@@ -9,9 +9,13 @@
     <BootstrapperRoot Condition="'$(BootstrapperRoot)' == ''">$(MSBuildThisFileDirectory)..\DS4Windows.Bootstrapper\bin\x64\Release\net48\win-x64</BootstrapperRoot>
     <SetupActionsPath Condition="'$(SetupActionsPath)' == ''">$(MSBuildThisFileDirectory)..\DS4Windows.SetupActions\bin\x64\Release\net48\DS4Windows.SetupActions.exe</SetupActionsPath>
     <ExtrasRoot Condition="'$(ExtrasRoot)' == ''">$(MSBuildThisFileDirectory)..\..\extras</ExtrasRoot>
-    <DefineConstants>BundleVersion=$(BundleVersion);DisplayVersion=$(DisplayVersion);MsiPath=$(MsiPath);BootstrapperRoot=$(BootstrapperRoot);SetupActionsPath=$(SetupActionsPath);ExtrasRoot=$(ExtrasRoot)</DefineConstants>
+    <DefineConstants>BundleVersion=$(BundleVersion);DisplayVersion=$(DisplayVersion);MsiPath=$(MsiPath);BootstrapperRoot=$(BootstrapperRoot);SetupActionsPath=$(SetupActionsPath);SetupActionsHash=$(SetupActionsHash);ExtrasRoot=$(ExtrasRoot)</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="WixToolset.Util.wixext" Version="5.0.2" />
   </ItemGroup>
+  <Target Name="RequireContentAddressedSetupHelper" BeforeTargets="Build">
+    <Error Condition="'$(SetupActionsHash)' == '' Or !$([System.Text.RegularExpressions.Regex]::IsMatch($(SetupActionsHash), '^[0-9A-Fa-f]{64}$'))"
+           Text="A 64-character SetupActionsHash is required; build this bundle through installer/build-installer.ps1." />
+  </Target>
 </Project>

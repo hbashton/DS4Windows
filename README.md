@@ -166,7 +166,7 @@ DualSense or DualShock 4 selected by the profile. Supported paths include:
   microphone while keeping the recording stream active.
 
 Audio, microphone, and advanced haptics support require matching DS4Windows 5
-and VIIPER 0.0.7 builds.
+and VIIPER 0.0.8 builds.
 
 ### Quality of life
 

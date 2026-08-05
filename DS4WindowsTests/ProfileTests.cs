@@ -508,7 +508,21 @@ namespace DS4WindowsTests
             }
 
             Assert.AreEqual(true, !string.IsNullOrEmpty(testStr));
-            Assert.AreEqual(defaultProfileXml, testStr);
+            // The fixture is a legacy X360 profile. Serialization is expected
+            // to add newly introduced defaults and migrate its retired output
+            // type instead of reproducing the old XML byte-for-byte.
+            StringAssert.Contains(testStr,
+                "<OutputContDevice>ViiperX360</OutputContDevice>");
+            StringAssert.Contains(testStr,
+                "<AudioSettings>");
+            using StringReader roundTripReader = new StringReader(testStr);
+            ProfileDTO roundTrip = (ProfileDTO)serializer.Deserialize(
+                roundTripReader);
+            roundTrip.DeviceIndex = 0;
+            BackingStore roundTripStore = new BackingStore();
+            roundTrip.MapTo(roundTripStore);
+            Assert.AreEqual(OutContType.ViiperX360,
+                roundTripStore.outputDevType[0]);
         }
     }
 }

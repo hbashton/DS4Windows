@@ -20,6 +20,7 @@ namespace DS4Windows
         public const string AutomaticEndpointPrefix =
             "DS4Windows:AudioHapticsAuto:";
         private const int CapturePollMilliseconds = 4;
+        internal const int ProcessLoopbackStallMilliseconds = 750;
         internal const int ProcessedRouteStallMilliseconds = 750;
         private const int ProcessedRouteWatchdogPollMilliseconds = 100;
         private const int FixedRouteReconnectMilliseconds = 250;
@@ -208,6 +209,21 @@ namespace DS4Windows
                 currentTimestamp - lastCallbackTimestamp >=
                     Stopwatch.Frequency *
                         ProcessedRouteStallMilliseconds / 1000;
+        }
+
+        internal static bool ShouldRecoverProcessLoopback(
+            long lastPacketTimestamp, long currentTimestamp)
+        {
+            // Microsoft's application-loopback contract continues producing
+            // silence when the selected process has no render streams. A
+            // started client that yields no packet at all is therefore
+            // stalled; requiring a non-zero endpoint meter here left browser
+            // captures permanently armed but silent after a source switch.
+            return lastPacketTimestamp > 0 &&
+                currentTimestamp >= lastPacketTimestamp &&
+                currentTimestamp - lastPacketTimestamp >=
+                    Stopwatch.Frequency *
+                        ProcessLoopbackStallMilliseconds / 1000;
         }
 
         public static bool TryParseAutomaticEndpointId(string endpointId,
@@ -1093,8 +1109,7 @@ namespace DS4Windows
                     long now = Stopwatch.GetTimestamp();
                     long last = Volatile.Read(
                         ref lastProcessLoopbackPacketTimestamp);
-                    if (!ShouldRecoverProcessedRoute(last, now,
-                            IsTargetAudiblyActive()))
+                    if (!ShouldRecoverProcessLoopback(last, now))
                     {
                         continue;
                     }
@@ -1107,21 +1122,6 @@ namespace DS4Windows
                     SignalCaptureStopped(new InvalidOperationException(
                         "The selected application's process-loopback client stopped delivering packets while its Windows audio session remained audible."));
                     return;
-                }
-            }
-
-            private bool IsTargetAudiblyActive()
-            {
-                try
-                {
-                    return ProcessedAppAudioRouteResolver
-                        .IsTargetAudiblyActiveAnywhere(ProcessId);
-                }
-                catch
-                {
-                    // A transient endpoint rebuild is not enough evidence to
-                    // discard an otherwise healthy capture client.
-                    return false;
                 }
             }
 

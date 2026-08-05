@@ -38,6 +38,7 @@ namespace DS4Windows
         public bool ViiperPackageCurrent { get; set; }
         public bool ServerRunning { get; set; }
         public bool UsbipInstalled { get; set; }
+        public bool UsbipExecutableSafe { get; set; }
         public bool UsbipDriverFilesSafe { get; set; }
         public string UsbipDriverIntegrityMessage { get; set; }
         public bool UsbipRuntimeReady { get; set; }
@@ -61,7 +62,8 @@ namespace DS4Windows
         // be repaired without preventing virtual devices from being created.
         public bool Ready => ViiperInstalled && ViiperPackageCurrent &&
             !ViiperProcessConflict && ServerRunning && UsbipInstalled &&
-            UsbipDriverFilesSafe && UsbipRuntimeReady &&
+            UsbipExecutableSafe && UsbipDriverFilesSafe &&
+            UsbipRuntimeReady &&
             !CitrixUsbMonitorConflict;
 
         public string DisplayText
@@ -101,6 +103,11 @@ namespace DS4Windows
                     return string.IsNullOrWhiteSpace(UsbipVersion)
                         ? "usbip-win2 0.9.7.7 is missing"
                         : $"usbip-win2 {UsbipVersion} must be replaced with supported 0.9.7.7";
+                }
+
+                if (!UsbipExecutableSafe)
+                {
+                    return "usbip-win2 executable verification failed";
                 }
 
                 if (!UsbipDriverFilesSafe)
@@ -147,9 +154,11 @@ namespace DS4Windows
             "--run-embedded-viiper-installer";
         private const string InstallerResourceName =
             "DS4Windows.install-viiper-backend.ps1";
-        private const string BundledViiperName = "VIIPER-0.0.7-x64.exe";
+        private const string BundledViiperName = "VIIPER-0.0.8-x64.exe";
         private const string BundledViiperHashName =
             BundledViiperName + ".sha256";
+        internal const string SupportedViiperSha256 =
+            "376CE160548B44AB8436ADF88F315557E9E3278501A5B015857167FADDFC94B8";
         private const string BundledUsbipName = "USBip-0.9.7.7-x64.exe";
         private const string BundledHidHideName =
             "HidHide_1.5.230_x64.exe";
@@ -173,6 +182,8 @@ namespace DS4Windows
             "51DB440065393E588A6B2585508C50EB3E1510B7B06D9AFA6C5BDE583751EA7D";
         internal const string SupportedUsbipFilterSha256 =
             "C290299FF4D0F6A597DB5CE03E15B29A5349CDCE7C587EBFBD9ECAECA04F73ED";
+        internal const string SupportedUsbipExecutableSha256 =
+            "FC1660E3759D8AF4CEDE48DBE194285A5A1DE85CE6E3216724499AFD32BE92E8";
         private static readonly object serverStartLock = new object();
         private static readonly object foreignViiperProcessLock = new object();
         private static readonly Lazy<(bool Conflict, string Message)>
@@ -224,6 +235,8 @@ namespace DS4Windows
             string usbipPath = GetCanonicalUsbipPath();
             Version usbipVersion = TryGetUsbipVersion(usbipPath);
             bool usbipInstalled = IsSupportedUsbipVersion(usbipVersion);
+            bool usbipExecutableSafe = usbipInstalled &&
+                FileHasSha256(usbipPath, SupportedUsbipExecutableSha256);
             bool usbipRuntimeReady = false;
             string usbipProbeMessage;
             (bool usbipDriverFilesSafe,
@@ -233,7 +246,8 @@ namespace DS4Windows
                 TryGetCitrixUsbMonitorConflict(
                     out string citrixUsbMonitorConflictMessage);
 
-            if (usbipInstalled && usbipDriverFilesSafe)
+            if (usbipInstalled && usbipExecutableSafe &&
+                usbipDriverFilesSafe)
             {
                 usbipRuntimeReady = TryProbeUsbipRuntime(usbipPath,
                     out usbipProbeMessage);
@@ -245,7 +259,9 @@ namespace DS4Windows
             }
             else
             {
-                usbipProbeMessage = !usbipDriverFilesSafe &&
+                usbipProbeMessage = !usbipExecutableSafe && usbipInstalled
+                    ? "The installed usbip.exe does not match the bundled 0.9.7.7 executable."
+                    : !usbipDriverFilesSafe &&
                     usbipInstalled
                     ? usbipDriverIntegrityMessage
                     : usbipVersion == null
@@ -256,8 +272,8 @@ namespace DS4Windows
             // Location never weakens binary identity. Program Files,
             // LocalAppData, and arbitrary portable choices must all be the
             // exact VIIPER executable bundled with this DS4Windows build.
-            bool viiperPackageCurrent = FilesHaveSameSha256(viiperPath,
-                bundledViiperPath);
+            bool viiperPackageCurrent = IsBundledViiperAuthentic() &&
+                FilesHaveSameSha256(viiperPath, bundledViiperPath);
             bool startupEnabled = DS4WinWPF.StartupMethods.
                 IsRunAtStartupEnabled();
             bool viiperStartupTaskReady = !startupEnabled ||
@@ -298,12 +314,14 @@ namespace DS4Windows
                 ViiperStartupTaskReady = viiperStartupTaskReady,
                 SetupScriptFound = File.Exists(setupScriptPath),
                 UsbipInstalled = usbipInstalled,
+                UsbipExecutableSafe = usbipExecutableSafe,
                 UsbipDriverFilesSafe = usbipDriverFilesSafe,
                 UsbipDriverIntegrityMessage =
                     usbipDriverIntegrityMessage,
                 UsbipRuntimeReady = usbipRuntimeReady,
                 UsbipRebootOrRepairRequired = usbipInstalled &&
-                    (!usbipDriverFilesSafe || !usbipRuntimeReady),
+                    (!usbipExecutableSafe || !usbipDriverFilesSafe ||
+                     !usbipRuntimeReady),
                 UsbipPath = usbipPath,
                 UsbipVersion = usbipVersion?.ToString(),
                 UsbipProbeMessage = usbipProbeMessage,
@@ -321,19 +339,27 @@ namespace DS4Windows
             ViiperPrerequisiteStatus status = GetStatus(tryStartServer: true);
             bool readyPortableViiper = IsReadyPortableRuntime(status);
             bool verifiedUpdateRequired = RequiresVerifiedViiperUpdate(status);
+            bool usbipReplacementRequired =
+                RequiresUsbipReplacement(status);
+            // VIIPER is the only output backend. An incomplete, mismatched,
+            // ABI-incompatible, or non-running prerequisite set is therefore
+            // a startup gate rather than an ignorable warning. Keeping this
+            // separate from verifiedUpdateRequired lets the prompt explain a
+            // missing dependency accurately while still failing closed.
+            bool mandatoryRepairRequired = !status.Ready;
             if (status.Ready && !readyPortableViiper && !forcePrompt)
             {
                 return true;
             }
 
             if (Global.SuppressViiperSetupPrompt && !forcePrompt &&
-                !verifiedUpdateRequired)
+                !mandatoryRepairRequired)
             {
                 return readyPortableViiper;
             }
 
             if (Volatile.Read(ref promptShownThisSession) == 1 && !forcePrompt &&
-                !verifiedUpdateRequired)
+                !mandatoryRepairRequired)
             {
                 return readyPortableViiper;
             }
@@ -345,7 +371,8 @@ namespace DS4Windows
             DS4WinWPF.DS4Forms.ViiperSetupPrompt prompt = new(
                 status.DisplayText, alternativeViiperPath,
                 status.CitrixUsbMonitorConflict, readyPortableViiper,
-                verifiedUpdateRequired);
+                verifiedUpdateRequired, usbipReplacementRequired,
+                mandatoryRepairRequired);
             if (owner != null && owner.IsLoaded)
             {
                 prompt.Owner = owner;
@@ -391,14 +418,22 @@ namespace DS4Windows
                     InstallStandard:
                     DS4WinWPF.StartupMethods.
                         RetargetExistingTaskToCurrentExecutable();
-                    return LaunchInstaller(status, owner);
+                    LaunchInstaller(status, owner);
+                    // The elevated setup process owns the replacement from
+                    // this point onward and restarts DS4Windows only after its
+                    // verified postconditions pass. Never let this process
+                    // continue opening devices against a changing driver.
+                    Application.Current?.Shutdown();
+                    return false;
 
                 case DS4WinWPF.DS4Forms.ViiperSetupPromptDecision.
                     InstallPortable:
                     DS4WinWPF.StartupMethods.
                         RetargetExistingTaskToCurrentExecutable();
-                    return LaunchInstaller(status, owner,
+                    LaunchInstaller(status, owner,
                         portableInstallation: true);
+                    Application.Current?.Shutdown();
+                    return false;
 
                 case DS4WinWPF.DS4Forms.ViiperSetupPromptDecision.
                     UseExisting:
@@ -423,8 +458,26 @@ namespace DS4Windows
         internal static bool RequiresVerifiedViiperUpdate(
             ViiperPrerequisiteStatus status)
         {
-            return status != null && status.ViiperInstalled &&
-                !status.ViiperPackageCurrent;
+            return status != null &&
+                ((status.ViiperInstalled && !status.ViiperPackageCurrent) ||
+                 RequiresUsbipReplacement(status) ||
+                 (status.UsbipInstalled &&
+                    (!status.UsbipExecutableSafe ||
+                     !status.UsbipDriverFilesSafe ||
+                     status.UsbipRebootOrRepairRequired)) ||
+                 status.CitrixUsbMonitorConflict);
+        }
+
+        internal static bool RequiresUsbipReplacement(
+            ViiperPrerequisiteStatus status)
+        {
+            // A readable but unsupported version is an exact identity
+            // mismatch, not an optional missing prerequisite. It must bypass
+            // both "don't show again" and the once-per-session prompt latch so
+            // the user is offered the safe two-boot replacement flow.
+            return status != null &&
+                !string.IsNullOrWhiteSpace(status.UsbipVersion) &&
+                !status.UsbipInstalled;
         }
 
         public static void RefreshSelectedStartupTaskOnLaunch()
@@ -549,9 +602,32 @@ namespace DS4Windows
                         "Windows did not start the setup process.");
                 }
 
+                int completionHandled = 0;
+                void HandleInstallerExit(object sender, EventArgs eventArgs)
+                {
+                    if (Interlocked.Exchange(ref completionHandled, 1) != 0)
+                    {
+                        return;
+                    }
+                    InstallerProcess_Exited(process, owner,
+                        portableInstallation, targetLocalAppData);
+                }
+                process.Exited += HandleInstallerExit;
                 process.EnableRaisingEvents = true;
-                process.Exited += (_, _) => InstallerProcess_Exited(process,
-                    owner, portableInstallation, targetLocalAppData);
+                // A very fast validation failure can exit between Start and
+                // event subscription. Converge it through the same exactly-once
+                // completion path so installerRunning can never stay latched.
+                try
+                {
+                    if (process.HasExited)
+                    {
+                        HandleInstallerExit(process, EventArgs.Empty);
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                    // The event won the race and already disposed the process.
+                }
                 return true;
             }
             catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
@@ -607,7 +683,7 @@ namespace DS4Windows
                 {
                     Interlocked.Exchange(ref promptShownThisSession, 0);
                     AppLogger.LogToGui(
-                        "SUCCESSFUL: VIIPER setup finished successfully. DS4Windows restart was requested.",
+                        "SUCCESSFUL: VIIPER setup finished successfully.",
                         false, false);
                     return;
                 }
@@ -741,12 +817,36 @@ namespace DS4Windows
                     string.Equals(argument, "--skip-startup-tasks",
                         StringComparison.Ordinal));
 
+                string hostPath = Environment.ProcessPath;
+                if (string.IsNullOrWhiteSpace(hostPath) ||
+                    !IsExactViiperExecutablePath(hostPath,
+                        targetDs4WindowsPath))
+                {
+                    throw new InvalidOperationException(
+                        "The elevated installer host does not match the " +
+                        "DS4Windows executable that requested setup.");
+                }
+                string expectedExtras = Path.Combine(
+                    Path.GetDirectoryName(Path.GetFullPath(hostPath))!,
+                    "extras");
+                if (!IsExactViiperExecutablePath(packageExtras,
+                        expectedExtras))
+                {
+                    throw new InvalidOperationException(
+                        "The setup payload is not the package adjacent to " +
+                        "the running DS4Windows executable.");
+                }
+
                 string setupRoot = Path.Combine(
                     GetNativeProgramFilesPath(),
                     "DS4Windows.Setup");
+                EnsurePathDoesNotTraverseReparsePoints(setupRoot,
+                    requireExisting: false);
                 string setupDirectory = Path.Combine(setupRoot,
                     Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(setupDirectory);
+                EnsurePathDoesNotTraverseReparsePoints(setupDirectory,
+                    requireExisting: true);
                 string scriptPath = Path.Combine(setupDirectory,
                     InstallerScriptName);
 
@@ -782,7 +882,9 @@ namespace DS4Windows
                     ProcessStartInfo startInfo = new ProcessStartInfo
                     {
                         FileName = powershellPath,
-                        UseShellExecute = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        WindowStyle = ProcessWindowStyle.Hidden,
                         WorkingDirectory = stagedExtras,
                     };
                     startInfo.ArgumentList.Add("-NoProfile");
@@ -878,9 +980,13 @@ namespace DS4Windows
                 throw new InvalidOperationException(
                     "The DS4Windows release package root is missing.");
             }
+            EnsurePathDoesNotTraverseReparsePoints(sourceRoot,
+                requireExisting: true);
 
             string manifestPath = Path.Combine(sourceRoot,
                 ".ds4windows-managed-files.txt");
+            EnsurePathDoesNotTraverseReparsePoints(manifestPath,
+                requireExisting: true);
             string stagedRoot = Path.Combine(setupDirectory, "package");
             Directory.CreateDirectory(stagedRoot);
 
@@ -921,6 +1027,7 @@ namespace DS4Windows
             foreach (string relativePath in relativePaths)
             {
                 if (Path.IsPathFullyQualified(relativePath) ||
+                    !IsSafeRelativePackagePath(relativePath) ||
                     !seen.Add(relativePath))
                 {
                     throw new InvalidOperationException(
@@ -942,6 +1049,8 @@ namespace DS4Windows
                     throw new InvalidOperationException(
                         $"Invalid package file: {relativePath}");
                 }
+                EnsurePathDoesNotTraverseReparsePoints(sourcePath,
+                    requireExisting: true);
 
                 Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
                 using FileStream source = new FileStream(sourcePath,
@@ -982,7 +1091,96 @@ namespace DS4Windows
                     Path.GetFileName(missingOfflineFile) + " is missing.");
             }
 
+            string stagedViiper = Path.Combine(stagedExtras,
+                BundledViiperName);
+            string stagedViiperHash = Path.Combine(stagedExtras,
+                BundledViiperHashName);
+            if (!FileHasSha256(stagedViiper, SupportedViiperSha256) ||
+                !Sha256SidecarMatches(stagedViiperHash,
+                    SupportedViiperSha256))
+            {
+                throw new InvalidOperationException(
+                    "The staged VIIPER payload does not match this " +
+                    "DS4Windows build.");
+            }
+
             return stagedRoot;
+        }
+
+        private static bool IsSafeRelativePackagePath(string relativePath)
+        {
+            if (string.IsNullOrWhiteSpace(relativePath) ||
+                Path.IsPathRooted(relativePath))
+            {
+                return false;
+            }
+
+            string[] components = relativePath.Split(new[]
+                { Path.DirectorySeparatorChar,
+                  Path.AltDirectorySeparatorChar });
+            char[] invalid = Path.GetInvalidFileNameChars();
+            foreach (string component in components)
+            {
+                if (string.IsNullOrWhiteSpace(component) ||
+                    component == "." || component == ".." ||
+                    component.IndexOfAny(invalid) >= 0 ||
+                    component.EndsWith(" ", StringComparison.Ordinal) ||
+                    component.EndsWith(".", StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                string stem = component.Split('.')[0].ToUpperInvariant();
+                if (stem == "CON" || stem == "PRN" || stem == "AUX" ||
+                    stem == "NUL" ||
+                    (stem.Length == 4 &&
+                     (stem.StartsWith("COM", StringComparison.Ordinal) ||
+                      stem.StartsWith("LPT", StringComparison.Ordinal)) &&
+                     stem[3] >= '1' && stem[3] <= '9'))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private static void EnsurePathDoesNotTraverseReparsePoints(
+            string path, bool requireExisting)
+        {
+            string resolved = Path.GetFullPath(path);
+            string root = Path.GetPathRoot(resolved);
+            if (string.IsNullOrWhiteSpace(root))
+            {
+                throw new InvalidOperationException(
+                    "A rooted setup path is required.");
+            }
+
+            string cursor = root;
+            string relative = resolved.Substring(root.Length);
+            foreach (string component in relative.Split(new[]
+                     { Path.DirectorySeparatorChar,
+                       Path.AltDirectorySeparatorChar },
+                     StringSplitOptions.RemoveEmptyEntries))
+            {
+                cursor = Path.Combine(cursor, component);
+                if (!File.Exists(cursor) && !Directory.Exists(cursor))
+                {
+                    continue;
+                }
+                if ((File.GetAttributes(cursor) &
+                     FileAttributes.ReparsePoint) != 0)
+                {
+                    throw new InvalidOperationException(
+                        "Setup path traverses a reparse point: " + cursor);
+                }
+            }
+
+            if (requireExisting && !File.Exists(resolved) &&
+                !Directory.Exists(resolved))
+            {
+                throw new FileNotFoundException(
+                    "A required setup path is missing.", resolved);
+            }
         }
 
         private static string GetRequiredInstallerArgument(string[] args,
@@ -1039,10 +1237,11 @@ namespace DS4Windows
             string logPath)
         {
             return $"VIIPER setup could not finish (exit code {exitCode}).\n\n" +
-                "If a viiper.exe process was still running, it may have " +
-                "blocked the VIIPER registration step. Close viiper.exe " +
-                "manually and run Repair again.\n\nReview the setup log " +
-                $"for details:\n{logPath}";
+                "No incompatible VIIPER installation was accepted. Click " +
+                "Repair to retry the verified bundled package. If Windows " +
+                "requires a restart to replace USB-IP, restart once and run " +
+                "Repair again.\n\nThe exact failing phase is recorded here:\n" +
+                logPath;
         }
 
         internal static string ResolveConfiguredViiperPath(
@@ -1127,8 +1326,9 @@ namespace DS4Windows
                     return false;
                 }
 
-                return FilesHaveSameSha256(normalized,
-                    GetBundledViiperPath());
+                return IsBundledViiperAuthentic() &&
+                    FilesHaveSameSha256(normalized,
+                        GetBundledViiperPath());
             }
             catch
             {
@@ -1317,7 +1517,7 @@ namespace DS4Windows
             {
                 ShowInstallerMessage(owner,
                     "The selected VIIPER executable is missing or does not " +
-                    "match the supported VIIPER 0.0.7 contract.",
+                    "match the supported VIIPER 0.0.8 contract.",
                     "VIIPER could not be selected", MessageBoxImage.Warning);
                 return false;
             }
@@ -2031,6 +2231,47 @@ namespace DS4Windows
             }
         }
 
+        private static bool IsBundledViiperAuthentic()
+        {
+            return FileHasSha256(GetBundledViiperPath(),
+                       SupportedViiperSha256) &&
+                   Sha256SidecarMatches(Path.Combine(Global.exedirpath,
+                       "extras", BundledViiperHashName),
+                       SupportedViiperSha256);
+        }
+
+        private static bool FileHasSha256(string path, string expected)
+        {
+            try
+            {
+                using FileStream stream = File.OpenRead(path);
+                string actual = Convert.ToHexString(SHA256.HashData(stream));
+                return string.Equals(actual, expected,
+                    StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool Sha256SidecarMatches(string path,
+            string expected)
+        {
+            try
+            {
+                string value = File.ReadAllText(path, Encoding.ASCII).Trim();
+                string[] parts = value.Split((char[])null,
+                    StringSplitOptions.RemoveEmptyEntries);
+                return parts.Length > 0 && string.Equals(parts[0], expected,
+                    StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private static string GetCanonicalUsbipPath()
         {
             return Path.Combine(GetNativeProgramFilesPath(),
@@ -2493,9 +2734,13 @@ namespace DS4Windows
                 };
 
                 IAsyncResult result = tcp.BeginConnect(ApiHost, ApiPort, null, null);
-                if (!result.AsyncWaitHandle.WaitOne(TimeSpan.FromMilliseconds(750)))
+                using (result.AsyncWaitHandle)
                 {
-                    return false;
+                    if (!result.AsyncWaitHandle.WaitOne(
+                            TimeSpan.FromMilliseconds(750)))
+                    {
+                        return false;
+                    }
                 }
 
                 tcp.EndConnect(result);
@@ -2504,14 +2749,29 @@ namespace DS4Windows
                 stream.Write(request, 0, request.Length);
 
                 byte[] buffer = new byte[256];
-                int read = stream.Read(buffer, 0, buffer.Length);
-                if (read <= 0)
+                int total = 0;
+                Stopwatch deadline = Stopwatch.StartNew();
+                while (total < buffer.Length &&
+                       deadline.ElapsedMilliseconds < 1000)
                 {
-                    return false;
+                    stream.ReadTimeout = Math.Max(1,
+                        1000 - (int)deadline.ElapsedMilliseconds);
+                    int read = stream.Read(buffer, total,
+                        buffer.Length - total);
+                    if (read <= 0)
+                    {
+                        break;
+                    }
+                    total += read;
+                    string response = Encoding.UTF8.GetString(buffer, 0,
+                        total);
+                    if (response.IndexOf("VIIPER",
+                            StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        return true;
+                    }
                 }
-
-                string response = Encoding.UTF8.GetString(buffer, 0, read);
-                return response.IndexOf("VIIPER", StringComparison.OrdinalIgnoreCase) >= 0;
+                return false;
             }
             catch
             {

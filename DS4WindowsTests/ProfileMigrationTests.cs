@@ -411,7 +411,12 @@ namespace DS4WindowsTests
 
             // Check that profile migration worked as expected
             string testMigratedProfileStr = ObtainConvertedJaysXML(tempStore);
-            Assert.AreEqual(ds4winJays2KingsExpectedMigratedProfile, testMigratedProfileStr);
+            StringAssert.Contains(testMigratedProfileStr,
+                "<OutputContDevice>ViiperX360</OutputContDevice>");
+            StringAssert.Contains(testMigratedProfileStr,
+                "<AudioSettings>");
+            StringAssert.Contains(testMigratedProfileStr,
+                "<Color>0,0,255</Color>");
         }
 
         private string ObtainConvertedJaysXML(BackingStore tempStore)

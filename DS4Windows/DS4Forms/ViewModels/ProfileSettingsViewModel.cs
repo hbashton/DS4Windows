@@ -3194,8 +3194,16 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public List<AudioEndpointChoice> AudioCaptureEndpointChoices
         {
-            get => AudioEndpointChoiceCache.BuildControllerAudioChoices(
-                DualSenseAudioCaptureEndpointId);
+            get
+            {
+                ViiperOutDevice outputDevice = App.rootHub?
+                    .GetPlayStationFeatureOutput(device);
+                return AudioEndpointChoiceCache.BuildControllerAudioChoices(
+                    DualSenseAudioCaptureEndpointId,
+                    outputDevice?.OutputType ??
+                        Global.OutContType[device].Normalize(),
+                    outputDevice?.DirectSpeakerUsbipPort ?? -1);
+            }
         }
 
         public string DualSenseAudioCaptureEndpointId

@@ -13,7 +13,7 @@ namespace DS4WinWPF.DS4Forms
 
     public partial class ViiperSetupPrompt : Window
     {
-        private readonly bool verifiedUpdateRequired;
+        private readonly bool mandatoryRepairRequired;
 
         public ViiperSetupPromptDecision Decision { get; private set; } =
             ViiperSetupPromptDecision.NotNow;
@@ -21,15 +21,18 @@ namespace DS4WinWPF.DS4Forms
         public bool SuppressFuturePrompts =>
             suppressPromptCheck.IsChecked == true;
 
-        public bool ExitApplicationRequested => verifiedUpdateRequired &&
+        public bool ExitApplicationRequested => mandatoryRepairRequired &&
             Decision == ViiperSetupPromptDecision.NotNow;
 
         public ViiperSetupPrompt(string currentStatus,
             string existingViiperPath, bool citrixUsbMonitorConflict = false,
             bool portableMigration = false,
-            bool verifiedUpdateRequired = false)
+            bool verifiedUpdateRequired = false,
+            bool usbipReplacementRequired = false,
+            bool mandatoryRepairRequired = false)
         {
-            this.verifiedUpdateRequired = verifiedUpdateRequired;
+            this.mandatoryRepairRequired = mandatoryRepairRequired ||
+                verifiedUpdateRequired;
             InitializeComponent();
             statusText.Text = currentStatus;
 
@@ -44,6 +47,9 @@ namespace DS4WinWPF.DS4Forms
                 installButton.Content = "Disable conflicting USB monitor";
                 installPortableButton.Visibility = Visibility.Collapsed;
                 portableWarningPanel.Visibility = Visibility.Collapsed;
+                suppressPromptCheck.Visibility = Visibility.Collapsed;
+                notNowButton.Content = "Exit DS4Windows";
+                closeButton.ToolTip = "Exit DS4Windows";
                 return;
             }
 
@@ -80,15 +86,43 @@ namespace DS4WinWPF.DS4Forms
 
             if (verifiedUpdateRequired)
             {
-                headingText.Text = "VIIPER verification failed";
-                summaryText.Text =
-                    "The installed VIIPER does not match this DS4Windows package.";
+                headingText.Text = usbipReplacementRequired
+                    ? "USB-IP version must be replaced"
+                    : "VIIPER verification failed";
+                summaryText.Text = usbipReplacementRequired
+                    ? currentStatus
+                    : "The installed VIIPER does not match this DS4Windows package.";
                 requirementsHeadingText.Text = "Verified update required";
-                requirementsText.Text =
-                    "• Install the exact bundled VIIPER build\n" +
-                    "• Choose Standard or Portable installation\n" +
-                    "• The unverified backend will not be started";
+                requirementsText.Text = usbipReplacementRequired
+                    ? "• Install and verify bundled VIIPER 0.0.8\n" +
+                      "• Safely remove the unsupported USB-IP package\n" +
+                      "• Restart, then finish installing USB-IP 0.9.7.7"
+                    : "• Install the exact bundled VIIPER build\n" +
+                      "• Choose Standard or Portable installation\n" +
+                      "• The unverified backend will not be started";
+                installButton.Content = usbipReplacementRequired
+                    ? "Repair VIIPER + USB-IP"
+                    : "Install standard";
+                installPortableButton.Content = usbipReplacementRequired
+                    ? "Repair portably"
+                    : "Install portably";
                 existingViiperPanel.Visibility = Visibility.Collapsed;
+                useExistingButton.Visibility = Visibility.Collapsed;
+                suppressPromptCheck.Visibility = Visibility.Collapsed;
+                notNowButton.Content = "Exit DS4Windows";
+                closeButton.ToolTip = "Exit DS4Windows";
+            }
+            else if (this.mandatoryRepairRequired)
+            {
+                headingText.Text = "VIIPER setup required";
+                summaryText.Text = currentStatus;
+                requirementsHeadingText.Text = "Required before DS4Windows can run";
+                requirementsText.Text =
+                    "• Install the bundled VIIPER 0.0.8 build\n" +
+                    "• Install and verify USB-IP 0.9.7.7\n" +
+                    "• Start DS4Windows only after the runtime probe passes";
+                installButton.Content = "Install / Repair";
+                installPortableButton.Content = "Repair portably";
                 useExistingButton.Visibility = Visibility.Collapsed;
                 suppressPromptCheck.Visibility = Visibility.Collapsed;
                 notNowButton.Content = "Exit DS4Windows";

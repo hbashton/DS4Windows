@@ -1,14 +1,17 @@
 using Microsoft.Win32;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Management;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
 using System.Threading;
+using System.Xml;
 
 namespace DS4Windows.SetupActions
 {
@@ -16,7 +19,7 @@ namespace DS4Windows.SetupActions
     {
         private const string RegistryKeyPath = @"SOFTWARE\DS4Windows";
         private const string InfrastructureVersion =
-            "VIIPER-0.0.7+USBIP-0.9.7.7";
+            "VIIPER-0.0.8+USBIP-0.9.7.7";
         private static readonly string InstallerLogRoot = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "DS4Windows", "Installer");
@@ -35,6 +38,11 @@ namespace DS4Windows.SetupActions
                 var installRoot = ReadArgument(args, "--install-root") ??
                     Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "DS4Windows");
                 var bundleSource = ReadArgument(args, "--bundle-source");
+
+                if (action != "preflight")
+                {
+                    installRoot = ValidateManagedInstallRoot(installRoot);
+                }
 
                 switch (action)
                 {
@@ -160,6 +168,16 @@ namespace DS4Windows.SetupActions
                     try
                     {
                         if (process.HasExited) continue;
+                        if (!IsRecognizedProductProcess(process, processName,
+                                out var executablePath))
+                        {
+                            throw new InvalidOperationException(
+                                "A process named " + processName + " (PID " +
+                                process.Id + ") is not a verified DS4Windows " +
+                                "package executable. Close it manually before " +
+                                "setup continues. Observed path: " +
+                                (executablePath ?? "<unavailable>"));
+                        }
                         var closedGracefully = process.CloseMainWindow() && process.WaitForExit(5000);
                         if (!closedGracefully && !process.HasExited)
                         {
@@ -174,6 +192,39 @@ namespace DS4Windows.SetupActions
                 }
             }
             return 0;
+        }
+
+        private static bool IsRecognizedProductProcess(Process process,
+            string processName, out string executablePath)
+        {
+            executablePath = null;
+            try
+            {
+                executablePath = process.MainModule?.FileName;
+                if (string.IsNullOrWhiteSpace(executablePath) ||
+                    !File.Exists(executablePath))
+                {
+                    return false;
+                }
+
+                var version = FileVersionInfo.GetVersionInfo(executablePath);
+                if (string.Equals(processName, "DS4Windows",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return string.Equals(version.ProductName, "DS4Windows",
+                               StringComparison.OrdinalIgnoreCase) ||
+                           string.Equals(version.FileDescription, "DS4Windows",
+                               StringComparison.OrdinalIgnoreCase);
+                }
+                return string.Equals(version.ProductName, "VIIPER",
+                           StringComparison.OrdinalIgnoreCase) ||
+                       (version.FileDescription?.StartsWith("VIIPER",
+                            StringComparison.OrdinalIgnoreCase) ?? false);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static int Probe(string installRoot)
@@ -199,10 +250,11 @@ namespace DS4Windows.SetupActions
             var expectedRoot = Path.GetFullPath(installRoot).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
             if (viiperRoot.StartsWith(expectedRoot, StringComparison.OrdinalIgnoreCase) && Directory.Exists(viiperRoot))
             {
+                EnsureTreeHasNoReparsePoints(viiperRoot);
                 Directory.Delete(viiperRoot, true);
             }
 
-            using (var key = Registry.LocalMachine.OpenSubKey(RegistryKeyPath, writable: true))
+            using (var key = OpenMachineKey64(RegistryKeyPath, writable: true))
             {
                 key?.DeleteValue("InfrastructureVersion", false);
                 key?.SetValue("InfrastructureState", "Uninstalled",
@@ -235,8 +287,10 @@ namespace DS4Windows.SetupActions
                     }
                     if (!mutexOwned)
                     {
-                        throw new InvalidOperationException(
-                            "Another DS4Windows VIIPER setup is already running.");
+                        WriteFallbackLog(
+                            "Another DS4Windows VIIPER setup owns the global " +
+                            "setup mutex; returning Windows Installer busy (1618).");
+                        return 1618;
                     }
                     return action();
                 }
@@ -281,7 +335,8 @@ namespace DS4Windows.SetupActions
                     if (!string.IsNullOrWhiteSpace(name))
                     {
                         var sid = ((SecurityIdentifier)new NTAccount(name).Translate(typeof(SecurityIdentifier))).Value;
-                        using (var profile = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\" + sid))
+                        using (var profile = OpenMachineKey64(
+                                   @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\" + sid))
                         {
                             var profilePath = Environment.ExpandEnvironmentVariables(profile?.GetValue("ProfileImagePath") as string ?? string.Empty);
                             var localAppData = Path.Combine(profilePath, "AppData", "Local");
@@ -311,7 +366,7 @@ namespace DS4Windows.SetupActions
             string roamingAppData)
         {
             var securityIdentifier = new SecurityIdentifier(sid);
-            using (var profile = Registry.LocalMachine.OpenSubKey(
+            using (var profile = OpenMachineKey64(
                        @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\" +
                        securityIdentifier.Value))
             {
@@ -368,8 +423,14 @@ namespace DS4Windows.SetupActions
                     "The original installer is unavailable for reboot resume.",
                     bundleSource);
             }
-            var resumeRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "DS4Windows", "Installer", "resume");
+            var resumeRoot = Path.Combine(
+                Environment.GetFolderPath(
+                    Environment.SpecialFolder.CommonApplicationData),
+                "DS4Windows", "Installer", "resume");
+            EnsureDirectoryPathHasNoReparsePoints(resumeRoot);
             Directory.CreateDirectory(resumeRoot);
+            EnsureDirectoryPathHasNoReparsePoints(resumeRoot);
+            ProtectResumeDirectory(resumeRoot, targetUser.Sid);
             var stagedBundle = Path.Combine(resumeRoot, "DS4Windows_Setup_x64.exe");
             if (!string.Equals(Path.GetFullPath(bundleSource),
                     Path.GetFullPath(stagedBundle),
@@ -377,18 +438,24 @@ namespace DS4Windows.SetupActions
             {
                 File.Copy(bundleSource, stagedBundle, true);
             }
+            if (!HashesEqual(bundleSource, stagedBundle))
+            {
+                throw new InvalidOperationException(
+                    "The reboot-resume installer copy failed verification.");
+            }
 
             var startupDirectory = Path.Combine(targetUser.RoamingAppData,
                 "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
+            EnsureDirectoryPathHasNoReparsePoints(startupDirectory);
             Directory.CreateDirectory(startupDirectory);
+            EnsureDirectoryPathHasNoReparsePoints(startupDirectory);
             var shortcutPath = Path.Combine(startupDirectory,
                 "DS4Windows Setup Resume.lnk");
             try
             {
                 CreateShortcut(shortcutPath, stagedBundle, "/repair",
                     resumeRoot);
-                using (var key = Registry.LocalMachine.CreateSubKey(
-                           RegistryKeyPath))
+                using (var key = CreateMachineKey64(RegistryKeyPath))
                 {
                     key?.SetValue("SetupResumeShortcut", shortcutPath,
                         RegistryValueKind.String);
@@ -411,7 +478,7 @@ namespace DS4Windows.SetupActions
             // Burn owns its own GUID-named resume entry.
             try
             {
-                using (var runOnce = Registry.LocalMachine.OpenSubKey(
+                using (var runOnce = OpenMachineKey64(
                            @"SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce",
                            writable: true))
                 {
@@ -427,7 +494,7 @@ namespace DS4Windows.SetupActions
             string shortcutPath = null;
             try
             {
-                using (var key = Registry.LocalMachine.OpenSubKey(
+                using (var key = OpenMachineKey64(
                            RegistryKeyPath, writable: true))
                 {
                     shortcutPath = key?.GetValue("SetupResumeShortcut") as string;
@@ -449,8 +516,101 @@ namespace DS4Windows.SetupActions
             }
             catch { }
 
-            var stagedBundle = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "DS4Windows", "Installer", "resume", "DS4Windows_Setup_x64.exe");
-            try { if (File.Exists(stagedBundle)) File.Delete(stagedBundle); } catch { }
+            var resumeRoot = Path.Combine(
+                Environment.GetFolderPath(
+                    Environment.SpecialFolder.CommonApplicationData),
+                "DS4Windows", "Installer", "resume");
+            try
+            {
+                EnsureDirectoryPathHasNoReparsePoints(resumeRoot);
+                var stagedBundle = Path.Combine(resumeRoot,
+                    "DS4Windows_Setup_x64.exe");
+                if (File.Exists(stagedBundle) &&
+                    (File.GetAttributes(stagedBundle) &
+                     FileAttributes.ReparsePoint) == 0)
+                {
+                    File.Delete(stagedBundle);
+                }
+            }
+            catch (Exception ex)
+            {
+                WriteFallbackLog("Refused unsafe resume-cache cleanup: " +
+                    ex.Message);
+            }
+        }
+
+        private static void EnsureDirectoryPathHasNoReparsePoints(string path)
+        {
+            var resolved = Path.GetFullPath(path)
+                .TrimEnd(Path.DirectorySeparatorChar);
+            var root = Path.GetPathRoot(resolved);
+            if (string.IsNullOrWhiteSpace(root))
+            {
+                throw new InvalidOperationException(
+                    "A rooted directory path is required.");
+            }
+
+            var cursor = root;
+            var relative = resolved.Substring(root.Length);
+            foreach (var component in relative.Split(new[]
+                     { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar },
+                     StringSplitOptions.RemoveEmptyEntries))
+            {
+                cursor = Path.Combine(cursor, component);
+                if (!Directory.Exists(cursor) && !File.Exists(cursor)) continue;
+                var attributes = File.GetAttributes(cursor);
+                if ((attributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    throw new InvalidOperationException(
+                        "Directory path traverses a reparse point: " + cursor);
+                }
+                if ((attributes & FileAttributes.Directory) == 0)
+                {
+                    throw new InvalidOperationException(
+                        "Directory path traverses a file: " + cursor);
+                }
+            }
+        }
+
+        private static void ProtectResumeDirectory(string resumeRoot,
+            string targetUserSid)
+        {
+            var ownerExit = RunCaptured("icacls.exe",
+                Quote(resumeRoot) + " /setowner " +
+                Quote("*S-1-5-32-544") + " /Q",
+                TimeSpan.FromSeconds(15), out var ownerOutput);
+            if (ownerExit != 0)
+            {
+                throw new InvalidOperationException(
+                    "Could not secure ownership of the reboot-resume " +
+                    "directory: " + ownerOutput.Trim());
+            }
+            var arguments = Quote(resumeRoot) +
+                " /inheritance:r /grant:r " +
+                Quote("*S-1-5-18:(OI)(CI)(F)") + " " +
+                Quote("*S-1-5-32-544:(OI)(CI)(F)") + " " +
+                Quote("*" + targetUserSid + ":(OI)(CI)(RX)") + " /Q";
+            var exitCode = RunCaptured("icacls.exe", arguments,
+                TimeSpan.FromSeconds(15), out var output);
+            if (exitCode != 0)
+            {
+                throw new InvalidOperationException(
+                    "Could not protect the reboot-resume directory: " +
+                    output.Trim());
+            }
+        }
+
+        private static bool HashesEqual(string first, string second)
+        {
+            using (var algorithm = SHA256.Create())
+            using (var firstStream = File.OpenRead(first))
+            using (var secondStream = File.OpenRead(second))
+            {
+                var firstHash = algorithm.ComputeHash(firstStream);
+                algorithm.Initialize();
+                var secondHash = algorithm.ComputeHash(secondStream);
+                return firstHash.SequenceEqual(secondHash);
+            }
         }
 
         private static bool IsOwnedResumeShortcut(string path)
@@ -507,19 +667,100 @@ namespace DS4Windows.SetupActions
 
         private static bool IsInfrastructureCommitted()
         {
-            using (var key = Registry.LocalMachine.OpenSubKey(RegistryKeyPath))
+            string observedVersion;
+            string observedState;
+            // The PowerShell child and WiX registry searches use the 64-bit
+            // machine view. Select it explicitly here as well so WOW64 cannot
+            // turn a successful install into a false failure and rollback.
+            using (var machine = RegistryKey.OpenBaseKey(
+                       RegistryHive.LocalMachine,
+                       RegistryView.Registry64))
+            using (var key = machine.OpenSubKey(RegistryKeyPath))
             {
-                return string.Equals(
-                           key?.GetValue("InfrastructureVersion") as string,
-                           InfrastructureVersion, StringComparison.Ordinal) &&
-                       string.Equals(
-                           key?.GetValue("InfrastructureState") as string,
-                           "Ready", StringComparison.Ordinal);
+                observedVersion = key?.GetValue(
+                    "InfrastructureVersion") as string;
+                observedState = key?.GetValue(
+                    "InfrastructureState") as string;
+            }
+
+            if (string.Equals(observedVersion, InfrastructureVersion,
+                    StringComparison.Ordinal) &&
+                string.Equals(observedState, "Ready",
+                    StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            WriteFallbackLog("Infrastructure readiness postcondition failed. " +
+                "Expected " + InfrastructureVersion + "/Ready; observed " +
+                (observedVersion ?? "<missing>") + "/" +
+                (observedState ?? "<missing>") + " in Registry64.");
+            return false;
+        }
+
+        private static string ValidateManagedInstallRoot(string installRoot)
+        {
+            if (string.IsNullOrWhiteSpace(installRoot))
+            {
+                throw new InvalidOperationException(
+                    "The managed installation path is empty.");
+            }
+
+            var expected = Path.GetFullPath(Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                "DS4Windows")).TrimEnd(Path.DirectorySeparatorChar);
+            var actual = Path.GetFullPath(installRoot)
+                .TrimEnd(Path.DirectorySeparatorChar);
+            if (!string.Equals(actual, expected,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "The standard installer only manages " + expected + ".");
+            }
+
+            var current = new DirectoryInfo(actual);
+            while (current != null &&
+                   current.FullName.StartsWith(
+                       Environment.GetFolderPath(
+                           Environment.SpecialFolder.ProgramFiles),
+                       StringComparison.OrdinalIgnoreCase))
+            {
+                if (current.Exists &&
+                    (current.Attributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    throw new InvalidOperationException(
+                        "The managed installation path contains a reparse point: " +
+                        current.FullName);
+                }
+                current = current.Parent;
+            }
+            return actual;
+        }
+
+        private static RegistryKey OpenMachineKey64(string path,
+            bool writable = false)
+        {
+            using (var machine = RegistryKey.OpenBaseKey(
+                       RegistryHive.LocalMachine, RegistryView.Registry64))
+            {
+                return machine.OpenSubKey(path, writable);
+            }
+        }
+
+        private static RegistryKey CreateMachineKey64(string path)
+        {
+            using (var machine = RegistryKey.OpenBaseKey(
+                       RegistryHive.LocalMachine, RegistryView.Registry64))
+            {
+                return machine.CreateSubKey(path, writable: true);
             }
         }
 
         private static void StopManagedProcesses(string installRoot)
         {
+            var managedPrefix = Path.GetFullPath(installRoot)
+                .TrimEnd(Path.DirectorySeparatorChar) +
+                Path.DirectorySeparatorChar;
             foreach (var processName in new[] { "DS4Windows", "viiper" })
             {
                 foreach (var process in Process.GetProcessesByName(processName))
@@ -527,7 +768,9 @@ namespace DS4Windows.SetupActions
                     try
                     {
                         var path = process.MainModule?.FileName;
-                        if (path != null && Path.GetFullPath(path).StartsWith(Path.GetFullPath(installRoot), StringComparison.OrdinalIgnoreCase))
+                        if (path != null && Path.GetFullPath(path).StartsWith(
+                                managedPrefix,
+                                StringComparison.OrdinalIgnoreCase))
                         {
                             if (!process.CloseMainWindow() || !process.WaitForExit(3000))
                             {
@@ -542,11 +785,57 @@ namespace DS4Windows.SetupActions
             }
         }
 
+        private static void EnsureTreeHasNoReparsePoints(string root)
+        {
+            var directory = new DirectoryInfo(Path.GetFullPath(root));
+            if ((directory.Attributes & FileAttributes.ReparsePoint) != 0)
+            {
+                throw new InvalidOperationException(
+                    "Refusing to remove a reparse-point installation directory: " +
+                    directory.FullName);
+            }
+
+            var pending = new Stack<DirectoryInfo>();
+            pending.Push(directory);
+            while (pending.Count > 0)
+            {
+                foreach (var entry in pending.Pop().GetFileSystemInfos())
+                {
+                    if ((entry.Attributes & FileAttributes.ReparsePoint) != 0)
+                    {
+                        throw new InvalidOperationException(
+                            "Refusing to remove an installation tree containing " +
+                            "a reparse point: " + entry.FullName);
+                    }
+                    if (entry is DirectoryInfo child)
+                    {
+                        pending.Push(child);
+                    }
+                }
+            }
+        }
+
         private static void RemoveOwnedTask(string taskName, string expectedExecutable)
         {
             var query = RunCaptured("schtasks.exe", "/Query /TN " + Quote(taskName) + " /XML", TimeSpan.FromSeconds(10), out var output);
-            if (query != 0 || output.IndexOf(expectedExecutable, StringComparison.OrdinalIgnoreCase) < 0)
+            if (query != 0)
             {
+                return;
+            }
+
+            try
+            {
+                var document = new XmlDocument { XmlResolver = null };
+                document.LoadXml(output.Trim());
+                var command = document.SelectSingleNode(
+                    "//*[local-name()='Exec']/*[local-name()='Command']")?
+                    .InnerText?.Trim();
+                if (!PathsEqual(expectedExecutable, command)) return;
+            }
+            catch
+            {
+                // Never delete a task whose action could not be parsed and
+                // compared exactly to the installer-owned executable.
                 return;
             }
 
@@ -655,7 +944,9 @@ namespace DS4Windows.SetupActions
         {
             try
             {
+                EnsureDirectoryPathHasNoReparsePoints(InstallerLogRoot);
                 Directory.CreateDirectory(InstallerLogRoot);
+                EnsureDirectoryPathHasNoReparsePoints(InstallerLogRoot);
                 File.AppendAllText(Path.Combine(InstallerLogRoot, "setup-actions.log"), DateTime.Now.ToString("O") + " " + message + Environment.NewLine);
             }
             catch { }
@@ -666,7 +957,9 @@ namespace DS4Windows.SetupActions
             if (string.IsNullOrWhiteSpace(message)) return;
             try
             {
+                EnsureDirectoryPathHasNoReparsePoints(InstallerLogRoot);
                 Directory.CreateDirectory(InstallerLogRoot);
+                EnsureDirectoryPathHasNoReparsePoints(InstallerLogRoot);
                 File.AppendAllText(InfrastructureLogPath,
                     Environment.NewLine + message + Environment.NewLine);
             }
@@ -677,7 +970,9 @@ namespace DS4Windows.SetupActions
         {
             try
             {
+                EnsureDirectoryPathHasNoReparsePoints(InstallerLogRoot);
                 Directory.CreateDirectory(InstallerLogRoot);
+                EnsureDirectoryPathHasNoReparsePoints(InstallerLogRoot);
                 File.WriteAllText(InfrastructureLogPath,
                     DateTime.Now.ToString("O") +
                     " Infrastructure setup started for " + targetUser.Name +

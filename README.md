@@ -64,6 +64,8 @@ selector.
 
 DS4Windows 5 release candidates include virtual DualSense output, advanced
 haptics, controller audio, microphone capture, and the redesigned interface.
+Release Candidate 4, **The Parity Patch**, adds the all-in-one installer and
+unifies native game feedback, PlayStation audio, and cross-output features.
 They appear as pre-releases on the
 [DS4Windows Releases page](https://github.com/hbashton/DS4Windows/releases).
 Choose the newest release-candidate build when you want to test these features.

@@ -7,12 +7,12 @@
     {
       "version_str": "5.0.0.0",
       "version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 0},
-      "base_header": "Version 5.0.0.0 - Release Candidate 4",
+      "base_header": "Version 5.0.0.0 - The Parity Patch",
       "release_date": "2026-08-04T00:00:00+0000",
       "locales": [
         {
           "code": "en",
-          "header": "Version 5.0.0.0 - Release Candidate 4",
+          "header": "Version 5.0.0.0 - The Parity Patch (Release Candidate 4)",
           "log_text": [
             "* **New all-in-one installer** - the offline 5.0.0.0 setup EXE installs or updates DS4Windows, VIIPER 0.0.7, and usbip-win2 0.9.7.7, with optional HidHide and FakerInput checkboxes, payload verification, repair support, and restart recovery",
             "* **One production backend** - VIIPER drives Xbox 360, DualShock 4, DualSense, DualSense Edge, and Switch 2 Pro output; legacy profile selections migrate automatically",
@@ -26,7 +26,7 @@
             "* **Safer startup and updates** - exact VIIPER hash/version enforcement, guided standard or portable repair, startup tasks that respect Run at Startup, scoped cleanup, Citrix/USB-IP safeguards, and self-contained x64 packaging"
           ],
           "editor": "hbashton",
-          "editors_note": ["Release Candidate 4 pairs DS4Windows 5.0.0.0 with VIIPER 0.0.7 and the new all-in-one installer."],
+          "editors_note": ["The Parity Patch pairs DS4Windows 5.0.0.0 with VIIPER 0.0.7 and the new all-in-one installer."],
           "updated_at": "2026-08-04T00:00:00+0000"
         }
       ]

@@ -1,13 +1,16 @@
-# Release Candidate 4.2 — Controller and Audio Reliability
+# Release Candidate 4.2 — Reduce CPU Usage
 
-RC4.2 tightens the parts of DS4Windows that must remain invisible when they
-work: controller input, Game Bar navigation, Bluetooth ownership, and clean
-application-audio routing.
+RC4.2 cuts VIIPER's controller-emulation overhead while preserving responsive
+input, Game Bar navigation, Bluetooth ownership, and clean application-audio
+routing.
 
 ## Highlights
 
-- **Stable Xbox 360 and Game Bar input.** VIIPER 0.0.9 retains adaptive,
-  thread-safe latest-state delivery. Profile changes now retire temporary Game
+- **Much lower VIIPER CPU usage.** Virtual Xbox 360, DualShock 4, DualSense,
+  and Switch 2 Pro input writers use adaptive, thread-safe latest-state
+  delivery instead of busy-looping redundant reports. Fresh input retains a
+  1,000 Hz ceiling without manufacturing duplicate traffic.
+- **Stable Xbox 360 and Game Bar input.** Profile changes retire temporary Game
   Bar companions before a native Xbox pad appears, so the overlay cannot bind
   a stale controller that is about to be removed.
 - **Lower-latency input without stale queues.** Mapped controller state uses a

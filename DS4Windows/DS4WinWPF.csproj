@@ -22,10 +22,10 @@
 		     a SustainedLowLatency lease in the process. -->
 		<ServerGarbageCollection>false</ServerGarbageCollection>
 		<ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
-		<AssemblyVersion>5.0.1.0</AssemblyVersion>
-		<FileVersion>5.0.1.0</FileVersion>
-		<Version>5.0.1.0-dualsense-beta</Version>
-		<InformationalVersion>5.0.1.0 DualSense Beta</InformationalVersion>
+		<AssemblyVersion>5.0.2.0</AssemblyVersion>
+		<FileVersion>5.0.2.0</FileVersion>
+		<Version>5.0.2.0-dualsense-beta</Version>
+		<InformationalVersion>5.0.2.0 DualSense Beta</InformationalVersion>
 		<IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 		<Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
 		<Platform Condition=" '$(Platform)' == '' ">x64</Platform>
@@ -91,7 +91,7 @@
 		AfterTargets="Publish"
 		BeforeTargets="GenerateManagedFileManifest">
 		<PropertyGroup>
-			<_BundledViiperName>VIIPER-0.0.8-x64.exe</_BundledViiperName>
+			<_BundledViiperName>VIIPER-0.0.9-x64.exe</_BundledViiperName>
 			<_BundledViiperPath>$(PublishDir)extras\$(_BundledViiperName)</_BundledViiperPath>
 			<_BundledViiperHashPath>$(_BundledViiperPath).sha256</_BundledViiperHashPath>
 		</PropertyGroup>
@@ -136,8 +136,8 @@
 		<EmbeddedResource Include="..\extras\install-viiper-backend.ps1">
 			<LogicalName>DS4Windows.install-viiper-backend.ps1</LogicalName>
 		</EmbeddedResource>
-		<Content Include="..\extras\VIIPER-0.0.8-x64.exe">
-			<Link>extras\VIIPER-0.0.8-x64.exe</Link>
+		<Content Include="..\extras\VIIPER-0.0.9-x64.exe">
+			<Link>extras\VIIPER-0.0.9-x64.exe</Link>
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
 		</Content>

@@ -84,7 +84,7 @@
           SourceFile="$(var.SetupActionsPath)"
           PerMachine="yes"
           Vital="yes"
-          DetectCondition="InfrastructureInstalled = &quot;VIIPER-0.0.8+USBIP-0.9.7.7&quot; OR ManagedInstallRegistered OR ManagedViiperPresent"
+          DetectCondition="InfrastructureInstalled = &quot;VIIPER-0.0.9+USBIP-0.9.7.7&quot; OR ManagedInstallRegistered OR ManagedViiperPresent"
           InstallArguments="install --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot; --bundle-source &quot;[WixBundleOriginalSource]&quot; --target-user-sid &quot;[TargetUserSid]&quot; --target-user-name &quot;[TargetUserName]&quot; --target-local-appdata &quot;[TargetLocalAppData]&quot; --target-roaming-appdata &quot;[TargetRoamingAppData]&quot;"
           RepairArguments="repair --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot; --bundle-source &quot;[WixBundleOriginalSource]&quot; --target-user-sid &quot;[TargetUserSid]&quot; --target-user-name &quot;[TargetUserName]&quot; --target-local-appdata &quot;[TargetLocalAppData]&quot; --target-roaming-appdata &quot;[TargetRoamingAppData]&quot;"
           UninstallArguments="uninstall --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot;">

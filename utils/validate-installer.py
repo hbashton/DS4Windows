@@ -15,8 +15,8 @@ REQUIRED_PUBLISH_FILES = {
     "DS4Windows.exe",
     "DS4Windows.release",
     "extras/install-viiper-backend.ps1",
-    "extras/VIIPER-0.0.8-x64.exe",
-    "extras/VIIPER-0.0.8-x64.exe.sha256",
+    "extras/VIIPER-0.0.9-x64.exe",
+    "extras/VIIPER-0.0.9-x64.exe.sha256",
     "extras/USBip-0.9.7.7-x64.exe",
     "extras/HidHide_1.5.230_x64.exe",
     "extras/FakerInput_0.1.0_x64.msi",
@@ -274,7 +274,7 @@ def main() -> int:
         "Commit-InfrastructureReadiness",
         "Test-RecognizedProductExecutable",
         '$script:InstallerLogRoot = Assert-SafeManagedDirectory',
-        '"VIIPER-0.0.8-x64.exe"',
+        '"VIIPER-0.0.9-x64.exe"',
         '[Version]"0.9.7.7"',
         '"USBip-0.9.7.7-x64.exe"',
         'Start-AndVerifyViiper',
@@ -345,10 +345,10 @@ def main() -> int:
         r'ExpectedViiperHash\s*=\s*"([0-9A-F]{64})"', probe
     )
     actual_viiper_hash = sha256(
-        args.publish_root / "extras" / "VIIPER-0.0.8-x64.exe"
+        args.publish_root / "extras" / "VIIPER-0.0.9-x64.exe"
     )
     sidecar_hash = (
-        args.publish_root / "extras" / "VIIPER-0.0.8-x64.exe.sha256"
+        args.publish_root / "extras" / "VIIPER-0.0.9-x64.exe.sha256"
     ).read_text(encoding="utf-8").split()[0].upper()
     if sidecar_hash != actual_viiper_hash:
         raise SystemExit("Packaged VIIPER hash sidecar is stale.")

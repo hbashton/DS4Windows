@@ -19,7 +19,7 @@ namespace DS4Windows.SetupActions
     {
         private const string RegistryKeyPath = @"SOFTWARE\DS4Windows";
         private const string InfrastructureVersion =
-            "VIIPER-0.0.8+USBIP-0.9.7.7";
+            "VIIPER-0.0.9+USBIP-0.9.7.7";
         private static readonly string InstallerLogRoot = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "DS4Windows", "Installer");

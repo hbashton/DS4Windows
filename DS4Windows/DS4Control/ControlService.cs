@@ -3528,6 +3528,51 @@ namespace DS4Windows
                 outputType == OutContType.ViiperDS4);
         }
 
+        internal static bool ShouldRetireGameBarCompatibilityBeforeProfileChange(
+            bool routeActive, bool enabled, OutContType requestedOutputType,
+            bool requestedDInputOnly)
+        {
+            return routeActive &&
+                !ShouldUseGameBarControllerCompatibility(enabled,
+                    requestedOutputType.Normalize(), requestedDInputOnly);
+        }
+
+        /// <summary>
+        /// Reconciles the temporary XInput route with a profile's requested
+        /// output before that profile unplugs or creates its native device.
+        /// Waiting for the periodic Game Bar visibility poll leaves a window
+        /// where reports still target the old companion while a new native
+        /// Xbox pad is already visible. Game Bar can bind that stale pad and
+        /// then lose all input when the timer eventually removes it.
+        /// </summary>
+        internal void PrepareGameBarCompatibilityProfileTransition(int index,
+            OutContType requestedOutputType, bool requestedDInputOnly)
+        {
+            if (index < 0 || index >= MAX_DS4_CONTROLLER_COUNT)
+            {
+                return;
+            }
+
+            lock (gameBarCompatibilityOutputLock)
+            {
+                bool routeActive = Volatile.Read(
+                    ref gameBarCompatibilityRoutingActive[index]) == 1;
+                if (!ShouldRetireGameBarCompatibilityBeforeProfileChange(
+                        routeActive,
+                        Global.GameBarControllerCompatibility[index],
+                        requestedOutputType, requestedDInputOnly))
+                {
+                    return;
+                }
+
+                Interlocked.Exchange(
+                    ref gameBarCompatibilityPrewarmUntilTicks[index], 0);
+                DeactivateGameBarCompatibilityOutputCore(index);
+                StartupDiag(
+                    $"GameBar compatibility retired before profile output transition controller={index + 1} requested={requestedOutputType.Normalize()}");
+            }
+        }
+
         private bool HasAnyConfiguredGameBarCompatibility()
         {
             for (int i = 0; i < MAX_DS4_CONTROLLER_COUNT; i++)

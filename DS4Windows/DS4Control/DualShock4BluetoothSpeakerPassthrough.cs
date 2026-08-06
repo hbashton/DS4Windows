@@ -197,6 +197,8 @@ namespace DS4Windows
         private const int PcmValuesPerSbcFrame = SamplesPerSbcFrame * Channels;
         private const int SourceFramesPerTick = CaptureSampleRate *
             SamplesPerSbcFrame / SpeakerSampleRate;
+        private const int SourceSamplesPerTick = SourceFramesPerTick *
+            Channels;
         private const int EncodedFrameQueueLimit =
             DualShock4BluetoothAudioProtocol.SpeakerEncodedFrameQueueLimit;
         private const int DirectPcmPacketQueueLimit = 64;
@@ -350,7 +352,7 @@ namespace DS4Windows
         private DateTime diagnosticCaptureStartedUtc;
         private long diagnosticCaptureStartedTimestamp;
 
-        private WasapiCapture capture;
+        private IWaveIn capture;
         private BufferedWaveProvider captureBuffer;
         private ISampleProvider sampleProvider;
         private Thread worker;
@@ -600,9 +602,30 @@ namespace DS4Windows
             }
         }
 
-        private static WasapiCapture CreateCapture(string endpointId,
+        private static IWaveIn CreateCapture(string endpointId,
             ControllerAudioEndpointKind endpointKind, out string sourceName)
         {
+            if (ProcessLoopbackWaveCapture.TryParseAutomaticEndpointId(
+                    endpointId, out int automaticSlot))
+            {
+                sourceName = "Automatic game audio";
+                return ProcessLoopbackWaveCapture.CreateAutomatic(
+                    automaticSlot);
+            }
+
+            if (ProcessLoopbackWaveCapture.TryParseEndpointId(endpointId,
+                    out int processId))
+            {
+                sourceName = $"Selected app (process {processId})";
+                return new ProcessLoopbackWaveCapture(processId);
+            }
+
+            if (ProcessLoopbackWaveCapture.IsProcessEndpointId(endpointId))
+            {
+                throw new InvalidOperationException(
+                    "The selected app is not running, so its audio cannot be streamed to the controller.");
+            }
+
             bool useSystemDefault = string.Equals(endpointId,
                 DualSenseAudioPassthrough.DefaultSystemAudioEndpointId,
                 StringComparison.Ordinal) ||
@@ -2426,7 +2449,8 @@ namespace DS4Windows
                     lock (syncRoot)
                     {
                         samplesRead = stopping || sampleProvider == null ? 0 :
-                            sampleProvider.Read(sourceSamples, 0, sourceSamples.Length);
+                            sampleProvider.Read(sourceSamples, 0,
+                                SourceSamplesPerTick);
                     }
 
                     if (HasAudibleSamples(sourceSamples, samplesRead))
@@ -2456,7 +2480,7 @@ namespace DS4Windows
                     {
                         samplesRead = stopping || sampleProvider == null ? 0 :
                             sampleProvider.Read(sourceSamples, 0,
-                                sourceSamples.Length);
+                                SourceSamplesPerTick);
                     }
                     if (HasAudibleSamples(sourceSamples, samplesRead))
                     {
@@ -4550,7 +4574,7 @@ namespace DS4Windows
                 speakerWriteHandle = null;
             }
 
-            WasapiCapture oldCapture;
+            IWaveIn oldCapture;
             lock (syncRoot)
             {
                 oldCapture = capture;

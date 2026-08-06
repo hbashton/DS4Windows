@@ -38,6 +38,50 @@ namespace DS4WindowsTests
                 enabled: true, OutContType.ViiperDualSense, dInputOnly: true));
         }
 
+        [DataTestMethod]
+        [DataRow(OutContType.ViiperX360)]
+        [DataRow(OutContType.ViiperSwitch2Pro)]
+        [DataRow(OutContType.None)]
+        public void ActiveCompanionRetiresBeforeNonPlayStationProfileAppears(
+            OutContType requestedOutputType)
+        {
+            Assert.IsTrue(ControlService.
+                ShouldRetireGameBarCompatibilityBeforeProfileChange(
+                    routeActive: true, enabled: true, requestedOutputType,
+                    requestedDInputOnly: false));
+        }
+
+        [TestMethod]
+        public void ActiveCompanionCanRemainAcrossCompatiblePlayStationProfile()
+        {
+            Assert.IsFalse(ControlService.
+                ShouldRetireGameBarCompatibilityBeforeProfileChange(
+                    routeActive: true, enabled: true,
+                    OutContType.ViiperDualSense,
+                    requestedDInputOnly: false));
+        }
+
+        [TestMethod]
+        public void InactiveCompanionRequiresNoProfileTransitionWork()
+        {
+            Assert.IsFalse(ControlService.
+                ShouldRetireGameBarCompatibilityBeforeProfileChange(
+                    routeActive: false, enabled: true,
+                    OutContType.ViiperX360,
+                    requestedDInputOnly: false));
+        }
+
+        [DataTestMethod]
+        [DataRow(true, true)]
+        [DataRow(false, false)]
+        public void BluetoothInputTimeoutPreservesOnlyPresentPhysicalInterface(
+            bool interfaceStillPresent, bool expectedRetry)
+        {
+            Assert.AreEqual(expectedRetry,
+                DS4Device.ShouldRetryBluetoothInputAfterTimeout(
+                    interfaceStillPresent));
+        }
+
         [TestMethod]
         public void PrewarmKeepsCompanionUntilVisibilityProbeCatchesUp()
         {

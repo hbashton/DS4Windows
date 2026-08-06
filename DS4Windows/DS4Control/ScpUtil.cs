@@ -10931,6 +10931,14 @@ namespace DS4Windows
 
                     //tempDev.setIdleTimeout(idleDisconnectTimeout[device]);
                     //tempDev.setBTPollRate(btPollRate[device]);
+                    // A temporary Game Bar XInput companion is a report route,
+                    // not merely another output slot. Retire it before exposing
+                    // a profile that no longer needs it; otherwise the new
+                    // native Xbox pad and the stale companion coexist and the
+                    // overlay can bind the pad that is about to be removed.
+                    control.PrepareGameBarCompatibilityProfileTransition(
+                        device, requestedContType, dinputOnly[device]);
+
                     if (xinputStatus && tempDev.PrimaryDevice)
                     {
                         // This callback runs on the controller queue after the

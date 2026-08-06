@@ -103,9 +103,9 @@ namespace DS4WindowsTests
         public void InstalledPrereleaseMarkerKeepsChangelogOnPrereleaseChannel()
         {
             Assert.IsTrue(ReleaseChannelPolicy.IsPrereleaseInstall(
-                "5.0.1.0", "VIIPERRC4.1"));
+                "5.0.2.0", "VIIPERRC4.2"));
             Assert.IsFalse(ReleaseChannelPolicy.IsPrereleaseInstall(
-                "5.0.1.0", "v5.0.1"));
+                "5.0.2.0", "v5.0.2"));
         }
 
         [TestMethod]

@@ -35,7 +35,7 @@ API contract must be verified first.
 
 ## Pinned runtime contract
 
-- VIIPER must match the SHA-256 of the bundled 0.0.8 executable.
+- VIIPER must match the SHA-256 of the bundled 0.0.9 executable.
 - `usbip.exe` must report version 0.9.7.7 and match the pinned executable
   SHA-256.
 - The active `usbip2_ude` and `usbip2_filter` driver files must match the two
@@ -44,7 +44,7 @@ API contract must be verified first.
   mismatch diagnostic.
 - The VIIPER API must answer its local readiness probe.
 - The machine readiness marker must be
-  `VIIPER-0.0.8+USBIP-0.9.7.7 / Ready` in the 64-bit registry view.
+  `VIIPER-0.0.9+USBIP-0.9.7.7 / Ready` in the 64-bit registry view.
 
 DS4Windows repeats these identity and ABI checks at startup. Missing or
 mismatched prerequisites open a mandatory offline repair prompt; suppressing

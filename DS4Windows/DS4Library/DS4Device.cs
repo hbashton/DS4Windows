@@ -1521,6 +1521,43 @@ namespace DS4Windows
                                 long lastInputAge = lastInputTick == 0 ? -1 :
                                     Math.Max(0, Environment.TickCount64 -
                                         lastInputTick);
+
+                                // A visible Game Bar can briefly take the
+                                // Windows gaming/HID stack through a discovery
+                                // transition. The physical DS4 remains a
+                                // present PnP device during that transition,
+                                // but no input IRP completes for one timeout
+                                // interval. Treating that recoverable drought
+                                // as removal tore down both VIIPER devices and
+                                // immediately rediscovered the same controller,
+                                // producing an unplug/replug loop and stranding
+                                // its persistent audio endpoint. Preserve the
+                                // existing owner and simply issue the next read
+                                // while Windows still reports the exact HID
+                                // interface as present. A real disconnect still
+                                // follows the original removal path as soon as
+                                // the interface leaves the present-device set.
+                                bool interfaceStillPresent = false;
+                                try
+                                {
+                                    interfaceStillPresent = hDevice.IsConnected;
+                                }
+                                catch
+                                {
+                                    // Enumeration failure is not proof that a
+                                    // disconnected device is still usable.
+                                }
+
+                                if (ShouldRetryBluetoothInputAfterTimeout(
+                                        interfaceStillPresent))
+                                {
+                                    AppLogger.LogToGui(
+                                        $"{Mac} Bluetooth input paused for {lastInputAge} ms while its HID interface remains present; preserving the controller and retrying the read.",
+                                        true);
+                                    readWaitEv.Reset();
+                                    continue;
+                                }
+
                                 AppLogger.LogToGui(Mac.ToString() +
                                     " disconnected due to timeout" +
                                     $" (lastValidInputAgeMs={lastInputAge}, " +
@@ -2363,6 +2400,12 @@ namespace DS4Windows
                 heavyMotorStrength = previewHeavyRumbleStrength;
                 return lightMotorActive || heavyMotorActive;
             }
+        }
+
+        internal static bool ShouldRetryBluetoothInputAfterTimeout(
+            bool interfaceStillPresent)
+        {
+            return interfaceStillPresent;
         }
 
         public void setRumble(byte rightLightFastMotor, byte leftHeavySlowMotor)

@@ -39,7 +39,7 @@ VIIPER integration on this page refer to the hbashton repositories.
 
 ### Standard installer — recommended
 
-Most users should download `DS4Windows_5.0.1.0_Setup_x64.exe` from the
+Most users should download `DS4Windows_5.0.2.0_Setup_x64.exe` from the
 [newest release candidate](https://github.com/hbashton/DS4Windows/releases). The
 single offline installer:
 
@@ -167,7 +167,7 @@ DualSense or DualShock 4 selected by the profile. Supported paths include:
   microphone while keeping the recording stream active.
 
 Audio, microphone, and advanced haptics support require matching DS4Windows 5
-and VIIPER 0.0.8 builds.
+and VIIPER 0.0.9 builds.
 
 ### Quality of life
 

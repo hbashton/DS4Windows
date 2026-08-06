@@ -1301,9 +1301,10 @@ namespace DS4Windows.InputDevices
 
         /// <summary>
         /// Publishes one exact game-authored common-state update together with
-        /// the quiescent media template that follows it. The helper consumes
-        /// both under one state lock, so a speaker/haptics frame can never see
-        /// half of this transition.
+        /// the quiescent state template that follows it. The helper consumes
+        /// both under one state lock while retaining the independently owned
+        /// speaker and haptics media, so a frame can never see half of either
+        /// transition.
         /// </summary>
         public bool UpdateGameStateAndTemplate(byte[] gameStateReport,
             byte[] quiescentTemplate, long hapticsExpiryQpc)
@@ -1348,8 +1349,15 @@ namespace DS4Windows.InputDevices
                     return false;
                 }
 
-                latestTemplate = (byte[])quiescentTemplate.Clone();
-                latestTemplateHapticsExpiryQpc = hapticsExpiryQpc;
+                // Native game output owns the common controller state, not
+                // the speaker media generation. Replacing the whole template
+                // here lets a high-rate game SET_REPORT repeatedly restore the
+                // stale/silent media snapshot that accompanied that state and
+                // suppress an app-selected speaker source. Preserve the media
+                // clock, speaker payload, and current haptics generation while
+                // atomically advancing only the state bytes the game owns.
+                MergeControllerStateIntoTemplate(quiescentTemplate,
+                    latestTemplate);
             }
 
             outboundAvailable.Set();
@@ -1978,6 +1986,35 @@ namespace DS4Windows.InputDevices
             {
                 return string.Empty;
             }
+        }
+
+        internal static void MergeControllerStateIntoTemplate(
+            byte[] stateTemplate, byte[] destinationTemplate)
+        {
+            if (stateTemplate == null ||
+                stateTemplate.Length != ReportLength)
+            {
+                throw new ArgumentException(
+                    $"State template must be exactly {ReportLength} bytes.",
+                    nameof(stateTemplate));
+            }
+
+            if (destinationTemplate == null ||
+                destinationTemplate.Length != ReportLength)
+            {
+                throw new ArgumentException(
+                    $"Destination template must be exactly {ReportLength} bytes.",
+                    nameof(destinationTemplate));
+            }
+
+            Buffer.BlockCopy(stateTemplate,
+                DualSenseBluetoothPhysicalOutputSequence.
+                    ControllerStateSourceOffset,
+                destinationTemplate,
+                DualSenseBluetoothPhysicalOutputSequence.
+                    ControllerStateSourceOffset,
+                DualSenseBluetoothPhysicalOutputSequence.
+                    ControllerStatePayloadLength);
         }
 
         private static int NextGeneration(int generation)
@@ -4024,9 +4061,27 @@ namespace DS4Windows.InputDevices
                 lock (stateLock)
                 {
                     ShiftLatestTemplateToPrevious();
-                    Buffer.BlockCopy(payload, templateOffset,
-                        latestTemplate, 0, ReportLength);
-                    latestTemplateHapticsExpiryQpc = hapticsExpiryQpc;
+                    if (latestTemplateAvailable)
+                    {
+                        // The state transition and its validity bits must land
+                        // atomically, but its attached media snapshot is stale
+                        // by construction. Keep the newest locally-owned media
+                        // generation (including selected-app speaker PCM) and
+                        // merge only the common controller state.
+                        Buffer.BlockCopy(payload, templateOffset +
+                            DualSenseBluetoothPhysicalOutputSequence.
+                                ControllerStateSourceOffset,
+                            latestTemplate,
+                            DualSenseBluetoothPhysicalOutputSequence.
+                                ControllerStateSourceOffset,
+                            stateLength);
+                    }
+                    else
+                    {
+                        Buffer.BlockCopy(payload, templateOffset,
+                            latestTemplate, 0, ReportLength);
+                        latestTemplateHapticsExpiryQpc = hapticsExpiryQpc;
+                    }
                     latestTemplateAvailable = true;
 
                     if (pendingControllerStateAvailable)

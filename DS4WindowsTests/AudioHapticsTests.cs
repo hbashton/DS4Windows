@@ -413,6 +413,28 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void LiveMixFramePreservesAndCombinesNativeGameHaptics()
+        {
+            byte[] carrier = Enumerable.Repeat(unchecked((byte)(sbyte)24),
+                AudioHapticsService.SlotRuntime.FrameBytes).ToArray();
+            byte[] derived = Enumerable.Repeat(unchecked((byte)(sbyte)18),
+                AudioHapticsService.SlotRuntime.FrameBytes).ToArray();
+            byte expected = AudioHapticsProcessor.MixSigned8(
+                unchecked((byte)(sbyte)24), unchecked((byte)(sbyte)18));
+
+            bool applied = AudioHapticsService.SlotRuntime.ApplyLiveFrame(
+                AudioHapticsMode.Mix, derived,
+                liveFrameAvailable: true, carrier, 0);
+
+            Assert.IsTrue(applied);
+            CollectionAssert.AreEqual(
+                Enumerable.Repeat(expected,
+                    AudioHapticsService.SlotRuntime.FrameBytes).ToArray(),
+                carrier,
+                "Mix mode must combine Audio Haptics with the native game frame instead of replacing either source.");
+        }
+
+        [TestMethod]
         public void SilentStandaloneFramesDoNotCreateACompetingCadence()
         {
             Assert.IsFalse(
@@ -558,6 +580,54 @@ namespace DS4WindowsTests
             Assert.IsTrue(capture.CurrentProcessId > 0);
             Assert.IsTrue(received.Wait(TimeSpan.FromSeconds(3)),
                 "The selected application produced no captured PCM.");
+        }
+
+        [TestMethod]
+        public void LiveProcessCaptureDeliversAudiblePcm()
+        {
+            string processIdText = Environment.GetEnvironmentVariable(
+                "DS4W_TEST_PROCESS_LOOPBACK_PID");
+            if (!int.TryParse(processIdText, out int processId) ||
+                processId <= 0)
+            {
+                Assert.Inconclusive(
+                    "Set DS4W_TEST_PROCESS_LOOPBACK_PID for this opt-in integration test.");
+            }
+
+            using var capture = new ProcessLoopbackWaveCapture(processId);
+            using var audible = new ManualResetEventSlim(false);
+            long callbackCount = 0;
+            long silentCallbackCount = 0;
+            capture.DataAvailable += (_, eventArgs) =>
+            {
+                Interlocked.Increment(ref callbackCount);
+                bool hasAudibleSample = false;
+                for (int offset = 0; offset + sizeof(float) <=
+                        eventArgs.BytesRecorded; offset += sizeof(float))
+                {
+                    float sample = BitConverter.ToSingle(eventArgs.Buffer,
+                        offset);
+                    if (float.IsFinite(sample) && Math.Abs(sample) > 0.0001f)
+                    {
+                        hasAudibleSample = true;
+                        break;
+                    }
+                }
+
+                if (hasAudibleSample)
+                {
+                    audible.Set();
+                }
+                else
+                {
+                    Interlocked.Increment(ref silentCallbackCount);
+                }
+            };
+
+            capture.StartRecording();
+            Assert.IsTrue(audible.Wait(TimeSpan.FromSeconds(5)),
+                $"The selected application produced only silence across " +
+                $"{callbackCount} callbacks ({silentCallbackCount} silent).");
         }
 
         [TestMethod]

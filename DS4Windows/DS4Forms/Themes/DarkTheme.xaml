@@ -651,7 +651,8 @@
                                 </VisualBrush.Visual>
                             </VisualBrush>
                         </Border.OpacityMask>
-                        <ScrollViewer Style="{DynamicResource {x:Static GridView.GridViewScrollViewerStyleKey}}">
+                        <ScrollViewer Style="{DynamicResource {x:Static GridView.GridViewScrollViewerStyleKey}}"
+                                      Padding="0,0,8,0">
                             <ItemsPresenter SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"/>
                         </ScrollViewer>
                     </Border>
@@ -1467,7 +1468,13 @@
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
-                        <Border Grid.Column="0" BorderBrush="Transparent">
+                        <!-- Keep interactive content clear of the scrollbar.
+                             Several dense editor pages intentionally stretch
+                             to the viewport; without a gutter their rightmost
+                             toggles and combo boxes sat directly beneath the
+                             scrollbar hit target. -->
+                        <Border Grid.Column="0" BorderBrush="Transparent"
+                                Margin="0,0,8,0">
                             <ScrollContentPresenter x:Name="ScrollContents"  CanContentScroll="{TemplateBinding CanContentScroll}" />
                         </Border>
 

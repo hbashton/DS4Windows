@@ -2,7 +2,7 @@
   <PropertyGroup>
     <OutputType>Bundle</OutputType>
     <Platform>x64</Platform>
-    <BundleVersion Condition="'$(BundleVersion)' == ''">5.0.1.0</BundleVersion>
+    <BundleVersion Condition="'$(BundleVersion)' == ''">5.0.2.0</BundleVersion>
     <DisplayVersion Condition="'$(DisplayVersion)' == ''">$(BundleVersion)</DisplayVersion>
     <OutputName>DS4Windows_$(DisplayVersion)_Setup_x64</OutputName>
     <MsiPath Condition="'$(MsiPath)' == ''">$(MSBuildThisFileDirectory)..\DS4Windows.Package\bin\x64\Release\DS4Windows_$(BundleVersion)_x64.msi</MsiPath>

@@ -1,9 +1,36 @@
 {
-  "latest_version": "5.0.1.0",
-  "latest_version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 1},
+  "latest_version": "5.0.2.0",
+  "latest_version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 2},
   "updated_at": "2026-08-05T00:00:00+0000",
   "changelog": {
     "versions": [
+    {
+      "version_str": "5.0.2.0",
+      "version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 2},
+      "base_header": "Version 5.0.2.0 - Controller and Audio Reliability",
+      "release_date": "2026-08-05T00:00:00+0000",
+      "locales": [
+        {
+          "code": "en",
+          "header": "Release Candidate 4.2 - Controller and Audio Reliability",
+          "log_text": [
+            "* **Stable Xbox 360 and Game Bar input** - VIIPER 0.0.9 keeps adaptive, thread-safe latest-state delivery, while profile changes now retire temporary Game Bar companions before exposing a native Xbox pad so the overlay cannot bind a stale controller",
+            "* **Lower-latency controller pipeline** - mapped input uses one bounded latest-state writer and avoids stale queued reports, keeping supported virtual controllers responsive under load",
+            "* **Reliable DualShock 4 Bluetooth ownership** - transient HID read droughts no longer tear down and recreate an otherwise-present controller, virtual device, or persistent audio endpoint",
+            "* **Correct per-app DualShock 4 audio** - selected application capture now uses the same process-loopback contract as DualSense and consumes exactly one 8 ms source quantum without silently discarding PCM frames",
+            "* **Game-safe app speaker overrides** - a selected application remains the controller speaker source when a native PS5 game takes feedback ownership; game state is merged without replacing app PCM, while Audio Haptics Mix combines captured and native game haptics",
+            "* **Cleaner audio source recovery** - application speaker routing and Audio Haptics recover after source reselection, process restarts, headset/speaker transitions, and capture-session churn",
+            "* **Automatic prerelease updates** - release-candidate installs now stay on the prerelease channel automatically, while stable installs remain stable and a newer stable release still takes priority",
+            "* **Transport continuity preserved** - speaker, AUX, microphone, advanced haptics, lightbar, rumble, and controller input remain on their established controller-specific paths",
+            "* **Interface cleanup** - Audio Haptics, Trigger Lab, Auto Profiles, and log views reserve a proper scrollbar gutter so controls and text are no longer obscured",
+            "* **Updated offline backend** - the installer and portable package bundle verified VIIPER 0.0.9 with USB-IP 0.9.7.7 and retain optional offline HidHide and FakerInput installation"
+          ],
+          "editor": "hbashton",
+          "editors_note": ["RC4.2 focuses on dependable controller input, lower overhead, and application-audio correctness without regressing the proven PlayStation media transports."],
+          "updated_at": "2026-08-05T00:00:00+0000"
+        }
+      ]
+    },
     {
       "version_str": "5.0.1.0",
       "version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 1},

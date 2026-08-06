@@ -13,6 +13,41 @@ namespace DS4Windows.Tests
         private const int HapticsLength = 64;
 
         [TestMethod]
+        public void GameStateTemplateMergePreservesOwnedMediaLanes()
+        {
+            byte[] selectedAppMedia = CreateReport(0x31);
+            byte[] gameStateTemplate = CreateReport(0x72);
+            for (int index = 0; index < ReportLength; index++)
+            {
+                selectedAppMedia[index] = (byte)(index * 17 + 3);
+                gameStateTemplate[index] = (byte)(index * 29 + 7);
+            }
+
+            byte[] expectedMedia = (byte[])selectedAppMedia.Clone();
+            DualSenseBluetoothAudioPacer.MergeControllerStateIntoTemplate(
+                gameStateTemplate, selectedAppMedia);
+
+            const int stateOffset =
+                DualSenseBluetoothPhysicalOutputSequence.
+                    ControllerStateSourceOffset;
+            const int stateLength =
+                DualSenseBluetoothPhysicalOutputSequence.
+                    ControllerStatePayloadLength;
+            CollectionAssert.AreEqual(
+                CopyRange(gameStateTemplate, stateOffset, stateLength),
+                CopyRange(selectedAppMedia, stateOffset, stateLength));
+            CollectionAssert.AreEqual(CopyRange(expectedMedia, 0, stateOffset),
+                CopyRange(selectedAppMedia, 0, stateOffset),
+                "Game state replaced the active media header.");
+            CollectionAssert.AreEqual(
+                CopyRange(expectedMedia, stateOffset + stateLength,
+                    ReportLength - stateOffset - stateLength),
+                CopyRange(selectedAppMedia, stateOffset + stateLength,
+                    ReportLength - stateOffset - stateLength),
+                "Game state replaced app-owned haptics or speaker media.");
+        }
+
+        [TestMethod]
         public void RealtimeHapticsPreserveAttackAndZeroTailInOrder()
         {
             using DualSenseRealtimeHapticsSharedRing producer =

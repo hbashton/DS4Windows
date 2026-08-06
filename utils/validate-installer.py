@@ -419,6 +419,7 @@ def main() -> int:
         "is_reparse_point",
         "Refusing to replace output containing a reparse point",
         ".ds4windows-managed-files.txt",
+        'Path(__file__).resolve().with_name("inject_deps_path.py")',
     ]:
         if contract not in post_build:
             raise SystemExit(

@@ -88,8 +88,12 @@ for lang in langs:
         current_lang_dir.rmdir()
 
 
-# run the script injecting new dependency paths to DS4Windows.deps.json
-lang_script = project_dir.parent / "utils" / "inject_deps_path.py"
+# Resolve companion tooling from this script, not from the caller's checkout
+# layout. CI passes the repository root as project_dir; the historical parent
+# lookup escaped that checkout and failed only on a clean runner.
+lang_script = Path(__file__).resolve().with_name("inject_deps_path.py")
+if not lang_script.is_file():
+    raise FileNotFoundError(f"Dependency-path helper is missing: {lang_script}")
 deps_json_path = target_dir / "DS4Windows.deps.json"
 subprocess.run([sys.executable, str(lang_script), str(deps_json_path)], check=True)
 

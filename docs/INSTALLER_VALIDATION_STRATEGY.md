@@ -23,6 +23,15 @@ API contract must be verified first.
    records a failed state.
 7. A newer related bundle blocks an older installer with error 1638 before any
    package is planned.
+8. One interlocked Plan gate rejects duplicate UI, passive, resume, or recovery
+   requests until the active Apply pass completes or Retry explicitly resets
+   the gate.
+9. Process preflight acquires the same infrastructure mutex as in-app repair,
+   preventing one transaction from stopping executables while another is
+   replacing or probing them.
+10. Every elevated helper invocation has a correlated start and completion
+    record; bounded append retries preserve diagnostics when a log reader or
+    adjacent process briefly owns the file.
 
 ## Pinned runtime contract
 
@@ -70,8 +79,10 @@ build host.
 - WiX MSI ICE validation.
 - Burn/bootstrapper and setup-action compilation.
 - Content-addressed payload manifest and hash validation.
+- Fail-fast equality between `DS4Windows.release` and the requested package
+  identity before WiX or manifest generation can run.
 - USB-IP reboot-boundary simulation.
 - Installer state-machine simulation covering clean install, update, repair,
   uninstall, downgrade, cancellation, concurrency, failure, and reboot/resume.
 - Atomic publication of the completed installer only after every gate passes.
-
+  The verified manifest is committed first and the installer EXE last.

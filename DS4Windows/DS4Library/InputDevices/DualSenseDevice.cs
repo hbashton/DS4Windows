@@ -3847,6 +3847,23 @@ namespace DS4Windows.InputDevices
                     else if (ledOwnershipUpdate < 0)
                     {
                         nativeGameLightbarOwnershipReleased = true;
+                        AppLogger.LogToGui(
+                            "DualSense game released lightbar/player LED ownership; restoring the active profile state atomically.",
+                            false);
+                    }
+
+                    if (nativeGameLightbarOwnershipReleased &&
+                        outputReport != null && outputReport.Length >= 2 +
+                            BluetoothCombinedNativeStateLength &&
+                        outputReport[0] == OUTPUT_REPORT_ID_BT)
+                    {
+                        // Sony's release bit is an immediate ownership
+                        // boundary. Publish the profile lightbar and player
+                        // LEDs in this same atomic carrier instead of waiting
+                        // for an unrelated later state/media callback.
+                        MergeProfileLightbarIntoV5AudioSnapshot(outputReport,
+                            2, latestBluetoothCombinedSpeakerReport,
+                            BluetoothCombinedStateOffset);
                     }
                 }
                 else if (outputReport != null &&
@@ -3990,6 +4007,18 @@ namespace DS4Windows.InputDevices
                 else if (ledOwnershipUpdate < 0)
                 {
                     nativeGameLightbarOwnershipReleased = true;
+                    AppLogger.LogToGui(
+                        "DualSense game released lightbar/player LED ownership; restoring the active profile state atomically.",
+                        false);
+                }
+                if (nativeGameLightbarOwnershipReleased &&
+                    outputReport != null && outputReport.Length >= 2 +
+                        BluetoothCombinedNativeStateLength &&
+                    outputReport[0] == OUTPUT_REPORT_ID_BT)
+                {
+                    MergeProfileLightbarIntoV5AudioSnapshot(outputReport, 2,
+                        latestBluetoothCombinedSpeakerReport,
+                        BluetoothCombinedStateOffset);
                 }
                 ApplyActiveRumblePreviewToV5AudioSnapshot(
                     latestBluetoothCombinedSpeakerReport,

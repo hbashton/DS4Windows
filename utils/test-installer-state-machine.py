@@ -89,6 +89,7 @@ def require(text: str, *contracts: str) -> None:
 
 def main() -> None:
     bootstrapper = (ROOT / "installer/DS4Windows.Bootstrapper/InstallerApplication.cs").read_text(encoding="utf-8")
+    setup_actions = (ROOT / "installer/DS4Windows.SetupActions/Program.cs").read_text(encoding="utf-8")
     backend = (ROOT / "extras/install-viiper-backend.ps1").read_text(encoding="utf-8")
     runtime = (ROOT / "DS4Windows/DS4Control/Viiper/ViiperSetupManager.cs").read_text(encoding="utf-8")
 
@@ -102,6 +103,8 @@ def main() -> None:
         "IsRelatedBundleNewer",
         "ShowFailure(1638",
         "command.Resume == ResumeType.Reboot",
+        "Interlocked.CompareExchange(ref planStarted, 1, 0)",
+        "Ignoring a duplicate installer plan request",
     )
     require(
         backend,
@@ -123,6 +126,12 @@ def main() -> None:
         "TryProbeUsbipRuntime",
         "mandatoryRepairRequired = !status.Ready",
         "Application.Current?.Shutdown()",
+    )
+    require(
+        setup_actions,
+        "return RunWithSetupMutex(PreflightLocked);",
+        "completed with exit code",
+        "AppendLogWithRetry",
     )
 
     clean = Transaction("install").run()

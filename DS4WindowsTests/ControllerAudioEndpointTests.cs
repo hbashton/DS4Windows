@@ -906,9 +906,9 @@ namespace DS4WindowsTests
                 ViiperStateWriteRateSettings.DefaultDualShock4RateHz;
             Assert.AreEqual(200, ViiperStateWriteRateSettings.GetDefaultRateHz(
                 ViiperVirtualDeviceType.DualShock4));
-            Assert.AreEqual(250, ViiperStateWriteRateSettings.GetDefaultRateHz(
+            Assert.AreEqual(1000, ViiperStateWriteRateSettings.GetDefaultRateHz(
                 ViiperVirtualDeviceType.DualSense));
-            Assert.AreEqual(250, ViiperStateWriteRateSettings.GetDefaultRateHz(
+            Assert.AreEqual(1000, ViiperStateWriteRateSettings.GetDefaultRateHz(
                 ViiperVirtualDeviceType.DualSenseEdge));
             Assert.AreEqual(0, ViiperStateWriteRateSettings.GetDefaultRateHz(
                 ViiperVirtualDeviceType.Xbox360));
@@ -924,6 +924,73 @@ namespace DS4WindowsTests
                 ViiperStateWriteRateSettings.Parse("off", defaultRate));
             Assert.AreEqual(0,
                 ViiperStateWriteRateSettings.Parse("0", defaultRate));
+        }
+
+        [TestMethod]
+        public void DualSenseStateRateIgnoresLegacyLowFrequencyCap()
+        {
+            Assert.AreEqual(1000,
+                ViiperStateWriteRateSettings.ResolveConfiguredRateHz(
+                    ViiperVirtualDeviceType.DualSense, "200"));
+            Assert.AreEqual(1000,
+                ViiperStateWriteRateSettings.ResolveConfiguredRateHz(
+                    ViiperVirtualDeviceType.DualSenseEdge, "250"));
+            Assert.AreEqual(0,
+                ViiperStateWriteRateSettings.ResolveConfiguredRateHz(
+                    ViiperVirtualDeviceType.DualSense, "immediate"));
+            Assert.AreEqual(100,
+                ViiperStateWriteRateSettings.ResolveConfiguredRateHz(
+                    ViiperVirtualDeviceType.DualShock4, "100"));
+        }
+
+        [TestMethod]
+        public void DualSensePhysicalCadenceIsNotDelayedByOneKilohertzCeiling()
+        {
+            long intervalTicks =
+                ViiperStateWriteRateSettings.GetMinimumIntervalTicks(1000);
+            long previousWriteTicks = 10 * Stopwatch.Frequency;
+            long nextPhysicalReportTicks = previousWriteTicks +
+                (Stopwatch.Frequency * 5 / 4 / 1000);
+
+            Assert.AreEqual(0,
+                ViiperStateWriteRateSettings.GetRemainingTicks(
+                    nextPhysicalReportTicks, previousWriteTicks,
+                    intervalTicks));
+        }
+
+        [TestMethod]
+        public void NativeGameOwnerFilteringRejectsShellAndInfrastructureOnly()
+        {
+            Assert.IsTrue(ViiperOutDevice.IsExcludedNativeGameOwner(
+                "DS4Windows"));
+            Assert.IsTrue(ViiperOutDevice.IsExcludedNativeGameOwner(
+                "viiper"));
+            Assert.IsTrue(ViiperOutDevice.IsExcludedNativeGameOwner(
+                "explorer"));
+            Assert.IsTrue(ViiperOutDevice.IsExcludedNativeGameOwner(
+                "steam"));
+            Assert.IsTrue(ViiperOutDevice.IsExcludedNativeGameOwner(
+                "ChatGPT"));
+            Assert.IsTrue(ViiperOutDevice.IsExcludedNativeGameOwner(
+                "WindowsTerminal"));
+            Assert.IsFalse(ViiperOutDevice.IsExcludedNativeGameOwner(
+                "SlayTheSpire2"));
+            Assert.IsFalse(ViiperOutDevice.IsExcludedNativeGameOwner(
+                "GhostOfTsushima"));
+        }
+
+        [TestMethod]
+        public void NeutralNativeInitializationCannotClaimGameOwnership()
+        {
+            byte[] report = new byte[48];
+            report[0] = 0x02;
+
+            Assert.IsFalse(ViiperOutDevice.HasMeaningfulNativeGameOutput(
+                report, 0));
+
+            report[1] = 0x04;
+            Assert.IsTrue(ViiperOutDevice.HasMeaningfulNativeGameOutput(
+                report, 0));
         }
 
         [TestMethod]

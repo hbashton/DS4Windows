@@ -14,6 +14,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -34,7 +35,7 @@ namespace DS4Windows
         internal const string EnvironmentVariableName =
             "DS4WINDOWS_VIIPER_STATE_RATE_HZ";
         internal const int DefaultDualShock4RateHz = 200;
-        internal const int DefaultDualSenseRateHz = 250;
+        internal const int DefaultDualSenseRateHz = 1000;
         private const int MinimumRateHz = 30;
         private const int MaximumRateHz = 1000;
 
@@ -73,12 +74,35 @@ namespace DS4Windows
                     return DefaultDualShock4RateHz;
                 case ViiperVirtualDeviceType.DualSense:
                 case ViiperVirtualDeviceType.DualSenseEdge:
-                    // High-speed HID bInterval=6 (one input opportunity every
-                    // 32 microframes, or four milliseconds).
+                    // The VIIPER low-latency descriptor exposes a one-
+                    // millisecond interrupt-IN opportunity. This is a ceiling,
+                    // not a synthetic producer: DS4Windows still submits only
+                    // fresh mapped physical reports, so a Bluetooth DualSense
+                    // naturally runs at its observed 600-800 Hz while a
+                    // 1 kHz-capable source can use the full endpoint rate.
                     return DefaultDualSenseRateHz;
                 default:
                     return 0;
             }
+        }
+
+        internal static int ResolveConfiguredRateHz(
+            ViiperVirtualDeviceType deviceType, string configuredValue)
+        {
+            int defaultRate = GetDefaultRateHz(deviceType);
+            int configuredRate = Parse(configuredValue, defaultRate);
+            if ((deviceType == ViiperVirtualDeviceType.DualSense ||
+                    deviceType == ViiperVirtualDeviceType.DualSenseEdge) &&
+                configuredRate > 0)
+            {
+                // A stale diagnostic environment override previously kept
+                // otherwise fast controllers at 200/250 Hz. DualSense input
+                // is now always allowed to reach its 1 kHz virtual endpoint;
+                // "off"/"immediate" remains an uncapped event-driven mode.
+                return Math.Max(DefaultDualSenseRateHz, configuredRate);
+            }
+
+            return configuredRate;
         }
 
         internal static long GetMinimumIntervalTicks(int rateHz)
@@ -194,6 +218,8 @@ namespace DS4Windows
             new byte[DualSenseNativeOutputReportLength];
         private long lastNativeGameOutputTimestamp;
         private int nativeGameOutputSessionActive;
+        private Process nativeGameOutputOwnerProcess;
+        private string nativeGameOutputOwnerName;
 
         private readonly OutContType outputType;
         private readonly ViiperVirtualDeviceType viiperType;
@@ -629,6 +655,7 @@ namespace DS4Windows
         public override void Connect()
         {
             Disconnect();
+            ClearNativeGameOutputProcessLease();
 
             ViiperPrerequisiteStatus status = ViiperSetupManager.GetStatus(tryStartServer: true);
             if (!status.Ready)
@@ -683,10 +710,10 @@ namespace DS4Windows
                 long.MaxValue);
             Interlocked.Exchange(ref lastRateLimitedStateWriteStartedTimestamp,
                 0);
-            stateWriteRateHz = ViiperStateWriteRateSettings.Parse(
-                Environment.GetEnvironmentVariable(
-                    ViiperStateWriteRateSettings.EnvironmentVariableName),
-                ViiperStateWriteRateSettings.GetDefaultRateHz(viiperType));
+            stateWriteRateHz = ViiperStateWriteRateSettings.
+                ResolveConfiguredRateHz(viiperType,
+                    Environment.GetEnvironmentVariable(
+                        ViiperStateWriteRateSettings.EnvironmentVariableName));
             stateWriteMinimumIntervalTicks =
                 ViiperStateWriteRateSettings.GetMinimumIntervalTicks(
                     stateWriteRateHz);
@@ -889,6 +916,7 @@ namespace DS4Windows
             feedbackSpeakerSignal.Set();
             feedbackControlSignal.Set();
             WaitForFeedbackDispatchCallbacks();
+            ClearNativeGameOutputProcessLease();
             ReleaseNativeDualSenseFeedbackOwnership();
             // A real output-device disconnect must not inherit the interface
             // monitor's debounce period. The generation change prevents the
@@ -4018,14 +4046,31 @@ namespace DS4Windows
                 return;
             }
 
+            bool meaningfulOutput = HasMeaningfulNativeGameOutput(feedback,
+                offset);
+            bool captureForegroundOwner;
             lock (nativeGameOutputTraceLock)
             {
+                // VIIPER publishes one neutral 0x02 snapshot while the
+                // virtual pad is being armed. It is transport initialization,
+                // not a game claiming feedback ownership. Treating it as a
+                // claim binds the lease to whichever unrelated window happens
+                // to be foreground while a game starts.
+                if (!meaningfulOutput &&
+                    nativeGameOutputSessionActive == 0 &&
+                    nativeGameOutputOwnerProcess == null)
+                {
+                    return;
+                }
+
                 bool sessionStarted = nativeGameOutputSessionActive == 0;
                 Buffer.BlockCopy(feedback, offset,
                     lastNativeGameOutputReport, 0,
                     DualSenseNativeOutputReportLength);
                 nativeGameOutputSessionActive = 1;
                 lastNativeGameOutputTimestamp = Stopwatch.GetTimestamp();
+                captureForegroundOwner = meaningfulOutput &&
+                    (sessionStarted || nativeGameOutputOwnerProcess == null);
                 if (sessionStarted)
                 {
                     AppLogger.LogToGui(
@@ -4033,13 +4078,48 @@ namespace DS4Windows
                         false);
                 }
             }
+
+            if (captureForegroundOwner)
+            {
+                CaptureForegroundNativeGameOutputOwner();
+            }
+        }
+
+        internal static bool HasMeaningfulNativeGameOutput(byte[] feedback,
+            int offset)
+        {
+            if (feedback == null || offset < 0 ||
+                offset + DualSenseNativeOutputReportLength > feedback.Length ||
+                feedback[offset] != 0x02)
+            {
+                return false;
+            }
+
+            for (int i = offset + 1;
+                 i < offset + DualSenseNativeOutputReportLength; i++)
+            {
+                if (feedback[i] != 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private void TraceNativeGameOutputIdleBoundary()
         {
+            Process ownerProcess;
+            string ownerName;
+            bool captureOwnerAtBoundary;
             lock (nativeGameOutputTraceLock)
             {
                 long now = Stopwatch.GetTimestamp();
+                captureOwnerAtBoundary =
+                    nativeGameOutputOwnerProcess == null &&
+                    lastNativeGameOutputTimestamp > 0 &&
+                    HasMeaningfulNativeGameOutput(
+                        lastNativeGameOutputReport, 0);
                 if (nativeGameOutputSessionActive != 0 &&
                     lastNativeGameOutputTimestamp > 0 &&
                     now - lastNativeGameOutputTimestamp >=
@@ -4055,8 +4135,201 @@ namespace DS4Windows
                     // writing until it changes.
                 }
 
+                ownerProcess = nativeGameOutputOwnerProcess;
+                ownerName = nativeGameOutputOwnerName;
+            }
+
+            // A freshly launched game can publish its first SET_REPORT before
+            // Windows has foregrounded its window. Retry once at the idle
+            // boundary, when the game's top-level window is established, so a
+            // one-shot LED/trigger claim still receives a process lifetime.
+            if (captureOwnerAtBoundary && ownerProcess == null)
+            {
+                CaptureForegroundNativeGameOutputOwner();
+                lock (nativeGameOutputTraceLock)
+                {
+                    ownerProcess = nativeGameOutputOwnerProcess;
+                    ownerName = nativeGameOutputOwnerName;
+                }
+            }
+
+            if (ownerProcess == null || IsProcessAlive(ownerProcess))
+            {
+                return;
+            }
+
+            bool released = false;
+            lock (nativeGameOutputTraceLock)
+            {
+                if (ReferenceEquals(nativeGameOutputOwnerProcess,
+                        ownerProcess))
+                {
+                    nativeGameOutputOwnerProcess = null;
+                    nativeGameOutputOwnerName = null;
+                    nativeGameOutputSessionActive = 0;
+                    lastNativeGameOutputTimestamp = 0;
+                    released = true;
+                }
+            }
+
+            ownerProcess.Dispose();
+            if (released)
+            {
+                ReleaseNativeDualSenseFeedbackOwnership();
+                AppLogger.LogToGui(
+                    $"DualSense native game-output owner {ownerName ?? "game"} exited; restored the active profile lightbar, player LEDs, triggers, and rumble.",
+                    false);
             }
         }
+
+        private void CaptureForegroundNativeGameOutputOwner()
+        {
+            Process candidate = TryOpenForegroundGameProcess();
+            if (candidate == null)
+            {
+                return;
+            }
+
+            Process previous = null;
+            string candidateName;
+            try
+            {
+                candidateName = candidate.ProcessName;
+            }
+            catch
+            {
+                candidate.Dispose();
+                return;
+            }
+
+            lock (nativeGameOutputTraceLock)
+            {
+                if (nativeGameOutputOwnerProcess != null &&
+                    IsProcessAlive(nativeGameOutputOwnerProcess) &&
+                    nativeGameOutputOwnerProcess.Id == candidate.Id)
+                {
+                    candidate.Dispose();
+                    return;
+                }
+
+                previous = nativeGameOutputOwnerProcess;
+                nativeGameOutputOwnerProcess = candidate;
+                nativeGameOutputOwnerName = candidateName;
+            }
+
+            previous?.Dispose();
+            AppLogger.LogToGui(
+                $"DualSense native game-output ownership associated with {candidateName} (PID {candidate.Id}).",
+                false);
+        }
+
+        private void ClearNativeGameOutputProcessLease()
+        {
+            Process owner;
+            lock (nativeGameOutputTraceLock)
+            {
+                owner = nativeGameOutputOwnerProcess;
+                nativeGameOutputOwnerProcess = null;
+                nativeGameOutputOwnerName = null;
+                nativeGameOutputSessionActive = 0;
+                lastNativeGameOutputTimestamp = 0;
+            }
+
+            owner?.Dispose();
+        }
+
+        private static Process TryOpenForegroundGameProcess()
+        {
+            IntPtr window = GetForegroundWindow();
+            if (window == IntPtr.Zero)
+            {
+                return null;
+            }
+
+            GetWindowThreadProcessId(window, out uint rawProcessId);
+            if (rawProcessId == 0 || rawProcessId == Environment.ProcessId ||
+                rawProcessId > int.MaxValue)
+            {
+                return null;
+            }
+
+            Process process = null;
+            try
+            {
+                process = Process.GetProcessById((int)rawProcessId);
+                string name = process.ProcessName;
+                if (process.HasExited || IsExcludedNativeGameOwner(name))
+                {
+                    process.Dispose();
+                    return null;
+                }
+
+                return process;
+            }
+            catch
+            {
+                process?.Dispose();
+                return null;
+            }
+        }
+
+        private static bool IsProcessAlive(Process process)
+        {
+            try
+            {
+                return process != null && !process.HasExited;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        internal static bool IsExcludedNativeGameOwner(string processName)
+        {
+            if (string.IsNullOrWhiteSpace(processName))
+            {
+                return true;
+            }
+
+            return processName.Equals("explorer",
+                       StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("dwm",
+                    StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("ApplicationFrameHost",
+                    StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("ShellExperienceHost",
+                    StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("SearchHost",
+                    StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("StartMenuExperienceHost",
+                    StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("steam",
+                    StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("ChatGPT",
+                    StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("Codex",
+                    StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("WindowsTerminal",
+                    StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("powershell",
+                    StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("pwsh",
+                    StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("cmd",
+                    StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("viiper",
+                    StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("DS4Windows",
+                    StringComparison.OrdinalIgnoreCase);
+        }
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr window,
+            out uint processId);
 
         private static void ApplyTriggerLabNativeOverrides(byte[] report,
             int flagsOffset, int rightTriggerOffset, int leftTriggerOffset,

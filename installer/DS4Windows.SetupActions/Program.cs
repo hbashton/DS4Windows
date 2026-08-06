@@ -44,20 +44,29 @@ namespace DS4Windows.SetupActions
                     installRoot = ValidateManagedInstallRoot(installRoot);
                 }
 
+                int exitCode;
                 switch (action)
                 {
                     case "preflight":
-                        return Preflight();
+                        exitCode = Preflight();
+                        break;
                     case "install":
                     case "repair":
-                        return InstallOrRepair(installRoot, bundleSource, args);
+                        exitCode = InstallOrRepair(installRoot, bundleSource, args);
+                        break;
                     case "uninstall":
-                        return Uninstall(installRoot);
+                        exitCode = Uninstall(installRoot);
+                        break;
                     case "probe":
-                        return Probe(installRoot);
+                        exitCode = Probe(installRoot);
+                        break;
                     default:
                         throw new ArgumentException("Unknown setup action: " + action);
                 }
+                WriteFallbackLog("=== DS4Windows setup invocation " +
+                    invocationId + " completed with exit code " +
+                    exitCode + " ===");
+                return exitCode;
             }
             catch (Exception ex)
             {
@@ -160,6 +169,11 @@ namespace DS4Windows.SetupActions
         }
 
         private static int Preflight()
+        {
+            return RunWithSetupMutex(PreflightLocked);
+        }
+
+        private static int PreflightLocked()
         {
             foreach (var processName in new[] { "DS4Windows", "viiper" })
             {
@@ -947,7 +961,9 @@ namespace DS4Windows.SetupActions
                 EnsureDirectoryPathHasNoReparsePoints(InstallerLogRoot);
                 Directory.CreateDirectory(InstallerLogRoot);
                 EnsureDirectoryPathHasNoReparsePoints(InstallerLogRoot);
-                File.AppendAllText(Path.Combine(InstallerLogRoot, "setup-actions.log"), DateTime.Now.ToString("O") + " " + message + Environment.NewLine);
+                AppendLogWithRetry(Path.Combine(InstallerLogRoot,
+                    "setup-actions.log"), DateTime.Now.ToString("O") +
+                    " " + message + Environment.NewLine);
             }
             catch { }
         }
@@ -960,10 +976,32 @@ namespace DS4Windows.SetupActions
                 EnsureDirectoryPathHasNoReparsePoints(InstallerLogRoot);
                 Directory.CreateDirectory(InstallerLogRoot);
                 EnsureDirectoryPathHasNoReparsePoints(InstallerLogRoot);
-                File.AppendAllText(InfrastructureLogPath,
+                AppendLogWithRetry(InfrastructureLogPath,
                     Environment.NewLine + message + Environment.NewLine);
             }
             catch { }
+        }
+
+        private static void AppendLogWithRetry(string path, string message)
+        {
+            var bytes = new UTF8Encoding(false).GetBytes(message);
+            for (var attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    using (var stream = new FileStream(path, FileMode.Append,
+                               FileAccess.Write, FileShare.Read))
+                    {
+                        stream.Write(bytes, 0, bytes.Length);
+                        stream.Flush();
+                    }
+                    return;
+                }
+                catch (IOException) when (attempt < 9)
+                {
+                    Thread.Sleep(25);
+                }
+            }
         }
 
         private static void ResetInfrastructureLog(InteractiveUser targetUser)

@@ -1138,6 +1138,9 @@ namespace DS4WindowsTests
         private static readonly FieldInfo ConnectionTypeField =
             typeof(DS4Device).GetField("conType",
                 BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo OutputReportField =
+            typeof(DS4Device).GetField("outputReport",
+                BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo EventQueueField =
             typeof(DS4Device).GetField("eventQueue",
                 BindingFlags.Instance | BindingFlags.NonPublic);
@@ -1735,6 +1738,42 @@ namespace DS4WindowsTests
             Assert.AreEqual((byte)0x33, cached[59]);
             Assert.AreEqual((byte)0x14, (byte)(cached[14] & 0x1C),
                 "An explicit Sony release did not return visual ownership to the profile.");
+        }
+
+        [TestMethod]
+        public void NativeReleasePublishesProfileLedsInSameAtomicCarrier()
+        {
+            DualSenseDevice device = CreateBluetoothDevice();
+            byte[] profile = new byte[78];
+            profile[0] = 0x31;
+            profile[3] = 0x14;
+            profile[45] = 0x09;
+            profile[46] = 0x31;
+            profile[47] = 0x52;
+            profile[48] = 0x73;
+            SetFieldValue(OutputReportField, device, profile);
+
+            byte[] claimed = BuildCombinedControlReport(0, 0, false);
+            claimed[14] = 0x14;
+            claimed[56] = 0x1A;
+            claimed[57] = 0xA1;
+            claimed[58] = 0xA2;
+            claimed[59] = 0xA3;
+            device.WriteBluetoothCombinedHapticsAudioOutputReport(claimed, 0,
+                claimed.Length, hasNativeGameState: true);
+
+            byte[] released = BuildCombinedControlReport(0, 0, false);
+            released[14] = 0x08;
+            device.WriteBluetoothCombinedHapticsAudioOutputReport(released, 0,
+                released.Length, hasNativeGameState: true);
+
+            byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
+                device);
+            Assert.AreEqual((byte)0x14, (byte)(cached[14] & 0x1C));
+            Assert.AreEqual((byte)0x09, cached[56]);
+            Assert.AreEqual((byte)0x31, cached[57]);
+            Assert.AreEqual((byte)0x52, cached[58]);
+            Assert.AreEqual((byte)0x73, cached[59]);
         }
 
         [TestMethod]

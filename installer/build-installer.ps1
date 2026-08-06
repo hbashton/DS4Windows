@@ -100,6 +100,19 @@ if (-not $SkipApplicationPublish) {
 if (-not (Test-Path -LiteralPath (Join-Path $publishPath "DS4Windows.exe") -PathType Leaf)) {
     throw "DS4Windows publish output is incomplete: $publishPath"
 }
+$releaseMarker = Join-Path $publishPath "DS4Windows.release"
+if (-not (Test-Path -LiteralPath $releaseMarker -PathType Leaf)) {
+    throw "DS4Windows publish output has no release identity: $releaseMarker"
+}
+$publishedRelease = (Get-Content -LiteralPath $releaseMarker -Raw).Trim()
+if (-not [string]::Equals($publishedRelease, $DisplayVersion,
+        [StringComparison]::Ordinal)) {
+    throw (
+        "DisplayVersion '$DisplayVersion' does not match the completed " +
+        "publish identity '$publishedRelease'. Refusing to compose a mixed " +
+        "or stale installer."
+    )
+}
 
 $generatedWix = Join-Path $repoRoot "installer\DS4Windows.Package\GeneratedFiles.wxs"
 $manifestPath = Join-Path $publishPath "package-manifest.json"
@@ -197,8 +210,11 @@ if ($env:DS4W_SIGN_CERT_PATH) {
     }
 }
 
-    Publish-InstallerFileAtomically $pendingInstaller $finalInstaller
+    # The installer EXE is the externally visible commit point. Publish its
+    # verified sidecar first so a terminated composition can never expose a
+    # new installer beside an older manifest.
     Publish-InstallerFileAtomically $pendingManifest $finalManifest
+    Publish-InstallerFileAtomically $pendingInstaller $finalInstaller
 }
 finally {
     foreach ($pending in @($pendingInstaller, $pendingManifest)) {

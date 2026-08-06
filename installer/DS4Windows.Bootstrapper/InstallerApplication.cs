@@ -33,6 +33,7 @@ namespace DS4Windows.Bootstrapper
         private bool infrastructureRecoveryPass;
         private Mutex bundleMutex;
         private bool bundleMutexOwned;
+        private int planStarted;
 
         internal IEngine Engine => engine;
 
@@ -114,25 +115,49 @@ namespace DS4Windows.Bootstrapper
                 command.Relation == RelationType.Upgrade &&
                 action == LaunchAction.Uninstall;
             if (!parentOwnedRelatedUninstall && !EnsureBundleMutex()) return;
-            plannedAction = action;
-            deferInfrastructureUntilUpgradeCompletes =
-                !infrastructureRecoveryPass &&
-                (action == LaunchAction.Install ||
-                 action == LaunchAction.Repair) &&
-                relatedUpgradeDetected;
-            if (deferInfrastructureUntilUpgradeCompletes)
+            StartPlan(action, () =>
+            {
+                deferInfrastructureUntilUpgradeCompletes =
+                    !infrastructureRecoveryPass &&
+                    (action == LaunchAction.Install ||
+                     action == LaunchAction.Repair) &&
+                    relatedUpgradeDetected;
+                if (deferInfrastructureUntilUpgradeCompletes)
+                {
+                    engine.Log(LogLevel.Standard,
+                        "Deferring shared infrastructure until older related bundles are removed.");
+                }
+                engine.SetVariableNumeric("CreateDesktopShortcut", desktopShortcut ? 1 : 0);
+                engine.SetVariableNumeric("InstallHidHide", hidHide ? 1 : 0);
+                engine.SetVariableNumeric("InstallFakerInput", fakerInput ? 1 : 0);
+            });
+        }
+
+        private bool StartPlan(LaunchAction action, Action configure = null)
+        {
+            if (Interlocked.CompareExchange(ref planStarted, 1, 0) != 0)
             {
                 engine.Log(LogLevel.Standard,
-                    "Deferring shared infrastructure until older related bundles are removed.");
+                    "Ignoring a duplicate installer plan request while the current transaction is active.");
+                return false;
             }
-            engine.SetVariableNumeric("CreateDesktopShortcut", desktopShortcut ? 1 : 0);
-            engine.SetVariableNumeric("InstallHidHide", hidHide ? 1 : 0);
-            engine.SetVariableNumeric("InstallFakerInput", fakerInput ? 1 : 0);
-            if (command.Display == Display.Full)
+
+            try
             {
-                Ui(() => window.ShowPlanning());
+                plannedAction = action;
+                configure?.Invoke();
+                if (command.Display == Display.Full)
+                {
+                    Ui(() => window.ShowPlanning());
+                }
+                engine.Plan(action);
+                return true;
             }
-            engine.Plan(action);
+            catch
+            {
+                Interlocked.Exchange(ref planStarted, 0);
+                throw;
+            }
         }
 
         private bool TryAcquireBundleMutex(int waitMilliseconds)
@@ -195,6 +220,7 @@ namespace DS4Windows.Bootstrapper
             deferInfrastructureUntilUpgradeCompletes = false;
             applyCompleted = false;
             failureShown = false;
+            Interlocked.Exchange(ref planStarted, 0);
             engine.Detect();
         }
 
@@ -435,9 +461,7 @@ namespace DS4Windows.Bootstrapper
             if (infrastructureRecoveryPass)
             {
                 if (!EnsureBundleMutex()) return;
-                plannedAction = LaunchAction.Repair;
-                Ui(() => window.ShowPlanning());
-                engine.Plan(LaunchAction.Repair);
+                StartPlan(LaunchAction.Repair);
                 return;
             }
 
@@ -466,9 +490,7 @@ namespace DS4Windows.Bootstrapper
                 var resumeAction = command.Action == LaunchAction.Unknown
                     ? LaunchAction.Install
                     : command.Action;
-                plannedAction = resumeAction;
-                Ui(() => window.ShowPlanning());
-                engine.Plan(resumeAction);
+                StartPlan(resumeAction);
                 return;
             }
 
@@ -631,6 +653,7 @@ namespace DS4Windows.Bootstrapper
                 engine.Log(LogLevel.Standard,
                     "Starting isolated post-upgrade infrastructure recovery pass.");
                 Ui(() => window.ShowPlanning());
+                Interlocked.Exchange(ref planStarted, 0);
                 engine.Detect();
                 return;
             }

@@ -176,12 +176,23 @@ def main() -> int:
         'Publish-InstallerFileAtomically',
         '$pendingInstaller',
         '[IO.File]::Replace',
+        'does not match the completed',
         '-p:Version=$ProductVersion -p:InformationalVersion=$DisplayVersion',
         'test-viiper-reboot-boundary.ps1',
         'test-installer-state-machine.py',
     ]:
         if contract not in build_script:
             raise SystemExit("Installer build identity contract missing: " + contract)
+    manifest_commit = build_script.rfind(
+        "Publish-InstallerFileAtomically $pendingManifest $finalManifest"
+    )
+    installer_commit = build_script.rfind(
+        "Publish-InstallerFileAtomically $pendingInstaller $finalInstaller"
+    )
+    if manifest_commit < 0 or installer_commit < manifest_commit:
+        raise SystemExit(
+            "The verified manifest must publish before the installer commit point."
+        )
     if "Portable" in bundle or "InstallFolder" in bundle or "destination" in bundle.lower():
         raise SystemExit("The standard installer must not expose a portable or destination-selection path.")
 
@@ -214,6 +225,7 @@ def main() -> int:
         "? RequestState.Present",
         "IsRelatedBundleNewer",
         "ShowFailure(1638",
+        "Interlocked.CompareExchange(ref planStarted, 1, 0)",
     ]:
         if contract not in bootstrapper:
             raise SystemExit(
@@ -239,6 +251,9 @@ def main() -> int:
         'IsRecognizedProductProcess(process, processName',
         'FileVersionInfo.GetVersionInfo(executablePath)',
         'EnsureDirectoryPathHasNoReparsePoints(InstallerLogRoot)',
+        'return RunWithSetupMutex(PreflightLocked);',
+        'completed with exit code',
+        'AppendLogWithRetry',
     ]:
         if contract not in setup_actions:
             raise SystemExit("Setup action safety contract missing: " + contract)

@@ -34,8 +34,7 @@ namespace DS4Windows
     {
         internal const string EnvironmentVariableName =
             "DS4WINDOWS_VIIPER_STATE_RATE_HZ";
-        internal const int DefaultDualShock4RateHz = 200;
-        internal const int DefaultDualSenseRateHz = 1000;
+        internal const int DefaultControllerRateHz = 1000;
         private const int MinimumRateHz = 30;
         private const int MaximumRateHz = 1000;
 
@@ -68,21 +67,18 @@ namespace DS4Windows
         {
             switch (deviceType)
             {
+                case ViiperVirtualDeviceType.Xbox360:
                 case ViiperVirtualDeviceType.DualShock4:
-                    // Full-speed HID bInterval=5 (one input opportunity every
-                    // five milliseconds).
-                    return DefaultDualShock4RateHz;
                 case ViiperVirtualDeviceType.DualSense:
                 case ViiperVirtualDeviceType.DualSenseEdge:
-                    // The VIIPER low-latency descriptor exposes a one-
-                    // millisecond interrupt-IN opportunity. This is a ceiling,
-                    // not a synthetic producer: DS4Windows still submits only
-                    // fresh mapped physical reports, so a Bluetooth DualSense
-                    // naturally runs at its observed 600-800 Hz while a
-                    // 1 kHz-capable source can use the full endpoint rate.
-                    return DefaultDualSenseRateHz;
+                case ViiperVirtualDeviceType.Switch2Pro:
+                    // Every virtual controller exposes a one-millisecond
+                    // maximum input opportunity. This remains adaptive rather
+                    // than becoming a polling loop: the writer wakes only for
+                    // fresh mapped physical reports and coalesces queued state.
+                    return DefaultControllerRateHz;
                 default:
-                    return 0;
+                    return DefaultControllerRateHz;
             }
         }
 
@@ -91,18 +87,10 @@ namespace DS4Windows
         {
             int defaultRate = GetDefaultRateHz(deviceType);
             int configuredRate = Parse(configuredValue, defaultRate);
-            if ((deviceType == ViiperVirtualDeviceType.DualSense ||
-                    deviceType == ViiperVirtualDeviceType.DualSenseEdge) &&
-                configuredRate > 0)
-            {
-                // A stale diagnostic environment override previously kept
-                // otherwise fast controllers at 200/250 Hz. DualSense input
-                // is now always allowed to reach its 1 kHz virtual endpoint;
-                // "off"/"immediate" remains an uncapped event-driven mode.
-                return Math.Max(DefaultDualSenseRateHz, configuredRate);
-            }
-
-            return configuredRate;
+            // The descriptor and USB/IP scheduler enforce the same 1 kHz hard
+            // ceiling. Do not let the diagnostic "immediate" value restore an
+            // unbounded loop; a numeric override can still choose a lower cap.
+            return configuredRate > 0 ? configuredRate : defaultRate;
         }
 
         internal static long GetMinimumIntervalTicks(int rateHz)

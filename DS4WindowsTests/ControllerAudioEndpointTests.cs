@@ -900,23 +900,23 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void ViiperPlayStationStateRatesDefaultToTheirUsbDescriptorIntervals()
+        public void ViiperControllerStateRatesUseAdaptiveOneKilohertzCeiling()
         {
             const int defaultRate =
-                ViiperStateWriteRateSettings.DefaultDualShock4RateHz;
-            Assert.AreEqual(200, ViiperStateWriteRateSettings.GetDefaultRateHz(
+                ViiperStateWriteRateSettings.DefaultControllerRateHz;
+            Assert.AreEqual(1000, ViiperStateWriteRateSettings.GetDefaultRateHz(
                 ViiperVirtualDeviceType.DualShock4));
             Assert.AreEqual(1000, ViiperStateWriteRateSettings.GetDefaultRateHz(
                 ViiperVirtualDeviceType.DualSense));
             Assert.AreEqual(1000, ViiperStateWriteRateSettings.GetDefaultRateHz(
                 ViiperVirtualDeviceType.DualSenseEdge));
-            Assert.AreEqual(0, ViiperStateWriteRateSettings.GetDefaultRateHz(
+            Assert.AreEqual(1000, ViiperStateWriteRateSettings.GetDefaultRateHz(
                 ViiperVirtualDeviceType.Xbox360));
-            Assert.AreEqual(0, ViiperStateWriteRateSettings.GetDefaultRateHz(
+            Assert.AreEqual(1000, ViiperStateWriteRateSettings.GetDefaultRateHz(
                 ViiperVirtualDeviceType.Switch2Pro));
-            Assert.AreEqual(200,
+            Assert.AreEqual(1000,
                 ViiperStateWriteRateSettings.Parse(null, defaultRate));
-            Assert.AreEqual(200,
+            Assert.AreEqual(1000,
                 ViiperStateWriteRateSettings.Parse("unknown", defaultRate));
             Assert.AreEqual(250,
                 ViiperStateWriteRateSettings.Parse("250", defaultRate));
@@ -927,20 +927,26 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void DualSenseStateRateIgnoresLegacyLowFrequencyCap()
+        public void ControllerStateRateAllowsOnlyBoundedNumericOverrides()
         {
-            Assert.AreEqual(1000,
+            Assert.AreEqual(200,
                 ViiperStateWriteRateSettings.ResolveConfiguredRateHz(
                     ViiperVirtualDeviceType.DualSense, "200"));
-            Assert.AreEqual(1000,
+            Assert.AreEqual(250,
                 ViiperStateWriteRateSettings.ResolveConfiguredRateHz(
                     ViiperVirtualDeviceType.DualSenseEdge, "250"));
-            Assert.AreEqual(0,
+            Assert.AreEqual(1000,
                 ViiperStateWriteRateSettings.ResolveConfiguredRateHz(
                     ViiperVirtualDeviceType.DualSense, "immediate"));
             Assert.AreEqual(100,
                 ViiperStateWriteRateSettings.ResolveConfiguredRateHz(
                     ViiperVirtualDeviceType.DualShock4, "100"));
+            Assert.AreEqual(1000,
+                ViiperStateWriteRateSettings.ResolveConfiguredRateHz(
+                    ViiperVirtualDeviceType.Xbox360, null));
+            Assert.AreEqual(1000,
+                ViiperStateWriteRateSettings.ResolveConfiguredRateHz(
+                    ViiperVirtualDeviceType.Switch2Pro, null));
         }
 
         [TestMethod]

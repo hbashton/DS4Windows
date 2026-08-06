@@ -229,6 +229,25 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void XboxSeriesImpulseUsesNativeAdaptiveTriggerVibration()
+        {
+            TriggerLabEffectEncoder.Effect active =
+                TriggerLabEffectEncoder.EncodeImpulseTriggerVibration(173);
+            TriggerLabEffectEncoder.Effect stopped =
+                TriggerLabEffectEncoder.EncodeImpulseTriggerVibration(0);
+
+            Assert.AreEqual(0x06, active.Mode);
+            Assert.AreEqual(15, active.ZoneMaskLow,
+                "Mode 0x06 byte 1 is the vibration frequency.");
+            Assert.AreEqual(173, active.ZoneMaskHigh,
+                "Mode 0x06 byte 2 must preserve the game's magnitude.");
+            Assert.AreEqual(0, active.Data0,
+                "Impulse vibration starts across the complete trigger pull.");
+            Assert.AreEqual(0x05, stopped.Mode);
+            Assert.IsTrue(stopped.IsOff);
+        }
+
+        [TestMethod]
         public void LinkedEffectsKeepPerTriggerActivationIndependent()
         {
             TriggerLabProfileSettings settings = new TriggerLabProfileSettings

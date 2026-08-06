@@ -24,6 +24,7 @@ namespace DS4Windows
         {
             outputType = outputType.Normalize();
             return outputType == OutContType.ViiperX360 ||
+                outputType == OutContType.ViiperXboxSeries ||
                 outputType == OutContType.ViiperSwitch2Pro;
         }
 

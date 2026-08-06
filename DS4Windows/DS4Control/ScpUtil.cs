@@ -70,6 +70,7 @@ namespace DS4Windows
         ViiperDualSense,
         ViiperDualSenseEdge,
         ViiperSwitch2Pro,
+        ViiperXboxSeries,
     }
 
     public static class OutContTypeCompatibility
@@ -93,6 +94,7 @@ namespace DS4Windows
                 OutContType.ViiperDualSense => "DualSense",
                 OutContType.ViiperDualSenseEdge => "DualSense Edge",
                 OutContType.ViiperSwitch2Pro => "Switch 2 Pro",
+                OutContType.ViiperXboxSeries => "Xbox Series X|S",
                 _ => "None",
             };
         }
@@ -904,7 +906,8 @@ namespace DS4Windows
             conType = conType.Normalize();
             string result = string.Empty;
             if (conType == DS4Windows.OutContType.X360 ||
-                conType == DS4Windows.OutContType.ViiperX360)
+                conType == DS4Windows.OutContType.ViiperX360 ||
+                conType == DS4Windows.OutContType.ViiperXboxSeries)
             {
                 xboxDefaultNames.TryGetValue(key, out result);
             }
@@ -4596,6 +4599,7 @@ namespace DS4Windows
                 case OutContType.ViiperDualSense: result = "ViiperDualSense"; break;
                 case OutContType.ViiperDualSenseEdge: result = "ViiperDualSenseEdge"; break;
                 case OutContType.ViiperSwitch2Pro: result = "ViiperSwitch2Pro"; break;
+                case OutContType.ViiperXboxSeries: result = "ViiperXboxSeries"; break;
                 default: break;
             }
 
@@ -4616,6 +4620,9 @@ namespace DS4Windows
                 case "ViiperDualSense": id = OutContType.ViiperDualSense; break;
                 case "ViiperDualSenseEdge": id = OutContType.ViiperDualSenseEdge; break;
                 case "ViiperSwitch2Pro": id = OutContType.ViiperSwitch2Pro; break;
+                case "XboxSeries":
+                case "XboxSeriesXS":
+                case "ViiperXboxSeries": id = OutContType.ViiperXboxSeries; break;
                 default: break;
             }
 

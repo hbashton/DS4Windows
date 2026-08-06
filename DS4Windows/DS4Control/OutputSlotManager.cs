@@ -139,6 +139,10 @@ namespace DS4Windows
                 case OutContType.ViiperSwitch2Pro:
                     outputDevice = new ViiperOutDevice(contType, ViiperVirtualDeviceType.Switch2Pro);
                     break;
+                case OutContType.ViiperXboxSeries:
+                    outputDevice = new ViiperOutDevice(contType,
+                        ViiperVirtualDeviceType.XboxSeries);
+                    break;
                 case OutContType.None:
                 default:
                     break;

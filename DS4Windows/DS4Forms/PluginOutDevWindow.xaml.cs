@@ -72,6 +72,9 @@ namespace DS4WinWPF.DS4Forms
                 case 4:
                     contType = OutContType.ViiperSwitch2Pro;
                     break;
+                case 5:
+                    contType = OutContType.ViiperXboxSeries;
+                    break;
                 default:
                     break;
             }

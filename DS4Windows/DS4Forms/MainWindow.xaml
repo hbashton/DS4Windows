@@ -590,7 +590,7 @@
                                             Margin="8,0,0,0"
                                             Click="ViiperRefreshBtn_Click" />
                                 </StackPanel>
-                                <TextBlock Text="Required for VIIPER outputs: DualSense, DualSense Edge, Switch 2 Pro, DS4, and Xbox 360 over USB/IP."
+                                <TextBlock Text="Required for VIIPER outputs: DualSense, DualSense Edge, Switch 2 Pro, DS4, Xbox 360, and Xbox Series X|S over USB/IP."
                                            TextWrapping="Wrap"
                                            MaxWidth="420"
                                            Opacity="0.75"

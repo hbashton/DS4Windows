@@ -24,7 +24,7 @@ controller backend.
 
 | What you get | Why it matters |
 |---|---|
-| **One profile, any output** | Emulate Xbox 360, DualShock 4, DualSense, DualSense Edge, or Switch 2 Pro without giving up physical-controller features. |
+| **One profile, any output** | Emulate Xbox 360, Xbox Series X|S, DualShock 4, DualSense, DualSense Edge, or Switch 2 Pro without giving up physical-controller features. |
 | **PlayStation audio over Bluetooth** | Route a selected app or the default Windows mix to the controller speaker or AUX port, and expose the controller microphone to Windows. |
 | **Audio Haptics + native game feedback** | Convert system or per-app audio into DualSense haptics, or mix it with the game's own advanced feedback. |
 | **Trigger Lab** | Design, preview, and save independent L2/R2 effects directly in each profile. |
@@ -86,7 +86,7 @@ After installing a VIIPER-capable DS4Windows build:
    startup tasks.
 4. Restart Windows if the setup installed or updated `usbip-win2`.
 5. Edit a profile and select **DualSense**, **DualSense Edge**, **DualShock 4**,
-   **Xbox 360**, or **Switch 2 Pro**. VIIPER is the backend for every virtual
+   **Xbox 360**, **Xbox Series X|S**, or **Switch 2 Pro**. VIIPER is the backend for every virtual
    controller type; it is not repeated in the device names.
 
 When **Run at Startup** is enabled, setup registers and verifies the
@@ -135,7 +135,12 @@ correctly.
 
 ### Controller output
 
-- VIIPER virtual Xbox 360, DualShock 4, DualSense, DualSense Edge, and Switch 2 Pro output.
+- VIIPER virtual Xbox 360, Xbox Series X|S, DualShock 4, DualSense,
+  DualSense Edge, and Switch 2 Pro output.
+- Native Xbox Series four-motor feedback. Body vibration becomes accurate
+  DualSense haptics, impulse-trigger channels become independent adaptive
+  trigger vibration, and non-adaptive physical controllers retain the effect
+  through their ordinary rumble motors.
 - Automatic migration of old Xbox 360 and DualShock 4 output selections to
   their VIIPER equivalents; ViGEmBus is not required.
 - Native-style DualSense buttons, sticks, triggers, touch, gyro, accelerometer,

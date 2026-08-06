@@ -5083,6 +5083,24 @@ namespace DS4Windows.InputDevices
             });
         }
 
+        /// <summary>
+        /// Applies both adaptive-trigger blocks in one device-queue action so
+        /// a four-motor Xbox Series update cannot expose a half-updated trigger
+        /// pair to the physical output writer.
+        /// </summary>
+        public void PrepareRawTriggerEffects(TriggerEffectData left,
+            TriggerEffectData right)
+        {
+            queueEvent(() =>
+            {
+                l2EffectData = left;
+                r2EffectData = right;
+                outputDirty = true;
+                currentHap.dirty = true;
+                PrepareOutReport();
+            });
+        }
+
         private byte DeviceBatteryLinearMask(int deviceBattery)
         {
             byte batteryMask;

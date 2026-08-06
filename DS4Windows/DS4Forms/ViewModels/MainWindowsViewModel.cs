@@ -98,6 +98,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             new List<OverviewOutputControllerChoice>
             {
                 new("Xbox 360", OutContType.ViiperX360),
+                new("Xbox Series X|S", OutContType.ViiperXboxSeries),
                 new("DualShock 4", OutContType.ViiperDS4),
                 new("DualSense", OutContType.ViiperDualSense),
                 new("DualSense Edge", OutContType.ViiperDualSenseEdge),

@@ -28,6 +28,7 @@ namespace DS4WindowsTests
         [DataRow(OutContType.ViiperDS4, (int)ControllerAudioEndpointKind.DualShock4)]
         [DataRow(OutContType.ViiperDualSense, (int)ControllerAudioEndpointKind.DualSense)]
         [DataRow(OutContType.ViiperDualSenseEdge, (int)ControllerAudioEndpointKind.DualSense)]
+        [DataRow(OutContType.ViiperXboxSeries, (int)ControllerAudioEndpointKind.Any)]
         // Legacy profiles that serialized "DS4" are migrated to the VIIPER
         // DualShock 4 backend before audio endpoint selection.
         [DataRow(OutContType.DS4, (int)ControllerAudioEndpointKind.DualShock4)]
@@ -206,6 +207,7 @@ namespace DS4WindowsTests
         [DataRow(OutContType.ViiperDualSenseEdge, true)]
         [DataRow(OutContType.X360, true)]
         [DataRow(OutContType.ViiperX360, true)]
+        [DataRow(OutContType.ViiperXboxSeries, true)]
         [DataRow(OutContType.ViiperSwitch2Pro, true)]
         public void DirectRouteSupportsPrimaryOrAudioOnlyFeatureOutput(
             OutContType outputType, bool expected)

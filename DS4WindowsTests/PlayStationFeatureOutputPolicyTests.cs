@@ -8,6 +8,7 @@ namespace DS4WindowsTests
     {
         [DataTestMethod]
         [DataRow((int)OutContType.ViiperX360)]
+        [DataRow((int)OutContType.ViiperXboxSeries)]
         [DataRow((int)OutContType.ViiperSwitch2Pro)]
         public void NonPlayStationPersonaNeedsAudioOnlyCompanion(
             int outputType)
@@ -42,6 +43,7 @@ namespace DS4WindowsTests
 
         [DataTestMethod]
         [DataRow((int)OutContType.ViiperX360)]
+        [DataRow((int)OutContType.ViiperXboxSeries)]
         [DataRow((int)OutContType.ViiperSwitch2Pro)]
         public void NonPlayStationPrimaryOutputsDoNotOwnAudio(int outputType)
         {
@@ -61,6 +63,9 @@ namespace DS4WindowsTests
             (int)OutContType.ViiperSwitch2Pro, (int)OutContType.ViiperDS4)]
         [DataRow((int)InputDeviceType.DualSense, 0x0CE6,
             (int)OutContType.ViiperX360,
+            (int)OutContType.ViiperDualSense)]
+        [DataRow((int)InputDeviceType.DualSense, 0x0CE6,
+            (int)OutContType.ViiperXboxSeries,
             (int)OutContType.ViiperDualSense)]
         [DataRow((int)InputDeviceType.DualSense, 0x0DF2,
             (int)OutContType.ViiperSwitch2Pro,

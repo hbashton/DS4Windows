@@ -82,6 +82,43 @@ namespace DS4WindowsTests
             Assert.AreEqual((short)0, ReadInt16(packet, 12));
         }
 
+        [TestMethod]
+        public void XboxSeriesPacketKeepsXInputLayoutAndAddsShare()
+        {
+            DS4State state = new DS4State
+            {
+                Cross = true,
+                Share = true,
+                Capture = true,
+                L2 = 17,
+                R2 = 231,
+                LX = 128,
+                LY = 128,
+                RX = 128,
+                RY = 128,
+            };
+
+            byte[] packet = BuildViiperStatePacket(
+                ViiperVirtualDeviceType.XboxSeries, state);
+
+            Assert.AreEqual(20, packet.Length);
+            Assert.AreEqual(0x00011020u, ReadUInt32(packet, 0));
+            Assert.AreEqual(17, packet[4]);
+            Assert.AreEqual(231, packet[5]);
+        }
+
+        [TestMethod]
+        public void XboxSeriesSelectsNativeGipContract()
+        {
+            Type builderType = typeof(ViiperVirtualDeviceType).Assembly.GetType(
+                "DS4Windows.ViiperStatePacketBuilder", true);
+            MethodInfo method = builderType.GetMethod("GetViiperDeviceName",
+                BindingFlags.Public | BindingFlags.Static);
+
+            Assert.AreEqual("xboxseries", (string)method.Invoke(null,
+                new object[] { ViiperVirtualDeviceType.XboxSeries }));
+        }
+
         [DataTestMethod]
         [DataRow(ViiperVirtualDeviceType.DualSense)]
         [DataRow(ViiperVirtualDeviceType.DualSenseEdge)]

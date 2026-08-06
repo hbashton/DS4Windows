@@ -2558,6 +2558,8 @@ namespace DS4WinWPF.DS4Forms
             {
                 OutContType.ViiperSwitch2Pro =>
                     "Switch 2 layout: Cross -> B, Circle -> A, Square -> Y, Triangle -> X, Share -> Minus, Options -> Plus, PS -> Home, Capture -> Capture.",
+                OutContType.ViiperXboxSeries =>
+                    "Xbox Series X|S output exposes native XInput controls, the Share button, four-motor vibration, and impulse-trigger feedback. DualSense hardware converts the trigger motors into adaptive-trigger vibration.",
                 OutContType.ViiperDualSense =>
                     "DualSense output exposes native DualSense identity with mute, touch, gyro, rumble, lightbar, and player LEDs. Adaptive triggers require the raw-output follow-up.",
                 OutContType.ViiperDualSenseEdge =>

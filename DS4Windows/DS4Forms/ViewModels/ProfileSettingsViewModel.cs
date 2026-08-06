@@ -989,6 +989,10 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                         type = 4;
                         break;
 
+                    case OutContType.ViiperXboxSeries:
+                        type = 5;
+                        break;
+
                     default: break;
                 }
 
@@ -1034,6 +1038,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 2 => OutContType.ViiperDualSense,
                 3 => OutContType.ViiperDualSenseEdge,
                 4 => OutContType.ViiperSwitch2Pro,
+                5 => OutContType.ViiperXboxSeries,
                 _ => OutContType.ViiperX360,
             };
         }

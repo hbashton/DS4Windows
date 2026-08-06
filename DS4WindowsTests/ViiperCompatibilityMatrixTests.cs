@@ -15,6 +15,7 @@ namespace DS4WindowsTests
             ViiperVirtualDeviceType.DualSense,
             ViiperVirtualDeviceType.DualSenseEdge,
             ViiperVirtualDeviceType.Switch2Pro,
+            ViiperVirtualDeviceType.XboxSeries,
         };
 
         [DataTestMethod]
@@ -49,6 +50,7 @@ namespace DS4WindowsTests
         [DataRow(ViiperVirtualDeviceType.DualSense, 33)]
         [DataRow(ViiperVirtualDeviceType.DualSenseEdge, 33)]
         [DataRow(ViiperVirtualDeviceType.Switch2Pro, 24)]
+        [DataRow(ViiperVirtualDeviceType.XboxSeries, 20)]
         public void ViiperOutputReportsKeepTheirProtocolLength(
             ViiperVirtualDeviceType outputType, int expectedLength)
         {

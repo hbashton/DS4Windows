@@ -336,6 +336,7 @@ namespace DS4WindowsTests
                 OutContType.ViiperDualSense,
                 OutContType.ViiperDualSenseEdge,
                 OutContType.ViiperSwitch2Pro,
+                OutContType.ViiperXboxSeries,
             };
 
             foreach (OutContType outputType in outputTypes)

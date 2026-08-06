@@ -57,7 +57,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         {
             this.deviceNum = deviceNum;
             outputControllerType = Global.outDevTypeTemp[deviceNum].Normalize();
-            use360Mode = outputControllerType.Normalize() == OutContType.ViiperX360;
+            use360Mode = outputControllerType.Normalize() == OutContType.ViiperX360 ||
+                outputControllerType == OutContType.ViiperXboxSeries;
             this.settings = settings;
             currentOutBind = new OutBinding();
             shiftOutBind = new OutBinding();

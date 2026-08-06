@@ -2033,6 +2033,8 @@ Suspend support not enabled.", true);
                                             Program.rootHub.AttachUnboundOutDev(slotDevice, OutContType.ViiperDualSenseEdge);
                                         else if (strData[2] == "plugviiperswitch2pro")
                                             Program.rootHub.AttachUnboundOutDev(slotDevice, OutContType.ViiperSwitch2Pro);
+                                        else if (strData[2] == "plugviiperxboxseries")
+                                            Program.rootHub.AttachUnboundOutDev(slotDevice, OutContType.ViiperXboxSeries);
                                     }
                                 }
                                 else if (strData[0] == "query" && strData.Length >= 3)

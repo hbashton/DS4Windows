@@ -2215,6 +2215,7 @@
                                         <ComboBoxItem Content="DualSense"/>
                                         <ComboBoxItem Content="DualSense Edge"/>
                                         <ComboBoxItem Content="Switch 2 Pro"/>
+                                        <ComboBoxItem Content="Xbox Series X|S"/>
                                     </ComboBox>
                                 </StackPanel>
                                 <TextBlock x:Name="outputControllerHintText"

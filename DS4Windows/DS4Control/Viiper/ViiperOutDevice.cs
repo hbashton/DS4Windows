@@ -72,6 +72,7 @@ namespace DS4Windows
                 case ViiperVirtualDeviceType.DualSense:
                 case ViiperVirtualDeviceType.DualSenseEdge:
                 case ViiperVirtualDeviceType.Switch2Pro:
+                case ViiperVirtualDeviceType.XboxSeries:
                     // Every virtual controller exposes a one-millisecond
                     // maximum input opportunity. This remains adaptive rather
                     // than becoming a polling loop: the writer wakes only for
@@ -119,6 +120,7 @@ namespace DS4Windows
         DualSense,
         DualSenseEdge,
         Switch2Pro,
+        XboxSeries,
     }
 
     public sealed class ViiperOutDevice : OutputDevice
@@ -286,6 +288,12 @@ namespace DS4Windows
         private bool lastTriggerLabLeftRumbleEnabled;
         private bool lastTriggerLabRightRumbleEnabled;
         private readonly object triggerLabRumbleLock = new object();
+        private readonly object xboxSeriesImpulseLock = new object();
+        private DS4Device xboxSeriesImpulseDevice;
+        private byte lastXboxSeriesLeftImpulse;
+        private byte lastXboxSeriesRightImpulse;
+        private int lastXboxSeriesTriggerLabSignature;
+        private bool xboxSeriesImpulseStateKnown;
         private int dualShock4DecodedPcmFifoCount;
         private int dualShock4LastDecodedPcmCount;
         private ushort dualShock4LastMicrophoneSequence;
@@ -632,6 +640,7 @@ namespace DS4Windows
             if (previousDeviceIndex != deviceIndex)
             {
                 ReleaseTriggerLabRumbleOverrides(previousDeviceIndex);
+                ReleaseXboxSeriesImpulseOverrides(previousDeviceIndex);
             }
             Volatile.Write(ref lastInputDeviceIndex, deviceIndex);
             if (connected)
@@ -666,6 +675,7 @@ namespace DS4Windows
             Interlocked.Exchange(ref writtenPacketCount, 0);
             ResetMicrophoneLiveness();
             ResetTriggerLabRumbleState();
+            ResetXboxSeriesImpulseState();
             Interlocked.Exchange(ref lastMicrophoneArmTimestamp, 0);
             Interlocked.Exchange(ref microphoneArmAttempts, 0);
             Interlocked.Exchange(ref microphoneArmFailures, 0);
@@ -914,6 +924,9 @@ namespace DS4Windows
             ReleaseTriggerLabRumbleOverrides(
                 Volatile.Read(ref lastInputDeviceIndex));
             ResetTriggerLabRumbleState();
+            ReleaseXboxSeriesImpulseOverrides(
+                Volatile.Read(ref lastInputDeviceIndex));
+            ResetXboxSeriesImpulseState();
             StopMicrophoneInterfaceMonitor();
             lock (pendingPacketLock)
             {
@@ -1199,7 +1212,8 @@ namespace DS4Windows
                 type == OutContType.ViiperDS4 ||
                 type == OutContType.ViiperDualSense ||
                 type == OutContType.ViiperDualSenseEdge ||
-                type == OutContType.ViiperSwitch2Pro;
+                type == OutContType.ViiperSwitch2Pro ||
+                type == OutContType.ViiperXboxSeries;
         }
 
         public static bool SupportsVirtualMicrophone(OutContType type)
@@ -3015,6 +3029,13 @@ namespace DS4Windows
                     }
                     break;
 
+                case ViiperVirtualDeviceType.XboxSeries:
+                    if (feedbackLength >= 7)
+                    {
+                        ApplyXboxSeriesFeedback(device, deviceIndex, feedback);
+                    }
+                    break;
+
                 case ViiperVirtualDeviceType.DualShock4:
                     if (feedbackLength >= 7)
                     {
@@ -3303,6 +3324,124 @@ namespace DS4Windows
             if (!armed)
             {
                 Interlocked.Increment(ref microphoneArmFailures);
+            }
+        }
+
+        private void ApplyXboxSeriesFeedback(DS4Device device,
+            int deviceIndex, byte[] feedback)
+        {
+            byte leftBody = feedback[0];
+            byte rightBody = feedback[1];
+            byte leftImpulse = feedback[2];
+            byte rightImpulse = feedback[3];
+
+            if (device is DualSenseDevice dualSense &&
+                IsCurrentPhysicalSonyDualSense(dualSense))
+            {
+                // Body motors remain on DS4Windows' accurate DualSense rumble
+                // path. It converts ordinary Xbox vibration to the physical
+                // controller's haptic actuators without touching the proven
+                // speaker/media transport.
+                Program.rootHub.SetDevRumble(device, leftBody, rightBody,
+                    deviceIndex);
+                ApplyXboxSeriesImpulseTriggers(dualSense, deviceIndex,
+                    leftBody, rightBody, leftImpulse, rightImpulse);
+                return;
+            }
+
+            // Controllers without adaptive trigger actuators must not lose
+            // the Series-only channels. Fold each impulse motor into the
+            // corresponding ordinary rumble voice without increasing either
+            // channel beyond the magnitude authored by the game.
+            Program.rootHub.SetDevRumble(device,
+                Math.Max(leftBody, leftImpulse),
+                Math.Max(rightBody, rightImpulse), deviceIndex);
+            ApplyGameRumbleTriggerVibration(device, deviceIndex,
+                Math.Max(rightBody, rightImpulse),
+                Math.Max(leftBody, leftImpulse));
+        }
+
+        private void ApplyXboxSeriesImpulseTriggers(DualSenseDevice device,
+            int deviceIndex, byte leftBody, byte rightBody,
+            byte leftImpulse, byte rightImpulse)
+        {
+            lock (xboxSeriesImpulseLock)
+            {
+                TriggerLabProfileSettings settings =
+                    TriggerLabForDevice(deviceIndex);
+                // Native Series impulse channels are authoritative. If a game
+                // only authors body vibration, the existing per-trigger
+                // Trigger Lab opt-in can still project that side onto the
+                // corresponding adaptive trigger.
+                byte leftMagnitude = leftImpulse != 0 ? leftImpulse :
+                    settings?.LeftGameRumbleVibration == true ? leftBody :
+                    (byte)0;
+                byte rightMagnitude = rightImpulse != 0 ? rightImpulse :
+                    settings?.RightGameRumbleVibration == true ? rightBody :
+                    (byte)0;
+                int signature = TriggerLabRumbleSignature(settings);
+                if (xboxSeriesImpulseStateKnown &&
+                    ReferenceEquals(xboxSeriesImpulseDevice, device) &&
+                    lastXboxSeriesLeftImpulse == leftMagnitude &&
+                    lastXboxSeriesRightImpulse == rightMagnitude &&
+                    lastXboxSeriesTriggerLabSignature == signature)
+                {
+                    return;
+                }
+
+                xboxSeriesImpulseDevice = device;
+                lastXboxSeriesLeftImpulse = leftMagnitude;
+                lastXboxSeriesRightImpulse = rightMagnitude;
+                lastXboxSeriesTriggerLabSignature = signature;
+                xboxSeriesImpulseStateKnown = true;
+
+                bool leftOverride = settings?.Enabled == true &&
+                    settings.LeftActive;
+                bool rightOverride = settings?.Enabled == true &&
+                    settings.RightActive;
+                TriggerLabEffectEncoder.Effect leftEffect = leftOverride ?
+                    TriggerLabEffectEncoder.Encode(settings.Left, true) :
+                    TriggerLabEffectEncoder.EncodeImpulseTriggerVibration(
+                        leftMagnitude);
+                TriggerLabEffectEncoder.Effect rightEffect = rightOverride ?
+                    TriggerLabEffectEncoder.Encode(settings.Right, true) :
+                    TriggerLabEffectEncoder.EncodeImpulseTriggerVibration(
+                        rightMagnitude);
+                TriggerLabEffectEncoder.ApplyPairToDevice(device, leftEffect,
+                    rightEffect);
+            }
+        }
+
+        private void ReleaseXboxSeriesImpulseOverrides(int deviceIndex)
+        {
+            lock (xboxSeriesImpulseLock)
+            {
+                if (!xboxSeriesImpulseStateKnown ||
+                    xboxSeriesImpulseDevice is not DualSenseDevice device ||
+                    deviceIndex < 0)
+                {
+                    return;
+                }
+
+                TriggerLabProfileSettings settings =
+                    TriggerLabForDevice(deviceIndex);
+                TriggerLabEffectEncoder.ApplyPairToDevice(device,
+                    TriggerLabEffectEncoder.Encode(settings?.Left,
+                        settings?.Enabled == true && settings.LeftActive),
+                    TriggerLabEffectEncoder.Encode(settings?.Right,
+                        settings?.Enabled == true && settings.RightActive));
+            }
+        }
+
+        private void ResetXboxSeriesImpulseState()
+        {
+            lock (xboxSeriesImpulseLock)
+            {
+                xboxSeriesImpulseDevice = null;
+                lastXboxSeriesLeftImpulse = 0;
+                lastXboxSeriesRightImpulse = 0;
+                lastXboxSeriesTriggerLabSignature = 0;
+                xboxSeriesImpulseStateKnown = false;
             }
         }
 
@@ -6200,6 +6339,7 @@ namespace DS4Windows
                 ViiperVirtualDeviceType.DualSenseEdge =>
                     "dualsenseedgecombinedaudioduplexv5",
                 ViiperVirtualDeviceType.Switch2Pro => "ns2pro",
+                ViiperVirtualDeviceType.XboxSeries => "xboxseries",
                 _ => "xbox360",
             };
         }
@@ -6213,6 +6353,7 @@ namespace DS4Windows
                 ViiperVirtualDeviceType.DualSense => DualSenseFeedbackPacketSize,
                 ViiperVirtualDeviceType.DualSenseEdge => DualSenseFeedbackPacketSize,
                 ViiperVirtualDeviceType.Switch2Pro => 34,
+                ViiperVirtualDeviceType.XboxSeries => 7,
                 _ => 0,
             };
         }
@@ -6226,6 +6367,7 @@ namespace DS4Windows
                 ViiperVirtualDeviceType.DualSense => BuildDualSense(state, device),
                 ViiperVirtualDeviceType.DualSenseEdge => BuildDualSense(state, device),
                 ViiperVirtualDeviceType.Switch2Pro => BuildSwitch2Pro(state, device),
+                ViiperVirtualDeviceType.XboxSeries => BuildXboxSeries(state, device),
                 _ => BuildXbox360(state, device),
             };
         }
@@ -6282,6 +6424,18 @@ namespace DS4Windows
             WriteInt16(packet, 8, ly);
             WriteInt16(packet, 10, rx);
             WriteInt16(packet, 12, ry);
+            return packet;
+        }
+
+        private static byte[] BuildXboxSeries(DS4State state, int device)
+        {
+            byte[] packet = BuildXbox360(state, device);
+            uint buttons = BinaryPrimitives.ReadUInt32LittleEndian(packet);
+            if (state.Capture)
+            {
+                buttons |= 0x00010000;
+            }
+            BinaryPrimitives.WriteUInt32LittleEndian(packet, buttons);
             return packet;
         }
 

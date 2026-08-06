@@ -22,6 +22,7 @@ namespace DS4WindowsTests
         [DataRow(OutContType.X360)]
         [DataRow(OutContType.DS4)]
         [DataRow(OutContType.ViiperX360)]
+        [DataRow(OutContType.ViiperXboxSeries)]
         [DataRow(OutContType.ViiperSwitch2Pro)]
         public void DoesNotCreateCompanionForOtherOutputs(OutContType outputType)
         {
@@ -40,6 +41,7 @@ namespace DS4WindowsTests
 
         [DataTestMethod]
         [DataRow(OutContType.ViiperX360)]
+        [DataRow(OutContType.ViiperXboxSeries)]
         [DataRow(OutContType.ViiperSwitch2Pro)]
         [DataRow(OutContType.None)]
         public void ActiveCompanionRetiresBeforeNonPlayStationProfileAppears(

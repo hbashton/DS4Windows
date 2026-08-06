@@ -66,6 +66,30 @@ namespace DS4Windows
                 effect.Data3, effect.Frequency);
         }
 
+        public static void ApplyPairToDevice(DualSenseDevice device,
+            Effect left, Effect right)
+        {
+            if (device == null) return;
+            device.PrepareRawTriggerEffects(ToDeviceEffect(left),
+                ToDeviceEffect(right));
+        }
+
+        private static DualSenseDevice.TriggerEffectData ToDeviceEffect(
+            Effect effect)
+        {
+            return new DualSenseDevice.TriggerEffectData
+            {
+                triggerMotorMode = effect.Mode,
+                triggerStartResistance = effect.ZoneMaskLow,
+                triggerEffectForce = effect.ZoneMaskHigh,
+                triggerRangeForce = effect.Data0,
+                triggerNearReleaseStrength = effect.Data1,
+                triggerNearMiddleStrength = effect.Data2,
+                triggerPressedStrength = effect.Data3,
+                triggerActuationFrequency = effect.Frequency,
+            };
+        }
+
         public static TriggerLabEffectSettings CreateGameRumbleVibration(
             TriggerLabEffectSettings template, byte magnitude)
         {
@@ -74,6 +98,23 @@ namespace DS4Windows
             effect.Mode = TriggerLabMode.Vibration;
             effect.ForcePercent = MagnitudeToPercent(magnitude);
             return effect;
+        }
+
+        /// <summary>
+        /// Converts an Xbox One/Series impulse-motor magnitude into Sony's
+        /// native Adaptive Trigger Vibration effect. Unlike Trigger Lab's
+        /// authored multi-zone vibration, impulse feedback is a transient
+        /// motor voice and must preserve its full 8-bit amplitude directly.
+        /// </summary>
+        public static Effect EncodeImpulseTriggerVibration(byte magnitude)
+        {
+            // Sony mode 0x06 is [frequency, strength, start position]. A
+            // stable 15 Hz carrier closely matches the tactile character of
+            // the Xbox trigger motors while keeping game-authored amplitude
+            // changes intact.
+            return magnitude == 0
+                ? Off()
+                : new Effect(0x06, 15, magnitude, 0, 0, 0, 0, 0);
         }
 
         public static void ApplyGameRumbleToDevice(DualSenseDevice device,

@@ -198,6 +198,9 @@ namespace DS4WindowsTests
             0x054C, 0x09CC, (int)OutContType.ViiperSwitch2Pro, true,
             (int)ControllerMicrophoneUiStatus.Ready, true)]
         [DataRow((int)InputDeviceType.DualSense, (int)ConnectionType.BT,
+            0x054C, 0x0CE6, (int)OutContType.ViiperXboxSeries, true,
+            (int)ControllerMicrophoneUiStatus.Ready, true)]
+        [DataRow((int)InputDeviceType.DualSense, (int)ConnectionType.BT,
             0x054C, 0x0CE6, (int)OutContType.ViiperDualSense, false,
             (int)ControllerMicrophoneUiStatus.OutputStarting, false)]
         [DataRow((int)InputDeviceType.DualSense, (int)ConnectionType.USB,

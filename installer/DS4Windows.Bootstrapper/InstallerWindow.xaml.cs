@@ -93,6 +93,12 @@ namespace DS4Windows.Bootstrapper
             }
         }
 
+        internal void ShowInstallerBusyRetry(int attempt, int maximumRetries)
+        {
+            ProgressDetail.Text = "Another Windows installation is finishing; " +
+                "retrying safely (" + attempt + " of " + maximumRetries + ")";
+        }
+
         internal void SetProgress(int percent)
         {
             OverallProgress.Value = Math.Max(0, Math.Min(100, percent));

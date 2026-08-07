@@ -94,6 +94,40 @@ def main() -> int:
     if {path.casefold() for path in manifest_paths} != actual_paths:
         raise SystemExit("Package manifest does not exactly own the publish tree.")
 
+    generated_wix_path = (
+        args.bundle_source.parent.parent
+        / "DS4Windows.Package"
+        / "GeneratedFiles.wxs"
+    )
+    generated_wix_xml = ET.fromstring(
+        generated_wix_path.read_text(encoding="utf-8")
+    )
+    wix_namespace = {"w": "http://wixtoolset.org/schemas/v4/wxs"}
+    publish_prefix = "$(var.PublishRoot)\\"
+    generated_paths = set()
+    for file_element in generated_wix_xml.findall(".//w:File", wix_namespace):
+        source = file_element.get("Source", "")
+        if not source.startswith(publish_prefix):
+            raise SystemExit("Generated MSI contains a non-publish-root file.")
+        generated_paths.add(
+            source[len(publish_prefix):].replace("\\", "/").casefold()
+        )
+    expected_generated_paths = actual_paths | {
+        args.manifest.relative_to(args.publish_root).as_posix().casefold()
+    }
+    if generated_paths != expected_generated_paths:
+        missing_from_msi = sorted(expected_generated_paths - generated_paths)
+        extra_in_msi = sorted(generated_paths - expected_generated_paths)
+        details = []
+        if missing_from_msi:
+            details.append("missing=" + ", ".join(missing_from_msi[:5]))
+        if extra_in_msi:
+            details.append("extra=" + ", ".join(extra_in_msi[:5]))
+        raise SystemExit(
+            "Generated MSI does not exactly own the publish tree (" +
+            "; ".join(details) + ")."
+        )
+
     for entry in manifest["files"]:
         path = args.publish_root / entry["path"]
         if not path.is_file() or path.stat().st_size != entry["size"] or sha256(path) != entry["sha256"]:
@@ -127,8 +161,13 @@ def main() -> int:
         if contract not in bundle:
             raise SystemExit("Bundle contract missing: " + contract)
 
-    wix_namespace = {"w": "http://wixtoolset.org/schemas/v4/wxs"}
     bundle_xml = ET.fromstring(bundle)
+    chain = bundle_xml.find(".//w:Chain", wix_namespace)
+    if chain is None or chain.get("DisableSystemRestore") != "yes":
+        raise SystemExit(
+            "Burn system restore must stay disabled so elevation cannot block "
+            "before package execution."
+        )
     packages = {
         element.get("Id"): element
         for element in bundle_xml.findall(".//w:Chain/*", wix_namespace)
@@ -285,6 +324,11 @@ def main() -> int:
         'pinned USB-IP package and runtime ABI pass after reboot',
         'registration attempt " +',
         'retrying the same packaged executable directly',
+        'New-ScheduledTaskTrigger -AtLogOn',
+        'infrastructure-actions.log',
+        '[string]::IsNullOrWhiteSpace($triggerUser)',
+        "sourceInfo.Length -eq $destinationInfo.Length",
+        "destinationHash = (Get-FileHash",
     ]:
         if contract not in backend_script:
             raise SystemExit(
@@ -325,6 +369,10 @@ def main() -> int:
         'plannedAction == LaunchAction.Uninstall',
         'Close(result);',
         'IsRelatedBundleNewer',
+        'IsInstallerBusyStatus',
+        'BOOTSTRAPPER_EXECUTEPACKAGECOMPLETE_ACTION.Retry',
+        'ShowInstallerBusyRetry',
+        '0x80070652u',
     ]:
         if contract not in bootstrapper:
             raise SystemExit("Bootstrapper lifecycle contract missing: " + contract)
@@ -404,6 +452,11 @@ def main() -> int:
         "EnsurePathDoesNotTraverseReparsePoints(sourcePath",
         "IsSafeRelativePackagePath(relativePath)",
         "FileShare.Read",
+        "IsOptionalSatelliteResourcePath(relativePath)",
+        "GetInfrastructureActionsLogPath()",
+        "viiper-setup-host.log",
+        'startInfo.ArgumentList.Add("-Yes")',
+        "definition.Triggers.Add(new LogonTrigger())",
     ]:
         if contract not in setup_manager:
             raise SystemExit(

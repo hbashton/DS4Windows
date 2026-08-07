@@ -230,13 +230,19 @@ namespace DS4WinWPF
 
             TaskService ts = new TaskService();
             TaskDefinition td = ts.NewTask();
-            string currentUser = WindowsIdentity.GetCurrent().Name;
-            td.Triggers.Add(new LogonTrigger { UserId = currentUser });
+            string currentUserSid = WindowsIdentity.GetCurrent().User?.Value ??
+                throw new InvalidOperationException(
+                    "Windows did not provide the current account SID.");
+            // Leave the trigger user-neutral and bind the principal to the
+            // exact SID. This avoids Task Scheduler's ambiguous UserId name
+            // lookup when the computer and local account share a name while
+            // retaining the same interactive-user security boundary.
+            td.Triggers.Add(new LogonTrigger());
             string dir = DS4Windows.Global.exedirpath;
             td.Actions.Add(new ExecAction(
                 DS4Windows.Global.exelocation, "-m", dir));
 
-            td.Principal.UserId = currentUser;
+            td.Principal.UserId = currentUserSid;
             td.Principal.LogonType = TaskLogonType.InteractiveToken;
             td.Principal.RunLevel = TaskRunLevel.Highest;
             td.Settings.StopIfGoingOnBatteries = false;
@@ -342,7 +348,8 @@ namespace DS4WinWPF
                 AccountMatchesSid(definition.Principal.UserId,
                     currentUserSid) &&
                 trigger.Enabled &&
-                AccountMatchesSid(trigger.UserId, currentUserSid) &&
+                (string.IsNullOrWhiteSpace(trigger.UserId) ||
+                 AccountMatchesSid(trigger.UserId, currentUserSid)) &&
                 definition.Settings.ExecutionTimeLimit == TimeSpan.Zero &&
                 definition.Settings.MultipleInstances ==
                     TaskInstancesPolicy.IgnoreNew &&

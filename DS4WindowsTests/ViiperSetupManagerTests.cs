@@ -34,6 +34,39 @@ namespace DS4Windows.Tests
                 StringComparison.Ordinal));
         }
 
+        [DataTestMethod]
+        [DataRow(@"Lang\ar\DS4Windows.resources.dll", true)]
+        [DataRow(@"lang\ja\ds4windows.resources.dll", true)]
+        [DataRow(@"Lang\cs\Microsoft.VisualBasic.Forms.resources.dll", true)]
+        [DataRow(@"Lang\de\PresentationFramework.resources.dll", true)]
+        [DataRow(@"DS4Windows.exe", false)]
+        [DataRow(@"extras\install-viiper-backend.ps1", false)]
+        [DataRow(@"Lang\DS4Windows.resources.dll", false)]
+        [DataRow(@"Lang\cs\plugin.dll", false)]
+        [DataRow(@"Lang\cs\nested\plugin.resources.dll", false)]
+        public void OnlySatelliteLanguageResourcesAreOptionalDuringRepair(
+            string path, bool expected)
+        {
+            Assert.AreEqual(expected, ViiperSetupManager.
+                IsOptionalSatelliteResourcePath(path));
+        }
+
+        [TestMethod]
+        public void InstallerDiagnosticsAlwaysUsePersistentProgramData()
+        {
+            string infrastructure = ViiperSetupManager.
+                GetInfrastructureActionsLogPath();
+            string host = ViiperSetupManager.GetInstallerHostLogPath();
+
+            StringAssert.Contains(infrastructure,
+                Path.Combine("DS4Windows", "Installer"));
+            StringAssert.EndsWith(infrastructure,
+                "infrastructure-actions.log");
+            StringAssert.Contains(host,
+                Path.Combine("DS4Windows", "Installer"));
+            StringAssert.EndsWith(host, "viiper-setup-host.log");
+        }
+
         [TestMethod]
         public void UsbipPortProbeRequiresZeroExitCode()
         {

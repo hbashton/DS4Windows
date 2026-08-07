@@ -50,7 +50,17 @@ def emit_directory(lines: list[str], root: Path, directory: Path, files: list[Pa
         lines.append(f'{indent}</Component>')
         refs.append(component_id)
 
-    children = sorted({p.parent for p in files if p.parent.parent == directory}, key=lambda p: p.name.lower())
+    # Include every immediate child that contains a descendant file, even
+    # when that child has no files of its own. The previous parent.parent
+    # shortcut silently omitted complete trees such as Lang/<culture>/.
+    children = sorted(
+        {
+            directory / p.relative_to(directory).parts[0]
+            for p in files
+            if p.parent != directory and directory in p.parents
+        },
+        key=lambda p: p.name.lower(),
+    )
     for child in children:
         child_rel = child.relative_to(root).as_posix()
         lines.append(f'{indent}<Directory Id="{wix_id("dir", child_rel)}" Name="{xml(child.name)}">')

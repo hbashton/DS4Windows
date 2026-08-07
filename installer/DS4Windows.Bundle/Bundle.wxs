@@ -55,7 +55,11 @@
         Result="value"
         Bitness="always64" />
 
-    <Chain>
+    <!-- Burn's restore-point creation can block indefinitely when Windows
+         System Protection/WMI is unhealthy. MSI rollback already protects the
+         application transaction, and the driver helper owns its own guarded
+         rollback/reboot contract, so never hold the elevated engine here. -->
+    <Chain DisableSystemRestore="yes">
       <ExePackage
           Id="CloseRunningApplications"
           CacheId="DS4WindowsSetupActionsPreflight-$(var.SetupActionsHash)"

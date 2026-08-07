@@ -16,10 +16,13 @@ portable ZIP remains a separate CI artifact.
   -SkipApplicationPublish
 ```
 
-Installer logs are written by Burn and by the elevated infrastructure helper.
-The helper's persistent log is under
-`%ProgramData%\DS4Windows\Installer\setup-actions.log`; the hardened VIIPER and
-USB-IP log remains under the managed VIIPER installation.
+Installer logs are written by Burn and by the elevated helpers. Process
+preflight diagnostics are stored in
+`%ProgramData%\DS4Windows\Installer\setup-actions.log`; VIIPER, USB-IP, startup
+task, and runtime verification is stored in
+`%ProgramData%\DS4Windows\Installer\infrastructure-actions.log`. The in-app
+repair host records failures that occur before its helper starts in
+`%ProgramData%\DS4Windows\Installer\viiper-setup-host.log`.
 
 Set `DS4W_SIGN_CERT_PATH`, `DS4W_SIGN_CERT_PASSWORD`, and optionally
 `DS4W_SIGN_TIMESTAMP_URL` to Authenticode-sign the final EXE in a protected

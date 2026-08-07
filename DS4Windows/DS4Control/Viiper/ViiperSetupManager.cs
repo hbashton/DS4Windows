@@ -419,11 +419,11 @@ namespace DS4Windows
                     DS4WinWPF.StartupMethods.
                         RetargetExistingTaskToCurrentExecutable();
                     LaunchInstaller(status, owner);
-                    // The elevated setup process owns the replacement from
-                    // this point onward and restarts DS4Windows only after its
-                    // verified postconditions pass. Never let this process
-                    // continue opening devices against a changing driver.
-                    Application.Current?.Shutdown();
+                    // Do not terminate a running settings UI merely because
+                    // the user selected an installation mode. The elevated
+                    // transaction closes DS4Windows only when it actually
+                    // reaches the verified mutation boundary; startup callers
+                    // still fail closed through their existing return path.
                     return false;
 
                 case DS4WinWPF.DS4Forms.ViiperSetupPromptDecision.
@@ -432,7 +432,6 @@ namespace DS4Windows
                         RetargetExistingTaskToCurrentExecutable();
                     LaunchInstaller(status, owner,
                         portableInstallation: true);
-                    Application.Current?.Shutdown();
                     return false;
 
                 case DS4WinWPF.DS4Forms.ViiperSetupPromptDecision.
@@ -700,10 +699,7 @@ namespace DS4Windows
                     return;
                 }
 
-                string logPath = portableInstallation
-                    ? Path.Combine(targetLocalAppData, "VIIPER", "install.log")
-                    : Path.Combine(GetNativeProgramFilesPath(),
-                        "DS4Windows", "VIIPER", "install.log");
+                string logPath = GetInfrastructureActionsLogPath();
                 string message = exitCode == 0
                     ? "VIIPER was installed, but Windows is not reporting every component as ready yet. Restart Windows once, then click Refresh."
                     : exitCode == 1223
@@ -893,6 +889,10 @@ namespace DS4Windows
                     startInfo.ArgumentList.Add("-File");
                     startInfo.ArgumentList.Add(scriptPath);
                     startInfo.ArgumentList.Add("-NoPause");
+                    // The user already chose Standard or Portable in the
+                    // setup prompt before UAC. The elevated helper is hidden,
+                    // so it must never wait on a second interactive prompt.
+                    startInfo.ArgumentList.Add("-Yes");
                     startInfo.ArgumentList.Add("-TargetLocalAppData");
                     startInfo.ArgumentList.Add(targetLocalAppData);
                     startInfo.ArgumentList.Add("-TargetUserSid");
@@ -936,11 +936,14 @@ namespace DS4Windows
                     }
                     else if (exitCode != 0 && exitCode != 1223)
                     {
+                        string scriptLogPath =
+                            GetInfrastructureActionsLogPath();
+                        WriteInstallerHostLog(
+                            $"Embedded VIIPER setup exited with code " +
+                            $"{exitCode}. Script log: {scriptLogPath}");
                         MessageBox.Show(
-                            $"VIIPER setup did not finish (exit code " +
-                            $"{exitCode}). Review " +
-                            @"%ProgramFiles%\DS4Windows\VIIPER\install.log " +
-                            "and run Install / Repair again.",
+                            BuildInstallerFailureMessage(exitCode,
+                                scriptLogPath),
                             "VIIPER setup failed", MessageBoxButton.OK,
                             MessageBoxImage.Error);
                     }
@@ -958,10 +961,13 @@ namespace DS4Windows
             }
             catch (Exception ex)
             {
+                string hostLogPath = GetInstallerHostLogPath();
+                WriteInstallerHostLog("VIIPER setup host failed: " + ex);
                 try
                 {
                     MessageBox.Show(
-                        $"VIIPER setup host failed: {ex.Message}",
+                        $"VIIPER setup host failed: {ex.Message}\n\n" +
+                        $"Diagnostics were saved to:\n{hostLogPath}",
                         "VIIPER setup", MessageBoxButton.OK,
                         MessageBoxImage.Error);
                 }
@@ -1023,6 +1029,7 @@ namespace DS4Windows
                 Path.DirectorySeparatorChar;
             HashSet<string> seen = new HashSet<string>(
                 StringComparer.OrdinalIgnoreCase);
+            List<string> stagedRelativePaths = new List<string>();
 
             foreach (string relativePath in relativePaths)
             {
@@ -1041,9 +1048,24 @@ namespace DS4Windows
                 if (!sourcePath.StartsWith(sourcePrefix,
                         StringComparison.OrdinalIgnoreCase) ||
                     !targetPath.StartsWith(stagedPrefix,
-                        StringComparison.OrdinalIgnoreCase) ||
-                    !File.Exists(sourcePath) ||
-                    (File.GetAttributes(sourcePath) &
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        $"Invalid package file: {relativePath}");
+                }
+                if (!File.Exists(sourcePath))
+                {
+                    if (IsOptionalSatelliteResourcePath(relativePath))
+                    {
+                        WriteInstallerHostLog(
+                            "Skipping missing optional language resource: " +
+                            relativePath);
+                        continue;
+                    }
+                    throw new InvalidOperationException(
+                        $"Invalid package file: {relativePath}");
+                }
+                if ((File.GetAttributes(sourcePath) &
                         FileAttributes.ReparsePoint) != 0)
                 {
                     throw new InvalidOperationException(
@@ -1059,15 +1081,23 @@ namespace DS4Windows
                     FileMode.CreateNew, FileAccess.Write, FileShare.None);
                 source.CopyTo(target);
                 target.Flush(flushToDisk: true);
+                stagedRelativePaths.Add(relativePath.Replace(
+                    Path.DirectorySeparatorChar, '/'));
             }
 
-            manifestStream.Position = 0;
             string stagedManifest = Path.Combine(stagedRoot,
                 ".ds4windows-managed-files.txt");
             using (FileStream target = new FileStream(stagedManifest,
                        FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            using (StreamWriter writer = new StreamWriter(target,
+                       new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                       bufferSize: 4096, leaveOpen: true))
             {
-                manifestStream.CopyTo(target);
+                foreach (string relativePath in stagedRelativePaths)
+                {
+                    writer.WriteLine(relativePath);
+                }
+                writer.Flush();
                 target.Flush(flushToDisk: true);
             }
 
@@ -1105,6 +1135,27 @@ namespace DS4Windows
             }
 
             return stagedRoot;
+        }
+
+        internal static bool IsOptionalSatelliteResourcePath(
+            string relativePath)
+        {
+            if (string.IsNullOrWhiteSpace(relativePath))
+            {
+                return false;
+            }
+
+            string normalized = relativePath.Replace(
+                Path.AltDirectorySeparatorChar,
+                Path.DirectorySeparatorChar);
+            string[] components = normalized.Split(
+                Path.DirectorySeparatorChar);
+            return components.Length == 3 &&
+                string.Equals(components[0], "Lang",
+                    StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(components[1]) &&
+                components[2].EndsWith(".resources.dll",
+                    StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsSafeRelativePackagePath(string relativePath)
@@ -1242,6 +1293,37 @@ namespace DS4Windows
                 "requires a restart to replace USB-IP, restart once and run " +
                 "Repair again.\n\nThe exact failing phase is recorded here:\n" +
                 logPath;
+        }
+
+        internal static string GetInstallerHostLogPath()
+        {
+            return Path.Combine(Environment.GetFolderPath(
+                    Environment.SpecialFolder.CommonApplicationData),
+                "DS4Windows", "Installer", "viiper-setup-host.log");
+        }
+
+        internal static string GetInfrastructureActionsLogPath()
+        {
+            return Path.Combine(Environment.GetFolderPath(
+                    Environment.SpecialFolder.CommonApplicationData),
+                "DS4Windows", "Installer", "infrastructure-actions.log");
+        }
+
+        private static void WriteInstallerHostLog(string message)
+        {
+            try
+            {
+                string path = GetInstallerHostLogPath();
+                string directory = Path.GetDirectoryName(path);
+                Directory.CreateDirectory(directory!);
+                File.AppendAllText(path,
+                    $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {message}" +
+                    Environment.NewLine, new UTF8Encoding(false));
+            }
+            catch
+            {
+                // Diagnostics must never replace the primary setup error.
+            }
         }
 
         internal static string ResolveConfiguredViiperPath(
@@ -1491,8 +1573,9 @@ namespace DS4Windows
                         string.Equals(TryResolveAccountSid(
                                 definition.Principal.UserId), currentSid,
                             StringComparison.OrdinalIgnoreCase) &&
-                        string.Equals(TryResolveAccountSid(trigger.UserId),
-                            currentSid, StringComparison.OrdinalIgnoreCase);
+                        (string.IsNullOrWhiteSpace(trigger.UserId) ||
+                         string.Equals(TryResolveAccountSid(trigger.UserId),
+                            currentSid, StringComparison.OrdinalIgnoreCase));
                     if (!valid)
                     {
                         failureMessage = "RunVIIPER does not target the " +
@@ -1742,7 +1825,9 @@ namespace DS4Windows
         {
             string fullPath = Path.GetFullPath(viiperPath);
             string workingDirectory = Path.GetDirectoryName(fullPath);
-            string currentUser = WindowsIdentity.GetCurrent().Name;
+            string currentUserSid = WindowsIdentity.GetCurrent().User?.Value ??
+                throw new InvalidOperationException(
+                    "Windows did not provide the current account SID.");
             using TaskService service = new TaskService();
             Microsoft.Win32.TaskScheduler.Task existing =
                 service.GetTask(@"\" + ViiperStartupTaskName);
@@ -1753,13 +1838,13 @@ namespace DS4Windows
             }
 
             TaskDefinition definition = service.NewTask();
-            definition.Triggers.Add(new LogonTrigger
-            {
-                UserId = currentUser,
-            });
+            // A generic logon trigger plus an exact-SID interactive principal
+            // avoids Task Scheduler's ambiguous UserId lookup when a local
+            // account and its computer have the same name.
+            definition.Triggers.Add(new LogonTrigger());
             definition.Actions.Add(new ExecAction(fullPath, "server",
                 workingDirectory));
-            definition.Principal.UserId = currentUser;
+            definition.Principal.UserId = currentUserSid;
             definition.Principal.LogonType =
                 TaskLogonType.InteractiveToken;
             definition.Principal.RunLevel = TaskRunLevel.Highest;

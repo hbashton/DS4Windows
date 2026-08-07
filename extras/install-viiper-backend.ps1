@@ -123,12 +123,10 @@ else {
 }
 $script:Ds4WindowsInstallDir = $script:ManagedRoot
 $script:InstallerLogRoot = Join-Path $env:ProgramData "DS4Windows\Installer"
-$script:LogPath = if ($script:InstallerMode) {
-    Join-Path $script:InstallerLogRoot "infrastructure-actions.log"
-}
-else {
-    Join-Path $script:InstallDir "install.log"
-}
+# Keep diagnostics outside the transaction target so failures that occur
+# before Program Files/LocalAppData creation still leave a readable record.
+$script:LogPath = Join-Path $script:InstallerLogRoot `
+    "infrastructure-actions.log"
 $script:UsbipReplacementStatePath = Join-Path $script:InstallDir `
     "usbip-replacement-pending.json"
 $script:UsbipUninstallKeyName = `
@@ -143,6 +141,12 @@ function Write-SetupLog([string]$message, [ConsoleColor]$color =
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     Write-Host $message -ForegroundColor $color
     try {
+        $logDirectory = Split-Path -Parent $script:LogPath
+        if (-not [string]::IsNullOrWhiteSpace($logDirectory) -and
+                -not (Test-Path -LiteralPath $logDirectory -PathType Container)) {
+            New-Item -ItemType Directory -Path $logDirectory -Force |
+                Out-Null
+        }
         Add-Content -LiteralPath $script:LogPath -Value (
             "[$timestamp] $message") -Encoding UTF8
     }
@@ -1760,8 +1764,16 @@ function Test-HighestLogonTask([string]$taskName,
     $principalSid = Convert-AccountToSid `
         ([string]$registered.Principal.UserId)
     $matchingTrigger = @($registered.Triggers | Where-Object {
-        $_.CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger' -and
-        (Convert-AccountToSid ([string]$_.UserId)) -eq $script:TargetUserSid
+        if ($_.CimClass.CimClassName -ne 'MSFT_TaskLogonTrigger') {
+            return $false
+        }
+        # A user-neutral logon trigger avoids Task Scheduler's ambiguous
+        # UserId name resolution when the local account and computer have the
+        # same name. The principal below remains pinned to the exact SID, so
+        # the task can still execute only in the intended interactive token.
+        $triggerUser = [string]$_.UserId
+        return [string]::IsNullOrWhiteSpace($triggerUser) -or
+            (Convert-AccountToSid $triggerUser) -eq $script:TargetUserSid
     }).Count -gt 0
 
     return (-not $requireEnabled -or $registered.Settings.Enabled) -and
@@ -1791,8 +1803,7 @@ function Register-HighestLogonTask([string]$taskName,
             $taskActionParameters.WorkingDirectory = $workingDirectory
         }
         $taskAction = New-ScheduledTaskAction @taskActionParameters
-        $taskTrigger = New-ScheduledTaskTrigger -AtLogOn `
-            -User $script:TargetUserSid
+        $taskTrigger = New-ScheduledTaskTrigger -AtLogOn
         $taskPrincipal = New-ScheduledTaskPrincipal `
             -UserId $script:TargetUserSid `
             -RunLevel Highest -LogonType Interactive
@@ -2077,11 +2088,47 @@ function Install-Ds4WindowsPackage([string]$sourceDirectory,
         foreach ($file in $copyPlan) {
             $parent = Split-Path -Parent $file.Destination
             New-Item -ItemType Directory -Path $parent -Force | Out-Null
+            # An in-app repair is hosted by the installed DS4Windows process.
+            # Its executable and managed DLLs are therefore legitimately open
+            # while this verified snapshot is promoted. Never overwrite a
+            # byte-identical destination: doing so is unnecessary and fails
+            # on Windows for loaded assemblies. Changed package files are
+            # still replaced normally after all other DS4Windows processes
+            # have been quiesced.
+            if (Test-Path -LiteralPath $file.Destination -PathType Leaf) {
+                $sourceInfo = Get-Item -LiteralPath $file.Source -Force
+                $destinationInfo = Get-Item -LiteralPath $file.Destination `
+                    -Force
+                if ($sourceInfo.Length -eq $destinationInfo.Length) {
+                    $sourceHash = (Get-FileHash -LiteralPath $file.Source `
+                        -Algorithm SHA256).Hash
+                    $destinationHash = (Get-FileHash `
+                        -LiteralPath $file.Destination `
+                        -Algorithm SHA256).Hash
+                    if ([string]::Equals($sourceHash, $destinationHash,
+                            [StringComparison]::OrdinalIgnoreCase)) {
+                        continue
+                    }
+                }
+            }
             Copy-Item -LiteralPath $file.Source `
                 -Destination $file.Destination -Force
         }
-        Copy-Item -LiteralPath $sourceManifest `
-            -Destination (Join-Path $destination $manifestName) -Force
+        $destinationManifest = Join-Path $destination $manifestName
+        $copyManifest = $true
+        if (Test-Path -LiteralPath $destinationManifest -PathType Leaf) {
+            $sourceManifestHash = (Get-FileHash -LiteralPath $sourceManifest `
+                -Algorithm SHA256).Hash
+            $destinationManifestHash = (Get-FileHash `
+                -LiteralPath $destinationManifest -Algorithm SHA256).Hash
+            $copyManifest = -not [string]::Equals($sourceManifestHash,
+                $destinationManifestHash,
+                [StringComparison]::OrdinalIgnoreCase)
+        }
+        if ($copyManifest) {
+            Copy-Item -LiteralPath $sourceManifest `
+                -Destination $destinationManifest -Force
+        }
     }
 
     $installedExecutable = Join-Path $destination "DS4Windows.exe"

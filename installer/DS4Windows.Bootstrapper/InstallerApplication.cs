@@ -16,6 +16,7 @@ namespace DS4Windows.Bootstrapper
     internal sealed class InstallerApplication : BootstrapperApplication
     {
         private readonly Dictionary<string, PackageState> packageStates = new Dictionary<string, PackageState>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, int> installerBusyRetries = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private InstallerWindow window;
         private IBootstrapperCommand command;
         private RegistrationType registrationType;
@@ -220,6 +221,10 @@ namespace DS4Windows.Bootstrapper
             deferInfrastructureUntilUpgradeCompletes = false;
             applyCompleted = false;
             failureShown = false;
+            lock (installerBusyRetries)
+            {
+                installerBusyRetries.Clear();
+            }
             Interlocked.Exchange(ref planStarted, 0);
             engine.Detect();
         }
@@ -415,14 +420,7 @@ namespace DS4Windows.Bootstrapper
             {
                 Ui(() => window.SetCurrentPackage(e.PackageId));
             };
-            ExecutePackageComplete += (_, e) =>
-            {
-                if (string.Equals(e.PackageId, "ViiperUsbipSetup",
-                        StringComparison.OrdinalIgnoreCase) && e.Status < 0)
-                {
-                    infrastructureFailed = true;
-                }
-            };
+            ExecutePackageComplete += OnExecutePackageComplete;
             ExecuteProgress += (_, e) => Ui(() => window.SetProgress(e.OverallPercentage));
             Error += (_, e) =>
             {
@@ -430,6 +428,62 @@ namespace DS4Windows.Bootstrapper
                 engine.Log(LogLevel.Error, lastError);
             };
             ApplyComplete += OnApplyComplete;
+        }
+
+        private void OnExecutePackageComplete(object sender,
+            ExecutePackageCompleteEventArgs e)
+        {
+            if (IsInstallerBusyStatus(e.Status))
+            {
+                const int maximumRetries = 3;
+                int attempt;
+                string packageId = e.PackageId ?? string.Empty;
+                lock (installerBusyRetries)
+                {
+                    installerBusyRetries.TryGetValue(packageId, out attempt);
+                    attempt++;
+                    installerBusyRetries[packageId] = attempt;
+                }
+
+                if (attempt <= maximumRetries)
+                {
+                    engine.Log(LogLevel.Standard,
+                        "Windows Installer is busy; retrying package '" +
+                        packageId + "' (" + attempt + "/" +
+                        maximumRetries + ").");
+                    Ui(() => window.ShowInstallerBusyRetry(attempt,
+                        maximumRetries));
+                    Thread.Sleep(750 * attempt);
+                    e.Action =
+                        BOOTSTRAPPER_EXECUTEPACKAGECOMPLETE_ACTION.Retry;
+                    return;
+                }
+
+                lastError = "Another Windows installation is still active. " +
+                    "Let it finish, close any stale installer windows, then " +
+                    "choose Retry. DS4Windows did not wait indefinitely or " +
+                    "change the existing installation.";
+            }
+            else if (e.Status >= 0)
+            {
+                lock (installerBusyRetries)
+                {
+                    installerBusyRetries.Remove(e.PackageId ?? string.Empty);
+                }
+                return;
+            }
+
+            if (string.Equals(e.PackageId, "ViiperUsbipSetup",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                infrastructureFailed = true;
+            }
+        }
+
+        internal static bool IsInstallerBusyStatus(int status)
+        {
+            return status == 1618 ||
+                unchecked((uint)status) == 0x80070652u;
         }
 
         private void OnDetectComplete(object sender, DetectCompleteEventArgs e)

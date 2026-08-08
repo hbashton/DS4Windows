@@ -6,7 +6,8 @@ param(
     [string]$DisplayVersion = "5.0.2.0",
     [string]$BundleVersion,
     [string]$OutputDirectory,
-    [switch]$SkipApplicationPublish
+    [switch]$SkipApplicationPublish,
+    [switch]$RequireSigning
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,6 +17,45 @@ if (-not $OutputDirectory) {
     $OutputDirectory = Join-Path $repoRoot "bin\x64\Release\installer"
 }
 $outputPath = [IO.Path]::GetFullPath($OutputDirectory)
+$signingEnabled = -not [string]::IsNullOrWhiteSpace(
+    $env:DS4W_SIGN_CERT_PATH)
+if ($RequireSigning -and -not $signingEnabled) {
+    throw (
+        "Release signing is required, but DS4W_SIGN_CERT_PATH is not set. " +
+        "Unsigned public installers are intentionally blocked."
+    )
+}
+$signtool = $null
+if ($signingEnabled) {
+    $signtool = (Get-Command signtool.exe -ErrorAction Stop).Source
+}
+
+function Invoke-SignAndVerify([string]$path) {
+    if (-not $signingEnabled) { return }
+    $timestampUrl = if ($env:DS4W_SIGN_TIMESTAMP_URL) {
+        $env:DS4W_SIGN_TIMESTAMP_URL
+    }
+    else { "https://timestamp.digicert.com" }
+    & $signtool sign /fd SHA256 /f $env:DS4W_SIGN_CERT_PATH `
+        /p $env:DS4W_SIGN_CERT_PASSWORD /tr $timestampUrl /td SHA256 $path
+    if ($LASTEXITCODE -ne 0) {
+        throw "Authenticode signing failed: $path"
+    }
+    $signature = Get-AuthenticodeSignature -LiteralPath $path
+    if ($signature.Status -ne
+            [Management.Automation.SignatureStatus]::Valid) {
+        throw "Authenticode verification failed for '$path': $($signature.StatusMessage)"
+    }
+}
+
+function Assert-ReleaseSignature([string]$path) {
+    if (-not $RequireSigning) { return }
+    $signature = Get-AuthenticodeSignature -LiteralPath $path
+    if ($signature.Status -ne
+            [Management.Automation.SignatureStatus]::Valid) {
+        throw "Required first-party signature is invalid for '$path': $($signature.StatusMessage)"
+    }
+}
 
 $buildMutex = [Threading.Mutex]::new($false,
     "Global\DS4Windows-Installer-Build")
@@ -100,6 +140,9 @@ if (-not $SkipApplicationPublish) {
 if (-not (Test-Path -LiteralPath (Join-Path $publishPath "DS4Windows.exe") -PathType Leaf)) {
     throw "DS4Windows publish output is incomplete: $publishPath"
 }
+Invoke-SignAndVerify (Join-Path $publishPath "DS4Windows.exe")
+Assert-ReleaseSignature (Join-Path $publishPath `
+    "extras\VIIPER-0.0.9-x64.exe")
 $releaseMarker = Join-Path $publishPath "DS4Windows.release"
 if (-not (Test-Path -LiteralPath $releaseMarker -PathType Leaf)) {
     throw "DS4Windows publish output has no release identity: $releaseMarker"
@@ -120,13 +163,21 @@ $manifestPath = Join-Path $publishPath "package-manifest.json"
     $publishPath $generatedWix $manifestPath --version $DisplayVersion
 if ($LASTEXITCODE -ne 0) { throw "Installer manifest generation failed." }
 
-& dotnet build (Join-Path $repoRoot "installer\DS4Windows.SetupActions\DS4Windows.SetupActions.csproj") `
-    -c Release -p:Platform=x64 -p:Version=$ProductVersion
+& dotnet publish (Join-Path $repoRoot "installer\DS4Windows.SetupActions\DS4Windows.SetupActions.csproj") `
+    -c Release -p:Platform=x64 -p:Version=$ProductVersion `
+    -r win-x64 --self-contained true `
+    -o (Join-Path $repoRoot "installer\DS4Windows.SetupActions\bin\x64\Release\publish")
 if ($LASTEXITCODE -ne 0) { throw "Setup action host build failed." }
+$setupActions = Join-Path $repoRoot "installer\DS4Windows.SetupActions\bin\x64\Release\publish\DS4Windows.SetupActions.exe"
+Invoke-SignAndVerify $setupActions
 
-& dotnet build (Join-Path $repoRoot "installer\DS4Windows.Bootstrapper\DS4Windows.Bootstrapper.csproj") `
-    -c Release -p:Platform=x64 -p:Version=$ProductVersion
+& dotnet publish (Join-Path $repoRoot "installer\DS4Windows.Bootstrapper\DS4Windows.Bootstrapper.csproj") `
+    -c Release -p:Platform=x64 -p:Version=$ProductVersion `
+    -r win-x64 --self-contained true `
+    -o (Join-Path $repoRoot "installer\DS4Windows.Bootstrapper\bin\x64\Release\publish")
 if ($LASTEXITCODE -ne 0) { throw "Bootstrapper UI build failed." }
+$baRoot = Join-Path $repoRoot "installer\DS4Windows.Bootstrapper\bin\x64\Release\publish"
+Invoke-SignAndVerify (Join-Path $baRoot "DS4Windows.Bootstrapper.exe")
 
 $packageProject = Join-Path $repoRoot "installer\DS4Windows.Package\DS4Windows.Package.wixproj"
 & dotnet build $packageProject -t:Rebuild -c Release -p:Platform=x64 `
@@ -135,8 +186,7 @@ $packageProject = Join-Path $repoRoot "installer\DS4Windows.Package\DS4Windows.P
 if ($LASTEXITCODE -ne 0) { throw "DS4Windows MSI build failed." }
 
 $msiPath = Join-Path $repoRoot "installer\DS4Windows.Package\bin\x64\Release\DS4Windows_${ProductVersion}_x64.msi"
-$baRoot = Join-Path $repoRoot "installer\DS4Windows.Bootstrapper\bin\x64\Release\net48\win-x64"
-$setupActions = Join-Path $repoRoot "installer\DS4Windows.SetupActions\bin\x64\Release\net48\DS4Windows.SetupActions.exe"
+Invoke-SignAndVerify $msiPath
 $setupActionsHash = (Get-FileHash -LiteralPath $setupActions -Algorithm SHA256).Hash
 if ($setupActionsHash -notmatch '^[0-9A-F]{64}$') {
     throw "Could not derive a content-addressed setup-helper cache identity."
@@ -181,7 +231,9 @@ try {
     Copy-Item -LiteralPath $builtInstaller -Destination $pendingInstaller
     Copy-Item -LiteralPath $manifestPath -Destination $pendingManifest
 
-& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass `
+& (Join-Path $env:SystemRoot `
+    "System32\WindowsPowerShell\v1.0\powershell.exe") `
+    -NoLogo -NoProfile -ExecutionPolicy Bypass `
     -File (Join-Path $repoRoot "utils\test-viiper-reboot-boundary.ps1") `
     -BackendScript (Join-Path $repoRoot "extras\install-viiper-backend.ps1")
 if ($LASTEXITCODE -ne 0) {
@@ -198,17 +250,8 @@ if ($LASTEXITCODE -ne 0) {
     --installer $pendingInstaller --bundle-source (Join-Path $repoRoot "installer\DS4Windows.Bundle\Bundle.wxs")
 if ($LASTEXITCODE -ne 0) { throw "Installer validation failed." }
 
-if ($env:DS4W_SIGN_CERT_PATH) {
-    $signtool = (Get-Command signtool.exe -ErrorAction Stop).Source
-    $timestampUrl = if ($env:DS4W_SIGN_TIMESTAMP_URL) { $env:DS4W_SIGN_TIMESTAMP_URL } else { "http://timestamp.digicert.com" }
-    & $signtool sign /fd SHA256 /f $env:DS4W_SIGN_CERT_PATH `
-        /p $env:DS4W_SIGN_CERT_PASSWORD /tr $timestampUrl /td SHA256 $pendingInstaller
-    if ($LASTEXITCODE -ne 0) { throw "Authenticode signing failed." }
-    $signature = Get-AuthenticodeSignature -LiteralPath $pendingInstaller
-    if ($signature.Status -ne [Management.Automation.SignatureStatus]::Valid) {
-        throw "Authenticode verification failed after signing: $($signature.StatusMessage)"
-    }
-}
+Invoke-SignAndVerify $pendingInstaller
+Assert-ReleaseSignature $pendingInstaller
 
     # The installer EXE is the externally visible commit point. Publish its
     # verified sidecar first so a terminated composition can never expose a

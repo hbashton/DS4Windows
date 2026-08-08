@@ -29,9 +29,18 @@ API contract must be verified first.
 9. Process preflight acquires the same infrastructure mutex as in-app repair,
    preventing one transaction from stopping executables while another is
    replacing or probing them.
-10. Every elevated helper invocation has a correlated start and completion
-    record; bounded append retries preserve diagnostics when a log reader or
-    adjacent process briefly owns the file.
+10. Burn creates one persisted correlation ID and passes it through every
+    preflight, elevated helper, PowerShell phase, and reboot resume. In-app
+    repair creates the same kind of transaction ID. Bounded append retries
+    preserve diagnostics when a log reader briefly owns the file.
+11. The backend always lives under Program Files. "Keep DS4Windows portable"
+    changes only the UI/package location; it never creates an elevated task for
+    a LocalAppData VIIPER executable.
+12. Start-menu and optional desktop shortcuts are all-users shell integration
+    owned by the infrastructure host, not per-user MSI components.
+13. Program Files ACL normalization is a required safety gate for both the
+    managed application and VIIPER backend; setup never registers an elevated
+    task against a directory it could not protect.
 
 ## Pinned runtime contract
 
@@ -47,9 +56,10 @@ API contract must be verified first.
   `VIIPER-0.0.9+USBIP-0.9.7.7 / Ready` in the 64-bit registry view.
 
 DS4Windows repeats these identity and ABI checks at startup. Missing or
-mismatched prerequisites open a mandatory offline repair prompt; suppressing
-the portable-location recommendation never suppresses a verification failure.
-Controller services do not start until a fresh readiness check passes.
+mismatched prerequisites open an offline repair prompt; suppressing a location
+recommendation never suppresses a verification failure. The main UI remains
+available in degraded mode for Settings and diagnostics, while virtual output
+continues to fail closed until a fresh readiness check passes.
 
 ## USB-IP 0.9.7.8 downgrade
 
@@ -78,6 +88,8 @@ build host.
 - Full unit/regression suite.
 - WiX MSI ICE validation.
 - Burn/bootstrapper and setup-action compilation.
+- Self-contained .NET 8 publication for both installer hosts.
+- Real MSI install, repair, and uninstall execution on the Windows CI runner.
 - Content-addressed payload manifest and hash validation.
 - Fail-fast equality between `DS4Windows.release` and the requested package
   identity before WiX or manifest generation can run.
@@ -86,3 +98,6 @@ build host.
   uninstall, downgrade, cancellation, concurrency, failure, and reboot/resume.
 - Atomic publication of the completed installer only after every gate passes.
   The verified manifest is committed first and the installer EXE last.
+- Mandatory Authenticode verification for public release artifacts; release
+  composition is blocked when signing material or a first-party signature is
+  missing.

@@ -8,7 +8,6 @@ namespace DS4WinWPF.DS4Forms
         NotNow,
         InstallStandard,
         InstallPortable,
-        UseExisting,
     }
 
     public partial class ViiperSetupPrompt : Window
@@ -21,12 +20,10 @@ namespace DS4WinWPF.DS4Forms
         public bool SuppressFuturePrompts =>
             suppressPromptCheck.IsChecked == true;
 
-        public bool ExitApplicationRequested => mandatoryRepairRequired &&
-            Decision == ViiperSetupPromptDecision.NotNow;
+        public bool ExitApplicationRequested => false;
 
         public ViiperSetupPrompt(string currentStatus,
             string existingViiperPath, bool citrixUsbMonitorConflict = false,
-            bool portableMigration = false,
             bool verifiedUpdateRequired = false,
             bool usbipReplacementRequired = false,
             bool mandatoryRepairRequired = false)
@@ -48,8 +45,8 @@ namespace DS4WinWPF.DS4Forms
                 installPortableButton.Visibility = Visibility.Collapsed;
                 portableWarningPanel.Visibility = Visibility.Collapsed;
                 suppressPromptCheck.Visibility = Visibility.Collapsed;
-                notNowButton.Content = "Exit DS4Windows";
-                closeButton.ToolTip = "Exit DS4Windows";
+                notNowButton.Content = "Continue without virtual output";
+                closeButton.ToolTip = "Continue without virtual output";
                 return;
             }
 
@@ -57,31 +54,6 @@ namespace DS4WinWPF.DS4Forms
             {
                 existingViiperPathText.Text = existingViiperPath;
                 existingViiperPanel.Visibility = Visibility.Visible;
-                useExistingButton.Visibility = Visibility.Visible;
-            }
-
-            if (portableMigration)
-            {
-                // A verified portable backend is usable. This is only a
-                // security recommendation, so the user may dismiss it
-                // permanently. Hash failures override this below.
-                suppressPromptCheck.Visibility = Visibility.Visible;
-                headingText.Text = "Move VIIPER to its safer home?";
-                summaryText.Text =
-                    "Your portable DS4Windows can stay exactly where it is.";
-                requirementsHeadingText.Text = "Recommended setup";
-                requirementsText.Text =
-                    "• Standard: install DS4Windows and VIIPER in Program Files\n" +
-                    "• Portable: keep DS4Windows here and put VIIPER in LocalAppData\n" +
-                    "• Keep both startup tasks aligned with your choice";
-                existingViiperHeadingText.Text = "Current portable VIIPER";
-                existingViiperDescriptionText.Text =
-                    "It is working and will remain usable if you keep it. " +
-                    "The standard location is safer for updates and prevents " +
-                    "two VIIPER copies from competing.";
-                useExistingButton.Content = "Keep portable VIIPER";
-                installPortableButton.Content = "Repair portable install";
-                installButton.Content = "Install standard";
             }
 
             if (verifiedUpdateRequired)
@@ -98,19 +70,17 @@ namespace DS4WinWPF.DS4Forms
                       "• Safely remove the unsupported USB-IP package\n" +
                       "• Restart, then finish installing USB-IP 0.9.7.7"
                     : "• Install the exact bundled VIIPER build\n" +
-                      "• Choose Standard or Portable installation\n" +
+                      "• Choose managed or portable DS4Windows\n" +
                       "• The unverified backend will not be started";
                 installButton.Content = usbipReplacementRequired
                     ? "Repair VIIPER + USB-IP"
                     : "Install standard";
-                installPortableButton.Content = usbipReplacementRequired
-                    ? "Repair portably"
-                    : "Install portably";
+                installPortableButton.Content =
+                    "Keep DS4Windows portable";
                 existingViiperPanel.Visibility = Visibility.Collapsed;
-                useExistingButton.Visibility = Visibility.Collapsed;
                 suppressPromptCheck.Visibility = Visibility.Collapsed;
-                notNowButton.Content = "Exit DS4Windows";
-                closeButton.ToolTip = "Exit DS4Windows";
+                notNowButton.Content = "Continue without virtual output";
+                closeButton.ToolTip = "Continue without virtual output";
             }
             else if (this.mandatoryRepairRequired)
             {
@@ -122,11 +92,10 @@ namespace DS4WinWPF.DS4Forms
                     "• Install and verify USB-IP 0.9.7.7\n" +
                     "• Start DS4Windows only after the runtime probe passes";
                 installButton.Content = "Install / Repair";
-                installPortableButton.Content = "Repair portably";
-                useExistingButton.Visibility = Visibility.Collapsed;
+                installPortableButton.Content = "Keep DS4Windows portable";
                 suppressPromptCheck.Visibility = Visibility.Collapsed;
-                notNowButton.Content = "Exit DS4Windows";
-                closeButton.ToolTip = "Exit DS4Windows";
+                notNowButton.Content = "Continue without virtual output";
+                closeButton.ToolTip = "Continue without virtual output";
             }
         }
 
@@ -149,13 +118,6 @@ namespace DS4WinWPF.DS4Forms
             RoutedEventArgs e)
         {
             Decision = ViiperSetupPromptDecision.InstallPortable;
-            DialogResult = true;
-        }
-
-        private void UseExistingButton_Click(object sender,
-            RoutedEventArgs e)
-        {
-            Decision = ViiperSetupPromptDecision.UseExisting;
             DialogResult = true;
         }
 

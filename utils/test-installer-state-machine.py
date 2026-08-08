@@ -20,6 +20,7 @@ class Transaction:
     mutex_available: bool = True
     cancel_before_apply: bool = False
     helper_result: int = 0
+    optional_result: int = 0
     events: list[str] = field(default_factory=list)
     result: int = 0
 
@@ -39,7 +40,9 @@ class Transaction:
 
         self.events.append("preflight")
         if self.action == "uninstall":
-            self.events += ["remove-msi", "remove-owned-infrastructure"]
+            # Burn uninstalls in reverse chain order. Infrastructure is
+            # quiesced and removed while the MSI-owned app files still exist.
+            self.events += ["remove-owned-infrastructure", "remove-msi"]
             return self
 
         self.events.append("apply-msi")
@@ -78,6 +81,8 @@ class Transaction:
                 "verify-hash-driver-abi-api",
                 "commit-ready-marker",
             ]
+            if self.optional_result:
+                self.events.append("report-optional-package-failure")
         return self
 
 
@@ -105,6 +110,7 @@ def main() -> None:
         "command.Resume == ResumeType.Reboot",
         "Interlocked.CompareExchange(ref planStarted, 1, 0)",
         "Ignoring a duplicate installer plan request",
+        'engine.SetVariableString("SetupCorrelationId"',
     )
     require(
         backend,
@@ -116,6 +122,7 @@ def main() -> None:
         "Test-UsbipRuntime",
         "Commit-InfrastructureReadiness",
         'Set-InfrastructureState "Failed"',
+        'Protect-ElevatedTaskTargetDirectory $script:InstallDir "VIIPER"',
     )
     require(
         runtime,
@@ -125,13 +132,15 @@ def main() -> None:
         "SupportedUsbipFilterSha256",
         "TryProbeUsbipRuntime",
         "mandatoryRepairRequired = !status.Ready",
-        "Application.Current?.Shutdown()",
+        "Continue in degraded mode",
+        "string viiperPath = canonicalViiperPath",
     )
     require(
         setup_actions,
         "return RunWithSetupMutex(PreflightLocked);",
         "completed with exit code",
         "AppendLogWithRetry",
+        'ReadArgument(args, "--correlation-id")',
     )
 
     clean = Transaction("install").run()
@@ -144,7 +153,7 @@ def main() -> None:
     update = Transaction("install", related="older").run()
     assert update.events.index("remove-old-related-without-shared-teardown") < update.events.index("isolated-infrastructure-recovery")
     uninstall = Transaction("uninstall").run()
-    assert uninstall.events == ["preflight", "remove-msi", "remove-owned-infrastructure"]
+    assert uninstall.events == ["preflight", "remove-owned-infrastructure", "remove-msi"]
     downgrade = Transaction("install", related="newer").run()
     assert downgrade.result == 1638 and downgrade.events == ["block-downgrade"]
     busy = Transaction("repair", mutex_available=False).run()
@@ -158,8 +167,11 @@ def main() -> None:
     reboot = Transaction("install", helper_result=3010).run()
     assert reboot.events.index("disable-owned-startup-tasks") < reboot.events.index("reboot")
     assert reboot.events.index("verify-hash-driver-abi-api") < reboot.events.index("commit-ready-marker")
+    optional_failed = Transaction("install", optional_result=1).run()
+    assert optional_failed.result == 0
+    assert optional_failed.events[-1] == "report-optional-package-failure"
 
-    print("Installer state-machine simulation passed: clean, update, repair, uninstall, downgrade, cancel, concurrency, failure, reboot/resume.")
+    print("Installer state-machine simulation passed: clean, update, repair, uninstall, downgrade, cancel, concurrency, core failure, optional failure, reboot/resume.")
 
 
 if __name__ == "__main__":

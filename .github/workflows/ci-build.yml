@@ -108,6 +108,40 @@ jobs:
             throw "Installer layout planning produced no offline payloads."
           }
 
+      - name: Exercise MSI install, repair, and uninstall lifecycle
+        shell: pwsh
+        run: |
+          $msi = (Resolve-Path ".\installer\DS4Windows.Package\bin\x64\Release\DS4Windows_${{ env.PRODUCT_VERSION }}_x64.msi").Path
+          $msiexec = Join-Path $env:SystemRoot "System32\msiexec.exe"
+          $logRoot = Join-Path $env:RUNNER_TEMP "ds4windows-msi-lifecycle"
+          New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
+          function Invoke-Msi([string]$arguments, [string]$phase) {
+            $process = Start-Process -FilePath $msiexec `
+              -ArgumentList "$arguments /qn /norestart /L*v `"$logRoot\$phase.log`"" `
+              -PassThru -Wait
+            if ($process.ExitCode -notin @(0, 3010)) {
+              throw "MSI $phase failed with $($process.ExitCode). Log: $logRoot\$phase.log"
+            }
+          }
+          try {
+            Invoke-Msi "/i `"$msi`"" "install"
+            if (-not (Test-Path "$env:ProgramFiles\DS4Windows\DS4Windows.exe")) {
+              throw "MSI install completed without its application keypath."
+            }
+            Invoke-Msi "/fa `"$msi`"" "repair"
+          }
+          finally {
+            Invoke-Msi "/x `"$msi`"" "uninstall"
+          }
+          if (Test-Path "HKLM:\SOFTWARE\DS4Windows") {
+            $installPath = Get-ItemPropertyValue `
+              -Path "HKLM:\SOFTWARE\DS4Windows" -Name InstallPath `
+              -ErrorAction SilentlyContinue
+            if ($installPath) {
+              throw "MSI uninstall left its machine registration behind."
+            }
+          }
+
       - name: Upload portable ZIP
         id: upload_portable
         uses: actions/upload-artifact@v4

@@ -46,10 +46,40 @@ jobs:
       shell: bash
     - name: Build X64
       run: dotnet publish .\DS4Windows\DS4WinWPF.csproj -c Release /p:platform=x64 -r win-x64 --self-contained true /p:AssemblyVersion=${{ env.BINARY_VERSION }} /p:FileVersion=${{ env.BINARY_VERSION }} /p:Version=${{ env.PACKAGE_VERSION }} /p:InformationalVersion=${{ env.VERSION }} -o .\bin\x64\Release\output
+    - name: Sign and verify release binaries
+      shell: pwsh
+      env:
+        DS4W_SIGN_CERT_PASSWORD: ${{ secrets.DS4W_SIGN_CERT_PASSWORD }}
+      run: |
+        if ([string]::IsNullOrWhiteSpace("${{ secrets.DS4W_SIGN_CERT_BASE64 }}")) {
+          throw "Release signing secret DS4W_SIGN_CERT_BASE64 is not configured."
+        }
+        $certificatePath = Join-Path $env:RUNNER_TEMP "ds4windows-release.pfx"
+        [IO.File]::WriteAllBytes($certificatePath,
+          [Convert]::FromBase64String("${{ secrets.DS4W_SIGN_CERT_BASE64 }}"))
+        $signtool = (Get-Command signtool.exe -ErrorAction Stop).Source
+        $firstPartyBinaries = @(
+          ".\bin\x64\Release\output\DS4Windows.exe",
+          ".\bin\x64\Release\output\extras\VIIPER-0.0.9-x64.exe")
+        foreach ($path in $firstPartyBinaries) {
+          & $signtool sign /fd SHA256 /f $certificatePath `
+            /p $env:DS4W_SIGN_CERT_PASSWORD /tr https://timestamp.digicert.com `
+            /td SHA256 $path
+          if ($LASTEXITCODE -ne 0) {
+            throw "First-party release signing failed for $path."
+          }
+          $signature = Get-AuthenticodeSignature -LiteralPath $path
+          if ($signature.Status -ne "Valid") {
+            throw "Required release signature is invalid for $path: $($signature.StatusMessage)"
+          }
+        }
+        "DS4W_SIGN_CERT_PATH=$certificatePath" >> $env:GITHUB_ENV
     - name: Post-Build script X64
       run: python .\utils\post-build.py .\bin\x64\Release\output . ${{env.VERSION}}
     - name: Build standard installer X64
       shell: pwsh
+      env:
+        DS4W_SIGN_CERT_PASSWORD: ${{ secrets.DS4W_SIGN_CERT_PASSWORD }}
       run: |
         .\installer\build-installer.ps1 `
           -PublishRoot ".\bin\x64\Release\DS4Windows" `
@@ -57,7 +87,8 @@ jobs:
           -BundleVersion "${{ env.BINARY_VERSION }}" `
           -DisplayVersion "${{ env.VERSION }}" `
           -OutputDirectory ".\bin\x64\Release\installer" `
-          -SkipApplicationPublish
+          -SkipApplicationPublish `
+          -RequireSigning
     - name: Name release asset
       shell: pwsh
       run: |

@@ -20,6 +20,8 @@ namespace DS4Windows.SetupActions
         private const string RegistryKeyPath = @"SOFTWARE\DS4Windows";
         private const string InfrastructureVersion =
             "VIIPER-0.0.9+USBIP-0.9.7.7";
+        private static string CorrelationId =
+            Guid.NewGuid().ToString("N");
         private static readonly string InstallerLogRoot = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "DS4Windows", "Installer");
@@ -29,9 +31,10 @@ namespace DS4Windows.SetupActions
         [STAThread]
         private static int Main(string[] args)
         {
-            var invocationId = Guid.NewGuid().ToString("N");
+            CorrelationId = NormalizeCorrelationId(
+                ReadArgument(args, "--correlation-id"));
             WriteFallbackLog("=== DS4Windows setup invocation " +
-                invocationId + " started ===");
+                CorrelationId + " started ===");
             try
             {
                 var action = args.FirstOrDefault()?.Trim().ToLowerInvariant() ?? "install";
@@ -64,14 +67,14 @@ namespace DS4Windows.SetupActions
                         throw new ArgumentException("Unknown setup action: " + action);
                 }
                 WriteFallbackLog("=== DS4Windows setup invocation " +
-                    invocationId + " completed with exit code " +
+                    CorrelationId + " completed with exit code " +
                     exitCode + " ===");
                 return exitCode;
             }
             catch (Exception ex)
             {
                 WriteFallbackLog("=== DS4Windows setup invocation " +
-                    invocationId + " failed ===" + Environment.NewLine + ex);
+                    CorrelationId + " failed ===" + Environment.NewLine + ex);
                 return 1;
             }
         }
@@ -88,13 +91,17 @@ namespace DS4Windows.SetupActions
             }
 
             var targetUser = ResolveInteractiveUser(args);
+            var desktopShortcut = !string.Equals(
+                ReadArgument(args, "--desktop-shortcut"), "0",
+                StringComparison.OrdinalIgnoreCase);
             return RunWithSetupMutex(() => InstallOrRepairLocked(ds4Path,
-                extrasRoot, scriptPath, bundleSource, targetUser));
+                extrasRoot, scriptPath, bundleSource, targetUser,
+                desktopShortcut));
         }
 
         private static int InstallOrRepairLocked(string ds4Path,
             string extrasRoot, string scriptPath, string bundleSource,
-            InteractiveUser targetUser)
+            InteractiveUser targetUser, bool desktopShortcut)
         {
             ResetInfrastructureLog(targetUser);
             WriteFallbackLog("Infrastructure setup starting for interactive user " +
@@ -108,6 +115,7 @@ namespace DS4Windows.SetupActions
             arguments.Append(" -TargetLocalAppData ").Append(Quote(targetUser.LocalAppData));
             arguments.Append(" -TargetUserSid ").Append(Quote(targetUser.Sid));
             arguments.Append(" -TargetUserName ").Append(Quote(targetUser.Name));
+            arguments.Append(" -CorrelationId ").Append(Quote(CorrelationId));
 
             var elevatedSid = WindowsIdentity.GetCurrent().User?.Value;
             var alternateAdministrator = !string.Equals(elevatedSid,
@@ -126,7 +134,8 @@ namespace DS4Windows.SetupActions
                     " is deferred.");
             }
 
-            var result = RunCaptured("powershell.exe", arguments.ToString(),
+            var result = RunCaptured(SystemTool("WindowsPowerShell", "v1.0",
+                    "powershell.exe"), arguments.ToString(),
                 Timeout.InfiniteTimeSpan, out var scriptOutput);
             WriteInfrastructureLog(scriptOutput);
             WriteFallbackLog("Infrastructure setup exited with code " + result +
@@ -163,6 +172,17 @@ namespace DS4Windows.SetupActions
             else if (result == 0)
             {
                 ClearRebootResume();
+                try
+                {
+                    ConfigureCommonShortcuts(ds4Path, desktopShortcut);
+                }
+                catch (Exception ex)
+                {
+                    // Shell integration is recoverable and must not roll back
+                    // a verified driver/backend transaction.
+                    WriteFallbackLog("Common shortcut setup was skipped: " +
+                        ex.Message);
+                }
             }
 
             return result;
@@ -249,6 +269,90 @@ namespace DS4Windows.SetupActions
             return healthy ? 0 : 1;
         }
 
+        private static string NormalizeCorrelationId(string candidate)
+        {
+            return Guid.TryParseExact(candidate, "N", out var parsed)
+                ? parsed.ToString("N")
+                : Guid.NewGuid().ToString("N");
+        }
+
+        private static void ConfigureCommonShortcuts(string ds4Path,
+            bool desktopShortcut)
+        {
+            var workingDirectory = Path.GetDirectoryName(ds4Path) ??
+                throw new InvalidOperationException(
+                    "DS4Windows working directory is unavailable.");
+            var programsDirectory = Path.Combine(
+                Environment.GetFolderPath(
+                    Environment.SpecialFolder.CommonPrograms),
+                "DS4Windows");
+            Directory.CreateDirectory(programsDirectory);
+            CreateShellShortcut(Path.Combine(programsDirectory,
+                    "DS4Windows.lnk"), ds4Path, workingDirectory);
+
+            var desktopPath = Path.Combine(
+                Environment.GetFolderPath(
+                    Environment.SpecialFolder.CommonDesktopDirectory),
+                "DS4Windows.lnk");
+            if (desktopShortcut)
+            {
+                CreateShellShortcut(desktopPath, ds4Path, workingDirectory);
+            }
+            else if (File.Exists(desktopPath))
+            {
+                File.Delete(desktopPath);
+            }
+        }
+
+        private static void CreateShellShortcut(string shortcutPath,
+            string targetPath, string workingDirectory)
+        {
+            var shellType = Type.GetTypeFromProgID("WScript.Shell", true);
+            object shell = Activator.CreateInstance(shellType);
+            object shortcut = null;
+            try
+            {
+                shortcut = ((dynamic)shell).CreateShortcut(shortcutPath);
+                ((dynamic)shortcut).TargetPath = targetPath;
+                ((dynamic)shortcut).Arguments = string.Empty;
+                ((dynamic)shortcut).WorkingDirectory = workingDirectory;
+                ((dynamic)shortcut).Description =
+                    "Configure and use PlayStation controllers on Windows";
+                ((dynamic)shortcut).IconLocation = targetPath + ",0";
+                ((dynamic)shortcut).Save();
+            }
+            finally
+            {
+                if (shortcut != null && Marshal.IsComObject(shortcut))
+                    Marshal.FinalReleaseComObject(shortcut);
+                if (shell != null && Marshal.IsComObject(shell))
+                    Marshal.FinalReleaseComObject(shell);
+            }
+        }
+
+        private static void RemoveCommonShortcuts()
+        {
+            var startMenuDirectory = Path.Combine(
+                Environment.GetFolderPath(
+                    Environment.SpecialFolder.CommonPrograms),
+                "DS4Windows");
+            var startMenuShortcut = Path.Combine(startMenuDirectory,
+                "DS4Windows.lnk");
+            var desktopShortcut = Path.Combine(
+                Environment.GetFolderPath(
+                    Environment.SpecialFolder.CommonDesktopDirectory),
+                "DS4Windows.lnk");
+            foreach (var path in new[] { startMenuShortcut, desktopShortcut })
+            {
+                if (File.Exists(path)) File.Delete(path);
+            }
+            if (Directory.Exists(startMenuDirectory) &&
+                !Directory.EnumerateFileSystemEntries(startMenuDirectory).Any())
+            {
+                Directory.Delete(startMenuDirectory);
+            }
+        }
+
         private static int Uninstall(string installRoot)
         {
             return RunWithSetupMutex(() => UninstallLocked(installRoot));
@@ -277,6 +381,12 @@ namespace DS4Windows.SetupActions
                     DateTime.UtcNow.ToString("O"), RegistryValueKind.String);
             }
             ClearRebootResume();
+            try { RemoveCommonShortcuts(); }
+            catch (Exception ex)
+            {
+                WriteFallbackLog("Common shortcut cleanup was skipped: " +
+                    ex.Message);
+            }
 
             // USB-IP, HidHide, and FakerInput are shared system drivers. They are
             // deliberately not removed with DS4Windows; each has its own ARP entry.
@@ -589,7 +699,7 @@ namespace DS4Windows.SetupActions
         private static void ProtectResumeDirectory(string resumeRoot,
             string targetUserSid)
         {
-            var ownerExit = RunCaptured("icacls.exe",
+            var ownerExit = RunCaptured(SystemTool("icacls.exe"),
                 Quote(resumeRoot) + " /setowner " +
                 Quote("*S-1-5-32-544") + " /Q",
                 TimeSpan.FromSeconds(15), out var ownerOutput);
@@ -604,7 +714,7 @@ namespace DS4Windows.SetupActions
                 Quote("*S-1-5-18:(OI)(CI)(F)") + " " +
                 Quote("*S-1-5-32-544:(OI)(CI)(F)") + " " +
                 Quote("*" + targetUserSid + ":(OI)(CI)(RX)") + " /Q";
-            var exitCode = RunCaptured("icacls.exe", arguments,
+            var exitCode = RunCaptured(SystemTool("icacls.exe"), arguments,
                 TimeSpan.FromSeconds(15), out var output);
             if (exitCode != 0)
             {
@@ -831,7 +941,7 @@ namespace DS4Windows.SetupActions
 
         private static void RemoveOwnedTask(string taskName, string expectedExecutable)
         {
-            var query = RunCaptured("schtasks.exe", "/Query /TN " + Quote(taskName) + " /XML", TimeSpan.FromSeconds(10), out var output);
+            var query = RunCaptured(SystemTool("schtasks.exe"), "/Query /TN " + Quote(taskName) + " /XML", TimeSpan.FromSeconds(10), out var output);
             if (query != 0)
             {
                 return;
@@ -853,12 +963,27 @@ namespace DS4Windows.SetupActions
                 return;
             }
 
-            RunHidden("schtasks.exe", "/Delete /TN " + Quote(taskName) + " /F", TimeSpan.FromSeconds(10));
+            RunHidden(SystemTool("schtasks.exe"), "/Delete /TN " + Quote(taskName) + " /F", TimeSpan.FromSeconds(10));
         }
 
         private static int RunHidden(string fileName, string arguments, TimeSpan timeout)
         {
             return RunCaptured(fileName, arguments, timeout, out _);
+        }
+
+        private static string SystemTool(params string[] segments)
+        {
+            var path = Environment.SystemDirectory;
+            foreach (var segment in segments)
+            {
+                path = Path.Combine(path, segment);
+            }
+            if (!File.Exists(path))
+            {
+                throw new FileNotFoundException(
+                    "Required Windows system tool is missing.", path);
+            }
+            return path;
         }
 
         private static int RunCaptured(string fileName, string arguments, TimeSpan timeout, out string output)
@@ -917,7 +1042,7 @@ namespace DS4Windows.SetupActions
             try
             {
                 using (var taskkill = Process.Start(new ProcessStartInfo(
-                    "taskkill.exe", "/PID " + process.Id + " /T /F")
+                    SystemTool("taskkill.exe"), "/PID " + process.Id + " /T /F")
                 {
                     UseShellExecute = false,
                     CreateNoWindow = true,

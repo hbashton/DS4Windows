@@ -7,10 +7,15 @@ param(
     [string]$TargetDs4WindowsPath,
     [string]$PackageExtrasRoot,
     [int]$InstallerHostPid = 0,
+    # Backward-compatible name used by older DS4Windows packages. This now
+    # means "keep DS4Windows portable" only. The elevated VIIPER service is
+    # always installed beneath Program Files.
     [switch]$PortableInstallation,
+    [switch]$KeepDs4WindowsPortable,
     [switch]$SkipStartupTasks,
     [switch]$SetupMutexAlreadyHeld,
-    [switch]$InstallerMode
+    [switch]$InstallerMode,
+    [string]$CorrelationId
 )
 
 # DS4Windows normally streams this script from an embedded resource into the
@@ -32,11 +37,17 @@ if ($env:DS4W_SETUP_TARGET_EXE) {
 if ($env:DS4W_SETUP_NO_PAUSE -eq '1') {
     $NoPause = $true
 }
-$script:PortableInstallation = [bool]$PortableInstallation
+$script:KeepDs4WindowsPortable = [bool]$KeepDs4WindowsPortable -or
+    [bool]$PortableInstallation
 $script:InstallerMode = [bool]$InstallerMode
+$script:CorrelationId = if ([string]::IsNullOrWhiteSpace($CorrelationId) -or
+        $CorrelationId.Trim() -notmatch '^[0-9A-Fa-f]{32}$') {
+    [Guid]::NewGuid().ToString("N")
+}
+else { $CorrelationId.Trim().ToLowerInvariant() }
 $script:RunAtStartupEnabled = -not [bool]$SkipStartupTasks
 if ($env:DS4W_SETUP_PORTABLE_INSTALLATION -eq '1') {
-    $script:PortableInstallation = $true
+    $script:KeepDs4WindowsPortable = $true
 }
 $script:InstallerHostPid = $InstallerHostPid
 if ($env:DS4W_SETUP_HOST_PID) {
@@ -115,12 +126,7 @@ $script:TargetUserSid = $TargetUserSid
 $script:TargetUserName = $TargetUserName
 $script:TargetRunKeyPath = "Registry::HKEY_USERS\$TargetUserSid\Software\Microsoft\Windows\CurrentVersion\Run"
 $script:ManagedRoot = Join-Path $programFilesRoot "DS4Windows"
-$script:InstallDir = if ($script:PortableInstallation) {
-    Join-Path $TargetLocalAppData "VIIPER"
-}
-else {
-    Join-Path $script:ManagedRoot "VIIPER"
-}
+$script:InstallDir = Join-Path $script:ManagedRoot "VIIPER"
 $script:Ds4WindowsInstallDir = $script:ManagedRoot
 $script:InstallerLogRoot = Join-Path $env:ProgramData "DS4Windows\Installer"
 # Keep diagnostics outside the transaction target so failures that occur
@@ -133,6 +139,10 @@ $script:UsbipUninstallKeyName = `
     "{199505b0-b93d-4521-a8c7-897818e0205a}_is1"
 $script:InfrastructureRegistryPath = "HKLM:\SOFTWARE\DS4Windows"
 $script:InfrastructureVersion = "VIIPER-0.0.9+USBIP-0.9.7.7"
+$script:System32 = [Environment]::SystemDirectory
+$script:PnPUtilPath = Join-Path $script:System32 "pnputil.exe"
+$script:TaskKillPath = Join-Path $script:System32 "taskkill.exe"
+$script:IcaclsPath = Join-Path $script:System32 "icacls.exe"
 $script:TempDir = Join-Path ([IO.Path]::GetTempPath()) (
     "DS4Windows-VIIPER-Setup-" + [Guid]::NewGuid().ToString("N"))
 
@@ -148,7 +158,7 @@ function Write-SetupLog([string]$message, [ConsoleColor]$color =
                 Out-Null
         }
         Add-Content -LiteralPath $script:LogPath -Value (
-            "[$timestamp] $message") -Encoding UTF8
+            "[$timestamp] [$($script:CorrelationId)] $message") -Encoding UTF8
     }
     catch { }
 }
@@ -171,7 +181,6 @@ function Format-NativeFailure([object[]]$output) {
 }
 
 function Clear-InfrastructureReadiness {
-    if ($script:PortableInstallation) { return }
     $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
         [Microsoft.Win32.RegistryHive]::LocalMachine,
         [Microsoft.Win32.RegistryView]::Registry64)
@@ -197,7 +206,6 @@ function Clear-InfrastructureReadiness {
 }
 
 function Commit-InfrastructureReadiness {
-    if ($script:PortableInstallation) { return }
     $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
         [Microsoft.Win32.RegistryHive]::LocalMachine,
         [Microsoft.Win32.RegistryView]::Registry64)
@@ -244,7 +252,6 @@ function Commit-InfrastructureReadiness {
 }
 
 function Set-InfrastructureState([string]$state) {
-    if ($script:PortableInstallation) { return }
     $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
         [Microsoft.Win32.RegistryHive]::LocalMachine,
         [Microsoft.Win32.RegistryView]::Registry64)
@@ -543,7 +550,7 @@ function Assert-UsbipPostRebootState {
     $previousErrorActionPreference = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
-        $driverStoreOutput = @(& pnputil.exe /enum-drivers 2>&1)
+        $driverStoreOutput = @(& $script:PnPUtilPath /enum-drivers 2>&1)
         $driverStoreExitCode = $LASTEXITCODE
     }
     finally {
@@ -1286,11 +1293,10 @@ function Test-KnownPortableViiperPath([string]$path) {
 }
 
 function Remove-ForeignViiperInstallations {
-    $foreign = @(Get-ForeignViiperProcesses | Where-Object {
-        $script:PortableInstallation -or
-            -not (Test-KnownPortableViiperPath `
-                ($_.ExecutablePath -as [string]))
-    })
+    # There is one elevated backend owner: Program Files. An older
+    # LocalAppData copy is foreign too, even when DS4Windows itself remains
+    # portable.
+    $foreign = @(Get-ForeignViiperProcesses)
     if ($foreign.Count -eq 0) { return }
 
     Write-SetupLog (
@@ -1341,7 +1347,7 @@ function Remove-ForeignViiperInstallations {
         if ($remaining.Count -eq 0) { break }
         foreach ($process in $remaining) {
             try {
-                & taskkill.exe /PID $process.ProcessId /T /F 2>&1 |
+                & $script:TaskKillPath /PID $process.ProcessId /T /F 2>&1 |
                     Out-Null
             }
             catch { }
@@ -1367,6 +1373,14 @@ function Remove-ForeignViiperInstallations {
         if (Test-ManagedViiperPath $path) {
             throw "Refusing to remove the managed VIIPER binary: $path"
         }
+        if (-not (Test-KnownPortableViiperPath $path) -or
+                -not (Test-RecognizedProductExecutable $path "VIIPER")) {
+            Write-SetupLog (
+                "Stopped but preserved an unmanaged executable outside the " +
+                "installer-owned LocalAppData VIIPER path: $path"
+            ) Yellow
+            continue
+        }
         try {
             Remove-Item -LiteralPath $path -Force -ErrorAction Stop
         }
@@ -1384,8 +1398,6 @@ function Remove-ForeignViiperInstallations {
 }
 
 function Remove-PortableViiperInstallationForStandardMode {
-    if ($script:PortableInstallation) { return }
-
     $portableDirectory = Get-PortableViiperDirectory
     if (-not (Test-Path -LiteralPath $portableDirectory)) { return }
 
@@ -1451,7 +1463,7 @@ function Remove-PortableViiperInstallationForStandardMode {
 }
 
 function Stop-InstallerHostForStandardMigration {
-    if ($script:PortableInstallation -or $script:InstallerHostPid -le 0) {
+    if ($script:KeepDs4WindowsPortable -or $script:InstallerHostPid -le 0) {
         return
     }
 
@@ -1496,7 +1508,7 @@ function Stop-InstallerHostForStandardMigration {
 }
 
 function Remove-PortableDs4WindowsPackageForStandardMode {
-    if ($script:PortableInstallation) { return }
+    if ($script:KeepDs4WindowsPortable) { return }
 
     $portableDirectory = [IO.Path]::GetFullPath(
         (Split-Path -Parent $TargetDs4WindowsPath)).TrimEnd('\', '/')
@@ -1629,7 +1641,8 @@ function Stop-ViiperProcesses([string]$operation) {
             foreach ($process in $remaining) {
                 if ($process.ProcessId -eq $PID) { continue }
                 try {
-                    & taskkill.exe /PID $process.ProcessId /T /F | Out-Null
+                    & $script:TaskKillPath /PID $process.ProcessId /T /F |
+                        Out-Null
                 }
                 catch { }
             }
@@ -2147,12 +2160,12 @@ function Protect-ElevatedTaskTargetDirectory([string]$directory,
     $administrators = '*S-1-5-32-544'
     $system = '*S-1-5-18'
     $targetUser = "*$script:TargetUserSid"
-    $aclOutput = @(& icacls.exe $resolved /reset /Q 2>&1)
+    $aclOutput = @(& $script:IcaclsPath $resolved /reset /Q 2>&1)
     if ($LASTEXITCODE -ne 0) {
         throw "Could not reset access controls for the $label directory: " +
             (Format-NativeFailure $aclOutput)
     }
-    $aclOutput = @(& icacls.exe $resolved /inheritance:r /grant:r `
+    $aclOutput = @(& $script:IcaclsPath $resolved /inheritance:r /grant:r `
         "${system}:(OI)(CI)(F)" `
         "${administrators}:(OI)(CI)(F)" `
         "${targetUser}:(OI)(CI)(RX)" /Q 2>&1)
@@ -2160,7 +2173,7 @@ function Protect-ElevatedTaskTargetDirectory([string]$directory,
         throw "Could not protect the elevated $label startup target: " +
             (Format-NativeFailure $aclOutput)
     }
-    $aclOutput = @(& icacls.exe $resolved /setowner $administrators /Q 2>&1)
+    $aclOutput = @(& $script:IcaclsPath $resolved /setowner $administrators /Q 2>&1)
     if ($LASTEXITCODE -ne 0) {
         throw "Could not assign protected ownership for ${label}: " +
             (Format-NativeFailure $aclOutput)
@@ -2185,14 +2198,14 @@ function Protect-ElevatedTaskTargetFile([string]$filePath, [string]$label) {
     $administrators = '*S-1-5-32-544'
     $system = '*S-1-5-18'
     $targetUser = "*$script:TargetUserSid"
-    $aclOutput = @(& icacls.exe $resolved /inheritance:r /grant:r `
+    $aclOutput = @(& $script:IcaclsPath $resolved /inheritance:r /grant:r `
         "${system}:(F)" "${administrators}:(F)" "${targetUser}:(RX)" `
         /Q 2>&1)
     if ($LASTEXITCODE -ne 0) {
         throw "Could not protect the elevated $label startup executable: " +
             (Format-NativeFailure $aclOutput)
     }
-    $aclOutput = @(& icacls.exe $resolved /setowner $administrators /Q 2>&1)
+    $aclOutput = @(& $script:IcaclsPath $resolved /setowner $administrators /Q 2>&1)
     if ($LASTEXITCODE -ne 0) {
         throw "Could not assign protected ownership for the $label startup " +
             "executable: " + (Format-NativeFailure $aclOutput)
@@ -2247,8 +2260,8 @@ try {
     Write-Host ""
     Write-Host "DS4Windows VIIPER virtual controller setup" `
         -ForegroundColor Green
-    $installationMode = if ($script:PortableInstallation) {
-        "Portable: keep DS4Windows in place; install VIIPER in LocalAppData."
+    $installationMode = if ($script:KeepDs4WindowsPortable) {
+        "Portable app: keep DS4Windows in place; install VIIPER safely in Program Files."
     }
     else {
         "Standard: install DS4Windows and VIIPER in Program Files."
@@ -2286,47 +2299,16 @@ try {
 
     $script:InstallDir = Assert-SafeManagedDirectory $script:InstallDir `
         "VIIPER installation"
-    if (-not $script:PortableInstallation) {
+    if (-not $script:KeepDs4WindowsPortable) {
         $script:Ds4WindowsInstallDir = Assert-SafeManagedDirectory `
             $script:Ds4WindowsInstallDir "managed DS4Windows installation"
         New-Item -ItemType Directory -Path $script:Ds4WindowsInstallDir `
             -Force | Out-Null
-        try {
-            Protect-ElevatedTaskTargetDirectory $script:Ds4WindowsInstallDir `
-                "DS4Windows"
-        }
-        catch {
-            if (-not $script:InstallerMode) { throw }
-            # MSI already created this directory under Program Files with
-            # Windows Installer ownership. A third-party filesystem filter can
-            # reject redundant directory ACL normalization; the exact task
-            # executable is protected and verified below before registration.
-            Write-SetupLog (
-                "Windows Installer directory ACL normalization was skipped: " +
-                $_.Exception.Message
-            ) Yellow
-        }
+        Protect-ElevatedTaskTargetDirectory $script:Ds4WindowsInstallDir `
+            "DS4Windows"
     }
     New-Item -ItemType Directory -Path $script:InstallDir -Force | Out-Null
-    if (-not $script:PortableInstallation) {
-        try {
-            Protect-ElevatedTaskTargetDirectory $script:InstallDir "VIIPER"
-        }
-        catch {
-            if (-not $script:InstallerMode) { throw }
-            Write-SetupLog (
-                "VIIPER directory ACL normalization was skipped: " +
-                $_.Exception.Message
-            ) Yellow
-        }
-    }
-    else {
-        Write-SetupLog (
-            "Portable mode selected: VIIPER will run elevated from the " +
-            "user-writable path $script:InstallDir. Program Files provides " +
-            "stronger tamper protection."
-        ) Yellow
-    }
+    Protect-ElevatedTaskTargetDirectory $script:InstallDir "VIIPER"
     New-Item -ItemType Directory -Path $script:TempDir -Force | Out-Null
     Write-SetupLog ""
     Write-SetupLog "Setup authorized; beginning verified installation." Green
@@ -2427,7 +2409,7 @@ try {
                 "release ZIP, and run Install / Repair again."
         }
 
-    if ($script:PortableInstallation) {
+    if ($script:KeepDs4WindowsPortable) {
         # Keep the exact package executable that initiated setup. No
         # DS4Windows files are copied into Program Files in portable mode.
         Write-SetupLog (
@@ -2447,12 +2429,11 @@ try {
     }
     }
 
-    if (-not $script:PortableInstallation) {
-        # Program Files inheritance protects the package tree. Lock the two
-        # executable task targets explicitly instead of recursively rewriting
-        # thousands of self-contained runtime files, which is slow and can
-        # fail on otherwise healthy systems with security-filter drivers.
-        Protect-ElevatedTaskTargetFile $viiperPath "VIIPER"
+    # VIIPER is always an elevated Program Files component. Lock its task
+    # target regardless of where the unprivileged DS4Windows UI lives.
+    Protect-ElevatedTaskTargetFile $viiperPath "VIIPER"
+    if (-not $script:KeepDs4WindowsPortable) {
+        # Program Files inheritance protects the managed app package tree.
         Protect-ElevatedTaskTargetFile $script:Ds4WindowsRestartPath `
             "DS4Windows"
     }
@@ -2799,7 +2780,7 @@ try {
         if ($script:Ds4WindowsRestartPath -and -not $script:InstallerMode) {
             Write-SetupLog "SUCCESSFUL: restarting DS4Windows in 2 seconds." Green
             Start-Sleep -Seconds 2
-            if (-not $script:PortableInstallation) {
+            if (-not $script:KeepDs4WindowsPortable) {
                 Stop-InstallerHostForStandardMigration
                 Remove-PortableDs4WindowsPackageForStandardMode
             }

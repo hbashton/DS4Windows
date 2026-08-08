@@ -61,8 +61,8 @@ namespace DS4WindowsTests
                     Assert.AreEqual(Visibility.Collapsed,
                         ((CheckBox)repairPrompt.FindName(
                             "suppressPromptCheck")).Visibility);
-                    Assert.IsTrue(repairPrompt.ExitApplicationRequested,
-                        "Mandatory USB-IP repair must not be dismissible into an unsafe runtime.");
+                    Assert.IsFalse(repairPrompt.ExitApplicationRequested,
+                        "The settings UI must remain available in degraded mode while virtual output fails closed.");
 
                     var missingPrompt = new ViiperSetupPrompt(
                         "VIIPER and usbip-win2 need setup", null,
@@ -70,11 +70,11 @@ namespace DS4WindowsTests
                     Assert.AreEqual("VIIPER setup required",
                         ((TextBlock)missingPrompt.FindName(
                             "headingText")).Text);
-                    Assert.AreEqual("Exit DS4Windows",
+                    Assert.AreEqual("Continue without virtual output",
                         ((Button)missingPrompt.FindName(
                             "notNowButton")).Content);
-                    Assert.IsTrue(missingPrompt.ExitApplicationRequested,
-                        "Missing prerequisites must not be suppressible into a backend-less runtime.");
+                    Assert.IsFalse(missingPrompt.ExitApplicationRequested,
+                        "Missing prerequisites must leave repair and diagnostics accessible.");
 
                     // The repair progress surface is created before the
                     // elevated setup host runs. Its clean-install XAML must

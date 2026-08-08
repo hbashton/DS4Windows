@@ -116,10 +116,10 @@
                             Visibility="Collapsed">
                         <StackPanel>
                             <TextBlock x:Name="existingViiperHeadingText"
-                                       Text="Keep the VIIPER you already launched"
+                                       Text="Competing VIIPER detected"
                                        FontWeight="SemiBold" />
                             <TextBlock x:Name="existingViiperDescriptionText"
-                                       Text="DS4Windows can trust this executable and keep its RunVIIPER startup task pointed here:"
+                                       Text="This executable will not be elevated or selected. Install or Repair uses the verified Program Files backend and removes only recognized legacy VIIPER files:"
                                        Foreground="{DynamicResource MutedForegroundColor}"
                                        TextWrapping="Wrap"
                                        Margin="0,4,0,7" />
@@ -143,7 +143,7 @@
                             CornerRadius="6"
                             Padding="12"
                             Margin="0,0,0,16">
-                        <TextBlock Text="Portable installation keeps this DS4Windows executable in place and installs VIIPER under LocalAppData. Its elevated startup target has less tamper protection than Program Files; choose it only if you accept that tradeoff. Choosing Standard removes only installer-owned LocalAppData VIIPER files and manifest-owned portable DS4Windows package files; profiles, settings, and unrecognized files are preserved."
+                        <TextBlock Text="Keep DS4Windows portable leaves this app exactly where it is, while installing the elevated VIIPER backend in protected Program Files. Standard also moves only package-owned DS4Windows files into Program Files. Profiles, settings, and unrecognized files are always preserved."
                                    Foreground="{DynamicResource MutedForegroundColor}"
                                    TextWrapping="Wrap" />
                     </Border>
@@ -160,15 +160,8 @@
                                 HorizontalAlignment="Left"
                                 Click="NotNowButton_Click" />
                         <StackPanel Grid.Column="1" Orientation="Horizontal">
-                            <Button x:Name="useExistingButton"
-                                    Content="Use this VIIPER"
-                                    MinWidth="132"
-                                    Margin="0,0,10,0"
-                                    Visibility="Collapsed"
-                                    Style="{StaticResource BridgeSecondaryButtonStyle}"
-                                    Click="UseExistingButton_Click" />
                             <Button x:Name="installPortableButton"
-                                    Content="Install portably"
+                                    Content="Keep DS4Windows portable"
                                     MinWidth="132"
                                     Margin="0,0,10,0"
                                     Style="{StaticResource BridgeSecondaryButtonStyle}"

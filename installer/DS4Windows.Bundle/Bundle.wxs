@@ -11,15 +11,12 @@
       AboutUrl="https://github.com/hbashton/DS4Windows"
       HelpUrl="https://github.com/hbashton/DS4Windows/issues">
 
-    <BootstrapperApplication SourceFile="$(var.BootstrapperRoot)\DS4Windows.Bootstrapper.exe">
-      <Payload SourceFile="$(var.BootstrapperRoot)\DS4Windows.Bootstrapper.exe.config" />
-      <Payload SourceFile="$(var.BootstrapperRoot)\mbanative.dll" />
-      <Payload SourceFile="$(var.BootstrapperRoot)\WixToolset.BootstrapperApplicationApi.dll" />
-    </BootstrapperApplication>
+    <BootstrapperApplication SourceFile="$(var.BootstrapperRoot)\DS4Windows.Bootstrapper.exe" />
 
     <Variable Name="CreateDesktopShortcut" Type="numeric" Value="1" />
     <Variable Name="InstallHidHide" Type="numeric" Value="1" />
     <Variable Name="InstallFakerInput" Type="numeric" Value="0" />
+    <Variable Name="SetupCorrelationId" Type="string" Value="" Persisted="yes" />
     <Variable Name="TargetUserSid" Type="string" Value="" Persisted="yes" />
     <Variable Name="TargetUserName" Type="string" Value="" Persisted="yes" />
     <Variable Name="TargetLocalAppData" Type="string" Value="" Persisted="yes" />
@@ -69,7 +66,7 @@
           Permanent="yes"
           Vital="yes"
           DetectCondition="0"
-          InstallArguments="preflight">
+          InstallArguments="preflight --correlation-id &quot;[SetupCorrelationId]&quot;">
         <ExitCode Value="0" Behavior="success" />
         <ExitCode Behavior="error" />
       </ExePackage>
@@ -78,9 +75,7 @@
           Id="DS4WindowsMsi"
           SourceFile="$(var.MsiPath)"
           Visible="no"
-          Vital="yes">
-        <MsiProperty Name="DESKTOP_SHORTCUT" Value="[CreateDesktopShortcut]" />
-      </MsiPackage>
+          Vital="yes" />
 
       <ExePackage
           Id="ViiperUsbipSetup"
@@ -89,9 +84,9 @@
           PerMachine="yes"
           Vital="yes"
           DetectCondition="InfrastructureInstalled = &quot;VIIPER-0.0.9+USBIP-0.9.7.7&quot; OR ManagedInstallRegistered OR ManagedViiperPresent"
-          InstallArguments="install --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot; --bundle-source &quot;[WixBundleOriginalSource]&quot; --target-user-sid &quot;[TargetUserSid]&quot; --target-user-name &quot;[TargetUserName]&quot; --target-local-appdata &quot;[TargetLocalAppData]&quot; --target-roaming-appdata &quot;[TargetRoamingAppData]&quot;"
-          RepairArguments="repair --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot; --bundle-source &quot;[WixBundleOriginalSource]&quot; --target-user-sid &quot;[TargetUserSid]&quot; --target-user-name &quot;[TargetUserName]&quot; --target-local-appdata &quot;[TargetLocalAppData]&quot; --target-roaming-appdata &quot;[TargetRoamingAppData]&quot;"
-          UninstallArguments="uninstall --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot;">
+          InstallArguments="install --correlation-id &quot;[SetupCorrelationId]&quot; --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot; --bundle-source &quot;[WixBundleOriginalSource]&quot; --desktop-shortcut &quot;[CreateDesktopShortcut]&quot; --target-user-sid &quot;[TargetUserSid]&quot; --target-user-name &quot;[TargetUserName]&quot; --target-local-appdata &quot;[TargetLocalAppData]&quot; --target-roaming-appdata &quot;[TargetRoamingAppData]&quot;"
+          RepairArguments="repair --correlation-id &quot;[SetupCorrelationId]&quot; --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot; --bundle-source &quot;[WixBundleOriginalSource]&quot; --desktop-shortcut &quot;[CreateDesktopShortcut]&quot; --target-user-sid &quot;[TargetUserSid]&quot; --target-user-name &quot;[TargetUserName]&quot; --target-local-appdata &quot;[TargetLocalAppData]&quot; --target-roaming-appdata &quot;[TargetRoamingAppData]&quot;"
+          UninstallArguments="uninstall --correlation-id &quot;[SetupCorrelationId]&quot; --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot;">
         <ExitCode Value="0" Behavior="success" />
         <ExitCode Value="3010" Behavior="scheduleReboot" />
         <ExitCode Behavior="error" />
@@ -102,7 +97,7 @@
           SourceFile="$(var.ExtrasRoot)\HidHide_1.5.230_x64.exe"
           PerMachine="yes"
           Permanent="yes"
-          Vital="yes"
+          Vital="no"
           DetectCondition="HidHideInstalled"
           InstallCondition="InstallHidHide"
           InstallArguments="/quiet /norestart">
@@ -115,7 +110,7 @@
           Id="FakerInput"
           SourceFile="$(var.ExtrasRoot)\FakerInput_0.1.0_x64.msi"
           Permanent="yes"
-          Vital="yes"
+          Vital="no"
           InstallCondition="InstallFakerInput"
           Visible="no" />
 
@@ -132,7 +127,7 @@
           Permanent="yes"
           Vital="yes"
           DetectCondition="0"
-          InstallArguments="preflight">
+          InstallArguments="preflight --correlation-id &quot;[SetupCorrelationId]&quot;">
         <ExitCode Value="0" Behavior="success" />
         <ExitCode Behavior="error" />
       </ExePackage>

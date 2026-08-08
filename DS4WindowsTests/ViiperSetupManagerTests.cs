@@ -122,45 +122,23 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
-        public void HealthyPortableRuntimeRemainsUsableWhileMigrationIsOffered()
-        {
-            ViiperPrerequisiteStatus status = new ViiperPrerequisiteStatus
-            {
-                ViiperInstalled = true,
-                ViiperPackageCurrent = true,
-                ServerRunning = true,
-                UsbipInstalled = true,
-                UsbipExecutableSafe = true,
-                UsbipDriverFilesSafe = true,
-                UsbipRuntimeReady = true,
-                UsingExternalViiper = true,
-            };
-
-            Assert.IsTrue(ViiperSetupManager.IsReadyPortableRuntime(status));
-            status.UsingExternalViiper = false;
-            Assert.IsFalse(ViiperSetupManager.IsReadyPortableRuntime(status));
-            status.UsingExternalViiper = true;
-            status.ServerRunning = false;
-            Assert.IsFalse(ViiperSetupManager.IsReadyPortableRuntime(status));
-        }
-
-        [TestMethod]
-        public void ExplicitPortablePathWinsOverAStaleStartupTask()
+        public void ExternalRuntimeIsNeverSelectedAsTheManagedBackend()
         {
             string directory = Path.Combine(Path.GetTempPath(),
                 $"viiper-portable-{Guid.NewGuid():N}");
             string preferred = Path.Combine(directory, "viiper.exe");
+            string canonical = Path.Combine(directory, "canonical",
+                "viiper.exe");
             try
             {
                 Directory.CreateDirectory(directory);
                 File.WriteAllBytes(preferred, new byte[] { 0x4D, 0x5A });
 
                 string selected = ViiperSetupManager.ResolveRuntimeViiperPath(
-                    Path.Combine(directory, "canonical", "viiper.exe"),
-                    preferred);
+                    canonical, preferred);
 
                 Assert.IsTrue(ViiperSetupManager.IsExactViiperExecutablePath(
-                    preferred, selected));
+                    canonical, selected));
             }
             finally
             {
@@ -172,16 +150,18 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
-        public void PortableInstallerViiperPathUsesLocalAppData()
+        public void CanonicalRuntimeIgnoresLegacyLocalAppDataPreference()
         {
             string localApplicationData = Path.Combine("C:\\Users", "Tester",
                 "AppData", "Local");
+            string canonical = Path.Combine("C:\\Program Files", "DS4Windows",
+                "VIIPER", "viiper.exe");
 
-            string path = ViiperSetupManager.GetPortableViiperExePath(
-                localApplicationData);
+            string path = ViiperSetupManager.ResolveRuntimeViiperPath(
+                canonical, Path.Combine(localApplicationData, "VIIPER",
+                    "viiper.exe"));
 
-            Assert.AreEqual(Path.Combine(localApplicationData, "VIIPER",
-                "viiper.exe"), path);
+            Assert.AreEqual(canonical, path);
         }
 
         [TestMethod]

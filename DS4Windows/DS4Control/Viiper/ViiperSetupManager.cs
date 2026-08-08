@@ -52,7 +52,6 @@ namespace DS4Windows
         public string UsbipVersion { get; set; }
         public string UsbipProbeMessage { get; set; }
         public string ViiperProcessConflictMessage { get; set; }
-        public bool UsingExternalViiper { get; set; }
         public bool CitrixUsbMonitorConflict { get; set; }
         public string CitrixUsbMonitorConflictMessage { get; set; }
 
@@ -226,10 +225,10 @@ namespace DS4Windows
         public static ViiperPrerequisiteStatus GetStatus(bool tryStartServer = false)
         {
             string canonicalViiperPath = GetCanonicalViiperExePath();
-            string viiperPath = ResolveRuntimeViiperPath(
-                canonicalViiperPath, Global.PreferredViiperPath);
-            bool usingExternalViiper = !IsExactViiperExecutablePath(
-                viiperPath, canonicalViiperPath);
+            // Elevated infrastructure has one protected owner. Portable
+            // DS4Windows packages still use the canonical Program Files
+            // backend; a user-writable executable is never elevated.
+            string viiperPath = canonicalViiperPath;
             string bundledViiperPath = GetBundledViiperPath();
             string setupScriptPath = GetSetupScriptPath();
             string usbipPath = GetCanonicalUsbipPath();
@@ -269,9 +268,7 @@ namespace DS4Windows
                         : $"usbip.exe {usbipVersion} does not match the supported {RequiredUsbipVersion}.";
             }
 
-            // Location never weakens binary identity. Program Files,
-            // LocalAppData, and arbitrary portable choices must all be the
-            // exact VIIPER executable bundled with this DS4Windows build.
+            // Verify both the protected location and exact package identity.
             bool viiperPackageCurrent = IsBundledViiperAuthentic() &&
                 FilesHaveSameSha256(viiperPath, bundledViiperPath);
             bool startupEnabled = DS4WinWPF.StartupMethods.
@@ -310,7 +307,6 @@ namespace DS4Windows
                 ViiperPackageCurrent = viiperPackageCurrent,
                 ViiperProcessConflict = !viiperProcessOwnershipReady,
                 ViiperProcessConflictMessage = viiperProcessConflictMessage,
-                UsingExternalViiper = usingExternalViiper,
                 ViiperStartupTaskReady = viiperStartupTaskReady,
                 SetupScriptFound = File.Exists(setupScriptPath),
                 UsbipInstalled = usbipInstalled,
@@ -337,7 +333,6 @@ namespace DS4Windows
         public static bool EnsureReadyWithPrompt(Window owner, bool forcePrompt = false)
         {
             ViiperPrerequisiteStatus status = GetStatus(tryStartServer: true);
-            bool readyPortableViiper = IsReadyPortableRuntime(status);
             bool verifiedUpdateRequired = RequiresVerifiedViiperUpdate(status);
             bool usbipReplacementRequired =
                 RequiresUsbipReplacement(status);
@@ -347,7 +342,7 @@ namespace DS4Windows
             // separate from verifiedUpdateRequired lets the prompt explain a
             // missing dependency accurately while still failing closed.
             bool mandatoryRepairRequired = !status.Ready;
-            if (status.Ready && !readyPortableViiper && !forcePrompt)
+            if (status.Ready && !forcePrompt)
             {
                 return true;
             }
@@ -355,22 +350,21 @@ namespace DS4Windows
             if (Global.SuppressViiperSetupPrompt && !forcePrompt &&
                 !mandatoryRepairRequired)
             {
-                return readyPortableViiper;
+                return status.Ready;
             }
 
             if (Volatile.Read(ref promptShownThisSession) == 1 && !forcePrompt &&
                 !mandatoryRepairRequired)
             {
-                return readyPortableViiper;
+                return status.Ready;
             }
 
             Interlocked.Exchange(ref promptShownThisSession, 1);
-            string alternativeViiperPath = readyPortableViiper
-                ? status.ViiperPath
-                : FindAlternativeViiperPath(GetCanonicalViiperExePath());
+            string alternativeViiperPath =
+                FindAlternativeViiperPath(GetCanonicalViiperExePath());
             DS4WinWPF.DS4Forms.ViiperSetupPrompt prompt = new(
                 status.DisplayText, alternativeViiperPath,
-                status.CitrixUsbMonitorConflict, readyPortableViiper,
+                status.CitrixUsbMonitorConflict,
                 verifiedUpdateRequired, usbipReplacementRequired,
                 mandatoryRepairRequired);
             if (owner != null && owner.IsLoaded)
@@ -434,24 +428,13 @@ namespace DS4Windows
                         portableInstallation: true);
                     return false;
 
-                case DS4WinWPF.DS4Forms.ViiperSetupPromptDecision.
-                    UseExisting:
-                    return readyPortableViiper
-                        ? KeepReadyPortableViiper(alternativeViiperPath,
-                            owner)
-                        : TryAdoptViiperExecutable(alternativeViiperPath,
-                            owner);
-
                 default:
-                    return readyPortableViiper;
+                    // Continue in degraded mode. Virtual output remains
+                    // fail-closed, while Settings and diagnostics stay
+                    // available so a broken prerequisite cannot make the UI
+                    // look like it failed to launch.
+                    return status.Ready;
             }
-        }
-
-        internal static bool IsReadyPortableRuntime(
-            ViiperPrerequisiteStatus status)
-        {
-            return status != null && status.Ready &&
-                status.UsingExternalViiper;
         }
 
         internal static bool RequiresVerifiedViiperUpdate(
@@ -488,8 +471,7 @@ namespace DS4Windows
             }
 
             string canonicalPath = GetCanonicalViiperExePath();
-            string selectedPath = ResolveRuntimeViiperPath(canonicalPath,
-                Global.PreferredViiperPath);
+            string selectedPath = canonicalPath;
             if (!File.Exists(selectedPath))
             {
                 return;
@@ -501,10 +483,7 @@ namespace DS4Windows
                 return;
             }
 
-            string persistedPath = IsExactViiperExecutablePath(selectedPath,
-                    canonicalPath)
-                ? string.Empty
-                : Path.GetFullPath(selectedPath);
+            string persistedPath = string.Empty;
             if (!string.Equals(Global.PreferredViiperPath ?? string.Empty,
                     persistedPath, StringComparison.OrdinalIgnoreCase))
             {
@@ -670,9 +649,7 @@ namespace DS4Windows
                 // canceling UAC must not disable a working portable backend.
                 if (exitCode == 0)
                 {
-                    Global.PreferredViiperPath = portableInstallation
-                        ? GetPortableViiperExePath(targetLocalAppData)
-                        : string.Empty;
+                    Global.PreferredViiperPath = string.Empty;
                     Global.Save();
                 }
 
@@ -928,9 +905,16 @@ namespace DS4Windows
                     startInfo.ArgumentList.Add("-InstallerHostPid");
                     startInfo.ArgumentList.Add(
                         Environment.ProcessId.ToString());
+                    string correlationId = Guid.NewGuid().ToString("N");
+                    WriteInstallerHostLog(
+                        $"Starting embedded infrastructure transaction " +
+                        $"{correlationId}.");
+                    startInfo.ArgumentList.Add("-CorrelationId");
+                    startInfo.ArgumentList.Add(correlationId);
                     if (portableInstallation)
                     {
-                        startInfo.ArgumentList.Add("-PortableInstallation");
+                        startInfo.ArgumentList.Add(
+                            "-KeepDs4WindowsPortable");
                     }
                     if (skipStartupTasks)
                     {
@@ -1303,16 +1287,6 @@ namespace DS4Windows
                 "viiper.exe");
         }
 
-        internal static string GetPortableViiperExePath(
-            string localApplicationData = null)
-        {
-            string root = string.IsNullOrWhiteSpace(localApplicationData)
-                ? Environment.GetFolderPath(
-                    Environment.SpecialFolder.LocalApplicationData)
-                : localApplicationData;
-            return Path.Combine(Path.GetFullPath(root), "VIIPER", "viiper.exe");
-        }
-
         internal static string BuildInstallerFailureMessage(int exitCode,
             string logPath)
         {
@@ -1355,74 +1329,12 @@ namespace DS4Windows
             }
         }
 
-        internal static string ResolveConfiguredViiperPath(
-            string canonicalPath, string preferredPath)
-        {
-            if (!string.IsNullOrWhiteSpace(preferredPath))
-            {
-                try
-                {
-                    string normalized = Path.GetFullPath(preferredPath);
-                    if (File.Exists(normalized))
-                    {
-                        return normalized;
-                    }
-                }
-                catch { }
-            }
-
-            return canonicalPath;
-        }
-
         internal static string ResolveRuntimeViiperPath(
             string canonicalPath, string preferredPath)
         {
-            string selectedPath = ResolveConfiguredViiperPath(canonicalPath,
-                preferredPath);
-            // An explicit, existing portable choice is authoritative. A stale
-            // running process or startup-task action describes yesterday's
-            // runtime; it must not silently replace the path the user saved.
-            if (!string.IsNullOrWhiteSpace(preferredPath))
-            {
-                try
-                {
-                    if (IsExactViiperExecutablePath(selectedPath,
-                            Path.GetFullPath(preferredPath)))
-                    {
-                        return selectedPath;
-                    }
-                }
-                catch { }
-            }
-
-            List<ViiperProcessIdentity> processes =
-                GetRunningViiperProcesses();
-            if (processes != null)
-            {
-                foreach (ViiperProcessIdentity process in processes)
-                {
-                    if (IsExactViiperExecutablePath(process.ExecutablePath,
-                            selectedPath))
-                    {
-                        return selectedPath;
-                    }
-                }
-
-                string runningAlternative = SelectAlternativeViiperPath(
-                    selectedPath,
-                    processes.ConvertAll(process => process.ExecutablePath),
-                    null);
-                if (!string.IsNullOrWhiteSpace(runningAlternative))
-                {
-                    return runningAlternative;
-                }
-            }
-
-            string taskAlternative = SelectAlternativeViiperPath(
-                selectedPath, null, GetRunViiperTaskExecutablePath());
-            return string.IsNullOrWhiteSpace(taskAlternative)
-                ? selectedPath
-                : taskAlternative;
+            // The preferred-path setting is retained only so old profiles can
+            // deserialize. Runtime ownership is always canonical.
+            return canonicalPath;
         }
 
         private static bool IsSelectableViiperExecutable(string viiperPath)
@@ -1620,92 +1532,6 @@ namespace DS4Windows
                     ex.Message;
                 return false;
             }
-        }
-
-        private static bool TryAdoptViiperExecutable(string viiperPath,
-            Window owner)
-        {
-            if (!IsSelectableViiperExecutable(viiperPath))
-            {
-                ShowInstallerMessage(owner,
-                    "The selected VIIPER executable is missing or does not " +
-                    "match the supported VIIPER 0.0.9 contract.",
-                    "VIIPER could not be selected", MessageBoxImage.Warning);
-                return false;
-            }
-
-            if (!TryTerminateForeignViiperProcesses(viiperPath,
-                    out string ownershipFailure))
-            {
-                ShowInstallerMessage(owner, ownershipFailure,
-                    "VIIPER ownership could not be changed",
-                    MessageBoxImage.Warning);
-                return false;
-            }
-
-            if (DS4WinWPF.StartupMethods.IsRunAtStartupEnabled() &&
-                !EnsureViiperStartupTask(viiperPath,
-                    requestElevation: true))
-            {
-                ShowInstallerMessage(owner,
-                    "Windows could not retarget the elevated RunVIIPER " +
-                    "startup task. The executable was not adopted.",
-                    "VIIPER startup task", MessageBoxImage.Warning);
-                return false;
-            }
-
-            Global.PreferredViiperPath = Path.GetFullPath(viiperPath);
-            if (!Global.Save())
-            {
-                ShowInstallerMessage(owner,
-                    "DS4Windows could not save the selected VIIPER path.",
-                    "VIIPER preference", MessageBoxImage.Warning);
-                return false;
-            }
-
-            DS4WinWPF.StartupMethods.
-                RetargetExistingTaskToCurrentExecutable();
-            TryStartServerOnce(Global.PreferredViiperPath);
-            return GetStatus(tryStartServer: false).Ready;
-        }
-
-        private static bool KeepReadyPortableViiper(string viiperPath,
-            Window owner)
-        {
-            // GetStatus already proved that this exact executable is running,
-            // compatible, and backed by a healthy USB/IP runtime. Keeping it
-            // must never tear down that working session merely because task
-            // registration is canceled or unavailable.
-            if (!IsSelectableViiperExecutable(viiperPath))
-            {
-                return false;
-            }
-
-            Global.PreferredViiperPath = Path.GetFullPath(viiperPath);
-            if (!Global.Save())
-            {
-                AppLogger.LogToGui(
-                    "Portable VIIPER is still active, but its preferred path could not be saved.",
-                    true);
-            }
-
-            bool startupEnabled = DS4WinWPF.StartupMethods.
-                IsRunAtStartupEnabled();
-            bool taskReady = !startupEnabled || EnsureViiperStartupTask(
-                viiperPath, requestElevation: true);
-            if (!taskReady)
-            {
-                ShowInstallerMessage(owner,
-                    "Portable VIIPER remains active for this session. " +
-                    "Windows did not update its startup task, so use " +
-                    "Settings > VIIPER Virtual Controller Support to retry " +
-                    "before the next sign-in.",
-                    "Portable VIIPER kept", MessageBoxImage.Information);
-            }
-
-            DS4WinWPF.StartupMethods.
-                RetargetExistingTaskToCurrentExecutable();
-            return true;
         }
 
         private static bool EnsureViiperStartupTask(string viiperPath,

@@ -381,18 +381,11 @@ namespace DS4WinWPF
             {
                 DS4Windows.ViiperSetupManager.
                     RefreshSelectedStartupTaskOnLaunch();
-                bool viiperReady = DS4Windows.ViiperSetupManager.
-                    EnsureReadyWithPrompt(null);
-                if (!viiperReady || Dispatcher.HasShutdownStarted ||
-                    Dispatcher.HasShutdownFinished)
-                {
-                    if (!Dispatcher.HasShutdownStarted &&
-                        !Dispatcher.HasShutdownFinished)
-                    {
-                        Shutdown();
-                    }
-                    return;
-                }
+                // Keep the UI and repair diagnostics available when the
+                // backend is unhealthy. Virtual output already fails closed
+                // at its own readiness gate; exiting here made an install
+                // problem indistinguishable from an application crash.
+                DS4Windows.ViiperSetupManager.EnsureReadyWithPrompt(null);
             }
             else
             {

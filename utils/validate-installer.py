@@ -215,13 +215,18 @@ def main() -> int:
         "CloseRunningApplicationsForUninstall",
         "DS4WindowsMsi",
         "ViiperUsbipSetup",
-        "HidHide",
-        "FakerInput",
     ):
         if package_id not in packages:
             raise SystemExit(f"Bundle package is missing: {package_id}")
         if packages[package_id].get("Vital") != "yes":
             raise SystemExit(f"Bundle package must be vital: {package_id}")
+    for package_id in ("HidHide", "FakerInput"):
+        if package_id not in packages:
+            raise SystemExit(f"Bundle package is missing: {package_id}")
+        if packages[package_id].get("Vital") != "no":
+            raise SystemExit(
+                f"Optional package must not roll back the core install: {package_id}"
+            )
     if packages["HidHide"].get("InstallCondition") != "InstallHidHide":
         raise SystemExit("HidHide optional-install condition is invalid.")
     if packages["FakerInput"].get("InstallCondition") != "InstallFakerInput":
@@ -257,6 +262,10 @@ def main() -> int:
         '-p:Version=$ProductVersion -p:InformationalVersion=$DisplayVersion',
         'test-viiper-reboot-boundary.ps1',
         'test-installer-state-machine.py',
+        '[switch]$RequireSigning',
+        'Unsigned public installers are intentionally blocked',
+        'Invoke-SignAndVerify $msiPath',
+        'Invoke-SignAndVerify $pendingInstaller',
     ]:
         if contract not in build_script:
             raise SystemExit("Installer build identity contract missing: " + contract)
@@ -270,19 +279,39 @@ def main() -> int:
         raise SystemExit(
             "The verified manifest must publish before the installer commit point."
         )
+    release_workflow = (
+        args.bundle_source.parent.parent.parent
+        / ".github"
+        / "workflows"
+        / "release.yml"
+    ).read_text(encoding="utf-8")
+    for contract in [
+        "$firstPartyBinaries = @(",
+        "output\\extras\\VIIPER-0.0.9-x64.exe",
+        "First-party release signing failed for $path.",
+    ]:
+        if contract not in release_workflow:
+            raise SystemExit(
+                "First-party release signing contract missing: " + contract
+            )
     if "Portable" in bundle or "InstallFolder" in bundle or "destination" in bundle.lower():
         raise SystemExit("The standard installer must not expose a portable or destination-selection path.")
+    for contract in [
+        'Name="SetupCorrelationId"',
+        'Persisted="yes"',
+        '--correlation-id &quot;[SetupCorrelationId]&quot;',
+    ]:
+        if contract not in bundle:
+            raise SystemExit(
+                "Burn-to-infrastructure correlation contract missing: " +
+                contract
+            )
 
     product = (args.bundle_source.parent.parent / "DS4Windows.Package" / "Product.wxs").read_text(encoding="utf-8")
     for contract in [
         '<MajorUpgrade',
-        'Id="DESKTOP_SHORTCUT"',
         'Scope="perMachine"',
-        '<StandardDirectory Id="ProgramMenuFolder">',
-        '<StandardDirectory Id="DesktopFolder" />',
-        'Directory="DesktopFolder"',
-        'Root="HKCU" Key="Software\\DS4Windows\\Installer"',
-        'Transitive="yes"',
+        'Root="HKLM" Key="Software\\DS4Windows"',
     ]:
         if contract not in product:
             raise SystemExit("MSI upgrade contract missing: " + contract)
@@ -303,6 +332,8 @@ def main() -> int:
         "IsRelatedBundleNewer",
         "ShowFailure(1638",
         "Interlocked.CompareExchange(ref planStarted, 1, 0)",
+        'engine.SetVariableString("SetupCorrelationId"',
+        'Path.Combine(Environment.SystemDirectory, "schtasks.exe")',
     ]:
         if contract not in bootstrapper:
             raise SystemExit(
@@ -331,6 +362,14 @@ def main() -> int:
         'return RunWithSetupMutex(PreflightLocked);',
         'completed with exit code',
         'AppendLogWithRetry',
+        'SystemTool("WindowsPowerShell", "v1.0",',
+        'arguments.Append(" -CorrelationId ")',
+        'ConfigureCommonShortcuts(ds4Path, desktopShortcut)',
+        'ReadArgument(args, "--correlation-id")',
+        'NormalizeCorrelationId(',
+        'Environment.SpecialFolder.CommonPrograms',
+        'Environment.SpecialFolder.CommonDesktopDirectory',
+        'RemoveCommonShortcuts()',
     ]:
         if contract not in setup_actions:
             raise SystemExit("Setup action safety contract missing: " + contract)
@@ -367,6 +406,11 @@ def main() -> int:
         '[string]::IsNullOrWhiteSpace($triggerUser)',
         "sourceInfo.Length -eq $destinationInfo.Length",
         "destinationHash = (Get-FileHash",
+        '$script:InstallDir = Join-Path $script:ManagedRoot "VIIPER"',
+        '$script:KeepDs4WindowsPortable',
+        '$script:CorrelationId',
+        "$CorrelationId.Trim() -notmatch '^[0-9A-Fa-f]{32}$'",
+        'Protect-ElevatedTaskTargetDirectory $script:InstallDir "VIIPER"',
     ]:
         if contract not in backend_script:
             raise SystemExit(
@@ -497,6 +541,7 @@ def main() -> int:
         "definition.Triggers.Add(new LogonTrigger())",
         "progress = new DS4WinWPF.DS4Forms.ViiperSetupProgress(",
         "progress.WaitForProcess(process)",
+        'startInfo.ArgumentList.Add("-CorrelationId")',
     ]:
         if contract not in setup_manager:
             raise SystemExit(

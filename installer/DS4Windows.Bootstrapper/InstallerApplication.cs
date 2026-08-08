@@ -58,6 +58,8 @@ namespace DS4Windows.Bootstrapper
                     if (command.Resume != ResumeType.Reboot)
                     {
                         SetInteractiveUserVariables();
+                        engine.SetVariableString("SetupCorrelationId",
+                            Guid.NewGuid().ToString("N"), true);
                     }
                     window = new InstallerWindow(this);
                     if (command.Display == Display.Full || command.Display == Display.Passive)
@@ -233,7 +235,9 @@ namespace DS4Windows.Bootstrapper
 
         internal void LaunchDs4Windows()
         {
-            var task = new ProcessStartInfo("schtasks.exe", "/Run /TN \"RunDS4Windows\"")
+            var task = new ProcessStartInfo(
+                Path.Combine(Environment.SystemDirectory, "schtasks.exe"),
+                "/Run /TN \"RunDS4Windows\"")
             {
                 UseShellExecute = false,
                 CreateNoWindow = true,

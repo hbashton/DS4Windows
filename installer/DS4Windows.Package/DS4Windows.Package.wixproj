@@ -3,7 +3,7 @@
     <Platform>x64</Platform>
     <OutputType>Package</OutputType>
     <OutputName>DS4Windows_$(ProductVersion)_x64</OutputName>
-    <ProductVersion Condition="'$(ProductVersion)' == ''">5.0.2.0</ProductVersion>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">5.0.3.0</ProductVersion>
     <PublishRoot Condition="'$(PublishRoot)' == ''">$(MSBuildThisFileDirectory)..\..\bin\x64\Release\output</PublishRoot>
     <DefineConstants>ProductVersion=$(ProductVersion);PublishRoot=$(PublishRoot)</DefineConstants>
     <!-- Burn owns downgrade ordering. The embedded MSI permits an equal

@@ -15,9 +15,9 @@ path. Program Files remains the recommended, tamper-resistant location.
 ```powershell
 .\installer\build-installer.ps1 `
   -PublishRoot .\bin\x64\Release\output `
-  -ProductVersion 5.0.2.0 `
-  -BundleVersion 5.0.2.0 `
-  -DisplayVersion 5.0.2.0 `
+  -ProductVersion 5.0.3.0 `
+  -BundleVersion 5.0.3.0 `
+  -DisplayVersion 5.0.3.0 `
   -SkipApplicationPublish
 ```
 

@@ -1,9 +1,30 @@
 {
-  "latest_version": "5.0.2.0",
-  "latest_version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 2},
-  "updated_at": "2026-08-05T00:00:00+0000",
+  "latest_version": "5.0.3.0",
+  "latest_version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 3},
+  "updated_at": "2026-08-08T00:00:00+0000",
   "changelog": {
     "versions": [
+    {
+      "version_str": "5.0.3.0",
+      "version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 3},
+      "base_header": "Version 5.0.3.0 - Installer Reliability",
+      "release_date": "2026-08-08T00:00:00+0000",
+      "locales": [
+        {
+          "code": "en",
+          "header": "Version 5.0.3.0 - Installer Reliability",
+          "log_text": [
+            "* **Verified portable VIIPER** - DS4Windows can use VIIPER from any location when its executable exactly matches the build bundled with this release",
+            "* **Fast deterministic upgrades** - stale historical installer registrations are ignored instead of being launched, retried, or allowed to block the current update",
+            "* **Safe shared infrastructure lifecycle** - updates preserve the active VIIPER and USB-IP runtime while direct uninstall removes only installer-owned components",
+            "* **Expanded release validation** - clean install, upgrade, repair, internal VIIPER repair, USB-IP removal/recovery, uninstall, and reinstall paths are exercised before release"
+          ],
+          "editor": "hbashton",
+          "editors_note": ["5.0.3.0 focuses on a predictable offline installation and exact, portable backend compatibility."],
+          "updated_at": "2026-08-08T00:00:00+0000"
+        }
+      ]
+    },
     {
       "version_str": "5.0.2.0",
       "version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 2},

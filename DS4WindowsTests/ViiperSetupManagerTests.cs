@@ -122,7 +122,7 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
-        public void ExternalRuntimeIsNeverSelectedAsTheManagedBackend()
+        public void VerifiedPortableRuntimeIsSelectedByExactPath()
         {
             string directory = Path.Combine(Path.GetTempPath(),
                 $"viiper-portable-{Guid.NewGuid():N}");
@@ -135,10 +135,12 @@ namespace DS4Windows.Tests
                 File.WriteAllBytes(preferred, new byte[] { 0x4D, 0x5A });
 
                 string selected = ViiperSetupManager.ResolveRuntimeViiperPath(
-                    canonical, preferred);
+                    canonical, preferred, null,
+                    path => string.Equals(path, preferred,
+                        StringComparison.OrdinalIgnoreCase));
 
                 Assert.IsTrue(ViiperSetupManager.IsExactViiperExecutablePath(
-                    canonical, selected));
+                    preferred, selected));
             }
             finally
             {
@@ -150,18 +152,37 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
-        public void CanonicalRuntimeIgnoresLegacyLocalAppDataPreference()
+        public void MismatchedPortableRuntimeFallsBackToVerifiedCanonical()
         {
             string localApplicationData = Path.Combine("C:\\Users", "Tester",
                 "AppData", "Local");
             string canonical = Path.Combine("C:\\Program Files", "DS4Windows",
                 "VIIPER", "viiper.exe");
 
+            string portable = Path.Combine(localApplicationData, "VIIPER",
+                "viiper.exe");
             string path = ViiperSetupManager.ResolveRuntimeViiperPath(
-                canonical, Path.Combine(localApplicationData, "VIIPER",
-                    "viiper.exe"));
+                canonical, portable, null,
+                candidate => string.Equals(candidate, canonical,
+                    StringComparison.OrdinalIgnoreCase));
 
             Assert.AreEqual(canonical, path);
+        }
+
+        [TestMethod]
+        public void RunningVerifiedPortableRuntimeCanBeDiscoveredWithoutPreference()
+        {
+            string canonical = Path.Combine("C:\\Program Files", "DS4Windows",
+                "VIIPER", "viiper.exe");
+            string running = Path.Combine("D:\\Portable", "VIIPER",
+                "viiper.exe");
+
+            string path = ViiperSetupManager.ResolveRuntimeViiperPath(
+                canonical, null, running,
+                candidate => string.Equals(candidate, running,
+                    StringComparison.OrdinalIgnoreCase));
+
+            Assert.AreEqual(running, path);
         }
 
         [TestMethod]

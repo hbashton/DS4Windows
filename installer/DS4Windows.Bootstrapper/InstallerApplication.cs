@@ -15,8 +15,10 @@ namespace DS4Windows.Bootstrapper
 {
     internal sealed class InstallerApplication : BootstrapperApplication
     {
+        private const string ManagedBundleTag = "DS4WindowsManagedV2";
         private readonly Dictionary<string, PackageState> packageStates = new Dictionary<string, PackageState>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, int> installerBusyRetries = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> managedRelatedBundles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private InstallerWindow window;
         private IBootstrapperCommand command;
         private RegistrationType registrationType;
@@ -388,6 +390,7 @@ namespace DS4Windows.Bootstrapper
             {
                 registrationType = e.RegistrationType;
                 packageStates.Clear();
+                managedRelatedBundles.Clear();
                 relatedUpgradeDetected = false;
                 newerRelatedBundleVersion = null;
             };
@@ -395,13 +398,19 @@ namespace DS4Windows.Bootstrapper
             {
                 if (e.RelationType == RelationType.Upgrade)
                 {
+                    var managedGeneration = string.Equals(e.BundleTag,
+                        ManagedBundleTag, StringComparison.Ordinal);
+                    if (managedGeneration)
+                    {
+                        managedRelatedBundles.Add(e.ProductCode);
+                    }
                     var currentVersion = engine.GetVariableVersion(
                         "WixBundleVersion");
                     if (IsRelatedBundleNewer(e.Version, currentVersion))
                     {
                         newerRelatedBundleVersion = e.Version;
                     }
-                    else
+                    else if (managedGeneration)
                     {
                         relatedUpgradeDetected = true;
                     }
@@ -414,7 +423,8 @@ namespace DS4Windows.Bootstrapper
             {
                 if (infrastructureRecoveryPass ||
                     (command.Relation == RelationType.Upgrade &&
-                     plannedAction == LaunchAction.Uninstall))
+                     plannedAction == LaunchAction.Uninstall) ||
+                    !managedRelatedBundles.Contains(e.BundleId))
                 {
                     // The incoming primary engine owns related-bundle
                     // ordering. An outgoing bundle only removes itself, and
@@ -624,6 +634,22 @@ namespace DS4Windows.Bootstrapper
                 // ownership is removed.
                 e.State = !infrastructureRecoveryPass &&
                     plannedAction == LaunchAction.Uninstall
+                    ? RequestState.Present
+                    : RequestState.None;
+                return;
+            }
+
+            if (string.Equals(e.PackageId,
+                    "ViiperUsbipUninstall",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                // Shared infrastructure is permanent in the normal package
+                // chain so an outgoing related bundle can unregister without
+                // deleting the incoming backend. Only a direct Add/Remove
+                // Programs uninstall explicitly runs this dedicated action.
+                e.State = !infrastructureRecoveryPass &&
+                    plannedAction == LaunchAction.Uninstall &&
+                    command.Relation != RelationType.Upgrade
                     ? RequestState.Present
                     : RequestState.None;
                 return;

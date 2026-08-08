@@ -5,9 +5,12 @@ bundle with a custom WPF interface. It contains the managed DS4Windows MSI,
 VIIPER 0.0.9, USB-IP 0.9.7.7, and optional HidHide/FakerInput packages.
 
 The installer intentionally has no portable mode or destination selector. The
-portable ZIP remains a separate CI artifact. Portable DS4Windows uses the same
-protected `%ProgramFiles%\DS4Windows\VIIPER` infrastructure as the managed
-installation; no elevated backend is launched from a user-writable directory.
+portable ZIP remains a separate CI artifact. The standard installer places
+VIIPER under protected `%ProgramFiles%\DS4Windows\VIIPER`. A portable
+DS4Windows package may instead use VIIPER from any location, but only when the
+executable is an exact SHA-256 match for the VIIPER build bundled with that
+DS4Windows release; its selected startup task is retargeted to that verified
+path. Program Files remains the recommended, tamper-resistant location.
 
 ```powershell
 .\installer\build-installer.ps1 `

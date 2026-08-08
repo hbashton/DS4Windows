@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class Transaction:
     action: str
     related: str = "none"  # none, older, newer
+    managed_related: bool = True
     invoked_by_upgrade: bool = False
     infrastructure_healthy: bool = False
     mutex_available: bool = True
@@ -54,7 +55,7 @@ class Transaction:
             return self
 
         self.events.append("apply-msi")
-        if self.related == "older":
+        if self.related == "older" and self.managed_related:
             self.events += [
                 "defer-infrastructure",
                 "remove-old-related-without-shared-teardown",
@@ -62,6 +63,8 @@ class Transaction:
             ]
         else:
             self.events.append("apply-or-repair-infrastructure")
+            if self.related == "older":
+                self.events.append("ignore-legacy-bundle-registration")
 
         if self.helper_result == 3010:
             self.events += [
@@ -102,6 +105,7 @@ def require(text: str, *contracts: str) -> None:
 
 def main() -> None:
     bootstrapper = (ROOT / "installer/DS4Windows.Bootstrapper/InstallerApplication.cs").read_text(encoding="utf-8")
+    bundle = (ROOT / "installer/DS4Windows.Bundle/Bundle.wxs").read_text(encoding="utf-8")
     setup_actions = (ROOT / "installer/DS4Windows.SetupActions/Program.cs").read_text(encoding="utf-8")
     backend = (ROOT / "extras/install-viiper-backend.ps1").read_text(encoding="utf-8")
     runtime = (ROOT / "DS4Windows/DS4Control/Viiper/ViiperSetupManager.cs").read_text(encoding="utf-8")
@@ -122,6 +126,16 @@ def main() -> None:
         'engine.SetVariableString("SetupCorrelationId"',
         "Not retrying installer-busy result from non-vital",
         "packageStates.ContainsKey",
+        "managedRelatedBundles",
+        "ManagedBundleTag",
+        '"ViiperUsbipUninstall"',
+    )
+    require(
+        bundle,
+        'Tag="DS4WindowsManagedV2"',
+        'Id="ViiperUsbipUninstall"',
+        'Name="DS4Windows.SetupActions.InfrastructureUninstall.exe"',
+        'Permanent="yes"',
     )
     require(
         backend,
@@ -144,7 +158,11 @@ def main() -> None:
         "TryProbeUsbipRuntime",
         "mandatoryRepairRequired = !status.Ready",
         "Continue in degraded mode",
-        "string viiperPath = canonicalViiperPath",
+        "ResolveRuntimeViiperPath(",
+        "FindAlternativeViiperPath(canonicalViiperPath)",
+        "IsSelectableViiperExecutable(selectedPath)",
+        "FilesHaveSameSha256(normalized",
+        "PersistPreferredViiperPath(selectedPath, canonicalPath)",
     )
     require(
         setup_actions,
@@ -163,6 +181,14 @@ def main() -> None:
     assert "apply-or-repair-infrastructure" in repair.events
     update = Transaction("install", related="older").run()
     assert update.events.index("remove-old-related-without-shared-teardown") < update.events.index("isolated-infrastructure-recovery")
+    legacy_update = Transaction(
+        "install", related="older", managed_related=False
+    ).run()
+    assert "defer-infrastructure" not in legacy_update.events
+    assert "ignore-legacy-bundle-registration" in legacy_update.events
+    assert legacy_update.events.index(
+        "apply-or-repair-infrastructure"
+    ) < legacy_update.events.index("ignore-legacy-bundle-registration")
     uninstall = Transaction("uninstall").run()
     assert uninstall.events == ["preflight", "remove-owned-infrastructure", "remove-msi"]
     downgrade = Transaction("install", related="newer").run()

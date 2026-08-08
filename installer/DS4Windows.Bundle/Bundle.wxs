@@ -6,6 +6,7 @@
       Manufacturer="DS4Windows"
       Version="$(var.BundleVersion)"
       UpgradeCode="BC70CCB1-AD65-42A0-B468-8A7278A37A62"
+      Tag="DS4WindowsManagedV2"
       IconSourceFile="$(var.ExtrasRoot)\..\DS4Windows\DS4W.ico"
       Compressed="yes"
       AboutUrl="https://github.com/hbashton/DS4Windows"
@@ -82,6 +83,7 @@
           CacheId="DS4WindowsSetupActionsInfrastructure-$(var.SetupActionsHash)"
           SourceFile="$(var.SetupActionsPath)"
           PerMachine="yes"
+          Permanent="yes"
           Vital="yes"
           DetectCondition="InfrastructureInstalled = &quot;VIIPER-0.0.9+USBIP-0.9.7.7&quot; OR ManagedInstallRegistered OR ManagedViiperPresent"
           InstallArguments="install --correlation-id &quot;[SetupCorrelationId]&quot; --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot; --bundle-source &quot;[WixBundleOriginalSource]&quot; --desktop-shortcut &quot;[CreateDesktopShortcut]&quot; --target-user-sid &quot;[TargetUserSid]&quot; --target-user-name &quot;[TargetUserName]&quot; --target-local-appdata &quot;[TargetLocalAppData]&quot; --target-roaming-appdata &quot;[TargetRoamingAppData]&quot;"
@@ -113,6 +115,25 @@
           Vital="no"
           InstallCondition="InstallFakerInput"
           Visible="no" />
+
+      <!-- VIIPER/USB-IP is shared machine infrastructure. Keep the normal
+           setup package permanent so an outgoing related bundle cannot tear
+           down the incoming version or retain its own Burn registration.
+           A direct uninstall explicitly plans this one-shot action instead. -->
+      <ExePackage
+          Id="ViiperUsbipUninstall"
+          CacheId="DS4WindowsSetupActionsInfrastructureUninstall-$(var.SetupActionsHash)"
+          Name="DS4Windows.SetupActions.InfrastructureUninstall.exe"
+          SourceFile="$(var.SetupActionsPath)"
+          PerMachine="yes"
+          Permanent="yes"
+          Vital="yes"
+          DetectCondition="0"
+          InstallArguments="uninstall --correlation-id &quot;[SetupCorrelationId]&quot; --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot;">
+        <ExitCode Value="0" Behavior="success" />
+        <ExitCode Value="3010" Behavior="scheduleReboot" />
+        <ExitCode Behavior="error" />
+      </ExePackage>
 
       <!-- Burn removes packages in reverse chain order. Keep a second,
            install-only invocation of the verified preflight helper at the

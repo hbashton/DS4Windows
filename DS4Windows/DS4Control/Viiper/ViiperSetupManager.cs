@@ -225,10 +225,13 @@ namespace DS4Windows
         public static ViiperPrerequisiteStatus GetStatus(bool tryStartServer = false)
         {
             string canonicalViiperPath = GetCanonicalViiperExePath();
-            // Elevated infrastructure has one protected owner. Portable
-            // DS4Windows packages still use the canonical Program Files
-            // backend; a user-writable executable is never elevated.
-            string viiperPath = canonicalViiperPath;
+            // Location is not identity. Portable users may keep the exact
+            // bundled VIIPER executable anywhere; the preferred/running/task
+            // candidate still has to pass the same SHA-256 package check as
+            // the protected Program Files copy before it can be selected.
+            string viiperPath = ResolveRuntimeViiperPath(
+                canonicalViiperPath, Global.PreferredViiperPath,
+                FindAlternativeViiperPath(canonicalViiperPath));
             string bundledViiperPath = GetBundledViiperPath();
             string setupScriptPath = GetSetupScriptPath();
             string usbipPath = GetCanonicalUsbipPath();
@@ -464,15 +467,23 @@ namespace DS4Windows
 
         public static void RefreshSelectedStartupTaskOnLaunch()
         {
+            string canonicalPath = GetCanonicalViiperExePath();
+            string selectedPath = ResolveRuntimeViiperPath(canonicalPath,
+                Global.PreferredViiperPath,
+                FindAlternativeViiperPath(canonicalPath));
+
+            if (IsSelectableViiperExecutable(selectedPath))
+            {
+                PersistPreferredViiperPath(selectedPath, canonicalPath);
+            }
+
             if (!DS4WinWPF.StartupMethods.IsRunAtStartupEnabled())
             {
                 RemoveViiperStartupTask(requestElevation: true);
                 return;
             }
 
-            string canonicalPath = GetCanonicalViiperExePath();
-            string selectedPath = canonicalPath;
-            if (!File.Exists(selectedPath))
+            if (!IsSelectableViiperExecutable(selectedPath))
             {
                 return;
             }
@@ -483,13 +494,7 @@ namespace DS4Windows
                 return;
             }
 
-            string persistedPath = string.Empty;
-            if (!string.Equals(Global.PreferredViiperPath ?? string.Empty,
-                    persistedPath, StringComparison.OrdinalIgnoreCase))
-            {
-                Global.PreferredViiperPath = persistedPath;
-                Global.Save();
-            }
+            PersistPreferredViiperPath(selectedPath, canonicalPath);
         }
 
         public static void RefreshSelectedStartupTaskAfterRunAtStartupChange()
@@ -1330,11 +1335,62 @@ namespace DS4Windows
         }
 
         internal static string ResolveRuntimeViiperPath(
-            string canonicalPath, string preferredPath)
+            string canonicalPath, string preferredPath,
+            string alternativePath = null)
         {
-            // The preferred-path setting is retained only so old profiles can
-            // deserialize. Runtime ownership is always canonical.
+            return ResolveRuntimeViiperPath(canonicalPath, preferredPath,
+                alternativePath, IsSelectableViiperExecutable);
+        }
+
+        internal static string ResolveRuntimeViiperPath(
+            string canonicalPath, string preferredPath,
+            string alternativePath, Func<string, bool> isSelectable)
+        {
+            if (isSelectable == null)
+            {
+                throw new ArgumentNullException(nameof(isSelectable));
+            }
+
+            foreach (string candidate in new[]
+                     {
+                         preferredPath, alternativePath, canonicalPath,
+                     })
+            {
+                if (string.IsNullOrWhiteSpace(candidate) ||
+                    !isSelectable(candidate))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    return Path.GetFullPath(candidate);
+                }
+                catch
+                {
+                    // Treat a malformed preference like any other failed
+                    // package-identity candidate and continue fail-closed.
+                }
+            }
+
             return canonicalPath;
+        }
+
+        private static void PersistPreferredViiperPath(string selectedPath,
+            string canonicalPath)
+        {
+            string persistedPath = IsExactViiperExecutablePath(selectedPath,
+                    canonicalPath)
+                ? string.Empty
+                : Path.GetFullPath(selectedPath);
+            if (string.Equals(Global.PreferredViiperPath ?? string.Empty,
+                    persistedPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            Global.PreferredViiperPath = persistedPath;
+            Global.Save();
         }
 
         private static bool IsSelectableViiperExecutable(string viiperPath)

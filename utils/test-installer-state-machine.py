@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class Transaction:
     action: str
     related: str = "none"  # none, older, newer
+    invoked_by_upgrade: bool = False
     infrastructure_healthy: bool = False
     mutex_available: bool = True
     cancel_before_apply: bool = False
@@ -25,7 +26,9 @@ class Transaction:
     result: int = 0
 
     def run(self) -> "Transaction":
-        if self.related == "newer":
+        if self.related == "newer" and not (
+            self.invoked_by_upgrade and self.action == "uninstall"
+        ):
             self.events.append("block-downgrade")
             self.result = 1638
             return self
@@ -41,8 +44,13 @@ class Transaction:
         self.events.append("preflight")
         if self.action == "uninstall":
             # Burn uninstalls in reverse chain order. Infrastructure is
-            # quiesced and removed while the MSI-owned app files still exist.
-            self.events += ["remove-owned-infrastructure", "remove-msi"]
+            # quiesced while the MSI-owned app files still exist. An outgoing
+            # bundle preserves infrastructure owned by the incoming upgrade.
+            self.events += (
+                ["preserve-shared-infrastructure", "remove-msi"]
+                if self.invoked_by_upgrade
+                else ["remove-owned-infrastructure", "remove-msi"]
+            )
             return self
 
         self.events.append("apply-msi")
@@ -105,6 +113,7 @@ def main() -> None:
         "deferInfrastructureUntilUpgradeCompletes",
         "infrastructureRecoveryPass",
         "parentOwnedRelatedUninstall",
+        "IsParentOwnedRelatedUninstall",
         "IsRelatedBundleNewer",
         "ShowFailure(1638",
         "command.Resume == ResumeType.Reboot",
@@ -156,6 +165,13 @@ def main() -> None:
     assert uninstall.events == ["preflight", "remove-owned-infrastructure", "remove-msi"]
     downgrade = Transaction("install", related="newer").run()
     assert downgrade.result == 1638 and downgrade.events == ["block-downgrade"]
+    outgoing = Transaction(
+        "uninstall", related="newer", invoked_by_upgrade=True
+    ).run()
+    assert outgoing.result == 0
+    assert outgoing.events == [
+        "preflight", "preserve-shared-infrastructure", "remove-msi",
+    ]
     busy = Transaction("repair", mutex_available=False).run()
     assert busy.result == 1618 and "preflight" not in busy.events
     canceled = Transaction("install", cancel_before_apply=True).run()

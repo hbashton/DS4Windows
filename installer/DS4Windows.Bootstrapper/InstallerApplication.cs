@@ -115,8 +115,7 @@ namespace DS4Windows.Bootstrapper
             // its parent for the same lock; all top-level invocations still
             // have to acquire it before planning anything.
             var parentOwnedRelatedUninstall =
-                command.Relation == RelationType.Upgrade &&
-                action == LaunchAction.Uninstall;
+                IsParentOwnedRelatedUninstall(action);
             if (!parentOwnedRelatedUninstall && !EnsureBundleMutex()) return;
             StartPlan(action, () =>
             {
@@ -201,6 +200,12 @@ namespace DS4Windows.Bootstrapper
             ShowFailure(1618,
                 "Another DS4Windows installation or repair is already running. Close it, then choose Retry.");
             return false;
+        }
+
+        private bool IsParentOwnedRelatedUninstall(LaunchAction action)
+        {
+            return command.Relation == RelationType.Upgrade &&
+                   action == LaunchAction.Uninstall;
         }
 
         private void ReleaseBundleMutex()
@@ -498,7 +503,16 @@ namespace DS4Windows.Bootstrapper
                 return;
             }
 
-            if (!string.IsNullOrWhiteSpace(newerRelatedBundleVersion))
+            // During a bundle upgrade Burn launches the outgoing bundle with
+            // an Upgrade relation and an Uninstall action. It necessarily
+            // detects the incoming bundle as newer. Blocking that child here
+            // returns ERROR_PRODUCT_VERSION (1638) to the parent, prevents
+            // Burn from unregistering the old bundle, and leaves a stale ARP
+            // and package-cache owner behind. Downgrade protection applies
+            // only to a top-level install/repair; the parent engine already
+            // owns and orders a related-bundle uninstall.
+            if (!IsParentOwnedRelatedUninstall(command.Action) &&
+                !string.IsNullOrWhiteSpace(newerRelatedBundleVersion))
             {
                 ShowFailure(1638,
                     "A newer DS4Windows installer (" +

@@ -31,6 +31,41 @@ def sha256(path: Path) -> str:
     return value.hexdigest().upper()
 
 
+def validate_named_xaml_resources(source_root: Path) -> None:
+    """Reject unresolved named WPF resource references before packaging.
+
+    WPF can defer some StaticResource failures until a view is constructed,
+    which previously allowed a clean install to succeed and then crash on the
+    first MainWindow load. The application uses named resources globally, so
+    every named reference must have a source declaration somewhere in the
+    compiled XAML tree. Type-key expressions are resolved by WPF and are not
+    named-resource references.
+    """
+    declared: set[str] = set()
+    referenced: dict[str, set[str]] = {}
+    xaml_files = sorted((source_root / "DS4Windows").rglob("*.xaml"))
+    for path in xaml_files:
+        source = path.read_text(encoding="utf-8-sig")
+        declared.update(re.findall(r'x:Key\s*=\s*["\']([^"\']+)', source))
+        for resource_kind in ("StaticResource", "DynamicResource"):
+            for key in re.findall(
+                rf"\{{{resource_kind}\s+([^}}\s,]+)", source
+            ):
+                if key.startswith("{"):
+                    continue
+                referenced.setdefault(key, set()).add(
+                    path.relative_to(source_root).as_posix()
+                )
+
+    missing = sorted(set(referenced) - declared)
+    if missing:
+        details = "; ".join(
+            f"{key} ({', '.join(sorted(referenced[key]))})"
+            for key in missing
+        )
+        raise SystemExit("Unresolved named WPF resource reference(s): " + details)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--publish-root", type=Path, required=True)
@@ -38,6 +73,9 @@ def main() -> int:
     parser.add_argument("--installer", type=Path, required=True)
     parser.add_argument("--bundle-source", type=Path, required=True)
     args = parser.parse_args()
+
+    source_root = Path(__file__).resolve().parent.parent
+    validate_named_xaml_resources(source_root)
 
     missing = sorted(path for path in REQUIRED_PUBLISH_FILES if not (args.publish_root / path).is_file())
     if missing:
@@ -457,6 +495,8 @@ def main() -> int:
         "viiper-setup-host.log",
         'startInfo.ArgumentList.Add("-Yes")',
         "definition.Triggers.Add(new LogonTrigger())",
+        "progress = new DS4WinWPF.DS4Forms.ViiperSetupProgress(",
+        "progress.WaitForProcess(process)",
     ]:
         if contract not in setup_manager:
             raise SystemExit(

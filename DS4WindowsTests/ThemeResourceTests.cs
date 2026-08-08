@@ -75,6 +75,20 @@ namespace DS4WindowsTests
                             "notNowButton")).Content);
                     Assert.IsTrue(missingPrompt.ExitApplicationRequested,
                         "Missing prerequisites must not be suppressible into a backend-less runtime.");
+
+                    // The repair progress surface is created before the
+                    // elevated setup host runs. Its clean-install XAML must
+                    // therefore resolve using only application theme assets.
+                    var setupProgress = new ViiperSetupProgress(
+                        System.IO.Path.Combine(
+                            System.IO.Path.GetTempPath(),
+                            "ds4windows-missing-setup-log.txt"));
+                    Assert.AreEqual("Setting up VIIPER",
+                        ((TextBlock)setupProgress.FindName(
+                            "headingText")).Text);
+                    Assert.AreEqual("Preparing verified package...",
+                        ((TextBlock)setupProgress.FindName(
+                            "phaseText")).Text);
                 }
                 catch (Exception ex)
                 {

@@ -1,0 +1,105 @@
+<Window x:Class="DS4WinWPF.DS4Forms.ViiperSetupProgress"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="VIIPER setup"
+        Width="560"
+        SizeToContent="Height"
+        ResizeMode="NoResize"
+        WindowStyle="None"
+        ShowInTaskbar="True"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource SurfaceBackgroundColor}"
+        Foreground="{DynamicResource ForegroundColor}">
+    <Border Background="{DynamicResource SurfaceBackgroundColor}"
+            BorderBrush="{DynamicResource BorderColor}"
+            BorderThickness="1"
+            CornerRadius="8">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0"
+                    Background="{DynamicResource SidebarBackgroundColor}"
+                    BorderBrush="{DynamicResource BorderColor}"
+                    BorderThickness="0,0,0,1"
+                    CornerRadius="8,8,0,0"
+                    Padding="18,14">
+                <TextBlock Text="VIIPER virtual controller setup"
+                           FontSize="14"
+                           FontWeight="SemiBold" />
+            </Border>
+
+            <StackPanel Grid.Row="1" Margin="26,24,26,24">
+                <Grid Margin="0,0,0,18">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="54" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Border Width="42"
+                            Height="42"
+                            CornerRadius="21"
+                            Background="{DynamicResource NavigationSelectionColor}"
+                            BorderBrush="{DynamicResource AccentColor}"
+                            BorderThickness="1">
+                        <TextBlock x:Name="statusGlyph"
+                                   Text="&#x21BB;"
+                                   Foreground="{DynamicResource AccentColor}"
+                                   FontSize="25"
+                                   FontWeight="SemiBold"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center" />
+                    </Border>
+                    <StackPanel Grid.Column="1">
+                        <TextBlock x:Name="headingText"
+                                   Text="Setting up VIIPER"
+                                   Style="{StaticResource BridgeSectionTitleStyle}"
+                                   FontSize="20" />
+                        <TextBlock Text="DS4Windows is verifying the complete controller backend."
+                                   Foreground="{DynamicResource MutedForegroundColor}"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                </Grid>
+
+                <Border Style="{StaticResource BridgeCardStyle}"
+                        Padding="16"
+                        Margin="0,0,0,14">
+                    <StackPanel>
+                        <TextBlock x:Name="phaseText"
+                                   Text="Preparing verified package..."
+                                   FontWeight="SemiBold"
+                                   TextWrapping="Wrap" />
+                        <ProgressBar x:Name="setupProgress"
+                                     Height="7"
+                                     Margin="0,13,0,14"
+                                     IsIndeterminate="True"
+                                     Foreground="{DynamicResource AccentColor}"
+                                     Background="{DynamicResource RaisedBackgroundColor}" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="&#x2022; Verify packaged files" />
+                                <TextBlock Text="&#x2022; Install VIIPER 0.0.9"
+                                           Margin="0,5,0,0" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1">
+                                <TextBlock Text="&#x2022; Verify USB-IP 0.9.7.7" />
+                                <TextBlock Text="&#x2022; Verify startup and API"
+                                           Margin="0,5,0,0" />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <TextBlock x:Name="detailText"
+                           Text="Keep this window open. Setup will finish automatically."
+                           Foreground="{DynamicResource MutedForegroundColor}"
+                           TextWrapping="Wrap" />
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>

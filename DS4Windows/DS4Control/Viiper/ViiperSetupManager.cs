@@ -845,9 +845,27 @@ namespace DS4Windows
                     requireExisting: true);
                 string scriptPath = Path.Combine(setupDirectory,
                     InstallerScriptName);
+                DS4WinWPF.DS4Forms.ViiperSetupProgress progress = null;
+                bool progressFinished = false;
+
+                void FinishProgress(bool success)
+                {
+                    if (progressFinished)
+                    {
+                        return;
+                    }
+                    progressFinished = true;
+                    try { progress?.Finish(success); } catch { }
+                }
 
                 try
                 {
+                    // Begin the cleanup boundary before constructing any WPF
+                    // surface. A missing theme resource must not strand a
+                    // protected staging directory on a clean installation.
+                    progress = new DS4WinWPF.DS4Forms.ViiperSetupProgress(
+                        GetInfrastructureActionsLogPath());
+                    progress.ShowPreparing();
                     using Stream resource = Assembly.GetExecutingAssembly()
                         .GetManifestResourceStream(InstallerResourceName);
                     if (resource == null)
@@ -867,10 +885,14 @@ namespace DS4Windows
                     // handle denies write/delete sharing while it is copied,
                     // so another unelevated process cannot swap a DLL or
                     // rewrite the package manifest across the UAC boundary.
+                    progress.SetPhase(
+                        "Verifying every packaged DS4Windows file...");
                     string stagedPackageRoot = StageInstallerPackage(
                         packageExtras, setupDirectory);
                     string stagedExtras = Path.Combine(stagedPackageRoot,
                         "extras");
+                    progress.SetPhase(
+                        "Starting the verified VIIPER installer...");
 
                     string powershellPath = Path.Combine(
                         Environment.SystemDirectory, "WindowsPowerShell",
@@ -921,8 +943,10 @@ namespace DS4Windows
                         throw new InvalidOperationException(
                             "Windows did not start the embedded VIIPER setup.");
                     }
-                    process.WaitForExit();
-                    exitCode = process.ExitCode;
+                    progress.SetPhase(
+                        "Installing VIIPER and verifying USB-IP...");
+                    exitCode = progress.WaitForProcess(process);
+                    FinishProgress(exitCode == 0);
 
                     if (exitCode == 3010)
                     {
@@ -947,6 +971,11 @@ namespace DS4Windows
                             "VIIPER setup failed", MessageBoxButton.OK,
                             MessageBoxImage.Error);
                     }
+                }
+                catch
+                {
+                    FinishProgress(false);
+                    throw;
                 }
                 finally
                 {

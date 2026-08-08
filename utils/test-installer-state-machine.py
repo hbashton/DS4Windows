@@ -120,6 +120,8 @@ def main() -> None:
         "Interlocked.CompareExchange(ref planStarted, 1, 0)",
         "Ignoring a duplicate installer plan request",
         'engine.SetVariableString("SetupCorrelationId"',
+        "Not retrying installer-busy result from non-vital",
+        "packageStates.ContainsKey",
     )
     require(
         backend,

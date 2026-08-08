@@ -444,6 +444,22 @@ namespace DS4Windows.Bootstrapper
         {
             if (IsInstallerBusyStatus(e.Status))
             {
+                // Related bundles are non-vital cleanup owned by Burn, not
+                // packages in this bundle's chain. Legacy DS4Windows bundles
+                // can return ERROR_INSTALL_ALREADY_RUNNING while their child
+                // elevated engine is still winding down. Retrying the same
+                // stale bundle only repeats the collision and presents a
+                // misleading "another installation" status to the user.
+                // Keep retry protection for our own vital MSI/setup packages;
+                // let Burn continue after one failed legacy cleanup attempt.
+                if (!packageStates.ContainsKey(e.PackageId ?? string.Empty))
+                {
+                    engine.Log(LogLevel.Standard,
+                        "Not retrying installer-busy result from non-vital " +
+                        "related bundle '" + e.PackageId + "'.");
+                    return;
+                }
+
                 const int maximumRetries = 3;
                 int attempt;
                 string packageId = e.PackageId ?? string.Empty;

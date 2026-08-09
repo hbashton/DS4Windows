@@ -60,7 +60,7 @@ jobs:
         $signtool = (Get-Command signtool.exe -ErrorAction Stop).Source
         $firstPartyBinaries = @(
           ".\bin\x64\Release\output\DS4Windows.exe",
-          ".\bin\x64\Release\output\extras\VIIPER-0.0.9-x64.exe")
+          ".\bin\x64\Release\output\extras\VIIPER-0.1.0-x64.exe")
         foreach ($path in $firstPartyBinaries) {
           & $signtool sign /fd SHA256 /f $certificatePath `
             /p $env:DS4W_SIGN_CERT_PASSWORD /tr https://timestamp.digicert.com `

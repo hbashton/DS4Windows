@@ -83,7 +83,7 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel>
                                 <TextBlock Text="&#x2022; Verify packaged files" />
-                                <TextBlock Text="&#x2022; Install VIIPER 0.0.9"
+                                <TextBlock Text="&#x2022; Install VIIPER 0.1.0"
                                            Margin="0,5,0,0" />
                             </StackPanel>
                             <StackPanel Grid.Column="1">

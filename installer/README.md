@@ -2,7 +2,7 @@
 
 `build-installer.ps1` composes the standard x64 distribution as a WiX 5 Burn
 bundle with a custom WPF interface. It contains the managed DS4Windows MSI,
-VIIPER 0.0.9, USB-IP 0.9.7.7, and optional HidHide/FakerInput packages.
+VIIPER 0.1.0, USB-IP 0.9.7.7, and optional HidHide/FakerInput packages.
 
 The installer intentionally has no portable mode or destination selector. The
 portable ZIP remains a separate CI artifact. The standard installer places

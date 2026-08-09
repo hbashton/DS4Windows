@@ -153,11 +153,11 @@ namespace DS4Windows
             "--run-embedded-viiper-installer";
         private const string InstallerResourceName =
             "DS4Windows.install-viiper-backend.ps1";
-        private const string BundledViiperName = "VIIPER-0.0.9-x64.exe";
+        private const string BundledViiperName = "VIIPER-0.1.0-x64.exe";
         private const string BundledViiperHashName =
             BundledViiperName + ".sha256";
         internal const string SupportedViiperSha256 =
-            "CCA0EF92B25767EEEB8D0B7AB9DE795AB434A0847FCD6E3BD5F5FCEFDB3DE5B1";
+            "AD14F2C9048D61B3447F2F79D7A122EDEA81E5DB52A1AC803D294E5BC9CD2324";
         private const string BundledUsbipName = "USBip-0.9.7.7-x64.exe";
         private const string BundledHidHideName =
             "HidHide_1.5.230_x64.exe";

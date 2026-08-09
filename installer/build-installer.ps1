@@ -142,7 +142,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $publishPath "DS4Windows.exe") -Path
 }
 Invoke-SignAndVerify (Join-Path $publishPath "DS4Windows.exe")
 Assert-ReleaseSignature (Join-Path $publishPath `
-    "extras\VIIPER-0.0.9-x64.exe")
+    "extras\VIIPER-0.1.0-x64.exe")
 $releaseMarker = Join-Path $publishPath "DS4Windows.release"
 if (-not (Test-Path -LiteralPath $releaseMarker -PathType Leaf)) {
     throw "DS4Windows publish output has no release identity: $releaseMarker"

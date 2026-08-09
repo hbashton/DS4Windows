@@ -7,20 +7,22 @@
     {
       "version_str": "5.0.3.0",
       "version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 3},
-      "base_header": "Version 5.0.3.0 - Installer Reliability",
+      "base_header": "Release Candidate 4.3 - Installer Reliability",
       "release_date": "2026-08-08T00:00:00+0000",
       "locales": [
         {
           "code": "en",
-          "header": "Version 5.0.3.0 - Installer Reliability",
+          "header": "Release Candidate 4.3 - Installer Reliability",
           "log_text": [
-            "* **Verified portable VIIPER** - DS4Windows can use VIIPER from any location when its executable exactly matches the build bundled with this release",
+            "* **VIIPER 0.1.0 included** - the tray, executable metadata, API version, standard installer, portable repair path, and release package now agree on one production backend build",
+            "* **Verified portable VIIPER** - DS4Windows can use VIIPER from any location when its executable exactly matches the SHA-256 pinned by this release",
             "* **Fast deterministic upgrades** - stale historical installer registrations are ignored instead of being launched, retried, or allowed to block the current update",
-            "* **Safe shared infrastructure lifecycle** - updates preserve the active VIIPER and USB-IP runtime while direct uninstall removes only installer-owned components",
-            "* **Expanded release validation** - clean install, upgrade, repair, internal VIIPER repair, USB-IP removal/recovery, uninstall, and reinstall paths are exercised before release"
+            "* **Safe shared infrastructure lifecycle** - updates preserve healthy VIIPER and USB-IP infrastructure while direct uninstall removes only installer-owned components",
+            "* **Fail-closed backend validation** - missing, mismatched, or outdated VIIPER packages are repaired from the exact bundled offline payload before virtual controllers can start",
+            "* **Expanded release validation** - clean install, upgrade, repair, internal VIIPER repair, USB-IP removal/recovery, uninstall, reinstall, package integrity, and startup paths are exercised before release"
           ],
           "editor": "hbashton",
-          "editors_note": ["5.0.3.0 focuses on a predictable offline installation and exact, portable backend compatibility."],
+          "editors_note": ["RC4.3 pairs DS4Windows 5.0.3.0 with VIIPER 0.1.0 and focuses on predictable offline installation, exact portable compatibility, and safe upgrades."],
           "updated_at": "2026-08-08T00:00:00+0000"
         }
       ]

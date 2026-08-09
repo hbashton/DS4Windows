@@ -58,6 +58,24 @@
          application transaction, and the driver helper owns its own guarded
          rollback/reboot contract, so never hold the elevated engine here. -->
     <Chain DisableSystemRestore="yes">
+      <!-- This package is first so Burn executes it last while unwinding a
+           direct uninstall, after MSI has removed every owned file. It only
+           removes empty directories and therefore preserves any unrecognized
+           user or third-party content left under the install root. -->
+      <ExePackage
+          Id="PostUninstallCleanup"
+          CacheId="DS4WindowsSetupActionsPostUninstall-$(var.SetupActionsHash)"
+          Name="DS4Windows.SetupActions.PostUninstall.exe"
+          SourceFile="$(var.SetupActionsPath)"
+          PerMachine="yes"
+          Permanent="yes"
+          Vital="yes"
+          DetectCondition="0"
+          InstallArguments="postuninstall --correlation-id &quot;[SetupCorrelationId]&quot; --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot;">
+        <ExitCode Value="0" Behavior="success" />
+        <ExitCode Behavior="error" />
+      </ExePackage>
+
       <ExePackage
           Id="CloseRunningApplications"
           CacheId="DS4WindowsSetupActionsPreflight-$(var.SetupActionsHash)"

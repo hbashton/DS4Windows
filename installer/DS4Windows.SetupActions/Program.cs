@@ -20,6 +20,8 @@ namespace DS4Windows.SetupActions
         private const string RegistryKeyPath = @"SOFTWARE\DS4Windows";
         private const string InfrastructureVersion =
             "VIIPER-0.0.9+USBIP-0.9.7.7";
+        private const string CurrentBundledViiperName =
+            "VIIPER-0.0.9-x64.exe";
         private static string CorrelationId =
             Guid.NewGuid().ToString("N");
         private static readonly string InstallerLogRoot = Path.Combine(
@@ -50,6 +52,9 @@ namespace DS4Windows.SetupActions
                 int exitCode;
                 switch (action)
                 {
+                    case "postuninstall":
+                        exitCode = PostUninstallCleanup(installRoot);
+                        break;
                     case "preflight":
                         exitCode = Preflight();
                         break;
@@ -89,6 +94,9 @@ namespace DS4Windows.SetupActions
             {
                 throw new FileNotFoundException("The managed DS4Windows installation is incomplete.", scriptPath);
             }
+
+            RemoveObsoleteBundledViiperPayloads(installRoot,
+                preserveCurrent: true);
 
             var targetUser = ResolveInteractiveUser(args);
             var desktopShortcut = !string.Equals(
@@ -363,6 +371,8 @@ namespace DS4Windows.SetupActions
             StopManagedProcesses(installRoot);
             RemoveOwnedTask("RunVIIPER", Path.Combine(installRoot, "VIIPER", "viiper.exe"));
             RemoveOwnedTask("RunDS4Windows", Path.Combine(installRoot, "DS4Windows.exe"));
+            RemoveObsoleteBundledViiperPayloads(installRoot,
+                preserveCurrent: false);
 
             var viiperRoot = Path.GetFullPath(Path.Combine(installRoot, "VIIPER"));
             var expectedRoot = Path.GetFullPath(installRoot).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
@@ -391,6 +401,78 @@ namespace DS4Windows.SetupActions
             // USB-IP, HidHide, and FakerInput are shared system drivers. They are
             // deliberately not removed with DS4Windows; each has its own ARP entry.
             return 0;
+        }
+
+        private static int PostUninstallCleanup(string installRoot)
+        {
+            if (!Directory.Exists(installRoot))
+            {
+                return 0;
+            }
+
+            EnsureTreeHasNoReparsePoints(installRoot);
+            foreach (var directory in Directory.EnumerateDirectories(
+                         installRoot, "*", SearchOption.AllDirectories)
+                     .OrderByDescending(path => path.Length))
+            {
+                if (!Directory.EnumerateFileSystemEntries(directory).Any())
+                {
+                    Directory.Delete(directory);
+                }
+            }
+
+            if (!Directory.EnumerateFileSystemEntries(installRoot).Any())
+            {
+                Directory.Delete(installRoot);
+            }
+            WriteFallbackLog(
+                "Removed only empty managed-install directories after MSI uninstall.");
+            return 0;
+        }
+
+        private static void RemoveObsoleteBundledViiperPayloads(
+            string installRoot, bool preserveCurrent)
+        {
+            var extrasRoot = Path.Combine(installRoot, "extras");
+            if (!Directory.Exists(extrasRoot))
+            {
+                return;
+            }
+
+            EnsureTreeHasNoReparsePoints(extrasRoot);
+            var currentHashName = CurrentBundledViiperName + ".sha256";
+            foreach (var pattern in new[]
+                     {
+                         "VIIPER-*-x64.exe",
+                         "VIIPER-*-x64.exe.sha256"
+                     })
+            {
+                foreach (var path in Directory.EnumerateFiles(extrasRoot,
+                             pattern, SearchOption.TopDirectoryOnly))
+                {
+                    var name = Path.GetFileName(path);
+                    if (preserveCurrent &&
+                        (string.Equals(name, CurrentBundledViiperName,
+                             StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(name, currentHashName,
+                             StringComparison.OrdinalIgnoreCase)))
+                    {
+                        continue;
+                    }
+
+                    if ((File.GetAttributes(path) &
+                         FileAttributes.ReparsePoint) != 0)
+                    {
+                        throw new InvalidOperationException(
+                            "Refusing to remove a reparse-point installer " +
+                            "payload: " + path);
+                    }
+
+                    File.Delete(path);
+                    WriteFallbackLog("Removed obsolete bundled VIIPER " +
+                        "payload: " + path);
+                }
+            }
         }
 
         private static int RunWithSetupMutex(Func<int> action)

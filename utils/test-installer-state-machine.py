@@ -112,6 +112,7 @@ def main() -> None:
 
     require(
         bootstrapper,
+        'e.PackageId, "PostUninstallCleanup"',
         'e.PackageId, "CloseRunningApplications"',
         "plannedAction == LaunchAction.Uninstall",
         "deferInfrastructureUntilUpgradeCompletes",
@@ -133,6 +134,7 @@ def main() -> None:
     require(
         bundle,
         'Tag="DS4WindowsManagedV2"',
+        'Id="PostUninstallCleanup"',
         'Id="ViiperUsbipUninstall"',
         'Name="DS4Windows.SetupActions.InfrastructureUninstall.exe"',
         'Permanent="yes"',

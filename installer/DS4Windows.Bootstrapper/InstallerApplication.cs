@@ -610,6 +610,20 @@ namespace DS4Windows.Bootstrapper
 
         private void OnPlanPackageBegin(object sender, PlanPackageBeginEventArgs e)
         {
+            if (string.Equals(e.PackageId, "PostUninstallCleanup",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                // Burn unwinds in reverse chain order. The package is first
+                // in the chain so this direct-uninstall cleanup runs after
+                // MSI, and never during an outgoing upgrade bundle.
+                e.State = !infrastructureRecoveryPass &&
+                    plannedAction == LaunchAction.Uninstall &&
+                    command.Relation != RelationType.Upgrade
+                    ? RequestState.Present
+                    : RequestState.None;
+                return;
+            }
+
             if (string.Equals(e.PackageId, "CloseRunningApplications",
                     StringComparison.OrdinalIgnoreCase))
             {

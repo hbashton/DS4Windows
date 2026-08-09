@@ -178,6 +178,7 @@ def main() -> int:
         'Name="InstallFakerInput"',
         'Id="ViiperUsbipSetup"',
         'Id="DS4WindowsMsi"',
+        'Id="PostUninstallCleanup"',
         'Id="CloseRunningApplications"',
         'Id="CloseRunningApplicationsForUninstall"',
         'RepairArguments="repair ',
@@ -211,6 +212,7 @@ def main() -> int:
         for element in bundle_xml.findall(".//w:Chain/*", wix_namespace)
     }
     for package_id in (
+        "PostUninstallCleanup",
         "CloseRunningApplications",
         "CloseRunningApplicationsForUninstall",
         "DS4WindowsMsi",
@@ -232,11 +234,12 @@ def main() -> int:
     if packages["FakerInput"].get("InstallCondition") != "InstallFakerInput":
         raise SystemExit("FakerInput optional-install condition is invalid.")
     cache_ids = {
+        packages["PostUninstallCleanup"].get("CacheId"),
         packages["CloseRunningApplications"].get("CacheId"),
         packages["CloseRunningApplicationsForUninstall"].get("CacheId"),
         packages["ViiperUsbipSetup"].get("CacheId"),
     }
-    if None in cache_ids or len(cache_ids) != 3 or any(
+    if None in cache_ids or len(cache_ids) != 4 or any(
         "$(var.SetupActionsHash)" not in cache_id for cache_id in cache_ids
     ):
         raise SystemExit("Setup helper cache identities are not content-addressed.")
@@ -244,9 +247,11 @@ def main() -> int:
         element.get("Id")
         for element in bundle_xml.findall(".//w:Chain/*", wix_namespace)
     ]
-    if chain_ids[0] != "CloseRunningApplications" or chain_ids[-1] != "CloseRunningApplicationsForUninstall":
+    if (chain_ids[:2] != ["PostUninstallCleanup", "CloseRunningApplications"] or
+            chain_ids[-1] != "CloseRunningApplicationsForUninstall"):
         raise SystemExit(
-            "Process preflights must bracket the forward/reverse Burn chain."
+            "Post-uninstall cleanup and process preflights must bracket the "
+            "forward/reverse Burn chain."
         )
 
     build_script = (args.bundle_source.parent.parent / "build-installer.ps1").read_text(encoding="utf-8")
@@ -323,6 +328,7 @@ def main() -> int:
         / "InstallerApplication.cs"
     ).read_text(encoding="utf-8")
     for contract in [
+        'e.PackageId, "PostUninstallCleanup"',
         'e.PackageId, "CloseRunningApplications"',
         '"CloseRunningApplicationsForUninstall"',
         "plannedAction == LaunchAction.Install",

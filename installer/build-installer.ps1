@@ -141,8 +141,9 @@ if (-not (Test-Path -LiteralPath (Join-Path $publishPath "DS4Windows.exe") -Path
     throw "DS4Windows publish output is incomplete: $publishPath"
 }
 Invoke-SignAndVerify (Join-Path $publishPath "DS4Windows.exe")
-Assert-ReleaseSignature (Join-Path $publishPath `
-    "extras\VIIPER-0.1.0-x64.exe")
+# VIIPER is an immutable upstream release payload. Its compiled-in SHA-256
+# and generated package sidecar are validated below; signing it here would
+# mutate the executable after DS4Windows has pinned that identity.
 $releaseMarker = Join-Path $publishPath "DS4Windows.release"
 if (-not (Test-Path -LiteralPath $releaseMarker -PathType Leaf)) {
     throw "DS4Windows publish output has no release identity: $releaseMarker"

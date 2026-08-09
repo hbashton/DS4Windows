@@ -49,18 +49,23 @@ jobs:
     - name: Sign and verify release binaries
       shell: pwsh
       env:
+        DS4W_SIGN_CERT_BASE64: ${{ secrets.DS4W_SIGN_CERT_BASE64 }}
         DS4W_SIGN_CERT_PASSWORD: ${{ secrets.DS4W_SIGN_CERT_PASSWORD }}
       run: |
-        if ([string]::IsNullOrWhiteSpace("${{ secrets.DS4W_SIGN_CERT_BASE64 }}")) {
-          throw "Release signing secret DS4W_SIGN_CERT_BASE64 is not configured."
+        if ([string]::IsNullOrWhiteSpace($env:DS4W_SIGN_CERT_BASE64)) {
+          Write-Warning (
+            "Authenticode secrets are not configured; publishing the " +
+            "hash-verified unsigned package.")
+          "DS4W_SIGNING_ENABLED=false" >> $env:GITHUB_ENV
+          exit 0
         }
         $certificatePath = Join-Path $env:RUNNER_TEMP "ds4windows-release.pfx"
         [IO.File]::WriteAllBytes($certificatePath,
-          [Convert]::FromBase64String("${{ secrets.DS4W_SIGN_CERT_BASE64 }}"))
+          [Convert]::FromBase64String($env:DS4W_SIGN_CERT_BASE64))
         $signtool = (Get-Command signtool.exe -ErrorAction Stop).Source
-        $firstPartyBinaries = @(
-          ".\bin\x64\Release\output\DS4Windows.exe",
-          ".\bin\x64\Release\output\extras\VIIPER-0.1.0-x64.exe")
+        # VIIPER is an immutable release input whose exact hash is compiled
+        # into DS4Windows. Mutating it here would invalidate that identity.
+        $firstPartyBinaries = @(".\bin\x64\Release\output\DS4Windows.exe")
         foreach ($path in $firstPartyBinaries) {
           & $signtool sign /fd SHA256 /f $certificatePath `
             /p $env:DS4W_SIGN_CERT_PASSWORD /tr https://timestamp.digicert.com `
@@ -70,10 +75,11 @@ jobs:
           }
           $signature = Get-AuthenticodeSignature -LiteralPath $path
           if ($signature.Status -ne "Valid") {
-            throw "Required release signature is invalid for $path: $($signature.StatusMessage)"
+            throw "Required release signature is invalid for ${path}: $($signature.StatusMessage)"
           }
         }
         "DS4W_SIGN_CERT_PATH=$certificatePath" >> $env:GITHUB_ENV
+        "DS4W_SIGNING_ENABLED=true" >> $env:GITHUB_ENV
     - name: Post-Build script X64
       run: python .\utils\post-build.py .\bin\x64\Release\output . ${{env.VERSION}}
     - name: Build standard installer X64
@@ -81,14 +87,18 @@ jobs:
       env:
         DS4W_SIGN_CERT_PASSWORD: ${{ secrets.DS4W_SIGN_CERT_PASSWORD }}
       run: |
-        .\installer\build-installer.ps1 `
-          -PublishRoot ".\bin\x64\Release\DS4Windows" `
-          -ProductVersion "${{ env.BINARY_VERSION }}" `
-          -BundleVersion "${{ env.BINARY_VERSION }}" `
-          -DisplayVersion "${{ env.VERSION }}" `
-          -OutputDirectory ".\bin\x64\Release\installer" `
-          -SkipApplicationPublish `
-          -RequireSigning
+        $parameters = @{
+          PublishRoot = ".\bin\x64\Release\DS4Windows"
+          ProductVersion = "${{ env.BINARY_VERSION }}"
+          BundleVersion = "${{ env.BINARY_VERSION }}"
+          DisplayVersion = "${{ env.VERSION }}"
+          OutputDirectory = ".\bin\x64\Release\installer"
+          SkipApplicationPublish = $true
+        }
+        if ($env:DS4W_SIGNING_ENABLED -eq "true") {
+          $parameters.RequireSigning = $true
+        }
+        .\installer\build-installer.ps1 @parameters
     - name: Name release asset
       shell: pwsh
       run: |

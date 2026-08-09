@@ -291,9 +291,12 @@ def main() -> int:
         / "release.yml"
     ).read_text(encoding="utf-8")
     for contract in [
-        "$firstPartyBinaries = @(",
-        "output\\extras\\VIIPER-0.1.0-x64.exe",
+        'DS4W_SIGN_CERT_BASE64: ${{ secrets.DS4W_SIGN_CERT_BASE64 }}',
+        "DS4W_SIGNING_ENABLED=false",
+        '$firstPartyBinaries = @(".\\bin\\x64\\Release\\output\\DS4Windows.exe")',
         "First-party release signing failed for $path.",
+        '$parameters.RequireSigning = $true',
+        "VIIPER is an immutable release input",
     ]:
         if contract not in release_workflow:
             raise SystemExit(

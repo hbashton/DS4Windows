@@ -149,6 +149,26 @@ namespace DS4WindowsTests
             }
             CollectionAssert.AreEquivalent(operations, invoked.ToArray());
         }
+
+        [DataTestMethod]
+        [DataRow(false, false, false, true, true)]
+        [DataRow(true, false, false, false, true)]
+        [DataRow(false, true, true, false, true)]
+        [DataRow(false, true, false, false, false)]
+        [DataRow(false, false, false, false, false)]
+        public void RegisteredNativeServicePreventsLegacyFallback(
+            bool nativeDetected, bool serverRunning, bool backendNative,
+            bool serviceRegistered, bool expected)
+        {
+            var backend = new ViiperBackendSelection(backendNative
+                ? ViiperBackendMode.NativeUde
+                : ViiperBackendMode.LegacyUsbip);
+
+            Assert.AreEqual(expected,
+                ViiperSetupManager.IsNativeBackendAuthoritative(
+                    nativeDetected, serverRunning, backend,
+                    serviceRegistered));
+        }
     }
 
     [TestClass]

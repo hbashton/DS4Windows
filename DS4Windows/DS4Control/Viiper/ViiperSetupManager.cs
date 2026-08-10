@@ -202,6 +202,8 @@ namespace DS4Windows
         private const string RemoveViiperTaskArgument =
             "--remove-viiper-startup-task";
         private const string ViiperStartupTaskName = "RunVIIPER";
+        private const string NativeBrokerServiceName =
+            "VIIPERNativeBroker";
         private const int ForeignViiperHelperTimeoutMilliseconds = 15000;
         private const string UsbipRelativePath = @"USBip\usbip.exe";
         private const int UsbipProbeTimeoutMilliseconds = 3000;
@@ -284,8 +286,9 @@ namespace DS4Windows
             bool viiperServerRunning = viiperProcessOwnershipReady &&
                 canonicalViiperRunning && TryProbeServer(out backend,
                     out nativeBackendDetected);
-            bool nativeBackend = nativeBackendDetected ||
-                (viiperServerRunning && backend.IsNative);
+            bool nativeBackend = IsNativeBackendAuthoritative(
+                nativeBackendDetected, viiperServerRunning, backend,
+                IsNativeBrokerServiceRegistered());
 
             // Native UDE is proved before any USB/IP executable, driver,
             // filter, or runtime query. Once selected, none of the legacy
@@ -358,8 +361,9 @@ namespace DS4Windows
                         canonicalViiperRunning &&
                         TryProbeServer(out backend,
                             out nativeBackendDetected);
-                    nativeBackend = nativeBackendDetected ||
-                        (viiperServerRunning && backend.IsNative);
+                    nativeBackend = IsNativeBackendAuthoritative(
+                        nativeBackendDetected, viiperServerRunning,
+                        backend, IsNativeBrokerServiceRegistered());
                 }
             }
 
@@ -2806,6 +2810,37 @@ namespace DS4Windows
                 backend = null;
                 nativeBackendDetected = false;
                 return false;
+            }
+        }
+
+        // A registered native broker is authoritative even when its protected
+        // credential is missing or unreadable. Treating that authentication
+        // failure as legacy would inspect USB/IP and could try to start a
+        // second backend beside the service. The result remains not-ready,
+        // but Install / Repair is directed at native UDE only.
+        internal static bool IsNativeBackendAuthoritative(
+            bool nativeBackendDetected, bool serverRunning,
+            ViiperBackendSelection backend, bool serviceRegistered)
+        {
+            return serviceRegistered || nativeBackendDetected ||
+                (serverRunning && backend?.IsNative == true);
+        }
+
+        private static bool IsNativeBrokerServiceRegistered()
+        {
+            try
+            {
+                using RegistryKey service = Registry.LocalMachine.OpenSubKey(
+                    @"SYSTEM\CurrentControlSet\Services\" +
+                    NativeBrokerServiceName);
+                return service != null;
+            }
+            catch
+            {
+                // Failure to inspect an administrator-owned service key is
+                // itself not proof of legacy mode. Fail closed so USB/IP is
+                // never activated beside a potentially live native broker.
+                return true;
             }
         }
 

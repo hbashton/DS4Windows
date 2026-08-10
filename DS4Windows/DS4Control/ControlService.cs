@@ -1909,11 +1909,20 @@ namespace DS4Windows
                     // USB/IP output imported. Remove those ports before HID
                     // discovery or DS4Windows will ingest its own VIIPER DS4,
                     // create a second output/UAC endpoint, and recurse.
-                    ViiperUsbipPortManager.DetachStaleLocalViiperPorts();
-                    // Let usbccgp/HID finish publishing removal before the
-                    // first input snapshot; otherwise a detached interface can
-                    // remain enumerable for one final discovery pass.
-                    Thread.Sleep(250);
+                    ViiperBackendSelection startupBackend =
+                        new ViiperClient(ViiperSetupManager.ApiHost,
+                            ViiperSetupManager.ApiPort).ProbeBackend();
+                    ViiperBackendPolicy.RunUsbipOnly(startupBackend.Mode,
+                        () =>
+                        {
+                            ViiperUsbipPortManager.
+                                DetachStaleLocalViiperPorts();
+                            // Let usbccgp/HID finish publishing removal before
+                            // the first input snapshot; otherwise a detached
+                            // interface can remain enumerable for one final
+                            // discovery pass.
+                            Thread.Sleep(250);
+                        });
 
                     StartupDiag("DS4Devices.findControllers dispatch begin");
                     eventDispatcher.Invoke(() =>

@@ -15,6 +15,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -608,6 +609,9 @@ namespace DS4Windows
         internal int DirectSpeakerUsbipPort =>
             Volatile.Read(ref deviceStream)?.UsbipPort ?? -1;
 
+        internal ViiperBackendMode? BackendMode =>
+            Volatile.Read(ref deviceStream)?.BackendMode;
+
         internal bool SupportsActiveVirtualMicrophone =>
             connected && activeStreamSupportsMicrophone;
 
@@ -649,7 +653,7 @@ namespace DS4Windows
             if (!status.Ready)
             {
                 throw new IOException(
-                    $"{status.DisplayText}. Use Settings > VIIPER Virtual Controller Support to install or repair VIIPER and usbip-win2.");
+                    $"{status.DisplayText}. Use Settings > VIIPER Virtual Controller Support to install or repair the selected backend.");
             }
 
             deviceStream = CreateDeviceStreamWithServerFallback();
@@ -4903,6 +4907,7 @@ namespace DS4Windows
 
         private readonly string host;
         private readonly int port;
+        private ViiperBackendSelection lastBackendSelection;
 
         public ViiperClient(string host, int port)
         {
@@ -4918,9 +4923,12 @@ namespace DS4Windows
         public ViiperDeviceStream CreateDeviceAndOpenStream(string deviceName,
             ushort? idProduct = null)
         {
-            ViiperUsbipPortManager.DetachStaleLocalViiperPorts();
+            ViiperBackendSelection backend = ProbeBackend();
+            ViiperBackendPolicy.RunUsbipOnly(backend.Mode,
+                ViiperUsbipPortManager.DetachStaleLocalViiperPorts);
 
-            ViiperBusCreateResponse bus = SendRequest<ViiperBusCreateResponse>("bus/create", "0");
+            ViiperBusCreateResponse bus = SendRequest<ViiperBusCreateResponse>(
+                "bus/create", "0", backend);
             ViiperDeviceResponse device = null;
             int usbipPort = -1;
             try
@@ -4931,30 +4939,39 @@ namespace DS4Windows
                     IdProduct = idProduct,
                 }, JsonOptions);
 
-                device = SendRequest<ViiperDeviceResponse>($"bus/{bus.BusId}/add", payload);
+                device = SendRequest<ViiperDeviceResponse>(
+                    $"bus/{bus.BusId}/add", payload, backend);
                 usbipPort = device.UsbipPort;
-                if (!ViiperUsbipPortManager.IsTrustedCreateResponse(
-                    usbipPort, device.UsbipOwnerSerial))
+                if (ViiperBackendPolicy.UsesUsbip(backend.Mode) &&
+                    !ViiperUsbipPortManager.IsTrustedCreateResponse(
+                        usbipPort, device.UsbipOwnerSerial))
                 {
                     throw new IOException(
                         $"VIIPER created {bus.BusId}-{device.DevId}, but its native usbip-win2 attach response did not contain a positive port and supported ownership metadata.");
                 }
 
-                ViiperUsbipPortManager.DetachDuplicateLocalViiperPorts(bus.BusId, device.DevId, usbipPort);
-                ViiperUsbipPortManager.RegisterActivePort(usbipPort,
-                    $"{bus.BusId}-{device.DevId}");
-                return OpenStream(bus.BusId, device.DevId, usbipPort);
+                ViiperBackendPolicy.RunUsbipOnly(backend.Mode, () =>
+                {
+                    ViiperUsbipPortManager.DetachDuplicateLocalViiperPorts(
+                        bus.BusId, device.DevId, usbipPort);
+                    ViiperUsbipPortManager.RegisterActivePort(usbipPort,
+                        $"{bus.BusId}-{device.DevId}");
+                });
+                var identity = new ViiperVirtualDeviceIdentity(bus.BusId,
+                    device.DevId);
+                return OpenStream(identity, usbipPort, backend);
             }
             catch
             {
-                ViiperUsbipPortManager.UnregisterActivePort(usbipPort);
+                ViiperBackendPolicy.RunUsbipOnly(backend.Mode, () =>
+                    ViiperUsbipPortManager.UnregisterActivePort(usbipPort));
 
                 if (device != null && !string.IsNullOrEmpty(device.DevId))
                 {
-                    TryRemoveDevice(bus.BusId, device.DevId);
+                    TryRemoveDevice(bus.BusId, device.DevId, backend);
                 }
 
-                TryRemoveBus(bus.BusId);
+                TryRemoveBus(bus.BusId, backend);
                 throw;
             }
         }
@@ -4967,8 +4984,10 @@ namespace DS4Windows
         internal ViiperMicrophoneInterfaceStatus GetMicrophoneInterfaceStatus(
             uint busId, string devId)
         {
+            ViiperBackendSelection backend = RequireBackendSelection();
             ViiperBusDevicesResponse response =
-                SendRequest<ViiperBusDevicesResponse>($"bus/{busId}/list");
+                SendRequest<ViiperBusDevicesResponse>($"bus/{busId}/list",
+                    null, backend);
             if (response?.Devices == null)
             {
                 throw new IOException(
@@ -5019,7 +5038,10 @@ namespace DS4Windows
         public ViiperDeviceStream OpenExistingDeviceStream(uint busId,
             string devId, int usbipPort)
         {
-            return OpenExistingDeviceStream(busId, devId, usbipPort, null);
+            var identity = new ViiperVirtualDeviceIdentity(busId, devId);
+            var backend = new ViiperBackendSelection(
+                ViiperBackendMode.LegacyUsbip);
+            return OpenStream(identity, usbipPort, backend);
         }
 
         internal ViiperDeviceStream OpenExistingDeviceStream(uint busId,
@@ -5033,71 +5055,115 @@ namespace DS4Windows
                     nameof(devId));
             }
             if (deviceLifetime != null &&
-                (deviceLifetime.BusId != busId ||
-                    !string.Equals(deviceLifetime.DevId, devId,
-                        StringComparison.Ordinal) ||
-                    deviceLifetime.UsbipPort != usbipPort))
+                !deviceLifetime.Identity.Matches(busId, devId))
             {
                 throw new ArgumentException(
                     "The VIIPER stream identity must match its virtual-device lifetime.",
                     nameof(deviceLifetime));
             }
+            if (deviceLifetime?.BackendMode ==
+                    ViiperBackendMode.LegacyUsbip &&
+                deviceLifetime.UsbipPort != usbipPort)
+            {
+                throw new ArgumentException(
+                    "The USB/IP port must match its legacy virtual-device lifetime.",
+                    nameof(usbipPort));
+            }
 
-            return OpenStream(busId, devId, usbipPort, deviceLifetime);
+            ViiperBackendSelection backend =
+                Volatile.Read(ref lastBackendSelection);
+            if (deviceLifetime?.BackendMode == ViiperBackendMode.NativeUde)
+            {
+                // A service/driver crash invalidates every native kernel
+                // child. Reopening is allowed only after a fresh exact health
+                // proof from the same transport; USB/IP is never a fallback.
+                backend = ProbeBackend();
+                if (!backend.IsNative)
+                {
+                    throw new IOException(
+                        "VIIPER changed transport while reopening a native UDE device.");
+                }
+            }
+            else
+            {
+                backend ??= new ViiperBackendSelection(
+                    ViiperBackendMode.LegacyUsbip);
+            }
+
+            if (deviceLifetime != null &&
+                backend.Mode != deviceLifetime.BackendMode)
+            {
+                throw new IOException(
+                    "VIIPER transport no longer matches the virtual-device lifetime.");
+            }
+
+            ViiperVirtualDeviceIdentity identity = deviceLifetime?.Identity ??
+                new ViiperVirtualDeviceIdentity(busId, devId);
+            return OpenStream(identity, usbipPort, backend,
+                deviceLifetime);
         }
 
-        private ViiperDeviceStream OpenStream(uint busId, string devId,
-            int usbipPort,
+        private ViiperDeviceStream OpenStream(
+            ViiperVirtualDeviceIdentity identity, int usbipPort,
+            ViiperBackendSelection backend,
             ViiperVirtualDeviceLifetime deviceLifetime = null)
         {
             TcpClient tcp = Connect(StreamReceiveTimeoutMs);
+            Stream stream = null;
             try
             {
-                NetworkStream stream = tcp.GetStream();
-                byte[] request = Encoding.UTF8.GetBytes($"bus/{busId}/{devId}\0");
+                stream = OpenTransportStream(tcp, backend);
+                byte[] request = Encoding.UTF8.GetBytes(
+                    $"bus/{identity.BusId}/{identity.DevId}\0");
                 stream.Write(request, 0, request.Length);
-                deviceLifetime ??= new ViiperVirtualDeviceLifetime(busId,
-                    devId, usbipPort, RemoveDevice);
+                deviceLifetime ??= new ViiperVirtualDeviceLifetime(identity,
+                    backend.Mode, usbipPort,
+                    (bus, device) => RemoveDevice(bus, device, backend));
                 return new ViiperDeviceStream(tcp, stream, deviceLifetime);
             }
             catch
             {
+                stream?.Dispose();
                 tcp.Dispose();
                 throw;
             }
         }
 
-        private void RemoveDevice(uint busId, string devId)
+        private void RemoveDevice(uint busId, string devId,
+            ViiperBackendSelection backend)
         {
-            TryRemoveDevice(busId, devId);
-            TryRemoveBus(busId);
+            TryRemoveDevice(busId, devId, backend);
+            TryRemoveBus(busId, backend);
         }
 
-        private void TryRemoveDevice(uint busId, string devId)
+        private void TryRemoveDevice(uint busId, string devId,
+            ViiperBackendSelection backend)
         {
             try
             {
-                SendRequestRaw($"bus/{busId}/remove", devId);
+                SendRequestRaw($"bus/{busId}/remove", devId, backend);
             }
             catch
             {
             }
         }
 
-        private void TryRemoveBus(uint busId)
+        private void TryRemoveBus(uint busId,
+            ViiperBackendSelection backend)
         {
             try
             {
-                SendRequestRaw("bus/remove", busId.ToString());
+                SendRequestRaw("bus/remove", busId.ToString(), backend);
             }
             catch
             {
             }
         }
 
-        private T SendRequest<T>(string path, string payload = null)
+        private T SendRequest<T>(string path, string payload,
+            ViiperBackendSelection backend)
         {
-            string raw = SendRequestRaw(path, payload);
+            string raw = SendRequestRaw(path, payload, backend);
             if (string.IsNullOrWhiteSpace(raw))
             {
                 throw new IOException("VIIPER returned an empty response.");
@@ -5112,10 +5178,101 @@ namespace DS4Windows
             return JsonSerializer.Deserialize<T>(raw, JsonOptions);
         }
 
-        private string SendRequestRaw(string path, string payload = null)
+        internal ViiperBackendSelection ProbeBackend()
+        {
+            string raw = null;
+            Exception unauthenticatedError = null;
+            try
+            {
+                raw = SendRequestRawCore("ping", null, null);
+                ViiperBackendSelection selection =
+                    ViiperBackendContract.ParsePing(raw);
+                Volatile.Write(ref lastBackendSelection, selection);
+                return selection;
+            }
+            catch (Exception ex) when (ex is IOException ||
+                ex is SocketException)
+            {
+                // An explicit native response with a bad health contract is
+                // authoritative. Never search for a credential or reinterpret
+                // it as legacy.
+                if (ex is ViiperNativeContractException ||
+                    IsExplicitNativePing(raw))
+                {
+                    throw;
+                }
+                unauthenticatedError = ex;
+            }
+
+            Exception authenticatedError = null;
+            foreach (string credential in
+                ViiperCredentialProvider.ReadCandidateCredentials())
+            {
+                try
+                {
+                    raw = SendRequestRawCore("ping", null, credential);
+                    ViiperBackendSelection selection =
+                        ViiperBackendContract.ParsePing(raw, credential);
+                    Volatile.Write(ref lastBackendSelection, selection);
+                    return selection;
+                }
+                catch (Exception ex) when (ex is IOException ||
+                    ex is SocketException || ex is CryptographicException)
+                {
+                    if (ex is ViiperNativeContractException)
+                    {
+                        throw;
+                    }
+                    authenticatedError = ex;
+                }
+            }
+
+            throw new IOException(
+                "VIIPER did not provide a usable authenticated or legacy backend health proof.",
+                authenticatedError ?? unauthenticatedError);
+        }
+
+        private ViiperBackendSelection RequireBackendSelection()
+        {
+            return Volatile.Read(ref lastBackendSelection) ?? ProbeBackend();
+        }
+
+        private static bool IsExplicitNativePing(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return false;
+            }
+
+            try
+            {
+                using JsonDocument document = JsonDocument.Parse(raw);
+                return document.RootElement.TryGetProperty("transport",
+                        out JsonElement transport) &&
+                    transport.ValueKind == JsonValueKind.String &&
+                    string.Equals(transport.GetString(),
+                        ViiperBackendContract.NativeTransport,
+                        StringComparison.Ordinal);
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
+        }
+
+        private string SendRequestRaw(string path, string payload,
+            ViiperBackendSelection backend)
+        {
+            return SendRequestRawCore(path, payload, backend?.Credential);
+        }
+
+        private string SendRequestRawCore(string path, string payload,
+            string credential)
         {
             using TcpClient tcp = Connect(ApiReceiveTimeoutMs);
-            NetworkStream stream = tcp.GetStream();
+            using Stream stream = OpenTransportStream(tcp,
+                new ViiperBackendSelection(ViiperBackendMode.LegacyUsbip,
+                    credential));
             string request = string.IsNullOrEmpty(payload) ? path : $"{path} {payload}";
             byte[] requestBytes = Encoding.UTF8.GetBytes(request + "\0");
             stream.Write(requestBytes, 0, requestBytes.Length);
@@ -5129,6 +5286,16 @@ namespace DS4Windows
             }
 
             return Encoding.UTF8.GetString(response.ToArray()).TrimEnd('\n');
+        }
+
+        private static Stream OpenTransportStream(TcpClient tcp,
+            ViiperBackendSelection backend)
+        {
+            NetworkStream network = tcp.GetStream();
+            return backend != null && backend.UsesAuthentication
+                ? ViiperAuthentication.Authenticate(network,
+                    backend.Credential)
+                : network;
         }
 
         private TcpClient Connect(int receiveTimeout)
@@ -5186,7 +5353,7 @@ namespace DS4Windows
             public string DevId { get; set; }
 
             [JsonPropertyName("usbipPort")]
-            public int UsbipPort { get; set; }
+            public int UsbipPort { get; set; } = -1;
 
             [JsonPropertyName("usbipOwnerSerial")]
             public string UsbipOwnerSerial { get; set; }
@@ -5785,10 +5952,32 @@ namespace DS4Windows
         }
     }
 
+    internal readonly struct ViiperVirtualDeviceIdentity
+    {
+        internal ViiperVirtualDeviceIdentity(uint busId, string devId)
+        {
+            if (string.IsNullOrWhiteSpace(devId))
+            {
+                throw new ArgumentException(
+                    "A VIIPER device ID is required.", nameof(devId));
+            }
+
+            BusId = busId;
+            DevId = devId;
+        }
+
+        internal uint BusId { get; }
+        internal string DevId { get; }
+
+        internal bool Matches(uint busId, string devId) =>
+            BusId == busId && string.Equals(DevId, devId,
+                StringComparison.Ordinal);
+    }
+
     internal sealed class ViiperVirtualDeviceLifetime : IDisposable
     {
-        private readonly uint busId;
-        private readonly string devId;
+        private readonly ViiperVirtualDeviceIdentity identity;
+        private readonly ViiperBackendMode backendMode;
         private readonly int usbipPort;
         private readonly Action<int, string> detachPort;
         private readonly Action<int> unregisterPort;
@@ -5801,9 +5990,22 @@ namespace DS4Windows
             Action<int, string> detachPort = null,
             Action<int> unregisterPort = null,
             Action detachStalePorts = null)
+            : this(new ViiperVirtualDeviceIdentity(busId, devId),
+                ViiperBackendMode.LegacyUsbip, usbipPort, removeDevice,
+                detachPort, unregisterPort, detachStalePorts)
         {
-            this.busId = busId;
-            this.devId = devId ?? throw new ArgumentNullException(nameof(devId));
+        }
+
+        internal ViiperVirtualDeviceLifetime(
+            ViiperVirtualDeviceIdentity identity,
+            ViiperBackendMode backendMode, int usbipPort,
+            Action<uint, string> removeDevice,
+            Action<int, string> detachPort = null,
+            Action<int> unregisterPort = null,
+            Action detachStalePorts = null)
+        {
+            this.identity = identity;
+            this.backendMode = backendMode;
             this.usbipPort = usbipPort;
             this.removeDevice = removeDevice;
             this.detachPort = detachPort ??
@@ -5814,9 +6016,13 @@ namespace DS4Windows
                 ViiperUsbipPortManager.DetachStaleLocalViiperPorts;
         }
 
-        internal uint BusId => busId;
+        internal ViiperVirtualDeviceIdentity Identity => identity;
 
-        internal string DevId => devId;
+        internal ViiperBackendMode BackendMode => backendMode;
+
+        internal uint BusId => identity.BusId;
+
+        internal string DevId => identity.DevId;
 
         internal int UsbipPort => usbipPort;
 
@@ -5829,38 +6035,44 @@ namespace DS4Windows
                 return;
             }
 
+            ViiperBackendPolicy.RunUsbipOnly(backendMode, () =>
+            {
+                try
+                {
+                    detachPort?.Invoke(usbipPort,
+                        "DS4Windows VIIPER device stopped");
+                }
+                catch
+                {
+                }
+
+                try
+                {
+                    unregisterPort?.Invoke(usbipPort);
+                }
+                catch
+                {
+                }
+            });
+
             try
             {
-                detachPort?.Invoke(usbipPort,
-                    "DS4Windows VIIPER device stopped");
+                removeDevice?.Invoke(identity.BusId, identity.DevId);
             }
             catch
             {
             }
 
-            try
+            ViiperBackendPolicy.RunUsbipOnly(backendMode, () =>
             {
-                unregisterPort?.Invoke(usbipPort);
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                removeDevice?.Invoke(busId, devId);
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                detachStalePorts?.Invoke();
-            }
-            catch
-            {
-            }
+                try
+                {
+                    detachStalePorts?.Invoke();
+                }
+                catch
+                {
+                }
+            });
         }
 
     }
@@ -5911,6 +6123,9 @@ namespace DS4Windows
         public string DevId => deviceLifetime.DevId;
 
         public int UsbipPort => deviceLifetime.UsbipPort;
+
+        internal ViiperBackendMode BackendMode =>
+            deviceLifetime.BackendMode;
 
         internal ViiperVirtualDeviceLifetime DeviceLifetime => deviceLifetime;
 

@@ -373,6 +373,21 @@ namespace DS4Windows
                 return false;
             }
 
+            if (Global.CheckIfViiperNativeUdeDevice(devicePath))
+            {
+                return true;
+            }
+
+            return IsOwnedLegacyVirtualPath(devicePath);
+        }
+
+        private static bool IsOwnedLegacyVirtualPath(string devicePath)
+        {
+            if (string.IsNullOrEmpty(devicePath))
+            {
+                return false;
+            }
+
             lock (ownVirtualLock)
             {
                 if (ownVirtualSonyPaths.Count > 0 &&
@@ -384,6 +399,15 @@ namespace DS4Windows
 
             return Global.TryGetUsbIpWin2Port(devicePath, out int port) &&
                 ViiperUsbipPortManager.IsActivePort(port);
+        }
+
+        internal static bool ShouldSuppressViiperSonyInput(int vendorId,
+            int productId, bool nativeUdeAncestor,
+            bool ownedLegacyUsbipPath)
+        {
+            return vendorId == SONY_VID &&
+                IsViiperSonyProductId(productId) &&
+                (nativeUdeAncestor || ownedLegacyUsbipPath);
         }
 
         private static bool HasMoonlightVirtualDS4Identity(HidDevice hDevice, string serial)
@@ -398,7 +422,14 @@ namespace DS4Windows
         {
             // Our own virtual output controllers are never valid input, regardless of
             // mode. This is what breaks the Moonlight + DS4-output feedback loop.
-            if (IsOwnVirtualDevice(hDevice.DevicePath))
+            bool nativeUdeAncestor = Global.CheckIfViiperNativeUdeDevice(
+                hDevice.DevicePath);
+            bool ownedVirtualPath = nativeUdeAncestor ||
+                IsOwnedLegacyVirtualPath(hDevice.DevicePath);
+            if (ShouldSuppressViiperSonyInput(
+                    hDevice.Attributes.VendorId,
+                    hDevice.Attributes.ProductId, nativeUdeAncestor,
+                    ownedVirtualPath) || ownedVirtualPath)
             {
                 return false;
             }

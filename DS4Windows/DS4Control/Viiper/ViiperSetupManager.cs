@@ -14,7 +14,6 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Management;
-using System.Net.Sockets;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
@@ -54,16 +53,30 @@ namespace DS4Windows
         public string ViiperProcessConflictMessage { get; set; }
         public bool CitrixUsbMonitorConflict { get; set; }
         public string CitrixUsbMonitorConflictMessage { get; set; }
+        internal ViiperBackendMode BackendMode { get; set; } =
+            ViiperBackendMode.LegacyUsbip;
 
         // Runtime readiness is deliberately independent of startup-task
         // maintenance. A healthy compatible VIIPER server must remain usable
         // when DS4Windows or VIIPER is run portably; a stale/missing task can
         // be repaired without preventing virtual devices from being created.
-        public bool Ready => ViiperInstalled && ViiperPackageCurrent &&
-            !ViiperProcessConflict && ServerRunning && UsbipInstalled &&
-            UsbipExecutableSafe && UsbipDriverFilesSafe &&
-            UsbipRuntimeReady &&
-            !CitrixUsbMonitorConflict;
+        public bool Ready
+        {
+            get
+            {
+                bool commonReady = ViiperInstalled &&
+                    ViiperPackageCurrent && !ViiperProcessConflict &&
+                    ServerRunning;
+                if (BackendMode == ViiperBackendMode.NativeUde)
+                {
+                    return commonReady;
+                }
+
+                return commonReady && UsbipInstalled &&
+                    UsbipExecutableSafe && UsbipDriverFilesSafe &&
+                    UsbipRuntimeReady && !CitrixUsbMonitorConflict;
+            }
+        }
 
         public string DisplayText
         {
@@ -71,6 +84,10 @@ namespace DS4Windows
             {
                 if (Ready)
                 {
+                    if (BackendMode == ViiperBackendMode.NativeUde)
+                    {
+                        return "VIIPER native UDE ready";
+                    }
                     return ViiperStartupTaskReady
                         ? "VIIPER ready"
                         : "VIIPER ready; startup task needs repair";
@@ -90,6 +107,21 @@ namespace DS4Windows
                         ViiperProcessConflictMessage)
                         ? "VIIPER startup blocked by another viiper.exe"
                         : ViiperProcessConflictMessage;
+                }
+
+                if (BackendMode == ViiperBackendMode.NativeUde)
+                {
+                    if (!ViiperInstalled)
+                    {
+                        return "VIIPER native UDE helper missing";
+                    }
+                    if (!ViiperPackageCurrent)
+                    {
+                        return "packaged VIIPER native UDE update required";
+                    }
+                    return ServerRunning
+                        ? "VIIPER native UDE status unknown"
+                        : "VIIPER native UDE health proof unavailable";
                 }
 
                 if (!UsbipInstalled && !ViiperInstalled)
@@ -234,43 +266,6 @@ namespace DS4Windows
                 FindAlternativeViiperPath(canonicalViiperPath));
             string bundledViiperPath = GetBundledViiperPath();
             string setupScriptPath = GetSetupScriptPath();
-            string usbipPath = GetCanonicalUsbipPath();
-            Version usbipVersion = TryGetUsbipVersion(usbipPath);
-            bool usbipInstalled = IsSupportedUsbipVersion(usbipVersion);
-            bool usbipExecutableSafe = usbipInstalled &&
-                FileHasSha256(usbipPath, SupportedUsbipExecutableSha256);
-            bool usbipRuntimeReady = false;
-            string usbipProbeMessage;
-            (bool usbipDriverFilesSafe,
-                string usbipDriverIntegrityMessage) =
-                usbipDriverIntegrityStatus.Value;
-            bool citrixUsbMonitorConflict =
-                TryGetCitrixUsbMonitorConflict(
-                    out string citrixUsbMonitorConflictMessage);
-
-            if (usbipInstalled && usbipExecutableSafe &&
-                usbipDriverFilesSafe)
-            {
-                usbipRuntimeReady = TryProbeUsbipRuntime(usbipPath,
-                    out usbipProbeMessage);
-            }
-            else if (!File.Exists(usbipPath))
-            {
-                usbipProbeMessage =
-                    $"usbip.exe was not found at {usbipPath}.";
-            }
-            else
-            {
-                usbipProbeMessage = !usbipExecutableSafe && usbipInstalled
-                    ? "The installed usbip.exe does not match the bundled 0.9.7.7 executable."
-                    : !usbipDriverFilesSafe &&
-                    usbipInstalled
-                    ? usbipDriverIntegrityMessage
-                    : usbipVersion == null
-                        ? "The canonical usbip.exe version could not be read."
-                        : $"usbip.exe {usbipVersion} does not match the supported {RequiredUsbipVersion}.";
-            }
-
             // Verify both the protected location and exact package identity.
             bool viiperPackageCurrent = IsBundledViiperAuthentic() &&
                 FilesHaveSameSha256(viiperPath, bundledViiperPath);
@@ -284,8 +279,71 @@ namespace DS4Windows
                 viiperPath, out canonicalViiperRunning,
                 out viiperProcessConflictMessage);
 
+            ViiperBackendSelection backend = null;
+            bool nativeBackendDetected = false;
+            bool viiperServerRunning = viiperProcessOwnershipReady &&
+                canonicalViiperRunning && TryProbeServer(out backend,
+                    out nativeBackendDetected);
+            bool nativeBackend = nativeBackendDetected ||
+                (viiperServerRunning && backend.IsNative);
+
+            // Native UDE is proved before any USB/IP executable, driver,
+            // filter, or runtime query. Once selected, none of the legacy
+            // discovery path is touched.
+            string usbipPath = GetCanonicalUsbipPath();
+            Version usbipVersion = null;
+            bool usbipInstalled = false;
+            bool usbipExecutableSafe = false;
+            bool usbipRuntimeReady = false;
+            bool usbipDriverFilesSafe = false;
+            string usbipDriverIntegrityMessage = string.Empty;
+            string usbipProbeMessage = nativeBackend
+                ? "usbip-win2 is not used by the active native UDE transport."
+                : string.Empty;
+            bool citrixUsbMonitorConflict = false;
+            string citrixUsbMonitorConflictMessage = null;
+
+            if (!nativeBackend)
+            {
+                usbipVersion = TryGetUsbipVersion(usbipPath);
+                usbipInstalled = IsSupportedUsbipVersion(usbipVersion);
+                usbipExecutableSafe = usbipInstalled &&
+                    FileHasSha256(usbipPath,
+                        SupportedUsbipExecutableSha256);
+                (usbipDriverFilesSafe,
+                    usbipDriverIntegrityMessage) =
+                    usbipDriverIntegrityStatus.Value;
+                citrixUsbMonitorConflict =
+                    TryGetCitrixUsbMonitorConflict(
+                        out citrixUsbMonitorConflictMessage);
+
+                if (usbipInstalled && usbipExecutableSafe &&
+                    usbipDriverFilesSafe)
+                {
+                    usbipRuntimeReady = TryProbeUsbipRuntime(usbipPath,
+                        out usbipProbeMessage);
+                }
+                else if (!File.Exists(usbipPath))
+                {
+                    usbipProbeMessage =
+                        $"usbip.exe was not found at {usbipPath}.";
+                }
+                else
+                {
+                    usbipProbeMessage = !usbipExecutableSafe &&
+                        usbipInstalled
+                        ? "The installed usbip.exe does not match the bundled 0.9.7.7 executable."
+                        : !usbipDriverFilesSafe && usbipInstalled
+                            ? usbipDriverIntegrityMessage
+                            : usbipVersion == null
+                                ? "The canonical usbip.exe version could not be read."
+                                : $"usbip.exe {usbipVersion} does not match the supported {RequiredUsbipVersion}.";
+                }
+            }
+
             if (tryStartServer && File.Exists(viiperPath) &&
-                viiperPackageCurrent && usbipRuntimeReady &&
+                viiperPackageCurrent && !nativeBackend &&
+                usbipRuntimeReady &&
                 !citrixUsbMonitorConflict)
             {
                 if (viiperProcessOwnershipReady &&
@@ -296,11 +354,14 @@ namespace DS4Windows
                         InspectViiperProcessOwnership(viiperPath,
                             out canonicalViiperRunning,
                             out viiperProcessConflictMessage);
+                    viiperServerRunning = viiperProcessOwnershipReady &&
+                        canonicalViiperRunning &&
+                        TryProbeServer(out backend,
+                            out nativeBackendDetected);
+                    nativeBackend = nativeBackendDetected ||
+                        (viiperServerRunning && backend.IsNative);
                 }
             }
-
-            bool viiperServerRunning = viiperProcessOwnershipReady &&
-                canonicalViiperRunning && CanPingServer();
 
             ViiperPrerequisiteStatus status = new ViiperPrerequisiteStatus
             {
@@ -328,6 +389,9 @@ namespace DS4Windows
                 CitrixUsbMonitorConflict = citrixUsbMonitorConflict,
                 CitrixUsbMonitorConflictMessage =
                     citrixUsbMonitorConflictMessage,
+                BackendMode = nativeBackend
+                    ? ViiperBackendMode.NativeUde
+                    : ViiperBackendMode.LegacyUsbip,
             };
 
             return status;
@@ -445,12 +509,13 @@ namespace DS4Windows
         {
             return status != null &&
                 ((status.ViiperInstalled && !status.ViiperPackageCurrent) ||
-                 RequiresUsbipReplacement(status) ||
-                 (status.UsbipInstalled &&
+                 (status.BackendMode == ViiperBackendMode.LegacyUsbip &&
+                  (RequiresUsbipReplacement(status) ||
+                  (status.UsbipInstalled &&
                     (!status.UsbipExecutableSafe ||
                      !status.UsbipDriverFilesSafe ||
                      status.UsbipRebootOrRepairRequired)) ||
-                 status.CitrixUsbMonitorConflict);
+                  status.CitrixUsbMonitorConflict)));
         }
 
         internal static bool RequiresUsbipReplacement(
@@ -461,6 +526,7 @@ namespace DS4Windows
             // both "don't show again" and the once-per-session prompt latch so
             // the user is offered the safe two-boot replacement flow.
             return status != null &&
+                status.BackendMode == ViiperBackendMode.LegacyUsbip &&
                 !string.IsNullOrWhiteSpace(status.UsbipVersion) &&
                 !status.UsbipInstalled;
         }
@@ -2639,7 +2705,7 @@ namespace DS4Windows
 
                 if (canonicalProcessRunning)
                 {
-                    return CanPingServer();
+                    return TryProbeServer(out _, out _);
                 }
 
                 DateTime now = DateTime.UtcNow;
@@ -2718,59 +2784,27 @@ namespace DS4Windows
             }
         }
 
-        private static bool CanPingServer()
+        private static bool TryProbeServer(
+            out ViiperBackendSelection backend,
+            out bool nativeBackendDetected)
         {
+            backend = null;
+            nativeBackendDetected = false;
             try
             {
-                using TcpClient tcp = new TcpClient
-                {
-                    NoDelay = true,
-                    SendTimeout = 500,
-                    ReceiveTimeout = 1000,
-                };
-
-                IAsyncResult result = tcp.BeginConnect(ApiHost, ApiPort, null, null);
-                using (result.AsyncWaitHandle)
-                {
-                    if (!result.AsyncWaitHandle.WaitOne(
-                            TimeSpan.FromMilliseconds(750)))
-                    {
-                        return false;
-                    }
-                }
-
-                tcp.EndConnect(result);
-                NetworkStream stream = tcp.GetStream();
-                byte[] request = Encoding.UTF8.GetBytes("ping\0");
-                stream.Write(request, 0, request.Length);
-
-                byte[] buffer = new byte[256];
-                int total = 0;
-                Stopwatch deadline = Stopwatch.StartNew();
-                while (total < buffer.Length &&
-                       deadline.ElapsedMilliseconds < 1000)
-                {
-                    stream.ReadTimeout = Math.Max(1,
-                        1000 - (int)deadline.ElapsedMilliseconds);
-                    int read = stream.Read(buffer, total,
-                        buffer.Length - total);
-                    if (read <= 0)
-                    {
-                        break;
-                    }
-                    total += read;
-                    string response = Encoding.UTF8.GetString(buffer, 0,
-                        total);
-                    if (response.IndexOf("VIIPER",
-                            StringComparison.OrdinalIgnoreCase) >= 0)
-                    {
-                        return true;
-                    }
-                }
+                backend = new ViiperClient(ApiHost, ApiPort).ProbeBackend();
+                nativeBackendDetected = backend.IsNative;
+                return true;
+            }
+            catch (ViiperNativeContractException)
+            {
+                nativeBackendDetected = true;
                 return false;
             }
             catch
             {
+                backend = null;
+                nativeBackendDetected = false;
                 return false;
             }
         }

@@ -185,7 +185,7 @@ namespace DS4WindowsTests
             object legacyNames = JsonSerializer.Deserialize(
                 "{\"devId\":\"3\",\"usbPort\":9," +
                 "\"ownerSerial\":\"DS4WABCDEF01234\"}", responseType);
-            Assert.AreEqual(0, portProperty.GetValue(legacyNames));
+            Assert.AreEqual(-1, portProperty.GetValue(legacyNames));
             Assert.IsNull(serialProperty.GetValue(legacyNames));
         }
 

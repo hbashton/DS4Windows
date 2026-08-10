@@ -2473,9 +2473,13 @@ Suspend support not enabled.", true);
             }
 
             ViiperPrerequisiteStatus status = ViiperSetupManager.GetStatus(tryStartServer: false);
+            string transportStatus = status.BackendMode ==
+                    ViiperBackendMode.NativeUde
+                ? "transport: native UDE"
+                : $"usbip-win2: {(status.UsbipInstalled ? "installed" : "missing")}";
             viiperStatusText.Text = $"{status.DisplayText}. " +
                 $"VIIPER helper: {(status.ViiperInstalled ? "installed" : "missing")}; " +
-                $"usbip-win2: {(status.UsbipInstalled ? "installed" : "missing")}; " +
+                $"{transportStatus}; " +
                 $"server: {(status.ServerRunning ? "running" : "not running")}.";
         }
 

@@ -221,10 +221,23 @@ namespace DS4Windows
 
                     if (beforeVirtualSony != null)
                     {
-                        DS4Devices.RegisterOwnVirtualSonyAsync(
-                            beforeVirtualSony, virtualSonyRegisteredCallback);
-                        // The asynchronous registration worker now owns the
-                        // matching EndOwnVirtualSonyConnect call.
+                        if (outputDevice is ViiperOutDevice viiperOutput &&
+                            viiperOutput.BackendMode ==
+                                ViiperBackendMode.NativeUde)
+                        {
+                            // Native children are rejected by their exact PnP
+                            // ancestry. Do not run the USB/IP-era HID delta
+                            // wait/registration loop.
+                            DS4Devices.EndOwnVirtualSonyConnect();
+                        }
+                        else
+                        {
+                            DS4Devices.RegisterOwnVirtualSonyAsync(
+                                beforeVirtualSony,
+                                virtualSonyRegisteredCallback);
+                            // The asynchronous registration worker now owns
+                            // the matching EndOwnVirtualSonyConnect call.
+                        }
                         beforeVirtualSony = null;
                     }
 

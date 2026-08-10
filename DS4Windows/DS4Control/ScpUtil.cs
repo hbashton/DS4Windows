@@ -1359,6 +1359,79 @@ namespace DS4Windows
                 usbIpWin2AncestorFound;
         }
 
+        // UdeCx publishes ordinary USB/HID children below the controller
+        // devnode, so the child device path does not contain VIIPER. Resolve
+        // the complete PnP ancestry and require the exact root hardware ID.
+        public static bool CheckIfViiperNativeUdeDevice(string devicePath)
+        {
+            const string nativeUdeHardwareId = @"ROOT\VIIPER\UDE";
+            string instanceId = GetInstanceIdFromDevicePath(devicePath);
+            return HasHardwareIdInAncestry(instanceId,
+                nativeUdeHardwareId,
+                id => GetStringArrayDeviceProperty(id,
+                    NativeMethods.DEVPKEY_Device_HardwareIds),
+                id => GetStringDeviceProperty(id,
+                    NativeMethods.DEVPKEY_Device_Parent));
+        }
+
+        internal static bool HasHardwareIdInAncestry(string instanceId,
+            string expectedHardwareId,
+            Func<string, string[]> getHardwareIds,
+            Func<string, string> getParent)
+        {
+            if (string.IsNullOrWhiteSpace(instanceId) ||
+                string.IsNullOrWhiteSpace(expectedHardwareId) ||
+                getHardwareIds == null || getParent == null)
+            {
+                return false;
+            }
+
+            string current = instanceId;
+            var visited = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase);
+            for (int depth = 0; depth < 16 &&
+                !string.IsNullOrWhiteSpace(current); depth++)
+            {
+                if (!visited.Add(current))
+                {
+                    return false;
+                }
+
+                string[] hardwareIds;
+                try
+                {
+                    hardwareIds = getHardwareIds(current);
+                }
+                catch
+                {
+                    return false;
+                }
+                if (hardwareIds != null && hardwareIds.Any(id =>
+                    string.Equals(id, expectedHardwareId,
+                        StringComparison.OrdinalIgnoreCase)))
+                {
+                    return true;
+                }
+
+                string parent;
+                try
+                {
+                    parent = getParent(current);
+                }
+                catch
+                {
+                    return false;
+                }
+                if (string.Equals(parent, @"HTREE\ROOT\0",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+                current = parent;
+            }
+            return false;
+        }
+
         internal static bool TryGetUsbIpWin2Port(string devicePath, out int port)
         {
             return TryResolveUsbIpWin2Device(devicePath,

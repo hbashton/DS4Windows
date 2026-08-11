@@ -21,7 +21,7 @@ namespace DS4WindowsTests
                 "abiMajor":1,
                 "abiMinor":8,
                 "capabilities":13,
-                "expectedDriverPackageVersion":"0.1.0.0",
+                "expectedDriverPackageVersion":"0.1.0.1",
                 "maxDevices":32,
                 "maxDescriptorBytes":262144,
                 "maxTransferBytes":1048576,
@@ -48,7 +48,7 @@ namespace DS4WindowsTests
         [DataRow("\"abiMajor\":1", "\"abiMajor\":2")]
         [DataRow("\"abiMinor\":8", "\"abiMinor\":7")]
         [DataRow("\"capabilities\":13", "\"capabilities\":15")]
-        [DataRow("\"0.1.0.0\"", "\"0.1.0.1\"")]
+        [DataRow("\"0.1.0.1\"", "\"0.1.0.0\"")]
         [DataRow("\"maxDevices\":32", "\"maxDevices\":31")]
         [DataRow("\"maxDescriptorBytes\":262144",
             "\"maxDescriptorBytes\":262143")]
@@ -824,7 +824,7 @@ namespace DS4WindowsTests
 
         private sealed class AuthenticatedViiperProtocolServer : IDisposable
         {
-            private const string NativePing = "{\"server\":\"VIIPER\",\"version\":\"0.1.0\",\"transport\":\"native-ude\",\"ready\":true,\"nativeUde\":{\"abiMajor\":1,\"abiMinor\":8,\"capabilities\":13,\"expectedDriverPackageVersion\":\"0.1.0.0\",\"maxDevices\":32,\"maxDescriptorBytes\":262144,\"maxTransferBytes\":1048576,\"maxIsoPackets\":1024,\"maxPendingOperations\":4096}}";
+            private const string NativePing = "{\"server\":\"VIIPER\",\"version\":\"0.1.0\",\"transport\":\"native-ude\",\"ready\":true,\"nativeUde\":{\"abiMajor\":1,\"abiMinor\":8,\"capabilities\":13,\"expectedDriverPackageVersion\":\"0.1.0.1\",\"maxDevices\":32,\"maxDescriptorBytes\":262144,\"maxTransferBytes\":1048576,\"maxIsoPackets\":1024,\"maxPendingOperations\":4096}}";
             internal const string LegacyPing =
                 "{\"server\":\"VIIPER\",\"version\":\"0.1.0\",\"transport\":\"usbip\",\"ready\":true}";
             private readonly TcpListener listener;

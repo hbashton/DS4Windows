@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -22,7 +23,7 @@ namespace DS4WindowsTests
                 "abiMajor":1,
                 "abiMinor":8,
                 "capabilities":13,
-                "expectedDriverPackageVersion":"0.1.0.1",
+                "expectedDriverPackageVersion":"0.1.0.2",
                 "maxDevices":32,
                 "maxDescriptorBytes":262144,
                 "maxTransferBytes":1048576,
@@ -59,7 +60,7 @@ namespace DS4WindowsTests
         [DataRow("\"abiMajor\":1", "\"abiMajor\":2")]
         [DataRow("\"abiMinor\":8", "\"abiMinor\":7")]
         [DataRow("\"capabilities\":13", "\"capabilities\":15")]
-        [DataRow("\"0.1.0.1\"", "\"0.1.0.0\"")]
+        [DataRow("\"0.1.0.2\"", "\"0.1.0.0\"")]
         [DataRow("\"maxDevices\":32", "\"maxDevices\":31")]
         [DataRow("\"maxDescriptorBytes\":262144",
             "\"maxDescriptorBytes\":262143")]
@@ -513,8 +514,13 @@ namespace DS4WindowsTests
 
             using Stream authenticated = ViiperAuthentication.Authenticate(
                 transport, password);
+            int writesAfterHandshake = transport.WriteCalls;
             byte[] payload = Encoding.UTF8.GetBytes("ping\0");
             authenticated.Write(payload, 0, payload.Length);
+
+            Assert.AreEqual(writesAfterHandshake + 1,
+                transport.WriteCalls,
+                "One authenticated controller frame must use one underlying transport write.");
 
             byte[] written = transport.Written;
             const int handshakeLength = 5 + 32 + 32;
@@ -558,6 +564,145 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void ConcurrentEncryptedWritesRemainWholeViiperV1Records()
+        {
+            byte[] key = Enumerable.Range(0, 32)
+                .Select(index => (byte)(index * 13 + 7)).ToArray();
+            using var transport = new ScriptedDuplexStream(
+                Array.Empty<byte>());
+            using var authenticated = new ViiperAuthenticatedStream(
+                transport, key);
+            const int recordCount = 64;
+
+            Parallel.For(0, recordCount, id =>
+            {
+                byte[] payload = new byte[sizeof(int)];
+                BinaryPrimitives.WriteInt32BigEndian(payload, id);
+                authenticated.Write(payload, 0, payload.Length);
+            });
+
+            Assert.AreEqual(recordCount, transport.WriteCalls,
+                "Each controller frame must remain one underlying write under concurrency.");
+            byte[] wire = transport.Written;
+            var seen = new HashSet<int>();
+            int offset = 0;
+            for (ulong counter = 0; counter < recordCount; counter++)
+            {
+                Assert.IsTrue(wire.Length - offset >= sizeof(uint));
+                int packetLength = checked((int)
+                    BinaryPrimitives.ReadUInt32BigEndian(
+                        wire.AsSpan(offset, sizeof(uint))));
+                Assert.IsTrue(packetLength >= 12 + 16);
+                Assert.IsTrue(wire.Length - offset >=
+                    sizeof(uint) + packetLength);
+                ReadOnlySpan<byte> packet = wire.AsSpan(
+                    offset + sizeof(uint), packetLength);
+                Assert.AreEqual(counter,
+                    BinaryPrimitives.ReadUInt64BigEndian(
+                        packet.Slice(4, sizeof(ulong))),
+                    "Concurrent writes must serialize monotonically without nonce reuse.");
+                int ciphertextLength = packetLength - 12 - 16;
+                byte[] plaintext = new byte[ciphertextLength];
+                using (var cipher = new ChaCha20Poly1305(key))
+                {
+                    cipher.Decrypt(packet.Slice(0, 12),
+                        packet.Slice(12, ciphertextLength),
+                        packet.Slice(12 + ciphertextLength, 16),
+                        plaintext);
+                }
+                Assert.IsTrue(seen.Add(
+                    BinaryPrimitives.ReadInt32BigEndian(plaintext)),
+                    "A controller frame was duplicated.");
+                offset += sizeof(uint) + packetLength;
+            }
+
+            Assert.AreEqual(recordCount, seen.Count);
+            Assert.AreEqual(wire.Length, offset,
+                "Authenticated records must not overlap or leave trailing bytes.");
+        }
+
+        [TestMethod]
+        public void EncryptedWritesSupportEmptyAndChangingFrameSizes()
+        {
+            byte[] key = Enumerable.Range(0, 32)
+                .Select(index => (byte)(index * 3 + 11)).ToArray();
+            using var transport = new ScriptedDuplexStream(
+                Array.Empty<byte>());
+            using var authenticated = new ViiperAuthenticatedStream(
+                transport, key);
+            byte[][] payloads =
+            {
+                Enumerable.Range(0, 63).Select(index => (byte)index)
+                    .ToArray(),
+                Array.Empty<byte>(),
+                Enumerable.Range(0, 547)
+                    .Select(index => (byte)(index * 17)).ToArray(),
+                new byte[] { 9, 8, 7 },
+            };
+
+            foreach (byte[] payload in payloads)
+            {
+                authenticated.Write(payload, 0, payload.Length);
+            }
+
+            Assert.AreEqual(payloads.Length, transport.WriteCalls);
+            byte[] wire = transport.Written;
+            int offset = 0;
+            for (int counter = 0; counter < payloads.Length; counter++)
+            {
+                int packetLength = checked((int)
+                    BinaryPrimitives.ReadUInt32BigEndian(
+                        wire.AsSpan(offset, sizeof(uint))));
+                ReadOnlySpan<byte> packet = wire.AsSpan(
+                    offset + sizeof(uint), packetLength);
+                Assert.AreEqual((ulong)counter,
+                    BinaryPrimitives.ReadUInt64BigEndian(
+                        packet.Slice(4, sizeof(ulong))));
+                int ciphertextLength = packetLength - 12 - 16;
+                Assert.AreEqual(payloads[counter].Length,
+                    ciphertextLength);
+                byte[] actual = new byte[ciphertextLength];
+                using (var cipher = new ChaCha20Poly1305(key))
+                {
+                    cipher.Decrypt(packet.Slice(0, 12),
+                        packet.Slice(12, ciphertextLength),
+                        packet.Slice(12 + ciphertextLength, 16), actual);
+                }
+                CollectionAssert.AreEqual(payloads[counter], actual);
+                offset += sizeof(uint) + packetLength;
+            }
+            Assert.AreEqual(wire.Length, offset);
+        }
+
+        [TestMethod]
+        public void EncryptedWriteUsesFinalUniqueCounterThenExhausts()
+        {
+            byte[] key = Enumerable.Range(0, 32)
+                .Select(index => (byte)(index * 5 + 17)).ToArray();
+            using var transport = new ScriptedDuplexStream(
+                Array.Empty<byte>());
+            using var authenticated = new ViiperAuthenticatedStream(
+                transport, key);
+            SetPrivateField(authenticated, "sendCounter", ulong.MaxValue);
+            byte[] payload = { 4, 3, 2, 1 };
+
+            authenticated.Write(payload, 0, payload.Length);
+
+            Assert.AreEqual(1, transport.WriteCalls);
+            byte[] wire = transport.Written;
+            Assert.AreEqual(ulong.MaxValue,
+                BinaryPrimitives.ReadUInt64BigEndian(
+                    wire.AsSpan(sizeof(uint) + 4, sizeof(ulong))),
+                "The final 64-bit counter value is still a unique nonce.");
+            StringAssert.Contains(
+                Assert.ThrowsException<IOException>(() =>
+                    authenticated.Write(payload, 0, payload.Length)).Message,
+                "nonce space is exhausted");
+            Assert.AreEqual(1, transport.WriteCalls,
+                "Counter exhaustion must be detected before another transport write.");
+        }
+
+        [TestMethod]
         public void EncryptedReadPreservesPartialStreamReads()
         {
             byte[] key = Enumerable.Range(0, 32)
@@ -577,7 +722,7 @@ namespace DS4WindowsTests
             BinaryPrimitives.WriteUInt32BigEndian(framed,
                 (uint)packet.Length);
             Buffer.BlockCopy(packet, 0, framed, 4, packet.Length);
-            using var inner = new MemoryStream(framed);
+            using var inner = new ChunkedReadStream(framed, 3);
             using var authenticated = new ViiperAuthenticatedStream(inner,
                 key);
             byte[] actual = new byte[plaintext.Length];
@@ -591,6 +736,255 @@ namespace DS4WindowsTests
             }
 
             CollectionAssert.AreEqual(plaintext, actual);
+            Assert.IsTrue(inner.ReadCalls > packet.Length / 3,
+                "The test must exercise short reads in both the header and packet body.");
+        }
+
+        [TestMethod]
+        public void ConcurrentEncryptedReadsRemainWholeAcrossShortReads()
+        {
+            byte[] key = Enumerable.Range(0, 32)
+                .Select(index => (byte)(index * 7 + 19)).ToArray();
+            const int recordCount = 64;
+            byte[] framed = Enumerable.Range(0, recordCount)
+                .SelectMany(id =>
+                {
+                    byte[] payload = new byte[sizeof(int)];
+                    BinaryPrimitives.WriteInt32BigEndian(payload, id);
+                    return BuildEncryptedPacket(key, payload, (ulong)id);
+                }).ToArray();
+            using var inner = new ChunkedReadStream(framed, 1);
+            using var authenticated = new ViiperAuthenticatedStream(inner,
+                key);
+            using var start = new ManualResetEventSlim(false);
+            var seen = new ConcurrentBag<int>();
+            Task[] readers = Enumerable.Range(0, recordCount)
+                .Select(_ => Task.Run(() =>
+                {
+                    start.Wait();
+                    byte[] payload = new byte[sizeof(int)];
+                    Assert.AreEqual(payload.Length,
+                        authenticated.Read(payload, 0, payload.Length));
+                    seen.Add(BinaryPrimitives.ReadInt32BigEndian(payload));
+                })).ToArray();
+
+            start.Set();
+            Assert.IsTrue(Task.WaitAll(readers, TimeSpan.FromSeconds(10)),
+                "Concurrent authenticated readers did not complete.");
+            CollectionAssert.AreEquivalent(
+                Enumerable.Range(0, recordCount).ToArray(),
+                seen.ToArray());
+            Assert.AreEqual(1, inner.MaximumConcurrentReads,
+                "Authenticated reads must serialize record parsing and reusable-buffer access.");
+        }
+
+        [TestMethod]
+        public void EncryptedReadSkipsEmptyRecordWithoutFalseEof()
+        {
+            byte[] key = Enumerable.Range(0, 32)
+                .Select(index => (byte)(index * 5 + 1)).ToArray();
+            byte[] expected = Encoding.UTF8.GetBytes("next-frame");
+            byte[] framed = BuildEncryptedPacket(key, Array.Empty<byte>(), 0)
+                .Concat(BuildEncryptedPacket(key, expected, 1)).ToArray();
+            using var inner = new MemoryStream(framed);
+            using var authenticated = new ViiperAuthenticatedStream(inner,
+                key);
+            byte[] actual = new byte[expected.Length];
+
+            Assert.AreEqual(expected.Length,
+                authenticated.Read(actual, 0, actual.Length),
+                "An authenticated empty frame is not stream EOF.");
+            CollectionAssert.AreEqual(expected, actual);
+        }
+
+        [TestMethod]
+        public void AuthenticationFailureClearsReusedReceiveBuffers()
+        {
+            byte[] key = Enumerable.Range(0, 32)
+                .Select(index => (byte)(index * 9 + 5)).ToArray();
+            byte[] first = Enumerable.Range(0, 128)
+                .Select(index => (byte)(index * 3 + 1)).ToArray();
+            byte[] second = Enumerable.Range(0, 31)
+                .Select(index => (byte)(index * 11 + 7)).ToArray();
+            byte[] rejected = Enumerable.Range(0, 64)
+                .Select(index => (byte)(index * 13 + 9)).ToArray();
+            byte[] tampered = BuildEncryptedPacket(key, rejected, 2);
+            tampered[^1] ^= 0x80;
+            byte[] framed = BuildEncryptedPacket(key, first, 0)
+                .Concat(BuildEncryptedPacket(key, second, 1))
+                .Concat(tampered).ToArray();
+            using var inner = new ChunkedReadStream(framed, 2);
+            using var authenticated = new ViiperAuthenticatedStream(inner,
+                key);
+
+            byte[] actualFirst = new byte[first.Length];
+            Assert.AreEqual(first.Length,
+                authenticated.Read(actualFirst, 0, actualFirst.Length));
+            CollectionAssert.AreEqual(first, actualFirst);
+            byte[] packetBuffer = GetPrivateBuffer(authenticated,
+                "receivePacket");
+            byte[] plaintextBuffer = GetPrivateBuffer(authenticated,
+                "receivePlaintext");
+
+            byte[] actualSecond = new byte[second.Length];
+            Assert.AreEqual(second.Length,
+                authenticated.Read(actualSecond, 0, actualSecond.Length));
+            CollectionAssert.AreEqual(second, actualSecond);
+            Assert.AreSame(packetBuffer, GetPrivateBuffer(authenticated,
+                "receivePacket"));
+            Assert.AreSame(plaintextBuffer, GetPrivateBuffer(authenticated,
+                "receivePlaintext"));
+
+            plaintextBuffer.AsSpan(0, rejected.Length).Fill(0xA5);
+            byte[] destination = Enumerable.Repeat((byte)0xCC,
+                rejected.Length).ToArray();
+            IOException failure = Assert.ThrowsException<IOException>(() =>
+                authenticated.Read(destination, 0, destination.Length));
+
+            StringAssert.Contains(failure.Message, "authentication failed");
+            Assert.IsInstanceOfType<CryptographicException>(
+                failure.InnerException);
+            Assert.IsTrue(plaintextBuffer.All(value => value == 0),
+                "Rejected plaintext must be cleared before the authentication error escapes.");
+            Assert.IsTrue(packetBuffer.All(value => value == 0),
+                "The reusable ciphertext/tag buffer must be cleared after every decrypt attempt.");
+            Assert.IsTrue(destination.All(value => value == 0xCC),
+                "Unauthenticated plaintext must never reach the caller buffer.");
+        }
+
+        [TestMethod]
+        public void EncryptedWriteFailurePermanentlyFencesTheStream()
+        {
+            byte[] key = Enumerable.Range(0, 32)
+                .Select(index => (byte)(index + 17)).ToArray();
+            using var transport = new FailingWriteStream();
+            using var authenticated = new ViiperAuthenticatedStream(
+                transport, key);
+            byte[] payload = { 1, 2, 3, 4 };
+
+            StringAssert.Contains(
+                Assert.ThrowsException<IOException>(() =>
+                    authenticated.Write(payload, 0, payload.Length)).Message,
+                "injected");
+            StringAssert.Contains(
+                Assert.ThrowsException<IOException>(() =>
+                    authenticated.Write(payload, 0, payload.Length)).Message,
+                "unusable");
+            Assert.AreEqual(1, transport.WriteCalls,
+                "A failed authenticated record must never be followed by another record on the same stream.");
+            Assert.IsTrue(transport.IsDisposed,
+                "The potentially truncated transport must close immediately.");
+            Assert.IsTrue(GetPrivateBuffer(authenticated, "sendPacket")
+                    .All(value => value == 0),
+                "A record retained after a failed write must be cleared.");
+        }
+
+        [TestMethod]
+        public void DisposeUnblocksAndJoinsPendingEncryptedIo()
+        {
+            byte[] key = Enumerable.Range(0, 32)
+                .Select(index => (byte)(index + 23)).ToArray();
+            var transport = new DisposeAwareBlockingStream();
+            var authenticated = new ViiperAuthenticatedStream(transport,
+                key);
+            Task read = Task.Run(() =>
+                Assert.ThrowsException<ObjectDisposedException>(() =>
+                    authenticated.Read(new byte[1], 0, 1)));
+            Task write = Task.Run(() =>
+                Assert.ThrowsException<ObjectDisposedException>(() =>
+                    authenticated.Write(new byte[] { 1, 2, 3 }, 0, 3)));
+            Assert.IsTrue(transport.ReadStarted.Wait(
+                TimeSpan.FromSeconds(2)));
+            Assert.IsTrue(transport.WriteStarted.Wait(
+                TimeSpan.FromSeconds(2)));
+            byte[] pendingSend = GetPrivateBuffer(authenticated,
+                "sendPacket");
+
+            Task dispose = Task.Run(authenticated.Dispose);
+            Assert.IsTrue(Task.WaitAll(new[] { read, write, dispose },
+                TimeSpan.FromSeconds(5)),
+                "Dispose deadlocked with pending authenticated I/O.");
+            Assert.IsTrue(transport.IsDisposed);
+            Assert.IsTrue(pendingSend.All(value => value == 0),
+                "Dispose must clear the reusable send record after joining the write lane.");
+            Assert.ThrowsException<ObjectDisposedException>(() =>
+                authenticated.Read(new byte[1], 0, 1));
+            Assert.ThrowsException<ObjectDisposedException>(() =>
+                authenticated.Write(new byte[1], 0, 1));
+        }
+
+        [DataTestMethod]
+        [DataRow(0)]
+        [DataRow(1)]
+        [DataRow(27)]
+        [DataRow(2097153)]
+        public void EncryptedReadRejectsOutOfBoundsPacketLength(int length)
+        {
+            byte[] key = Enumerable.Range(0, 32)
+                .Select(index => (byte)(index + 29)).ToArray();
+            byte[] header = new byte[sizeof(uint)];
+            BinaryPrimitives.WriteUInt32BigEndian(header,
+                checked((uint)length));
+            using var inner = new MemoryStream(header);
+            using var authenticated = new ViiperAuthenticatedStream(inner,
+                key);
+
+            StringAssert.Contains(
+                Assert.ThrowsException<IOException>(() =>
+                    authenticated.Read(new byte[1], 0, 1)).Message,
+                "invalid encrypted packet length");
+        }
+
+        [TestMethod]
+        public void EncryptedWriteHonorsExactMaximumPacketLength()
+        {
+            byte[] key = Enumerable.Range(0, 32)
+                .Select(index => (byte)(index + 31)).ToArray();
+            using var transport = new ScriptedDuplexStream(
+                Array.Empty<byte>());
+            using var authenticated = new ViiperAuthenticatedStream(
+                transport, key);
+            const int maximumPacketLength = 2 * 1024 * 1024;
+            const int maximumPlaintextLength = maximumPacketLength - 12 - 16;
+            byte[] maximum = Enumerable.Range(0, maximumPlaintextLength)
+                .Select(index => (byte)(index * 17 + 3)).ToArray();
+
+            authenticated.Write(maximum, 0, maximum.Length);
+
+            Assert.AreEqual(1, transport.WriteCalls);
+            byte[] wire = transport.Written;
+            Assert.AreEqual(maximumPacketLength,
+                checked((int)BinaryPrimitives.ReadUInt32BigEndian(wire)));
+            Assert.AreEqual(sizeof(uint) + maximumPacketLength, wire.Length);
+            byte[] oversized = new byte[maximumPlaintextLength + 1];
+
+            StringAssert.Contains(
+                Assert.ThrowsException<IOException>(() =>
+                    authenticated.Write(oversized, 0,
+                        oversized.Length)).Message,
+                "too large");
+            Assert.AreEqual(1, transport.WriteCalls,
+                "An oversized record must be rejected before transport I/O.");
+        }
+
+        [TestMethod]
+        public void EncryptedReadAcceptsExactMaximumPacketLength()
+        {
+            byte[] key = Enumerable.Range(0, 32)
+                .Select(index => (byte)(index * 7 + 31)).ToArray();
+            const int maximumPlaintextLength =
+                2 * 1024 * 1024 - 12 - 16;
+            byte[] expected = Enumerable.Range(0, maximumPlaintextLength)
+                .Select(index => (byte)(index * 19 + 1)).ToArray();
+            byte[] framed = BuildEncryptedPacket(key, expected);
+            using var inner = new ChunkedReadStream(framed, 8191);
+            using var authenticated = new ViiperAuthenticatedStream(inner,
+                key);
+            byte[] actual = new byte[expected.Length];
+
+            Assert.AreEqual(actual.Length,
+                authenticated.Read(actual, 0, actual.Length));
+            CollectionAssert.AreEqual(expected, actual);
         }
 
         [TestMethod]
@@ -1199,9 +1593,11 @@ namespace DS4WindowsTests
         }
 
         private static byte[] BuildEncryptedPacket(byte[] key,
-            byte[] plaintext)
+            byte[] plaintext, ulong counter = 0)
         {
             byte[] nonce = new byte[12];
+            BinaryPrimitives.WriteUInt64BigEndian(nonce.AsSpan(4),
+                counter);
             byte[] ciphertext = new byte[plaintext.Length];
             byte[] tag = new byte[16];
             using (var cipher = new ChaCha20Poly1305(key))
@@ -1217,6 +1613,191 @@ namespace DS4WindowsTests
             return framed;
         }
 
+        private static byte[] GetPrivateBuffer(
+            ViiperAuthenticatedStream stream, string name) =>
+            (byte[])GetPrivateField(name).GetValue(stream);
+
+        private static void SetPrivateField(ViiperAuthenticatedStream stream,
+            string name, object value) =>
+            GetPrivateField(name).SetValue(stream, value);
+
+        private static FieldInfo GetPrivateField(string name) =>
+            typeof(ViiperAuthenticatedStream).GetField(name,
+                BindingFlags.Instance | BindingFlags.NonPublic) ??
+            throw new InvalidOperationException(
+                $"Missing ViiperAuthenticatedStream field '{name}'.");
+
+        private sealed class ChunkedReadStream : Stream
+        {
+            private readonly MemoryStream readable;
+            private readonly int maximumReadSize;
+            private int activeReads;
+            private int maximumConcurrentReads;
+            private int readCalls;
+
+            internal ChunkedReadStream(byte[] bytes, int maximumReadSize)
+            {
+                if (maximumReadSize <= 0)
+                {
+                    throw new ArgumentOutOfRangeException(
+                        nameof(maximumReadSize));
+                }
+                readable = new MemoryStream(bytes, writable: false);
+                this.maximumReadSize = maximumReadSize;
+            }
+
+            internal int MaximumConcurrentReads =>
+                Volatile.Read(ref maximumConcurrentReads);
+
+            internal int ReadCalls => Volatile.Read(ref readCalls);
+
+            public override bool CanRead => true;
+            public override bool CanSeek => false;
+            public override bool CanWrite => false;
+            public override long Length => throw new NotSupportedException();
+            public override long Position
+            {
+                get => throw new NotSupportedException();
+                set => throw new NotSupportedException();
+            }
+
+            public override void Flush()
+            {
+            }
+
+            public override int Read(byte[] buffer, int offset, int count)
+            {
+                int concurrent = Interlocked.Increment(ref activeReads);
+                UpdateMaximum(ref maximumConcurrentReads, concurrent);
+                Interlocked.Increment(ref readCalls);
+                try
+                {
+                    Thread.Yield();
+                    return readable.Read(buffer, offset,
+                        Math.Min(count, maximumReadSize));
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref activeReads);
+                }
+            }
+
+            private static void UpdateMaximum(ref int target, int value)
+            {
+                int current;
+                while (value > (current = Volatile.Read(ref target)) &&
+                    Interlocked.CompareExchange(ref target, value,
+                        current) != current)
+                {
+                }
+            }
+
+            public override void Write(byte[] buffer, int offset,
+                int count) => throw new NotSupportedException();
+
+            public override long Seek(long offset, SeekOrigin origin) =>
+                throw new NotSupportedException();
+
+            public override void SetLength(long value) =>
+                throw new NotSupportedException();
+
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing)
+                {
+                    readable.Dispose();
+                }
+                base.Dispose(disposing);
+            }
+        }
+
+        private sealed class FailingWriteStream : Stream
+        {
+            private int disposed;
+
+            internal bool IsDisposed => Volatile.Read(ref disposed) != 0;
+            internal int WriteCalls { get; private set; }
+            public override bool CanRead => false;
+            public override bool CanSeek => false;
+            public override bool CanWrite => !IsDisposed;
+            public override long Length => throw new NotSupportedException();
+            public override long Position
+            {
+                get => throw new NotSupportedException();
+                set => throw new NotSupportedException();
+            }
+            public override void Flush()
+            {
+            }
+            public override int Read(byte[] buffer, int offset, int count) =>
+                throw new NotSupportedException();
+            public override void Write(byte[] buffer, int offset, int count)
+            {
+                WriteCalls++;
+                throw new IOException("injected partial transport write");
+            }
+            public override long Seek(long offset, SeekOrigin origin) =>
+                throw new NotSupportedException();
+            public override void SetLength(long value) =>
+                throw new NotSupportedException();
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing)
+                {
+                    Interlocked.Exchange(ref disposed, 1);
+                }
+                base.Dispose(disposing);
+            }
+        }
+
+        private sealed class DisposeAwareBlockingStream : Stream
+        {
+            private readonly ManualResetEventSlim release = new(false);
+            private int disposed;
+
+            internal ManualResetEventSlim ReadStarted { get; } = new(false);
+            internal ManualResetEventSlim WriteStarted { get; } = new(false);
+            internal bool IsDisposed => Volatile.Read(ref disposed) != 0;
+            public override bool CanRead => !IsDisposed;
+            public override bool CanSeek => false;
+            public override bool CanWrite => !IsDisposed;
+            public override long Length => throw new NotSupportedException();
+            public override long Position
+            {
+                get => throw new NotSupportedException();
+                set => throw new NotSupportedException();
+            }
+            public override void Flush()
+            {
+            }
+            public override int Read(byte[] buffer, int offset, int count)
+            {
+                ReadStarted.Set();
+                release.Wait();
+                throw new ObjectDisposedException(
+                    nameof(DisposeAwareBlockingStream));
+            }
+            public override void Write(byte[] buffer, int offset, int count)
+            {
+                WriteStarted.Set();
+                release.Wait();
+                throw new ObjectDisposedException(
+                    nameof(DisposeAwareBlockingStream));
+            }
+            public override long Seek(long offset, SeekOrigin origin) =>
+                throw new NotSupportedException();
+            public override void SetLength(long value) =>
+                throw new NotSupportedException();
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing && Interlocked.Exchange(ref disposed, 1) == 0)
+                {
+                    release.Set();
+                }
+                base.Dispose(disposing);
+            }
+        }
+
         private sealed class ScriptedDuplexStream : Stream
         {
             private readonly MemoryStream readable;
@@ -1228,6 +1809,7 @@ namespace DS4WindowsTests
             }
 
             internal byte[] Written => written.ToArray();
+            internal int WriteCalls { get; private set; }
             public override bool CanRead => true;
             public override bool CanSeek => false;
             public override bool CanWrite => true;
@@ -1242,8 +1824,11 @@ namespace DS4WindowsTests
             }
             public override int Read(byte[] buffer, int offset, int count) =>
                 readable.Read(buffer, offset, count);
-            public override void Write(byte[] buffer, int offset, int count) =>
+            public override void Write(byte[] buffer, int offset, int count)
+            {
+                WriteCalls++;
                 written.Write(buffer, offset, count);
+            }
             public override long Seek(long offset, SeekOrigin origin) =>
                 throw new NotSupportedException();
             public override void SetLength(long value) =>
@@ -1261,7 +1846,7 @@ namespace DS4WindowsTests
 
         private sealed class AuthenticatedViiperProtocolServer : IDisposable
         {
-            private const string NativePing = "{\"server\":\"VIIPER\",\"version\":\"0.1.0\",\"transport\":\"native-ude\",\"ready\":true,\"nativeUde\":{\"abiMajor\":1,\"abiMinor\":8,\"capabilities\":13,\"expectedDriverPackageVersion\":\"0.1.0.1\",\"maxDevices\":32,\"maxDescriptorBytes\":262144,\"maxTransferBytes\":1048576,\"maxIsoPackets\":1024,\"maxPendingOperations\":4096}}";
+            private const string NativePing = "{\"server\":\"VIIPER\",\"version\":\"0.1.0\",\"transport\":\"native-ude\",\"ready\":true,\"nativeUde\":{\"abiMajor\":1,\"abiMinor\":8,\"capabilities\":13,\"expectedDriverPackageVersion\":\"0.1.0.2\",\"maxDevices\":32,\"maxDescriptorBytes\":262144,\"maxTransferBytes\":1048576,\"maxIsoPackets\":1024,\"maxPendingOperations\":4096}}";
             internal const string LegacyPing =
                 "{\"server\":\"VIIPER\",\"version\":\"0.1.0\",\"transport\":\"usbip\",\"ready\":true}";
             private readonly TcpListener listener;

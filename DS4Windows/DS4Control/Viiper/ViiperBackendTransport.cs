@@ -16,6 +16,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading;
 
 namespace DS4Windows
 {
@@ -123,7 +124,7 @@ namespace DS4Windows
         internal const ushort NativeAbiMajor = 1;
         internal const ushort NativeAbiMinor = 8;
         internal const uint NativeCapabilities = 0x0d;
-        internal const string NativeDriverPackageVersion = "0.1.0.1";
+        internal const string NativeDriverPackageVersion = "0.1.0.2";
         internal const uint NativeMaxDevices = 32;
         internal const uint NativeMaxDescriptorBytes = 262144;
         internal const uint NativeMaxTransferBytes = 1048576;
@@ -425,35 +426,52 @@ namespace DS4Windows
                     "VIIPER authentication requires a credential.");
             }
 
-            byte[] key = Rfc2898DeriveBytes.Pbkdf2(
-                Encoding.UTF8.GetBytes(password), Pbkdf2Salt,
-                Pbkdf2Iterations, HashAlgorithmName.SHA256, 32);
-            byte[] clientNonce = RandomNumberGenerator.GetBytes(NonceSize);
-            byte[] clientProof;
-            using (var hmac = new HMACSHA256(key))
-            {
-                byte[] proofInput = new byte[AuthContext.Length +
-                    clientNonce.Length];
-                Buffer.BlockCopy(AuthContext, 0, proofInput, 0,
-                    AuthContext.Length);
-                Buffer.BlockCopy(clientNonce, 0, proofInput,
-                    AuthContext.Length, clientNonce.Length);
-                clientProof = hmac.ComputeHash(proofInput);
-                CryptographicOperations.ZeroMemory(proofInput);
-            }
-
-            byte[] handshake = new byte[HandshakeMagic.Length +
-                clientNonce.Length + clientProof.Length];
-            Buffer.BlockCopy(HandshakeMagic, 0, handshake, 0,
-                HandshakeMagic.Length);
-            Buffer.BlockCopy(clientNonce, 0, handshake,
-                HandshakeMagic.Length, clientNonce.Length);
-            Buffer.BlockCopy(clientProof, 0, handshake,
-                HandshakeMagic.Length + clientNonce.Length,
-                clientProof.Length);
-
+            byte[] passwordBytes = Encoding.UTF8.GetBytes(password);
+            byte[] key;
             try
             {
+                key = Rfc2898DeriveBytes.Pbkdf2(passwordBytes, Pbkdf2Salt,
+                    Pbkdf2Iterations, HashAlgorithmName.SHA256, 32);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(passwordBytes);
+            }
+
+            byte[] clientNonce = Array.Empty<byte>();
+            byte[] clientProof = Array.Empty<byte>();
+            byte[] handshake = Array.Empty<byte>();
+            try
+            {
+                clientNonce = RandomNumberGenerator.GetBytes(NonceSize);
+                using (var hmac = new HMACSHA256(key))
+                {
+                    byte[] proofInput = new byte[AuthContext.Length +
+                        clientNonce.Length];
+                    try
+                    {
+                        Buffer.BlockCopy(AuthContext, 0, proofInput, 0,
+                            AuthContext.Length);
+                        Buffer.BlockCopy(clientNonce, 0, proofInput,
+                            AuthContext.Length, clientNonce.Length);
+                        clientProof = hmac.ComputeHash(proofInput);
+                    }
+                    finally
+                    {
+                        CryptographicOperations.ZeroMemory(proofInput);
+                    }
+                }
+
+                handshake = new byte[HandshakeMagic.Length +
+                    clientNonce.Length + clientProof.Length];
+                Buffer.BlockCopy(HandshakeMagic, 0, handshake, 0,
+                    HandshakeMagic.Length);
+                Buffer.BlockCopy(clientNonce, 0, handshake,
+                    HandshakeMagic.Length, clientNonce.Length);
+                Buffer.BlockCopy(clientProof, 0, handshake,
+                    HandshakeMagic.Length + clientNonce.Length,
+                    clientProof.Length);
+
                 stream.Write(handshake, 0, handshake.Length);
                 byte[] prefix = new byte[3];
                 ReadExactly(stream, prefix, 0, prefix.Length);
@@ -465,32 +483,41 @@ namespace DS4Windows
                 }
 
                 byte[] serverNonce = new byte[NonceSize];
-                ReadExactly(stream, serverNonce, 0, serverNonce.Length);
-                byte[] sessionInput = new byte[key.Length +
-                    serverNonce.Length + clientNonce.Length +
-                    SessionContext.Length];
-                int offset = 0;
-                Buffer.BlockCopy(key, 0, sessionInput, offset, key.Length);
-                offset += key.Length;
-                Buffer.BlockCopy(serverNonce, 0, sessionInput, offset,
-                    serverNonce.Length);
-                offset += serverNonce.Length;
-                Buffer.BlockCopy(clientNonce, 0, sessionInput, offset,
-                    clientNonce.Length);
-                offset += clientNonce.Length;
-                Buffer.BlockCopy(SessionContext, 0, sessionInput, offset,
-                    SessionContext.Length);
-                byte[] sessionKey = SHA256.HashData(sessionInput);
-                CryptographicOperations.ZeroMemory(sessionInput);
-                CryptographicOperations.ZeroMemory(serverNonce);
+                byte[] sessionInput = Array.Empty<byte>();
                 try
                 {
-                    return new ViiperAuthenticatedStream(stream,
-                        sessionKey);
+                    ReadExactly(stream, serverNonce, 0,
+                        serverNonce.Length);
+                    sessionInput = new byte[key.Length +
+                        serverNonce.Length + clientNonce.Length +
+                        SessionContext.Length];
+                    int offset = 0;
+                    Buffer.BlockCopy(key, 0, sessionInput, offset,
+                        key.Length);
+                    offset += key.Length;
+                    Buffer.BlockCopy(serverNonce, 0, sessionInput, offset,
+                        serverNonce.Length);
+                    offset += serverNonce.Length;
+                    Buffer.BlockCopy(clientNonce, 0, sessionInput, offset,
+                        clientNonce.Length);
+                    offset += clientNonce.Length;
+                    Buffer.BlockCopy(SessionContext, 0, sessionInput,
+                        offset, SessionContext.Length);
+                    byte[] sessionKey = SHA256.HashData(sessionInput);
+                    try
+                    {
+                        return new ViiperAuthenticatedStream(stream,
+                            sessionKey);
+                    }
+                    finally
+                    {
+                        CryptographicOperations.ZeroMemory(sessionKey);
+                    }
                 }
                 finally
                 {
-                    CryptographicOperations.ZeroMemory(sessionKey);
+                    CryptographicOperations.ZeroMemory(sessionInput);
+                    CryptographicOperations.ZeroMemory(serverNonce);
                 }
             }
             finally
@@ -534,10 +561,19 @@ namespace DS4Windows
         private readonly ChaCha20Poly1305 sendCipher;
         private readonly ChaCha20Poly1305 receiveCipher;
         private readonly object writeLock = new object();
+        private readonly object readLock = new object();
+        private byte[] sendPacket = Array.Empty<byte>();
+        private readonly byte[] receiveHeader = new byte[sizeof(uint)];
+        private byte[] receivePacket = Array.Empty<byte>();
         private byte[] receivePlaintext = Array.Empty<byte>();
+        private int receiveLength;
         private int receiveOffset;
         private ulong sendCounter;
-        private bool disposed;
+        private bool sendCounterExhausted;
+        private Exception sendFault;
+        private int disposeState;
+
+        private bool IsDisposed => Volatile.Read(ref disposeState) != 0;
 
         internal ViiperAuthenticatedStream(Stream inner, byte[] sessionKey)
         {
@@ -548,12 +584,20 @@ namespace DS4Windows
             // reader. Separate instances avoid relying on undocumented
             // concurrent-use guarantees in the platform AEAD implementation.
             sendCipher = new ChaCha20Poly1305(sessionKey);
-            receiveCipher = new ChaCha20Poly1305(sessionKey);
+            try
+            {
+                receiveCipher = new ChaCha20Poly1305(sessionKey);
+            }
+            catch
+            {
+                sendCipher.Dispose();
+                throw;
+            }
         }
 
-        public override bool CanRead => !disposed && inner.CanRead;
+        public override bool CanRead => !IsDisposed && inner.CanRead;
         public override bool CanSeek => false;
-        public override bool CanWrite => !disposed && inner.CanWrite;
+        public override bool CanWrite => !IsDisposed && inner.CanWrite;
         public override long Length => throw new NotSupportedException();
         public override long Position
         {
@@ -561,11 +605,20 @@ namespace DS4Windows
             set => throw new NotSupportedException();
         }
 
-        public override void Flush() => inner.Flush();
+        public override void Flush()
+        {
+            ObjectDisposedException.ThrowIf(IsDisposed, this);
+            lock (writeLock)
+            {
+                ObjectDisposedException.ThrowIf(IsDisposed, this);
+                ThrowIfWriteFaulted();
+                inner.Flush();
+            }
+        }
 
         public override int Read(byte[] buffer, int offset, int count)
         {
-            ObjectDisposedException.ThrowIf(disposed, this);
+            ObjectDisposedException.ThrowIf(IsDisposed, this);
             ArgumentNullException.ThrowIfNull(buffer);
             if (offset < 0 || count < 0 || offset > buffer.Length - count)
             {
@@ -576,31 +629,36 @@ namespace DS4Windows
                 return 0;
             }
 
-            if (receiveOffset >= receivePlaintext.Length)
+            lock (readLock)
             {
-                if (!ReadPacket())
+                ObjectDisposedException.ThrowIf(IsDisposed, this);
+                while (receiveOffset >= receiveLength)
                 {
-                    return 0;
+                    if (!ReadPacket())
+                    {
+                        return 0;
+                    }
                 }
-            }
 
-            int available = receivePlaintext.Length - receiveOffset;
-            int copied = Math.Min(count, available);
-            Buffer.BlockCopy(receivePlaintext, receiveOffset, buffer,
-                offset, copied);
-            receiveOffset += copied;
-            if (receiveOffset >= receivePlaintext.Length)
-            {
-                CryptographicOperations.ZeroMemory(receivePlaintext);
-                receivePlaintext = Array.Empty<byte>();
-                receiveOffset = 0;
+                int available = receiveLength - receiveOffset;
+                int copied = Math.Min(count, available);
+                Buffer.BlockCopy(receivePlaintext, receiveOffset, buffer,
+                    offset, copied);
+                receiveOffset += copied;
+                if (receiveOffset >= receiveLength)
+                {
+                    CryptographicOperations.ZeroMemory(
+                        receivePlaintext.AsSpan(0, receiveLength));
+                    receiveLength = 0;
+                    receiveOffset = 0;
+                }
+                return copied;
             }
-            return copied;
         }
 
         public override void Write(byte[] buffer, int offset, int count)
         {
-            ObjectDisposedException.ThrowIf(disposed, this);
+            ObjectDisposedException.ThrowIf(IsDisposed, this);
             ArgumentNullException.ThrowIfNull(buffer);
             if (offset < 0 || count < 0 || offset > buffer.Length - count)
             {
@@ -609,33 +667,107 @@ namespace DS4Windows
 
             lock (writeLock)
             {
-                byte[] nonce = new byte[NonceLength];
+                ObjectDisposedException.ThrowIf(IsDisposed, this);
+                ThrowIfWriteFaulted();
+                if (sendCounterExhausted)
+                {
+                    throw new IOException(
+                        "VIIPER encrypted stream nonce space is exhausted.");
+                }
+                if (count > MaximumPacketLength - NonceLength - TagLength)
+                {
+                    throw new IOException(
+                        "VIIPER encrypted packet is too large.");
+                }
+
+                int packetLength = NonceLength + count + TagLength;
+                int recordLength = sizeof(uint) + packetLength;
+                EnsureCapacity(ref sendPacket, recordLength);
+
+                Span<byte> record = sendPacket.AsSpan(0, recordLength);
+                BinaryPrimitives.WriteUInt32BigEndian(record,
+                    (uint)packetLength);
+                Span<byte> nonce = record.Slice(sizeof(uint), NonceLength);
+                nonce.Clear();
                 BinaryPrimitives.WriteUInt64BigEndian(
-                    nonce.AsSpan(4), sendCounter++);
-                byte[] ciphertext = new byte[count];
-                byte[] tag = new byte[TagLength];
+                    nonce.Slice(NonceLength - sizeof(ulong)), sendCounter);
+                Span<byte> ciphertext = record.Slice(
+                    sizeof(uint) + NonceLength, count);
+                Span<byte> tag = record.Slice(
+                    sizeof(uint) + NonceLength + count, TagLength);
                 sendCipher.Encrypt(nonce, buffer.AsSpan(offset, count),
                     ciphertext, tag);
-                int packetLength = nonce.Length + ciphertext.Length +
-                    tag.Length;
-                byte[] header = new byte[sizeof(uint)];
-                BinaryPrimitives.WriteUInt32BigEndian(header,
-                    (uint)packetLength);
-                inner.Write(header, 0, header.Length);
-                inner.Write(nonce, 0, nonce.Length);
-                inner.Write(ciphertext, 0, ciphertext.Length);
-                inner.Write(tag, 0, tag.Length);
+
+                // One authenticated record maps to one transport write. This
+                // keeps an input sample from paying four independent socket
+                // submissions while preserving the exact VIIPER v1 framing.
+                try
+                {
+                    inner.Write(sendPacket, 0, recordLength);
+                    if (sendCounter == ulong.MaxValue)
+                    {
+                        sendCounterExhausted = true;
+                    }
+                    else
+                    {
+                        sendCounter++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Stream.Write cannot report how much of a record reached
+                    // the socket. Treat every failure as terminal so a retry
+                    // can never append a new record behind a truncated one.
+                    sendFault = ex;
+                    CryptographicOperations.ZeroMemory(record);
+                    try
+                    {
+                        inner.Dispose();
+                    }
+                    catch
+                    {
+                        // Preserve the write failure that made this
+                        // authenticated stream unusable.
+                    }
+                    throw;
+                }
+            }
+        }
+
+        private void ThrowIfWriteFaulted()
+        {
+            if (sendFault != null)
+            {
+                throw new IOException(
+                    "VIIPER encrypted stream is unusable after a failed write.",
+                    sendFault);
+            }
+        }
+
+        private static void EnsureCapacity(ref byte[] buffer,
+            int requiredLength)
+        {
+            if (buffer.Length >= requiredLength)
+            {
+                return;
+            }
+
+            byte[] previous = buffer;
+            buffer = new byte[requiredLength];
+            if (previous.Length != 0)
+            {
+                CryptographicOperations.ZeroMemory(previous);
             }
         }
 
         private bool ReadPacket()
         {
-            byte[] header = new byte[sizeof(uint)];
-            if (!TryReadPacketHeader(inner, header))
+            if (!TryReadPacketHeader(inner, receiveHeader))
             {
                 return false;
             }
-            uint rawLength = BinaryPrimitives.ReadUInt32BigEndian(header);
+            uint rawLength = BinaryPrimitives.ReadUInt32BigEndian(
+                receiveHeader);
             if (rawLength < NonceLength + TagLength ||
                 rawLength > MaximumPacketLength)
             {
@@ -644,28 +776,33 @@ namespace DS4Windows
             }
 
             int packetLength = checked((int)rawLength);
-            byte[] packet = new byte[packetLength];
-            ReadExactly(inner, packet, 0, packet.Length);
+            EnsureCapacity(ref receivePacket, packetLength);
             int ciphertextLength = packetLength - NonceLength - TagLength;
-            byte[] plaintext = new byte[ciphertextLength];
+            EnsureCapacity(ref receivePlaintext, ciphertextLength);
             try
             {
-                receiveCipher.Decrypt(packet.AsSpan(0, NonceLength),
-                    packet.AsSpan(NonceLength, ciphertextLength),
-                    packet.AsSpan(NonceLength + ciphertextLength,
-                        TagLength), plaintext);
+                ReadExactly(inner, receivePacket, 0, packetLength);
+                receiveCipher.Decrypt(
+                    receivePacket.AsSpan(0, NonceLength),
+                    receivePacket.AsSpan(NonceLength, ciphertextLength),
+                    receivePacket.AsSpan(NonceLength + ciphertextLength,
+                        TagLength),
+                    receivePlaintext.AsSpan(0, ciphertextLength));
             }
             catch (CryptographicException ex)
             {
+                CryptographicOperations.ZeroMemory(
+                    receivePlaintext.AsSpan(0, ciphertextLength));
                 throw new IOException(
                     "VIIPER encrypted packet authentication failed.", ex);
             }
             finally
             {
-                CryptographicOperations.ZeroMemory(packet);
+                CryptographicOperations.ZeroMemory(
+                    receivePacket.AsSpan(0, packetLength));
             }
 
-            receivePlaintext = plaintext;
+            receiveLength = ciphertextLength;
             receiveOffset = 0;
             return true;
         }
@@ -723,22 +860,42 @@ namespace DS4Windows
 
         protected override void Dispose(bool disposing)
         {
-            if (!disposed)
+            try
             {
-                disposed = true;
-                if (disposing)
+                if (disposing && Interlocked.CompareExchange(
+                    ref disposeState, 1, 0) == 0)
                 {
-                    if (receivePlaintext.Length != 0)
+                    // Closing the transport first releases a blocked Read or
+                    // Write. Buffer and cipher teardown then joins both lanes
+                    // through their locks before clearing reusable memory.
+                    try
                     {
-                        CryptographicOperations.ZeroMemory(
-                            receivePlaintext);
+                        inner.Dispose();
                     }
-                    sendCipher.Dispose();
-                    receiveCipher.Dispose();
-                    inner.Dispose();
+                    finally
+                    {
+                        lock (writeLock)
+                        {
+                            CryptographicOperations.ZeroMemory(sendPacket);
+                            sendCipher.Dispose();
+                        }
+                        lock (readLock)
+                        {
+                            CryptographicOperations.ZeroMemory(receiveHeader);
+                            CryptographicOperations.ZeroMemory(receivePacket);
+                            CryptographicOperations.ZeroMemory(
+                                receivePlaintext);
+                            receiveLength = 0;
+                            receiveOffset = 0;
+                            receiveCipher.Dispose();
+                        }
+                    }
                 }
             }
-            base.Dispose(disposing);
+            finally
+            {
+                base.Dispose(disposing);
+            }
         }
     }
 }

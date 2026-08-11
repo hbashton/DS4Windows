@@ -26,8 +26,16 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
       - name: Restore dependencies
         run: dotnet restore
+
+      - name: Test immutable VIIPER native bundle contract
+        run: python .\utils\test_viiper_native_bundle.py
 
       - name: Run tests (x64)
         # NOTE: Three tests are excluded below. They are exact-string XML round-trip

@@ -129,13 +129,18 @@ namespace DS4Windows
     {
         internal const string NativeTransport = "native-ude";
         internal const string LegacyTransport = "usbip";
-        internal const string NativeServerVersion = "0.1.0";
-        internal const ushort NativeAbiMajor = 1;
-        internal const ushort NativeAbiMinor = 9;
-        internal const uint NativeCapabilities = 0x0d;
-        internal const string NativeDriverPackageVersion = "0.1.0.5";
+        internal const string NativeServerVersion =
+            ViiperNativePackageContract.ServerVersion;
+        internal const ushort NativeAbiMajor =
+            ViiperNativePackageContract.DriverAbiMajor;
+        internal const ushort NativeAbiMinor =
+            ViiperNativePackageContract.DriverAbiMinor;
+        internal const uint NativeCapabilities =
+            ViiperNativePackageContract.DriverCapabilities;
+        internal const string NativeDriverPackageVersion =
+            ViiperNativePackageContract.DriverPackageVersion;
         internal const string NativeLoadedDriverBuildIdentity =
-            "8a900c7a4c49d2ec765289c828d72b32997a732bbf2ef0282f28ceb5742846a8";
+            ViiperNativePackageContract.DriverBuildIdentity;
         internal const uint NativeMaxDevices = 32;
         internal const uint NativeMaxDescriptorBytes = 262144;
         internal const uint NativeMaxTransferBytes = 1048576;

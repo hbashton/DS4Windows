@@ -23,7 +23,7 @@ namespace DS4WindowsTests
                 "abiMajor":1,
                 "abiMinor":9,
                 "capabilities":13,
-                "expectedDriverPackageVersion":"0.1.0.4",
+                "expectedDriverPackageVersion":"0.1.0.5",
                 "loadedDriverBuildIdentity":"{{ViiperBackendContract.NativeLoadedDriverBuildIdentity}}",
                 "maxDevices":32,
                 "maxDescriptorBytes":262144,
@@ -50,7 +50,7 @@ namespace DS4WindowsTests
         public void PinnedLoadedDriverIdentityIsCanonicalLowercaseSha256()
         {
             Assert.AreEqual(
-                "114c1e4232004a328cf0e6e376c35e68ed7f314b61611084d35e6a7475a8f7c4",
+                "8a900c7a4c49d2ec765289c828d72b32997a732bbf2ef0282f28ceb5742846a8",
                 ViiperBackendContract.NativeLoadedDriverBuildIdentity,
                 "DS4Windows must pin the identity derived from final VIIPER HEAD e1deabca21ce8e0e7a0e2f26d060ca357baf79f0.");
             Assert.IsTrue(ViiperBackendContract.IsCanonicalLowerHexSha256(
@@ -78,7 +78,7 @@ namespace DS4WindowsTests
         [DataRow("\"abiMajor\":1", "\"abiMajor\":2")]
         [DataRow("\"abiMinor\":9", "\"abiMinor\":8")]
         [DataRow("\"capabilities\":13", "\"capabilities\":15")]
-        [DataRow("\"0.1.0.4\"", "\"0.1.0.3\"")]
+        [DataRow("\"0.1.0.5\"", "\"0.1.0.4\"")]
         [DataRow("\"maxDevices\":32", "\"maxDevices\":31")]
         [DataRow("\"maxDescriptorBytes\":262144",
             "\"maxDescriptorBytes\":262143")]
@@ -1997,7 +1997,7 @@ namespace DS4WindowsTests
         private sealed class AuthenticatedViiperProtocolServer : IDisposable
         {
             private static readonly string NativePing =
-                "{\"server\":\"VIIPER\",\"version\":\"0.1.0\",\"transport\":\"native-ude\",\"ready\":true,\"nativeUde\":{\"abiMajor\":1,\"abiMinor\":9,\"capabilities\":13,\"expectedDriverPackageVersion\":\"0.1.0.4\",\"loadedDriverBuildIdentity\":\"" +
+                "{\"server\":\"VIIPER\",\"version\":\"0.1.0\",\"transport\":\"native-ude\",\"ready\":true,\"nativeUde\":{\"abiMajor\":1,\"abiMinor\":9,\"capabilities\":13,\"expectedDriverPackageVersion\":\"0.1.0.5\",\"loadedDriverBuildIdentity\":\"" +
                 ViiperBackendContract.NativeLoadedDriverBuildIdentity +
                 "\",\"maxDevices\":32,\"maxDescriptorBytes\":262144,\"maxTransferBytes\":1048576,\"maxIsoPackets\":1024,\"maxPendingOperations\":4096}}";
             internal const string LegacyPing =

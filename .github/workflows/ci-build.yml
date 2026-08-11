@@ -37,6 +37,9 @@ jobs:
       - name: Test immutable VIIPER native bundle contract
         run: python .\utils\test_viiper_native_bundle.py
 
+      - name: Test native installer transaction state machine
+        run: python .\utils\test-installer-state-machine.py
+
       - name: Run tests (x64)
         # NOTE: Three tests are excluded below. They are exact-string XML round-trip
         # "snapshot" tests whose hardcoded expected XML predates several fields the
@@ -90,7 +93,21 @@ jobs:
       - name: Package ${{ matrix.platform }}
         run: python .\utils\post-build.py .\bin\${{ matrix.platform }}\Release\output . ${{ env.VERSION }}
 
+      - name: Detect reviewed native installer media
+        id: native_bundle
+        shell: pwsh
+        run: |
+          $lock = ".\bin\${{ matrix.platform }}\Release\DS4Windows\extras\viiper-native-udecx.lock.json"
+          $runtime = ".\bin\${{ matrix.platform }}\Release\DS4Windows\extras\viiper-native-udecx"
+          $available = (Test-Path -LiteralPath $lock -PathType Leaf) -and
+            (Test-Path -LiteralPath $runtime -PathType Container)
+          "available=$($available.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          if (-not $available) {
+            "Native installer composition is correctly deferred: ordinary CI has no reviewed signed VIIPER runtime bundle." >> $env:GITHUB_STEP_SUMMARY
+          }
+
       - name: Build standard installer
+        if: steps.native_bundle.outputs.available == 'true'
         shell: pwsh
         run: |
           .\installer\build-installer.ps1 `
@@ -99,9 +116,11 @@ jobs:
             -BundleVersion "${{ env.BUNDLE_VERSION }}" `
             -DisplayVersion "${{ env.VERSION }}" `
             -OutputDirectory ".\bin\${{ matrix.platform }}\Release\installer" `
-            -SkipApplicationPublish
+            -SkipApplicationPublish `
+            -RequireNativeBundle
 
       - name: Validate offline installer layout plan
+        if: steps.native_bundle.outputs.available == 'true'
         shell: pwsh
         run: |
           $installer = ".\bin\${{ matrix.platform }}\Release\installer\DS4Windows_${{ env.VERSION }}_Setup_${{ matrix.platform }}.exe"
@@ -117,6 +136,7 @@ jobs:
           }
 
       - name: Exercise MSI install, repair, and uninstall lifecycle
+        if: steps.native_bundle.outputs.available == 'true'
         shell: pwsh
         run: |
           $msi = (Resolve-Path ".\installer\DS4Windows.Package\bin\x64\Release\DS4Windows_${{ env.PRODUCT_VERSION }}_x64.msi").Path
@@ -159,6 +179,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload standard installer EXE
+        if: steps.native_bundle.outputs.available == 'true'
         id: upload_installer
         uses: actions/upload-artifact@v4
         with:
@@ -174,5 +195,9 @@ jobs:
           echo "Version: \`${{ env.VERSION }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "- [Portable ZIP](${{ steps.upload_portable.outputs.artifact-url }})" >> "$GITHUB_STEP_SUMMARY"
-          echo "- [Standard installer EXE](${{ steps.upload_installer.outputs.artifact-url }})" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "${{ steps.native_bundle.outputs.available }}" == "true" ]]; then
+            echo "- [Standard installer EXE](${{ steps.upload_installer.outputs.artifact-url }})" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- Standard installer: deferred until the reviewed signed native VIIPER bundle is supplied" >> "$GITHUB_STEP_SUMMARY"
+          fi
 

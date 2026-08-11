@@ -13,7 +13,7 @@ namespace DS4WindowsTests
     [TestClass]
     public class ViiperNativeBackendContractTests
     {
-        private const string ExactNativePing = """
+        private static readonly string ExactNativePing = $$"""
             {
               "server":"VIIPER",
               "version":"0.1.0",
@@ -21,9 +21,10 @@ namespace DS4WindowsTests
               "ready":true,
               "nativeUde":{
                 "abiMajor":1,
-                "abiMinor":8,
+                "abiMinor":9,
                 "capabilities":13,
-                "expectedDriverPackageVersion":"0.1.0.3",
+                "expectedDriverPackageVersion":"0.1.0.4",
+                "loadedDriverBuildIdentity":"{{ViiperBackendContract.NativeLoadedDriverBuildIdentity}}",
                 "maxDevices":32,
                 "maxDescriptorBytes":262144,
                 "maxTransferBytes":1048576,
@@ -46,6 +47,23 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void PinnedLoadedDriverIdentityIsCanonicalLowercaseSha256()
+        {
+            Assert.AreEqual(
+                "114c1e4232004a328cf0e6e376c35e68ed7f314b61611084d35e6a7475a8f7c4",
+                ViiperBackendContract.NativeLoadedDriverBuildIdentity,
+                "DS4Windows must pin the identity derived from final VIIPER HEAD e1deabca21ce8e0e7a0e2f26d060ca357baf79f0.");
+            Assert.IsTrue(ViiperBackendContract.IsCanonicalLowerHexSha256(
+                ViiperBackendContract.NativeLoadedDriverBuildIdentity));
+            Assert.AreEqual(64,
+                ViiperBackendContract.NativeLoadedDriverBuildIdentity.Length);
+            Assert.AreEqual(
+                ViiperBackendContract.NativeLoadedDriverBuildIdentity,
+                ViiperBackendContract.NativeLoadedDriverBuildIdentity.
+                    ToLowerInvariant());
+        }
+
+        [TestMethod]
         public void UnauthenticatedNativeHealthFailsClosed()
         {
             StringAssert.Contains(
@@ -58,9 +76,9 @@ namespace DS4WindowsTests
         [DataRow("\"version\":\"0.1.0\"", "\"version\":\"0.1.1\"")]
         [DataRow("\"ready\":true", "\"ready\":false")]
         [DataRow("\"abiMajor\":1", "\"abiMajor\":2")]
-        [DataRow("\"abiMinor\":8", "\"abiMinor\":7")]
+        [DataRow("\"abiMinor\":9", "\"abiMinor\":8")]
         [DataRow("\"capabilities\":13", "\"capabilities\":15")]
-        [DataRow("\"0.1.0.3\"", "\"0.1.0.2\"")]
+        [DataRow("\"0.1.0.4\"", "\"0.1.0.3\"")]
         [DataRow("\"maxDevices\":32", "\"maxDevices\":31")]
         [DataRow("\"maxDescriptorBytes\":262144",
             "\"maxDescriptorBytes\":262143")]
@@ -78,6 +96,116 @@ namespace DS4WindowsTests
 
             Assert.ThrowsException<ViiperNativeContractException>(() =>
                 ViiperBackendContract.ParsePing(drifted));
+        }
+
+        [TestMethod]
+        public void MissingLoadedDriverIdentityFailsClosed()
+        {
+            string property =
+                $"\"loadedDriverBuildIdentity\":\"{ViiperBackendContract.NativeLoadedDriverBuildIdentity}\",";
+            string missing = ExactNativePing.Replace(property, string.Empty,
+                StringComparison.Ordinal);
+
+            Assert.AreNotEqual(ExactNativePing, missing,
+                "The fixture did not remove the loaded-driver identity.");
+            Assert.ThrowsException<ViiperNativeContractException>(() =>
+                ViiperBackendContract.ParsePing(missing,
+                    "test-credential"));
+        }
+
+        [TestMethod]
+        public void MalformedUppercaseAndStaleLoadedDriverIdentitiesFailClosed()
+        {
+            string expected =
+                ViiperBackendContract.NativeLoadedDriverBuildIdentity;
+            string[] rejected =
+            {
+                string.Empty,
+                "not-a-sha256-identity",
+                expected.ToUpperInvariant(),
+                $"{(expected[0] == '0' ? '1' : '0')}{expected[1..]}",
+                $"g{expected[1..]}",
+                expected[..^1],
+                expected + "0",
+                " " + expected,
+            };
+
+            foreach (string identity in rejected)
+            {
+                string drifted = ExactNativePing.Replace(expected, identity,
+                    StringComparison.Ordinal);
+                Assert.ThrowsException<ViiperNativeContractException>(() =>
+                    ViiperBackendContract.ParsePing(drifted,
+                        "test-credential"),
+                    $"Rejected identity was accepted: {identity}");
+            }
+        }
+
+        [DataTestMethod]
+        [DataRow("null")]
+        [DataRow("42")]
+        [DataRow("{}")]
+        [DataRow("[]")]
+        public void NonStringLoadedDriverIdentityFailsAsNativeContract(
+            string jsonValue)
+        {
+            string expected =
+                ViiperBackendContract.NativeLoadedDriverBuildIdentity;
+            string drifted = ExactNativePing.Replace(
+                $"\"loadedDriverBuildIdentity\":\"{expected}\"",
+                $"\"loadedDriverBuildIdentity\":{jsonValue}",
+                StringComparison.Ordinal);
+
+            Assert.ThrowsException<ViiperNativeContractException>(() =>
+                ViiperBackendContract.ParsePing(drifted,
+                    "test-credential"));
+        }
+
+        [TestMethod]
+        public void MisCasedOrDuplicateLoadedDriverIdentityPropertyFailsClosed()
+        {
+            string expected =
+                ViiperBackendContract.NativeLoadedDriverBuildIdentity;
+            string exactProperty =
+                $"\"loadedDriverBuildIdentity\":\"{expected}\"";
+            string misCased = ExactNativePing.Replace(exactProperty,
+                $"\"LoadedDriverBuildIdentity\":\"{expected}\"",
+                StringComparison.Ordinal);
+            string duplicate = ExactNativePing.Replace(exactProperty,
+                $"{exactProperty},{exactProperty}",
+                StringComparison.Ordinal);
+
+            Assert.ThrowsException<ViiperNativeContractException>(() =>
+                ViiperBackendContract.ParsePing(misCased,
+                    "test-credential"));
+            Assert.ThrowsException<ViiperNativeContractException>(() =>
+                ViiperBackendContract.ParsePing(duplicate,
+                    "test-credential"));
+        }
+
+        [TestMethod]
+        public void StaleLoadedDriverIdentityCannotBecomeStartupReady()
+        {
+            string expected =
+                ViiperBackendContract.NativeLoadedDriverBuildIdentity;
+            string stale = ExactNativePing.Replace(expected,
+                $"{(expected[0] == '0' ? '1' : '0')}{expected[1..]}",
+                StringComparison.Ordinal);
+            Exception failure = null;
+            int discoveries = 0;
+
+            bool ready = ViiperStartupDiscovery.
+                TryPrepareBackendAndDiscover(
+                    () => ViiperBackendContract.ParsePing(stale,
+                        "test-credential"),
+                    () => Assert.Fail(
+                        "A stale native driver must not enter USB/IP preparation."),
+                    () => discoveries++,
+                    ex => failure = ex);
+
+            Assert.IsFalse(ready);
+            Assert.AreEqual(1, discoveries);
+            Assert.IsInstanceOfType<ViiperNativeContractException>(failure);
         }
 
         [DataTestMethod]
@@ -1085,6 +1213,28 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void AuthenticatedStaleLoadedDriverIdentityCreatesNoDevice()
+        {
+            const string password = "NativeCredential123";
+            using var server = new AuthenticatedViiperProtocolServer(password);
+            string expected =
+                ViiperBackendContract.NativeLoadedDriverBuildIdentity;
+            server.PingResponse = server.PingResponseForTest.Replace(expected,
+                $"{(expected[0] == '0' ? '1' : '0')}{expected[1..]}",
+                StringComparison.Ordinal);
+            var client = new ViiperClient("127.0.0.1", server.Port,
+                () => new[] { password }, () => server.BrokerInstance);
+
+            Assert.ThrowsException<ViiperNativeContractException>(() =>
+                client.CreateDeviceAndOpenStream("test-device"));
+            Assert.AreEqual(0, server.BusCreateCount,
+                "A stale loaded kernel identity must fail before any bus/device operation.");
+
+            server.WaitForIdle(TimeSpan.FromSeconds(5));
+            server.AssertNoErrors();
+        }
+
+        [TestMethod]
         public void BrokerProcessChangeDuringHealthProofFailsBeforeCreation()
         {
             const string password = "NativeCredential123";
@@ -1846,7 +1996,10 @@ namespace DS4WindowsTests
 
         private sealed class AuthenticatedViiperProtocolServer : IDisposable
         {
-            private const string NativePing = "{\"server\":\"VIIPER\",\"version\":\"0.1.0\",\"transport\":\"native-ude\",\"ready\":true,\"nativeUde\":{\"abiMajor\":1,\"abiMinor\":8,\"capabilities\":13,\"expectedDriverPackageVersion\":\"0.1.0.3\",\"maxDevices\":32,\"maxDescriptorBytes\":262144,\"maxTransferBytes\":1048576,\"maxIsoPackets\":1024,\"maxPendingOperations\":4096}}";
+            private static readonly string NativePing =
+                "{\"server\":\"VIIPER\",\"version\":\"0.1.0\",\"transport\":\"native-ude\",\"ready\":true,\"nativeUde\":{\"abiMajor\":1,\"abiMinor\":9,\"capabilities\":13,\"expectedDriverPackageVersion\":\"0.1.0.4\",\"loadedDriverBuildIdentity\":\"" +
+                ViiperBackendContract.NativeLoadedDriverBuildIdentity +
+                "\",\"maxDevices\":32,\"maxDescriptorBytes\":262144,\"maxTransferBytes\":1048576,\"maxIsoPackets\":1024,\"maxPendingOperations\":4096}}";
             internal const string LegacyPing =
                 "{\"server\":\"VIIPER\",\"version\":\"0.1.0\",\"transport\":\"usbip\",\"ready\":true}";
             private readonly TcpListener listener;
@@ -1905,6 +2058,9 @@ namespace DS4WindowsTests
             {
                 set => Volatile.Write(ref pingResponse, value);
             }
+
+            internal string PingResponseForTest =>
+                Volatile.Read(ref pingResponse);
 
             internal string[] Requests => requests.ToArray();
 

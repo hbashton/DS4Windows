@@ -109,12 +109,21 @@ namespace DS4Windows
             : base(message)
         {
         }
+
+        internal ViiperNativeContractException(string message,
+            Exception innerException)
+            : base(message, innerException)
+        {
+        }
     }
 
     /// <summary>
-    /// Pins the native opt-in to the negotiated contract exposed by VIIPER
-    /// commit 0e1eec2 and ABI 1.8. An unrecognised or incomplete native ping is
-    /// an error, never a reason to fall back to USB/IP.
+    /// Pins the native opt-in to the negotiated contract exposed by the exact
+    /// accepted VIIPER package. The build identity is returned by the loaded
+    /// kernel image, so a matching broker or on-disk package cannot disguise a
+    /// stale driver with the same ABI and capabilities. An unrecognised or
+    /// incomplete native ping is an error, never a reason to fall back to
+    /// USB/IP.
     /// </summary>
     internal static class ViiperBackendContract
     {
@@ -122,9 +131,11 @@ namespace DS4Windows
         internal const string LegacyTransport = "usbip";
         internal const string NativeServerVersion = "0.1.0";
         internal const ushort NativeAbiMajor = 1;
-        internal const ushort NativeAbiMinor = 8;
+        internal const ushort NativeAbiMinor = 9;
         internal const uint NativeCapabilities = 0x0d;
-        internal const string NativeDriverPackageVersion = "0.1.0.3";
+        internal const string NativeDriverPackageVersion = "0.1.0.4";
+        internal const string NativeLoadedDriverBuildIdentity =
+            "114c1e4232004a328cf0e6e376c35e68ed7f314b61611084d35e6a7475a8f7c4";
         internal const uint NativeMaxDevices = 32;
         internal const uint NativeMaxDescriptorBytes = 262144;
         internal const uint NativeMaxTransferBytes = 1048576;
@@ -153,6 +164,13 @@ namespace DS4Windows
             }
             catch (JsonException ex)
             {
+                if (HasExplicitNativeTransport(raw))
+                {
+                    throw new ViiperNativeContractException(
+                        "VIIPER returned malformed native UDE health metadata.",
+                        ex);
+                }
+
                 throw new IOException(
                     "VIIPER returned an invalid ping response.", ex);
             }
@@ -203,6 +221,9 @@ namespace DS4Windows
             }
 
             ViiperNativeUdeInfo native = ping.NativeUde;
+            bool exactIdentityProperty =
+                TryReadSingleLoadedDriverBuildIdentity(raw,
+                    out string loadedDriverBuildIdentity);
             if (!string.Equals(ping.Version, NativeServerVersion,
                     StringComparison.Ordinal) ||
                 ping.Ready != true || native == null ||
@@ -211,6 +232,11 @@ namespace DS4Windows
                 native.Capabilities != NativeCapabilities ||
                 !string.Equals(native.ExpectedDriverPackageVersion,
                     NativeDriverPackageVersion, StringComparison.Ordinal) ||
+                !exactIdentityProperty ||
+                !string.Equals(native.LoadedDriverBuildIdentity,
+                    loadedDriverBuildIdentity, StringComparison.Ordinal) ||
+                !MatchesLoadedDriverBuildIdentity(
+                    loadedDriverBuildIdentity) ||
                 native.MaxDevices != NativeMaxDevices ||
                 native.MaxDescriptorBytes != NativeMaxDescriptorBytes ||
                 native.MaxTransferBytes != NativeMaxTransferBytes ||
@@ -219,7 +245,7 @@ namespace DS4Windows
                     NativeMaxPendingOperations)
             {
                 throw new ViiperNativeContractException(
-                    "VIIPER native UDE health proof does not match the required ABI 1.8 driver contract.");
+                    "VIIPER native UDE health proof does not match the exact required ABI 1.9 loaded-driver contract.");
             }
 
             if (string.IsNullOrWhiteSpace(credential))
@@ -230,6 +256,128 @@ namespace DS4Windows
 
             return new ViiperBackendSelection(ViiperBackendMode.NativeUde,
                 credential);
+        }
+
+        private static bool MatchesLoadedDriverBuildIdentity(string actual)
+        {
+            if (!IsCanonicalLowerHexSha256(actual) ||
+                !IsCanonicalLowerHexSha256(
+                    NativeLoadedDriverBuildIdentity))
+            {
+                return false;
+            }
+
+            byte[] actualBytes = Encoding.ASCII.GetBytes(actual);
+            byte[] expectedBytes = Encoding.ASCII.GetBytes(
+                NativeLoadedDriverBuildIdentity);
+            return CryptographicOperations.FixedTimeEquals(actualBytes,
+                expectedBytes);
+        }
+
+        internal static bool IsCanonicalLowerHexSha256(string value)
+        {
+            if (value == null || value.Length != 64)
+            {
+                return false;
+            }
+
+            foreach (char character in value)
+            {
+                if ((character < '0' || character > '9') &&
+                    (character < 'a' || character > 'f'))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool HasExplicitNativeTransport(string raw)
+        {
+            try
+            {
+                using JsonDocument document = JsonDocument.Parse(raw);
+                return document.RootElement.ValueKind ==
+                        JsonValueKind.Object &&
+                    document.RootElement.TryGetProperty("transport",
+                        out JsonElement transport) &&
+                    transport.ValueKind == JsonValueKind.String &&
+                    string.Equals(transport.GetString(), NativeTransport,
+                        StringComparison.Ordinal);
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
+        }
+
+        private static bool TryReadSingleLoadedDriverBuildIdentity(
+            string raw, out string identity)
+        {
+            identity = null;
+            try
+            {
+                using JsonDocument document = JsonDocument.Parse(raw);
+                if (document.RootElement.ValueKind !=
+                    JsonValueKind.Object)
+                {
+                    return false;
+                }
+
+                JsonElement nativeUde = default;
+                int nativeUdeCount = 0;
+                foreach (JsonProperty property in
+                    document.RootElement.EnumerateObject())
+                {
+                    if (string.Equals(property.Name, "nativeUde",
+                        StringComparison.Ordinal))
+                    {
+                        nativeUde = property.Value;
+                        nativeUdeCount++;
+                    }
+                    else if (string.Equals(property.Name, "nativeUde",
+                        StringComparison.OrdinalIgnoreCase))
+                    {
+                        return false;
+                    }
+                }
+
+                if (nativeUdeCount != 1 || nativeUde.ValueKind !=
+                    JsonValueKind.Object)
+                {
+                    return false;
+                }
+
+                int identityCount = 0;
+                foreach (JsonProperty property in nativeUde.EnumerateObject())
+                {
+                    if (string.Equals(property.Name,
+                        "loadedDriverBuildIdentity",
+                        StringComparison.Ordinal))
+                    {
+                        if (property.Value.ValueKind != JsonValueKind.String)
+                        {
+                            return false;
+                        }
+
+                        identity = property.Value.GetString();
+                        identityCount++;
+                    }
+                    else if (string.Equals(property.Name,
+                        "loadedDriverBuildIdentity",
+                        StringComparison.OrdinalIgnoreCase))
+                    {
+                        return false;
+                    }
+                }
+
+                return identityCount == 1;
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
         }
 
         private sealed class ViiperPingResponse
@@ -263,6 +411,9 @@ namespace DS4Windows
 
             [JsonPropertyName("expectedDriverPackageVersion")]
             public string ExpectedDriverPackageVersion { get; set; }
+
+            [JsonPropertyName("loadedDriverBuildIdentity")]
+            public string LoadedDriverBuildIdentity { get; set; }
 
             [JsonPropertyName("maxDevices")]
             public uint MaxDevices { get; set; }

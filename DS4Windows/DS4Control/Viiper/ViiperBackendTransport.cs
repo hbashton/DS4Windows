@@ -250,7 +250,7 @@ namespace DS4Windows
                     NativeMaxPendingOperations)
             {
                 throw new ViiperNativeContractException(
-                    "VIIPER native UDE health proof does not match the exact required ABI 1.9 loaded-driver contract.");
+                    "VIIPER native UDE health proof does not match the exact required ABI 1.10 loaded-driver contract.");
             }
 
             if (string.IsNullOrWhiteSpace(credential))

@@ -2970,7 +2970,7 @@ namespace DS4Windows
                         backend))
                 {
                     throw new ViiperNativeContractException(
-                        "The registered VIIPER native UDE broker did not prove its exact trusted service identity and authenticated ABI 1.9 loaded-driver contract.");
+                        "The registered VIIPER native UDE broker did not prove its exact trusted service identity and authenticated ABI 1.10 loaded-driver contract.");
                 }
 
                 return backend;

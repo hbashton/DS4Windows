@@ -97,6 +97,77 @@ namespace DS4WindowsTests
         }
 
         [DataTestMethod]
+        [DataRow(ViiperVirtualDeviceType.Xbox360)]
+        [DataRow(ViiperVirtualDeviceType.DualShock4)]
+        [DataRow(ViiperVirtualDeviceType.DualSense)]
+        [DataRow(ViiperVirtualDeviceType.DualSenseEdge)]
+        [DataRow(ViiperVirtualDeviceType.Switch2Pro)]
+        public void PreallocatedBuilderMatchesAllocatingContractExactly(
+            ViiperVirtualDeviceType type)
+        {
+            DS4State state = CreateMotionState();
+            state.Cross = true;
+            state.DpadRight = true;
+            state.L2 = 91;
+            state.TrackPadTouch0.IsActive = true;
+            state.TrackPadTouch0.X = 640;
+            state.TrackPadTouch0.Y = 360;
+            byte[] expected = ViiperStatePacketBuilder.Build(type, state, -1);
+            byte[] actual = new byte[
+                ViiperStatePacketBuilder.GetPacketLength(type)];
+            Array.Fill(actual, (byte)0xA5);
+
+            ViiperStatePacketBuilder.BuildInto(type, state, -1, actual);
+
+            CollectionAssert.AreEqual(expected, actual);
+        }
+
+        [TestMethod]
+        public void ReusedXboxBufferClearsEveryReservedByte()
+        {
+            byte[] packet = new byte[
+                ViiperStatePacketBuilder.GetPacketLength(
+                    ViiperVirtualDeviceType.Xbox360)];
+            Array.Fill(packet, (byte)0xA5);
+
+            ViiperStatePacketBuilder.BuildInto(
+                ViiperVirtualDeviceType.Xbox360,
+                ViiperStatePacketBuilder.CreateNeutralState(), -1, packet);
+
+            CollectionAssert.AreEqual(new byte[6], packet[14..20]);
+        }
+
+        [DataTestMethod]
+        [DataRow(ViiperVirtualDeviceType.DualShock4)]
+        [DataRow(ViiperVirtualDeviceType.DualSense)]
+        [DataRow(ViiperVirtualDeviceType.DualSenseEdge)]
+        public void EdgeSignatureCoalescesAnalogMotionButPreservesButtonEdges(
+            ViiperVirtualDeviceType type)
+        {
+            DS4State neutral = ViiperStatePacketBuilder.CreateNeutralState();
+            DS4State analog = ViiperStatePacketBuilder.CreateNeutralState();
+            analog.LX = 212;
+            analog.Motion.gyroYawFull = 1200;
+            DS4State pressed = ViiperStatePacketBuilder.CreateNeutralState();
+            pressed.Cross = true;
+            byte[] packet = new byte[
+                ViiperStatePacketBuilder.GetPacketLength(type)];
+
+            ViiperStatePacketBuilder.BuildInto(type, neutral, -1, packet);
+            ulong neutralSignature =
+                ViiperStatePacketBuilder.GetEdgeSignature(type, packet);
+            ViiperStatePacketBuilder.BuildInto(type, analog, -1, packet);
+            ulong analogSignature =
+                ViiperStatePacketBuilder.GetEdgeSignature(type, packet);
+            ViiperStatePacketBuilder.BuildInto(type, pressed, -1, packet);
+            ulong pressedSignature =
+                ViiperStatePacketBuilder.GetEdgeSignature(type, packet);
+
+            Assert.AreEqual(neutralSignature, analogSignature);
+            Assert.AreNotEqual(neutralSignature, pressedSignature);
+        }
+
+        [DataTestMethod]
         [DataRow(ViiperVirtualDeviceType.DualSense,
             "dualsensecombinedaudioduplexv5")]
         [DataRow(ViiperVirtualDeviceType.DualSenseEdge,

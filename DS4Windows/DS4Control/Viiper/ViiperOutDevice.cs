@@ -32,88 +32,6 @@ namespace DS4Windows
         int feedbackLength, int speakerPcmOffset, int speakerPcmLength,
         int targetDeviceIndex);
 
-    internal static class ViiperStateWriteRateSettings
-    {
-        internal const string EnvironmentVariableName =
-            "DS4WINDOWS_VIIPER_STATE_RATE_HZ";
-        internal const int DefaultControllerRateHz = 1000;
-        private const int MinimumRateHz = 30;
-        private const int MaximumRateHz = 1000;
-
-        internal static int Parse(string value, int defaultRateHz = 0)
-        {
-            int fallback = defaultRateHz >= MinimumRateHz &&
-                defaultRateHz <= MaximumRateHz ? defaultRateHz : 0;
-            string normalized = value?.Trim();
-            if (string.IsNullOrEmpty(normalized))
-            {
-                return fallback;
-            }
-            if (string.Equals(normalized, "off",
-                    StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(normalized, "immediate",
-                    StringComparison.OrdinalIgnoreCase) || normalized == "0")
-            {
-                return 0;
-            }
-            if (!int.TryParse(normalized, out int rateHz) ||
-                rateHz < MinimumRateHz || rateHz > MaximumRateHz)
-            {
-                return fallback;
-            }
-
-            return rateHz;
-        }
-
-        internal static int GetDefaultRateHz(ViiperVirtualDeviceType deviceType)
-        {
-            switch (deviceType)
-            {
-                case ViiperVirtualDeviceType.Xbox360:
-                case ViiperVirtualDeviceType.DualShock4:
-                case ViiperVirtualDeviceType.DualSense:
-                case ViiperVirtualDeviceType.DualSenseEdge:
-                case ViiperVirtualDeviceType.Switch2Pro:
-                    // Every virtual controller exposes a one-millisecond
-                    // maximum input opportunity. This remains adaptive rather
-                    // than becoming a polling loop: the writer wakes only for
-                    // fresh mapped physical reports and coalesces queued state.
-                    return DefaultControllerRateHz;
-                default:
-                    return DefaultControllerRateHz;
-            }
-        }
-
-        internal static int ResolveConfiguredRateHz(
-            ViiperVirtualDeviceType deviceType, string configuredValue)
-        {
-            int defaultRate = GetDefaultRateHz(deviceType);
-            int configuredRate = Parse(configuredValue, defaultRate);
-            // The descriptor and USB/IP scheduler enforce the same 1 kHz hard
-            // ceiling. Do not let the diagnostic "immediate" value restore an
-            // unbounded loop; a numeric override can still choose a lower cap.
-            return configuredRate > 0 ? configuredRate : defaultRate;
-        }
-
-        internal static long GetMinimumIntervalTicks(int rateHz)
-        {
-            return rateHz <= 0 ? 0 : Math.Max(1,
-                (Stopwatch.Frequency + rateHz - 1) / rateHz);
-        }
-
-        internal static long GetRemainingTicks(long now, long previousWriteStart,
-            long minimumIntervalTicks)
-        {
-            if (previousWriteStart <= 0 || minimumIntervalTicks <= 0)
-            {
-                return 0;
-            }
-
-            long remaining = previousWriteStart + minimumIntervalTicks - now;
-            return Math.Max(0, remaining);
-        }
-    }
-
     public enum ViiperVirtualDeviceType
     {
         Xbox360,
@@ -216,7 +134,13 @@ namespace DS4Windows
         private readonly bool audioOnlySidecar;
         private readonly bool gamepadOnly;
         private readonly ViiperClient client;
+        private readonly object stateProducerLock = new object();
         private readonly object pendingPacketLock = new object();
+        private readonly ViiperInputPacketQueue statePacketQueue;
+        private readonly byte[] stateBuildPacket;
+        private readonly byte[] stateWriterPacket;
+        private readonly DS4State neutralState =
+            ViiperStatePacketBuilder.CreateNeutralState();
         private readonly object microphoneQueueLock = new object();
         private readonly object microphoneProcessingLock = new object();
         private readonly object writerThreadLock = new object();
@@ -232,8 +156,6 @@ namespace DS4Windows
         private readonly object microphoneControlTransitionLock = new object();
         private readonly object legacyDualSenseRumbleLock = new object();
         private readonly AutoResetEvent writerSignal = new AutoResetEvent(false);
-        private readonly ManualResetEvent writerRateWaitStopSignal =
-            new ManualResetEvent(false);
         private readonly AutoResetEvent microphoneWriterSignal = new AutoResetEvent(false);
         private readonly AutoResetEvent feedbackSpeakerSignal =
             new AutoResetEvent(false);
@@ -272,9 +194,6 @@ namespace DS4Windows
         private Thread stateWriterThread;
         private Thread microphoneWriterThread;
         private Thread microphoneInterfaceThread;
-        private byte[] pendingStatePacket;
-        private byte[] latestStatePacket;
-        private long pendingStatePacketQueuedTimestamp;
         private IOpusDecoder microphoneDecoder;
         private SbcDecoder microphoneSbcDecoder;
         private DS4Device microphoneSourceDevice;
@@ -319,7 +238,7 @@ namespace DS4Windows
         private long stateWriterThreadGeneration;
         private long lastStateReplayStreamGeneration;
         private int streamRecoveryAttempts;
-        private long replacedPendingPacketCount;
+        private long coalescedPendingPacketCount;
         private long submittedPacketCount;
         private long writtenPacketCount;
         private long microphoneArmAttempts;
@@ -347,9 +266,7 @@ namespace DS4Windows
         private long maximumStateWriteDurationTicks;
         private long maximumStateWriteGapTicks;
         private long minimumStateWriteStartGapTicks = long.MaxValue;
-        private long lastRateLimitedStateWriteStartedTimestamp;
-        private int stateWriteRateHz;
-        private long stateWriteMinimumIntervalTicks;
+        private long lastStateWriteStartedTimestamp;
         private DateTime lastWriterHealthLogUtc = DateTime.MinValue;
         private DateTime lastMicrophoneHealthLogUtc = DateTime.MinValue;
         private int lastInputDeviceIndex = -1;
@@ -430,6 +347,11 @@ namespace DS4Windows
                 GetFeedbackSpeakerMaximumAgeMilliseconds(viiperType),
                 IsDualSenseVirtualType(viiperType) ?
                     FeedbackOrderedControlMaximumAgeMilliseconds : 0);
+            int statePacketLength =
+                ViiperStatePacketBuilder.GetPacketLength(viiperType);
+            statePacketQueue = new ViiperInputPacketQueue(statePacketLength);
+            stateBuildPacket = new byte[statePacketLength];
+            stateWriterPacket = new byte[statePacketLength];
             client = new ViiperClient(DefaultHost, DefaultPort);
         }
 
@@ -674,7 +596,7 @@ namespace DS4Windows
             Volatile.Write(ref microphoneMuted, 0);
             Volatile.Write(ref lastInputDeviceIndex, -1);
             Interlocked.Exchange(ref streamRecoveryAttempts, 0);
-            Interlocked.Exchange(ref replacedPendingPacketCount, 0);
+            Interlocked.Exchange(ref coalescedPendingPacketCount, 0);
             Interlocked.Exchange(ref submittedPacketCount, 0);
             Interlocked.Exchange(ref writtenPacketCount, 0);
             ResetMicrophoneLiveness();
@@ -709,15 +631,7 @@ namespace DS4Windows
             Interlocked.Exchange(ref maximumStateWriteGapTicks, 0);
             Interlocked.Exchange(ref minimumStateWriteStartGapTicks,
                 long.MaxValue);
-            Interlocked.Exchange(ref lastRateLimitedStateWriteStartedTimestamp,
-                0);
-            stateWriteRateHz = ViiperStateWriteRateSettings.
-                ResolveConfiguredRateHz(viiperType,
-                    Environment.GetEnvironmentVariable(
-                        ViiperStateWriteRateSettings.EnvironmentVariableName));
-            stateWriteMinimumIntervalTicks =
-                ViiperStateWriteRateSettings.GetMinimumIntervalTicks(
-                    stateWriteRateHz);
+            Interlocked.Exchange(ref lastStateWriteStartedTimestamp, 0);
             Volatile.Write(ref edgePhysicalMismatchLogged, 0);
             Volatile.Write(ref feedbackSpeakerCallbackFailureLogged, 0);
             Volatile.Write(ref feedbackControlCallbackFailureLogged, 0);
@@ -744,7 +658,6 @@ namespace DS4Windows
             Volatile.Write(ref virtualMicrophoneBufferSnapshot,
                 ViiperMicrophoneBufferSnapshot.Empty);
             microphoneInterfaceStopSignal.Reset();
-            writerRateWaitStopSignal.Reset();
             long writerGeneration = Interlocked.Increment(
                 ref stateWriterGeneration);
             writerStopRequested = false;
@@ -759,12 +672,6 @@ namespace DS4Windows
             StartFeedbackDispatchWorkers();
             ResetState();
             StartFeedbackReader();
-            if (stateWriteRateHz > 0)
-            {
-                AppLogger.LogToGui(
-                    $"VIIPER {viiperType} virtual input presentation is capped at {stateWriteRateHz} Hz with latest-state coalescing.",
-                    false);
-            }
         }
 
         private ViiperDeviceStream CreateDeviceStream()
@@ -911,7 +818,6 @@ namespace DS4Windows
             }
             writerStopRequested = true;
             feedbackDispatchStopRequested = true;
-            writerRateWaitStopSignal.Set();
             writerSignal.Set();
             microphoneWriterSignal.Set();
             feedbackSpeakerSignal.Set();
@@ -930,10 +836,9 @@ namespace DS4Windows
             StopMicrophoneInterfaceMonitor();
             lock (pendingPacketLock)
             {
-                pendingStatePacket = null;
-                latestStatePacket = null;
-                pendingStatePacketQueuedTimestamp = 0;
+                statePacketQueue.Clear();
                 lastStateReplayStreamGeneration = 0;
+                Monitor.PulseAll(pendingPacketLock);
             }
             lock (microphoneQueueLock)
             {
@@ -1156,7 +1061,7 @@ namespace DS4Windows
 
             try
             {
-                QueueStatePacket(ViiperStatePacketBuilder.Build(viiperType, state, device));
+                QueueMappedState(state, device);
             }
             catch (IOException ex)
             {
@@ -1181,7 +1086,7 @@ namespace DS4Windows
 
             try
             {
-                QueueStatePacket(ViiperStatePacketBuilder.BuildNeutral(viiperType));
+                QueueMappedState(neutralState, -1);
             }
             catch (IOException ex)
             {
@@ -1223,25 +1128,49 @@ namespace DS4Windows
                 .SupportsVirtualMicrophoneOutput(type);
         }
 
-        private void QueueStatePacket(byte[] data)
+        private void QueueMappedState(DS4State state, int device)
         {
-            long queuedAt = Stopwatch.GetTimestamp();
-            long previousQueuedAt = Interlocked.Exchange(ref lastStateQueuedTimestamp, queuedAt);
+            long queuedAt;
+            bool coalesced;
+            // BuildInto reuses one producer slab. Keep it stable across a rare
+            // full-ring wait while pendingPacketLock is released for the
+            // writer; ResetState and the mapped-input callback cannot overwrite
+            // the waiting packet or pair it with a stale edge signature.
+            lock (stateProducerLock)
+            {
+                lock (pendingPacketLock)
+                {
+                    ViiperStatePacketBuilder.BuildInto(viiperType, state, device,
+                        stateBuildPacket);
+                    ulong edgeSignature = ViiperStatePacketBuilder.
+                        GetEdgeSignature(viiperType, stateBuildPacket);
+                    queuedAt = Stopwatch.GetTimestamp();
+                    while (!statePacketQueue.TryEnqueue(stateBuildPacket, queuedAt,
+                        edgeSignature, out coalesced))
+                    {
+                        if (writerStopRequested)
+                        {
+                            throw new IOException(
+                                $"VIIPER {viiperType} input publication stopped while waiting for fixed transition storage.");
+                        }
+                        // The mapped-input producer and state writer share this
+                        // monitor only at the bounded ring boundary. Ordinary
+                        // input remains immediate; a full transition ring applies
+                        // cancellable backpressure instead of dropping an edge.
+                        Monitor.Wait(pendingPacketLock);
+                    }
+                }
+            }
+            if (coalesced)
+            {
+                Interlocked.Increment(ref coalescedPendingPacketCount);
+            }
+            long previousQueuedAt = Interlocked.Exchange(
+                ref lastStateQueuedTimestamp, queuedAt);
             if (previousQueuedAt > 0)
             {
-                RecordMaximum(ref maximumStateQueueGapTicks, queuedAt - previousQueuedAt);
-            }
-
-            lock (pendingPacketLock)
-            {
-                if (pendingStatePacket != null)
-                {
-                    Interlocked.Increment(ref replacedPendingPacketCount);
-                }
-
-                pendingStatePacket = data;
-                latestStatePacket = data;
-                pendingStatePacketQueuedTimestamp = queuedAt;
+                RecordMaximum(ref maximumStateQueueGapTicks,
+                    queuedAt - previousQueuedAt);
             }
 
             Interlocked.Increment(ref submittedPacketCount);
@@ -1700,23 +1629,6 @@ namespace DS4Windows
 
                     while (IsStateWriterCurrent(writerGeneration))
                     {
-                        bool hasPendingPacket;
-                        lock (pendingPacketLock)
-                        {
-                            hasPendingPacket = pendingStatePacket != null;
-                        }
-
-                        if (!hasPendingPacket)
-                        {
-                            break;
-                        }
-
-                        if (!WaitForStateWriteRateWindow(writerGeneration))
-                        {
-                            return;
-                        }
-
-                        byte[] packet;
                         long queuedAt;
                         lock (pendingPacketLock)
                         {
@@ -1724,16 +1636,14 @@ namespace DS4Windows
                             {
                                 return;
                             }
-                            packet = pendingStatePacket;
-                            pendingStatePacket = null;
-                            queuedAt = pendingStatePacketQueuedTimestamp;
-                            pendingStatePacketQueuedTimestamp = 0;
+                            if (!statePacketQueue.TryDequeue(stateWriterPacket,
+                                    out queuedAt))
+                            {
+                                break;
+                            }
+                            Monitor.PulseAll(pendingPacketLock);
                         }
-
-                        if (packet == null)
-                        {
-                            break;
-                        }
+                        byte[] packet = stateWriterPacket;
 
                         long writeStreamGeneration = Volatile.Read(
                             ref streamGeneration);
@@ -1746,7 +1656,7 @@ namespace DS4Windows
                         {
                             long writeStartedAt = Stopwatch.GetTimestamp();
                             long previousWriteStartedAt = Interlocked.Exchange(
-                                ref lastRateLimitedStateWriteStartedTimestamp,
+                                ref lastStateWriteStartedTimestamp,
                                 writeStartedAt);
                             if (previousWriteStartedAt > 0)
                             {
@@ -1779,7 +1689,7 @@ namespace DS4Windows
                         {
                             if (IsStateWriterCurrent(writerGeneration) &&
                                 TryRecoverStream(ex.Message,
-                                    writeStreamGeneration, packet))
+                                    writeStreamGeneration, packet, queuedAt))
                             {
                                 continue;
                             }
@@ -1794,7 +1704,7 @@ namespace DS4Windows
                         {
                             if (IsStateWriterCurrent(writerGeneration) &&
                                 TryRecoverStream(ex.Message,
-                                    writeStreamGeneration, packet))
+                                    writeStreamGeneration, packet, queuedAt))
                             {
                                 continue;
                             }
@@ -1809,7 +1719,7 @@ namespace DS4Windows
                         {
                             if (IsStateWriterCurrent(writerGeneration) &&
                                 TryRecoverStream(ex.Message,
-                                    writeStreamGeneration, packet))
+                                    writeStreamGeneration, packet, queuedAt))
                             {
                                 continue;
                             }
@@ -1858,33 +1768,6 @@ namespace DS4Windows
                 StartMicrophoneWriter(Interlocked.Read(
                     ref microphoneWorkerGeneration));
             }
-        }
-
-        private bool WaitForStateWriteRateWindow(long writerGeneration)
-        {
-            while (IsStateWriterCurrent(writerGeneration))
-            {
-                long remainingTicks =
-                    ViiperStateWriteRateSettings.GetRemainingTicks(
-                        Stopwatch.GetTimestamp(),
-                        Interlocked.Read(
-                            ref lastRateLimitedStateWriteStartedTimestamp),
-                        stateWriteMinimumIntervalTicks);
-                if (remainingTicks <= 0)
-                {
-                    return true;
-                }
-
-                int waitMilliseconds = Math.Max(1, (int)Math.Min(int.MaxValue,
-                    Math.Ceiling(remainingTicks * 1000.0 /
-                        Stopwatch.Frequency)));
-                if (writerRateWaitStopSignal.WaitOne(waitMilliseconds))
-                {
-                    return false;
-                }
-            }
-
-            return false;
         }
 
         private void StartMicrophoneWriter(long workerGeneration)
@@ -1992,7 +1875,7 @@ namespace DS4Windows
         }
 
         private bool TryRecoverStream(string reason, long failedStreamGeneration,
-            byte[] packetToRetry = null)
+            byte[] packetToRetry = null, long packetQueuedAt = 0)
         {
             if (writerStopRequested || !connected)
             {
@@ -2003,7 +1886,7 @@ namespace DS4Windows
                 deviceStream != null)
             {
                 QueueFinalStateReplay(packetToRetry,
-                    Volatile.Read(ref streamGeneration));
+                    Volatile.Read(ref streamGeneration), packetQueuedAt);
                 return true;
             }
 
@@ -2018,7 +1901,7 @@ namespace DS4Windows
                     deviceStream != null)
                 {
                     QueueFinalStateReplay(packetToRetry,
-                        Volatile.Read(ref streamGeneration));
+                        Volatile.Read(ref streamGeneration), packetQueuedAt);
                     return true;
                 }
 
@@ -2094,7 +1977,7 @@ namespace DS4Windows
                         StartFeedbackDispatchWorkers();
                         StartFeedbackReader();
                         QueueFinalStateReplay(packetToRetry,
-                            replacementStreamGeneration);
+                            replacementStreamGeneration, packetQueuedAt);
 
                         AppLogger.LogToGui(
                             recreateNative
@@ -2158,7 +2041,7 @@ namespace DS4Windows
 
             if (activeStreamUsesFramedProtocol)
             {
-                stream.WriteFrame(activeStreamFrameVersion,
+                stream.WriteInputFrame(activeStreamFrameVersion,
                     ViiperStreamFrameInputState, data);
             }
             else
@@ -2665,13 +2548,13 @@ namespace DS4Windows
                 $"VIIPER {viiperType} writer stats: " +
                 $"submitted={Interlocked.Read(ref submittedPacketCount)} " +
                 $"written={Interlocked.Read(ref writtenPacketCount)} " +
-                $"coalesced={Interlocked.Read(ref replacedPendingPacketCount)} " +
+                $"coalesced={Interlocked.Read(ref coalescedPendingPacketCount)} " +
                 $"queueGapMaxMs={StopwatchTicksToMilliseconds(maximumQueueGap):F2} " +
                 $"packetAgeMaxMs={StopwatchTicksToMilliseconds(maximumPacketAge):F2} " +
                 $"writeMaxMs={StopwatchTicksToMilliseconds(maximumWriteDuration):F2} " +
                 $"writeGapMaxMs={StopwatchTicksToMilliseconds(maximumWriteGap):F2} " +
                 $"writeStartGapMinMs={(minimumWriteStartGap == long.MaxValue ? 0.0 : StopwatchTicksToMilliseconds(minimumWriteStartGap)):F2} " +
-                $"rateLimitHz={stateWriteRateHz} " +
+                $"presentation=immediate-native-scheduled " +
                 $"speakerQueued={feedbackDispatchBuffer.SpeakerEnqueued} " +
                 $"speakerDequeued={feedbackDispatchBuffer.SpeakerDequeued} " +
                 $"speakerDelivered={Interlocked.Read(ref feedbackSpeakerDelivered)} " +
@@ -2723,23 +2606,33 @@ namespace DS4Windows
         }
 
         private void QueueFinalStateReplay(byte[] packetToRetry,
-            long replayStreamGeneration)
+            long replayStreamGeneration, long packetQueuedAt = 0)
         {
             bool shouldSignal;
             lock (pendingPacketLock)
             {
-                // A state queued while recovery was running is newer than the
-                // failed packet. If recovery came from feedback or microphone
-                // input, replay the last desired controller state even though
-                // there was no failed state write to carry into this call.
-                shouldSignal = ViiperFinalStateReplayPolicy.TryPrepare(
-                    ref lastStateReplayStreamGeneration,
-                    replayStreamGeneration, ref pendingStatePacket,
-                    latestStatePacket, packetToRetry);
-                if (shouldSignal)
+                long replayQueuedAt = packetQueuedAt > 0 ? packetQueuedAt :
+                    Stopwatch.GetTimestamp();
+                if (packetToRetry != null)
                 {
-                    pendingStatePacketQueuedTimestamp =
-                        Stopwatch.GetTimestamp();
+                    // The failed state was already removed from the ring. Keep
+                    // it in the independent retry slot so newer press/release
+                    // transitions cannot overtake it during reconnect.
+                    shouldSignal = statePacketQueue.TryQueueRetry(
+                        packetToRetry, replayQueuedAt) ||
+                        statePacketQueue.Count > 0;
+                    lastStateReplayStreamGeneration = replayStreamGeneration;
+                }
+                else if (lastStateReplayStreamGeneration !=
+                    replayStreamGeneration)
+                {
+                    lastStateReplayStreamGeneration = replayStreamGeneration;
+                    shouldSignal = statePacketQueue.EnsureLatestQueued(
+                        replayQueuedAt);
+                }
+                else
+                {
+                    shouldSignal = false;
                 }
             }
 
@@ -4591,27 +4484,6 @@ namespace DS4Windows
             }
 
             AppLogger.LogToGui($"VIIPER {viiperType} output stopped: {message}", true);
-        }
-    }
-
-    /// <summary>
-    /// Publishes at most one final controller-state replay for each stream
-    /// generation. Callers hold their state-queue lock while applying it.
-    /// </summary>
-    internal static class ViiperFinalStateReplayPolicy
-    {
-        internal static bool TryPrepare(ref long replayedStreamGeneration,
-            long streamGeneration, ref byte[] pendingState,
-            byte[] latestState, byte[] failedState)
-        {
-            if (replayedStreamGeneration == streamGeneration)
-            {
-                return false;
-            }
-
-            replayedStreamGeneration = streamGeneration;
-            pendingState ??= latestState ?? failedState;
-            return pendingState != null;
         }
     }
 
@@ -6651,14 +6523,16 @@ namespace DS4Windows
         private readonly ViiperBackendMode backendMode;
         private readonly int usbipPort;
         private readonly long deviceLifetimeGeneration;
-        private readonly object writeLock = new object();
+        private readonly ViiperPriorityWriteScheduler writeScheduler =
+            new ViiperPriorityWriteScheduler();
         private readonly byte[] incomingFrameHeader =
             new byte[FramedHeaderLength];
-        // Input state and microphone writers share this buffer under
-        // writeLock. Reusing it removes the per-frame managed allocation which
-        // could otherwise pause the 4 ms physical speaker presenter during a
-        // full process GC.
-        private byte[] outgoingFrameBuffer =
+        // Input and microphone frames have independent reusable storage. The
+        // scheduler serializes only the final wire record/sequence and admits
+        // waiting input ahead of queued media without starving media.
+        private byte[] inputFrameBuffer =
+            new byte[FramedHeaderLength + 64];
+        private byte[] mediaFrameBuffer =
             new byte[FramedHeaderLength + 2048];
         private uint frameSequence;
         private uint incomingFrameSequence;
@@ -6727,7 +6601,8 @@ namespace DS4Windows
                 throw new ObjectDisposedException(nameof(ViiperDeviceStream));
             }
 
-            lock (writeLock)
+            writeScheduler.EnterInput();
+            try
             {
                 if (Volatile.Read(ref transportClosed) == 1)
                 {
@@ -6736,9 +6611,24 @@ namespace DS4Windows
 
                 stream.Write(data, 0, data.Length);
             }
+            finally
+            {
+                writeScheduler.Exit();
+            }
         }
 
         public void WriteFrame(byte version, byte frameType, byte[] data)
+        {
+            WriteFrameCore(version, frameType, data, inputPriority: false);
+        }
+
+        internal void WriteInputFrame(byte version, byte frameType, byte[] data)
+        {
+            WriteFrameCore(version, frameType, data, inputPriority: true);
+        }
+
+        private void WriteFrameCore(byte version, byte frameType, byte[] data,
+            bool inputPriority)
         {
             if (data == null)
             {
@@ -6753,7 +6643,15 @@ namespace DS4Windows
                 throw new ArgumentOutOfRangeException(nameof(version));
             }
 
-            lock (writeLock)
+            if (inputPriority)
+            {
+                writeScheduler.EnterInput();
+            }
+            else
+            {
+                writeScheduler.EnterMedia();
+            }
+            try
             {
                 if (Volatile.Read(ref transportClosed) == 1)
                 {
@@ -6761,12 +6659,21 @@ namespace DS4Windows
                 }
 
                 int frameLength = FramedHeaderLength + data.Length;
-                if (outgoingFrameBuffer.Length < frameLength)
+                byte[] frame = inputPriority ? inputFrameBuffer :
+                    mediaFrameBuffer;
+                if (frame.Length < frameLength)
                 {
-                    Array.Resize(ref outgoingFrameBuffer, Math.Max(frameLength,
-                        outgoingFrameBuffer.Length * 2));
+                    Array.Resize(ref frame, Math.Max(frameLength,
+                        frame.Length * 2));
+                    if (inputPriority)
+                    {
+                        inputFrameBuffer = frame;
+                    }
+                    else
+                    {
+                        mediaFrameBuffer = frame;
+                    }
                 }
-                byte[] frame = outgoingFrameBuffer;
                 frame[0] = FrameMagic0;
                 frame[1] = FrameMagic1;
                 frame[2] = FrameMagic2;
@@ -6787,6 +6694,10 @@ namespace DS4Windows
                 frame[14] = (byte)(crc >> 16);
                 frame[15] = (byte)(crc >> 24);
                 stream.Write(frame, 0, frameLength);
+            }
+            finally
+            {
+                writeScheduler.Exit();
             }
         }
 
@@ -7020,16 +6931,97 @@ namespace DS4Windows
             };
         }
 
-        public static byte[] Build(ViiperVirtualDeviceType type, DS4State state, int device)
+        public static int GetPacketLength(ViiperVirtualDeviceType type)
         {
             return type switch
             {
-                ViiperVirtualDeviceType.Xbox360 => BuildXbox360(state, device),
-                ViiperVirtualDeviceType.DualShock4 => BuildDualShock4(state, device),
-                ViiperVirtualDeviceType.DualSense => BuildDualSense(state, device),
-                ViiperVirtualDeviceType.DualSenseEdge => BuildDualSense(state, device),
-                ViiperVirtualDeviceType.Switch2Pro => BuildSwitch2Pro(state, device),
-                _ => BuildXbox360(state, device),
+                ViiperVirtualDeviceType.Xbox360 => X360PacketSize,
+                ViiperVirtualDeviceType.DualShock4 => DS4PacketSize,
+                ViiperVirtualDeviceType.DualSense => DualSensePacketSize,
+                ViiperVirtualDeviceType.DualSenseEdge => DualSensePacketSize,
+                ViiperVirtualDeviceType.Switch2Pro => Switch2PacketSize,
+                _ => X360PacketSize,
+            };
+        }
+
+        public static byte[] Build(ViiperVirtualDeviceType type, DS4State state, int device)
+        {
+            byte[] packet = new byte[GetPacketLength(type)];
+            BuildInto(type, state, device, packet);
+            return packet;
+        }
+
+        public static void BuildInto(ViiperVirtualDeviceType type,
+            DS4State state, int device, byte[] packet)
+        {
+            if (state == null)
+            {
+                throw new ArgumentNullException(nameof(state));
+            }
+            int packetLength = GetPacketLength(type);
+            if (packet == null)
+            {
+                throw new ArgumentNullException(nameof(packet));
+            }
+            if (packet.Length != packetLength)
+            {
+                throw new ArgumentException(
+                    $"The VIIPER {type} state packet must contain exactly {packetLength} bytes.",
+                    nameof(packet));
+            }
+
+            // Some controller contracts reserve trailing bytes. A reused slot
+            // must never retain those bytes from an older report.
+            Array.Clear(packet, 0, packet.Length);
+            switch (type)
+            {
+                case ViiperVirtualDeviceType.DualShock4:
+                    BuildDualShock4(state, device, packet);
+                    break;
+                case ViiperVirtualDeviceType.DualSense:
+                case ViiperVirtualDeviceType.DualSenseEdge:
+                    BuildDualSense(state, device, packet);
+                    break;
+                case ViiperVirtualDeviceType.Switch2Pro:
+                    BuildSwitch2Pro(state, device, packet);
+                    break;
+                default:
+                    BuildXbox360(state, device, packet);
+                    break;
+            }
+        }
+
+        public static ulong GetEdgeSignature(ViiperVirtualDeviceType type,
+            byte[] packet)
+        {
+            int packetLength = GetPacketLength(type);
+            if (packet == null || packet.Length != packetLength)
+            {
+                throw new ArgumentException(
+                    $"The VIIPER {type} state packet must contain exactly {packetLength} bytes.",
+                    nameof(packet));
+            }
+
+            return type switch
+            {
+                ViiperVirtualDeviceType.Xbox360 =>
+                    BinaryPrimitives.ReadUInt32LittleEndian(packet.AsSpan(0, 4)) |
+                    (packet[4] > 0 ? 1UL << 32 : 0) |
+                    (packet[5] > 0 ? 1UL << 33 : 0),
+                ViiperVirtualDeviceType.DualShock4 =>
+                    BinaryPrimitives.ReadUInt16LittleEndian(packet.AsSpan(4, 2)) |
+                    (ulong)packet[6] << 16 |
+                    (ulong)packet[13] << 24 |
+                    (ulong)packet[18] << 32,
+                ViiperVirtualDeviceType.DualSense or
+                    ViiperVirtualDeviceType.DualSenseEdge =>
+                    BinaryPrimitives.ReadUInt32LittleEndian(packet.AsSpan(4, 4)) |
+                    (ulong)packet[8] << 32 |
+                    (ulong)packet[15] << 40 |
+                    (ulong)packet[20] << 48,
+                ViiperVirtualDeviceType.Switch2Pro =>
+                    BinaryPrimitives.ReadUInt32LittleEndian(packet.AsSpan(0, 4)),
+                _ => 0,
             };
         }
 
@@ -7049,9 +7041,9 @@ namespace DS4Windows
             };
         }
 
-        private static byte[] BuildXbox360(DS4State state, int device)
+        private static void BuildXbox360(DS4State state, int device,
+            byte[] packet)
         {
-            byte[] packet = new byte[X360PacketSize];
             uint buttons = 0;
             if (state.DpadUp) buttons |= 0x0001;
             if (state.DpadDown) buttons |= 0x0002;
@@ -7085,12 +7077,11 @@ namespace DS4Windows
             WriteInt16(packet, 8, ly);
             WriteInt16(packet, 10, rx);
             WriteInt16(packet, 12, ry);
-            return packet;
         }
 
-        private static byte[] BuildDualShock4(DS4State state, int device)
+        private static void BuildDualShock4(DS4State state, int device,
+            byte[] packet)
         {
-            byte[] packet = new byte[DS4PacketSize];
             byte lx = state.LX;
             byte ly = state.LY;
             byte rx = state.RX;
@@ -7110,12 +7101,11 @@ namespace DS4Windows
             WriteTouch(packet, 9, state.TrackPadTouch0, 1920, 942);
             WriteTouch(packet, 14, state.TrackPadTouch1, 1920, 942);
             WriteSonyMotion(packet, 19, state, 0, 0);
-            return packet;
         }
 
-        private static byte[] BuildDualSense(DS4State state, int device)
+        private static void BuildDualSense(DS4State state, int device,
+            byte[] packet)
         {
-            byte[] packet = new byte[DualSensePacketSize];
             byte lx = state.LX;
             byte ly = state.LY;
             byte rx = state.RX;
@@ -7135,12 +7125,11 @@ namespace DS4Windows
             WriteDualSenseTouch(packet, 11, state.TrackPadTouch0, 1920, 1080);
             WriteDualSenseTouch(packet, 16, state.TrackPadTouch1, 1920, 1080);
             WriteSonyMotion(packet, 21, state, DualSenseGyroRestDeadband, DualSenseAccelRestZ);
-            return packet;
         }
 
-        private static byte[] BuildSwitch2Pro(DS4State state, int device)
+        private static void BuildSwitch2Pro(DS4State state, int device,
+            byte[] packet)
         {
-            byte[] packet = new byte[Switch2PacketSize];
             ushort lx = ScaleSwitchAxis(state.LX);
             ushort ly = ScaleSwitchAxis(state.LY);
             ushort rx = ScaleSwitchAxis(state.RX);
@@ -7158,7 +7147,6 @@ namespace DS4Windows
             WriteInt16(packet, 18, ClampShort(state.Motion?.gyroYawFull ?? 0));
             WriteInt16(packet, 20, ClampShort(state.Motion?.gyroPitchFull ?? 0));
             WriteInt16(packet, 22, ClampShort(state.Motion?.gyroRollFull ?? 0));
-            return packet;
         }
 
         private static ushort BuildDualShock4Buttons(DS4State state)

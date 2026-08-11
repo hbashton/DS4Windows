@@ -781,6 +781,80 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public async Task ConcurrentInputAndMediaFramesRemainWholeAndSequenced()
+        {
+            const int framesPerLane = 100;
+            var cleanup = new CleanupCounters();
+            var lifetime = cleanup.CreateLifetime(84, "10", 16);
+            var payloadStream = new CountingMemoryStream();
+            var transport = new CountingDisposable();
+            var stream = new ViiperDeviceStream(payloadStream, transport,
+                lifetime);
+            byte[] input = Enumerable.Range(0, 33)
+                .Select(index => (byte)(index * 11 + 1)).ToArray();
+            byte[] media = Enumerable.Range(0, 320)
+                .Select(index => (byte)(index * 13 + 7)).ToArray();
+            using ManualResetEventSlim start = new ManualResetEventSlim(false);
+
+            Task inputWriter = Task.Run(() =>
+            {
+                start.Wait();
+                for (int i = 0; i < framesPerLane; i++)
+                {
+                    stream.WriteInputFrame(0x03, 0x01, input);
+                }
+            });
+            Task mediaWriter = Task.Run(() =>
+            {
+                start.Wait();
+                for (int i = 0; i < framesPerLane; i++)
+                {
+                    stream.WriteFrame(0x03, 0x02, media);
+                }
+            });
+            start.Set();
+            await Task.WhenAll(inputWriter, mediaWriter);
+
+            byte[] framed = payloadStream.ToArray();
+            int offset = 0;
+            int inputCount = 0;
+            int mediaCount = 0;
+            uint sequence = 0;
+            while (offset < framed.Length)
+            {
+                CollectionAssert.AreEqual(new byte[]
+                {
+                    (byte)'V', (byte)'P', (byte)'C', (byte)'M',
+                }, framed.Skip(offset).Take(4).ToArray());
+                Assert.AreEqual(sequence++, ReadUInt32(framed, offset + 8));
+                int payloadLength = framed[offset + 6] |
+                    framed[offset + 7] << 8;
+                byte frameType = framed[offset + 5];
+                byte[] expected;
+                if (frameType == 0x01)
+                {
+                    expected = input;
+                    inputCount++;
+                }
+                else
+                {
+                    Assert.AreEqual((byte)0x02, frameType);
+                    expected = media;
+                    mediaCount++;
+                }
+                Assert.AreEqual(expected.Length, payloadLength);
+                CollectionAssert.AreEqual(expected,
+                    framed.Skip(offset + 16).Take(payloadLength).ToArray());
+                offset += 16 + payloadLength;
+            }
+
+            Assert.AreEqual(framesPerLane, inputCount);
+            Assert.AreEqual(framesPerLane, mediaCount);
+            stream.Dispose();
+            cleanup.AssertCleanedExactlyOnce(84, "10", 16);
+        }
+
+        [TestMethod]
         public void FramedWriterRejectsRemovedAtomicV4Generation()
         {
             var cleanup = new CleanupCounters();
@@ -935,86 +1009,6 @@ namespace DS4WindowsTests
                 ViiperOutDevice.GetStreamRecoveryBackoffMilliseconds(100));
         }
 
-        [DataTestMethod]
-        [DataRow(null, 0)]
-        [DataRow("", 0)]
-        [DataRow("immediate", 0)]
-        [DataRow("29", 0)]
-        [DataRow("200", 200)]
-        [DataRow(" 250 ", 250)]
-        [DataRow("1001", 0)]
-        public void ViiperStateWriteRateEnvironmentIsStrictAndBounded(
-            string value, int expected)
-        {
-            Assert.AreEqual(expected,
-                ViiperStateWriteRateSettings.Parse(value));
-        }
-
-        [TestMethod]
-        public void ViiperControllerStateRatesUseAdaptiveOneKilohertzCeiling()
-        {
-            const int defaultRate =
-                ViiperStateWriteRateSettings.DefaultControllerRateHz;
-            Assert.AreEqual(1000, ViiperStateWriteRateSettings.GetDefaultRateHz(
-                ViiperVirtualDeviceType.DualShock4));
-            Assert.AreEqual(1000, ViiperStateWriteRateSettings.GetDefaultRateHz(
-                ViiperVirtualDeviceType.DualSense));
-            Assert.AreEqual(1000, ViiperStateWriteRateSettings.GetDefaultRateHz(
-                ViiperVirtualDeviceType.DualSenseEdge));
-            Assert.AreEqual(1000, ViiperStateWriteRateSettings.GetDefaultRateHz(
-                ViiperVirtualDeviceType.Xbox360));
-            Assert.AreEqual(1000, ViiperStateWriteRateSettings.GetDefaultRateHz(
-                ViiperVirtualDeviceType.Switch2Pro));
-            Assert.AreEqual(1000,
-                ViiperStateWriteRateSettings.Parse(null, defaultRate));
-            Assert.AreEqual(1000,
-                ViiperStateWriteRateSettings.Parse("unknown", defaultRate));
-            Assert.AreEqual(250,
-                ViiperStateWriteRateSettings.Parse("250", defaultRate));
-            Assert.AreEqual(0,
-                ViiperStateWriteRateSettings.Parse("off", defaultRate));
-            Assert.AreEqual(0,
-                ViiperStateWriteRateSettings.Parse("0", defaultRate));
-        }
-
-        [TestMethod]
-        public void ControllerStateRateAllowsOnlyBoundedNumericOverrides()
-        {
-            Assert.AreEqual(200,
-                ViiperStateWriteRateSettings.ResolveConfiguredRateHz(
-                    ViiperVirtualDeviceType.DualSense, "200"));
-            Assert.AreEqual(250,
-                ViiperStateWriteRateSettings.ResolveConfiguredRateHz(
-                    ViiperVirtualDeviceType.DualSenseEdge, "250"));
-            Assert.AreEqual(1000,
-                ViiperStateWriteRateSettings.ResolveConfiguredRateHz(
-                    ViiperVirtualDeviceType.DualSense, "immediate"));
-            Assert.AreEqual(100,
-                ViiperStateWriteRateSettings.ResolveConfiguredRateHz(
-                    ViiperVirtualDeviceType.DualShock4, "100"));
-            Assert.AreEqual(1000,
-                ViiperStateWriteRateSettings.ResolveConfiguredRateHz(
-                    ViiperVirtualDeviceType.Xbox360, null));
-            Assert.AreEqual(1000,
-                ViiperStateWriteRateSettings.ResolveConfiguredRateHz(
-                    ViiperVirtualDeviceType.Switch2Pro, null));
-        }
-
-        [TestMethod]
-        public void DualSensePhysicalCadenceIsNotDelayedByOneKilohertzCeiling()
-        {
-            long intervalTicks =
-                ViiperStateWriteRateSettings.GetMinimumIntervalTicks(1000);
-            long previousWriteTicks = 10 * Stopwatch.Frequency;
-            long nextPhysicalReportTicks = previousWriteTicks +
-                (Stopwatch.Frequency * 5 / 4 / 1000);
-
-            Assert.AreEqual(0,
-                ViiperStateWriteRateSettings.GetRemainingTicks(
-                    nextPhysicalReportTicks, previousWriteTicks,
-                    intervalTicks));
-        }
-
         [TestMethod]
         public void NativeGameOwnerFilteringRejectsShellAndInfrastructureOnly()
         {
@@ -1048,36 +1042,6 @@ namespace DS4WindowsTests
             report[1] = 0x04;
             Assert.IsTrue(ViiperOutDevice.HasMeaningfulNativeGameOutput(
                 report, 0));
-        }
-
-        [TestMethod]
-        public void ViiperStateWriteRateWindowStartsImmediatelyAndNeverCatchesUp()
-        {
-            long interval =
-                ViiperStateWriteRateSettings.GetMinimumIntervalTicks(200);
-            Assert.IsTrue(interval >= Stopwatch.Frequency / 200);
-            Assert.AreEqual(0,
-                ViiperStateWriteRateSettings.GetRemainingTicks(
-                    now: 1000, previousWriteStart: 0,
-                    minimumIntervalTicks: interval));
-
-            long firstWrite = 10 * Stopwatch.Frequency;
-            Assert.AreEqual(interval,
-                ViiperStateWriteRateSettings.GetRemainingTicks(
-                    now: firstWrite, previousWriteStart: firstWrite,
-                    minimumIntervalTicks: interval));
-            Assert.AreEqual(0,
-                ViiperStateWriteRateSettings.GetRemainingTicks(
-                    now: firstWrite + interval,
-                    previousWriteStart: firstWrite,
-                    minimumIntervalTicks: interval));
-
-            long lateWrite = firstWrite + interval * 3;
-            Assert.AreEqual(interval,
-                ViiperStateWriteRateSettings.GetRemainingTicks(
-                    now: lateWrite, previousWriteStart: lateWrite,
-                    minimumIntervalTicks: interval),
-                "A late write must rebase the next window instead of creating a catch-up burst.");
         }
 
         private sealed class CleanupCounters

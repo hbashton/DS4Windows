@@ -21,13 +21,13 @@ namespace DS4Windows
         internal const string Architecture = "x64";
         internal const string UpstreamRepository = "hbashton/VIIPER";
         internal const string SourceRevision =
-            "8f45acdf7f267d886d99206495bd7ad9677739b5";
+            "d777a6a2100a7361ee83f16dc3ae5fe30abefd0d";
         internal const string ServerVersion = "0.1.0";
         internal const ushort DriverAbiMajor = 1;
         internal const ushort DriverAbiMinor = 9;
         internal const uint DriverCapabilities = 0x0000000d;
-        internal const string DriverPackageVersion = "0.1.0.5";
+        internal const string DriverPackageVersion = "0.1.0.6";
         internal const string DriverBuildIdentity =
-            "8a900c7a4c49d2ec765289c828d72b32997a732bbf2ef0282f28ceb5742846a8";
+            "82de0ed831924559f8b421b5feeb70b5efcc4206b91aa5c7b58c92a2a412c01b";
     }
 }

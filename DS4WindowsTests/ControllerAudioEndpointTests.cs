@@ -872,6 +872,57 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public async Task UsbipRecoveryRemainsReopenOnly()
+        {
+            var listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            var cleanup = new CleanupCounters();
+            var lifetime = cleanup.CreateLifetime(64, "11", 9);
+            var interrupted = new ViiperDeviceStream(
+                new CountingMemoryStream(), new CountingDisposable(),
+                lifetime);
+            ViiperDeviceStream recovered = null;
+
+            try
+            {
+                Task<TcpClient> accept = listener.AcceptTcpClientAsync();
+                var client = new ViiperClient("127.0.0.1", port);
+                recovered = client.RecoverDeviceStream(interrupted);
+                using TcpClient accepted = await accept.WaitAsync(
+                    TimeSpan.FromSeconds(2));
+                NetworkStream serverStream = accepted.GetStream();
+                byte[] expected = Encoding.UTF8.GetBytes("bus/64/11\0");
+                byte[] received = new byte[expected.Length];
+                int total = 0;
+                while (total < received.Length)
+                {
+                    int read = await serverStream.ReadAsync(
+                        received.AsMemory(total, received.Length - total));
+                    Assert.IsTrue(read > 0);
+                    total += read;
+                }
+
+                CollectionAssert.AreEqual(expected, received,
+                    "USB/IP recovery may only reopen the existing route.");
+                Assert.AreEqual((uint)64, lifetime.BusId);
+                Assert.AreEqual("11", lifetime.DevId);
+                Assert.AreEqual(9, lifetime.UsbipPort);
+                Assert.AreEqual(0L, lifetime.Generation,
+                    "USB/IP recovery must not replace its device lifetime.");
+                cleanup.AssertNotCleaned();
+            }
+            finally
+            {
+                recovered?.Dispose();
+                interrupted.Dispose();
+                listener.Stop();
+            }
+
+            cleanup.AssertCleanedExactlyOnce(64, "11", 9);
+        }
+
+        [TestMethod]
         public void RecoveryBackoffIsImmediateExponentialAndBounded()
         {
             CollectionAssert.AreEqual(new[]

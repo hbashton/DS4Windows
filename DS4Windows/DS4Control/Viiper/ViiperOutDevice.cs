@@ -272,6 +272,7 @@ namespace DS4Windows
         private Thread microphoneWriterThread;
         private Thread microphoneInterfaceThread;
         private byte[] pendingStatePacket;
+        private byte[] latestStatePacket;
         private long pendingStatePacketQueuedTimestamp;
         private IOpusDecoder microphoneDecoder;
         private SbcDecoder microphoneSbcDecoder;
@@ -315,6 +316,7 @@ namespace DS4Windows
         private long microphoneWorkerGeneration;
         private long stateWriterGeneration;
         private long stateWriterThreadGeneration;
+        private long lastStateReplayStreamGeneration;
         private int streamRecoveryAttempts;
         private long replacedPendingPacketCount;
         private long submittedPacketCount;
@@ -657,7 +659,13 @@ namespace DS4Windows
             }
 
             deviceStream = CreateDeviceStreamWithServerFallback();
-            Interlocked.Increment(ref streamGeneration);
+            long connectedStreamGeneration = Interlocked.Increment(
+                ref streamGeneration);
+            lock (pendingPacketLock)
+            {
+                lastStateReplayStreamGeneration =
+                    connectedStreamGeneration;
+            }
             Volatile.Write(ref submitFailureLogged, 0);
             Volatile.Write(ref microphoneUnavailableLogged, 0);
             Volatile.Write(ref microphoneNoiseSuppressionUnavailableLogged, 0);
@@ -922,7 +930,9 @@ namespace DS4Windows
             lock (pendingPacketLock)
             {
                 pendingStatePacket = null;
+                latestStatePacket = null;
                 pendingStatePacketQueuedTimestamp = 0;
+                lastStateReplayStreamGeneration = 0;
             }
             lock (microphoneQueueLock)
             {
@@ -1229,6 +1239,7 @@ namespace DS4Windows
                 }
 
                 pendingStatePacket = data;
+                latestStatePacket = data;
                 pendingStatePacketQueuedTimestamp = queuedAt;
             }
 
@@ -1990,7 +2001,8 @@ namespace DS4Windows
             if (Volatile.Read(ref streamGeneration) != failedStreamGeneration &&
                 deviceStream != null)
             {
-                QueueRetryStatePacket(packetToRetry);
+                QueueFinalStateReplay(packetToRetry,
+                    Volatile.Read(ref streamGeneration));
                 return true;
             }
 
@@ -2004,7 +2016,8 @@ namespace DS4Windows
                 if (Volatile.Read(ref streamGeneration) != failedStreamGeneration &&
                     deviceStream != null)
                 {
-                    QueueRetryStatePacket(packetToRetry);
+                    QueueFinalStateReplay(packetToRetry,
+                        Volatile.Read(ref streamGeneration));
                     return true;
                 }
 
@@ -2014,8 +2027,12 @@ namespace DS4Windows
                     return false;
                 }
 
+                bool recreateNative = interruptedStream.BackendMode ==
+                    ViiperBackendMode.NativeUde;
                 AppLogger.LogToGui(
-                    $"VIIPER {viiperType} stream interrupted; reopening the existing virtual device: {reason}",
+                    recreateNative
+                        ? $"VIIPER {viiperType} stream interrupted; waiting for authenticated native health before recreating its virtual controller: {reason}"
+                        : $"VIIPER {viiperType} stream interrupted; reopening the existing USB/IP virtual device: {reason}",
                     true);
 
                 // Closing only the TCP transport wakes the old feedback reader
@@ -2044,22 +2061,21 @@ namespace DS4Windows
                     try
                     {
                         ViiperDeviceStream replacement =
-                            client.OpenExistingDeviceStream(
-                                interruptedStream.BusId,
-                                interruptedStream.DevId,
-                                interruptedStream.UsbipPort,
-                                interruptedStream.DeviceLifetime);
+                            client.RecoverDeviceStream(interruptedStream);
                         if (writerStopRequested || !connected)
                         {
                             replacement.Dispose();
                             return false;
                         }
 
+                        long replacementStreamGeneration;
                         feedbackDispatchGenerationBarrier.EnterWriteLock();
                         try
                         {
                             deviceStream = replacement;
-                            Interlocked.Increment(ref streamGeneration);
+                            replacementStreamGeneration =
+                                Interlocked.Increment(
+                                    ref streamGeneration);
                             Interlocked.Exchange(ref streamRecoveryAttempts, 0);
                             // Publish the new timeline only after every old
                             // callback and reader admission has left its read
@@ -2076,10 +2092,13 @@ namespace DS4Windows
                         // publishing another reader.
                         StartFeedbackDispatchWorkers();
                         StartFeedbackReader();
-                        QueueRetryStatePacket(packetToRetry);
+                        QueueFinalStateReplay(packetToRetry,
+                            replacementStreamGeneration);
 
                         AppLogger.LogToGui(
-                            $"VIIPER {viiperType} stream recovered on the existing virtual device after {attempt} attempt(s).",
+                            recreateNative
+                                ? $"VIIPER {viiperType} native virtual controller topology was recreated after {attempt} attempt(s)."
+                                : $"VIIPER {viiperType} stream recovered on the existing USB/IP virtual device after {attempt} attempt(s).",
                             false);
                         return true;
                     }
@@ -2090,7 +2109,9 @@ namespace DS4Windows
                 }
 
                 AppLogger.LogToGui(
-                    $"VIIPER {viiperType} transport recovery exhausted {MaxStreamRecoveryAttempts} attempts without removing the virtual device: {lastError?.Message}",
+                    recreateNative
+                        ? $"VIIPER {viiperType} native topology recovery exhausted {MaxStreamRecoveryAttempts} attempts: {lastError?.Message}"
+                        : $"VIIPER {viiperType} USB/IP stream recovery exhausted {MaxStreamRecoveryAttempts} attempts without removing the virtual device: {lastError?.Message}",
                     true);
                 return false;
             }
@@ -2700,24 +2721,31 @@ namespace DS4Windows
             }
         }
 
-        private void QueueRetryStatePacket(byte[] packetToRetry)
+        private void QueueFinalStateReplay(byte[] packetToRetry,
+            long replayStreamGeneration)
         {
-            if (packetToRetry == null)
-            {
-                return;
-            }
-
+            bool shouldSignal;
             lock (pendingPacketLock)
             {
-                // A state queued while recovery was running is newer than the failed packet.
-                if (pendingStatePacket == null)
+                // A state queued while recovery was running is newer than the
+                // failed packet. If recovery came from feedback or microphone
+                // input, replay the last desired controller state even though
+                // there was no failed state write to carry into this call.
+                shouldSignal = ViiperFinalStateReplayPolicy.TryPrepare(
+                    ref lastStateReplayStreamGeneration,
+                    replayStreamGeneration, ref pendingStatePacket,
+                    latestStatePacket, packetToRetry);
+                if (shouldSignal)
                 {
-                    pendingStatePacket = packetToRetry;
-                    pendingStatePacketQueuedTimestamp = Stopwatch.GetTimestamp();
+                    pendingStatePacketQueuedTimestamp =
+                        Stopwatch.GetTimestamp();
                 }
             }
 
-            writerSignal.Set();
+            if (shouldSignal)
+            {
+                writerSignal.Set();
+            }
         }
 
         private static double StopwatchTicksToMilliseconds(long ticks)
@@ -4565,6 +4593,27 @@ namespace DS4Windows
         }
     }
 
+    /// <summary>
+    /// Publishes at most one final controller-state replay for each stream
+    /// generation. Callers hold their state-queue lock while applying it.
+    /// </summary>
+    internal static class ViiperFinalStateReplayPolicy
+    {
+        internal static bool TryPrepare(ref long replayedStreamGeneration,
+            long streamGeneration, ref byte[] pendingState,
+            byte[] latestState, byte[] failedState)
+        {
+            if (replayedStreamGeneration == streamGeneration)
+            {
+                return false;
+            }
+
+            replayedStreamGeneration = streamGeneration;
+            pendingState ??= latestState ?? failedState;
+            return pendingState != null;
+        }
+    }
+
     internal enum MicrophonePipelineHealthStage
     {
         None,
@@ -4933,7 +4982,16 @@ namespace DS4Windows
         public ViiperDeviceStream CreateDeviceAndOpenStream(string deviceName,
             ushort? idProduct = null)
         {
+            var topology = new ViiperVirtualDeviceTopology(deviceName,
+                idProduct);
             ViiperBackendSelection backend = ProbeBackend();
+            return CreateDeviceAndOpenStream(topology, backend);
+        }
+
+        private ViiperDeviceStream CreateDeviceAndOpenStream(
+            ViiperVirtualDeviceTopology topology,
+            ViiperBackendSelection backend)
+        {
             ViiperBackendPolicy.RunUsbipOnly(backend.Mode,
                 ViiperUsbipPortManager.DetachStaleLocalViiperPorts);
 
@@ -4945,8 +5003,8 @@ namespace DS4Windows
             {
                 string payload = JsonSerializer.Serialize(new ViiperDeviceCreateRequest
                 {
-                    Type = deviceName,
-                    IdProduct = idProduct,
+                    Type = topology.DeviceName,
+                    IdProduct = topology.IdProduct,
                 }, JsonOptions);
 
                 device = SendRequest<ViiperDeviceResponse>(
@@ -4969,7 +5027,8 @@ namespace DS4Windows
                 });
                 var identity = new ViiperVirtualDeviceIdentity(bus.BusId,
                     device.DevId);
-                return OpenStream(identity, usbipPort, backend);
+                return OpenStream(identity, usbipPort, backend,
+                    topology: topology);
             }
             catch
             {
@@ -5088,10 +5147,10 @@ namespace DS4Windows
                 // child. Reopening is allowed only after a fresh exact health
                 // proof from the same transport; USB/IP is never a fallback.
                 backend = ProbeBackend();
-                if (!backend.IsNative)
+                if (!backend.IsNative || !backend.UsesAuthentication)
                 {
                     throw new IOException(
-                        "VIIPER changed transport while reopening a native UDE device.");
+                        "VIIPER did not return authenticated native UDE health while reopening a native device.");
                 }
             }
             else
@@ -5113,10 +5172,154 @@ namespace DS4Windows
                 deviceLifetime);
         }
 
+        /// <summary>
+        /// Recovers one interrupted device lifetime. Legacy USB/IP owns a
+        /// persistent imported device and therefore only reopens its stream.
+        /// Native UDE children belong to the broker process, so a stream from
+        /// the failed lifetime generation is rebuilt from its immutable create
+        /// topology after a fresh authenticated native health proof.
+        /// </summary>
+        internal ViiperDeviceStream RecoverDeviceStream(
+            ViiperDeviceStream interruptedStream)
+        {
+            if (interruptedStream == null)
+            {
+                throw new ArgumentNullException(nameof(interruptedStream));
+            }
+
+            ViiperVirtualDeviceLifetime lifetime =
+                interruptedStream.DeviceLifetime;
+            lock (lifetime.RecoveryLock)
+            {
+                ViiperVirtualDeviceLifetime.State current =
+                    lifetime.CaptureState();
+                if (lifetime.IsDisposed)
+                {
+                    throw new ObjectDisposedException(
+                        nameof(ViiperVirtualDeviceLifetime));
+                }
+
+                if (lifetime.BackendMode ==
+                    ViiperBackendMode.LegacyUsbip)
+                {
+                    ViiperDeviceStream reopened =
+                        OpenExistingDeviceStream(
+                        interruptedStream.BusId,
+                        interruptedStream.DevId,
+                        interruptedStream.UsbipPort, lifetime);
+                    if (!lifetime.IsCurrent(current))
+                    {
+                        reopened.CloseTransport();
+                        throw new ObjectDisposedException(
+                            nameof(ViiperVirtualDeviceLifetime));
+                    }
+
+                    return reopened;
+                }
+
+                ViiperBackendSelection backend = ProbeBackend();
+                if (!backend.IsNative || !backend.UsesAuthentication)
+                {
+                    throw new IOException(
+                        "VIIPER did not return authenticated native UDE health while recovering its virtual device.");
+                }
+
+                // Another writer/feedback failure may have reached recovery
+                // with the retired stream after the first caller committed a
+                // new lifetime identity. It may reopen that published identity,
+                // but it must never create a second bus/device topology.
+                if (interruptedStream.DeviceLifetimeGeneration !=
+                    current.Generation)
+                {
+                    ViiperDeviceStream reopened = OpenStream(
+                        current.Identity, current.UsbipPort, backend,
+                        lifetime, lifetimeState: current);
+                    if (!lifetime.IsCurrent(current))
+                    {
+                        reopened.CloseTransport();
+                        throw new ObjectDisposedException(
+                            nameof(ViiperVirtualDeviceLifetime));
+                    }
+
+                    return reopened;
+                }
+
+                return RecreateNativeDeviceAndOpenStream(lifetime,
+                    current, backend);
+            }
+        }
+
+        private ViiperDeviceStream RecreateNativeDeviceAndOpenStream(
+            ViiperVirtualDeviceLifetime lifetime,
+            ViiperVirtualDeviceLifetime.State expected,
+            ViiperBackendSelection backend)
+        {
+            ViiperVirtualDeviceTopology topology = lifetime.Topology ??
+                throw new IOException(
+                    "The native VIIPER device lifetime did not retain its create topology.");
+
+            ViiperBusCreateResponse bus =
+                SendRequest<ViiperBusCreateResponse>(
+                    "bus/create", "0", backend);
+            ViiperDeviceResponse device = null;
+            ViiperDeviceStream replacement = null;
+            bool identityCommitted = false;
+            try
+            {
+                string payload = JsonSerializer.Serialize(
+                    new ViiperDeviceCreateRequest
+                    {
+                        Type = topology.DeviceName,
+                        IdProduct = topology.IdProduct,
+                    }, JsonOptions);
+                device = SendRequest<ViiperDeviceResponse>(
+                    $"bus/{bus.BusId}/add", payload, backend);
+                var identity = new ViiperVirtualDeviceIdentity(bus.BusId,
+                    device.DevId);
+                Action<uint, string> removeDevice = (removeBus,
+                    removeDev) => RemoveDevice(removeBus, removeDev,
+                        backend);
+                var provisionalState =
+                    new ViiperVirtualDeviceLifetime.State(identity, -1,
+                        removeDevice, checked(expected.Generation + 1));
+                replacement = OpenStream(identity, -1, backend, lifetime,
+                    lifetimeState: provisionalState);
+
+                if (!lifetime.TryReplaceNativeIdentity(expected, identity,
+                        removeDevice, out _))
+                {
+                    throw new ObjectDisposedException(
+                        nameof(ViiperVirtualDeviceLifetime),
+                        "The native VIIPER lifetime was retired while its topology was being recreated.");
+                }
+
+                identityCommitted = true;
+                return replacement;
+            }
+            catch
+            {
+                replacement?.CloseTransport();
+                if (!identityCommitted)
+                {
+                    if (device != null &&
+                        !string.IsNullOrWhiteSpace(device.DevId))
+                    {
+                        TryRemoveDevice(bus.BusId, device.DevId,
+                            backend);
+                    }
+
+                    TryRemoveBus(bus.BusId, backend);
+                }
+                throw;
+            }
+        }
+
         private ViiperDeviceStream OpenStream(
             ViiperVirtualDeviceIdentity identity, int usbipPort,
             ViiperBackendSelection backend,
-            ViiperVirtualDeviceLifetime deviceLifetime = null)
+            ViiperVirtualDeviceLifetime deviceLifetime = null,
+            ViiperVirtualDeviceTopology topology = null,
+            ViiperVirtualDeviceLifetime.State lifetimeState = null)
         {
             TcpClient tcp = Connect(StreamReceiveTimeoutMs);
             Stream stream = null;
@@ -5128,8 +5331,11 @@ namespace DS4Windows
                 stream.Write(request, 0, request.Length);
                 deviceLifetime ??= new ViiperVirtualDeviceLifetime(identity,
                     backend.Mode, usbipPort,
-                    (bus, device) => RemoveDevice(bus, device, backend));
-                return new ViiperDeviceStream(tcp, stream, deviceLifetime);
+                    (bus, device) => RemoveDevice(bus, device, backend),
+                    topology: topology);
+                lifetimeState ??= deviceLifetime.CaptureState();
+                return new ViiperDeviceStream(stream, tcp, deviceLifetime,
+                    lifetimeState);
             }
             catch
             {
@@ -5982,27 +6188,76 @@ namespace DS4Windows
         internal bool Matches(uint busId, string devId) =>
             BusId == busId && string.Equals(DevId, devId,
                 StringComparison.Ordinal);
+
+    }
+
+    /// <summary>
+    /// Immutable VIIPER create contract for one virtual controller. Native UDE
+    /// recovery must replay this exact descriptor because a broker exit removes
+    /// every child owned by that broker process.
+    /// </summary>
+    internal sealed class ViiperVirtualDeviceTopology
+    {
+        internal ViiperVirtualDeviceTopology(string deviceName,
+            ushort? idProduct = null)
+        {
+            if (string.IsNullOrWhiteSpace(deviceName))
+            {
+                throw new ArgumentException(
+                    "A VIIPER device type is required.", nameof(deviceName));
+            }
+
+            DeviceName = deviceName;
+            IdProduct = idProduct;
+        }
+
+        internal string DeviceName { get; }
+
+        internal ushort? IdProduct { get; }
     }
 
     internal sealed class ViiperVirtualDeviceLifetime : IDisposable
     {
-        private readonly ViiperVirtualDeviceIdentity identity;
+        internal sealed class State
+        {
+            internal State(ViiperVirtualDeviceIdentity identity,
+                int usbipPort, Action<uint, string> removeDevice,
+                long generation)
+            {
+                Identity = identity;
+                UsbipPort = usbipPort;
+                RemoveDevice = removeDevice;
+                Generation = generation;
+            }
+
+            internal ViiperVirtualDeviceIdentity Identity { get; }
+
+            internal int UsbipPort { get; }
+
+            internal Action<uint, string> RemoveDevice { get; }
+
+            internal long Generation { get; }
+        }
+
+        private readonly object stateLock = new object();
+        private readonly object recoveryLock = new object();
         private readonly ViiperBackendMode backendMode;
-        private readonly int usbipPort;
         private readonly Action<int, string> detachPort;
         private readonly Action<int> unregisterPort;
-        private readonly Action<uint, string> removeDevice;
         private readonly Action detachStalePorts;
+        private readonly ViiperVirtualDeviceTopology topology;
+        private State state;
         private int disposed;
 
         internal ViiperVirtualDeviceLifetime(uint busId, string devId,
             int usbipPort, Action<uint, string> removeDevice,
             Action<int, string> detachPort = null,
             Action<int> unregisterPort = null,
-            Action detachStalePorts = null)
+            Action detachStalePorts = null,
+            ViiperVirtualDeviceTopology topology = null)
             : this(new ViiperVirtualDeviceIdentity(busId, devId),
                 ViiperBackendMode.LegacyUsbip, usbipPort, removeDevice,
-                detachPort, unregisterPort, detachStalePorts)
+                detachPort, unregisterPort, detachStalePorts, topology)
         {
         }
 
@@ -6012,12 +6267,12 @@ namespace DS4Windows
             Action<uint, string> removeDevice,
             Action<int, string> detachPort = null,
             Action<int> unregisterPort = null,
-            Action detachStalePorts = null)
+            Action detachStalePorts = null,
+            ViiperVirtualDeviceTopology topology = null)
         {
-            this.identity = identity;
             this.backendMode = backendMode;
-            this.usbipPort = usbipPort;
-            this.removeDevice = removeDevice;
+            this.topology = topology;
+            state = new State(identity, usbipPort, removeDevice, 0);
             this.detachPort = detachPort ??
                 ViiperUsbipPortManager.DetachRegisteredPort;
             this.unregisterPort = unregisterPort ??
@@ -6026,30 +6281,86 @@ namespace DS4Windows
                 ViiperUsbipPortManager.DetachStaleLocalViiperPorts;
         }
 
-        internal ViiperVirtualDeviceIdentity Identity => identity;
+        internal ViiperVirtualDeviceIdentity Identity =>
+            Volatile.Read(ref state).Identity;
 
         internal ViiperBackendMode BackendMode => backendMode;
 
-        internal uint BusId => identity.BusId;
+        internal uint BusId => Identity.BusId;
 
-        internal string DevId => identity.DevId;
+        internal string DevId => Identity.DevId;
 
-        internal int UsbipPort => usbipPort;
+        internal int UsbipPort => Volatile.Read(ref state).UsbipPort;
+
+        internal long Generation => Volatile.Read(ref state).Generation;
+
+        internal ViiperVirtualDeviceTopology Topology => topology;
+
+        internal object RecoveryLock => recoveryLock;
 
         internal bool IsDisposed => Volatile.Read(ref disposed) == 1;
 
+        internal State CaptureState() => Volatile.Read(ref state);
+
+        internal bool IsCurrent(State expected)
+        {
+            if (expected == null)
+            {
+                return false;
+            }
+
+            lock (stateLock)
+            {
+                return disposed == 0 && ReferenceEquals(state, expected);
+            }
+        }
+
+        internal bool TryReplaceNativeIdentity(State expected,
+            ViiperVirtualDeviceIdentity replacementIdentity,
+            Action<uint, string> replacementRemoveDevice,
+            out State replacement)
+        {
+            replacement = null;
+            if (backendMode != ViiperBackendMode.NativeUde ||
+                expected == null)
+            {
+                return false;
+            }
+
+            lock (stateLock)
+            {
+                if (disposed != 0 || !ReferenceEquals(state, expected))
+                {
+                    return false;
+                }
+
+                replacement = new State(replacementIdentity, -1,
+                    replacementRemoveDevice,
+                    checked(expected.Generation + 1));
+                Volatile.Write(ref state, replacement);
+                return true;
+            }
+        }
+
         public void Dispose()
         {
-            if (Interlocked.Exchange(ref disposed, 1) == 1)
+            State cleanupState;
+            lock (stateLock)
             {
-                return;
+                if (disposed == 1)
+                {
+                    return;
+                }
+
+                Volatile.Write(ref disposed, 1);
+                cleanupState = state;
             }
 
             ViiperBackendPolicy.RunUsbipOnly(backendMode, () =>
             {
                 try
                 {
-                    detachPort?.Invoke(usbipPort,
+                    detachPort?.Invoke(cleanupState.UsbipPort,
                         "DS4Windows VIIPER device stopped");
                 }
                 catch
@@ -6058,7 +6369,7 @@ namespace DS4Windows
 
                 try
                 {
-                    unregisterPort?.Invoke(usbipPort);
+                    unregisterPort?.Invoke(cleanupState.UsbipPort);
                 }
                 catch
                 {
@@ -6067,7 +6378,9 @@ namespace DS4Windows
 
             try
             {
-                removeDevice?.Invoke(identity.BusId, identity.DevId);
+                cleanupState.RemoveDevice?.Invoke(
+                    cleanupState.Identity.BusId,
+                    cleanupState.Identity.DevId);
             }
             catch
             {
@@ -6084,7 +6397,6 @@ namespace DS4Windows
                 }
             });
         }
-
     }
 
     internal sealed class ViiperDeviceStream : IDisposable
@@ -6092,6 +6404,10 @@ namespace DS4Windows
         private readonly IDisposable transport;
         private readonly Stream stream;
         private readonly ViiperVirtualDeviceLifetime deviceLifetime;
+        private readonly ViiperVirtualDeviceIdentity identity;
+        private readonly ViiperBackendMode backendMode;
+        private readonly int usbipPort;
+        private readonly long deviceLifetimeGeneration;
         private readonly object writeLock = new object();
         private readonly byte[] incomingFrameHeader =
             new byte[FramedHeaderLength];
@@ -6121,23 +6437,42 @@ namespace DS4Windows
 
         internal ViiperDeviceStream(Stream stream, IDisposable transport,
             ViiperVirtualDeviceLifetime deviceLifetime)
+            : this(stream, transport, deviceLifetime,
+                deviceLifetime?.CaptureState())
+        {
+        }
+
+        internal ViiperDeviceStream(Stream stream, IDisposable transport,
+            ViiperVirtualDeviceLifetime deviceLifetime,
+            ViiperVirtualDeviceLifetime.State lifetimeState)
         {
             this.stream = stream ?? throw new ArgumentNullException(nameof(stream));
             this.transport = transport ?? throw new ArgumentNullException(nameof(transport));
             this.deviceLifetime = deviceLifetime ??
                 throw new ArgumentNullException(nameof(deviceLifetime));
+            if (lifetimeState == null)
+            {
+                throw new ArgumentNullException(nameof(lifetimeState));
+            }
+
+            identity = lifetimeState.Identity;
+            usbipPort = lifetimeState.UsbipPort;
+            backendMode = deviceLifetime.BackendMode;
+            deviceLifetimeGeneration = lifetimeState.Generation;
         }
 
-        public uint BusId => deviceLifetime.BusId;
+        public uint BusId => identity.BusId;
 
-        public string DevId => deviceLifetime.DevId;
+        public string DevId => identity.DevId;
 
-        public int UsbipPort => deviceLifetime.UsbipPort;
+        public int UsbipPort => usbipPort;
 
         internal ViiperBackendMode BackendMode =>
-            deviceLifetime.BackendMode;
+            backendMode;
 
         internal ViiperVirtualDeviceLifetime DeviceLifetime => deviceLifetime;
+
+        internal long DeviceLifetimeGeneration => deviceLifetimeGeneration;
 
         internal bool IsTransportClosed =>
             Volatile.Read(ref transportClosed) == 1;

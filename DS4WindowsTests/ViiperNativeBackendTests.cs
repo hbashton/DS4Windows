@@ -276,6 +276,81 @@ namespace DS4WindowsTests
             Assert.AreEqual(0, stale);
         }
 
+        [TestMethod]
+        public void NativeIdentityReplacementIsAtomicAndSkipsUsbipLifecycle()
+        {
+            int detach = 0;
+            int unregister = 0;
+            int stale = 0;
+            int oldRemove = 0;
+            int replacementRemove = 0;
+            uint removedBus = 0;
+            string removedDevice = null;
+            var topology = new ViiperVirtualDeviceTopology(
+                "dualshock4audioduplexv3", 0x05C4);
+            var lifetime = new ViiperVirtualDeviceLifetime(
+                new ViiperVirtualDeviceIdentity(12, "3"),
+                ViiperBackendMode.NativeUde, -1,
+                (_, _) => Interlocked.Increment(ref oldRemove),
+                (_, _) => Interlocked.Increment(ref detach),
+                _ => Interlocked.Increment(ref unregister),
+                () => Interlocked.Increment(ref stale), topology);
+            ViiperVirtualDeviceLifetime.State expected =
+                lifetime.CaptureState();
+
+            Assert.IsTrue(lifetime.TryReplaceNativeIdentity(expected,
+                new ViiperVirtualDeviceIdentity(91, "17"),
+                (bus, device) =>
+                {
+                    removedBus = bus;
+                    removedDevice = device;
+                    Interlocked.Increment(ref replacementRemove);
+                }, out ViiperVirtualDeviceLifetime.State replacement));
+            Assert.AreSame(replacement, lifetime.CaptureState());
+            Assert.AreEqual((uint)91, lifetime.BusId);
+            Assert.AreEqual("17", lifetime.DevId);
+            Assert.AreEqual(1L, lifetime.Generation);
+            Assert.AreEqual("dualshock4audioduplexv3",
+                lifetime.Topology.DeviceName);
+            Assert.AreEqual((ushort)0x05C4,
+                lifetime.Topology.IdProduct);
+
+            lifetime.Dispose();
+
+            Assert.AreEqual(0, oldRemove,
+                "A retired broker identity must not be cleaned after replacement.");
+            Assert.AreEqual(1, replacementRemove);
+            Assert.AreEqual((uint)91, removedBus);
+            Assert.AreEqual("17", removedDevice);
+            Assert.AreEqual(0, detach);
+            Assert.AreEqual(0, unregister);
+            Assert.AreEqual(0, stale);
+        }
+
+        [TestMethod]
+        public void FinalControllerStateReplaysOncePerPublishedStream()
+        {
+            long replayedGeneration = 4;
+            byte[] pending = null;
+            byte[] failed = { 1, 2, 3 };
+            byte[] final = { 9, 8, 7 };
+
+            Assert.IsTrue(ViiperFinalStateReplayPolicy.TryPrepare(
+                ref replayedGeneration, 5, ref pending, final, failed));
+            Assert.AreSame(final, pending,
+                "The latest desired state supersedes the packet that failed before recovery.");
+            Assert.IsFalse(ViiperFinalStateReplayPolicy.TryPrepare(
+                ref replayedGeneration, 5, ref pending, final, failed),
+                "Concurrent failures from the retired generation must not queue a duplicate replay.");
+
+            byte[] newerPending = { 4, 5, 6 };
+            pending = newerPending;
+            Assert.IsTrue(ViiperFinalStateReplayPolicy.TryPrepare(
+                ref replayedGeneration, 6, ref pending, final, failed));
+            Assert.AreSame(newerPending, pending,
+                "A state queued during recovery remains the final replay.");
+        }
+
         private sealed class CountingDisposable : IDisposable
         {
             public void Dispose()
@@ -475,6 +550,217 @@ namespace DS4WindowsTests
             server.AssertNoErrors();
         }
 
+        [TestMethod]
+        public void BrokerDeathRecreatesExactNativeTopologyAndLifetimeIdentity()
+        {
+            const string password = "NativeCredential123";
+            using var server = new AuthenticatedViiperProtocolServer(password);
+            var client = new ViiperClient("127.0.0.1", server.Port,
+                () => new[] { password });
+            ViiperDeviceStream initial = null;
+            ViiperDeviceStream replacement = null;
+
+            try
+            {
+                initial = client.CreateDeviceAndOpenStream(
+                    "dualshock4audioduplexv3", 0x05C4);
+                ViiperVirtualDeviceLifetime lifetime =
+                    initial.DeviceLifetime;
+                initial.CloseTransport();
+
+                replacement = client.RecoverDeviceStream(initial);
+
+                Assert.AreEqual((uint)42, initial.BusId,
+                    "The retired stream keeps the identity of the route it opened.");
+                Assert.AreEqual("7", initial.DevId);
+                Assert.AreEqual((uint)43, replacement.BusId);
+                Assert.AreEqual("8", replacement.DevId);
+                Assert.AreEqual((uint)43, lifetime.BusId);
+                Assert.AreEqual("8", lifetime.DevId);
+                Assert.AreEqual(1L, lifetime.Generation);
+                Assert.AreEqual(0L, initial.DeviceLifetimeGeneration);
+                Assert.AreEqual(1L, replacement.DeviceLifetimeGeneration);
+                Assert.AreEqual("dualshock4audioduplexv3",
+                    lifetime.Topology.DeviceName);
+                Assert.AreEqual((ushort)0x05C4,
+                    lifetime.Topology.IdProduct);
+
+                string[] requests = server.WaitForAuthenticatedRequests(8,
+                    TimeSpan.FromSeconds(5));
+                Assert.AreEqual(2, requests.Count(request =>
+                    string.Equals(request, "ping",
+                        StringComparison.Ordinal)),
+                    "Initial creation and recovery each require an authenticated health proof.");
+                Assert.AreEqual(2, server.BusCreateCount);
+                CollectionAssert.Contains(requests,
+                    "bus/43/add {\"type\":\"dualshock4audioduplexv3\",\"idProduct\":1476}");
+                CollectionAssert.Contains(requests, "bus/43/8");
+            }
+            finally
+            {
+                replacement?.Dispose();
+                initial?.Dispose();
+            }
+
+            server.WaitForIdle(TimeSpan.FromSeconds(5));
+            server.AssertNoErrors();
+        }
+
+        [TestMethod]
+        public void NativeRecoveryRejectsHealthyUsbipTransportWithoutCreation()
+        {
+            const string password = "NativeCredential123";
+            using var server = new AuthenticatedViiperProtocolServer(password);
+            var client = new ViiperClient("127.0.0.1", server.Port,
+                () => new[] { password });
+            ViiperDeviceStream initial = null;
+
+            try
+            {
+                initial = client.CreateDeviceAndOpenStream("test-device");
+                initial.CloseTransport();
+                server.PingResponse =
+                    AuthenticatedViiperProtocolServer.LegacyPing;
+
+                StringAssert.Contains(
+                    Assert.ThrowsException<IOException>(() =>
+                        client.RecoverDeviceStream(initial)).Message,
+                    "authenticated native UDE health");
+                Assert.AreEqual(1, server.BusCreateCount,
+                    "A USB/IP health response must not recreate a native lifetime.");
+                Assert.AreEqual((uint)42,
+                    initial.DeviceLifetime.BusId);
+                Assert.AreEqual(0L,
+                    initial.DeviceLifetime.Generation);
+            }
+            finally
+            {
+                initial?.Dispose();
+            }
+
+            server.WaitForIdle(TimeSpan.FromSeconds(5));
+            server.AssertNoErrors();
+        }
+
+        [TestMethod]
+        public async Task ConcurrentNativeFailuresCreateOneReplacementTopology()
+        {
+            const string password = "NativeCredential123";
+            using var server = new AuthenticatedViiperProtocolServer(password);
+            var client = new ViiperClient("127.0.0.1", server.Port,
+                () => new[] { password });
+            ViiperDeviceStream initial = client.CreateDeviceAndOpenStream(
+                "dualsensecombinedaudioduplexv5");
+            initial.CloseTransport();
+            ViiperDeviceStream[] recovered = null;
+
+            try
+            {
+                Task<ViiperDeviceStream> writerFailure = Task.Run(() =>
+                    client.RecoverDeviceStream(initial));
+                Task<ViiperDeviceStream> feedbackFailure = Task.Run(() =>
+                    client.RecoverDeviceStream(initial));
+                recovered = await Task.WhenAll(writerFailure,
+                    feedbackFailure);
+
+                Assert.AreEqual(2, server.BusCreateCount,
+                    "Only initial creation plus one native recovery topology are allowed.");
+                Assert.AreEqual(1L,
+                    initial.DeviceLifetime.Generation);
+                Assert.IsTrue(recovered.All(stream =>
+                    stream.BusId == 43 && stream.DevId == "8" &&
+                    stream.DeviceLifetimeGeneration == 1));
+            }
+            finally
+            {
+                if (recovered != null)
+                {
+                    foreach (ViiperDeviceStream stream in recovered)
+                    {
+                        stream.CloseTransport();
+                    }
+                    recovered[0].Dispose();
+                }
+                initial.Dispose();
+            }
+
+            server.WaitForIdle(TimeSpan.FromSeconds(5));
+            server.AssertNoErrors();
+        }
+
+        [TestMethod]
+        public void FailedNativeRecreateRollsBackPartialBus()
+        {
+            const string password = "NativeCredential123";
+            using var server = new AuthenticatedViiperProtocolServer(password);
+            var client = new ViiperClient("127.0.0.1", server.Port,
+                () => new[] { password });
+            ViiperDeviceStream initial = client.CreateDeviceAndOpenStream(
+                "dualshock4audioduplexv3", 0x05C4);
+            initial.CloseTransport();
+            server.FailOneDeviceAdd();
+
+            try
+            {
+                Assert.ThrowsException<IOException>(() =>
+                    client.RecoverDeviceStream(initial));
+                Assert.AreEqual((uint)42,
+                    initial.DeviceLifetime.BusId);
+                Assert.AreEqual("7", initial.DeviceLifetime.DevId);
+                Assert.AreEqual(0L,
+                    initial.DeviceLifetime.Generation);
+                Assert.IsTrue(SpinWait.SpinUntil(() =>
+                    server.Requests.Contains("bus/remove 43"),
+                    TimeSpan.FromSeconds(5)),
+                    "The partial replacement bus was not removed.");
+                Assert.IsFalse(server.Requests.Any(request =>
+                    request.StartsWith("bus/43/remove ",
+                        StringComparison.Ordinal)),
+                    "A failed add did not create a device to remove.");
+            }
+            finally
+            {
+                initial.Dispose();
+            }
+
+            server.WaitForIdle(TimeSpan.FromSeconds(5));
+            server.AssertNoErrors();
+        }
+
+        [TestMethod]
+        public async Task DisposalRaceRejectsCommitAndCleansRecreatedDevice()
+        {
+            const string password = "NativeCredential123";
+            using var server = new AuthenticatedViiperProtocolServer(password);
+            var client = new ViiperClient("127.0.0.1", server.Port,
+                () => new[] { password });
+            ViiperDeviceStream initial = client.CreateDeviceAndOpenStream(
+                "dualshock4audioduplexv3", 0x05C4);
+            initial.CloseTransport();
+            server.BlockOneDeviceAdd();
+            Task<ViiperDeviceStream> recovery = Task.Run(() =>
+                client.RecoverDeviceStream(initial));
+
+            server.WaitForBlockedDeviceAdd(TimeSpan.FromSeconds(5));
+            initial.DeviceLifetime.Dispose();
+            server.ReleaseBlockedDeviceAdd();
+
+            await Assert.ThrowsExceptionAsync<ObjectDisposedException>(
+                async () => await recovery);
+            Assert.IsTrue(initial.DeviceLifetime.IsDisposed);
+            Assert.AreEqual(0L, initial.DeviceLifetime.Generation,
+                "A disposed lifetime must never publish the replacement identity.");
+            Assert.IsTrue(SpinWait.SpinUntil(() =>
+                server.Requests.Contains("bus/43/remove 8") &&
+                server.Requests.Contains("bus/remove 43"),
+                TimeSpan.FromSeconds(5)),
+                "The recreated device and bus were not rolled back after disposal won the race.");
+
+            initial.Dispose();
+            server.WaitForIdle(TimeSpan.FromSeconds(5));
+            server.AssertNoErrors();
+        }
+
         private static byte[] BuildEncryptedPacket(byte[] key,
             byte[] plaintext)
         {
@@ -539,6 +825,8 @@ namespace DS4WindowsTests
         private sealed class AuthenticatedViiperProtocolServer : IDisposable
         {
             private const string NativePing = "{\"server\":\"VIIPER\",\"version\":\"0.1.0\",\"transport\":\"native-ude\",\"ready\":true,\"nativeUde\":{\"abiMajor\":1,\"abiMinor\":8,\"capabilities\":13,\"expectedDriverPackageVersion\":\"0.1.0.0\",\"maxDevices\":32,\"maxDescriptorBytes\":262144,\"maxTransferBytes\":1048576,\"maxIsoPackets\":1024,\"maxPendingOperations\":4096}}";
+            internal const string LegacyPing =
+                "{\"server\":\"VIIPER\",\"version\":\"0.1.0\",\"transport\":\"usbip\",\"ready\":true}";
             private readonly TcpListener listener;
             private readonly CancellationTokenSource shutdown = new();
             private readonly ConcurrentDictionary<int, TcpClient> clients =
@@ -547,8 +835,19 @@ namespace DS4WindowsTests
             private readonly ConcurrentQueue<Exception> errors = new();
             private readonly Task acceptLoop;
             private readonly byte[] key;
+            private readonly ConcurrentDictionary<uint, string> devices =
+                new();
+            private readonly ManualResetEventSlim blockedAddEntered =
+                new(false);
+            private readonly ManualResetEventSlim releaseBlockedAdd =
+                new(true);
             private int nextClientId;
             private int activeHandlers;
+            private int nextBusId = 41;
+            private int nextDeviceId = 6;
+            private int failNextAdd;
+            private int blockNextAdd;
+            private string pingResponse = NativePing;
             private volatile bool disposed;
 
             internal AuthenticatedViiperProtocolServer(string password)
@@ -564,6 +863,38 @@ namespace DS4WindowsTests
             }
 
             internal int Port { get; }
+
+            internal string PingResponse
+            {
+                set => Volatile.Write(ref pingResponse, value);
+            }
+
+            internal string[] Requests => requests.ToArray();
+
+            internal int BusCreateCount => Requests.Count(request =>
+                string.Equals(request, "bus/create 0",
+                    StringComparison.Ordinal));
+
+            internal void FailOneDeviceAdd()
+            {
+                Interlocked.Exchange(ref failNextAdd, 1);
+            }
+
+            internal void BlockOneDeviceAdd()
+            {
+                blockedAddEntered.Reset();
+                releaseBlockedAdd.Reset();
+                Interlocked.Exchange(ref blockNextAdd, 1);
+            }
+
+            internal void WaitForBlockedDeviceAdd(TimeSpan timeout)
+            {
+                Assert.IsTrue(blockedAddEntered.Wait(timeout),
+                    "Timed out waiting for the recreated device add request.");
+            }
+
+            internal void ReleaseBlockedDeviceAdd() =>
+                releaseBlockedAdd.Set();
 
             internal string[] WaitForAuthenticatedRequests(int count,
                 TimeSpan timeout)
@@ -671,8 +1002,7 @@ namespace DS4WindowsTests
                         string request = ReadNullTerminated(authenticated);
                         requests.Enqueue(request);
 
-                        if (string.Equals(request, "bus/42/7",
-                            StringComparison.Ordinal))
+                        if (IsOpenDeviceStreamRequest(request))
                         {
                             // Device streams remain open. The client closes
                             // this connection before issuing final API cleanup.
@@ -684,19 +1014,7 @@ namespace DS4WindowsTests
                             return;
                         }
 
-                        string response = request switch
-                        {
-                            "ping" => NativePing,
-                            "bus/create 0" => "{\"busId\":42}",
-                            "bus/42/add {\"type\":\"test-device\"}" =>
-                                "{\"devId\":\"7\"}",
-                            "bus/42/list" =>
-                                "{\"devices\":[{\"devId\":\"7\",\"deviceSpecific\":{\"microphoneInterfaceActive\":true}}]}",
-                            "bus/42/remove 7" => string.Empty,
-                            "bus/remove 42" => string.Empty,
-                            _ =>
-                                "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"unexpected test route\"}",
-                        };
+                        string response = BuildResponse(request);
                         byte[] responseBytes = Encoding.UTF8.GetBytes(
                             response + "\n");
                         authenticated.Write(responseBytes, 0,
@@ -720,6 +1038,114 @@ namespace DS4WindowsTests
                     clients.TryRemove(clientId, out _);
                     Interlocked.Decrement(ref activeHandlers);
                 }
+            }
+
+            private bool IsOpenDeviceStreamRequest(string request)
+            {
+                string[] parts = request.Split('/');
+                return parts.Length == 3 &&
+                    string.Equals(parts[0], "bus",
+                        StringComparison.Ordinal) &&
+                    uint.TryParse(parts[1], out uint busId) &&
+                    devices.TryGetValue(busId, out string devId) &&
+                    string.Equals(parts[2], devId,
+                        StringComparison.Ordinal);
+            }
+
+            private string BuildResponse(string request)
+            {
+                if (string.Equals(request, "ping",
+                    StringComparison.Ordinal))
+                {
+                    return Volatile.Read(ref pingResponse);
+                }
+
+                if (string.Equals(request, "bus/create 0",
+                    StringComparison.Ordinal))
+                {
+                    int busId = Interlocked.Increment(ref nextBusId);
+                    return $"{{\"busId\":{busId}}}";
+                }
+
+                if (TryParseBusRoute(request, "/add ", out uint addBus,
+                        out _))
+                {
+                    if (Interlocked.Exchange(ref failNextAdd, 0) == 1)
+                    {
+                        return "{\"status\":500,\"title\":\"Create Failed\",\"detail\":\"injected device creation failure\"}";
+                    }
+                    if (Interlocked.Exchange(ref blockNextAdd, 0) == 1)
+                    {
+                        blockedAddEntered.Set();
+                        if (!releaseBlockedAdd.Wait(
+                                TimeSpan.FromSeconds(5)))
+                        {
+                            throw new TimeoutException(
+                                "Timed out waiting to release the blocked add response.");
+                        }
+                    }
+
+                    string devId = Interlocked.Increment(
+                        ref nextDeviceId).ToString();
+                    devices[addBus] = devId;
+                    return $"{{\"devId\":\"{devId}\"}}";
+                }
+
+                if (TryParseBusRoute(request, "/list", out uint listBus,
+                        out _))
+                {
+                    return devices.TryGetValue(listBus, out string devId)
+                        ? $"{{\"devices\":[{{\"devId\":\"{devId}\",\"deviceSpecific\":{{\"microphoneInterfaceActive\":true}}}}]}}"
+                        : "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"bus not found\"}";
+                }
+
+                if (TryParseBusRoute(request, "/remove ",
+                        out uint removeBus, out string removeDevice))
+                {
+                    if (devices.TryGetValue(removeBus, out string current) &&
+                        string.Equals(current, removeDevice,
+                            StringComparison.Ordinal))
+                    {
+                        devices.TryRemove(removeBus, out _);
+                    }
+                    return string.Empty;
+                }
+
+                const string removeBusPrefix = "bus/remove ";
+                if (request.StartsWith(removeBusPrefix,
+                        StringComparison.Ordinal) &&
+                    uint.TryParse(request[removeBusPrefix.Length..],
+                        out uint removedBus))
+                {
+                    devices.TryRemove(removedBus, out _);
+                    return string.Empty;
+                }
+
+                return "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"unexpected test route\"}";
+            }
+
+            private static bool TryParseBusRoute(string request,
+                string routeMarker, out uint busId, out string remainder)
+            {
+                busId = 0;
+                remainder = null;
+                const string prefix = "bus/";
+                if (!request.StartsWith(prefix, StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                int marker = request.IndexOf(routeMarker,
+                    prefix.Length, StringComparison.Ordinal);
+                if (marker < 0 || !uint.TryParse(
+                        request.AsSpan(prefix.Length,
+                            marker - prefix.Length), out busId))
+                {
+                    return false;
+                }
+
+                remainder = request[(marker + routeMarker.Length)..];
+                return true;
             }
 
             private void VerifyClientProof(byte[] clientNonce,
@@ -797,6 +1223,7 @@ namespace DS4WindowsTests
                     return;
                 }
                 disposed = true;
+                releaseBlockedAdd.Set();
                 shutdown.Cancel();
                 listener.Stop();
                 foreach (TcpClient client in clients.Values)
@@ -814,6 +1241,8 @@ namespace DS4WindowsTests
                 {
                 }
                 CryptographicOperations.ZeroMemory(key);
+                blockedAddEntered.Dispose();
+                releaseBlockedAdd.Dispose();
                 shutdown.Dispose();
             }
         }

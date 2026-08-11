@@ -12,6 +12,7 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
@@ -2031,7 +2032,7 @@ namespace DS4Windows
                     ViiperBackendMode.NativeUde;
                 AppLogger.LogToGui(
                     recreateNative
-                        ? $"VIIPER {viiperType} stream interrupted; waiting for authenticated native health before recreating its virtual controller: {reason}"
+                        ? $"VIIPER {viiperType} stream interrupted; waiting for exact authenticated native health before recovering its virtual controller: {reason}"
                         : $"VIIPER {viiperType} stream interrupted; reopening the existing USB/IP virtual device: {reason}",
                     true);
 
@@ -2097,7 +2098,7 @@ namespace DS4Windows
 
                         AppLogger.LogToGui(
                             recreateNative
-                                ? $"VIIPER {viiperType} native virtual controller topology was recreated after {attempt} attempt(s)."
+                                ? $"VIIPER {viiperType} native virtual controller stream recovered after {attempt} attempt(s)."
                                 : $"VIIPER {viiperType} stream recovered on the existing USB/IP virtual device after {attempt} attempt(s).",
                             false);
                         return true;
@@ -4957,21 +4958,34 @@ namespace DS4Windows
         private readonly string host;
         private readonly int port;
         private readonly Func<IReadOnlyList<string>> credentialProvider;
+        private readonly Func<ViiperNativeBrokerInstance?>
+            nativeBrokerInstanceProvider;
         private ViiperBackendSelection lastBackendSelection;
 
         public ViiperClient(string host, int port)
             : this(host, port,
-                ViiperCredentialProvider.ReadCandidateCredentials)
+                ViiperCredentialProvider.ReadCandidateCredentials,
+                ViiperSetupManager.GetTrustedNativeBrokerInstance)
         {
         }
 
         internal ViiperClient(string host, int port,
             Func<IReadOnlyList<string>> credentialProvider)
+            : this(host, port, credentialProvider, null)
+        {
+        }
+
+        internal ViiperClient(string host, int port,
+            Func<IReadOnlyList<string>> credentialProvider,
+            Func<ViiperNativeBrokerInstance?>
+                nativeBrokerInstanceProvider)
         {
             this.host = host;
             this.port = port;
             this.credentialProvider = credentialProvider ??
                 throw new ArgumentNullException(nameof(credentialProvider));
+            this.nativeBrokerInstanceProvider =
+                nativeBrokerInstanceProvider;
         }
 
         public ViiperDeviceStream CreateDeviceAndOpenStream(ViiperVirtualDeviceType deviceType)
@@ -4992,6 +5006,13 @@ namespace DS4Windows
             ViiperVirtualDeviceTopology topology,
             ViiperBackendSelection backend)
         {
+            if (backend.IsNative &&
+                !backend.NativeBrokerInstance.HasValue)
+            {
+                throw new ViiperNativeContractException(
+                    "VIIPER native device creation requires the exact trusted broker service process generation.");
+            }
+
             ViiperBackendPolicy.RunUsbipOnly(backend.Mode,
                 ViiperUsbipPortManager.DetachStaleLocalViiperPorts);
 
@@ -5175,9 +5196,9 @@ namespace DS4Windows
         /// <summary>
         /// Recovers one interrupted device lifetime. Legacy USB/IP owns a
         /// persistent imported device and therefore only reopens its stream.
-        /// Native UDE children belong to the broker process, so a stream from
-        /// the failed lifetime generation is rebuilt from its immutable create
-        /// topology after a fresh authenticated native health proof.
+        /// Native UDE recovery reopens the exact retained grace-period child,
+        /// or rebuilds its immutable topology only after an authenticated
+        /// service-process/topology proof establishes that child is gone.
         /// </summary>
         internal ViiperDeviceStream RecoverDeviceStream(
             ViiperDeviceStream interruptedStream)
@@ -5223,13 +5244,26 @@ namespace DS4Windows
                     throw new IOException(
                         "VIIPER did not return authenticated native UDE health while recovering its virtual device.");
                 }
+                if (!current.NativeBrokerInstance.HasValue ||
+                    !backend.NativeBrokerInstance.HasValue)
+                {
+                    throw new ViiperNativeContractException(
+                        "VIIPER native recovery could not prove the exact broker service process generation.");
+                }
 
-                // Another writer/feedback failure may have reached recovery
-                // with the retired stream after the first caller committed a
-                // new lifetime identity. It may reopen that published identity,
-                // but it must never create a second bus/device topology.
-                if (interruptedStream.DeviceLifetimeGeneration !=
-                    current.Generation)
+                // VIIPER intentionally retains a disconnected device during
+                // its reconnect grace. A socket reset is therefore not proof
+                // that the native broker (and its UdeCx children) restarted.
+                // Always reason from the lifetime's current committed state,
+                // even when the caller holds a retired stream generation. A
+                // second broker restart can otherwise make that shortcut open
+                // a newly reused numeric identity from the wrong process.
+                bool sameBrokerInstance =
+                    current.NativeBrokerInstance.Value ==
+                        backend.NativeBrokerInstance.Value;
+                if (sameBrokerInstance &&
+                    NativeTopologyStillExists(current.Identity,
+                        lifetime.Topology, backend))
                 {
                     ViiperDeviceStream reopened = OpenStream(
                         current.Identity, current.UsbipPort, backend,
@@ -5247,6 +5281,115 @@ namespace DS4Windows
                 return RecreateNativeDeviceAndOpenStream(lifetime,
                     current, backend);
             }
+        }
+
+        private bool NativeTopologyStillExists(
+            ViiperVirtualDeviceIdentity identity,
+            ViiperVirtualDeviceTopology topology,
+            ViiperBackendSelection backend)
+        {
+            if (topology == null)
+            {
+                throw new IOException(
+                    "The native VIIPER device lifetime did not retain its create topology.");
+            }
+
+            ViiperBusListResponse buses = SendRequest<ViiperBusListResponse>(
+                "bus/list", null, backend);
+            if (buses?.Buses == null)
+            {
+                throw new IOException(
+                    "VIIPER did not return a bus list while proving native recovery identity.");
+            }
+            if (Array.IndexOf(buses.Buses, identity.BusId) < 0)
+            {
+                // An authenticated exact-contract broker proved that the old
+                // bus is gone. This is one authoritative state that permits
+                // native topology recreation.
+                return false;
+            }
+
+            if (Array.LastIndexOf(buses.Buses, identity.BusId) !=
+                Array.IndexOf(buses.Buses, identity.BusId))
+            {
+                throw new IOException(
+                    "VIIPER returned duplicate bus IDs while proving native recovery identity.");
+            }
+
+            ViiperBusDevicesResponse response =
+                SendRequest<ViiperBusDevicesResponse>(
+                    $"bus/{identity.BusId}/list", null, backend);
+            if (response?.Devices == null)
+            {
+                throw new IOException(
+                    "VIIPER did not return a device list while proving native recovery identity.");
+            }
+            if (response.Devices.Length != 1)
+            {
+                throw new IOException(
+                    "VIIPER native recovery bus no longer has the exact isolated one-device topology; refusing to create or reopen a controller.");
+            }
+
+            ViiperListedDevice matching = null;
+            foreach (ViiperListedDevice device in response.Devices)
+            {
+                if (!string.Equals(device?.DevId, identity.DevId,
+                        StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                if (matching != null)
+                {
+                    throw new IOException(
+                        "VIIPER returned duplicate device IDs while proving native recovery identity.");
+                }
+                matching = device;
+            }
+
+            if (matching == null)
+            {
+                // The bus survived, but the exact child did not. Its absence
+                // is authoritative and permits a new isolated topology.
+                return false;
+            }
+
+            if (!string.Equals(matching.Type, topology.DeviceName,
+                    StringComparison.Ordinal))
+            {
+                throw new IOException(
+                    "VIIPER native recovery identity exists with an unexpected device type; refusing to create a duplicate.");
+            }
+            if (topology.IdProduct.HasValue &&
+                (!TryParseUsbIdentifier(matching.Pid,
+                     out ushort listedProduct) ||
+                 listedProduct != topology.IdProduct.Value))
+            {
+                throw new IOException(
+                    "VIIPER native recovery identity exists with an unexpected product ID; refusing to create a duplicate.");
+            }
+
+            return true;
+        }
+
+        private static bool TryParseUsbIdentifier(string raw,
+            out ushort value)
+        {
+            value = 0;
+            string text = raw?.Trim();
+            if (string.IsNullOrEmpty(text))
+            {
+                return false;
+            }
+
+            if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            {
+                return ushort.TryParse(text.AsSpan(2),
+                    NumberStyles.AllowHexSpecifier,
+                    CultureInfo.InvariantCulture, out value);
+            }
+
+            return ushort.TryParse(text, NumberStyles.Integer,
+                CultureInfo.InvariantCulture, out value);
         }
 
         private ViiperDeviceStream RecreateNativeDeviceAndOpenStream(
@@ -5281,12 +5424,13 @@ namespace DS4Windows
                         backend);
                 var provisionalState =
                     new ViiperVirtualDeviceLifetime.State(identity, -1,
-                        removeDevice, checked(expected.Generation + 1));
+                        removeDevice, checked(expected.Generation + 1),
+                        backend.NativeBrokerInstance);
                 replacement = OpenStream(identity, -1, backend, lifetime,
                     lifetimeState: provisionalState);
 
                 if (!lifetime.TryReplaceNativeIdentity(expected, identity,
-                        removeDevice, out _))
+                        removeDevice, backend.NativeBrokerInstance, out _))
                 {
                     throw new ObjectDisposedException(
                         nameof(ViiperVirtualDeviceLifetime),
@@ -5332,7 +5476,8 @@ namespace DS4Windows
                 deviceLifetime ??= new ViiperVirtualDeviceLifetime(identity,
                     backend.Mode, usbipPort,
                     (bus, device) => RemoveDevice(bus, device, backend),
-                    topology: topology);
+                    topology: topology,
+                    nativeBrokerInstance: backend.NativeBrokerInstance);
                 lifetimeState ??= deviceLifetime.CaptureState();
                 return new ViiperDeviceStream(stream, tcp, deviceLifetime,
                     lifetimeState);
@@ -5355,6 +5500,11 @@ namespace DS4Windows
         private void TryRemoveDevice(uint busId, string devId,
             ViiperBackendSelection backend)
         {
+            if (!IsCurrentNativeBrokerInstance(backend))
+            {
+                return;
+            }
+
             try
             {
                 SendRequestRaw($"bus/{busId}/remove", devId, backend);
@@ -5367,6 +5517,11 @@ namespace DS4Windows
         private void TryRemoveBus(uint busId,
             ViiperBackendSelection backend)
         {
+            if (!IsCurrentNativeBrokerInstance(backend))
+            {
+                return;
+            }
+
             try
             {
                 SendRequestRaw("bus/remove", busId.ToString(), backend);
@@ -5429,6 +5584,7 @@ namespace DS4Windows
                     raw = SendRequestRawCore("ping", null, credential);
                     ViiperBackendSelection selection =
                         ViiperBackendContract.ParsePing(raw, credential);
+                    selection = BindNativeBrokerInstance(selection);
                     Volatile.Write(ref lastBackendSelection, selection);
                     return selection;
                 }
@@ -5446,6 +5602,68 @@ namespace DS4Windows
             throw new IOException(
                 "VIIPER did not provide a usable authenticated or legacy backend health proof.",
                 authenticatedError ?? unauthenticatedError);
+        }
+
+        private ViiperBackendSelection BindNativeBrokerInstance(
+            ViiperBackendSelection selection)
+        {
+            if (!selection.IsNative || nativeBrokerInstanceProvider == null)
+            {
+                return selection;
+            }
+
+            ViiperNativeBrokerInstance? before =
+                nativeBrokerInstanceProvider();
+            if (!before.HasValue)
+            {
+                throw new ViiperNativeContractException(
+                    "VIIPER native UDE health did not originate from the exact trusted running broker service process.");
+            }
+
+            // Confirm the negotiated contract inside one stable service
+            // process interval. The first ping selected the transport; this
+            // second authenticated proof closes the race with an SCM restart.
+            string confirmation = SendRequestRawCore("ping", null,
+                selection.Credential);
+            ViiperBackendSelection confirmed =
+                ViiperBackendContract.ParsePing(confirmation,
+                    selection.Credential);
+            ViiperNativeBrokerInstance? after =
+                nativeBrokerInstanceProvider();
+            if (!after.HasValue || before.Value != after.Value)
+            {
+                throw new ViiperNativeContractException(
+                    "The VIIPER native UDE broker service process changed during authenticated health proof.");
+            }
+
+            return new ViiperBackendSelection(confirmed.Mode,
+                confirmed.Credential, after.Value);
+        }
+
+        private bool IsCurrentNativeBrokerInstance(
+            ViiperBackendSelection backend)
+        {
+            if (backend?.IsNative != true)
+            {
+                return true;
+            }
+            if (!backend.NativeBrokerInstance.HasValue ||
+                nativeBrokerInstanceProvider == null)
+            {
+                return false;
+            }
+
+            ViiperNativeBrokerInstance? current;
+            try
+            {
+                current = nativeBrokerInstanceProvider();
+            }
+            catch
+            {
+                return false;
+            }
+            return current.HasValue &&
+                current.Value == backend.NativeBrokerInstance.Value;
         }
 
         private ViiperBackendSelection RequireBackendSelection()
@@ -5563,6 +5781,12 @@ namespace DS4Windows
             public uint BusId { get; set; }
         }
 
+        private sealed class ViiperBusListResponse
+        {
+            [JsonPropertyName("buses")]
+            public uint[] Buses { get; set; }
+        }
+
         private sealed class ViiperDeviceResponse
         {
             [JsonPropertyName("devId")]
@@ -5595,6 +5819,12 @@ namespace DS4Windows
         {
             [JsonPropertyName("devId")]
             public string DevId { get; set; }
+
+            [JsonPropertyName("type")]
+            public string Type { get; set; }
+
+            [JsonPropertyName("pid")]
+            public string Pid { get; set; }
 
             [JsonPropertyName("deviceSpecific")]
             public JsonElement DeviceSpecific { get; set; }
@@ -6222,12 +6452,14 @@ namespace DS4Windows
         {
             internal State(ViiperVirtualDeviceIdentity identity,
                 int usbipPort, Action<uint, string> removeDevice,
-                long generation)
+                long generation,
+                ViiperNativeBrokerInstance? nativeBrokerInstance = null)
             {
                 Identity = identity;
                 UsbipPort = usbipPort;
                 RemoveDevice = removeDevice;
                 Generation = generation;
+                NativeBrokerInstance = nativeBrokerInstance;
             }
 
             internal ViiperVirtualDeviceIdentity Identity { get; }
@@ -6237,6 +6469,11 @@ namespace DS4Windows
             internal Action<uint, string> RemoveDevice { get; }
 
             internal long Generation { get; }
+
+            internal ViiperNativeBrokerInstance? NativeBrokerInstance
+            {
+                get;
+            }
         }
 
         private readonly object stateLock = new object();
@@ -6254,10 +6491,12 @@ namespace DS4Windows
             Action<int, string> detachPort = null,
             Action<int> unregisterPort = null,
             Action detachStalePorts = null,
-            ViiperVirtualDeviceTopology topology = null)
+            ViiperVirtualDeviceTopology topology = null,
+            ViiperNativeBrokerInstance? nativeBrokerInstance = null)
             : this(new ViiperVirtualDeviceIdentity(busId, devId),
                 ViiperBackendMode.LegacyUsbip, usbipPort, removeDevice,
-                detachPort, unregisterPort, detachStalePorts, topology)
+                detachPort, unregisterPort, detachStalePorts, topology,
+                nativeBrokerInstance)
         {
         }
 
@@ -6268,11 +6507,13 @@ namespace DS4Windows
             Action<int, string> detachPort = null,
             Action<int> unregisterPort = null,
             Action detachStalePorts = null,
-            ViiperVirtualDeviceTopology topology = null)
+            ViiperVirtualDeviceTopology topology = null,
+            ViiperNativeBrokerInstance? nativeBrokerInstance = null)
         {
             this.backendMode = backendMode;
             this.topology = topology;
-            state = new State(identity, usbipPort, removeDevice, 0);
+            state = new State(identity, usbipPort, removeDevice, 0,
+                nativeBrokerInstance);
             this.detachPort = detachPort ??
                 ViiperUsbipPortManager.DetachRegisteredPort;
             this.unregisterPort = unregisterPort ??
@@ -6318,6 +6559,7 @@ namespace DS4Windows
         internal bool TryReplaceNativeIdentity(State expected,
             ViiperVirtualDeviceIdentity replacementIdentity,
             Action<uint, string> replacementRemoveDevice,
+            ViiperNativeBrokerInstance? replacementBrokerInstance,
             out State replacement)
         {
             replacement = null;
@@ -6336,7 +6578,8 @@ namespace DS4Windows
 
                 replacement = new State(replacementIdentity, -1,
                     replacementRemoveDevice,
-                    checked(expected.Generation + 1));
+                    checked(expected.Generation + 1),
+                    replacementBrokerInstance);
                 Volatile.Write(ref state, replacement);
                 return true;
             }

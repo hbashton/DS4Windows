@@ -53,6 +53,8 @@ namespace DS4Windows
         public string ViiperProcessConflictMessage { get; set; }
         public bool CitrixUsbMonitorConflict { get; set; }
         public string CitrixUsbMonitorConflictMessage { get; set; }
+        internal bool NativeBrokerServiceRegistered { get; set; }
+        internal bool NativeBrokerServiceTrusted { get; set; }
         internal ViiperBackendMode BackendMode { get; set; } =
             ViiperBackendMode.LegacyUsbip;
 
@@ -69,7 +71,12 @@ namespace DS4Windows
                     ServerRunning;
                 if (BackendMode == ViiperBackendMode.NativeUde)
                 {
-                    return commonReady;
+                    // Native package ownership is the protected LocalSystem
+                    // service, not the legacy bundled/task executable. Its
+                    // readiness is established by exact service identity plus
+                    // an authenticated ABI/package/capability proof.
+                    return NativeBrokerServiceRegistered &&
+                        NativeBrokerServiceTrusted && ServerRunning;
                 }
 
                 return commonReady && UsbipInstalled &&
@@ -111,13 +118,13 @@ namespace DS4Windows
 
                 if (BackendMode == ViiperBackendMode.NativeUde)
                 {
-                    if (!ViiperInstalled)
+                    if (!NativeBrokerServiceRegistered)
                     {
-                        return "VIIPER native UDE helper missing";
+                        return "VIIPER native UDE broker service missing";
                     }
-                    if (!ViiperPackageCurrent)
+                    if (!NativeBrokerServiceTrusted)
                     {
-                        return "packaged VIIPER native UDE update required";
+                        return "VIIPER native UDE broker service identity is not trusted";
                     }
                     return ServerRunning
                         ? "VIIPER native UDE status unknown"
@@ -204,6 +211,17 @@ namespace DS4Windows
         private const string ViiperStartupTaskName = "RunVIIPER";
         private const string NativeBrokerServiceName =
             "VIIPERNativeBroker";
+        private const string NativeBrokerDisplayName =
+            "VIIPER Native UDE Broker";
+        private const string NativeBrokerServiceAccount = "LocalSystem";
+        private const string NativeBrokerLogName =
+            "viiper-native-broker.log";
+        private const uint NativeBrokerServiceType = 0x10;
+        private const uint NativeBrokerStartType = 2;
+        private const uint NativeBrokerErrorControl = 1;
+        private const uint ServiceRunningState = 4;
+        private const uint ScManagerConnect = 0x0001;
+        private const uint ServiceQueryStatus = 0x0004;
         private const int ForeignViiperHelperTimeoutMilliseconds = 15000;
         private const string UsbipRelativePath = @"USBip\usbip.exe";
         private const int UsbipProbeTimeoutMilliseconds = 3000;
@@ -248,10 +266,82 @@ namespace DS4Windows
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool CloseHandle(IntPtr handle);
 
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode,
+            SetLastError = true)]
+        private static extern IntPtr OpenSCManager(string machineName,
+            string databaseName, uint desiredAccess);
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode,
+            SetLastError = true)]
+        private static extern IntPtr OpenService(IntPtr serviceManager,
+            string serviceName, uint desiredAccess);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool QueryServiceStatusEx(IntPtr service,
+            int infoLevel, out NativeServiceStatusProcess status,
+            int bufferSize, out int bytesNeeded);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CloseServiceHandle(IntPtr handle);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetProcessTimes(IntPtr process,
+            out NativeFileTime creationTime, out NativeFileTime exitTime,
+            out NativeFileTime kernelTime, out NativeFileTime userTime);
+
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode,
+            SetLastError = true)]
+        private static extern IntPtr CommandLineToArgvW(string commandLine,
+            out int argumentCount);
+
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr LocalFree(IntPtr memory);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NativeFileTime
+        {
+            internal uint LowDateTime;
+            internal uint HighDateTime;
+
+            internal long ToInt64() =>
+                unchecked((long)(((ulong)HighDateTime << 32) |
+                    LowDateTime));
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NativeServiceStatusProcess
+        {
+            internal uint ServiceType;
+            internal uint CurrentState;
+            internal uint ControlsAccepted;
+            internal uint Win32ExitCode;
+            internal uint ServiceSpecificExitCode;
+            internal uint CheckPoint;
+            internal uint WaitHint;
+            internal uint ProcessId;
+            internal uint ServiceFlags;
+        }
+
         private sealed class ViiperProcessIdentity
         {
             public int ProcessId { get; init; }
             public string ExecutablePath { get; init; }
+        }
+
+        private readonly struct NativeBrokerServiceStatus
+        {
+            internal NativeBrokerServiceStatus(bool registered, bool trusted)
+            {
+                Registered = registered;
+                Trusted = trusted;
+            }
+
+            internal bool Registered { get; }
+
+            internal bool Trusted { get; }
         }
 
         public static bool IsViiperOutputType(OutContType type) => ViiperOutDevice.IsViiperType(type);
@@ -283,12 +373,21 @@ namespace DS4Windows
 
             ViiperBackendSelection backend = null;
             bool nativeBackendDetected = false;
-            bool viiperServerRunning = viiperProcessOwnershipReady &&
-                canonicalViiperRunning && TryProbeServer(out backend,
-                    out nativeBackendDetected);
+            NativeBrokerServiceStatus nativeService =
+                InspectNativeBrokerService();
+            // Probe independently from legacy process ownership. The native
+            // LocalSystem broker runs from its own protected Program Files
+            // package and is intentionally not the legacy bundled/task image.
+            bool endpointHealthProved = TryProbeServer(out backend,
+                out nativeBackendDetected);
             bool nativeBackend = IsNativeBackendAuthoritative(
-                nativeBackendDetected, viiperServerRunning, backend,
-                IsNativeBrokerServiceRegistered());
+                nativeBackendDetected, endpointHealthProved, backend,
+                nativeService.Registered);
+            bool viiperServerRunning = nativeBackend
+                ? IsAuthenticatedNativeServiceReady(nativeService.Trusted,
+                    endpointHealthProved, backend)
+                : viiperProcessOwnershipReady && canonicalViiperRunning &&
+                    endpointHealthProved && backend?.IsNative == false;
 
             // Native UDE is proved before any USB/IP executable, driver,
             // filter, or runtime query. Once selected, none of the legacy
@@ -357,13 +456,18 @@ namespace DS4Windows
                         InspectViiperProcessOwnership(viiperPath,
                             out canonicalViiperRunning,
                             out viiperProcessConflictMessage);
-                    viiperServerRunning = viiperProcessOwnershipReady &&
-                        canonicalViiperRunning &&
-                        TryProbeServer(out backend,
-                            out nativeBackendDetected);
+                    endpointHealthProved = TryProbeServer(out backend,
+                        out nativeBackendDetected);
                     nativeBackend = IsNativeBackendAuthoritative(
-                        nativeBackendDetected, viiperServerRunning,
-                        backend, IsNativeBrokerServiceRegistered());
+                        nativeBackendDetected, endpointHealthProved,
+                        backend, nativeService.Registered);
+                    viiperServerRunning = nativeBackend
+                        ? IsAuthenticatedNativeServiceReady(
+                            nativeService.Trusted, endpointHealthProved,
+                            backend)
+                        : viiperProcessOwnershipReady &&
+                            canonicalViiperRunning && endpointHealthProved &&
+                            backend?.IsNative == false;
                 }
             }
 
@@ -393,6 +497,8 @@ namespace DS4Windows
                 CitrixUsbMonitorConflict = citrixUsbMonitorConflict,
                 CitrixUsbMonitorConflictMessage =
                     citrixUsbMonitorConflictMessage,
+                NativeBrokerServiceRegistered = nativeService.Registered,
+                NativeBrokerServiceTrusted = nativeService.Trusted,
                 BackendMode = nativeBackend
                     ? ViiperBackendMode.NativeUde
                     : ViiperBackendMode.LegacyUsbip,
@@ -512,14 +618,14 @@ namespace DS4Windows
             ViiperPrerequisiteStatus status)
         {
             return status != null &&
+                status.BackendMode == ViiperBackendMode.LegacyUsbip &&
                 ((status.ViiperInstalled && !status.ViiperPackageCurrent) ||
-                 (status.BackendMode == ViiperBackendMode.LegacyUsbip &&
-                  (RequiresUsbipReplacement(status) ||
+                 RequiresUsbipReplacement(status) ||
                   (status.UsbipInstalled &&
                     (!status.UsbipExecutableSafe ||
                      !status.UsbipDriverFilesSafe ||
                      status.UsbipRebootOrRepairRequired)) ||
-                  status.CitrixUsbMonitorConflict)));
+                 status.CitrixUsbMonitorConflict);
         }
 
         internal static bool RequiresUsbipReplacement(
@@ -2813,6 +2919,55 @@ namespace DS4Windows
             }
         }
 
+        /// <summary>
+        /// Performs the startup probe that runs before physical HID
+        /// discovery. A registered native service is authoritative at this
+        /// boundary too: startup may not accept a legacy listener, or an
+        /// otherwise valid native listener that is not the exact protected
+        /// service installation.
+        /// </summary>
+        internal static ViiperBackendSelection ProbeStartupBackend()
+        {
+            NativeBrokerServiceStatus nativeService =
+                InspectNativeBrokerService();
+            ViiperBackendSelection backend =
+                new ViiperClient(ApiHost, ApiPort).ProbeBackend();
+            return ValidateStartupBackend(backend,
+                nativeService.Registered, nativeService.Trusted);
+        }
+
+        internal static ViiperBackendSelection ValidateStartupBackend(
+            ViiperBackendSelection backend, bool nativeServiceRegistered,
+            bool nativeServiceTrusted)
+        {
+            if (backend == null)
+            {
+                throw new IOException(
+                    "VIIPER returned no backend selection.");
+            }
+
+            if (nativeServiceRegistered)
+            {
+                if (!IsAuthenticatedNativeServiceReady(
+                        nativeServiceTrusted, endpointHealthProved: true,
+                        backend))
+                {
+                    throw new ViiperNativeContractException(
+                        "The registered VIIPER native UDE broker did not prove its exact trusted service identity and authenticated ABI 1.8 contract.");
+                }
+
+                return backend;
+            }
+
+            if (backend.IsNative)
+            {
+                throw new ViiperNativeContractException(
+                    "VIIPER native UDE health was returned without the exact registered trusted broker service identity.");
+            }
+
+            return backend;
+        }
+
         // A registered native broker is authoritative even when its protected
         // credential is missing or unreadable. Treating that authentication
         // failure as legacy would inspect USB/IP and could try to start a
@@ -2826,22 +2981,303 @@ namespace DS4Windows
                 (serverRunning && backend?.IsNative == true);
         }
 
-        private static bool IsNativeBrokerServiceRegistered()
+        internal static bool IsAuthenticatedNativeServiceReady(
+            bool trustedServiceIdentity, bool endpointHealthProved,
+            ViiperBackendSelection backend)
+        {
+            return trustedServiceIdentity && endpointHealthProved &&
+                backend?.IsNative == true && backend.UsesAuthentication &&
+                backend.NativeBrokerInstance.HasValue;
+        }
+
+        /// <summary>
+        /// Resolves the exact running service process without trusting a
+        /// same-named executable. PID plus kernel creation time remains unique
+        /// if Windows recycles a PID after a broker crash.
+        /// </summary>
+        internal static ViiperNativeBrokerInstance?
+            GetTrustedNativeBrokerInstance()
+        {
+            NativeBrokerServiceStatus service =
+                InspectNativeBrokerService();
+            if (!service.Registered || !service.Trusted)
+            {
+                return null;
+            }
+
+            try
+            {
+                uint processId = TryGetRunningNativeBrokerProcessId();
+                if (processId == 0 ||
+                    processId > int.MaxValue)
+                {
+                    return null;
+                }
+
+                IntPtr process = OpenProcess(
+                    ProcessQueryLimitedInformation, false, (int)processId);
+                if (process == IntPtr.Zero)
+                {
+                    return null;
+                }
+
+                try
+                {
+                    StringBuilder path = new(32768);
+                    int length = path.Capacity;
+                    if (!QueryFullProcessImageName(process, 0, path,
+                            ref length) || length <= 0 ||
+                        !IsTrustedNativeBrokerExecutable(
+                            path.ToString(0, length)) ||
+                        !GetProcessTimes(process,
+                            out NativeFileTime created,
+                            out _, out _, out _))
+                    {
+                        return null;
+                    }
+
+                    long creationTime = created.ToInt64();
+                    return creationTime > 0
+                        ? new ViiperNativeBrokerInstance(processId,
+                            creationTime)
+                        : null;
+                }
+                finally
+                {
+                    CloseHandle(process);
+                }
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static uint TryGetRunningNativeBrokerProcessId()
+        {
+            IntPtr manager = OpenSCManager(null, null,
+                ScManagerConnect);
+            if (manager == IntPtr.Zero)
+            {
+                return 0;
+            }
+
+            try
+            {
+                IntPtr service = OpenService(manager,
+                    NativeBrokerServiceName, ServiceQueryStatus);
+                if (service == IntPtr.Zero)
+                {
+                    return 0;
+                }
+
+                try
+                {
+                    int size = Marshal.SizeOf<
+                        NativeServiceStatusProcess>();
+                    return QueryServiceStatusEx(service, 0,
+                            out NativeServiceStatusProcess status, size,
+                            out _) &&
+                        status.ServiceType == NativeBrokerServiceType &&
+                        status.CurrentState == ServiceRunningState
+                        ? status.ProcessId
+                        : 0;
+                }
+                finally
+                {
+                    CloseServiceHandle(service);
+                }
+            }
+            finally
+            {
+                CloseServiceHandle(manager);
+            }
+        }
+
+        private static NativeBrokerServiceStatus InspectNativeBrokerService()
         {
             try
             {
                 using RegistryKey service = Registry.LocalMachine.OpenSubKey(
                     @"SYSTEM\CurrentControlSet\Services\" +
                     NativeBrokerServiceName);
-                return service != null;
+                if (service == null)
+                {
+                    return new NativeBrokerServiceStatus(false, false);
+                }
+
+                string programFiles = GetTrustedNativeBrokerProgramFilesPath();
+                string expectedExecutable = Path.Combine(programFiles,
+                    "VIIPER", "viiper.exe");
+                string programData = Environment.GetFolderPath(
+                    Environment.SpecialFolder.CommonApplicationData);
+                string expectedCredential = Path.Combine(programData,
+                    "VIIPER", "viiper.key.txt");
+                string expectedLog = Path.Combine(programData, "VIIPER",
+                    NativeBrokerLogName);
+                bool trusted = IsTrustedNativeBrokerServiceIdentity(
+                    ReadRegistryString(service, "ImagePath"),
+                    ReadRegistryString(service, "ObjectName"),
+                    ReadRegistryDword(service, "Type"),
+                    ReadRegistryDword(service, "Start"),
+                    ReadRegistryDword(service, "ErrorControl"),
+                    ReadRegistryString(service, "DisplayName"),
+                    ReadRegistryDword(service, "DelayedAutoStart", 0),
+                    expectedExecutable, expectedCredential, expectedLog,
+                    IsTrustedNativeBrokerExecutable(expectedExecutable));
+                return new NativeBrokerServiceStatus(true, trusted);
             }
             catch
             {
                 // Failure to inspect an administrator-owned service key is
                 // itself not proof of legacy mode. Fail closed so USB/IP is
                 // never activated beside a potentially live native broker.
-                return true;
+                return new NativeBrokerServiceStatus(true, false);
             }
+        }
+
+        private static uint ReadRegistryDword(RegistryKey key, string name,
+            uint fallback = uint.MaxValue)
+        {
+            object raw = key.GetValue(name, null,
+                RegistryValueOptions.DoNotExpandEnvironmentNames);
+            try
+            {
+                return raw == null ? fallback : Convert.ToUInt32(raw);
+            }
+            catch
+            {
+                return fallback;
+            }
+        }
+
+        private static string ReadRegistryString(RegistryKey key,
+            string name)
+        {
+            return key.GetValue(name, null,
+                RegistryValueOptions.DoNotExpandEnvironmentNames) as string;
+        }
+
+        internal static bool IsTrustedNativeBrokerServiceIdentity(
+            string imagePath, string serviceAccount, uint serviceType,
+            uint startType, uint errorControl, string displayName,
+            uint delayedAutoStart, string expectedExecutable,
+            string expectedCredential, string expectedLog,
+            bool executablePathTrusted)
+        {
+            if (!executablePathTrusted ||
+                serviceType != NativeBrokerServiceType ||
+                startType != NativeBrokerStartType ||
+                errorControl != NativeBrokerErrorControl ||
+                delayedAutoStart != 0 ||
+                !string.Equals(serviceAccount, NativeBrokerServiceAccount,
+                    StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(displayName, NativeBrokerDisplayName,
+                    StringComparison.Ordinal) ||
+                string.IsNullOrWhiteSpace(expectedExecutable) ||
+                string.IsNullOrWhiteSpace(expectedCredential) ||
+                string.IsNullOrWhiteSpace(expectedLog))
+            {
+                return false;
+            }
+
+            string[] arguments = ParseWindowsCommandLine(imagePath);
+            if (arguments == null || arguments.Length != 8)
+            {
+                return false;
+            }
+
+            return IsExactViiperExecutablePath(arguments[0],
+                       expectedExecutable) &&
+                string.Equals(arguments[1], "service",
+                    StringComparison.Ordinal) &&
+                string.Equals(arguments[2], "--transport",
+                    StringComparison.Ordinal) &&
+                string.Equals(arguments[3],
+                    ViiperBackendContract.NativeTransport,
+                    StringComparison.Ordinal) &&
+                string.Equals(arguments[4], "--key-file",
+                    StringComparison.Ordinal) &&
+                IsExactViiperExecutablePath(arguments[5],
+                    expectedCredential) &&
+                string.Equals(arguments[6], "--log.file",
+                    StringComparison.Ordinal) &&
+                IsExactViiperExecutablePath(arguments[7], expectedLog);
+        }
+
+        private static string[] ParseWindowsCommandLine(string commandLine)
+        {
+            if (string.IsNullOrWhiteSpace(commandLine) ||
+                commandLine.IndexOf('\0') >= 0)
+            {
+                return null;
+            }
+
+            IntPtr arguments = CommandLineToArgvW(commandLine,
+                out int argumentCount);
+            if (arguments == IntPtr.Zero || argumentCount <= 0)
+            {
+                return null;
+            }
+
+            try
+            {
+                string[] parsed = new string[argumentCount];
+                for (int index = 0; index < parsed.Length; index++)
+                {
+                    IntPtr value = Marshal.ReadIntPtr(arguments,
+                        index * IntPtr.Size);
+                    parsed[index] = Marshal.PtrToStringUni(value);
+                }
+                return parsed;
+            }
+            finally
+            {
+                LocalFree(arguments);
+            }
+        }
+
+        private static bool IsTrustedNativeBrokerExecutable(string path)
+        {
+            try
+            {
+                string expected = Path.Combine(
+                    GetTrustedNativeBrokerProgramFilesPath(), "VIIPER",
+                    "viiper.exe");
+                if (!IsExactViiperExecutablePath(path, expected) ||
+                    !File.Exists(path))
+                {
+                    return false;
+                }
+
+                string directory = Path.GetDirectoryName(path);
+                return !string.IsNullOrWhiteSpace(directory) &&
+                    (File.GetAttributes(path) &
+                        FileAttributes.ReparsePoint) == 0 &&
+                    (File.GetAttributes(directory) &
+                        FileAttributes.ReparsePoint) == 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static string GetTrustedNativeBrokerProgramFilesPath()
+        {
+            // The supported integration is x64. Use the Windows known-folder
+            // result rather than the caller-controlled ProgramW6432 process
+            // environment when deciding whether a service path is trusted.
+            string path = Environment.GetFolderPath(
+                Environment.SpecialFolder.ProgramFiles,
+                Environment.SpecialFolderOption.DoNotVerify);
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                throw new IOException(
+                    "Windows did not return the native Program Files path.");
+            }
+
+            return Path.GetFullPath(path);
         }
 
     }

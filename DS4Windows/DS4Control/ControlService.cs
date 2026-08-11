@@ -1913,8 +1913,7 @@ namespace DS4Windows
                     backendStartupReady = false;
                     backendStartupReady = ViiperStartupDiscovery.
                         TryPrepareBackendAndDiscover(
-                        () => new ViiperClient(ViiperSetupManager.ApiHost,
-                            ViiperSetupManager.ApiPort).ProbeBackend(),
+                        ViiperSetupManager.ProbeStartupBackend,
                         () =>
                         {
                             ViiperUsbipPortManager.

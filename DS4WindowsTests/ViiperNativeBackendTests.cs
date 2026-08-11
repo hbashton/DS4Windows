@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 namespace DS4WindowsTests
 {
@@ -43,7 +44,17 @@ namespace DS4WindowsTests
             Assert.IsTrue(selection.UsesAuthentication);
         }
 
+        [TestMethod]
+        public void UnauthenticatedNativeHealthFailsClosed()
+        {
+            StringAssert.Contains(
+                Assert.ThrowsException<ViiperNativeContractException>(() =>
+                    ViiperBackendContract.ParsePing(ExactNativePing)).Message,
+                "authenticated");
+        }
+
         [DataTestMethod]
+        [DataRow("\"version\":\"0.1.0\"", "\"version\":\"0.1.1\"")]
         [DataRow("\"ready\":true", "\"ready\":false")]
         [DataRow("\"abiMajor\":1", "\"abiMajor\":2")]
         [DataRow("\"abiMinor\":8", "\"abiMinor\":7")]
@@ -103,15 +114,17 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void NativeReadinessDoesNotRequireUsbipState()
+        public void NativeReadinessDoesNotRequireLegacyPackageOrUsbipState()
         {
             var status = new ViiperPrerequisiteStatus
             {
-                ViiperInstalled = true,
-                ViiperPackageCurrent = true,
+                ViiperInstalled = false,
+                ViiperPackageCurrent = false,
                 ServerRunning = true,
-                ViiperProcessConflict = false,
+                ViiperProcessConflict = true,
                 BackendMode = ViiperBackendMode.NativeUde,
+                NativeBrokerServiceRegistered = true,
+                NativeBrokerServiceTrusted = true,
                 UsbipInstalled = false,
                 UsbipExecutableSafe = false,
                 UsbipDriverFilesSafe = false,
@@ -122,8 +135,133 @@ namespace DS4WindowsTests
             Assert.IsTrue(status.Ready);
             Assert.AreEqual("VIIPER native UDE ready", status.DisplayText);
 
-            status.BackendMode = ViiperBackendMode.LegacyUsbip;
+            status.NativeBrokerServiceTrusted = false;
+            Assert.IsFalse(status.Ready,
+                "An authenticated endpoint cannot replace exact registered service identity.");
+        }
+
+        [TestMethod]
+        public void UnhealthyRegisteredNativeServiceNeverUsesHealthyLegacyState()
+        {
+            var status = new ViiperPrerequisiteStatus
+            {
+                ViiperInstalled = true,
+                ViiperPackageCurrent = true,
+                ViiperProcessConflict = false,
+                ViiperStartupTaskReady = true,
+                ServerRunning = false,
+                BackendMode = ViiperBackendMode.NativeUde,
+                NativeBrokerServiceRegistered = true,
+                NativeBrokerServiceTrusted = true,
+                UsbipInstalled = true,
+                UsbipExecutableSafe = true,
+                UsbipDriverFilesSafe = true,
+                UsbipRuntimeReady = true,
+            };
+
             Assert.IsFalse(status.Ready);
+            Assert.IsFalse(ViiperSetupManager.
+                RequiresVerifiedViiperUpdate(status),
+                "Native failure must not route repair through the legacy bundled backend.");
+        }
+
+        [TestMethod]
+        public void LegacyReadinessPolicyRemainsUnchanged()
+        {
+            var status = new ViiperPrerequisiteStatus
+            {
+                ViiperInstalled = true,
+                ViiperPackageCurrent = true,
+                ViiperProcessConflict = false,
+                ViiperStartupTaskReady = true,
+                ServerRunning = true,
+                BackendMode = ViiperBackendMode.LegacyUsbip,
+                NativeBrokerServiceRegistered = true,
+                NativeBrokerServiceTrusted = true,
+                UsbipInstalled = true,
+                UsbipExecutableSafe = true,
+                UsbipDriverFilesSafe = true,
+                UsbipRuntimeReady = true,
+            };
+
+            Assert.IsTrue(status.Ready);
+
+            status.UsbipRuntimeReady = false;
+            Assert.IsFalse(status.Ready);
+        }
+
+        [TestMethod]
+        public void NativeServiceIdentityRequiresExactProtectedConfiguration()
+        {
+            const string executable =
+                @"C:\Program Files\VIIPER\viiper.exe";
+            const string credential =
+                @"C:\ProgramData\VIIPER\viiper.key.txt";
+            const string log =
+                @"C:\ProgramData\VIIPER\viiper-native-broker.log";
+            string imagePath =
+                $"\"{executable}\" service --transport native-ude " +
+                $"--key-file \"{credential}\" --log.file \"{log}\"";
+
+            Assert.IsTrue(ViiperSetupManager.
+                IsTrustedNativeBrokerServiceIdentity(imagePath,
+                    "LocalSystem", 0x10, 2, 1,
+                    "VIIPER Native UDE Broker", 0, executable,
+                    credential, log, executablePathTrusted: true));
+            Assert.IsFalse(ViiperSetupManager.
+                IsTrustedNativeBrokerServiceIdentity(
+                    imagePath.Replace("native-ude", "usbip",
+                        StringComparison.Ordinal),
+                    "LocalSystem", 0x10, 2, 1,
+                    "VIIPER Native UDE Broker", 0, executable,
+                    credential, log, executablePathTrusted: true));
+            Assert.IsFalse(ViiperSetupManager.
+                IsTrustedNativeBrokerServiceIdentity(imagePath,
+                    "LocalService", 0x10, 2, 1,
+                    "VIIPER Native UDE Broker", 0, executable,
+                    credential, log, executablePathTrusted: true));
+            Assert.IsFalse(ViiperSetupManager.
+                IsTrustedNativeBrokerServiceIdentity(imagePath,
+                    "LocalSystem", 0x10, 2, 1,
+                    "VIIPER Native UDE Broker", 0, executable,
+                    credential, log, executablePathTrusted: false));
+        }
+
+        [TestMethod]
+        public void StartupRequiresTrustedRegisteredIdentityForNativeHealth()
+        {
+            var native = new ViiperBackendSelection(
+                ViiperBackendMode.NativeUde, "test-credential",
+                new ViiperNativeBrokerInstance(42, 123456));
+
+            Assert.AreSame(native, ViiperSetupManager.
+                ValidateStartupBackend(native,
+                    nativeServiceRegistered: true,
+                    nativeServiceTrusted: true));
+            Assert.ThrowsException<ViiperNativeContractException>(() =>
+                ViiperSetupManager.ValidateStartupBackend(native,
+                    nativeServiceRegistered: false,
+                    nativeServiceTrusted: false));
+            Assert.ThrowsException<ViiperNativeContractException>(() =>
+                ViiperSetupManager.ValidateStartupBackend(native,
+                    nativeServiceRegistered: true,
+                    nativeServiceTrusted: false));
+        }
+
+        [TestMethod]
+        public void RegisteredNativeServiceRejectsLegacyStartupListener()
+        {
+            var legacy = new ViiperBackendSelection(
+                ViiperBackendMode.LegacyUsbip);
+
+            Assert.ThrowsException<ViiperNativeContractException>(() =>
+                ViiperSetupManager.ValidateStartupBackend(legacy,
+                    nativeServiceRegistered: true,
+                    nativeServiceTrusted: true));
+            Assert.AreSame(legacy, ViiperSetupManager.
+                ValidateStartupBackend(legacy,
+                    nativeServiceRegistered: false,
+                    nativeServiceTrusted: false));
         }
 
         [TestMethod]
@@ -305,7 +443,8 @@ namespace DS4WindowsTests
                     removedBus = bus;
                     removedDevice = device;
                     Interlocked.Increment(ref replacementRemove);
-                }, out ViiperVirtualDeviceLifetime.State replacement));
+                }, null,
+                out ViiperVirtualDeviceLifetime.State replacement));
             Assert.AreSame(replacement, lifetime.CaptureState());
             Assert.AreEqual((uint)91, lifetime.BusId);
             Assert.AreEqual("17", lifetime.DevId);
@@ -516,7 +655,7 @@ namespace DS4WindowsTests
             const string password = "NativeCredential123";
             using var server = new AuthenticatedViiperProtocolServer(password);
             var client = new ViiperClient("127.0.0.1", server.Port,
-                () => new[] { password });
+                () => new[] { password }, () => server.BrokerInstance);
             ViiperDeviceStream device = null;
 
             try
@@ -534,10 +673,11 @@ namespace DS4WindowsTests
                 device?.Dispose();
             }
 
-            string[] requests = server.WaitForAuthenticatedRequests(7,
+            string[] requests = server.WaitForAuthenticatedRequests(8,
                 TimeSpan.FromSeconds(5));
             CollectionAssert.AreEquivalent(new[]
             {
+                "ping",
                 "ping",
                 "bus/create 0",
                 "bus/42/add {\"type\":\"test-device\"}",
@@ -551,12 +691,37 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void BrokerDeathRecreatesExactNativeTopologyAndLifetimeIdentity()
+        public void BrokerProcessChangeDuringHealthProofFailsBeforeCreation()
+        {
+            const string password = "NativeCredential123";
+            using var server = new AuthenticatedViiperProtocolServer(password);
+            int instanceReads = 0;
+            var client = new ViiperClient("127.0.0.1", server.Port,
+                () => new[] { password }, () =>
+                {
+                    int read = Interlocked.Increment(ref instanceReads);
+                    return read == 1
+                        ? new ViiperNativeBrokerInstance(1001, 100001)
+                        : new ViiperNativeBrokerInstance(1002, 100002);
+                });
+
+            StringAssert.Contains(
+                Assert.ThrowsException<ViiperNativeContractException>(() =>
+                    client.CreateDeviceAndOpenStream("test-device")).Message,
+                "changed");
+            Assert.AreEqual(0, server.BusCreateCount,
+                "A health proof crossing a broker process boundary cannot authorize any topology mutation.");
+            server.WaitForIdle(TimeSpan.FromSeconds(5));
+            server.AssertNoErrors();
+        }
+
+        [TestMethod]
+        public void SameBrokerStreamReconnectReusesExactNativeTopology()
         {
             const string password = "NativeCredential123";
             using var server = new AuthenticatedViiperProtocolServer(password);
             var client = new ViiperClient("127.0.0.1", server.Port,
-                () => new[] { password });
+                () => new[] { password }, () => server.BrokerInstance);
             ViiperDeviceStream initial = null;
             ViiperDeviceStream replacement = null;
 
@@ -564,37 +729,16 @@ namespace DS4WindowsTests
             {
                 initial = client.CreateDeviceAndOpenStream(
                     "dualshock4audioduplexv3", 0x05C4);
-                ViiperVirtualDeviceLifetime lifetime =
-                    initial.DeviceLifetime;
                 initial.CloseTransport();
 
                 replacement = client.RecoverDeviceStream(initial);
 
-                Assert.AreEqual((uint)42, initial.BusId,
-                    "The retired stream keeps the identity of the route it opened.");
-                Assert.AreEqual("7", initial.DevId);
-                Assert.AreEqual((uint)43, replacement.BusId);
-                Assert.AreEqual("8", replacement.DevId);
-                Assert.AreEqual((uint)43, lifetime.BusId);
-                Assert.AreEqual("8", lifetime.DevId);
-                Assert.AreEqual(1L, lifetime.Generation);
-                Assert.AreEqual(0L, initial.DeviceLifetimeGeneration);
-                Assert.AreEqual(1L, replacement.DeviceLifetimeGeneration);
-                Assert.AreEqual("dualshock4audioduplexv3",
-                    lifetime.Topology.DeviceName);
-                Assert.AreEqual((ushort)0x05C4,
-                    lifetime.Topology.IdProduct);
-
-                string[] requests = server.WaitForAuthenticatedRequests(8,
-                    TimeSpan.FromSeconds(5));
-                Assert.AreEqual(2, requests.Count(request =>
-                    string.Equals(request, "ping",
-                        StringComparison.Ordinal)),
-                    "Initial creation and recovery each require an authenticated health proof.");
-                Assert.AreEqual(2, server.BusCreateCount);
-                CollectionAssert.Contains(requests,
-                    "bus/43/add {\"type\":\"dualshock4audioduplexv3\",\"idProduct\":1476}");
-                CollectionAssert.Contains(requests, "bus/43/8");
+                Assert.AreEqual(initial.BusId, replacement.BusId);
+                Assert.AreEqual(initial.DevId, replacement.DevId);
+                Assert.AreEqual(0L,
+                    replacement.DeviceLifetimeGeneration);
+                Assert.AreEqual(1, server.BusCreateCount,
+                    "VIIPER keeps the disconnected native child alive for its reconnect grace; recovery must not publish a duplicate bus.");
             }
             finally
             {
@@ -607,12 +751,261 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public async Task ConcurrentGraceReconnectsNeverCreateAnotherTopology()
+        {
+            const string password = "NativeCredential123";
+            using var server = new AuthenticatedViiperProtocolServer(password);
+            var client = new ViiperClient("127.0.0.1", server.Port,
+                () => new[] { password }, () => server.BrokerInstance);
+            ViiperDeviceStream initial = client.CreateDeviceAndOpenStream(
+                "dualsensecombinedaudioduplexv5");
+            initial.CloseTransport();
+            ViiperDeviceStream[] recovered = null;
+
+            try
+            {
+                recovered = await Task.WhenAll(
+                    Task.Run(() => client.RecoverDeviceStream(initial)),
+                    Task.Run(() => client.RecoverDeviceStream(initial)));
+
+                Assert.IsTrue(recovered.All(stream =>
+                    stream.BusId == initial.BusId &&
+                    stream.DevId == initial.DevId &&
+                    stream.DeviceLifetimeGeneration == 0));
+                Assert.AreEqual(1, server.BusCreateCount,
+                    "Concurrent failures inside VIIPER's reconnect grace must reuse the one live native child.");
+            }
+            finally
+            {
+                if (recovered != null)
+                {
+                    foreach (ViiperDeviceStream stream in recovered)
+                    {
+                        stream.CloseTransport();
+                    }
+                    recovered[0].Dispose();
+                }
+                initial.Dispose();
+            }
+
+            server.WaitForIdle(TimeSpan.FromSeconds(5));
+            server.AssertNoErrors();
+        }
+
+        [TestMethod]
+        public void AmbiguousNativeTopologyProbeFailsClosedWithoutCreation()
+        {
+            const string password = "NativeCredential123";
+            using var server = new AuthenticatedViiperProtocolServer(password);
+            var client = new ViiperClient("127.0.0.1", server.Port,
+                () => new[] { password }, () => server.BrokerInstance);
+            ViiperDeviceStream initial = client.CreateDeviceAndOpenStream(
+                "dualshock4audioduplexv3", 0x05C4);
+            initial.CloseTransport();
+            server.ReplaceDeviceTopology("dualshock4audioduplexv3",
+                0x09CC);
+
+            try
+            {
+                StringAssert.Contains(
+                    Assert.ThrowsException<IOException>(() =>
+                        client.RecoverDeviceStream(initial)).Message,
+                    "unexpected product ID");
+                Assert.AreEqual(1, server.BusCreateCount,
+                    "An occupied but mismatched identity is ambiguous and must never authorize another native bus.");
+            }
+            finally
+            {
+                initial.Dispose();
+            }
+
+            server.WaitForIdle(TimeSpan.FromSeconds(5));
+            server.AssertNoErrors();
+        }
+
+        [TestMethod]
+        public void NativeTopologyProbeServerErrorFailsClosedWithoutCreation()
+        {
+            const string password = "NativeCredential123";
+            using var server = new AuthenticatedViiperProtocolServer(password);
+            var client = new ViiperClient("127.0.0.1", server.Port,
+                () => new[] { password }, () => server.BrokerInstance);
+            ViiperDeviceStream initial = client.CreateDeviceAndOpenStream(
+                "test-device");
+            initial.CloseTransport();
+            server.FailOneBusList();
+
+            try
+            {
+                StringAssert.Contains(
+                    Assert.ThrowsException<IOException>(() =>
+                        client.RecoverDeviceStream(initial)).Message,
+                    "503");
+                Assert.AreEqual(1, server.BusCreateCount,
+                    "A failed identity probe is not proof that the old native child is absent.");
+            }
+            finally
+            {
+                initial.Dispose();
+            }
+
+            server.WaitForIdle(TimeSpan.FromSeconds(5));
+            server.AssertNoErrors();
+        }
+
+        [TestMethod]
+        public void BrokerDeathRecreatesExactNativeTopologyAndLifetimeIdentity()
+        {
+            const string password = "NativeCredential123";
+            using var server = new AuthenticatedViiperProtocolServer(password);
+            var client = new ViiperClient("127.0.0.1", server.Port,
+                () => new[] { password }, () => server.BrokerInstance);
+            ViiperDeviceStream initial = null;
+            ViiperDeviceStream replacement = null;
+
+            try
+            {
+                initial = client.CreateDeviceAndOpenStream(
+                    "dualshock4audioduplexv3", 0x05C4);
+                ViiperVirtualDeviceLifetime lifetime =
+                    initial.DeviceLifetime;
+                initial.CloseTransport();
+                server.SimulateBrokerRestart();
+
+                replacement = client.RecoverDeviceStream(initial);
+
+                Assert.AreEqual((uint)42, initial.BusId,
+                    "The retired stream keeps the identity of the route it opened.");
+                Assert.AreEqual("7", initial.DevId);
+                Assert.AreEqual((uint)42, replacement.BusId,
+                    "A real broker restart reuses its first free bus ID.");
+                Assert.AreEqual("7", replacement.DevId);
+                Assert.AreEqual((uint)42, lifetime.BusId);
+                Assert.AreEqual("7", lifetime.DevId);
+                Assert.AreEqual(1L, lifetime.Generation);
+                Assert.AreEqual(0L, initial.DeviceLifetimeGeneration);
+                Assert.AreEqual(1L, replacement.DeviceLifetimeGeneration);
+                Assert.AreEqual("dualshock4audioduplexv3",
+                    lifetime.Topology.DeviceName);
+                Assert.AreEqual((ushort)0x05C4,
+                    lifetime.Topology.IdProduct);
+
+                string[] requests = server.WaitForAuthenticatedRequests(10,
+                    TimeSpan.FromSeconds(5));
+                Assert.AreEqual(4, requests.Count(request =>
+                    string.Equals(request, "ping",
+                        StringComparison.Ordinal)),
+                    "Initial creation and recovery each pin two authenticated proofs inside one stable broker-process interval.");
+                Assert.AreEqual(2, server.BusCreateCount);
+                CollectionAssert.Contains(requests,
+                    "bus/42/add {\"type\":\"dualshock4audioduplexv3\",\"idProduct\":1476}");
+                CollectionAssert.Contains(requests, "bus/42/7");
+            }
+            finally
+            {
+                replacement?.Dispose();
+                initial?.Dispose();
+            }
+
+            server.WaitForIdle(TimeSpan.FromSeconds(5));
+            server.AssertNoErrors();
+        }
+
+        [TestMethod]
+        public void BrokerRestartIdReuseNeverMergesTwoControllerLifetimes()
+        {
+            const string password = "NativeCredential123";
+            using var server = new AuthenticatedViiperProtocolServer(password);
+            var firstClient = new ViiperClient("127.0.0.1", server.Port,
+                () => new[] { password }, () => server.BrokerInstance);
+            var secondClient = new ViiperClient("127.0.0.1", server.Port,
+                () => new[] { password }, () => server.BrokerInstance);
+            ViiperDeviceStream first = firstClient.CreateDeviceAndOpenStream(
+                "dualshock4audioduplexv3", 0x05C4);
+            ViiperDeviceStream second = secondClient.CreateDeviceAndOpenStream(
+                "dualshock4audioduplexv3", 0x05C4);
+            first.CloseTransport();
+            second.CloseTransport();
+            server.SimulateBrokerRestart();
+            ViiperDeviceStream recoveredSecond = null;
+            ViiperDeviceStream recoveredFirst = null;
+
+            try
+            {
+                // Recovering old bus 43 first creates new bus 42/dev 7,
+                // exactly colliding with the first lifetime's old numeric
+                // identity and topology.
+                recoveredSecond = secondClient.RecoverDeviceStream(second);
+                Assert.AreEqual((uint)42, recoveredSecond.BusId);
+                Assert.AreEqual("7", recoveredSecond.DevId);
+
+                recoveredFirst = firstClient.RecoverDeviceStream(first);
+
+                Assert.AreEqual((uint)43, recoveredFirst.BusId,
+                    "A matching numeric identity from a different broker process belongs to the already-recovered second controller and must not be reopened.");
+                Assert.AreEqual("8", recoveredFirst.DevId);
+                Assert.AreNotSame(recoveredSecond.DeviceLifetime,
+                    recoveredFirst.DeviceLifetime);
+                Assert.AreEqual(4, server.BusCreateCount,
+                    "Two initial and two post-restart controller topologies are required; neither recovery may merge into the other.");
+            }
+            finally
+            {
+                recoveredFirst?.Dispose();
+                recoveredSecond?.Dispose();
+                first.Dispose();
+                second.Dispose();
+            }
+
+            server.WaitForIdle(TimeSpan.FromSeconds(5));
+            server.AssertNoErrors();
+        }
+
+        [TestMethod]
+        public void StaleLifetimeCleanupCannotDeleteReusedBrokerIdentity()
+        {
+            const string password = "NativeCredential123";
+            using var server = new AuthenticatedViiperProtocolServer(password);
+            var staleClient = new ViiperClient("127.0.0.1", server.Port,
+                () => new[] { password }, () => server.BrokerInstance);
+            var liveClient = new ViiperClient("127.0.0.1", server.Port,
+                () => new[] { password }, () => server.BrokerInstance);
+            ViiperDeviceStream stale = staleClient.CreateDeviceAndOpenStream(
+                "dualshock4audioduplexv3", 0x05C4);
+            ViiperDeviceStream live = liveClient.CreateDeviceAndOpenStream(
+                "dualshock4audioduplexv3", 0x05C4);
+            stale.CloseTransport();
+            live.CloseTransport();
+            server.SimulateBrokerRestart();
+            ViiperDeviceStream recoveredLive =
+                liveClient.RecoverDeviceStream(live);
+
+            try
+            {
+                Assert.IsTrue(server.HasTopology(42, "7"));
+                stale.Dispose();
+                Assert.IsTrue(server.HasTopology(42, "7"),
+                    "Disposing old bus 42/dev 7 after restart must not remove the new controller that reused that identity.");
+                Assert.IsFalse(server.Requests.Contains(
+                    "bus/42/remove 7"));
+            }
+            finally
+            {
+                recoveredLive.Dispose();
+                live.Dispose();
+            }
+
+            server.WaitForIdle(TimeSpan.FromSeconds(5));
+            server.AssertNoErrors();
+        }
+
+        [TestMethod]
         public void NativeRecoveryRejectsHealthyUsbipTransportWithoutCreation()
         {
             const string password = "NativeCredential123";
             using var server = new AuthenticatedViiperProtocolServer(password);
             var client = new ViiperClient("127.0.0.1", server.Port,
-                () => new[] { password });
+                () => new[] { password }, () => server.BrokerInstance);
             ViiperDeviceStream initial = null;
 
             try
@@ -648,10 +1041,11 @@ namespace DS4WindowsTests
             const string password = "NativeCredential123";
             using var server = new AuthenticatedViiperProtocolServer(password);
             var client = new ViiperClient("127.0.0.1", server.Port,
-                () => new[] { password });
+                () => new[] { password }, () => server.BrokerInstance);
             ViiperDeviceStream initial = client.CreateDeviceAndOpenStream(
                 "dualsensecombinedaudioduplexv5");
             initial.CloseTransport();
+            server.SimulateBrokerRestart();
             ViiperDeviceStream[] recovered = null;
 
             try
@@ -668,7 +1062,7 @@ namespace DS4WindowsTests
                 Assert.AreEqual(1L,
                     initial.DeviceLifetime.Generation);
                 Assert.IsTrue(recovered.All(stream =>
-                    stream.BusId == 43 && stream.DevId == "8" &&
+                    stream.BusId == 42 && stream.DevId == "7" &&
                     stream.DeviceLifetimeGeneration == 1));
             }
             finally
@@ -689,15 +1083,57 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void RetiredStreamAfterSecondBrokerRestartRecreatesCurrentLifetime()
+        {
+            const string password = "NativeCredential123";
+            using var server = new AuthenticatedViiperProtocolServer(password);
+            var client = new ViiperClient("127.0.0.1", server.Port,
+                () => new[] { password }, () => server.BrokerInstance);
+            ViiperDeviceStream initial = client.CreateDeviceAndOpenStream(
+                "dualsensecombinedaudioduplexv5");
+            initial.CloseTransport();
+            server.SimulateBrokerRestart();
+            ViiperDeviceStream firstRecovery =
+                client.RecoverDeviceStream(initial);
+            firstRecovery.CloseTransport();
+            server.SimulateBrokerRestart();
+            ViiperDeviceStream secondRecovery = null;
+
+            try
+            {
+                // A delayed writer can still report the original generation
+                // after the generation-1 feedback recovery was published.
+                secondRecovery = client.RecoverDeviceStream(initial);
+
+                Assert.AreEqual(2L,
+                    initial.DeviceLifetime.Generation);
+                Assert.AreEqual(2L,
+                    secondRecovery.DeviceLifetimeGeneration);
+                Assert.AreEqual(3, server.BusCreateCount,
+                    "The retired generation must not bypass recreation after the replacement broker also restarted.");
+            }
+            finally
+            {
+                secondRecovery?.Dispose();
+                firstRecovery.Dispose();
+                initial.Dispose();
+            }
+
+            server.WaitForIdle(TimeSpan.FromSeconds(5));
+            server.AssertNoErrors();
+        }
+
+        [TestMethod]
         public void FailedNativeRecreateRollsBackPartialBus()
         {
             const string password = "NativeCredential123";
             using var server = new AuthenticatedViiperProtocolServer(password);
             var client = new ViiperClient("127.0.0.1", server.Port,
-                () => new[] { password });
+                () => new[] { password }, () => server.BrokerInstance);
             ViiperDeviceStream initial = client.CreateDeviceAndOpenStream(
                 "dualshock4audioduplexv3", 0x05C4);
             initial.CloseTransport();
+            server.SimulateBrokerRestart();
             server.FailOneDeviceAdd();
 
             try
@@ -710,11 +1146,11 @@ namespace DS4WindowsTests
                 Assert.AreEqual(0L,
                     initial.DeviceLifetime.Generation);
                 Assert.IsTrue(SpinWait.SpinUntil(() =>
-                    server.Requests.Contains("bus/remove 43"),
+                    server.Requests.Contains("bus/remove 42"),
                     TimeSpan.FromSeconds(5)),
                     "The partial replacement bus was not removed.");
                 Assert.IsFalse(server.Requests.Any(request =>
-                    request.StartsWith("bus/43/remove ",
+                    request.StartsWith("bus/42/remove ",
                         StringComparison.Ordinal)),
                     "A failed add did not create a device to remove.");
             }
@@ -733,10 +1169,11 @@ namespace DS4WindowsTests
             const string password = "NativeCredential123";
             using var server = new AuthenticatedViiperProtocolServer(password);
             var client = new ViiperClient("127.0.0.1", server.Port,
-                () => new[] { password });
+                () => new[] { password }, () => server.BrokerInstance);
             ViiperDeviceStream initial = client.CreateDeviceAndOpenStream(
                 "dualshock4audioduplexv3", 0x05C4);
             initial.CloseTransport();
+            server.SimulateBrokerRestart();
             server.BlockOneDeviceAdd();
             Task<ViiperDeviceStream> recovery = Task.Run(() =>
                 client.RecoverDeviceStream(initial));
@@ -751,8 +1188,8 @@ namespace DS4WindowsTests
             Assert.AreEqual(0L, initial.DeviceLifetime.Generation,
                 "A disposed lifetime must never publish the replacement identity.");
             Assert.IsTrue(SpinWait.SpinUntil(() =>
-                server.Requests.Contains("bus/43/remove 8") &&
-                server.Requests.Contains("bus/remove 43"),
+                server.Requests.Contains("bus/42/remove 7") &&
+                server.Requests.Contains("bus/remove 42"),
                 TimeSpan.FromSeconds(5)),
                 "The recreated device and bus were not rolled back after disposal won the race.");
 
@@ -835,7 +1272,9 @@ namespace DS4WindowsTests
             private readonly ConcurrentQueue<Exception> errors = new();
             private readonly Task acceptLoop;
             private readonly byte[] key;
-            private readonly ConcurrentDictionary<uint, string> devices =
+            private readonly ConcurrentDictionary<uint, byte> buses =
+                new();
+            private readonly ConcurrentDictionary<uint, TestDevice> devices =
                 new();
             private readonly ManualResetEventSlim blockedAddEntered =
                 new(false);
@@ -845,8 +1284,10 @@ namespace DS4WindowsTests
             private int activeHandlers;
             private int nextBusId = 41;
             private int nextDeviceId = 6;
+            private int brokerEpoch = 1;
             private int failNextAdd;
             private int blockNextAdd;
+            private int failNextBusList;
             private string pingResponse = NativePing;
             private volatile bool disposed;
 
@@ -864,6 +1305,17 @@ namespace DS4WindowsTests
 
             internal int Port { get; }
 
+            internal ViiperNativeBrokerInstance BrokerInstance
+            {
+                get
+                {
+                    int epoch = Volatile.Read(ref brokerEpoch);
+                    return new ViiperNativeBrokerInstance(
+                        checked((uint)(1000 + epoch)),
+                        checked(100000L + epoch));
+                }
+            }
+
             internal string PingResponse
             {
                 set => Volatile.Write(ref pingResponse, value);
@@ -874,6 +1326,35 @@ namespace DS4WindowsTests
             internal int BusCreateCount => Requests.Count(request =>
                 string.Equals(request, "bus/create 0",
                     StringComparison.Ordinal));
+
+            internal bool HasTopology(uint busId, string devId) =>
+                devices.TryGetValue(busId, out TestDevice device) &&
+                string.Equals(device.DevId, devId,
+                    StringComparison.Ordinal);
+
+            internal void SimulateBrokerRestart()
+            {
+                Interlocked.Increment(ref brokerEpoch);
+                devices.Clear();
+                buses.Clear();
+                Interlocked.Exchange(ref nextBusId, 41);
+                Interlocked.Exchange(ref nextDeviceId, 6);
+            }
+
+            internal void ReplaceDeviceTopology(string type,
+                ushort? idProduct)
+            {
+                foreach (KeyValuePair<uint, TestDevice> entry in devices)
+                {
+                    devices[entry.Key] = new TestDevice(entry.Value.DevId,
+                        type, idProduct);
+                }
+            }
+
+            internal void FailOneBusList()
+            {
+                Interlocked.Exchange(ref failNextBusList, 1);
+            }
 
             internal void FailOneDeviceAdd()
             {
@@ -1047,8 +1528,8 @@ namespace DS4WindowsTests
                     string.Equals(parts[0], "bus",
                         StringComparison.Ordinal) &&
                     uint.TryParse(parts[1], out uint busId) &&
-                    devices.TryGetValue(busId, out string devId) &&
-                    string.Equals(parts[2], devId,
+                    devices.TryGetValue(busId, out TestDevice device) &&
+                    string.Equals(parts[2], device.DevId,
                         StringComparison.Ordinal);
             }
 
@@ -1064,11 +1545,24 @@ namespace DS4WindowsTests
                     StringComparison.Ordinal))
                 {
                     int busId = Interlocked.Increment(ref nextBusId);
+                    buses[(uint)busId] = 0;
                     return $"{{\"busId\":{busId}}}";
                 }
 
+                if (string.Equals(request, "bus/list",
+                    StringComparison.Ordinal))
+                {
+                    if (Interlocked.Exchange(ref failNextBusList, 0) == 1)
+                    {
+                        return "{\"status\":503,\"title\":\"Unavailable\",\"detail\":\"injected topology probe failure\"}";
+                    }
+                    string ids = string.Join(",", buses.Keys.OrderBy(
+                        busId => busId));
+                    return $"{{\"buses\":[{ids}]}}";
+                }
+
                 if (TryParseBusRoute(request, "/add ", out uint addBus,
-                        out _))
+                        out string addPayload))
                 {
                     if (Interlocked.Exchange(ref failNextAdd, 0) == 1)
                     {
@@ -1087,23 +1581,44 @@ namespace DS4WindowsTests
 
                     string devId = Interlocked.Increment(
                         ref nextDeviceId).ToString();
-                    devices[addBus] = devId;
+                    using JsonDocument document = JsonDocument.Parse(
+                        addPayload);
+                    string type = document.RootElement.GetProperty("type")
+                        .GetString();
+                    ushort? idProduct = document.RootElement.TryGetProperty(
+                            "idProduct", out JsonElement product)
+                        ? product.GetUInt16()
+                        : null;
+                    devices[addBus] = new TestDevice(devId, type,
+                        idProduct);
                     return $"{{\"devId\":\"{devId}\"}}";
                 }
 
                 if (TryParseBusRoute(request, "/list", out uint listBus,
                         out _))
                 {
-                    return devices.TryGetValue(listBus, out string devId)
-                        ? $"{{\"devices\":[{{\"devId\":\"{devId}\",\"deviceSpecific\":{{\"microphoneInterfaceActive\":true}}}}]}}"
-                        : "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"bus not found\"}";
+                    if (!buses.ContainsKey(listBus))
+                    {
+                        return "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"bus not found\"}";
+                    }
+                    if (!devices.TryGetValue(listBus,
+                            out TestDevice device))
+                    {
+                        return "{\"devices\":[]}";
+                    }
+
+                    string pid = device.IdProduct.HasValue
+                        ? $"0x{device.IdProduct.Value:x4}"
+                        : "0x0000";
+                    return $"{{\"devices\":[{{\"devId\":\"{device.DevId}\",\"type\":\"{device.Type}\",\"pid\":\"{pid}\",\"deviceSpecific\":{{\"microphoneInterfaceActive\":true}}}}]}}";
                 }
 
                 if (TryParseBusRoute(request, "/remove ",
                         out uint removeBus, out string removeDevice))
                 {
-                    if (devices.TryGetValue(removeBus, out string current) &&
-                        string.Equals(current, removeDevice,
+                    if (devices.TryGetValue(removeBus,
+                            out TestDevice current) &&
+                        string.Equals(current.DevId, removeDevice,
                             StringComparison.Ordinal))
                     {
                         devices.TryRemove(removeBus, out _);
@@ -1118,6 +1633,7 @@ namespace DS4WindowsTests
                         out uint removedBus))
                 {
                     devices.TryRemove(removedBus, out _);
+                    buses.TryRemove(removedBus, out _);
                     return string.Empty;
                 }
 
@@ -1146,6 +1662,23 @@ namespace DS4WindowsTests
 
                 remainder = request[(marker + routeMarker.Length)..];
                 return true;
+            }
+
+            private sealed class TestDevice
+            {
+                internal TestDevice(string devId, string type,
+                    ushort? idProduct)
+                {
+                    DevId = devId;
+                    Type = type;
+                    IdProduct = idProduct;
+                }
+
+                internal string DevId { get; }
+
+                internal string Type { get; }
+
+                internal ushort? IdProduct { get; }
             }
 
             private void VerifyClientProof(byte[] clientNonce,

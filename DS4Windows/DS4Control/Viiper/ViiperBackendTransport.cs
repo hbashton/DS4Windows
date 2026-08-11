@@ -26,6 +26,53 @@ namespace DS4Windows
     }
 
     /// <summary>
+    /// Identifies one concrete Windows service process. VIIPER reuses bus and
+    /// device numbers from 1 after a broker restart, so those API identifiers
+    /// alone cannot distinguish a retained reconnect-grace child from a new
+    /// child created by another recovering output.
+    /// </summary>
+    internal readonly struct ViiperNativeBrokerInstance :
+        IEquatable<ViiperNativeBrokerInstance>
+    {
+        internal ViiperNativeBrokerInstance(uint processId,
+            long processCreationFileTime)
+        {
+            if (processId == 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(processId));
+            }
+            if (processCreationFileTime <= 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(processCreationFileTime));
+            }
+
+            ProcessId = processId;
+            ProcessCreationFileTime = processCreationFileTime;
+        }
+
+        internal uint ProcessId { get; }
+
+        internal long ProcessCreationFileTime { get; }
+
+        public bool Equals(ViiperNativeBrokerInstance other) =>
+            ProcessId == other.ProcessId &&
+            ProcessCreationFileTime == other.ProcessCreationFileTime;
+
+        public override bool Equals(object obj) =>
+            obj is ViiperNativeBrokerInstance other && Equals(other);
+
+        public override int GetHashCode() =>
+            HashCode.Combine(ProcessId, ProcessCreationFileTime);
+
+        public static bool operator ==(ViiperNativeBrokerInstance left,
+            ViiperNativeBrokerInstance right) => left.Equals(right);
+
+        public static bool operator !=(ViiperNativeBrokerInstance left,
+            ViiperNativeBrokerInstance right) => !left.Equals(right);
+    }
+
+    /// <summary>
     /// The live API transport selected by a successful ping. The credential is
     /// connection state rather than virtual-device identity and is therefore
     /// deliberately kept out of ViiperVirtualDeviceIdentity.
@@ -33,12 +80,14 @@ namespace DS4Windows
     internal sealed class ViiperBackendSelection
     {
         internal ViiperBackendSelection(ViiperBackendMode mode,
-            string credential = null)
+            string credential = null,
+            ViiperNativeBrokerInstance? nativeBrokerInstance = null)
         {
             Mode = mode;
             Credential = string.IsNullOrWhiteSpace(credential)
                 ? null
                 : credential;
+            NativeBrokerInstance = nativeBrokerInstance;
         }
 
         internal ViiperBackendMode Mode { get; }
@@ -46,6 +95,8 @@ namespace DS4Windows
         internal bool IsNative => Mode == ViiperBackendMode.NativeUde;
 
         internal bool UsesAuthentication => Credential != null;
+
+        internal ViiperNativeBrokerInstance? NativeBrokerInstance { get; }
 
         // Never include this value in diagnostics or ToString output.
         internal string Credential { get; }
@@ -68,6 +119,7 @@ namespace DS4Windows
     {
         internal const string NativeTransport = "native-ude";
         internal const string LegacyTransport = "usbip";
+        internal const string NativeServerVersion = "0.1.0";
         internal const ushort NativeAbiMajor = 1;
         internal const ushort NativeAbiMinor = 8;
         internal const uint NativeCapabilities = 0x0d;
@@ -150,7 +202,9 @@ namespace DS4Windows
             }
 
             ViiperNativeUdeInfo native = ping.NativeUde;
-            if (ping.Ready != true || native == null ||
+            if (!string.Equals(ping.Version, NativeServerVersion,
+                    StringComparison.Ordinal) ||
+                ping.Ready != true || native == null ||
                 native.AbiMajor != NativeAbiMajor ||
                 native.AbiMinor != NativeAbiMinor ||
                 native.Capabilities != NativeCapabilities ||
@@ -165,6 +219,12 @@ namespace DS4Windows
             {
                 throw new ViiperNativeContractException(
                     "VIIPER native UDE health proof does not match the required ABI 1.8 driver contract.");
+            }
+
+            if (string.IsNullOrWhiteSpace(credential))
+            {
+                throw new ViiperNativeContractException(
+                    "VIIPER native UDE health must be authenticated.");
             }
 
             return new ViiperBackendSelection(ViiperBackendMode.NativeUde,

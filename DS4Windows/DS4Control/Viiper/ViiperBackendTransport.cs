@@ -124,7 +124,7 @@ namespace DS4Windows
         internal const ushort NativeAbiMajor = 1;
         internal const ushort NativeAbiMinor = 8;
         internal const uint NativeCapabilities = 0x0d;
-        internal const string NativeDriverPackageVersion = "0.1.0.2";
+        internal const string NativeDriverPackageVersion = "0.1.0.3";
         internal const uint NativeMaxDevices = 32;
         internal const uint NativeMaxDescriptorBytes = 262144;
         internal const uint NativeMaxTransferBytes = 1048576;

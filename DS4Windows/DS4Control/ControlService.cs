@@ -1898,6 +1898,7 @@ namespace DS4Windows
                     StartupDiag("UDP change-status start end");
                 }
 
+                bool backendStartupReady = true;
                 try
                 {
                     loopControllers = true;
@@ -1909,10 +1910,11 @@ namespace DS4Windows
                     // USB/IP output imported. Remove those ports before HID
                     // discovery or DS4Windows will ingest its own VIIPER DS4,
                     // create a second output/UAC endpoint, and recurse.
-                    ViiperBackendSelection startupBackend =
-                        new ViiperClient(ViiperSetupManager.ApiHost,
-                            ViiperSetupManager.ApiPort).ProbeBackend();
-                    ViiperBackendPolicy.RunUsbipOnly(startupBackend.Mode,
+                    backendStartupReady = false;
+                    backendStartupReady = ViiperStartupDiscovery.
+                        TryPrepareBackendAndDiscover(
+                        () => new ViiperClient(ViiperSetupManager.ApiHost,
+                            ViiperSetupManager.ApiPort).ProbeBackend(),
                         () =>
                         {
                             ViiperUsbipPortManager.
@@ -1922,72 +1924,90 @@ namespace DS4Windows
                             // interface can remain enumerable for one final
                             // discovery pass.
                             Thread.Sleep(250);
+                        },
+                        () =>
+                        {
+                            StartupDiag(
+                                "DS4Devices.findControllers dispatch begin");
+                            eventDispatcher.Invoke(() =>
+                            {
+                                DS4Devices.findControllers();
+                            });
+                            StartupDiag(
+                                "DS4Devices.findControllers dispatch end");
+                        },
+                        ex =>
+                        {
+                            StartupDiag(
+                                $"VIIPER startup probe failed before physical discovery {ex.GetType().Name}: {ex.Message}");
+                            LogDebug(ex.Message, true);
+                            AppLogger.LogToTray(ex.Message, true);
                         });
 
-                    StartupDiag("DS4Devices.findControllers dispatch begin");
-                    eventDispatcher.Invoke(() =>
+                    if (backendStartupReady)
                     {
-                        DS4Devices.findControllers();
-                    });
-                    StartupDiag("DS4Devices.findControllers dispatch end");
-
-                    IEnumerable<DS4Device> devices = DS4Devices.getDS4Controllers();
-                    int numControllers = devices.Count();
-                    StartupDiag($"DS4Devices.getDS4Controllers count={numControllers}");
-                    activeControllers = numControllers;
-                    DS4LightBar.defaultLight = false;
-                    int i = 0;
-                    InputDevices.JoyConDevice tempPrimaryJoyDev = null;
-                    for (var devEnum = devices.GetEnumerator();
-                        devEnum.MoveNext() && loopControllers; i++)
-                    {
-                        DS4Device device = devEnum.Current;
-                        StartupDiag($"Prepare controller loop index={i} type={device.DeviceType} display={device.DisplayName} mac={device.MacAddress} conn={device.ConnectionType} synced={device.isSynced()} primary={device.PrimaryDevice}");
-
-                        StartupDiag($"BeginPrepareConnectedInputController begin index={i}");
-                        BeginPrepareConnectedInputController(device, showlog: true);
-                        StartupDiag($"BeginPrepareConnectedInputController end index={i}");
-
-                        if (deviceOptions.JoyConDeviceOpts.LinkedMode == JoyConDeviceOptions.LinkMode.Joined)
+                        IEnumerable<DS4Device> devices =
+                            DS4Devices.getDS4Controllers();
+                        int numControllers = devices.Count();
+                        StartupDiag(
+                            $"DS4Devices.getDS4Controllers count={numControllers}");
+                        activeControllers = numControllers;
+                        DS4LightBar.defaultLight = false;
+                        int i = 0;
+                        InputDevices.JoyConDevice tempPrimaryJoyDev = null;
+                        for (var devEnum = devices.GetEnumerator();
+                            devEnum.MoveNext() && loopControllers; i++)
                         {
-                            if ((device.DeviceType == InputDevices.InputDeviceType.JoyConL ||
-                                device.DeviceType == InputDevices.InputDeviceType.JoyConR) && device.PerformStateMerge)
+                            DS4Device device = devEnum.Current;
+                            StartupDiag($"Prepare controller loop index={i} type={device.DeviceType} display={device.DisplayName} mac={device.MacAddress} conn={device.ConnectionType} synced={device.isSynced()} primary={device.PrimaryDevice}");
+
+                            StartupDiag($"BeginPrepareConnectedInputController begin index={i}");
+                            BeginPrepareConnectedInputController(device,
+                                showlog: true);
+                            StartupDiag($"BeginPrepareConnectedInputController end index={i}");
+
+                            if (deviceOptions.JoyConDeviceOpts.LinkedMode == JoyConDeviceOptions.LinkMode.Joined)
                             {
-                                if (tempPrimaryJoyDev == null)
+                                if ((device.DeviceType == InputDevices.InputDeviceType.JoyConL ||
+                                    device.DeviceType == InputDevices.InputDeviceType.JoyConR) && device.PerformStateMerge)
                                 {
-                                    tempPrimaryJoyDev = device as InputDevices.JoyConDevice;
-                                }
-                                else
-                                {
-                                    InputDevices.JoyConDevice currentJoyDev = device as InputDevices.JoyConDevice;
-                                    tempPrimaryJoyDev.JointDevice = currentJoyDev;
-                                    currentJoyDev.JointDevice = tempPrimaryJoyDev;
-
-                                    tempPrimaryJoyDev.JointState = currentJoyDev.JointState;
-
-                                    InputDevices.JoyConDevice parentJoy = tempPrimaryJoyDev;
-                                    tempPrimaryJoyDev.Removal += (sender, args) =>
+                                    if (tempPrimaryJoyDev == null)
                                     {
-                                        currentJoyDev.JointDevice = null;
-                                    };
-                                    currentJoyDev.Removal += (sender, args) =>
+                                        tempPrimaryJoyDev = device as InputDevices.JoyConDevice;
+                                    }
+                                    else
                                     {
-                                        parentJoy.JointDevice = null;
-                                    };
+                                        InputDevices.JoyConDevice currentJoyDev = device as InputDevices.JoyConDevice;
+                                        tempPrimaryJoyDev.JointDevice = currentJoyDev;
+                                        currentJoyDev.JointDevice = tempPrimaryJoyDev;
 
-                                    tempPrimaryJoyDev = null;
+                                        tempPrimaryJoyDev.JointState = currentJoyDev.JointState;
+
+                                        InputDevices.JoyConDevice parentJoy = tempPrimaryJoyDev;
+                                        tempPrimaryJoyDev.Removal += (sender, args) =>
+                                        {
+                                            currentJoyDev.JointDevice = null;
+                                        };
+                                        currentJoyDev.Removal += (sender, args) =>
+                                        {
+                                            parentJoy.JointDevice = null;
+                                        };
+
+                                        tempPrimaryJoyDev = null;
+                                    }
                                 }
                             }
+
+                            DS4Controllers[i] = device;
+                            device.DeviceSlotNumber = i;
+                            StartupDiag($"PrepareConnectedInputControllerSettingEvents begin index={i}");
+                            PrepareConnectedInputControllerSettingEvents(
+                                numControllers, device, index: i);
+                            StartupDiag($"PrepareConnectedInputControllerSettingEvents end index={i}");
+
+                            if (i >= CURRENT_DS4_CONTROLLER_LIMIT) // out of Xinput devices!
+                                break;
                         }
-
-                        DS4Controllers[i] = device;
-                        device.DeviceSlotNumber = i;
-                        StartupDiag($"PrepareConnectedInputControllerSettingEvents begin index={i}");
-                        PrepareConnectedInputControllerSettingEvents(numControllers, device, index: i);
-                        StartupDiag($"PrepareConnectedInputControllerSettingEvents end index={i}");
-
-                        if (i >= CURRENT_DS4_CONTROLLER_LIMIT) // out of Xinput devices!
-                            break;
                     }
                 }
                 catch (Exception e)
@@ -1995,6 +2015,16 @@ namespace DS4Windows
                     StartupDiag($"ControlService.Start managed exception {e.GetType().Name}: {e.Message}");
                     LogDebug(e.Message, true);
                     AppLogger.LogToTray(e.Message, true);
+                }
+
+                if (!backendStartupReady)
+                {
+                    loopControllers = false;
+                    inServiceTask = false;
+                    runHotPlug = false;
+                    StartupDiag(
+                        "ControlService.Start rejected because the VIIPER backend probe failed after physical discovery");
+                    return false;
                 }
 
                 StartupDiag("ControlService.Start setting running=true");

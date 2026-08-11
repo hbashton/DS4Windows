@@ -4907,12 +4907,22 @@ namespace DS4Windows
 
         private readonly string host;
         private readonly int port;
+        private readonly Func<IReadOnlyList<string>> credentialProvider;
         private ViiperBackendSelection lastBackendSelection;
 
         public ViiperClient(string host, int port)
+            : this(host, port,
+                ViiperCredentialProvider.ReadCandidateCredentials)
+        {
+        }
+
+        internal ViiperClient(string host, int port,
+            Func<IReadOnlyList<string>> credentialProvider)
         {
             this.host = host;
             this.port = port;
+            this.credentialProvider = credentialProvider ??
+                throw new ArgumentNullException(nameof(credentialProvider));
         }
 
         public ViiperDeviceStream CreateDeviceAndOpenStream(ViiperVirtualDeviceType deviceType)
@@ -5205,8 +5215,8 @@ namespace DS4Windows
             }
 
             Exception authenticatedError = null;
-            foreach (string credential in
-                ViiperCredentialProvider.ReadCandidateCredentials())
+            foreach (string credential in credentialProvider() ??
+                Array.Empty<string>())
             {
                 try
                 {

@@ -235,6 +235,50 @@ namespace DS4Windows
         }
     }
 
+    internal static class ViiperStartupDiscovery
+    {
+        /// <summary>
+        /// Backend preparation must precede HID enumeration so a stale
+        /// DS4Windows-owned USB/IP controller cannot be ingested as physical
+        /// input. Discovery itself is unconditional: an unavailable native
+        /// broker is a service-start failure, not a reason to hide attached
+        /// physical controllers from the next recovery attempt.
+        /// </summary>
+        internal static bool TryPrepareBackendAndDiscover(
+            Func<ViiperBackendSelection> probeBackend,
+            Action prepareLegacyUsbip, Action discoverControllers,
+            Action<Exception> reportFailure = null)
+        {
+            ArgumentNullException.ThrowIfNull(probeBackend);
+            ArgumentNullException.ThrowIfNull(discoverControllers);
+
+            bool backendReady = false;
+            try
+            {
+                ViiperBackendSelection backend = probeBackend();
+                if (backend == null)
+                {
+                    throw new IOException(
+                        "VIIPER returned no backend selection.");
+                }
+
+                ViiperBackendPolicy.RunUsbipOnly(backend.Mode,
+                    prepareLegacyUsbip);
+                backendReady = true;
+            }
+            catch (Exception ex)
+            {
+                reportFailure?.Invoke(ex);
+            }
+            finally
+            {
+                discoverControllers();
+            }
+
+            return backendReady;
+        }
+    }
+
     internal static class ViiperCredentialProvider
     {
         private const string CredentialFileName = "viiper.key.txt";
@@ -474,7 +518,10 @@ namespace DS4Windows
 
             if (receiveOffset >= receivePlaintext.Length)
             {
-                ReadPacket();
+                if (!ReadPacket())
+                {
+                    return 0;
+                }
             }
 
             int available = receivePlaintext.Length - receiveOffset;
@@ -521,10 +568,13 @@ namespace DS4Windows
             }
         }
 
-        private void ReadPacket()
+        private bool ReadPacket()
         {
             byte[] header = new byte[sizeof(uint)];
-            ReadExactly(inner, header, 0, header.Length);
+            if (!TryReadPacketHeader(inner, header))
+            {
+                return false;
+            }
             uint rawLength = BinaryPrimitives.ReadUInt32BigEndian(header);
             if (rawLength < NonceLength + TagLength ||
                 rawLength > MaximumPacketLength)
@@ -557,6 +607,35 @@ namespace DS4Windows
 
             receivePlaintext = plaintext;
             receiveOffset = 0;
+            return true;
+        }
+
+        private static bool TryReadPacketHeader(Stream stream,
+            byte[] header)
+        {
+            int total = 0;
+            while (total < header.Length)
+            {
+                int read = stream.Read(header, total,
+                    header.Length - total);
+                if (read <= 0)
+                {
+                    if (total == 0)
+                    {
+                        // VIIPER one-shot API handlers write one encrypted
+                        // response packet and then close the TCP connection.
+                        // EOF before the next header is therefore the normal
+                        // packet-boundary terminator consumed by ReadToEnd.
+                        return false;
+                    }
+
+                    throw new IOException(
+                        "VIIPER encrypted connection closed during a packet header.");
+                }
+                total += read;
+            }
+
+            return true;
         }
 
         private static void ReadExactly(Stream stream, byte[] buffer,

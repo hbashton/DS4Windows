@@ -1,6 +1,8 @@
 using DS4Windows;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
+using System.Net;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -148,6 +150,54 @@ namespace DS4WindowsTests
                     () => invoked.Add(operation));
             }
             CollectionAssert.AreEquivalent(operations, invoked.ToArray());
+        }
+
+        [TestMethod]
+        public void FailedBackendProbeStillRunsPhysicalDiscoveryAndCannotStart()
+        {
+            var events = new List<string>();
+
+            bool ready = ViiperStartupDiscovery.
+                TryPrepareBackendAndDiscover(
+                    () =>
+                    {
+                        events.Add("probe");
+                        throw new ViiperNativeContractException(
+                            "native health proof failed");
+                    },
+                    () => events.Add("usbip"),
+                    () => events.Add("discover"),
+                    _ => events.Add("failure"));
+
+            Assert.IsFalse(ready,
+                "A failed native proof must not produce a running service.");
+            CollectionAssert.AreEqual(new[]
+            {
+                "probe", "failure", "discover",
+            }, events);
+        }
+
+        [TestMethod]
+        public void LegacyBackendPreparationRemainsBeforePhysicalDiscovery()
+        {
+            var events = new List<string>();
+
+            bool ready = ViiperStartupDiscovery.
+                TryPrepareBackendAndDiscover(
+                    () =>
+                    {
+                        events.Add("probe");
+                        return new ViiperBackendSelection(
+                            ViiperBackendMode.LegacyUsbip);
+                    },
+                    () => events.Add("usbip"),
+                    () => events.Add("discover"));
+
+            Assert.IsTrue(ready);
+            CollectionAssert.AreEqual(new[]
+            {
+                "probe", "usbip", "discover",
+            }, events);
         }
 
         [DataTestMethod]
@@ -329,6 +379,121 @@ namespace DS4WindowsTests
             CollectionAssert.AreEqual(plaintext, actual);
         }
 
+        [TestMethod]
+        public void EncryptedReadReturnsZeroAtCleanPacketBoundaryEof()
+        {
+            byte[] key = Enumerable.Range(0, 32)
+                .Select(index => (byte)(index * 5 + 9)).ToArray();
+            byte[] plaintext = Encoding.UTF8.GetBytes(
+                "{\"server\":\"VIIPER\"}\n");
+            byte[] framed = BuildEncryptedPacket(key, plaintext);
+            using var inner = new MemoryStream(framed);
+            using var authenticated = new ViiperAuthenticatedStream(inner,
+                key);
+            byte[] actual = new byte[plaintext.Length];
+
+            Assert.AreEqual(plaintext.Length,
+                authenticated.Read(actual, 0, actual.Length));
+            Assert.AreEqual(0, authenticated.Read(new byte[1], 0, 1),
+                "VIIPER closes each one-shot API connection after its complete encrypted response packet.");
+            CollectionAssert.AreEqual(plaintext, actual);
+        }
+
+        [DataTestMethod]
+        [DataRow(1)]
+        [DataRow(2)]
+        [DataRow(3)]
+        public void EncryptedReadRejectsPartialPacketHeaderEof(int byteCount)
+        {
+            byte[] key = Enumerable.Range(0, 32)
+                .Select(index => (byte)(index + 1)).ToArray();
+            using var inner = new MemoryStream(
+                new byte[] { 0, 0, 0, 28 }.Take(byteCount).ToArray());
+            using var authenticated = new ViiperAuthenticatedStream(inner,
+                key);
+
+            StringAssert.Contains(
+                Assert.ThrowsException<IOException>(() =>
+                    authenticated.Read(new byte[1], 0, 1)).Message,
+                "packet header");
+        }
+
+        [TestMethod]
+        public void EncryptedReadRejectsPartialPacketBodyEof()
+        {
+            byte[] key = Enumerable.Range(0, 32)
+                .Select(index => (byte)(index + 3)).ToArray();
+            byte[] truncated = new byte[4 + 27];
+            BinaryPrimitives.WriteUInt32BigEndian(truncated, 28);
+            using var inner = new MemoryStream(truncated);
+            using var authenticated = new ViiperAuthenticatedStream(inner,
+                key);
+
+            StringAssert.Contains(
+                Assert.ThrowsException<IOException>(() =>
+                    authenticated.Read(new byte[1], 0, 1)).Message,
+                "closed early");
+        }
+
+        [TestMethod]
+        public void AuthenticatedNativePingCreateListAndRemoveUseCloseDelimitedResponses()
+        {
+            const string password = "NativeCredential123";
+            using var server = new AuthenticatedViiperProtocolServer(password);
+            var client = new ViiperClient("127.0.0.1", server.Port,
+                () => new[] { password });
+            ViiperDeviceStream device = null;
+
+            try
+            {
+                device = client.CreateDeviceAndOpenStream("test-device");
+                Assert.AreEqual(ViiperBackendMode.NativeUde,
+                    device.BackendMode);
+                Assert.AreEqual((uint)42, device.BusId);
+                Assert.AreEqual("7", device.DevId);
+                Assert.IsTrue(client.GetMicrophoneInterfaceActive(
+                    device.BusId, device.DevId));
+            }
+            finally
+            {
+                device?.Dispose();
+            }
+
+            string[] requests = server.WaitForAuthenticatedRequests(7,
+                TimeSpan.FromSeconds(5));
+            CollectionAssert.AreEquivalent(new[]
+            {
+                "ping",
+                "bus/create 0",
+                "bus/42/add {\"type\":\"test-device\"}",
+                "bus/42/7",
+                "bus/42/list",
+                "bus/42/remove 7",
+                "bus/remove 42",
+            }, requests);
+            server.WaitForIdle(TimeSpan.FromSeconds(5));
+            server.AssertNoErrors();
+        }
+
+        private static byte[] BuildEncryptedPacket(byte[] key,
+            byte[] plaintext)
+        {
+            byte[] nonce = new byte[12];
+            byte[] ciphertext = new byte[plaintext.Length];
+            byte[] tag = new byte[16];
+            using (var cipher = new ChaCha20Poly1305(key))
+            {
+                cipher.Encrypt(nonce, plaintext, ciphertext, tag);
+            }
+
+            byte[] packet = nonce.Concat(ciphertext).Concat(tag).ToArray();
+            byte[] framed = new byte[4 + packet.Length];
+            BinaryPrimitives.WriteUInt32BigEndian(framed,
+                (uint)packet.Length);
+            Buffer.BlockCopy(packet, 0, framed, 4, packet.Length);
+            return framed;
+        }
+
         private sealed class ScriptedDuplexStream : Stream
         {
             private readonly MemoryStream readable;
@@ -368,6 +533,288 @@ namespace DS4WindowsTests
                     written.Dispose();
                 }
                 base.Dispose(disposing);
+            }
+        }
+
+        private sealed class AuthenticatedViiperProtocolServer : IDisposable
+        {
+            private const string NativePing = "{\"server\":\"VIIPER\",\"version\":\"0.1.0\",\"transport\":\"native-ude\",\"ready\":true,\"nativeUde\":{\"abiMajor\":1,\"abiMinor\":8,\"capabilities\":13,\"expectedDriverPackageVersion\":\"0.1.0.0\",\"maxDevices\":32,\"maxDescriptorBytes\":262144,\"maxTransferBytes\":1048576,\"maxIsoPackets\":1024,\"maxPendingOperations\":4096}}";
+            private readonly TcpListener listener;
+            private readonly CancellationTokenSource shutdown = new();
+            private readonly ConcurrentDictionary<int, TcpClient> clients =
+                new();
+            private readonly ConcurrentQueue<string> requests = new();
+            private readonly ConcurrentQueue<Exception> errors = new();
+            private readonly Task acceptLoop;
+            private readonly byte[] key;
+            private int nextClientId;
+            private int activeHandlers;
+            private volatile bool disposed;
+
+            internal AuthenticatedViiperProtocolServer(string password)
+            {
+                key = Rfc2898DeriveBytes.Pbkdf2(
+                    Encoding.UTF8.GetBytes(password),
+                    Encoding.ASCII.GetBytes("VIIPER-Key-v1"), 100000,
+                    HashAlgorithmName.SHA256, 32);
+                listener = new TcpListener(IPAddress.Loopback, 0);
+                listener.Start();
+                Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+                acceptLoop = AcceptLoopAsync();
+            }
+
+            internal int Port { get; }
+
+            internal string[] WaitForAuthenticatedRequests(int count,
+                TimeSpan timeout)
+            {
+                bool completed = SpinWait.SpinUntil(
+                    () => requests.Count >= count || !errors.IsEmpty,
+                    timeout);
+                Assert.IsTrue(completed,
+                    $"Timed out waiting for {count} authenticated VIIPER requests; received {requests.Count}.");
+                AssertNoErrors();
+                return requests.ToArray();
+            }
+
+            internal void WaitForIdle(TimeSpan timeout)
+            {
+                Assert.IsTrue(SpinWait.SpinUntil(
+                    () => Volatile.Read(ref activeHandlers) == 0,
+                    timeout),
+                    $"VIIPER protocol server still has {Volatile.Read(ref activeHandlers)} active handlers.");
+            }
+
+            internal void AssertNoErrors()
+            {
+                if (errors.TryDequeue(out Exception error))
+                {
+                    Assert.Fail(error.ToString());
+                }
+            }
+
+            private async Task AcceptLoopAsync()
+            {
+                try
+                {
+                    while (!shutdown.IsCancellationRequested)
+                    {
+                        TcpClient client = await listener.
+                            AcceptTcpClientAsync(shutdown.Token);
+                        int clientId = Interlocked.Increment(
+                            ref nextClientId);
+                        clients[clientId] = client;
+                        Interlocked.Increment(ref activeHandlers);
+                        _ = Task.Run(() => HandleClient(clientId, client));
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                }
+                catch (ObjectDisposedException) when (
+                    shutdown.IsCancellationRequested)
+                {
+                }
+                catch (SocketException) when (shutdown.IsCancellationRequested)
+                {
+                }
+                catch (Exception ex)
+                {
+                    errors.Enqueue(ex);
+                }
+            }
+
+            private void HandleClient(int clientId, TcpClient client)
+            {
+                try
+                {
+                    using (client)
+                    {
+                        client.NoDelay = true;
+                        NetworkStream network = client.GetStream();
+                        byte[] prefix = new byte[5];
+                        ReadExactly(network, prefix, 0, prefix.Length);
+                        if (!prefix.SequenceEqual(
+                            Encoding.ASCII.GetBytes("eVI1\0")))
+                        {
+                            ReadUnauthenticatedRequest(network, prefix);
+                            byte[] unauthorized = Encoding.UTF8.GetBytes(
+                                "{\"status\":401,\"title\":\"Unauthorized\",\"detail\":\"authentication required\"}\n");
+                            network.Write(unauthorized, 0,
+                                unauthorized.Length);
+                            return;
+                        }
+
+                        byte[] clientNonce = new byte[32];
+                        byte[] clientProof = new byte[32];
+                        ReadExactly(network, clientNonce, 0,
+                            clientNonce.Length);
+                        ReadExactly(network, clientProof, 0,
+                            clientProof.Length);
+                        VerifyClientProof(clientNonce, clientProof);
+
+                        byte[] serverNonce = RandomNumberGenerator.
+                            GetBytes(32);
+                        byte[] handshakeResponse = Encoding.ASCII.
+                            GetBytes("OK\0").Concat(serverNonce).ToArray();
+                        network.Write(handshakeResponse, 0,
+                            handshakeResponse.Length);
+
+                        byte[] sessionInput = key.Concat(serverNonce)
+                            .Concat(clientNonce)
+                            .Concat(Encoding.ASCII.GetBytes(
+                                "VIIPER-Session-v1")).ToArray();
+                        byte[] sessionKey = SHA256.HashData(sessionInput);
+                        using var authenticated =
+                            new ViiperAuthenticatedStream(network,
+                                sessionKey);
+                        string request = ReadNullTerminated(authenticated);
+                        requests.Enqueue(request);
+
+                        if (string.Equals(request, "bus/42/7",
+                            StringComparison.Ordinal))
+                        {
+                            // Device streams remain open. The client closes
+                            // this connection before issuing final API cleanup.
+                            byte[] drain = new byte[64];
+                            while (authenticated.Read(drain, 0,
+                                drain.Length) > 0)
+                            {
+                            }
+                            return;
+                        }
+
+                        string response = request switch
+                        {
+                            "ping" => NativePing,
+                            "bus/create 0" => "{\"busId\":42}",
+                            "bus/42/add {\"type\":\"test-device\"}" =>
+                                "{\"devId\":\"7\"}",
+                            "bus/42/list" =>
+                                "{\"devices\":[{\"devId\":\"7\",\"deviceSpecific\":{\"microphoneInterfaceActive\":true}}]}",
+                            "bus/42/remove 7" => string.Empty,
+                            "bus/remove 42" => string.Empty,
+                            _ =>
+                                "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"unexpected test route\"}",
+                        };
+                        byte[] responseBytes = Encoding.UTF8.GetBytes(
+                            response + "\n");
+                        authenticated.Write(responseBytes, 0,
+                            responseBytes.Length);
+                        authenticated.Flush();
+                        // Match VIIPER handleConn: one response packet is
+                        // followed immediately by a connection close.
+                    }
+                }
+                catch (Exception ex) when (disposed &&
+                    (ex is IOException || ex is ObjectDisposedException ||
+                     ex is SocketException))
+                {
+                }
+                catch (Exception ex)
+                {
+                    errors.Enqueue(ex);
+                }
+                finally
+                {
+                    clients.TryRemove(clientId, out _);
+                    Interlocked.Decrement(ref activeHandlers);
+                }
+            }
+
+            private void VerifyClientProof(byte[] clientNonce,
+                byte[] clientProof)
+            {
+                byte[] proofInput = Encoding.ASCII.GetBytes(
+                    "VIIPER-Auth-v1").Concat(clientNonce).ToArray();
+                using var hmac = new HMACSHA256(key);
+                byte[] expected = hmac.ComputeHash(proofInput);
+                if (!CryptographicOperations.FixedTimeEquals(expected,
+                    clientProof))
+                {
+                    throw new IOException(
+                        "The test client sent an invalid VIIPER proof.");
+                }
+            }
+
+            private static void ReadUnauthenticatedRequest(Stream stream,
+                byte[] prefix)
+            {
+                if (prefix.Contains((byte)0))
+                {
+                    return;
+                }
+
+                byte[] one = new byte[1];
+                do
+                {
+                    ReadExactly(stream, one, 0, 1);
+                }
+                while (one[0] != 0);
+            }
+
+            private static string ReadNullTerminated(Stream stream)
+            {
+                using var request = new MemoryStream();
+                byte[] one = new byte[1];
+                while (true)
+                {
+                    int read = stream.Read(one, 0, 1);
+                    if (read == 0)
+                    {
+                        throw new IOException(
+                            "Authenticated VIIPER request closed before its terminator.");
+                    }
+                    if (one[0] == 0)
+                    {
+                        return Encoding.UTF8.GetString(request.ToArray());
+                    }
+                    request.WriteByte(one[0]);
+                }
+            }
+
+            private static void ReadExactly(Stream stream, byte[] buffer,
+                int offset, int count)
+            {
+                int total = 0;
+                while (total < count)
+                {
+                    int read = stream.Read(buffer, offset + total,
+                        count - total);
+                    if (read == 0)
+                    {
+                        throw new IOException(
+                            "VIIPER test connection closed early.");
+                    }
+                    total += read;
+                }
+            }
+
+            public void Dispose()
+            {
+                if (disposed)
+                {
+                    return;
+                }
+                disposed = true;
+                shutdown.Cancel();
+                listener.Stop();
+                foreach (TcpClient client in clients.Values)
+                {
+                    client.Dispose();
+                }
+                SpinWait.SpinUntil(
+                    () => Volatile.Read(ref activeHandlers) == 0,
+                    TimeSpan.FromSeconds(2));
+                try
+                {
+                    acceptLoop.GetAwaiter().GetResult();
+                }
+                catch
+                {
+                }
+                CryptographicOperations.ZeroMemory(key);
+                shutdown.Dispose();
             }
         }
     }

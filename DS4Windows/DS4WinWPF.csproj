@@ -89,7 +89,8 @@
 	     The installer consumes the sidecar instead of a hand-maintained hash. -->
 	<Target Name="GenerateViiperPackageChecksum"
 		AfterTargets="Publish"
-		BeforeTargets="GenerateManagedFileManifest">
+		BeforeTargets="GenerateManagedFileManifest"
+		Condition="'$(ViiperNativeBundleEnabled)' != 'true'">
 		<PropertyGroup>
 			<_BundledViiperName>VIIPER-0.1.0-x64.exe</_BundledViiperName>
 			<_BundledViiperPath>$(PublishDir)extras\$(_BundledViiperName)</_BundledViiperPath>
@@ -128,25 +129,25 @@
 		<Content Include="BezierCurveEditor\index.html">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</Content>
-		<Content Include="..\extras\install-viiper-backend.ps1">
+		<Content Include="..\extras\install-viiper-backend.ps1" Condition="'$(ViiperNativeBundleEnabled)' != 'true'">
 			<Link>extras\install-viiper-backend.ps1</Link>
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
 		</Content>
-		<EmbeddedResource Include="..\extras\install-viiper-backend.ps1">
+		<EmbeddedResource Include="..\extras\install-viiper-backend.ps1" Condition="'$(ViiperNativeBundleEnabled)' != 'true'">
 			<LogicalName>DS4Windows.install-viiper-backend.ps1</LogicalName>
 		</EmbeddedResource>
-		<Content Include="..\extras\VIIPER-0.1.0-x64.exe">
+		<Content Include="..\extras\VIIPER-0.1.0-x64.exe" Condition="'$(ViiperNativeBundleEnabled)' != 'true'">
 			<Link>extras\VIIPER-0.1.0-x64.exe</Link>
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
 		</Content>
-		<Content Include="..\extras\USBip-0.9.7.7-x64.exe">
+		<Content Include="..\extras\USBip-0.9.7.7-x64.exe" Condition="'$(ViiperNativeBundleEnabled)' != 'true'">
 			<Link>extras\USBip-0.9.7.7-x64.exe</Link>
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
 		</Content>
-		<Content Include="..\extras\USBip-0.9.7.7-LICENSE.txt">
+		<Content Include="..\extras\USBip-0.9.7.7-LICENSE.txt" Condition="'$(ViiperNativeBundleEnabled)' != 'true'">
 			<Link>extras\USBip-0.9.7.7-LICENSE.txt</Link>
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
@@ -581,4 +582,60 @@
 	<ItemGroup>
 		<Folder Remove="extras\" />
 	</ItemGroup>
+
+	<ItemGroup Condition="'$(ViiperNativeBundleEnabled)' == 'true'">
+		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+			<_Parameter1>ViiperNativeSourceRevision</_Parameter1>
+			<_Parameter2>$(ViiperNativeSourceRevision)</_Parameter2>
+		</AssemblyAttribute>
+		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+			<_Parameter1>ViiperNativeDriverPackageVersion</_Parameter1>
+			<_Parameter2>$(ViiperNativeDriverPackageVersion)</_Parameter2>
+		</AssemblyAttribute>
+		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+			<_Parameter1>ViiperNativeDriverBuildIdentity</_Parameter1>
+			<_Parameter2>$(ViiperNativeDriverBuildIdentity)</_Parameter2>
+		</AssemblyAttribute>
+		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+			<_Parameter1>ViiperNativeBrokerSha256</_Parameter1>
+			<_Parameter2>$(ViiperNativeBrokerSha256)</_Parameter2>
+		</AssemblyAttribute>
+		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+			<_Parameter1>ViiperNativeHelperSha256</_Parameter1>
+			<_Parameter2>$(ViiperNativeHelperSha256)</_Parameter2>
+		</AssemblyAttribute>
+		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+			<_Parameter1>ViiperNativeManifestSha256</_Parameter1>
+			<_Parameter2>$(ViiperNativeManifestSha256)</_Parameter2>
+		</AssemblyAttribute>
+		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+			<_Parameter1>ViiperNativeInfSha256</_Parameter1>
+			<_Parameter2>$(ViiperNativeInfSha256)</_Parameter2>
+		</AssemblyAttribute>
+		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+			<_Parameter1>ViiperNativeSysSha256</_Parameter1>
+			<_Parameter2>$(ViiperNativeSysSha256)</_Parameter2>
+		</AssemblyAttribute>
+		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+			<_Parameter1>ViiperNativeCatSha256</_Parameter1>
+			<_Parameter2>$(ViiperNativeCatSha256)</_Parameter2>
+		</AssemblyAttribute>
+		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+			<_Parameter1>ViiperNativeLockSha256</_Parameter1>
+			<_Parameter2>$(ViiperNativeLockSha256)</_Parameter2>
+		</AssemblyAttribute>
+	</ItemGroup>
+	<Target Name="ValidateNativeViiperPackagePins"
+			BeforeTargets="GenerateAssemblyInfo"
+			Condition="'$(ViiperNativeBundleEnabled)' == 'true'">
+		<PropertyGroup>
+			<_ViiperNativeHashPins>$(ViiperNativeDriverBuildIdentity);$(ViiperNativeBrokerSha256);$(ViiperNativeHelperSha256);$(ViiperNativeManifestSha256);$(ViiperNativeInfSha256);$(ViiperNativeSysSha256);$(ViiperNativeCatSha256);$(ViiperNativeLockSha256)</_ViiperNativeHashPins>
+		</PropertyGroup>
+		<Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(ViiperNativeSourceRevision)', '^(?:[0-9a-f]{40}|[0-9a-f]{64})$'))"
+			   Text="ViiperNativeSourceRevision must be canonical lowercase hexadecimal." />
+		<Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(ViiperNativeDriverPackageVersion)', '^\d+\.\d+\.\d+\.\d+$'))"
+			   Text="ViiperNativeDriverPackageVersion must be a four-part numeric version." />
+		<Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(_ViiperNativeHashPins)', '^[0-9a-f]{64}(?:;[0-9a-f]{64}){7}$'))"
+			   Text="Every native VIIPER identity/file/lock pin must be canonical lowercase SHA-256." />
+	</Target>
 </Project>

@@ -7,7 +7,8 @@ param(
     [string]$BundleVersion,
     [string]$OutputDirectory,
     [switch]$SkipApplicationPublish,
-    [switch]$RequireSigning
+    [switch]$RequireSigning,
+    [switch]$RequireNativeBundle
 )
 
 $ErrorActionPreference = "Stop"
@@ -130,12 +131,12 @@ if ([string]::IsNullOrWhiteSpace($DisplayVersion) -or
 }
 
 if (-not $SkipApplicationPublish) {
-    & dotnet publish (Join-Path $repoRoot "DS4Windows\DS4WinWPF.csproj") `
-        -c Release -p:Platform=x64 -r win-x64 --self-contained true `
-        -p:AssemblyVersion=$ProductVersion -p:FileVersion=$ProductVersion `
-        -p:Version=$ProductVersion -p:InformationalVersion=$DisplayVersion `
-        -o $publishPath
-    if ($LASTEXITCODE -ne 0) { throw "DS4Windows publish failed." }
+    throw (
+        "Native installer composition requires a completed source-bound " +
+        "DS4Windows publish. Build the application with the immutable native " +
+        "pins, run post-build.py --require-native-bundle, then pass " +
+        "-SkipApplicationPublish."
+    )
 }
 if (-not (Test-Path -LiteralPath (Join-Path $publishPath "DS4Windows.exe") -PathType Leaf)) {
     throw "DS4Windows publish output is incomplete: $publishPath"
@@ -158,6 +159,64 @@ if (-not [string]::Equals($publishedRelease, $DisplayVersion,
     )
 }
 
+if (-not $RequireNativeBundle) {
+    throw (
+        "The standard installer is native-VIIPER-only. Supply " +
+        "-RequireNativeBundle with the reviewed signed package."
+    )
+}
+$nativeBundle = Join-Path $publishPath `
+    "extras\viiper-native-udecx"
+$nativeLock = Join-Path $publishPath `
+    "extras\viiper-native-udecx.lock.json"
+$nativeContract = Join-Path $repoRoot `
+    "DS4Windows\DS4Control\Viiper\ViiperNativePackageContract.cs"
+& (Join-Path $env:SystemRoot `
+    "System32\WindowsPowerShell\v1.0\powershell.exe") `
+    -NoLogo -NoProfile -ExecutionPolicy Bypass `
+    -File (Join-Path $repoRoot `
+        "utils\validate-viiper-native-bundle-signatures.ps1") `
+    -BundleRoot $nativeBundle -LockPath $nativeLock `
+    -ContractPath $nativeContract
+if ($LASTEXITCODE -ne 0) {
+    throw "The production VIIPER native signed-bundle gate failed."
+}
+
+$nativeLockObject = Get-Content -LiteralPath $nativeLock -Raw |
+    ConvertFrom-Json
+$nativeFilesByPath = @{}
+foreach ($entry in @($nativeLockObject.files)) {
+    if ($nativeFilesByPath.ContainsKey([string]$entry.path)) {
+        throw "The validated native lock contains a duplicate file path."
+    }
+    $nativeFilesByPath[[string]$entry.path] = [string]$entry.sha256
+}
+function Get-NativeFilePin([string]$relativePath) {
+    if (-not $nativeFilesByPath.ContainsKey($relativePath)) {
+        throw "The validated native lock has no '$relativePath' entry."
+    }
+    $value = $nativeFilesByPath[$relativePath]
+    if ($value -notmatch '^[0-9a-f]{64}$') {
+        throw "The native lock hash for '$relativePath' is not canonical."
+    }
+    return $value
+}
+$nativeLockHash = (Get-FileHash -LiteralPath $nativeLock `
+    -Algorithm SHA256).Hash.ToLowerInvariant()
+$nativeMsbuildArguments = @(
+    "-p:ViiperNativeBundleEnabled=true",
+    "-p:ViiperNativeSourceRevision=$($nativeLockObject.provenance.sourceRevision)",
+    "-p:ViiperNativeDriverPackageVersion=$($nativeLockObject.driverPackageVersion)",
+    "-p:ViiperNativeDriverBuildIdentity=$($nativeLockObject.driverBuildIdentity)",
+    "-p:ViiperNativeBrokerSha256=$(Get-NativeFilePin 'viiper.exe')",
+    "-p:ViiperNativeHelperSha256=$(Get-NativeFilePin 'ViiperUdeCtl.exe')",
+    "-p:ViiperNativeManifestSha256=$(Get-NativeFilePin 'submission-manifest.json')",
+    "-p:ViiperNativeInfSha256=$(Get-NativeFilePin 'driver/ViiperUde.inf')",
+    "-p:ViiperNativeSysSha256=$(Get-NativeFilePin 'driver/ViiperUde.sys')",
+    "-p:ViiperNativeCatSha256=$(Get-NativeFilePin 'driver/ViiperUde.cat')",
+    "-p:ViiperNativeLockSha256=$nativeLockHash"
+)
+
 $generatedWix = Join-Path $repoRoot "installer\DS4Windows.Package\GeneratedFiles.wxs"
 $manifestPath = Join-Path $publishPath "package-manifest.json"
 & python (Join-Path $repoRoot "utils\generate-installer-files.py") `
@@ -167,7 +226,8 @@ if ($LASTEXITCODE -ne 0) { throw "Installer manifest generation failed." }
 & dotnet publish (Join-Path $repoRoot "installer\DS4Windows.SetupActions\DS4Windows.SetupActions.csproj") `
     -c Release -p:Platform=x64 -p:Version=$ProductVersion `
     -r win-x64 --self-contained true `
-    -o (Join-Path $repoRoot "installer\DS4Windows.SetupActions\bin\x64\Release\publish")
+    -o (Join-Path $repoRoot "installer\DS4Windows.SetupActions\bin\x64\Release\publish") `
+    @nativeMsbuildArguments
 if ($LASTEXITCODE -ne 0) { throw "Setup action host build failed." }
 $setupActions = Join-Path $repoRoot "installer\DS4Windows.SetupActions\bin\x64\Release\publish\DS4Windows.SetupActions.exe"
 Invoke-SignAndVerify $setupActions
@@ -175,7 +235,8 @@ Invoke-SignAndVerify $setupActions
 & dotnet publish (Join-Path $repoRoot "installer\DS4Windows.Bootstrapper\DS4Windows.Bootstrapper.csproj") `
     -c Release -p:Platform=x64 -p:Version=$ProductVersion `
     -r win-x64 --self-contained true `
-    -o (Join-Path $repoRoot "installer\DS4Windows.Bootstrapper\bin\x64\Release\publish")
+    -o (Join-Path $repoRoot "installer\DS4Windows.Bootstrapper\bin\x64\Release\publish") `
+    @nativeMsbuildArguments
 if ($LASTEXITCODE -ne 0) { throw "Bootstrapper UI build failed." }
 $baRoot = Join-Path $repoRoot "installer\DS4Windows.Bootstrapper\bin\x64\Release\publish"
 Invoke-SignAndVerify (Join-Path $baRoot "DS4Windows.Bootstrapper.exe")
@@ -192,14 +253,25 @@ $setupActionsHash = (Get-FileHash -LiteralPath $setupActions -Algorithm SHA256).
 if ($setupActionsHash -notmatch '^[0-9A-F]{64}$') {
     throw "Could not derive a content-addressed setup-helper cache identity."
 }
-$extrasRoot = Join-Path $repoRoot "extras"
+$extrasRoot = Join-Path $publishPath "extras"
+$nativeCacheHasher = [Security.Cryptography.SHA256]::Create()
+try {
+    $nativeCacheBytes = [Text.Encoding]::UTF8.GetBytes(
+        $setupActionsHash.ToLowerInvariant() + "`n" + $nativeLockHash)
+    $nativeActionCacheId = [BitConverter]::ToString(
+        $nativeCacheHasher.ComputeHash($nativeCacheBytes)).Replace("-", "")
+}
+finally {
+    $nativeCacheHasher.Dispose()
+}
 $bundleProject = Join-Path $repoRoot "installer\DS4Windows.Bundle\DS4Windows.Bundle.wixproj"
 & dotnet build $bundleProject -t:Rebuild -c Release -p:Platform=x64 `
     -p:Version=$ProductVersion -p:BundleVersion=$BundleVersion `
     -p:DisplayVersion=$DisplayVersion `
     -p:MsiPath=$msiPath -p:BootstrapperRoot=$baRoot `
     -p:SetupActionsPath=$setupActions -p:SetupActionsHash=$setupActionsHash `
-    -p:ExtrasRoot=$extrasRoot
+    -p:ExtrasRoot=$extrasRoot -p:ViiperNativeBundleEnabled=true `
+    -p:NativeActionCacheId=$nativeActionCacheId
 if ($LASTEXITCODE -ne 0) { throw "DS4Windows Burn bundle build failed." }
 
 $builtInstaller = Join-Path $repoRoot "installer\DS4Windows.Bundle\bin\x64\Release\DS4Windows_${DisplayVersion}_Setup_x64.exe"
@@ -232,23 +304,20 @@ try {
     Copy-Item -LiteralPath $builtInstaller -Destination $pendingInstaller
     Copy-Item -LiteralPath $manifestPath -Destination $pendingManifest
 
-& (Join-Path $env:SystemRoot `
-    "System32\WindowsPowerShell\v1.0\powershell.exe") `
-    -NoLogo -NoProfile -ExecutionPolicy Bypass `
-    -File (Join-Path $repoRoot "utils\test-viiper-reboot-boundary.ps1") `
-    -BackendScript (Join-Path $repoRoot "extras\install-viiper-backend.ps1")
-if ($LASTEXITCODE -ne 0) {
-    throw "USB-IP reboot-boundary simulation failed."
-}
-
 & python (Join-Path $repoRoot "utils\test-installer-state-machine.py")
 if ($LASTEXITCODE -ne 0) {
     throw "Installer state-machine simulation failed."
 }
 
-& python (Join-Path $repoRoot "utils\validate-installer.py") `
-    --publish-root $publishPath --manifest $manifestPath `
-    --installer $pendingInstaller --bundle-source (Join-Path $repoRoot "installer\DS4Windows.Bundle\Bundle.wxs")
+$installerValidationArguments = @(
+    (Join-Path $repoRoot "utils\validate-installer.py"),
+    "--publish-root", $publishPath,
+    "--manifest", $manifestPath,
+    "--installer", $pendingInstaller,
+    "--bundle-source", (Join-Path $repoRoot `
+        "installer\DS4Windows.Bundle\Bundle.wxs"))
+$installerValidationArguments += "--require-native-bundle"
+& python @installerValidationArguments
 if ($LASTEXITCODE -ne 0) { throw "Installer validation failed." }
 
 Invoke-SignAndVerify $pendingInstaller

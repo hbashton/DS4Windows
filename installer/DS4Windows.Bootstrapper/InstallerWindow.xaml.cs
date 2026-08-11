@@ -47,7 +47,7 @@ namespace DS4Windows.Bootstrapper
                     break;
                 case InstallerMode.Uninstall:
                     ModeTitle.Text = "Uninstall DS4Windows";
-                    ModeDescription.Text = "DS4Windows and its managed VIIPER installation will be removed. Profiles, settings, and shared system drivers are preserved.";
+                    ModeDescription.Text = "DS4Windows and its managed VIIPER bus will be removed. Profiles, settings, and unrelated shared system drivers are preserved.";
                     ActionButton.Content = "Uninstall";
                     OptionsCard.Visibility = Visibility.Collapsed;
                     break;
@@ -60,7 +60,7 @@ namespace DS4Windows.Bootstrapper
 
             Ds4Status.Text = PackageStatus(packages, "DS4WindowsMsi");
             ViiperStatus.Text = infrastructureHealthy ? "Ready" : "Will install or repair";
-            UsbipStatus.Text = infrastructureHealthy ? "Ready" : "Will verify before changing";
+            NativeBusStatus.Text = infrastructureHealthy ? "Ready" : "Will verify before changing";
         }
 
         internal void ShowPlanning()
@@ -84,9 +84,9 @@ namespace DS4Windows.Bootstrapper
         {
             switch (packageId)
             {
-                case "CloseRunningApplications": ProgressDetail.Text = "Closing running DS4Windows and VIIPER processes"; break;
+                case "CloseRunningApplications": ProgressDetail.Text = "Closing the recognized DS4Windows process"; break;
                 case "DS4WindowsMsi": ProgressDetail.Text = "Installing DS4Windows"; break;
-                case "ViiperUsbipSetup": ProgressDetail.Text = "Verifying VIIPER and USB-IP"; break;
+                case "NativeViiperInstallRepair": ProgressDetail.Text = "Verifying the native VIIPER UdeCx bus"; break;
                 case "HidHide": ProgressDetail.Text = "Installing optional HidHide"; break;
                 case "FakerInput": ProgressDetail.Text = "Installing optional FakerInput"; break;
                 default: ProgressDetail.Text = "Verifying installation"; break;
@@ -114,7 +114,7 @@ namespace DS4Windows.Bootstrapper
             if (action == LaunchAction.Uninstall)
             {
                 CompleteTitle.Text = "DS4Windows was removed";
-                CompleteDescription.Text = "Profiles, settings, and shared system drivers were preserved.";
+                CompleteDescription.Text = "Profiles, settings, and unrelated shared system drivers were preserved.";
                 LaunchCheckBox.Visibility = Visibility.Collapsed;
             }
         }

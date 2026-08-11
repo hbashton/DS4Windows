@@ -7,18 +7,33 @@ import hashlib
 import re
 import stat
 
+from viiper_native_bundle import (
+    BUNDLE_DIRECTORY_NAME,
+    LOCK_FILE_NAME,
+    RUNTIME_PATHS,
+    remove_legacy_publish_payload,
+    stage_bundle,
+    validate_bundle,
+)
+
 
 def is_reparse_point(path: Path) -> bool:
     attributes = getattr(path.lstat(), "st_file_attributes", 0)
     return bool(attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
 
 
-if len(sys.argv) != 4:
-    raise SystemExit("Usage: post-build.py <publish-dir> <project-dir> <version>")
+if len(sys.argv) not in (4, 5) or (
+    len(sys.argv) == 5 and sys.argv[4] != "--require-native-bundle"
+):
+    raise SystemExit(
+        "Usage: post-build.py <publish-dir> <project-dir> <version> "
+        "[--require-native-bundle]"
+    )
 
 target_dir = Path(sys.argv[1]).absolute()
 project_dir = Path(sys.argv[2]).absolute()
 version = sys.argv[3].strip()
+require_native_bundle = len(sys.argv) == 5
 if not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z._-]{0,79}", version):
     raise SystemExit(
         "Version must be a filename-safe release identifier using only "
@@ -28,6 +43,52 @@ if not target_dir.is_dir() or is_reparse_point(target_dir):
     raise SystemExit(f"Publish directory is missing or unsafe: {target_dir}")
 
 
+if require_native_bundle:
+    source_bundle = project_dir / "extras" / BUNDLE_DIRECTORY_NAME
+    source_lock = project_dir / "extras" / LOCK_FILE_NAME
+    native_contract = (
+        project_dir
+        / "DS4Windows"
+        / "DS4Control"
+        / "Viiper"
+        / "ViiperNativePackageContract.cs"
+    )
+    validate_bundle(source_bundle, source_lock, native_contract)
+    powershell = (
+        Path(os.environ["SystemRoot"])
+        / "System32"
+        / "WindowsPowerShell"
+        / "v1.0"
+        / "powershell.exe"
+    )
+    subprocess.run(
+        [
+            str(powershell),
+            "-NoLogo",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(project_dir / "utils" / "validate-viiper-native-bundle-signatures.ps1"),
+            "-BundleRoot",
+            str(source_bundle),
+            "-LockPath",
+            str(source_lock),
+            "-ContractPath",
+            str(native_contract),
+        ],
+        check=True,
+    )
+    staged_bundle, staged_lock = stage_bundle(
+        source_bundle,
+        source_lock,
+        target_dir / "extras",
+        native_contract,
+    )
+    validate_bundle(staged_bundle, staged_lock, native_contract)
+    remove_legacy_publish_payload(target_dir)
+
+
 # A published DS4Windows build is an offline installer. Fail package
 # composition if any required runtime or installer payload is absent instead
 # of producing an archive that later needs a network recovery path.
@@ -35,12 +96,19 @@ required_offline_files = (
     "DS4Windows.exe",
     "coreclr.dll",
     "hostfxr.dll",
-    "extras/install-viiper-backend.ps1",
-    "extras/VIIPER-0.1.0-x64.exe",
-    "extras/USBip-0.9.7.7-x64.exe",
     "extras/HidHide_1.5.230_x64.exe",
     "extras/FakerInput_0.1.0_x64.msi",
 )
+if require_native_bundle:
+    required_offline_files += tuple(
+        f"extras/{BUNDLE_DIRECTORY_NAME}/{relative}" for relative in RUNTIME_PATHS
+    ) + (f"extras/{LOCK_FILE_NAME}",)
+else:
+    required_offline_files += (
+        "extras/install-viiper-backend.ps1",
+        "extras/VIIPER-0.1.0-x64.exe",
+        "extras/USBip-0.9.7.7-x64.exe",
+    )
 missing_offline_files = [
     relative_path
     for relative_path in required_offline_files
@@ -56,17 +124,18 @@ if missing_offline_files:
 # Bind setup to the exact VIIPER executable copied by this publish. This
 # sidecar is regenerated for every artifact, so no hand-maintained hash can
 # drift when the bundled executable changes.
-viiper_name = "VIIPER-0.1.0-x64.exe"
-viiper_path = target_dir / "extras" / viiper_name
-viiper_hasher = hashlib.sha256()
-with viiper_path.open("rb") as viiper_stream:
-    for chunk in iter(lambda: viiper_stream.read(1024 * 1024), b""):
-        viiper_hasher.update(chunk)
-viiper_hash_path = viiper_path.with_name(viiper_name + ".sha256")
-viiper_hash_path.write_text(
-    f"{viiper_hasher.hexdigest()} *{viiper_name}\n",
-    encoding="ascii",
-)
+if not require_native_bundle:
+    viiper_name = "VIIPER-0.1.0-x64.exe"
+    viiper_path = target_dir / "extras" / viiper_name
+    viiper_hasher = hashlib.sha256()
+    with viiper_path.open("rb") as viiper_stream:
+        for chunk in iter(lambda: viiper_stream.read(1024 * 1024), b""):
+            viiper_hasher.update(chunk)
+    viiper_hash_path = viiper_path.with_name(viiper_name + ".sha256")
+    viiper_hash_path.write_text(
+        f"{viiper_hasher.hexdigest()} *{viiper_name}\n",
+        encoding="ascii",
+    )
 
 # move l18n assemblies to a separate directory
 lang_dir = target_dir / "Lang"

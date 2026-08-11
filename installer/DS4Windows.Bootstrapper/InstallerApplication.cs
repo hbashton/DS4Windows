@@ -508,7 +508,10 @@ namespace DS4Windows.Bootstrapper
                 return;
             }
 
-            if (string.Equals(e.PackageId, "ViiperUsbipSetup",
+            if (string.Equals(e.PackageId, "NativeViiperInstallRepair",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(e.PackageId,
+                    "NativeViiperUninstallForDirectRemove",
                     StringComparison.OrdinalIgnoreCase))
             {
                 infrastructureFailed = true;
@@ -654,7 +657,7 @@ namespace DS4Windows.Bootstrapper
             }
 
             if (string.Equals(e.PackageId,
-                    "ViiperUsbipUninstall",
+                    "NativeViiperUninstallForDirectRemove",
                     StringComparison.OrdinalIgnoreCase))
             {
                 // Shared infrastructure is permanent in the normal package
@@ -671,11 +674,11 @@ namespace DS4Windows.Bootstrapper
 
             if (command.Relation == RelationType.Upgrade &&
                 plannedAction == LaunchAction.Uninstall &&
-                string.Equals(e.PackageId, "ViiperUsbipSetup",
+                string.Equals(e.PackageId, "NativeViiperInstallRepair",
                     StringComparison.OrdinalIgnoreCase))
             {
                 // Burn is removing this bundle as part of an upgrade. Shared
-                // VIIPER/USB-IP belongs to the incoming bundle, so an outgoing
+                // Native VIIPER belongs to the incoming bundle, so an outgoing
                 // bundle must never tear it down or replace it with its older
                 // payload. A direct Add/Remove Programs uninstall still runs
                 // the infrastructure uninstaller normally.
@@ -685,7 +688,7 @@ namespace DS4Windows.Bootstrapper
 
             if (infrastructureRecoveryPass)
             {
-                if (string.Equals(e.PackageId, "ViiperUsbipSetup",
+                if (string.Equals(e.PackageId, "NativeViiperInstallRepair",
                         StringComparison.OrdinalIgnoreCase))
                 {
                     e.State = e.CurrentState == PackageState.Present
@@ -696,13 +699,13 @@ namespace DS4Windows.Bootstrapper
                 {
                     // The MSI and optional drivers already completed in the
                     // primary transaction. The recovery pass is deliberately
-                    // limited to the shared VIIPER/USB-IP contract.
+                    // limited to the shared native VIIPER contract.
                     e.State = RequestState.None;
                 }
                 return;
             }
 
-            if (string.Equals(e.PackageId, "ViiperUsbipSetup",
+            if (string.Equals(e.PackageId, "NativeViiperInstallRepair",
                     StringComparison.OrdinalIgnoreCase) &&
                 deferInfrastructureUntilUpgradeCompletes)
             {
@@ -710,17 +713,14 @@ namespace DS4Windows.Bootstrapper
                 return;
             }
 
-            if (string.Equals(e.PackageId, "ViiperUsbipSetup",
+            if (string.Equals(e.PackageId, "NativeViiperInstallRepair",
                     StringComparison.OrdinalIgnoreCase) &&
                 (plannedAction == LaunchAction.Install ||
                  plannedAction == LaunchAction.Repair))
             {
-                // Preflight intentionally stops both output owners before MSI
-                // mutation. Always run the lightweight infrastructure helper
-                // afterwards so it can verify exact hashes/ABI, restore the
-                // startup contract, and restart the API in this transaction.
-                // The helper itself skips replacement when VIIPER and USB-IP
-                // are already the exact healthy versions.
+                // Always run the authoritative VIIPER package transaction.
+                // Exact healthy native state is a verified no-op; repair and
+                // upgrade retain the same driver/service rollback boundary.
                 e.State = e.CurrentState == PackageState.Present ? RequestState.Repair : RequestState.Present;
             }
         }
@@ -763,18 +763,15 @@ namespace DS4Windows.Bootstrapper
             }
 
             if (!restartRequired &&
+                deferInfrastructureUntilUpgradeCompletes &&
                 (plannedAction == LaunchAction.Install ||
-                 plannedAction == LaunchAction.Repair) &&
-                !InfrastructureProbe.IsHealthy())
+                 plannedAction == LaunchAction.Repair))
             {
-                if (infrastructureRecoveryPass)
-                {
-                    ShowFailure(1,
-                        "DS4Windows installed, but VIIPER/USB-IP did not pass " +
-                        "the final post-upgrade health check.");
-                    return;
-                }
-
+                // The primary related-upgrade pass intentionally skipped the
+                // native action while older bundles were removed. Execute the
+                // authoritative transaction once against the final machine
+                // state. A receipt probe is never allowed to overrule the
+                // authenticated result returned by that vital child.
                 infrastructureRecoveryPass = true;
                 applyCompleted = false;
                 infrastructureFailed = false;
@@ -872,7 +869,7 @@ namespace DS4Windows.Bootstrapper
                     tail.Substring(index, end - index);
                 return summary + "\r\nOpen Log includes the complete diagnostic record.";
             }
-            return "VIIPER/USB-IP setup failed. Open Log includes the detailed child-process diagnostics.";
+            return "Native VIIPER setup failed. Open Log includes the detailed child-process diagnostics.";
         }
 
         private static string ReadLogTail(string path, int maximumBytes)

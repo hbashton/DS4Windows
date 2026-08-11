@@ -13,19 +13,79 @@ jobs:
     #this makes it not run if tests failed.
     #needs: test
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       with:
            ref: ${{ github.event.release.tag_name }}
     - name: Setup .NET
-      uses: actions/setup-dotnet@v4
+      uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
       with:
-        dotnet-version: 8.0.x
+        dotnet-version: "8.0.419"
     - name: Set up Python 3.10
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
       with:
-        python-version: "3.10"
+        python-version: "3.10.18"
     - name: Restore dependencies
       run: dotnet restore
+    - name: Test immutable VIIPER native bundle contract
+      run: python .\utils\test_viiper_native_bundle.py
+    - name: Verify and export native VIIPER build pins
+      shell: pwsh
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        $bundle = ".\extras\viiper-native-udecx"
+        $lockPath = ".\extras\viiper-native-udecx.lock.json"
+        $contract = ".\DS4Windows\DS4Control\Viiper\ViiperNativePackageContract.cs"
+        .\utils\validate-viiper-native-bundle-signatures.ps1 `
+          -BundleRoot $bundle -LockPath $lockPath -ContractPath $contract
+        if ($LASTEXITCODE -ne 0) {
+          throw "The production VIIPER native bundle is not trusted."
+        }
+        $lock = Get-Content -LiteralPath $lockPath -Raw | ConvertFrom-Json
+        $files = @{}
+        foreach ($entry in @($lock.files)) {
+          if ($files.ContainsKey([string]$entry.path)) {
+            throw "The native bundle lock contains duplicate file paths."
+          }
+          $files[[string]$entry.path] = [string]$entry.sha256
+        }
+        $pins = [ordered]@{
+          VIIPER_NATIVE_SOURCE_REVISION = [string]$lock.provenance.sourceRevision
+          VIIPER_NATIVE_DRIVER_PACKAGE_VERSION = [string]$lock.driverPackageVersion
+          VIIPER_NATIVE_DRIVER_BUILD_IDENTITY = [string]$lock.driverBuildIdentity
+          VIIPER_NATIVE_BROKER_SHA256 = $files['viiper.exe']
+          VIIPER_NATIVE_HELPER_SHA256 = $files['ViiperUdeCtl.exe']
+          VIIPER_NATIVE_MANIFEST_SHA256 = $files['submission-manifest.json']
+          VIIPER_NATIVE_INF_SHA256 = $files['driver/ViiperUde.inf']
+          VIIPER_NATIVE_SYS_SHA256 = $files['driver/ViiperUde.sys']
+          VIIPER_NATIVE_CAT_SHA256 = $files['driver/ViiperUde.cat']
+          VIIPER_NATIVE_LOCK_SHA256 = (Get-FileHash -LiteralPath $lockPath `
+            -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+        if ($pins.VIIPER_NATIVE_SOURCE_REVISION -notmatch `
+            '^(?:[0-9a-f]{40}|[0-9a-f]{64})$') {
+          throw "The native source revision is not canonical."
+        }
+        if ($pins.VIIPER_NATIVE_DRIVER_PACKAGE_VERSION -notmatch `
+            '^\d+\.\d+\.\d+\.\d+$') {
+          throw "The native driver package version is not canonical."
+        }
+        foreach ($key in @(
+            'VIIPER_NATIVE_DRIVER_BUILD_IDENTITY',
+            'VIIPER_NATIVE_BROKER_SHA256',
+            'VIIPER_NATIVE_HELPER_SHA256',
+            'VIIPER_NATIVE_MANIFEST_SHA256',
+            'VIIPER_NATIVE_INF_SHA256',
+            'VIIPER_NATIVE_SYS_SHA256',
+            'VIIPER_NATIVE_CAT_SHA256',
+            'VIIPER_NATIVE_LOCK_SHA256')) {
+          if ($pins[$key] -notmatch '^[0-9a-f]{64}$') {
+            throw "Native build pin '$key' is not canonical."
+          }
+        }
+        foreach ($pin in $pins.GetEnumerator()) {
+          "$($pin.Key)=$($pin.Value)" >> $env:GITHUB_ENV
+        }
     - name: Set envars for versions
       run: | 
         TAG=${{ github.event.release.tag_name }}
@@ -45,19 +105,18 @@ jobs:
         echo "PACKAGE_VERSION=$PACKAGE_VERSION" >> $GITHUB_ENV
       shell: bash
     - name: Build X64
-      run: dotnet publish .\DS4Windows\DS4WinWPF.csproj -c Release /p:platform=x64 -r win-x64 --self-contained true /p:AssemblyVersion=${{ env.BINARY_VERSION }} /p:FileVersion=${{ env.BINARY_VERSION }} /p:Version=${{ env.PACKAGE_VERSION }} /p:InformationalVersion=${{ env.VERSION }} -o .\bin\x64\Release\output
+      run: dotnet publish .\DS4Windows\DS4WinWPF.csproj -c Release /p:platform=x64 -r win-x64 --self-contained true /p:AssemblyVersion=${{ env.BINARY_VERSION }} /p:FileVersion=${{ env.BINARY_VERSION }} /p:Version=${{ env.PACKAGE_VERSION }} /p:InformationalVersion=${{ env.VERSION }} /p:ViiperNativeBundleEnabled=true /p:ViiperNativeSourceRevision=${{ env.VIIPER_NATIVE_SOURCE_REVISION }} /p:ViiperNativeDriverPackageVersion=${{ env.VIIPER_NATIVE_DRIVER_PACKAGE_VERSION }} /p:ViiperNativeDriverBuildIdentity=${{ env.VIIPER_NATIVE_DRIVER_BUILD_IDENTITY }} /p:ViiperNativeBrokerSha256=${{ env.VIIPER_NATIVE_BROKER_SHA256 }} /p:ViiperNativeHelperSha256=${{ env.VIIPER_NATIVE_HELPER_SHA256 }} /p:ViiperNativeManifestSha256=${{ env.VIIPER_NATIVE_MANIFEST_SHA256 }} /p:ViiperNativeInfSha256=${{ env.VIIPER_NATIVE_INF_SHA256 }} /p:ViiperNativeSysSha256=${{ env.VIIPER_NATIVE_SYS_SHA256 }} /p:ViiperNativeCatSha256=${{ env.VIIPER_NATIVE_CAT_SHA256 }} /p:ViiperNativeLockSha256=${{ env.VIIPER_NATIVE_LOCK_SHA256 }} -o .\bin\x64\Release\output
     - name: Sign and verify release binaries
       shell: pwsh
       env:
         DS4W_SIGN_CERT_BASE64: ${{ secrets.DS4W_SIGN_CERT_BASE64 }}
         DS4W_SIGN_CERT_PASSWORD: ${{ secrets.DS4W_SIGN_CERT_PASSWORD }}
       run: |
-        if ([string]::IsNullOrWhiteSpace($env:DS4W_SIGN_CERT_BASE64)) {
-          Write-Warning (
-            "Authenticode secrets are not configured; publishing the " +
-            "hash-verified unsigned package.")
-          "DS4W_SIGNING_ENABLED=false" >> $env:GITHUB_ENV
-          exit 0
+        if ([string]::IsNullOrWhiteSpace($env:DS4W_SIGN_CERT_BASE64) -or
+            [string]::IsNullOrWhiteSpace($env:DS4W_SIGN_CERT_PASSWORD)) {
+          throw (
+            "DS4Windows release signing credentials are required for the " +
+            "native driver installation chain.")
         }
         $certificatePath = Join-Path $env:RUNNER_TEMP "ds4windows-release.pfx"
         [IO.File]::WriteAllBytes($certificatePath,
@@ -81,11 +140,14 @@ jobs:
         "DS4W_SIGN_CERT_PATH=$certificatePath" >> $env:GITHUB_ENV
         "DS4W_SIGNING_ENABLED=true" >> $env:GITHUB_ENV
     - name: Post-Build script X64
-      run: python .\utils\post-build.py .\bin\x64\Release\output . ${{env.VERSION}}
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: python .\utils\post-build.py .\bin\x64\Release\output . ${{env.VERSION}} --require-native-bundle
     - name: Build standard installer X64
       shell: pwsh
       env:
         DS4W_SIGN_CERT_PASSWORD: ${{ secrets.DS4W_SIGN_CERT_PASSWORD }}
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
         $parameters = @{
           PublishRoot = ".\bin\x64\Release\DS4Windows"
@@ -94,10 +156,9 @@ jobs:
           DisplayVersion = "${{ env.VERSION }}"
           OutputDirectory = ".\bin\x64\Release\installer"
           SkipApplicationPublish = $true
+          RequireNativeBundle = $true
         }
-        if ($env:DS4W_SIGNING_ENABLED -eq "true") {
-          $parameters.RequireSigning = $true
-        }
+        $parameters.RequireSigning = $true
         .\installer\build-installer.ps1 @parameters
     - name: Name release asset
       shell: pwsh

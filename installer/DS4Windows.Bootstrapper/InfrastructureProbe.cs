@@ -1,228 +1,228 @@
 using Microsoft.Win32;
 using System;
-using System.Diagnostics;
+using System.Collections.Generic;
 using System.IO;
-using System.Net.Sockets;
+using System.Linq;
+using System.Reflection;
 using System.Security.Cryptography;
-using System.Text;
 
 namespace DS4Windows.Bootstrapper
 {
+    // This is deliberately a scheduling/cache probe, not the authority for
+    // native readiness. The vital VIIPER package transaction performs the
+    // authenticated ABI/build-identity health proof on every install/repair.
     internal static class InfrastructureProbe
     {
-        private const string ExpectedMarker = "VIIPER-0.1.0+USBIP-0.9.7.7";
-        private const string ExpectedViiperVersion = "0.1.0";
-        private const string ExpectedViiperHash = "AD14F2C9048D61B3447F2F79D7A122EDEA81E5DB52A1AC803D294E5BC9CD2324";
-        private const string ExpectedUsbipVersion = "0.9.7.7";
-        private const string ExpectedUsbipHash = "FC1660E3759D8AF4CEDE48DBE194285A5A1DE85CE6E3216724499AFD32BE92E8";
-        private const string ExpectedUdeHash = "51DB440065393E588A6B2585508C50EB3E1510B7B06D9AFA6C5BDE583751EA7D";
-        private const string ExpectedFilterHash = "C290299FF4D0F6A597DB5CE03E15B29A5349CDCE7C587EBFBD9ECAECA04F73ED";
+        private const string ReceiptKey =
+            @"SOFTWARE\DS4Windows\NativeVIIPER";
 
         internal static bool IsHealthy()
         {
             try
             {
-                var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
-                var viiper = Path.Combine(programFiles, "DS4Windows", "VIIPER", "viiper.exe");
-                var usbip = Path.Combine(programFiles, "USBip", "usbip.exe");
-                if (!File.Exists(viiper) || !File.Exists(usbip)) return false;
+                var pins = NativePins.Load();
+                if (!ReceiptMatches(pins)) return false;
 
-                if (!VersionMatches(viiper, ExpectedViiperVersion) ||
-                    !HashMatches(viiper, ExpectedViiperHash) ||
-                    !VersionMatches(usbip, ExpectedUsbipVersion) ||
-                    !HashMatches(usbip, ExpectedUsbipHash))
-                {
-                    return false;
-                }
-
-                if (!DriverHashMatches("usbip2_ude", ExpectedUdeHash) ||
-                    !DriverHashMatches("usbip2_filter", ExpectedFilterHash))
-                {
-                    return false;
-                }
-
-                using (var machine = RegistryKey.OpenBaseKey(
-                           RegistryHive.LocalMachine,
-                           RegistryView.Registry64))
-                using (var key = machine.OpenSubKey(@"SOFTWARE\DS4Windows"))
-                {
-                    if (!string.Equals(key?.GetValue("InfrastructureVersion") as string,
-                            ExpectedMarker, StringComparison.Ordinal) ||
-                        !string.Equals(key?.GetValue("InfrastructureState") as string,
-                            "Ready", StringComparison.Ordinal))
-                    {
-                        return false;
-                    }
-                }
-
-                using (var process = Process.Start(new ProcessStartInfo(usbip, "port")
-                {
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    WindowStyle = ProcessWindowStyle.Hidden,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                }))
-                {
-                    if (process == null) return false;
-
-                    // usbip can emit enough diagnostics to fill a redirected
-                    // pipe. Drain both streams while it runs so health probing
-                    // cannot deadlock the installer UI.
-                    var stdout = new StringBuilder();
-                    var stderr = new StringBuilder();
-                    process.OutputDataReceived += (_, e) =>
-                    {
-                        if (e.Data != null) stdout.AppendLine(e.Data);
-                    };
-                    process.ErrorDataReceived += (_, e) =>
-                    {
-                        if (e.Data != null) stderr.AppendLine(e.Data);
-                    };
-                    process.BeginOutputReadLine();
-                    process.BeginErrorReadLine();
-                    if (!process.WaitForExit(10000))
-                    {
-                        try { process.Kill(); } catch { }
-                        return false;
-                    }
-                    process.WaitForExit();
-                    if (!IsCompatibleUsbipProbe(process.ExitCode,
-                            stdout.ToString() + Environment.NewLine +
-                            stderr.ToString()))
-                    {
-                        return false;
-                    }
-                }
-                return ViiperApiReady();
+                var broker = Path.Combine(Environment.GetFolderPath(
+                    Environment.SpecialFolder.ProgramFiles), "VIIPER",
+                    "viiper.exe");
+                if (!HashMatches(broker, pins.BrokerSha256)) return false;
+                if (!BrokerServiceMatches(broker)) return false;
+                return DriverServiceHashMatches(pins.SysSha256);
             }
-            catch { return false; }
+            catch
+            {
+                return false;
+            }
         }
 
-        internal static bool IsCompatibleUsbipProbe(int exitCode,
-            string diagnostic)
+        private static bool ReceiptMatches(NativePins pins)
         {
-            if (exitCode != 0) return false;
-            var text = diagnostic ?? string.Empty;
-            return text.IndexOf("ABI mismatch",
-                       StringComparison.OrdinalIgnoreCase) < 0 &&
-                   text.IndexOf("unexpected size",
-                       StringComparison.OrdinalIgnoreCase) < 0 &&
-                   text.IndexOf("specified conversion is not valid",
-                       StringComparison.OrdinalIgnoreCase) < 0 &&
-                   text.IndexOf("invalid structure size",
-                       StringComparison.OrdinalIgnoreCase) < 0;
+            using (var machine = RegistryKey.OpenBaseKey(
+                       RegistryHive.LocalMachine, RegistryView.Registry64))
+            using (var key = machine.OpenSubKey(ReceiptKey))
+            {
+                return key != null &&
+                    Convert.ToInt32(key.GetValue("Schema", 0)) == 1 &&
+                    ValueEquals(key, "State", "Ready") &&
+                    ValueEquals(key, "PackageIdentity", pins.LockSha256) &&
+                    ValueEquals(key, "SourceRevision", pins.SourceRevision) &&
+                    ValueEquals(key, "DriverPackageVersion",
+                        pins.DriverPackageVersion) &&
+                    ValueEquals(key, "BrokerSHA256", pins.BrokerSha256) &&
+                    ValueEquals(key, "HelperSHA256", pins.HelperSha256) &&
+                    ValueEquals(key, "ManifestSHA256", pins.ManifestSha256) &&
+                    ValueEquals(key, "InfSHA256", pins.InfSha256) &&
+                    ValueEquals(key, "SysSHA256", pins.SysSha256) &&
+                    ValueEquals(key, "CatSHA256", pins.CatSha256) &&
+                    ValueEquals(key, "DriverBuildIdentity",
+                        pins.DriverBuildIdentity);
+            }
         }
 
-        private static bool VersionMatches(string path, string expected)
+        private static bool ValueEquals(RegistryKey key, string name,
+            string expected)
         {
-            var info = FileVersionInfo.GetVersionInfo(path);
-            var value = string.IsNullOrWhiteSpace(info.ProductVersion) ? info.FileVersion : info.ProductVersion;
-            return !string.IsNullOrWhiteSpace(value) &&
-                (string.Equals(value, expected, StringComparison.OrdinalIgnoreCase) ||
-                 value.StartsWith(expected + ".", StringComparison.OrdinalIgnoreCase));
+            return string.Equals(key.GetValue(name) as string, expected,
+                StringComparison.Ordinal);
+        }
+
+        private static bool BrokerServiceMatches(string expectedBroker)
+        {
+            using (var machine = RegistryKey.OpenBaseKey(
+                       RegistryHive.LocalMachine, RegistryView.Registry64))
+            using (var key = machine.OpenSubKey(
+                       @"SYSTEM\CurrentControlSet\Services\VIIPERNativeBroker"))
+            {
+                if (key == null || Convert.ToInt32(key.GetValue("Start", -1)) != 2)
+                    return false;
+                var command = key.GetValue("ImagePath") as string;
+                if (string.IsNullOrWhiteSpace(command)) return false;
+                var executable = ExtractExecutablePath(command);
+                return string.Equals(Path.GetFullPath(executable),
+                    Path.GetFullPath(expectedBroker),
+                    StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        private static bool DriverServiceHashMatches(string expectedHash)
+        {
+            using (var machine = RegistryKey.OpenBaseKey(
+                       RegistryHive.LocalMachine, RegistryView.Registry64))
+            using (var key = machine.OpenSubKey(
+                       @"SYSTEM\CurrentControlSet\Services\ViiperUde"))
+            {
+                var imagePath = key?.GetValue("ImagePath") as string;
+                return !string.IsNullOrWhiteSpace(imagePath) &&
+                    HashMatches(ResolveServiceImagePath(imagePath), expectedHash);
+            }
+        }
+
+        private static string ExtractExecutablePath(string commandLine)
+        {
+            var value = Environment.ExpandEnvironmentVariables(
+                commandLine.Trim());
+            if (value.StartsWith("\"", StringComparison.Ordinal))
+            {
+                var closing = value.IndexOf('\"', 1);
+                if (closing <= 1) throw new InvalidDataException();
+                return value.Substring(1, closing - 1);
+            }
+            var extension = value.IndexOf(".exe",
+                StringComparison.OrdinalIgnoreCase);
+            if (extension < 0) throw new InvalidDataException();
+            return value.Substring(0, extension + 4);
+        }
+
+        private static string ResolveServiceImagePath(string imagePath)
+        {
+            var path = Environment.ExpandEnvironmentVariables(
+                imagePath.Trim().Trim('\"'));
+            if (path.StartsWith(@"\SystemRoot\",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                path = Path.Combine(Environment.GetFolderPath(
+                        Environment.SpecialFolder.Windows),
+                    path.Substring(@"\SystemRoot\".Length));
+            }
+            else if (path.StartsWith(@"\??\", StringComparison.Ordinal) ||
+                     path.StartsWith(@"\\?\", StringComparison.Ordinal))
+            {
+                path = path.Substring(4);
+            }
+            else if (!Path.IsPathRooted(path))
+            {
+                path = Path.Combine(Environment.GetFolderPath(
+                    Environment.SpecialFolder.Windows), path);
+            }
+            return Path.GetFullPath(path);
         }
 
         private static bool HashMatches(string path, string expected)
         {
             if (!File.Exists(path)) return false;
             using (var algorithm = SHA256.Create())
-            using (var stream = File.OpenRead(path))
+            using (var stream = new FileStream(path, FileMode.Open,
+                       FileAccess.Read, FileShare.Read))
             {
-                var actual = BitConverter.ToString(algorithm.ComputeHash(stream)).Replace("-", string.Empty);
-                return string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase);
+                var actual = BitConverter.ToString(
+                        algorithm.ComputeHash(stream))
+                    .Replace("-", string.Empty).ToLowerInvariant();
+                return string.Equals(actual, expected,
+                    StringComparison.Ordinal);
             }
         }
 
-        private static bool DriverHashMatches(string serviceName, string expected)
+        private sealed class NativePins
         {
-            using (var machine = RegistryKey.OpenBaseKey(
-                       RegistryHive.LocalMachine,
-                       RegistryView.Registry64))
-            using (var key = machine.OpenSubKey(
-                       @"SYSTEM\CurrentControlSet\Services\" + serviceName))
+            internal string SourceRevision { get; private set; }
+            internal string DriverPackageVersion { get; private set; }
+            internal string DriverBuildIdentity { get; private set; }
+            internal string BrokerSha256 { get; private set; }
+            internal string HelperSha256 { get; private set; }
+            internal string ManifestSha256 { get; private set; }
+            internal string InfSha256 { get; private set; }
+            internal string SysSha256 { get; private set; }
+            internal string CatSha256 { get; private set; }
+            internal string LockSha256 { get; private set; }
+
+            internal static NativePins Load()
             {
-                var imagePath = key?.GetValue("ImagePath") as string;
-                if (string.IsNullOrWhiteSpace(imagePath)) return false;
-                imagePath = Environment.ExpandEnvironmentVariables(
-                    imagePath.Trim());
-                if (imagePath.StartsWith("\"", StringComparison.Ordinal))
+                var values = new Dictionary<string, string>(
+                    StringComparer.Ordinal);
+                foreach (var attribute in Assembly.GetExecutingAssembly()
+                             .GetCustomAttributes<AssemblyMetadataAttribute>())
                 {
-                    var closingQuote = imagePath.IndexOf('"', 1);
-                    if (closingQuote <= 1) return false;
-                    imagePath = imagePath.Substring(1, closingQuote - 1);
+                    if (!values.TryAdd(attribute.Key, attribute.Value))
+                        throw new InvalidDataException();
                 }
-                else
+                return new NativePins
                 {
-                    var extension = imagePath.IndexOf(".sys",
-                        StringComparison.OrdinalIgnoreCase);
-                    if (extension >= 0)
-                    {
-                        imagePath = imagePath.Substring(0, extension + 4);
-                    }
-                }
-                if (imagePath.StartsWith(@"\SystemRoot\", StringComparison.OrdinalIgnoreCase))
-                {
-                    imagePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),
-                        imagePath.Substring(@"\SystemRoot\".Length));
-                }
-                else if (imagePath.StartsWith(@"\??\",
-                             StringComparison.Ordinal) ||
-                         imagePath.StartsWith(@"\\?\",
-                             StringComparison.Ordinal))
-                {
-                    imagePath = imagePath.Substring(4);
-                }
-                else if (!Path.IsPathRooted(imagePath))
-                {
-                    imagePath = Path.Combine(
-                        Environment.GetFolderPath(
-                            Environment.SpecialFolder.Windows), imagePath);
-                }
-                return HashMatches(Path.GetFullPath(imagePath), expected);
+                    SourceRevision = RequireHex(values,
+                        "ViiperNativeSourceRevision", 40, 64),
+                    DriverPackageVersion = RequireVersion(values,
+                        "ViiperNativeDriverPackageVersion"),
+                    DriverBuildIdentity = RequireHex(values,
+                        "ViiperNativeDriverBuildIdentity", 64, 64),
+                    BrokerSha256 = RequireHex(values,
+                        "ViiperNativeBrokerSha256", 64, 64),
+                    HelperSha256 = RequireHex(values,
+                        "ViiperNativeHelperSha256", 64, 64),
+                    ManifestSha256 = RequireHex(values,
+                        "ViiperNativeManifestSha256", 64, 64),
+                    InfSha256 = RequireHex(values,
+                        "ViiperNativeInfSha256", 64, 64),
+                    SysSha256 = RequireHex(values,
+                        "ViiperNativeSysSha256", 64, 64),
+                    CatSha256 = RequireHex(values,
+                        "ViiperNativeCatSha256", 64, 64),
+                    LockSha256 = RequireHex(values,
+                        "ViiperNativeLockSha256", 64, 64),
+                };
             }
-        }
 
-        private static bool ViiperApiReady()
-        {
-            using (var client = new TcpClient())
+            private static string RequireHex(
+                Dictionary<string, string> values, string name,
+                int minimum, int maximum)
             {
-                client.NoDelay = true;
-                client.SendTimeout = 1000;
-                client.ReceiveTimeout = 1000;
-                var connect = client.BeginConnect("127.0.0.1", 3242,
-                    null, null);
-                using (connect.AsyncWaitHandle)
-                {
-                    if (!connect.AsyncWaitHandle.WaitOne(1000)) return false;
-                    client.EndConnect(connect);
-                }
+                if (!values.TryGetValue(name, out var value) ||
+                    value == null || value.Length < minimum ||
+                    value.Length > maximum || value.Any(character =>
+                        !(character >= '0' && character <= '9') &&
+                        !(character >= 'a' && character <= 'f')))
+                    throw new InvalidDataException();
+                return value;
+            }
 
-                using (var stream = client.GetStream())
-                {
-                    var request = Encoding.UTF8.GetBytes("ping\0");
-                    stream.Write(request, 0, request.Length);
-                    var response = new byte[512];
-                    var total = 0;
-                    var deadline = Stopwatch.StartNew();
-                    while (total < response.Length &&
-                           deadline.ElapsedMilliseconds < 1000)
-                    {
-                        stream.ReadTimeout = Math.Max(1,
-                            1000 - (int)deadline.ElapsedMilliseconds);
-                        var read = stream.Read(response, total,
-                            response.Length - total);
-                        if (read <= 0) break;
-                        total += read;
-                        if (Encoding.UTF8.GetString(response, 0, total)
-                            .IndexOf("VIIPER",
-                                StringComparison.OrdinalIgnoreCase) >= 0)
-                        {
-                            return true;
-                        }
-                    }
-                    return false;
-                }
+            private static string RequireVersion(
+                Dictionary<string, string> values, string name)
+            {
+                if (!values.TryGetValue(name, out var value) ||
+                    value == null || value.Split('.').Length != 4 ||
+                    value.Split('.').Any(part =>
+                        !ushort.TryParse(part, out _)))
+                    throw new InvalidDataException();
+                return value;
             }
         }
     }

@@ -15,7 +15,7 @@ using System.Xml;
 
 namespace DS4Windows.SetupActions
 {
-    internal static class Program
+    internal static partial class Program
     {
         private const string RegistryKeyPath = @"SOFTWARE\DS4Windows";
         private const string InfrastructureVersion =
@@ -44,7 +44,7 @@ namespace DS4Windows.SetupActions
                     Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "DS4Windows");
                 var bundleSource = ReadArgument(args, "--bundle-source");
 
-                if (action != "preflight")
+                if (action != "preflight" && action != "native-preflight")
                 {
                     installRoot = ValidateManagedInstallRoot(installRoot);
                 }
@@ -58,6 +58,9 @@ namespace DS4Windows.SetupActions
                     case "preflight":
                         exitCode = Preflight();
                         break;
+                    case "native-preflight":
+                        exitCode = NativePreflight();
+                        break;
                     case "install":
                     case "repair":
                         exitCode = InstallOrRepair(installRoot, bundleSource, args);
@@ -67,6 +70,16 @@ namespace DS4Windows.SetupActions
                         break;
                     case "probe":
                         exitCode = Probe(installRoot);
+                        break;
+                    case "native-install":
+                    case "native-repair":
+                        exitCode = NativeInstallOrRepair(installRoot, args);
+                        break;
+                    case "native-uninstall":
+                        exitCode = NativeUninstall(args);
+                        break;
+                    case "native-probe":
+                        exitCode = NativeProbe();
                         break;
                     default:
                         throw new ArgumentException("Unknown setup action: " + action);
@@ -198,12 +211,21 @@ namespace DS4Windows.SetupActions
 
         private static int Preflight()
         {
-            return RunWithSetupMutex(PreflightLocked);
+            return RunWithSetupMutex(() => PreflightLocked(includeViiper: true));
         }
 
-        private static int PreflightLocked()
+        private static int NativePreflight()
         {
-            foreach (var processName in new[] { "DS4Windows", "viiper" })
+            return RunWithSetupMutex(() =>
+                PreflightLocked(includeViiper: false));
+        }
+
+        private static int PreflightLocked(bool includeViiper)
+        {
+            var processNames = includeViiper
+                ? new[] { "DS4Windows", "viiper" }
+                : new[] { "DS4Windows" };
+            foreach (var processName in processNames)
             {
                 foreach (var process in Process.GetProcessesByName(processName))
                 {

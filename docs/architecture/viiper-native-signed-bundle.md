@@ -93,15 +93,41 @@ asset:
    review. An existing release tag at another revision is never a valid native
    bundle provenance record, even if someone later attaches a same-named file.
 
-The next packaging-integration change must make portable staging, Burn
-composition, and in-app repair require this contract explicitly. It must use
-the deterministic staging copy, revalidate the staged bytes, recursively reject
-every legacy VIIPER/USB-IP payload, and provide no production-native fallback
-when the signed bundle or lock is absent.
+## DS4Windows integration
 
-At this commit boundary, portable packaging, Burn, and in-app repair still use
-the legacy payload path. A production-native release is intentionally blocked
-until that integration is complete and the final source/tag-bound Microsoft
-HLK/WHCP plus Authenticode release asset exists. Ordinary source builds and the
-synthetic contract tests remain available; synthetic fixtures are never
-accepted as production bytes.
+Native release mode is mutually exclusive with the legacy USB/IP package. The
+post-build step removes and recursively rejects the legacy VIIPER executable,
+USB/IP payloads, checksum sidecar, and PowerShell backend installer before it
+stages the exact locked native bundle. Missing native media has no download or
+legacy fallback.
+
+The standard Burn chain carries the exact six files and lock as attached,
+content-addressed payloads. Its final vital forward action invokes only the
+locked `viiper.exe native-package-install` transaction, passing the protected
+driver directory, schema-2 manifest, source revision, all six compiled hashes,
+helper path, and validated interactive-user SID. VIIPER alone owns the
+package/service mutex order, SetupAPI/SCM mutation, legacy-owner migration,
+loaded-driver identity proof, broker health proof, and rollback. Burn never
+pre-stops the broker and never kills a mutating child. Exit 3010 is preserved
+as a reboot-and-retry boundary.
+
+Direct uninstall is a separate permanent Burn action that runs the exact
+cached broker/helper before MSI removal. Related-bundle uninstall never tears
+down the shared native package. A scheduling-only HKLM receipt is written last
+after exit 0 and cannot turn a committed VIIPER operation into a Burn failure.
+
+The in-app Install / Repair path follows the same contract. Its elevated host
+creates an unguessable, protected Program Files staging directory, copies and
+flushes only the exact locked files, revalidates hashes/link counts/reparse
+boundaries, retains read handles across the child lifetime, and invokes the
+same authoritative command. It does not alter the PlayStation report, audio,
+haptics, resampling, clock, or state engines.
+
+A production-native release remains intentionally blocked until the final
+source/tag-bound Microsoft HLK/WHCP package and timestamped Authenticode
+broker/helper asset are published and installed into this exact layout. The
+remaining release proof is an elevated, reboot-capable signed-driver run with
+Driver Verifier and real DualSense/DualSense Edge/DualShock 4 input,
+speaker/haptics, and microphone soak. Ordinary source builds and synthetic
+contract tests remain available; synthetic fixtures are never production
+bytes.

@@ -90,7 +90,7 @@
         <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
           <ProgressBar IsIndeterminate="True" Width="300" Height="5" Foreground="{StaticResource AccentBrush}" />
           <TextBlock Text="Checking this PC…" FontSize="17" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,20,0,0" />
-          <TextBlock Text="DS4Windows, VIIPER, and USB-IP are being inspected." Foreground="{DynamicResource MutedBrush}" Margin="0,7,0,0" />
+          <TextBlock Text="DS4Windows and the native VIIPER UdeCx bus are being inspected." Foreground="{DynamicResource MutedBrush}" Margin="0,7,0,0" />
         </StackPanel>
       </Grid>
 
@@ -106,7 +106,7 @@
                 <TextBlock Text="Installation status" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,11" />
                 <Grid Margin="0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="DS4Windows" FontWeight="SemiBold"/><TextBlock x:Name="Ds4Status" Grid.Column="1" Foreground="{StaticResource AccentBrush}"/></Grid>
                 <Grid Margin="0,7,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="VIIPER 0.1.0" FontWeight="SemiBold"/><TextBlock x:Name="ViiperStatus" Grid.Column="1" Foreground="{StaticResource AccentBrush}"/></Grid>
-                <Grid Margin="0,7,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="USB-IP 0.9.7.7" FontWeight="SemiBold"/><TextBlock x:Name="UsbipStatus" Grid.Column="1" Foreground="{StaticResource AccentBrush}"/></Grid>
+                <Grid Margin="0,7,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="VIIPER native UdeCx bus" FontWeight="SemiBold"/><TextBlock x:Name="NativeBusStatus" Grid.Column="1" Foreground="{StaticResource AccentBrush}"/></Grid>
               </StackPanel>
             </Border>
 
@@ -138,7 +138,7 @@
           <ProgressBar x:Name="OverallProgress" Height="8" Minimum="0" Maximum="100" Foreground="{StaticResource AccentBrush}" Background="{DynamicResource BorderBrush}" />
           <TextBlock x:Name="ProgressPercent" Text="0%" FontSize="13" FontWeight="SemiBold" HorizontalAlignment="Right" Margin="0,7,0,0" />
           <Border Style="{StaticResource Card}" Margin="0,26,0,0">
-            <TextBlock Text="DS4Windows Setup requests administrator permission once, closes only recognized DS4Windows and VIIPER processes, and will not replace a live USB driver across an unsafe reboot boundary." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" />
+            <TextBlock Text="DS4Windows Setup requests administrator permission once, closes only recognized DS4Windows processes, and lets the signed VIIPER transaction stop its own service and enforce safe driver reboot boundaries." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" />
           </Border>
         </StackPanel>
       </Grid>
@@ -156,7 +156,7 @@
       <Grid x:Name="RestartPage" Visibility="Collapsed">
         <StackPanel VerticalAlignment="Center">
           <TextBlock Text="Restart required" FontSize="25" FontWeight="SemiBold" HorizontalAlignment="Center" />
-          <TextBlock x:Name="RestartDescription" Text="USB-IP was installed or repaired safely. Restart Windows to activate the verified driver, then DS4Windows and VIIPER will start automatically." TextWrapping="Wrap" TextAlignment="Center" Foreground="{DynamicResource MutedBrush}" Margin="50,12,50,26" />
+          <TextBlock x:Name="RestartDescription" Text="The native VIIPER bus was installed or repaired safely. Restart Windows to activate the verified driver, then DS4Windows will reconnect through VIIPER." TextWrapping="Wrap" TextAlignment="Center" Foreground="{DynamicResource MutedBrush}" Margin="50,12,50,26" />
           <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
             <Button Style="{StaticResource SecondaryButton}" Content="Restart later" Margin="0,0,10,0" Click="RestartLater_Click" />
             <Button x:Name="RestartNowButton" Style="{StaticResource PrimaryButton}" Content="Restart now" Click="RestartNow_Click" />

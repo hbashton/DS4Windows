@@ -10,16 +10,26 @@ import re
 import xml.etree.ElementTree as ET
 from pathlib import Path, PurePosixPath
 
+from viiper_native_bundle import (
+    BUNDLE_DIRECTORY_NAME,
+    LOCK_FILE_NAME,
+    RUNTIME_PATHS,
+    assert_no_legacy_publish_payload,
+    validate_bundle,
+)
 
-REQUIRED_PUBLISH_FILES = {
+
+BASE_REQUIRED_PUBLISH_FILES = {
     "DS4Windows.exe",
     "DS4Windows.release",
+    "extras/HidHide_1.5.230_x64.exe",
+    "extras/FakerInput_0.1.0_x64.msi",
+}
+LEGACY_REQUIRED_PUBLISH_FILES = {
     "extras/install-viiper-backend.ps1",
     "extras/VIIPER-0.1.0-x64.exe",
     "extras/VIIPER-0.1.0-x64.exe.sha256",
     "extras/USBip-0.9.7.7-x64.exe",
-    "extras/HidHide_1.5.230_x64.exe",
-    "extras/FakerInput_0.1.0_x64.msi",
 }
 
 
@@ -72,12 +82,35 @@ def main() -> int:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--installer", type=Path, required=True)
     parser.add_argument("--bundle-source", type=Path, required=True)
+    parser.add_argument("--require-native-bundle", action="store_true")
     args = parser.parse_args()
 
     source_root = Path(__file__).resolve().parent.parent
     validate_named_xaml_resources(source_root)
 
-    missing = sorted(path for path in REQUIRED_PUBLISH_FILES if not (args.publish_root / path).is_file())
+    if args.require_native_bundle:
+        validate_bundle(
+            args.publish_root / "extras" / BUNDLE_DIRECTORY_NAME,
+            args.publish_root / "extras" / LOCK_FILE_NAME,
+            source_root
+            / "DS4Windows"
+            / "DS4Control"
+            / "Viiper"
+            / "ViiperNativePackageContract.cs",
+        )
+        assert_no_legacy_publish_payload(args.publish_root)
+
+    required_publish_files = set(BASE_REQUIRED_PUBLISH_FILES)
+    if args.require_native_bundle:
+        required_publish_files.update(
+            f"extras/{BUNDLE_DIRECTORY_NAME}/{relative}"
+            for relative in RUNTIME_PATHS
+        )
+        required_publish_files.add(f"extras/{LOCK_FILE_NAME}")
+    else:
+        required_publish_files.update(LEGACY_REQUIRED_PUBLISH_FILES)
+
+    missing = sorted(path for path in required_publish_files if not (args.publish_root / path).is_file())
     if missing:
         raise SystemExit("Installer payload is missing: " + ", ".join(missing))
     if not args.installer.is_file() or args.installer.stat().st_size < 1024 * 1024:
@@ -172,30 +205,65 @@ def main() -> int:
             raise SystemExit(f"Payload hash mismatch: {entry['path']}")
 
     bundle = args.bundle_source.read_text(encoding="utf-8")
+    if args.require_native_bundle:
+        mixed_legacy_contracts = []
+        for legacy_id in ('Id="ViiperUsbipSetup"', 'Id="ViiperUsbipUninstall"'):
+            if legacy_id in bundle:
+                mixed_legacy_contracts.append(legacy_id)
+        mixed_legacy_contracts.extend(
+            match.group(0)
+            for match in re.finditer(
+                r"(?i)(?:VIIPER-.+?-x64\.exe(?:\.sha256)?|USBip-.+?-x64\.exe)",
+                bundle,
+            )
+        )
+        if mixed_legacy_contracts:
+            raise SystemExit(
+                "Native production installer still packages legacy VIIPER/USB-IP: "
+                + ", ".join(mixed_legacy_contracts)
+            )
     required_contracts = [
         'Name="CreateDesktopShortcut"',
         'Name="InstallHidHide"',
         'Name="InstallFakerInput"',
-        'Id="ViiperUsbipSetup"',
         'Id="DS4WindowsMsi"',
         'Id="PostUninstallCleanup"',
         'Id="CloseRunningApplications"',
         'Id="CloseRunningApplicationsForUninstall"',
-        'RepairArguments="repair ',
-        'UninstallArguments="uninstall ',
         'InstallCondition="InstallHidHide"',
         'InstallCondition="InstallFakerInput"',
         'Name="TargetUserSid"',
-        '--target-roaming-appdata',
-        'Variable="ManagedInstallRegistered"',
-        'Variable="ManagedViiperPresent"',
         'CacheId="DS4WindowsSetupActionsPreflight-$(var.SetupActionsHash)"',
         'CacheId="DS4WindowsSetupActionsUninstallPreflight-$(var.SetupActionsHash)"',
-        'CacheId="DS4WindowsSetupActionsInfrastructure-$(var.SetupActionsHash)"',
         'Id="HidHide"',
         'Id="FakerInput"',
         'Vital="yes"',
     ]
+    if args.require_native_bundle:
+        required_contracts.extend([
+            'Id="NativeViiperInstallRepair"',
+            'Id="NativeViiperUninstallForDirectRemove"',
+            'RepairArguments="native-repair ',
+            'InstallArguments="native-uninstall ',
+            '--native-bundle-root',
+            '--native-lock-path',
+            '[WixBundleExecutePackageCacheFolder]viiper-native-udecx',
+            'PayloadGroupRef Id="NativeViiperRuntimePayloads"',
+            'CacheId="DS4WindowsNativeViiperInstall-$(var.NativeActionCacheId)"',
+            'CacheId="DS4WindowsNativeViiperRemove-$(var.NativeActionCacheId)"',
+        ])
+    else:
+        required_contracts.extend(
+            [
+                'Id="ViiperUsbipSetup"',
+                'Variable="ManagedViiperPresent"',
+                'RepairArguments="repair ',
+                'UninstallArguments="uninstall ',
+                '--target-roaming-appdata',
+                'Variable="ManagedInstallRegistered"',
+                'CacheId="DS4WindowsSetupActionsInfrastructure-$(var.SetupActionsHash)"',
+            ]
+        )
     for contract in required_contracts:
         if contract not in bundle:
             raise SystemExit("Bundle contract missing: " + contract)
@@ -211,13 +279,20 @@ def main() -> int:
         element.get("Id"): element
         for element in bundle_xml.findall(".//w:Chain/*", wix_namespace)
     }
-    for package_id in (
+    vital_package_ids = [
         "PostUninstallCleanup",
         "CloseRunningApplications",
         "CloseRunningApplicationsForUninstall",
         "DS4WindowsMsi",
-        "ViiperUsbipSetup",
-    ):
+    ]
+    if args.require_native_bundle:
+        vital_package_ids.extend([
+            "NativeViiperInstallRepair",
+            "NativeViiperUninstallForDirectRemove",
+        ])
+    else:
+        vital_package_ids.append("ViiperUsbipSetup")
+    for package_id in vital_package_ids:
         if package_id not in packages:
             raise SystemExit(f"Bundle package is missing: {package_id}")
         if packages[package_id].get("Vital") != "yes":
@@ -237,12 +312,26 @@ def main() -> int:
         packages["PostUninstallCleanup"].get("CacheId"),
         packages["CloseRunningApplications"].get("CacheId"),
         packages["CloseRunningApplicationsForUninstall"].get("CacheId"),
-        packages["ViiperUsbipSetup"].get("CacheId"),
     }
-    if None in cache_ids or len(cache_ids) != 4 or any(
+    if not args.require_native_bundle:
+        cache_ids.add(packages["ViiperUsbipSetup"].get("CacheId"))
+    expected_cache_ids = 3 if args.require_native_bundle else 4
+    if None in cache_ids or len(cache_ids) != expected_cache_ids or any(
         "$(var.SetupActionsHash)" not in cache_id for cache_id in cache_ids
     ):
         raise SystemExit("Setup helper cache identities are not content-addressed.")
+    if args.require_native_bundle:
+        native_cache_ids = {
+            packages["NativeViiperInstallRepair"].get("CacheId"),
+            packages["NativeViiperUninstallForDirectRemove"].get("CacheId"),
+        }
+        if None in native_cache_ids or len(native_cache_ids) != 2 or any(
+            "$(var.NativeActionCacheId)" not in value
+            for value in native_cache_ids
+        ):
+            raise SystemExit(
+                "Native VIIPER action cache identities are not content-addressed."
+            )
     chain_ids = [
         element.get("Id")
         for element in bundle_xml.findall(".//w:Chain/*", wix_namespace)
@@ -252,6 +341,15 @@ def main() -> int:
         raise SystemExit(
             "Post-uninstall cleanup and process preflights must bracket the "
             "forward/reverse Burn chain."
+        )
+    if args.require_native_bundle and chain_ids[-3:] != [
+        "NativeViiperInstallRepair",
+        "NativeViiperUninstallForDirectRemove",
+        "CloseRunningApplicationsForUninstall",
+    ]:
+        raise SystemExit(
+            "Native VIIPER must be the last fallible forward transaction "
+            "and the first authoritative reverse mutation."
         )
 
     build_script = (args.bundle_source.parent.parent / "build-installer.ps1").read_text(encoding="utf-8")
@@ -264,8 +362,7 @@ def main() -> int:
         '$pendingInstaller',
         '[IO.File]::Replace',
         'does not match the completed',
-        '-p:Version=$ProductVersion -p:InformationalVersion=$DisplayVersion',
-        'test-viiper-reboot-boundary.ps1',
+        'Native installer composition requires a completed source-bound',
         'test-installer-state-machine.py',
         '[switch]$RequireSigning',
         'Unsigned public installers are intentionally blocked',
@@ -274,6 +371,18 @@ def main() -> int:
     ]:
         if contract not in build_script:
             raise SystemExit("Installer build identity contract missing: " + contract)
+    if args.require_native_bundle:
+        for contract in [
+            'The standard installer is native-VIIPER-only',
+            'ViiperNativeBundleEnabled=true',
+            'ViiperNativeLockSha256=$nativeLockHash',
+            '-p:NativeActionCacheId=$nativeActionCacheId',
+            '$extrasRoot = Join-Path $publishPath "extras"',
+        ]:
+            if contract not in build_script:
+                raise SystemExit(
+                    "Native installer composition contract missing: " + contract
+                )
     manifest_commit = build_script.rfind(
         "Publish-InstallerFileAtomically $pendingManifest $finalManifest"
     )
@@ -292,11 +401,21 @@ def main() -> int:
     ).read_text(encoding="utf-8")
     for contract in [
         'DS4W_SIGN_CERT_BASE64: ${{ secrets.DS4W_SIGN_CERT_BASE64 }}',
-        "DS4W_SIGNING_ENABLED=false",
+        "DS4Windows release signing credentials are required",
         '$firstPartyBinaries = @(".\\bin\\x64\\Release\\output\\DS4Windows.exe")',
         "First-party release signing failed for $path.",
         '$parameters.RequireSigning = $true',
         "VIIPER is an immutable release input",
+        "--require-native-bundle",
+        "RequireNativeBundle = $true",
+        "$parameters.RequireSigning = $true",
+        "VIIPER_NATIVE_SOURCE_REVISION",
+        "ViiperNativeSourceRevision=${{ env.VIIPER_NATIVE_SOURCE_REVISION }}",
+        "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+        "actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9",
+        "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065",
+        'dotnet-version: "8.0.419"',
+        'python-version: "3.10.18"',
     ]:
         if contract not in release_workflow:
             raise SystemExit(
@@ -350,36 +469,66 @@ def main() -> int:
                 contract
             )
 
-    setup_actions = (installer_root / "DS4Windows.SetupActions" / "Program.cs").read_text(encoding="utf-8")
-    for contract in [
-        r'@"Global\DS4Windows-VIIPER-Setup"',
-        'SetupResumeShortcut',
-        'KillProcessTree(process)',
-        'IsInfrastructureCommitted()',
-        'ValidateSuppliedInteractiveUser',
+    setup_actions = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (
+            installer_root / "DS4Windows.SetupActions" / "Program.cs",
+            installer_root / "DS4Windows.SetupActions" / "NativeViiperPackage.cs",
+        )
+    )
+    setup_action_contracts = [
         'RegistryView.Registry64',
-        'return 1618;',
         'ValidateManagedInstallRoot(installRoot)',
         'FileAttributes.ReparsePoint',
-        'EnsureDirectoryPathHasNoReparsePoints(resumeRoot)',
-        'ProtectResumeDirectory(resumeRoot, targetUser.Sid)',
-        'HashesEqual(bundleSource, stagedBundle)',
         '=== DS4Windows setup invocation ',
         'IsRecognizedProductProcess(process, processName',
         'FileVersionInfo.GetVersionInfo(executablePath)',
         'EnsureDirectoryPathHasNoReparsePoints(InstallerLogRoot)',
-        'return RunWithSetupMutex(PreflightLocked);',
         'completed with exit code',
         'AppendLogWithRetry',
-        'SystemTool("WindowsPowerShell", "v1.0",',
-        'arguments.Append(" -CorrelationId ")',
         'ConfigureCommonShortcuts(ds4Path, desktopShortcut)',
         'ReadArgument(args, "--correlation-id")',
         'NormalizeCorrelationId(',
         'Environment.SpecialFolder.CommonPrograms',
         'Environment.SpecialFolder.CommonDesktopDirectory',
         'RemoveCommonShortcuts()',
-    ]:
+    ]
+    if args.require_native_bundle:
+        setup_action_contracts.extend([
+            'native-package-install',
+            'RunNativePackageProcess',
+            'process.StartInfo.ArgumentList.Add(argument)',
+            'process.StandardOutput.ReadToEndAsync()',
+            'process.StandardError.ReadToEndAsync()',
+            'NativeBundleMedia.Open',
+            'FileShare.Read',
+            'NumberOfLinks != 1',
+            'MarkNativeReceiptRemoving();',
+            'exitCode == 0 || exitCode == 3010',
+            'CommitNativeReceipt(pins, targetSid);',
+            'native-preflight',
+            'ResolveInteractiveUser(args).Sid',
+            'WaitForSingleObject(process.SafeHandle, InfiniteWait)',
+        ])
+        if 'RunWithSetupMutex(() => NativeInstall' in setup_actions:
+            raise SystemExit(
+                "The native VIIPER transaction must own its protected mutexes."
+            )
+    else:
+        setup_action_contracts.extend([
+            r'@"Global\DS4Windows-VIIPER-Setup"',
+            'SetupResumeShortcut',
+            'KillProcessTree(process)',
+            'IsInfrastructureCommitted()',
+            'ValidateSuppliedInteractiveUser',
+            'return 1618;',
+            'EnsureDirectoryPathHasNoReparsePoints(resumeRoot)',
+            'ProtectResumeDirectory(resumeRoot, targetUser.Sid)',
+            'HashesEqual(bundleSource, stagedBundle)',
+            'SystemTool("WindowsPowerShell", "v1.0",',
+            'arguments.Append(" -CorrelationId ")',
+        ])
+    for contract in setup_action_contracts:
         if contract not in setup_actions:
             raise SystemExit("Setup action safety contract missing: " + contract)
     if 'SetValue("DS4WindowsSetupResume"' in setup_actions:
@@ -390,41 +539,42 @@ def main() -> int:
         / "extras"
         / "install-viiper-backend.ps1"
     ).read_text(encoding="utf-8")
-    for contract in [
-        '"Global\\DS4Windows-VIIPER-Setup"',
-        "Test-SafePackageRelativePath",
-        "Assert-SafeManagedDirectory",
-        "Install-ViiperAtomically",
-        "Resolve-UsbipReplacementBoundary",
-        "Commit-InfrastructureReadiness",
-        "Test-RecognizedProductExecutable",
-        '$script:InstallerLogRoot = Assert-SafeManagedDirectory',
-        '"VIIPER-0.1.0-x64.exe"',
-        '[Version]"0.9.7.7"',
-        '"USBip-0.9.7.7-x64.exe"',
-        'Start-AndVerifyViiper',
-        'Start-AndVerifyViiperDirectly',
-        'Suspend-StartupTasksUntilInfrastructureReady',
-        'Set-InfrastructureStartupFailClosed',
-        '$script:UsbipExecutableSha256',
-        'pinned USB-IP package and runtime ABI pass after reboot',
-        'registration attempt " +',
-        'retrying the same packaged executable directly',
-        'New-ScheduledTaskTrigger -AtLogOn',
-        'infrastructure-actions.log',
-        '[string]::IsNullOrWhiteSpace($triggerUser)',
-        "sourceInfo.Length -eq $destinationInfo.Length",
-        "destinationHash = (Get-FileHash",
-        '$script:InstallDir = Join-Path $script:ManagedRoot "VIIPER"',
-        '$script:KeepDs4WindowsPortable',
-        '$script:CorrelationId',
-        "$CorrelationId.Trim() -notmatch '^[0-9A-Fa-f]{32}$'",
-        'Protect-ElevatedTaskTargetDirectory $script:InstallDir "VIIPER"',
-    ]:
-        if contract not in backend_script:
-            raise SystemExit(
-                "Backend installer safety contract missing: " + contract
-            )
+    if not args.require_native_bundle:
+        for contract in [
+            '"Global\\DS4Windows-VIIPER-Setup"',
+            "Test-SafePackageRelativePath",
+            "Assert-SafeManagedDirectory",
+            "Install-ViiperAtomically",
+            "Resolve-UsbipReplacementBoundary",
+            "Commit-InfrastructureReadiness",
+            "Test-RecognizedProductExecutable",
+            '$script:InstallerLogRoot = Assert-SafeManagedDirectory',
+            '"VIIPER-0.1.0-x64.exe"',
+            '[Version]"0.9.7.7"',
+            '"USBip-0.9.7.7-x64.exe"',
+            'Start-AndVerifyViiper',
+            'Start-AndVerifyViiperDirectly',
+            'Suspend-StartupTasksUntilInfrastructureReady',
+            'Set-InfrastructureStartupFailClosed',
+            '$script:UsbipExecutableSha256',
+            'pinned USB-IP package and runtime ABI pass after reboot',
+            'registration attempt " +',
+            'retrying the same packaged executable directly',
+            'New-ScheduledTaskTrigger -AtLogOn',
+            'infrastructure-actions.log',
+            '[string]::IsNullOrWhiteSpace($triggerUser)',
+            "sourceInfo.Length -eq $destinationInfo.Length",
+            "destinationHash = (Get-FileHash",
+            '$script:InstallDir = Join-Path $script:ManagedRoot "VIIPER"',
+            '$script:KeepDs4WindowsPortable',
+            '$script:CorrelationId',
+            "$CorrelationId.Trim() -notmatch '^[0-9A-Fa-f]{32}$'",
+            'Protect-ElevatedTaskTargetDirectory $script:InstallDir "VIIPER"',
+        ]:
+            if contract not in backend_script:
+                raise SystemExit(
+                    "Backend installer safety contract missing: " + contract
+                )
     legacy_network_contracts = [
         "api.github.com/repos/hbashton/VIIPER",
         "viiper-windows-amd64.zip",
@@ -469,76 +619,98 @@ def main() -> int:
             raise SystemExit("Bootstrapper lifecycle contract missing: " + contract)
 
     probe = (installer_root / "DS4Windows.Bootstrapper" / "InfrastructureProbe.cs").read_text(encoding="utf-8")
-    for contract in [
-        '"InfrastructureState"',
-        'BeginOutputReadLine()',
-        'BeginErrorReadLine()',
-        'RegistryView.Registry64',
-        'ViiperApiReady()',
-        'ExpectedUsbipHash',
-        'IsCompatibleUsbipProbe',
-    ]:
+    probe_contracts = ['RegistryView.Registry64']
+    if args.require_native_bundle:
+        probe_contracts.extend([
+            'SOFTWARE\\DS4Windows\\NativeVIIPER',
+            'VIIPERNativeBroker',
+            'DriverServiceHashMatches',
+            'DriverBuildIdentity',
+        ])
+        for forbidden in ['TcpClient', 'ViiperApiReady', 'ExpectedUsbipHash']:
+            if forbidden in probe:
+                raise SystemExit(
+                    "Native scheduling probe contains legacy/unauthenticated "
+                    "authority: " + forbidden
+                )
+    else:
+        probe_contracts.extend([
+            '"InfrastructureState"',
+            'BeginOutputReadLine()',
+            'BeginErrorReadLine()',
+            'ViiperApiReady()',
+            'ExpectedUsbipHash',
+            'IsCompatibleUsbipProbe',
+        ])
+    for contract in probe_contracts:
         if contract not in probe:
             raise SystemExit("Infrastructure probe contract missing: " + contract)
-    expected_hash = re.search(
-        r'ExpectedViiperHash\s*=\s*"([0-9A-F]{64})"', probe
-    )
-    actual_viiper_hash = sha256(
-        args.publish_root / "extras" / "VIIPER-0.1.0-x64.exe"
-    )
-    sidecar_hash = (
-        args.publish_root / "extras" / "VIIPER-0.1.0-x64.exe.sha256"
-    ).read_text(encoding="utf-8").split()[0].upper()
-    if sidecar_hash != actual_viiper_hash:
-        raise SystemExit("Packaged VIIPER hash sidecar is stale.")
-    if not expected_hash or expected_hash.group(1) != actual_viiper_hash:
-        raise SystemExit("Bootstrapper VIIPER identity does not match its packaged binary.")
-
-    setup_manager = (
+    viiper_source_root = (
         args.bundle_source.parent.parent.parent
         / "DS4Windows"
         / "DS4Control"
         / "Viiper"
-        / "ViiperSetupManager.cs"
-    ).read_text(encoding="utf-8")
-    manager_hash = re.search(
-        r'SupportedViiperSha256\s*=\s*\n?\s*"([0-9A-F]{64})"',
-        setup_manager,
     )
-    if not manager_hash or manager_hash.group(1) != actual_viiper_hash:
-        raise SystemExit(
-            "Built-in setup VIIPER identity does not match its packaged binary."
+    setup_manager = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (
+            viiper_source_root / "ViiperSetupManager.cs",
+            viiper_source_root / "ViiperNativePackageInstaller.cs",
         )
+    )
+    if not args.require_native_bundle:
+        expected_hash = re.search(
+            r'ExpectedViiperHash\s*=\s*"([0-9A-F]{64})"', probe
+        )
+        actual_viiper_hash = sha256(
+            args.publish_root / "extras" / "VIIPER-0.1.0-x64.exe"
+        )
+        sidecar_hash = (
+            args.publish_root / "extras" / "VIIPER-0.1.0-x64.exe.sha256"
+        ).read_text(encoding="utf-8").split()[0].upper()
+        if sidecar_hash != actual_viiper_hash:
+            raise SystemExit("Packaged VIIPER hash sidecar is stale.")
+        if not expected_hash or expected_hash.group(1) != actual_viiper_hash:
+            raise SystemExit("Bootstrapper VIIPER identity does not match its packaged binary.")
 
-    usbip_hashes = []
-    for pattern, source, label in [
-        (
-            r'ExpectedUsbipHash\s*=\s*"([0-9A-Fa-f]{64})"',
-            probe,
-            "bootstrapper",
-        ),
-        (
-            r'\$script:UsbipExecutableSha256\s*=\s*\r?\n?\s*"([0-9A-Fa-f]{64})"',
-            backend_script,
-            "backend",
-        ),
-        (
-            r'SupportedUsbipExecutableSha256\s*=\s*\r?\n?\s*"([0-9A-Fa-f]{64})"',
+        manager_hash = re.search(
+            r'SupportedViiperSha256\s*=\s*\n?\s*"([0-9A-F]{64})"',
             setup_manager,
-            "runtime",
-        ),
-    ]:
-        match = re.search(pattern, source)
-        if not match:
-            raise SystemExit(
-                f"{label} USB-IP executable identity is missing."
-            )
-        usbip_hashes.append(match.group(1).upper())
-    if len(set(usbip_hashes)) != 1:
-        raise SystemExit(
-            "USB-IP executable identity differs between installer and runtime gates."
         )
-    for contract in [
+        if not manager_hash or manager_hash.group(1) != actual_viiper_hash:
+            raise SystemExit(
+                "Built-in setup VIIPER identity does not match its packaged binary."
+            )
+
+        usbip_hashes = []
+        for pattern, source, label in [
+            (
+                r'ExpectedUsbipHash\s*=\s*"([0-9A-Fa-f]{64})"',
+                probe,
+                "bootstrapper",
+            ),
+            (
+                r'\$script:UsbipExecutableSha256\s*=\s*\r?\n?\s*"([0-9A-Fa-f]{64})"',
+                backend_script,
+                "backend",
+            ),
+            (
+                r'SupportedUsbipExecutableSha256\s*=\s*\r?\n?\s*"([0-9A-Fa-f]{64})"',
+                setup_manager,
+                "runtime",
+            ),
+        ]:
+            match = re.search(pattern, source)
+            if not match:
+                raise SystemExit(
+                    f"{label} USB-IP executable identity is missing."
+                )
+            usbip_hashes.append(match.group(1).upper())
+        if len(set(usbip_hashes)) != 1:
+            raise SystemExit(
+                "USB-IP executable identity differs between installer and runtime gates."
+            )
+    setup_manager_contracts = [
         "EnsurePathDoesNotTraverseReparsePoints(sourceRoot",
         "EnsurePathDoesNotTraverseReparsePoints(sourcePath",
         "IsSafeRelativePackagePath(relativePath)",
@@ -551,7 +723,25 @@ def main() -> int:
         "progress = new DS4WinWPF.DS4Forms.ViiperSetupProgress(",
         "progress.WaitForProcess(process)",
         'startInfo.ArgumentList.Add("-CorrelationId")',
-    ]:
+    ]
+    if args.require_native_bundle:
+        setup_manager_contracts = [
+            "NativeInstallerPins.TryLoad",
+            "RunElevatedNativePackageInstall",
+            '"native-package-install"',
+            'startInfo.ArgumentList.Add(argument)',
+            "process.StandardOutput.ReadToEndAsync()",
+            "process.StandardError.ReadToEndAsync()",
+            "FileShare.Read",
+            "information.NumberOfLinks != 1",
+            "ProtectNativeSetupDirectory(setupDirectory)",
+            "O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+            "CommitNativeInstallerReceipt(pins, targetUserSid)",
+            "ValidateNativeInstallerAccount",
+            "WaitForSingleObject(process.SafeHandle",
+            "DeleteNativeSetupDirectory(setupDirectory)",
+        ]
+    for contract in setup_manager_contracts:
         if contract not in setup_manager:
             raise SystemExit(
                 "Built-in installer staging contract missing: " + contract

@@ -1,103 +1,106 @@
-# Installer validation and recovery strategy
+# Native VIIPER installer validation and recovery strategy
 
-The DS4Windows installer is treated as a transaction with one owner and one
-commit point. A package is not considered installed merely because its child
-process returned zero; the complete DS4Windows, VIIPER, USB-IP, task, ABI, and
-API contract must be verified first.
+The DS4Windows native-backend installer delegates all driver, broker-service,
+legacy-owner migration, and rollback mutations to VIIPER's signed transaction.
+DS4Windows validates and retains the release media, supplies immutable expected
+identities, waits for the exact child process to terminate, and interprets only
+the transaction's documented exit status. It does not reproduce SetupAPI, SCM,
+Driver Store, or USB-IP cleanup logic.
 
 ## Transaction rules
 
-1. A global Burn mutex rejects overlapping install, update, repair, and
-   uninstall plans with Windows Installer error 1618.
-2. A second global infrastructure mutex serializes VIIPER and USB-IP mutation,
-   including the built-in repair flow.
-3. Install/repair and uninstall have separate process preflights at opposite
-   ends of the Burn chain. This respects Burn's forward installation and
-   reverse uninstallation order.
-4. The original interactive user's SID and profile folders are captured before
-   elevation and persisted by Burn across a reboot resume.
-5. The readiness marker is cleared before mutation. It is restored only after
-   all pinned identities and runtime probes pass.
-6. A failed transaction stops VIIPER, disables only startup tasks whose full
-   executable/action/principal contract still belongs to this package, and
-   records a failed state.
-7. A newer related bundle blocks an older installer with error 1638 before any
-   package is planned.
-8. One interlocked Plan gate rejects duplicate UI, passive, resume, or recovery
-   requests until the active Apply pass completes or Retry explicitly resets
-   the gate.
-9. Process preflight acquires the same infrastructure mutex as in-app repair,
-   preventing one transaction from stopping executables while another is
-   replacing or probing them.
-10. Burn creates one persisted correlation ID and passes it through every
-    preflight, elevated helper, PowerShell phase, and reboot resume. In-app
-    repair creates the same kind of transaction ID. Bounded append retries
-    preserve diagnostics when a log reader briefly owns the file.
-11. The backend always lives under Program Files. "Keep DS4Windows portable"
-    changes only the UI/package location; it never creates an elevated task for
-    a LocalAppData VIIPER executable.
-12. Start-menu and optional desktop shortcuts are all-users shell integration
-    owned by the infrastructure host, not per-user MSI components.
-13. Program Files ACL normalization is a required safety gate for both the
-    managed application and VIIPER backend; setup never registers an elevated
-    task against a directory it could not protect.
+1. Burn and the in-app installer serialize their own setup entry points. VIIPER
+   then acquires its Administrators-bound private package and service namespaces
+   in package-to-service order.
+2. The only authoritative install command is the staged, pinned `viiper.exe
+   native-package-install`. The only authoritative removal command is the same
+   pinned executable's `uninstall` command. DS4Windows never invokes
+   `ViiperUdeCtl.exe` directly.
+3. The source bundle contains exactly six direct children: `viiper.exe`,
+   `ViiperUdeCtl.exe`, `ViiperUde.inf`, `ViiperUde.sys`, `ViiperUde.cat`, and
+   `submission-manifest.json`. Installation reshapes the unchanged driver bytes
+   into an exact three-file driver directory because that is the helper's
+   fail-closed input contract.
+4. Every file, source revision, ABI, capability mask, driver version, loaded
+   build identity, release asset, and signing identity is pinned by the compiled
+   native-package contract and immutable lock. Case, layout, duplicate JSON
+   members, reparse points, extra links, extras, and hash drift are rejected.
+5. The original interactive user's SID and profile are captured before
+   elevation, validated after elevation, and persisted by Burn across reboot
+   resume. They are data for VIIPER's exact legacy-owner migration, never a
+   substitute for authorization.
+6. DS4Windows may be closed before mutation. The wrapper never pre-stops or
+   kills VIIPER, modifies USB-IP, removes tasks, or edits the Driver Store.
+   VIIPER owns those operations and their rollback order.
+7. After the mutating child starts, the wrapper drains stdout and stderr and
+   waits on the exact Windows process object without a timeout or forced kill.
+   Source-media handles and transaction scope remain live until termination.
+8. Exit 0 means verified commit. Exit 3010 means verified reboot-required
+   outcome and causes the complete transaction to be retried after reboot.
+   Every other exit, malformed proof, crash, or wait ambiguity fails closed.
+9. A registry receipt is scheduling evidence only. It is written last and can
+   never override VIIPER's authenticated ABI, capability, package-version, and
+   loaded-driver identity proof.
+10. Native install/repair is the last vital forward Burn mutation. Direct
+    uninstall runs VIIPER's authoritative removal before MSI removes the cached
+    helper and bundle media. Related-bundle removal cannot tear down shared
+    native state.
 
-## Pinned runtime contract
+## Runtime contract
 
-- VIIPER must match the SHA-256 of the bundled 0.1.0 executable.
-- `usbip.exe` must report version 0.9.7.7 and match the pinned executable
-  SHA-256.
-- The active `usbip2_ude` and `usbip2_filter` driver files must match the two
-  pinned signed-driver SHA-256 values.
-- `usbip.exe port` must exit successfully without any known ABI/structure
-  mismatch diagnostic.
-- The VIIPER API must answer its local readiness probe.
-- The machine readiness marker must be
-  `VIIPER-0.1.0+USBIP-0.9.7.7 / Ready` in the 64-bit registry view.
+The current native contract is centralized in `ViiperNativePackageContract`.
+DS4Windows must authenticate the local VIIPER broker and require all of the
+following before creating a virtual controller:
 
-DS4Windows repeats these identity and ABI checks at startup. Missing or
-mismatched prerequisites open an offline repair prompt; suppressing a location
-recommendation never suppresses a verification failure. The main UI remains
-available in degraded mode for Settings and diagnostics, while virtual output
-continues to fail closed until a fresh readiness check passes.
+- server identity `VIIPER` and native transport ready;
+- exact UdeCx ABI and capability mask;
+- exact driver package version;
+- exact 32-byte loaded-kernel build identity, encoded as canonical lowercase
+  hexadecimal;
+- exact native service identity and protected installed broker provenance.
 
-## USB-IP 0.9.7.8 downgrade
+Missing, malformed, duplicated, differently cased, stale, or conflicting proof
+fails before any bus or device creation. No production native path falls back to
+USB-IP.
 
-The downgrade is intentionally split across boots:
+## Preservation boundaries
 
-1. Verify the exact 0.9.7.8 uninstall record, quiesce DS4Windows/VIIPER, detach
-   imports, remove 0.9.7.8, and persist the source/target versions plus the
-   current boot identity.
-2. Leave 0.9.7.7 uninstalled in that boot, disable the two verified startup
-   tasks, and return 3010.
-3. After reboot, prove the boot identity changed and the old root device,
-   running services, and DriverStore packages are gone.
-4. Install the bundled 0.9.7.7 package, validate executable and driver hashes,
-   validate ABI and VIIPER API, enable the owned startup tasks, then atomically
-   publish Ready.
+The native bus changes transport, scheduling, lifecycle, and installation—not
+the established DualSense, DualSense Edge, or DualShock 4 media/state engines.
+Deterministic parity gates compare the native adapter with the proven USB-IP
+behavior for HID input, output state, speaker/haptics, microphone ISO payloads,
+packet lengths, endpoint alternate settings, reset boundaries, and reconnect.
+Production release additionally requires signed live tests; byte-level unit
+parity is not presented as proof of real Windows USB scheduling or audio timing.
 
-The release gate runs a no-driver-mutation simulation of same-boot rejection,
-next-boot continuation, failed-uninstaller rollback, and task suspension. The
-test deliberately avoids installing a known-incompatible kernel driver on the
-build host.
+Uninstall removes only exact VIIPER-owned devnodes, packages, service, protected
+credentials, broker files, and logs. It does not recursively delete application
+directories, user profiles, settings, controller data, or unrelated USB-IP
+installations. Failed or indeterminate rollback preserves authenticated recovery
+media and leaves the broker stopped for reconciliation.
 
 ## Release gates
 
-- PowerShell parser validation for the backend installer.
-- WPF clean-configuration construction tests, including mandatory repair UI.
-- Full unit/regression suite.
-- WiX MSI ICE validation.
-- Burn/bootstrapper and setup-action compilation.
-- Self-contained .NET 8 publication for both installer hosts.
-- Real MSI install, repair, and uninstall execution on the Windows CI runner.
-- Content-addressed payload manifest and hash validation.
-- Fail-fast equality between `DS4Windows.release` and the requested package
-  identity before WiX or manifest generation can run.
-- USB-IP reboot-boundary simulation.
-- Installer state-machine simulation covering clean install, update, repair,
-  uninstall, downgrade, cancellation, concurrency, failure, and reboot/resume.
-- Atomic publication of the completed installer only after every gate passes.
-  The verified manifest is committed first and the installer EXE last.
-- Mandatory Authenticode verification for public release artifacts; release
-  composition is blocked when signing material or a first-party signature is
-  missing.
+- Production Authenticode verification for the broker and helper, including
+  trusted chain, timestamp, and pinned signer certificate.
+- Microsoft HLK/WHCP-returned INF/SYS/CAT validation, exact catalog membership,
+  schema-2 manifest, source revision, and loaded-build-identity derivation.
+- Exact six-file archive validation before and after archive round-trip, then
+  build-time reshaping and revalidation against the immutable DS4Windows lock.
+- Native-only resource and Burn-chain checks proving there is no legacy VIIPER,
+  USB-IP executable, PowerShell installer, network download, or fallback payload.
+- SetupActions, bootstrapper, WPF application, WiX, Python contract, and full
+  regression-suite builds/tests.
+- Deterministic install/repair/uninstall state-machine coverage for success,
+  no-op repair, rollback, rollback failure, crash, mutex contention, tampering,
+  reboot 3010, resume, direct uninstall, and related-bundle upgrade ordering.
+- Source-bound live Windows validation with Driver Verifier, sleep/resume,
+  broker crash/reconnect, reset/reconfigure, multiple controllers, and concurrent
+  HID plus full-duplex PlayStation speaker/haptics/microphone traffic.
+- Source-bound SDL/QPC/WPR latency evidence for Xbox, DualShock 4, and DualSense,
+  with causal event fences and comparison to the same-machine USB-IP baseline.
+
+No release is production-ready merely because it compiles. The final gate is a
+matching signed bundle installed on a disposable Windows target and exercised
+with real controllers without input loss, stale state, media dropout, cadence
+drift, lifecycle leaks, or Driver Verifier findings.

@@ -47,13 +47,14 @@ ARCHIVE_TO_RUNTIME = (
     ("submission-manifest.json", "submission-manifest.json"),
 )
 LEGACY_PUBLISH_PATHS = (
+    "extras/install-viiper-backend.ps1",
     "extras/VIIPER-0.1.0-x64.exe",
     "extras/VIIPER-0.1.0-x64.exe.sha256",
     "extras/USBip-0.9.7.7-x64.exe",
     "extras/USBip-0.9.7.7-LICENSE.txt",
 )
 LEGACY_PUBLISH_BASENAME = re.compile(
-    r"(?i)^(?:VIIPER-.+-x64\.exe(?:\.sha256)?|USBip-.+(?:-x64\.exe|-LICENSE\.txt))$"
+    r"(?i)^(?:install-viiper-backend\.ps1|VIIPER-.+-x64\.exe(?:\.sha256)?|USBip-.+(?:-x64\.exe|-LICENSE\.txt))$"
 )
 SUBMISSION_NAMES = (
     "ViiperUde.inf",

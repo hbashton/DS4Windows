@@ -181,7 +181,7 @@ namespace DS4Windows
         }
     }
 
-    public static class ViiperSetupManager
+    public static partial class ViiperSetupManager
     {
         public const string ApiHost = "127.0.0.1";
         public const int ApiPort = 3242;
@@ -682,6 +682,11 @@ namespace DS4Windows
             Window owner = null, bool portableInstallation = false)
         {
             status ??= GetStatus();
+            if (NativeInstallerPins.TryLoad(out _))
+            {
+                return LaunchNativePackageInstaller(owner,
+                    portableInstallation);
+            }
             if (!status.SetupScriptFound)
             {
                 string message =
@@ -861,7 +866,7 @@ namespace DS4Windows
                 string message = exitCode == 0
                     ? "VIIPER was installed, but Windows is not reporting every component as ready yet. Restart Windows once, then click Refresh."
                     : exitCode == 1223
-                    ? "VIIPER setup was canceled. No USBIP driver or foreign executable was changed."
+                    ? "VIIPER setup was canceled. No driver or unrelated executable was changed."
                     : BuildInstallerFailureMessage(exitCode, logPath);
                 ShowInstallerMessage(owner, message, "VIIPER setup",
                     exitCode == 1223 ? MessageBoxImage.Information :
@@ -970,6 +975,9 @@ namespace DS4Windows
                 bool skipStartupTasks = Array.Exists(args, argument =>
                     string.Equals(argument, "--skip-startup-tasks",
                         StringComparison.Ordinal));
+                bool nativePackage = Array.Exists(args, argument =>
+                    string.Equals(argument, "--native-package",
+                        StringComparison.Ordinal));
 
                 string hostPath = Environment.ProcessPath;
                 if (string.IsNullOrWhiteSpace(hostPath) ||
@@ -989,6 +997,15 @@ namespace DS4Windows
                     throw new InvalidOperationException(
                         "The setup payload is not the package adjacent to " +
                         "the running DS4Windows executable.");
+                }
+
+                if (nativePackage)
+                {
+                    ValidateNativeInstallerAccount(targetUserSid,
+                        targetUserName, targetLocalAppData);
+                    exitCode = RunElevatedNativePackageInstall(packageExtras,
+                        targetUserSid, portableInstallation);
+                    return true;
                 }
 
                 string setupRoot = Path.Combine(

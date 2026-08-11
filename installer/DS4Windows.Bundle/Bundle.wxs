@@ -24,27 +24,6 @@
     <Variable Name="TargetRoamingAppData" Type="string" Value="" Persisted="yes" />
 
     <util:RegistrySearch
-        Id="InfrastructureMarkerSearch"
-        Variable="InfrastructureInstalled"
-        Root="HKLM"
-        Key="SOFTWARE\DS4Windows"
-        Value="InfrastructureVersion"
-        Result="value"
-        Bitness="always64" />
-    <util:RegistrySearch
-        Id="ManagedInstallRegistrationSearch"
-        Variable="ManagedInstallRegistered"
-        Root="HKLM"
-        Key="SOFTWARE\DS4Windows"
-        Value="InstallPath"
-        Result="exists"
-        Bitness="always64" />
-    <util:FileSearch
-        Id="ManagedViiperExecutableSearch"
-        Variable="ManagedViiperPresent"
-        Path="[ProgramFiles64Folder]DS4Windows\VIIPER\viiper.exe"
-        Result="exists" />
-    <util:RegistrySearch
         Id="HidHideSearch"
         Variable="HidHideInstalled"
         Root="HKLM"
@@ -85,7 +64,7 @@
           Permanent="yes"
           Vital="yes"
           DetectCondition="0"
-          InstallArguments="preflight --correlation-id &quot;[SetupCorrelationId]&quot;">
+          InstallArguments="native-preflight --correlation-id &quot;[SetupCorrelationId]&quot;">
         <ExitCode Value="0" Behavior="success" />
         <ExitCode Behavior="error" />
       </ExePackage>
@@ -95,22 +74,6 @@
           SourceFile="$(var.MsiPath)"
           Visible="no"
           Vital="yes" />
-
-      <ExePackage
-          Id="ViiperUsbipSetup"
-          CacheId="DS4WindowsSetupActionsInfrastructure-$(var.SetupActionsHash)"
-          SourceFile="$(var.SetupActionsPath)"
-          PerMachine="yes"
-          Permanent="yes"
-          Vital="yes"
-          DetectCondition="InfrastructureInstalled = &quot;VIIPER-0.1.0+USBIP-0.9.7.7&quot; OR ManagedInstallRegistered OR ManagedViiperPresent"
-          InstallArguments="install --correlation-id &quot;[SetupCorrelationId]&quot; --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot; --bundle-source &quot;[WixBundleOriginalSource]&quot; --desktop-shortcut &quot;[CreateDesktopShortcut]&quot; --target-user-sid &quot;[TargetUserSid]&quot; --target-user-name &quot;[TargetUserName]&quot; --target-local-appdata &quot;[TargetLocalAppData]&quot; --target-roaming-appdata &quot;[TargetRoamingAppData]&quot;"
-          RepairArguments="repair --correlation-id &quot;[SetupCorrelationId]&quot; --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot; --bundle-source &quot;[WixBundleOriginalSource]&quot; --desktop-shortcut &quot;[CreateDesktopShortcut]&quot; --target-user-sid &quot;[TargetUserSid]&quot; --target-user-name &quot;[TargetUserName]&quot; --target-local-appdata &quot;[TargetLocalAppData]&quot; --target-roaming-appdata &quot;[TargetRoamingAppData]&quot;"
-          UninstallArguments="uninstall --correlation-id &quot;[SetupCorrelationId]&quot; --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot;">
-        <ExitCode Value="0" Behavior="success" />
-        <ExitCode Value="3010" Behavior="scheduleReboot" />
-        <ExitCode Behavior="error" />
-      </ExePackage>
 
       <ExePackage
           Id="HidHide"
@@ -134,20 +97,42 @@
           InstallCondition="InstallFakerInput"
           Visible="no" />
 
-      <!-- VIIPER/USB-IP is shared machine infrastructure. Keep the normal
-           setup package permanent so an outgoing related bundle cannot tear
-           down the incoming version or retain its own Burn registration.
-           A direct uninstall explicitly plans this one-shot action instead. -->
+      <!-- This is the last fallible forward mutation. VIIPER owns the driver,
+           broker-service, legacy-migration, authenticated health, and rollback
+           transaction. Permanent prevents Burn from tearing down shared native
+           state during an unrelated later rollback or outgoing upgrade. -->
       <ExePackage
-          Id="ViiperUsbipUninstall"
-          CacheId="DS4WindowsSetupActionsInfrastructureUninstall-$(var.SetupActionsHash)"
-          Name="DS4Windows.SetupActions.InfrastructureUninstall.exe"
+          Id="NativeViiperInstallRepair"
+          CacheId="DS4WindowsNativeViiperInstall-$(var.NativeActionCacheId)"
+          Name="DS4Windows.SetupActions.NativeViiperInstall.exe"
           SourceFile="$(var.SetupActionsPath)"
           PerMachine="yes"
           Permanent="yes"
           Vital="yes"
           DetectCondition="0"
-          InstallArguments="uninstall --correlation-id &quot;[SetupCorrelationId]&quot; --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot;">
+          InstallArguments="native-install --correlation-id &quot;[SetupCorrelationId]&quot; --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot; --native-bundle-root &quot;[WixBundleExecutePackageCacheFolder]viiper-native-udecx&quot; --native-lock-path &quot;[WixBundleExecutePackageCacheFolder]viiper-native-udecx.lock.json&quot; --desktop-shortcut &quot;[CreateDesktopShortcut]&quot; --target-user-sid &quot;[TargetUserSid]&quot; --target-user-name &quot;[TargetUserName]&quot; --target-local-appdata &quot;[TargetLocalAppData]&quot; --target-roaming-appdata &quot;[TargetRoamingAppData]&quot;"
+          RepairArguments="native-repair --correlation-id &quot;[SetupCorrelationId]&quot; --install-root &quot;[ProgramFiles64Folder]DS4Windows&quot; --native-bundle-root &quot;[WixBundleExecutePackageCacheFolder]viiper-native-udecx&quot; --native-lock-path &quot;[WixBundleExecutePackageCacheFolder]viiper-native-udecx.lock.json&quot; --desktop-shortcut &quot;[CreateDesktopShortcut]&quot; --target-user-sid &quot;[TargetUserSid]&quot; --target-user-name &quot;[TargetUserName]&quot; --target-local-appdata &quot;[TargetLocalAppData]&quot; --target-roaming-appdata &quot;[TargetRoamingAppData]&quot;">
+        <PayloadGroupRef Id="NativeViiperRuntimePayloads" />
+        <ExitCode Value="0" Behavior="success" />
+        <ExitCode Value="3010" Behavior="scheduleReboot" />
+        <ExitCode Behavior="error" />
+      </ExePackage>
+
+      <!-- Direct removal is a distinct always-absent permanent action. The BA
+           plans it only for a top-level uninstall, so an outgoing related
+           bundle cannot remove the incoming package. Burn executes it before
+           MSI removal while the exact cached helper/media still exist. -->
+      <ExePackage
+          Id="NativeViiperUninstallForDirectRemove"
+          CacheId="DS4WindowsNativeViiperRemove-$(var.NativeActionCacheId)"
+          Name="DS4Windows.SetupActions.NativeViiperRemove.exe"
+          SourceFile="$(var.SetupActionsPath)"
+          PerMachine="yes"
+          Permanent="yes"
+          Vital="yes"
+          DetectCondition="0"
+          InstallArguments="native-uninstall --correlation-id &quot;[SetupCorrelationId]&quot; --native-bundle-root &quot;[WixBundleExecutePackageCacheFolder]viiper-native-udecx&quot; --native-lock-path &quot;[WixBundleExecutePackageCacheFolder]viiper-native-udecx.lock.json&quot; --target-user-sid &quot;[TargetUserSid]&quot; --target-user-name &quot;[TargetUserName]&quot; --target-local-appdata &quot;[TargetLocalAppData]&quot; --target-roaming-appdata &quot;[TargetRoamingAppData]&quot;">
+        <PayloadGroupRef Id="NativeViiperRuntimePayloads" />
         <ExitCode Value="0" Behavior="success" />
         <ExitCode Value="3010" Behavior="scheduleReboot" />
         <ExitCode Behavior="error" />
@@ -155,8 +140,8 @@
 
       <!-- Burn removes packages in reverse chain order. Keep a second,
            install-only invocation of the verified preflight helper at the
-           tail so uninstall quiesces DS4Windows and VIIPER before any owned
-           package is removed. The BA plans exactly one of the two preflights. -->
+           tail so uninstall quiesces DS4Windows before any owned package is
+           removed. VIIPER alone owns broker shutdown inside its transaction. -->
       <ExePackage
           Id="CloseRunningApplicationsForUninstall"
           CacheId="DS4WindowsSetupActionsUninstallPreflight-$(var.SetupActionsHash)"
@@ -166,10 +151,36 @@
           Permanent="yes"
           Vital="yes"
           DetectCondition="0"
-          InstallArguments="preflight --correlation-id &quot;[SetupCorrelationId]&quot;">
+          InstallArguments="native-preflight --correlation-id &quot;[SetupCorrelationId]&quot;">
         <ExitCode Value="0" Behavior="success" />
         <ExitCode Behavior="error" />
       </ExePackage>
     </Chain>
   </Bundle>
+
+  <Fragment>
+    <PayloadGroup Id="NativeViiperRuntimePayloads">
+      <Payload Id="NativeViiperBrokerPayload"
+               SourceFile="$(var.ExtrasRoot)\viiper-native-udecx\viiper.exe"
+               Name="viiper-native-udecx\viiper.exe" />
+      <Payload Id="NativeViiperHelperPayload"
+               SourceFile="$(var.ExtrasRoot)\viiper-native-udecx\ViiperUdeCtl.exe"
+               Name="viiper-native-udecx\ViiperUdeCtl.exe" />
+      <Payload Id="NativeViiperManifestPayload"
+               SourceFile="$(var.ExtrasRoot)\viiper-native-udecx\submission-manifest.json"
+               Name="viiper-native-udecx\submission-manifest.json" />
+      <Payload Id="NativeViiperInfPayload"
+               SourceFile="$(var.ExtrasRoot)\viiper-native-udecx\driver\ViiperUde.inf"
+               Name="viiper-native-udecx\driver\ViiperUde.inf" />
+      <Payload Id="NativeViiperSysPayload"
+               SourceFile="$(var.ExtrasRoot)\viiper-native-udecx\driver\ViiperUde.sys"
+               Name="viiper-native-udecx\driver\ViiperUde.sys" />
+      <Payload Id="NativeViiperCatPayload"
+               SourceFile="$(var.ExtrasRoot)\viiper-native-udecx\driver\ViiperUde.cat"
+               Name="viiper-native-udecx\driver\ViiperUde.cat" />
+      <Payload Id="NativeViiperLockPayload"
+               SourceFile="$(var.ExtrasRoot)\viiper-native-udecx.lock.json"
+               Name="viiper-native-udecx.lock.json" />
+    </PayloadGroup>
+  </Fragment>
 </Wix>

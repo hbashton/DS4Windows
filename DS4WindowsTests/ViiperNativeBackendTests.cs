@@ -50,9 +50,9 @@ namespace DS4WindowsTests
         public void PinnedLoadedDriverIdentityIsCanonicalLowercaseSha256()
         {
             Assert.AreEqual(
-                "df740d4741a091bca3a649d73cc85671496a7253e298c161bb90874123c985fe",
+                "865aca70e365cd1bd3a4de43b67b968e7d00e96ffd3a78a4aac59831e811a7bc",
                 ViiperBackendContract.NativeLoadedDriverBuildIdentity,
-                "DS4Windows must pin the identity derived from final VIIPER HEAD 184aa66b3dc017576a99dfd1f369161706d0c4f8.");
+                "DS4Windows must pin the identity derived from final VIIPER HEAD 6974e001e62540d4a438aa41fbba2125e59601f2.");
             Assert.IsTrue(ViiperBackendContract.IsCanonicalLowerHexSha256(
                 ViiperBackendContract.NativeLoadedDriverBuildIdentity));
             Assert.AreEqual(64,

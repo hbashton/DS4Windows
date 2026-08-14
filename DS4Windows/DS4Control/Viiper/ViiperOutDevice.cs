@@ -5429,7 +5429,10 @@ namespace DS4Windows
             {
                 raw = SendRequestRawCore("ping", null, null);
                 ViiperBackendSelection selection =
-                    ViiperBackendContract.ParsePing(raw);
+                    ViiperBackendContract.ParsePing(raw,
+                        enforceExactVersionMatching:
+                        ViiperRuntimeBuildPolicy.
+                            EnforceExactViiperVersionMatching);
                 Volatile.Write(ref lastBackendSelection, selection);
                 return selection;
             }
@@ -5455,7 +5458,9 @@ namespace DS4Windows
                 {
                     raw = SendRequestRawCore("ping", null, credential);
                     ViiperBackendSelection selection =
-                        ViiperBackendContract.ParsePing(raw, credential);
+                        ViiperBackendContract.ParsePing(raw, credential,
+                            ViiperRuntimeBuildPolicy.
+                                EnforceExactViiperVersionMatching);
                     selection = BindNativeBrokerInstance(selection);
                     Volatile.Write(ref lastBackendSelection, selection);
                     return selection;
@@ -5499,7 +5504,9 @@ namespace DS4Windows
                 selection.Credential);
             ViiperBackendSelection confirmed =
                 ViiperBackendContract.ParsePing(confirmation,
-                    selection.Credential);
+                    selection.Credential,
+                    ViiperRuntimeBuildPolicy.
+                        EnforceExactViiperVersionMatching);
             ViiperNativeBrokerInstance? after =
                 nativeBrokerInstanceProvider();
             if (!after.HasValue || before.Value != after.Value)

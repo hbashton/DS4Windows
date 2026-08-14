@@ -99,6 +99,78 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void ExplicitLocalTestPolicyRelaxesOnlyVersionAndBuildPins()
+        {
+            string differentIdentity =
+                $"{(ViiperBackendContract.NativeLoadedDriverBuildIdentity[0] == '0' ? '1' : '0')}" +
+                ViiperBackendContract.NativeLoadedDriverBuildIdentity[1..];
+            string localTest = ExactNativePing
+                .Replace("\"version\":\"0.1.0\"",
+                    "\"version\":\"0.1.0-local-test\"",
+                    StringComparison.Ordinal)
+                .Replace("\"0.1.0.23\"", "\"0.1.0.24\"",
+                    StringComparison.Ordinal)
+                .Replace(ViiperBackendContract.
+                        NativeLoadedDriverBuildIdentity,
+                    differentIdentity, StringComparison.Ordinal);
+
+            ViiperBackendSelection selection =
+                ViiperBackendContract.ParsePing(localTest,
+                    "test-credential",
+                    enforceExactVersionMatching: false);
+
+            Assert.IsTrue(selection.IsNative);
+            Assert.IsTrue(selection.UsesAuthentication);
+        }
+
+        [DataTestMethod]
+        [DataRow("\"abiMinor\":10", "\"abiMinor\":9")]
+        [DataRow("\"capabilities\":13", "\"capabilities\":15")]
+        [DataRow("\"maxDevices\":32", "\"maxDevices\":31")]
+        public void LocalTestPolicyStillRejectsProtocolDrift(string current,
+            string replacement)
+        {
+            string drifted = ExactNativePing.Replace(current, replacement,
+                StringComparison.Ordinal);
+
+            Assert.ThrowsException<ViiperNativeContractException>(() =>
+                ViiperBackendContract.ParsePing(drifted,
+                    "test-credential",
+                    enforceExactVersionMatching: false));
+        }
+
+        [DataTestMethod]
+        [DataRow("0.1.0")]
+        [DataRow("0.1.0.024")]
+        [DataRow("0.1.0.+24")]
+        [DataRow("0.1.0. 24")]
+        public void LocalTestPolicyRejectsNoncanonicalPackageVersion(
+            string packageVersion)
+        {
+            string drifted = ExactNativePing.Replace("0.1.0.23",
+                packageVersion, StringComparison.Ordinal);
+
+            Assert.ThrowsException<ViiperNativeContractException>(() =>
+                ViiperBackendContract.ParsePing(drifted,
+                    "test-credential",
+                    enforceExactVersionMatching: false));
+        }
+
+        [TestMethod]
+        public void LocalTestPolicyRejectsNoncanonicalBuildIdentity()
+        {
+            string uppercase = ExactNativePing.Replace(
+                ViiperBackendContract.NativeLoadedDriverBuildIdentity,
+                ViiperBackendContract.NativeLoadedDriverBuildIdentity.
+                    ToUpperInvariant(), StringComparison.Ordinal);
+
+            Assert.ThrowsException<ViiperNativeContractException>(() =>
+                ViiperBackendContract.ParsePing(uppercase,
+                    "test-credential",
+                    enforceExactVersionMatching: false));
+        }
+
+        [TestMethod]
         public void MissingLoadedDriverIdentityFailsClosed()
         {
             string property =

@@ -30,4 +30,20 @@ namespace DS4Windows
         internal const string DriverBuildIdentity =
             "3769e8eab5493c9eea662f5ebd063fff99b37766f4da8d60a6ffea5d3737a3c9";
     }
+
+    /// <summary>
+    /// Local driver iteration may opt out of exact VIIPER version/build pin
+    /// equality without weakening the production default. The relaxed build
+    /// still requires authenticated native UDE, exact ABI/capabilities and
+    /// limits, a canonical four-part package version, a canonical loaded
+    /// driver identity, and the trusted LocalSystem service process.
+    /// </summary>
+    internal static class ViiperRuntimeBuildPolicy
+    {
+#if VIIPER_LOCAL_TEST_RELAXED_VERSION_MATCHING
+        internal const bool EnforceExactViiperVersionMatching = false;
+#else
+        internal const bool EnforceExactViiperVersionMatching = true;
+#endif
+    }
 }

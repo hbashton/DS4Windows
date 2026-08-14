@@ -154,7 +154,8 @@ namespace DS4Windows
             };
 
         internal static ViiperBackendSelection ParsePing(string raw,
-            string credential = null)
+            string credential = null,
+            bool enforceExactVersionMatching = true)
         {
             if (string.IsNullOrWhiteSpace(raw))
             {
@@ -229,19 +230,26 @@ namespace DS4Windows
             bool exactIdentityProperty =
                 TryReadSingleLoadedDriverBuildIdentity(raw,
                     out string loadedDriverBuildIdentity);
-            if (!string.Equals(ping.Version, NativeServerVersion,
-                    StringComparison.Ordinal) ||
+            bool versionContractMatches = enforceExactVersionMatching
+                ? string.Equals(ping.Version, NativeServerVersion,
+                      StringComparison.Ordinal) &&
+                  string.Equals(native?.ExpectedDriverPackageVersion,
+                      NativeDriverPackageVersion,
+                      StringComparison.Ordinal) &&
+                  MatchesLoadedDriverBuildIdentity(
+                      loadedDriverBuildIdentity)
+                : IsCanonicalFourPartVersion(
+                      native?.ExpectedDriverPackageVersion) &&
+                  IsCanonicalLowerHexSha256(
+                      loadedDriverBuildIdentity);
+            if (!versionContractMatches ||
                 ping.Ready != true || native == null ||
                 native.AbiMajor != NativeAbiMajor ||
                 native.AbiMinor != NativeAbiMinor ||
                 native.Capabilities != NativeCapabilities ||
-                !string.Equals(native.ExpectedDriverPackageVersion,
-                    NativeDriverPackageVersion, StringComparison.Ordinal) ||
                 !exactIdentityProperty ||
                 !string.Equals(native.LoadedDriverBuildIdentity,
                     loadedDriverBuildIdentity, StringComparison.Ordinal) ||
-                !MatchesLoadedDriverBuildIdentity(
-                    loadedDriverBuildIdentity) ||
                 native.MaxDevices != NativeMaxDevices ||
                 native.MaxDescriptorBytes != NativeMaxDescriptorBytes ||
                 native.MaxTransferBytes != NativeMaxTransferBytes ||
@@ -261,6 +269,39 @@ namespace DS4Windows
 
             return new ViiperBackendSelection(ViiperBackendMode.NativeUde,
                 credential);
+        }
+
+        private static bool IsCanonicalFourPartVersion(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return false;
+            }
+
+            string[] parts = value.Split('.');
+            if (parts.Length != 4)
+            {
+                return false;
+            }
+
+            foreach (string part in parts)
+            {
+                if (part.Length == 0 ||
+                    (part.Length > 1 && part[0] == '0'))
+                {
+                    return false;
+                }
+
+                foreach (char character in part)
+                {
+                    if (character < '0' || character > '9')
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            return true;
         }
 
         private static bool MatchesLoadedDriverBuildIdentity(string actual)

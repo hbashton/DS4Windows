@@ -68,6 +68,22 @@
 		<PlatformTarget>x86</PlatformTarget>
 	</PropertyGroup>
 
+	<PropertyGroup Condition="'$(ViiperLocalTestRelaxedVersionMatching)' == 'true'">
+		<DefineConstants>$(DefineConstants);VIIPER_LOCAL_TEST_RELAXED_VERSION_MATCHING</DefineConstants>
+	</PropertyGroup>
+	<ItemGroup Condition="'$(ViiperLocalTestRelaxedVersionMatching)' == 'true'">
+		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+			<_Parameter1>ViiperVersionMatching</_Parameter1>
+			<_Parameter2>RelaxedLocalTest</_Parameter2>
+		</AssemblyAttribute>
+	</ItemGroup>
+	<Target Name="ValidateViiperLocalTestVersionPolicy"
+			BeforeTargets="GenerateAssemblyInfo"
+			Condition="'$(ViiperLocalTestRelaxedVersionMatching)' == 'true'">
+		<Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(InformationalVersion)', '(?i)local[ -]?test'))"
+			   Text="Relaxed VIIPER version matching is allowed only in a build explicitly labeled Local Test." />
+	</Target>
+
 	<ItemGroup>
 		<None Remove="libs\x64\**" Condition="'$(Platform)' != 'x64'" />
 		<None Remove="libs\x86\**" Condition="'$(Platform)' != 'x86'" />

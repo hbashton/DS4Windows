@@ -774,65 +774,14 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         }
         public event EventHandler ProfileEditorSectionDescriptionChanged;
 
-        public string updaterExe = Environment.Is64BitProcess ? "DS4Updater.exe" : "DS4Updater_x86.exe";
-
-        private string DownloadUpstreamUpdaterVersion()
-        {
-            Uri url = new Uri("https://api.github.com/repos/hbashton/DS4Updater/releases/latest");
-
-            Task<System.Net.Http.HttpResponseMessage> requestTask = App.requestClient.GetAsync(url.ToString());
-            requestTask.Wait();
-            if (requestTask.Result.IsSuccessStatusCode)
-            {
-                var gitHubReleaseTask = requestTask.Result.Content.ReadFromJsonAsync<GithubRelease>();
-                gitHubReleaseTask.Wait();
-                if (!gitHubReleaseTask.IsFaulted &&
-                    gitHubReleaseTask.Result is not null &&
-                    Changelog.TryParseReleaseVersion(gitHubReleaseTask.Result.TagName, out var updaterVersion))
-                {
-                    return updaterVersion.ToString();
-                }
-            }
-            return string.Empty;
-        }
-
         public bool RunUpdaterCheck(bool launch, out string upstreamVersion)
         {
-            string destPath = Path.Combine(Global.exedirpath, "DS4Updater.exe");
-            bool updaterExists = File.Exists(destPath);
-            upstreamVersion = DownloadUpstreamUpdaterVersion();
-            if (string.IsNullOrEmpty(upstreamVersion)) return false;
-
-            if (!updaterExists ||
-                (!string.IsNullOrEmpty(upstreamVersion) && FileVersionInfo.GetVersionInfo(destPath).FileVersion.CompareTo(upstreamVersion) != 0))
-            {
-                launch = false;
-                Uri url2 = new Uri($"https://github.com/hbashton/DS4Updater/releases/download/v{upstreamVersion}/{updaterExe}");
-                string filename = Path.Combine(Path.GetTempPath(), "DS4Updater.exe");
-                using (var downloadStream = new FileStream(filename, FileMode.Create))
-                {
-                    Task<System.Net.Http.HttpResponseMessage> temp =
-                        App.requestClient.GetAsync(url2.ToString(), downloadStream);
-                    temp.Wait();
-                    if (temp.Result.IsSuccessStatusCode) launch = true;
-                }
-
-                if (launch)
-                {
-                    if (Global.AdminNeeded())
-                    {
-                        int copyStatus = DS4Windows.Util.ElevatedCopyUpdater(filename);
-                        if (copyStatus != 0) launch = false;
-                    }
-                    else
-                    {
-                        if (updaterExists) File.Delete(destPath);
-                        File.Move(filename, destPath);
-                    }
-                }
-            }
-
-            return launch;
+            // A portable, user-writable process is not an update trust root.
+            // The signed installer/maintenance entry owns authenticated
+            // replacement; callers fall back to the exact DS4Windows release
+            // page without downloading or elevating an updater payload.
+            upstreamVersion = string.Empty;
+            return false;
         }
 
         public void DownloadUpstreamVersionInfo()
@@ -879,40 +828,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public bool LauchDS4Updater(string releaseTag = null)
         {
-            bool launch = false;
-            using (Process p = new Process())
-            {
-                p.StartInfo.FileName = Path.Combine(Global.exedirpath, "DS4Updater.exe");
-                bool isAdmin = Global.IsAdministrator();
-                List<string> argList = new List<string>();
-                argList.Add("-autolaunch");
-                if (!isAdmin)
-                {
-                    argList.Add("-user");
-                }
-
-                if (!string.IsNullOrWhiteSpace(releaseTag))
-                {
-                    argList.Add("--releaseTag");
-                    argList.Add(releaseTag);
-                }
-
-                // Specify current exe to have DS4Updater launch
-                argList.Add("--launchExe");
-                argList.Add(Global.exeFileName);
-
-                foreach (string argument in argList)
-                {
-                    p.StartInfo.ArgumentList.Add(argument);
-                }
-                if (Global.AdminNeeded())
-                    p.StartInfo.Verb = "runas";
-
-                try { launch = p.Start(); }
-                catch (InvalidOperationException) { }
-            }
-
-            return launch;
+            return false;
         }
 
         public bool IsNET8Available()

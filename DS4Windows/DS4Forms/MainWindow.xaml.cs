@@ -318,11 +318,8 @@ namespace DS4WinWPF.DS4Forms
                     Dispatcher.Invoke(() =>
                     {
                         MessageBox.Show(Properties.Resources.PleaseDownloadUpdater);
-                        if (!string.IsNullOrEmpty(newUpdaterVersion))
-                        {
-                            Util.StartProcessHelper(
-                                $"https://github.com/hbashton/DS4Updater/releases/tag/v{newUpdaterVersion}");
-                        }
+                        Util.StartProcessHelper(
+                            $"https://github.com/hbashton/DS4Windows/releases/tag/{version}");
                     });
                 }
             }
@@ -381,10 +378,8 @@ namespace DS4WinWPF.DS4Forms
                         Dispatcher.Invoke(() =>
                         {
                             MessageBox.Show(Properties.Resources.PleaseDownloadUpdater);
-                            if (!string.IsNullOrEmpty(newUpdaterVersion))
-                            {
-                                Util.StartProcessHelper($"https://github.com/hbashton/DS4Updater/releases/tag/v{newUpdaterVersion}");
-                            }
+                            Util.StartProcessHelper(
+                                $"https://github.com/hbashton/DS4Windows/releases/tag/{newversion}");
                         });
                     }
                 }
@@ -2049,33 +2044,14 @@ Suspend support not enabled.", true);
             Process.Start("control", "joy.cpl");
         }
 
-        private async void DriverSetupBtn_Click(object sender, RoutedEventArgs e)
+        private void DriverSetupBtn_Click(object sender, RoutedEventArgs e)
         {
-            StartStopBtn.IsEnabled = false;
-            await Task.Run(() =>
-            {
-                if (App.rootHub.running)
-                    App.rootHub.Stop();
-            });
-
-            StartStopBtn.IsEnabled = true;
-            ProcessStartInfo startInfo = new ProcessStartInfo();
-            startInfo.FileName = Global.exelocation;
-            startInfo.Arguments = "-driverinstall";
-            startInfo.Verb = "runas";
-            startInfo.UseShellExecute = true;
-            try
-            {
-                using (Process temp = Process.Start(startInfo))
-                {
-                    temp.WaitForExit();
-                    Global.RefreshHidHideInfo();
-                    Global.RefreshFakerInputInfo();
-
-                    settingsWrapVM.DriverCheckRefresh();
-                }
-            }
-            catch { }
+            MessageBox.Show(this,
+                "The portable DS4Windows runtime does not elevate itself or " +
+                "mutable driver media. Install or repair system components " +
+                "through the signed DS4Windows installer or its installed " +
+                "maintenance entry.", "DS4Windows driver setup",
+                MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
         private void ViiperSetupBtn_Click(object sender, RoutedEventArgs e)

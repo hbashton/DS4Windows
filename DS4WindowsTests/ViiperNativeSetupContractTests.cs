@@ -277,6 +277,43 @@ namespace DS4WindowsTests
                 "WriteAllBytesAsync", StringComparison.Ordinal));
             Assert.IsFalse(welcomeDialog.Contains(
                 "Verb = \"runas\"", StringComparison.Ordinal));
+
+            string updaterViewModel = File.ReadAllText(Path.Combine(root,
+                "DS4Windows", "DS4Forms", "ViewModels",
+                "MainWindowsViewModel.cs"));
+            StringAssert.Contains(updaterViewModel,
+                "portable, user-writable process is not an update trust root");
+            Assert.IsFalse(updaterViewModel.Contains(
+                "DS4Updater/releases/download", StringComparison.Ordinal));
+            Assert.IsFalse(updaterViewModel.Contains(
+                "ElevatedCopyUpdater", StringComparison.Ordinal));
+            Assert.IsFalse(updaterViewModel.Contains(
+                "Verb = \"runas\"", StringComparison.Ordinal));
+
+            string controlService = File.ReadAllText(Path.Combine(root,
+                "DS4Windows", "DS4Control", "ControlService.cs"));
+            int elevationHandler = controlService.IndexOf(
+                "private void DS4Devices_RequestElevation",
+                StringComparison.Ordinal);
+            int nextMethod = controlService.IndexOf(
+                "public void CheckHidHidePresence", elevationHandler,
+                StringComparison.Ordinal);
+            Assert.IsTrue(elevationHandler >= 0 && nextMethod > elevationHandler);
+            string elevationBody = controlService.Substring(elevationHandler,
+                nextMethod - elevationHandler);
+            StringAssert.Contains(elevationBody,
+                "signed, machine-installed maintenance entry");
+            Assert.IsFalse(elevationBody.Contains(
+                "Process.Start", StringComparison.Ordinal));
+            Assert.IsFalse(elevationBody.Contains(
+                "runas", StringComparison.OrdinalIgnoreCase));
+
+            string utilSource = File.ReadAllText(Path.Combine(root,
+                "DS4Windows", "DS4Control", "Util.cs"));
+            Assert.IsFalse(utilSource.Contains(
+                "ElevatedCopyUpdater", StringComparison.Ordinal));
+            Assert.IsFalse(utilSource.Contains(
+                "updatercopy.bat", StringComparison.OrdinalIgnoreCase));
         }
 
         [TestMethod]

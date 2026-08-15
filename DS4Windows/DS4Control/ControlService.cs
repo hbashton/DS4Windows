@@ -752,27 +752,11 @@ namespace DS4Windows
 
         private void DS4Devices_RequestElevation(RequestElevationArgs args)
         {
-            // Launches an elevated child process to re-enable device
-            ProcessStartInfo startInfo =
-                new ProcessStartInfo(Global.exelocation);
-            startInfo.Verb = "runas";
-            startInfo.Arguments = "re-enabledevice " + args.InstanceId;
-            startInfo.UseShellExecute = true;
-
-            try
-            {
-                Process child = Process.Start(startInfo);
-                if (!child.WaitForExit(30000))
-                {
-                    child.Kill();
-                }
-                else
-                {
-                    args.StatusCode = child.ExitCode;
-                }
-                child.Dispose();
-            }
-            catch { }
+            // Never elevate the mutable portable executable. The caller keeps
+            // the default failure status and falls back to non-exclusive input.
+            // A signed, machine-installed maintenance entry owns privileged
+            // device repair in production builds.
+            args.StatusCode = RequestElevationArgs.STATUS_INIT_FAILURE;
         }
 
         public void CheckHidHidePresence(string ExePath = "", string ExeName = "Autoprofile Exe", bool AddExe = true) // Default value for D4W Startup

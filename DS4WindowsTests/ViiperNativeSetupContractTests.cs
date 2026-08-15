@@ -264,6 +264,19 @@ namespace DS4WindowsTests
                 "FileName = \"powershell.exe\"", StringComparison.Ordinal));
             Assert.IsFalse(setupManager.Contains(
                 "Verb = \"runas\"", StringComparison.Ordinal));
+
+            string welcomeDialog = File.ReadAllText(Path.Combine(root,
+                "DS4Windows", "DS4Forms", "WelcomeDialog.xaml.cs"));
+            StringAssert.Contains(welcomeDialog,
+                "portable DS4Windows runtime does not download or");
+            StringAssert.Contains(welcomeDialog,
+                "OpenExternalDriverReleasePage");
+            Assert.IsFalse(welcomeDialog.Contains(
+                "GetByteArrayAsync", StringComparison.Ordinal));
+            Assert.IsFalse(welcomeDialog.Contains(
+                "WriteAllBytesAsync", StringComparison.Ordinal));
+            Assert.IsFalse(welcomeDialog.Contains(
+                "Verb = \"runas\"", StringComparison.Ordinal));
         }
 
         [TestMethod]

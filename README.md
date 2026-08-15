@@ -26,10 +26,10 @@ Most users should start with the stable build.
 4. Run `DS4Windows.exe`. Do not run it from inside the ZIP archive.
 5. Complete the first-run driver prompts, connect a controller, and select or create a profile.
 
-For a one-file stable installer, download and run
-[`ds4w.bat`](https://raw.githubusercontent.com/hbashton/DS4Windows/main/ds4w.bat).
-It installs the latest stable hbashton release to `%LOCALAPPDATA%\DS4Windows`
-and creates a desktop shortcut.
+The legacy `ds4w.bat` downloader is retired: it did not provide the signature,
+hash, provenance, transactional update, or uninstall guarantees required for a
+driver-capable application. Use the release ZIP until the signed DS4Windows
+installer is published; never run an unverified third-party installer script.
 
 ### DualSense and VIIPER preview
 

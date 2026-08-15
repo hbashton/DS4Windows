@@ -333,3 +333,7 @@ ASALocalRun/
 !DS4Windows/libs/x64/
 !DS4Windows/libs/x86/
 
+# Native VIIPER driver/broker media is supplied by the signed release pipeline.
+# Never commit local-test certificates or package binaries into DS4Windows.
+extras/viiper-native-package/
+

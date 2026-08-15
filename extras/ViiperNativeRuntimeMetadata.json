@@ -1,0 +1,213 @@
+{
+  "schemaVersion": 1,
+  "releaseEligibility": "local-test-evidence-only",
+  "localTestOptInEnvironment": "DS4WINDOWS_VIIPER_ALLOW_LOCAL_TEST",
+  "sourceRevision": "cece30774e9df8183dc74fe6cd25950f1a74d021",
+  "driverPackageVersion": "0.1.0.38",
+  "driverAbi": {
+    "major": 1,
+    "minor": 14
+  },
+  "requiredCapabilities": 61,
+  "requiredCapabilitiesHex": "0x0000003d",
+  "loadedDriverBuildIdentity": "07793cc79206739d77de2618cbe42f03dcb7bed66953748af60618b216f7f1b4",
+  "productionSigningRoute": "HLK/WHCP dashboard signing",
+  "managedBroker": {
+    "serviceName": "VIIPERNativeBroker",
+    "serviceAccount": "LocalSystem",
+    "startMode": "automatic",
+    "transport": "native-ude",
+    "apiHost": "127.0.0.1",
+    "apiPort": 3242,
+    "credentialPath": "%ProgramData%/VIIPER/viiper.key.txt"
+  },
+  "controllerApiContract": {
+    "schemaVersion": 1,
+    "sourceRevision": "cece30774e9df8183dc74fe6cd25950f1a74d021",
+    "implementation": "VIIPER registered controller handlers and native UDE descriptors",
+    "registrations": [
+      {
+        "type": "xbox360",
+        "persona": "xbox360",
+        "defaultVid": "0x045e",
+        "defaultPid": "0x028e",
+        "ds4WindowsPid": "0x028e",
+        "interfaceProfile": "xusb-composite",
+        "streamProtocol": "fixed"
+      },
+      {
+        "type": "dualshock4",
+        "persona": "dualshock4",
+        "defaultVid": "0x054c",
+        "defaultPid": "0x09cc",
+        "ds4WindowsPid": "0x05c4",
+        "interfaceProfile": "hid-audio-duplex",
+        "streamProtocol": "fixed"
+      },
+      {
+        "type": "dualshock4audioduplexv3",
+        "persona": "dualshock4",
+        "defaultVid": "0x054c",
+        "defaultPid": "0x09cc",
+        "ds4WindowsPid": "0x05c4",
+        "interfaceProfile": "hid-audio-duplex",
+        "streamProtocol": "framed-v3"
+      },
+      {
+        "type": "dualshock4audioonlyduplexv3",
+        "persona": "dualshock4",
+        "defaultVid": "0x054c",
+        "defaultPid": "0x09cc",
+        "ds4WindowsPid": "0x05c4",
+        "interfaceProfile": "audio-duplex-only",
+        "streamProtocol": "framed-v3"
+      },
+      {
+        "type": "dualsensecombinedaudioduplexv5",
+        "persona": "dualsense",
+        "defaultVid": "0x054c",
+        "defaultPid": "0x0ce6",
+        "ds4WindowsPid": "0x0ce6",
+        "interfaceProfile": "hid-audio-duplex",
+        "streamProtocol": "framed-v5"
+      },
+      {
+        "type": "dualsenseaudioonlyduplexv5",
+        "persona": "dualsense",
+        "defaultVid": "0x054c",
+        "defaultPid": "0x0ce6",
+        "ds4WindowsPid": "0x0ce6",
+        "interfaceProfile": "audio-duplex-only",
+        "streamProtocol": "framed-v5"
+      },
+      {
+        "type": "dualsensegamepadv5",
+        "persona": "dualsense",
+        "defaultVid": "0x054c",
+        "defaultPid": "0x0ce6",
+        "ds4WindowsPid": "0x0ce6",
+        "interfaceProfile": "hid-gamepad-only",
+        "streamProtocol": "framed-v5"
+      },
+      {
+        "type": "dualsenseedgecombinedaudioduplexv5",
+        "persona": "dualsense-edge",
+        "defaultVid": "0x054c",
+        "defaultPid": "0x0df2",
+        "ds4WindowsPid": "0x0df2",
+        "interfaceProfile": "hid-audio-duplex",
+        "streamProtocol": "framed-v5"
+      },
+      {
+        "type": "dualsenseedgegamepadv5",
+        "persona": "dualsense-edge",
+        "defaultVid": "0x054c",
+        "defaultPid": "0x0df2",
+        "ds4WindowsPid": "0x0df2",
+        "interfaceProfile": "hid-gamepad-only",
+        "streamProtocol": "framed-v5"
+      },
+      {
+        "type": "ns2pro",
+        "persona": "switch2-pro",
+        "defaultVid": "0x057e",
+        "defaultPid": "0x2069",
+        "ds4WindowsPid": "0x2069",
+        "interfaceProfile": "hid-vendor-bulk",
+        "streamProtocol": "fixed"
+      }
+    ]
+  },
+  "artifacts": [
+    {
+      "role": "broker",
+      "relativePath": "viiper-native-package/viiper.exe",
+      "length": 18117120,
+      "sha256": "90b29d7027ccb6dcd171b7dfe7b55080c7e5412fdc36879ebc742fb4ad983045"
+    },
+    {
+      "role": "driver-helper",
+      "relativePath": "viiper-native-package/ViiperUdeCtl.exe",
+      "length": 1051648,
+      "sha256": "01c06814cd3d1b3809b58b2939c10eefc4b8e8ca9112bc0eb18e53542d968968"
+    },
+    {
+      "role": "media-probe",
+      "relativePath": "viiper-native-package/ViiperUdeMediaProbe.exe",
+      "length": 333824,
+      "sha256": "e33b23e091a2b6893317980adf95d0d4479f294acbe12dc4fbdc603c32e4ff7a"
+    },
+    {
+      "role": "input-probe",
+      "relativePath": "viiper-native-package/ViiperUdeInputProbe.exe",
+      "length": 312832,
+      "sha256": "9ab639d54cd0757df10ef46857cd547522e7db372d4383f5f8388d1baacbcf90"
+    },
+    {
+      "role": "live-probe-manifest",
+      "relativePath": "viiper-native-package/ViiperUdeLiveProbes.manifest.json",
+      "length": 311,
+      "sha256": "ed91cf07010434c36fd51fc9e9f309a1d80cbc9746be4a4e12dd0759528380bc"
+    },
+    {
+      "role": "submission-manifest",
+      "relativePath": "viiper-native-package/submission-manifest.json",
+      "length": 1253,
+      "sha256": "5a1cd33198c7865f9dbf79ed8137a127e8cfd788d3b5241321a9fcec5202212b"
+    },
+    {
+      "role": "driver-inf",
+      "relativePath": "viiper-native-package/driver/ViiperUde.inf",
+      "length": 1053,
+      "sha256": "f4aa386679120d9079454789f777e9e8701baff5b3e8c980ec5c491b5c2ce815"
+    },
+    {
+      "role": "driver-sys",
+      "relativePath": "viiper-native-package/driver/ViiperUde.sys",
+      "length": 72664,
+      "sha256": "4b56e19c9c331092143cbdce8bfd6bcb7a30798c0e41037d16014c5adcd07176"
+    },
+    {
+      "role": "driver-cat",
+      "relativePath": "viiper-native-package/driver/ViiperUde.cat",
+      "length": 2560,
+      "sha256": "53141a411c5e0effb02f21ac004da648587fac523a561c728ac0f5e102dc5ae2"
+    },
+    {
+      "role": "driver-pdb",
+      "relativePath": "viiper-native-package/signed-package/ViiperUde.pdb",
+      "length": 946176,
+      "sha256": "a994c4535d8e6bfaa195a5738536b185f531ec4ea1133dfaf9d6bd73262d3a8a"
+    },
+    {
+      "role": "signed-driver-inf",
+      "relativePath": "viiper-native-package/signed-package/ViiperUde.inf",
+      "length": 1053,
+      "sha256": "f4aa386679120d9079454789f777e9e8701baff5b3e8c980ec5c491b5c2ce815"
+    },
+    {
+      "role": "signed-driver-sys",
+      "relativePath": "viiper-native-package/signed-package/ViiperUde.sys",
+      "length": 72664,
+      "sha256": "4b56e19c9c331092143cbdce8bfd6bcb7a30798c0e41037d16014c5adcd07176"
+    },
+    {
+      "role": "signed-driver-cat",
+      "relativePath": "viiper-native-package/signed-package/ViiperUde.cat",
+      "length": 2560,
+      "sha256": "53141a411c5e0effb02f21ac004da648587fac523a561c728ac0f5e102dc5ae2"
+    },
+    {
+      "role": "local-test-package-lock",
+      "relativePath": "viiper-native-package/local-test-package.lock.json",
+      "length": 2739,
+      "sha256": "4cf7f8d5e7d2d71631efa6d6f7db1ef666f660a13719223055d5fb29e30ed036"
+    },
+    {
+      "role": "local-test-certificate-evidence",
+      "relativePath": "viiper-native-package/ViiperUdeTest.cer",
+      "length": 784,
+      "sha256": "09ca0c2d4d3da29268eff59cf85b6c1347d4a28ddc098b8640381694ad74c517"
+    }
+  ]
+}

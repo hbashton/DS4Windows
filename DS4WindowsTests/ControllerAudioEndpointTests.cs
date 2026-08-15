@@ -93,37 +93,29 @@ namespace DS4WindowsTests
         }
 
         [DataTestMethod]
-        [DataRow(true, true, true, true, true, 1, 1,
+        [DataRow(true, true, true, true,
             (int)DirectSpeakerEndpointOwnership.Owned)]
-        [DataRow(true, true, true, true, true, 2, 1,
+        [DataRow(true, true, true, false,
             (int)DirectSpeakerEndpointOwnership.Unowned)]
-        [DataRow(true, true, true, true, false, -1, 1,
+        [DataRow(true, true, false, false,
+            (int)DirectSpeakerEndpointOwnership.Unresolved)]
+        [DataRow(false, true, true, true,
+            (int)DirectSpeakerEndpointOwnership.Unresolved)]
+        [DataRow(true, false, true, true,
             (int)DirectSpeakerEndpointOwnership.Unowned)]
-        [DataRow(true, true, false, false, false, -1, 1,
-            (int)DirectSpeakerEndpointOwnership.Unresolved)]
-        [DataRow(true, true, true, false, false, -1, 1,
-            (int)DirectSpeakerEndpointOwnership.Unresolved)]
-        [DataRow(true, true, true, true, true, -1, 1,
-            (int)DirectSpeakerEndpointOwnership.Unresolved)]
-        [DataRow(false, true, true, true, true, 1, 1,
-            (int)DirectSpeakerEndpointOwnership.Unresolved)]
-        [DataRow(true, false, true, true, true, 1, 1,
-            (int)DirectSpeakerEndpointOwnership.Unowned)]
-        public void DirectSpeakerOwnershipRequiresExactActiveUsbipPort(
+        public void DirectSpeakerOwnershipRequiresExactActivePnpIdentity(
             bool endpointActive, bool identityMatches,
-            bool interfacePathAvailable, bool usbIpQueryResolved,
-            bool usbIpAncestor, int endpointPort, int sourcePort, int expected)
+            bool pnpIdentityResolved, bool exactOwnerMatch, int expected)
         {
             Assert.AreEqual((DirectSpeakerEndpointOwnership)expected,
                 DualSenseAudioPassthrough.
                     ClassifyDirectSpeakerEndpointOwnership(endpointActive,
-                        identityMatches, interfacePathAvailable,
-                        usbIpQueryResolved, usbIpAncestor, endpointPort,
-                        sourcePort));
+                        identityMatches, pnpIdentityResolved,
+                        exactOwnerMatch));
         }
 
         [TestMethod]
-        public void ViiperUsbipOwnershipTracksOnlyRegisteredActivePort()
+        public void ExplicitLegacyUsbipModeTracksOnlyRegisteredActivePort()
         {
             const int ownedPort = 7331;
             const int unrelatedPort = 7332;
@@ -838,7 +830,8 @@ namespace DS4WindowsTests
             try
             {
                 Task<TcpClient> accept = listener.AcceptTcpClientAsync();
-                var client = new ViiperClient("127.0.0.1", port);
+                var client = new ViiperClient("127.0.0.1", port,
+                    ViiperTransportMode.Usbip);
                 opened = client.OpenExistingDeviceStream(42, "9", 6,
                     lifetime);
                 using TcpClient accepted = await accept.WaitAsync(

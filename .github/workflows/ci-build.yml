@@ -29,16 +29,12 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore
 
+      - name: Validate VIIPER native package contract
+        shell: pwsh
+        run: .\extras\Test-ViiperNativePackageContract.ps1
+
       - name: Run tests (x64)
-        # NOTE: Three tests are excluded below. They are exact-string XML round-trip
-        # "snapshot" tests whose hardcoded expected XML predates several fields the
-        # current serializer emits (ProcessPriority, ProfileChangedNotification,
-        # UseMoonlight, DebouncingMs, LeftStickDriftXAxis, ...) and whose fixture
-        # source files use LF while the serializer writes CRLF. They fail on a clean
-        # checkout of upstream, independently of any feature change, so they are not
-        # used to gate the build. All other tests run and must pass.
-        # Remove the --filter once the upstream snapshot fixtures are regenerated.
-        run: dotnet test .\DS4WindowsTests\DS4WindowsTests.csproj -c Release -p:Platform=x64 --verbosity normal --filter "Name!=CheckSettingsSave&Name!=CheckWriteProfile&Name!=CheckJaysProfileRead"
+        run: dotnet test .\DS4WindowsTests\DS4WindowsTests.csproj -c Release -p:Platform=x64 --verbosity normal
 
   build:
     runs-on: windows-2022
@@ -62,6 +58,10 @@ jobs:
 
       - name: Restore dependencies
         run: dotnet restore
+
+      - name: Validate VIIPER native package contract
+        shell: pwsh
+        run: .\extras\Test-ViiperNativePackageContract.ps1
 
       - name: Compute version
         id: ver

@@ -2088,6 +2088,12 @@ Suspend support not enabled.", true);
             RefreshViiperStatusText();
         }
 
+        private void ViiperRemoveBtn_Click(object sender, RoutedEventArgs e)
+        {
+            ViiperSetupManager.LaunchUninstaller(
+                ViiperSetupManager.GetStatus(), this);
+        }
+
         private void RefreshViiperStatusText()
         {
             if (viiperStatusText == null)
@@ -2097,9 +2103,13 @@ Suspend support not enabled.", true);
 
             ViiperPrerequisiteStatus status = ViiperSetupManager.GetStatus(tryStartServer: false);
             viiperStatusText.Text = $"{status.DisplayText}. " +
-                $"VIIPER helper: {(status.ViiperInstalled ? "installed" : "missing")}; " +
-                $"usbip-win2: {(status.UsbipInstalled ? "installed" : "missing")}; " +
-                $"server: {(status.ServerRunning ? "running" : "not running")}.";
+                $"bundle: {(status.PackageBundleFound ? "exact" : "not bundled")}; " +
+                $"installed broker: {(status.BrokerHashMatches ? "exact" : "missing/mismatched")}; " +
+                $"service: {(status.BrokerServiceConfigured ? "configured" : "missing/mismatched")}/" +
+                $"{(status.BrokerServiceRunning ? "running" : "stopped")}; " +
+                $"credential: {(status.CredentialReadable ? "readable" : "unavailable")}; " +
+                $"authenticated ping: {(status.AuthenticatedPingSucceeded ? "ready" : "not ready")}; " +
+                $"driver identity: {(status.RuntimeContractCompatible ? "compatible" : "unverified")}.";
         }
 
         private void CheckUpdatesBtn_Click(object sender, RoutedEventArgs e)

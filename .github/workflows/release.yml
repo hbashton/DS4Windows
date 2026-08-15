@@ -26,6 +26,9 @@ jobs:
         python-version: "3.10"
     - name: Restore dependencies
       run: dotnet restore
+    - name: Require production VIIPER native runtime bundle
+      shell: pwsh
+      run: .\extras\Test-ViiperNativePackageContract.ps1 -RequireProduction
     - name: Set envars for versions
       run: | 
         TAG=${{ github.event.release.tag_name }}

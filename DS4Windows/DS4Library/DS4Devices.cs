@@ -187,9 +187,11 @@ namespace DS4Windows
         };
 
 
-        // Registry of Sony HID paths created by DS4Windows through VIIPER. These
-        // complete USB/IP devices look physical to Windows and must never be
-        // re-ingested as input, regardless of the selected virtual Sony persona.
+        // Cache of Sony HID paths which have already been correlated to an
+        // exact VIIPER virtual-device lifetime. The authoritative ownership
+        // record is transport-neutral and lives in ViiperPnPOwnershipRegistry;
+        // this path cache records enumeration progress for visibility cleanup;
+        // it is never sufficient to prove current ownership by itself.
         private static readonly object ownVirtualLock = new object();
         private static readonly HashSet<string> ownVirtualSonyPaths =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -217,24 +219,11 @@ namespace DS4Windows
                 foreach (HidDevice d in HidDevices.Enumerate(SONY_VID,
                     ViiperSonyPids))
                 {
-                    // VIIPER exposes a complete USB/IP composite device, so
-                    // Windows does not classify it as a software-enumerated
-                    // virtual HID. Snapshot every supported Sony path and identify
-                    // our output by the before/after difference instead.
                     set.Add(d.DevicePath);
                 }
             }
             catch { /* enumeration best-effort; never throw into the plug path */ }
             return set;
-        }
-
-        // Capture every supported Sony controller immediately before VIIPER
-        // creates one of our outputs. The before/after delta remains a fallback
-        // for transient PnP states where the USB/IP port cannot yet be resolved.
-        public static HashSet<string> SnapshotBeforeOwnVirtualSony()
-        {
-            HashSet<string> before = SnapshotVirtualSonyPaths();
-            return before;
         }
 
         public static void BeginOwnVirtualSonyConnect()
@@ -274,13 +263,12 @@ namespace DS4Windows
             }
         }
 
-        // VIIPER presents a complete USB composite device through USBIP. Windows can
-        // take several seconds to bind usbccgp, HID, and UAC after the API call has
-        // returned, so registration must outlive Connect() without blocking startup.
-        // The pending guard rejects the arriving virtual HID immediately; the path
-        // registry then keeps rejecting it for the rest of that output's lifetime.
+        // Windows can take several seconds to bind usbccgp, HID, and UAC after
+        // VIIPER returns from device creation. Resolve only paths whose exact
+        // controller-instance and UdeCx port match this source's authoritative
+        // create result. A VID/PID or before/after delta is never ownership.
         public static void RegisterOwnVirtualSonyAsync(
-            HashSet<string> beforePaths,
+            ViiperOutDevice source,
             Action<IReadOnlyCollection<string>> registeredCallback = null)
         {
             var worker = new System.Threading.Thread(() =>
@@ -288,40 +276,40 @@ namespace DS4Windows
                 try
                 {
                     HashSet<string> after = null;
-                    bool foundNew = false;
-                    for (int attempt = 0; attempt < 300 && !foundNew; attempt++)
+                    List<string> registeredPaths = null;
+                    for (int attempt = 0; attempt < 300; attempt++)
                     {
+                        int ownerToken =
+                            ViiperPnPOwnershipRegistry.GetToken(source);
                         after = SnapshotVirtualSonyPaths();
-                        foreach (string path in after)
+                        registeredPaths = ownerToken > 0 ?
+                            after.Where(path =>
+                                Global.TryResolveViiperPnPTopology(path,
+                                    out ViiperPnPTopologyIdentity topology) &&
+                                ViiperPnPOwnershipRegistry.Matches(ownerToken,
+                                    topology)).ToList() : new List<string>();
+                        if (registeredPaths.Count > 0)
                         {
-                            if (beforePaths == null || !beforePaths.Contains(path))
-                            {
-                                foundNew = true;
-                                break;
-                            }
+                            break;
                         }
 
-                        if (!foundNew)
-                        {
-                            System.Threading.Thread.Sleep(50);
-                        }
+                        System.Threading.Thread.Sleep(50);
                     }
 
-                    if (after == null)
+                    if (after == null || registeredPaths == null ||
+                        registeredPaths.Count == 0)
                     {
+                        AppLogger.LogToGui(
+                            "VIIPER's exact virtual Sony HID identity did not enumerate before the registration deadline.",
+                            true);
                         return;
                     }
 
-                    List<string> registeredPaths = new List<string>();
                     lock (ownVirtualLock)
                     {
-                        foreach (string path in after)
+                        foreach (string path in registeredPaths)
                         {
-                            if (beforePaths == null || !beforePaths.Contains(path))
-                            {
-                                ownVirtualSonyPaths.Add(path);
-                                registeredPaths.Add(path);
-                            }
+                            ownVirtualSonyPaths.Add(path);
                         }
 
                         ownVirtualSonyPaths.RemoveWhere(path =>
@@ -364,9 +352,9 @@ namespace DS4Windows
             }
         }
 
-        // True if devicePath belongs to a currently owned VIIPER Sony output.
-        // Match the active USB/IP port first so delayed HID enumeration and
-        // DualSense/Edge personas cannot bypass the path-delta fallback.
+        // True only when devicePath belongs to an exact, currently registered
+        // VIIPER virtual-device lifetime. Missing identities and unregistered
+        // devices never broaden into "any Sony controller".
         public static bool IsOwnVirtualDevice(string devicePath)
         {
             if (string.IsNullOrEmpty(devicePath))
@@ -374,17 +362,13 @@ namespace DS4Windows
                 return false;
             }
 
-            lock (ownVirtualLock)
-            {
-                if (ownVirtualSonyPaths.Count > 0 &&
-                    ownVirtualSonyPaths.Contains(devicePath))
-                {
-                    return true;
-                }
-            }
-
-            return Global.TryGetUsbIpWin2Port(devicePath, out int port) &&
-                ViiperUsbipPortManager.IsActivePort(port);
+            // Always revalidate the current generation-fenced correlation.
+            // A cached path can outlive device removal or be recycled by PnP,
+            // so treating the cache as authority would resurrect stale HID
+            // ownership after the source has been detached.
+            return Global.TryResolveViiperPnPTopology(devicePath,
+                    out ViiperPnPTopologyIdentity topology) &&
+                ViiperPnPOwnershipRegistry.MatchesAny(topology);
         }
 
         private static bool HasMoonlightVirtualDS4Identity(HidDevice hDevice, string serial)
@@ -408,7 +392,10 @@ namespace DS4Windows
 
             if (hDevice.Attributes.VendorId == SONY_VID &&
                 IsViiperSonyProductId(hDevice.Attributes.ProductId) &&
-                IsOwnVirtualSonyConnectPending())
+                IsOwnVirtualSonyConnectPending() &&
+                Global.TryResolveViiperPnPTopology(hDevice.DevicePath,
+                    out ViiperPnPTopologyIdentity pendingTopology) &&
+                pendingTopology.Transport != ViiperPnPTransport.Unknown)
             {
                 return false;
             }

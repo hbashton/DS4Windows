@@ -23,9 +23,9 @@
     </Window.Resources>
     <ScrollViewer>
         <DockPanel Margin="10,10,10,10" LastChildFill="False">
-            <Button x:Name="viiperInstallBtn" Content="Install / Repair VIIPER" Style="{StaticResource CommonMargin}" DockPanel.Dock="Top" Click="ViiperInstallBtn_Click" />
+            <Button x:Name="viiperInstallBtn" Content="Install / Repair VIIPER Native UDE" Style="{StaticResource CommonMargin}" DockPanel.Dock="Top" Click="ViiperInstallBtn_Click" />
             <TextBlock TextAlignment="Center" DockPanel.Dock="Top" TextWrapping="Wrap"
-                       Text="Required virtual-controller backend. DS4Windows requests administrator access and installs VIIPER plus usbip-win2 for you." />
+                       Text="Required virtual-controller backend. DS4Windows requests administrator access to install the exact signed VIIPER UdeCx package and managed LocalSystem broker. Builds without production HLK/WHCP media fail closed." />
             <Button x:Name="step2Btn" IsEnabled="False" Content="{lex:Loc Welcome.Step2Text}" Style="{StaticResource CommonMargin}" DockPanel.Dock="Top"
                 Click="Step2Btn_Click" />
             <TextBlock TextAlignment="Center" DockPanel.Dock="Top">

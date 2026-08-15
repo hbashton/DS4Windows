@@ -41,7 +41,7 @@ namespace DS4WinWPF.DS4Forms
                 DS4Windows.ViiperSetupManager.GetStatus(tryStartServer: true);
             if (status.Ready)
             {
-                viiperInstallBtn.Content = "VIIPER is ready";
+                viiperInstallBtn.Content = "VIIPER Native UDE is ready";
             }
         }
 
@@ -51,7 +51,7 @@ namespace DS4WinWPF.DS4Forms
                 DS4Windows.ViiperSetupManager.GetStatus(tryStartServer: true);
             if (status.Ready)
             {
-                viiperInstallBtn.Content = "VIIPER is ready";
+                viiperInstallBtn.Content = "VIIPER Native UDE is ready";
                 return;
             }
 

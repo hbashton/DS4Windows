@@ -1346,10 +1346,180 @@ namespace DS4Windows
             return result;
         }
 
-        // VIIPER exposes its USB devices through usbip-win2's emulated host
-        // controller.  Moonlight mode deliberately accepts some virtual DS4s,
-        // so CheckIfVirtualDevice alone cannot be used to reject our own
-        // VIIPER output.  Keep this identity check separate and explicit.
+        private const string ViiperNativeUdeHardwareId = @"ROOT\VIIPERUDE";
+        private const string UsbIpWin2HardwareId = @"ROOT\USBIP_WIN2\UDE";
+
+        // Moonlight mode deliberately accepts some virtual DS4s, so the broad
+        // virtual-device classifier cannot reject DS4Windows' own output. Walk
+        // the complete PnP ancestry and retain the exact emulated USB device,
+        // controller root, and port instead. The result is transport-neutral:
+        // native UdeCx is the production path and USB/IP remains available only
+        // to the explicit legacy validation path.
+        internal static bool TryResolveViiperPnPTopology(string devicePath,
+            out ViiperPnPTopologyIdentity topology)
+        {
+            return TryInspectViiperPnPTopology(devicePath, out topology) &&
+                topology.IsResolved;
+        }
+
+        internal static bool TryInspectViiperPnPTopology(string devicePath,
+            out ViiperPnPTopologyIdentity topology)
+        {
+            topology = default;
+            if (string.IsNullOrWhiteSpace(devicePath))
+            {
+                return false;
+            }
+
+            string testInstanceId = LooksLikeDeviceInstanceId(devicePath) ?
+                devicePath : GetInstanceIdFromDevicePath(devicePath);
+            if (string.IsNullOrWhiteSpace(testInstanceId))
+            {
+                return false;
+            }
+
+            var ancestry = new List<ViiperPnPAncestryNode>();
+            bool complete = false;
+            for (int depth = 0; depth < 32 &&
+                !string.IsNullOrWhiteSpace(testInstanceId); depth++)
+            {
+                string[] hardwareIds = GetStringArrayDeviceProperty(
+                    testInstanceId, NativeMethods.DEVPKEY_Device_HardwareIds) ??
+                    Array.Empty<string>();
+                string location = GetStringDeviceProperty(testInstanceId,
+                    NativeMethods.DEVPKEY_Device_LocationInfo);
+                string parentInstanceId = GetStringDeviceProperty(
+                    testInstanceId, NativeMethods.DEVPKEY_Device_Parent);
+
+                ancestry.Add(new ViiperPnPAncestryNode(testInstanceId,
+                    parentInstanceId, hardwareIds, location));
+
+                if (parentInstanceId.Equals(@"HTREE\ROOT\0",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    complete = true;
+                    break;
+                }
+
+                if (string.IsNullOrWhiteSpace(parentInstanceId))
+                {
+                    // A disappearing interface or a PnP tree still being
+                    // published is unresolved, not a physical controller.
+                    return false;
+                }
+
+                testInstanceId = parentInstanceId;
+            }
+
+            if (!complete)
+            {
+                return false;
+            }
+
+            TryClassifyViiperPnPAncestry(ancestry, out topology);
+            return true;
+        }
+
+        internal static bool TryClassifyViiperPnPAncestry(
+            IEnumerable<ViiperPnPAncestryNode> ancestry,
+            out ViiperPnPTopologyIdentity topology)
+        {
+            topology = default;
+            if (ancestry == null)
+            {
+                return false;
+            }
+
+            string usbDeviceInstanceId = string.Empty;
+            int usbPort = -1;
+            string rootInstanceId = string.Empty;
+            ViiperPnPTransport transport = ViiperPnPTransport.Unknown;
+
+            foreach (ViiperPnPAncestryNode node in ancestry)
+            {
+                string instanceId = node.InstanceId ?? string.Empty;
+                if (string.IsNullOrEmpty(rootInstanceId) &&
+                    string.Equals(node.ParentInstanceId, @"HTREE\ROOT\0",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    rootInstanceId = instanceId;
+                }
+
+                if (string.IsNullOrEmpty(usbDeviceInstanceId) &&
+                    instanceId.StartsWith(@"USB\VID_",
+                        StringComparison.OrdinalIgnoreCase) &&
+                    instanceId.IndexOf("&MI_",
+                        StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    usbDeviceInstanceId = instanceId;
+                    Match match = Regex.Match(node.LocationInfo ?? string.Empty,
+                        @"Port_#(?<port>\d+)", RegexOptions.IgnoreCase);
+                    if (match.Success && int.TryParse(
+                        match.Groups["port"].Value, NumberStyles.None,
+                        CultureInfo.InvariantCulture, out int parsedPort))
+                    {
+                        usbPort = parsedPort;
+                    }
+                }
+
+                if (NodeHasIdentity(node, ViiperNativeUdeHardwareId))
+                {
+                    transport = ViiperPnPTransport.NativeUdeCx;
+                    rootInstanceId = instanceId;
+                    break;
+                }
+
+                if (NodeHasIdentity(node, UsbIpWin2HardwareId))
+                {
+                    transport = ViiperPnPTransport.LegacyUsbIp;
+                    rootInstanceId = instanceId;
+                    break;
+                }
+            }
+
+            topology = new ViiperPnPTopologyIdentity(transport,
+                rootInstanceId, usbDeviceInstanceId, usbPort);
+            return topology.IsResolved;
+        }
+
+        private static bool NodeHasIdentity(ViiperPnPAncestryNode node,
+            string hardwareId)
+        {
+            string instanceId = node.InstanceId ?? string.Empty;
+            if (string.Equals(instanceId, hardwareId,
+                    StringComparison.OrdinalIgnoreCase) ||
+                instanceId.StartsWith(hardwareId + @"\",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return node.HardwareIds != null && node.HardwareIds.Any(id =>
+                string.Equals(id?.TrimEnd('\0'), hardwareId,
+                    StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool LooksLikeDeviceInstanceId(string value)
+        {
+            return value.StartsWith(@"HID\",
+                    StringComparison.OrdinalIgnoreCase) ||
+                value.StartsWith(@"USB\",
+                    StringComparison.OrdinalIgnoreCase) ||
+                value.StartsWith(@"ROOT\",
+                    StringComparison.OrdinalIgnoreCase) ||
+                value.StartsWith(@"SWD\",
+                    StringComparison.OrdinalIgnoreCase);
+        }
+
+        public static bool CheckIfViiperNativeUdeDevice(string devicePath)
+        {
+            return TryResolveViiperPnPTopology(devicePath,
+                out ViiperPnPTopologyIdentity topology) &&
+                topology.Transport == ViiperPnPTransport.NativeUdeCx;
+        }
+
+        // Compatibility wrappers for the explicitly selected legacy USB/IP
+        // ABBA/dev-validation path. Production ownership does not call these.
         public static bool CheckIfUsbIpWin2Device(string devicePath)
         {
             return TryResolveUsbIpWin2Device(devicePath,
@@ -1367,71 +1537,22 @@ namespace DS4Windows
         internal static bool TryResolveUsbIpWin2Device(string devicePath,
             out bool usbIpWin2AncestorFound, out int port)
         {
-            const string usbIpWin2HardwareId = @"ROOT\USBIP_WIN2\UDE";
-            string testInstanceId = GetInstanceIdFromDevicePath(devicePath);
             usbIpWin2AncestorFound = false;
             port = -1;
-            if (string.IsNullOrEmpty(testInstanceId))
+            if (!TryInspectViiperPnPTopology(devicePath,
+                    out ViiperPnPTopologyIdentity topology))
             {
                 return false;
             }
 
-            int discoveredPort = -1;
-
-            for (int depth = 0; depth < 16 && !string.IsNullOrEmpty(testInstanceId); depth++)
+            usbIpWin2AncestorFound =
+                topology.Transport == ViiperPnPTransport.LegacyUsbIp;
+            if (usbIpWin2AncestorFound)
             {
-                string[] hardwareIds = GetStringArrayDeviceProperty(testInstanceId,
-                    NativeMethods.DEVPKEY_Device_HardwareIds);
-                if (hardwareIds != null && hardwareIds.Any(id =>
-                    string.Equals(id, usbIpWin2HardwareId,
-                        StringComparison.OrdinalIgnoreCase)))
-                {
-                    usbIpWin2AncestorFound = true;
-                    port = discoveredPort;
-                    return true;
-                }
-
-                if (discoveredPort < 0 &&
-                    testInstanceId.StartsWith(@"USB\VID_",
-                        StringComparison.OrdinalIgnoreCase) &&
-                    testInstanceId.IndexOf("&MI_",
-                        StringComparison.OrdinalIgnoreCase) < 0)
-                {
-                    string location = GetStringDeviceProperty(testInstanceId,
-                        NativeMethods.DEVPKEY_Device_LocationInfo);
-                    Match match = Regex.Match(location ?? string.Empty,
-                        @"Port_#(?<port>\d+)", RegexOptions.IgnoreCase);
-                    if (match.Success && int.TryParse(
-                        match.Groups["port"].Value,
-                        NumberStyles.None, CultureInfo.InvariantCulture,
-                        out int parsedPort))
-                    {
-                        discoveredPort = parsedPort;
-                    }
-                }
-
-                string parentInstanceId = GetStringDeviceProperty(testInstanceId,
-                    NativeMethods.DEVPKEY_Device_Parent);
-                if (parentInstanceId.Equals(@"HTREE\ROOT\0",
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    port = discoveredPort;
-                    return true;
-                }
-
-                if (string.IsNullOrEmpty(parentInstanceId))
-                {
-                    // A missing parent before HTREE\ROOT means the PnP tree is
-                    // not ready (or the interface vanished mid-query). Do not
-                    // misclassify that transient as a physical USB endpoint.
-                    return false;
-                }
-
-                testInstanceId = parentInstanceId;
+                port = topology.UsbPortNumber;
             }
 
-            // Depth exhaustion is not a completed ancestry query.
-            return false;
+            return true;
         }
 
         public static void FindConfigLocation()

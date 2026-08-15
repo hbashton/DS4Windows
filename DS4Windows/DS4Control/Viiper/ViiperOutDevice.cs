@@ -12,7 +12,9 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
@@ -127,6 +129,8 @@ namespace DS4Windows
         private const int DualSenseCombinedBluetoothReportLength = 398;
         private const int DualSenseCombinedBluetoothReportOffset = DualSenseNativeOutputReportOffset + DualSenseNativeOutputReportLength;
         private const int DualSenseCombinedExtendedFeedbackLength = DualSenseCombinedBluetoothReportOffset + DualSenseCombinedBluetoothReportLength;
+        private const int DualSenseV5SpeakerPcmLength =
+            480 * sizeof(short) * 2;
         internal const int DualSenseAtomicFeedbackLength =
             DualSenseCombinedExtendedFeedbackLength;
         private const int DualSenseMicrophoneOpusFrameLength = 71;
@@ -151,9 +155,11 @@ namespace DS4Windows
         private const byte ViiperStreamFrameOutputState = 0x81;
         private const byte ViiperStreamFrameSpeakerPcm = 0x82;
         private const byte ViiperStreamFrameAtomicAudioHaptics = 0x83;
+        private const byte ViiperStreamFrameRealtimeHaptics = 0x84;
         private const byte ViiperStreamFrameVersionV2 = 0x02;
         private const byte ViiperStreamFrameVersionV3 = 0x03;
         private const byte ViiperStreamFrameVersionV4 = 0x04;
+        private const byte ViiperStreamFrameVersionV5 = 0x05;
         private const byte FeedbackSpeakerKindPcm = 0;
         private const byte FeedbackSpeakerKindAtomicAudioHaptics = 1;
         private const int AtomicAudioHapticsFeedbackLengthPrefix = 2;
@@ -461,6 +467,14 @@ namespace DS4Windows
                 (speakerPcmLength & (sizeof(short) * 2 - 1)) == 0;
         }
 
+        internal static bool IsValidV5RealtimeHapticsFrame(byte version,
+            byte frameType, int payloadLength)
+        {
+            return version == ViiperStreamFrameVersionV5 &&
+                frameType == ViiperStreamFrameRealtimeHaptics &&
+                payloadLength == DualSenseCombinedExtendedFeedbackLength;
+        }
+
         private Action<ViiperOutDevice, byte[], int>
             virtualSpeakerPcmReceived;
         private ViiperAtomicAudioHapticsHandler
@@ -532,6 +546,9 @@ namespace DS4Windows
         internal bool IsRuntimeConnected =>
             connected && Volatile.Read(ref deviceStream) != null;
 
+        internal ViiperVirtualDeviceIdentity VirtualDeviceIdentity =>
+            Volatile.Read(ref deviceStream)?.VirtualDeviceIdentity;
+
         internal bool SupportsAtomicAudioHaptics =>
             connected && activeStreamSupportsAtomicAudioHaptics;
 
@@ -548,8 +565,15 @@ namespace DS4Windows
             SupportsDirectSpeakerPcm ?
                 GetVirtualSpeakerPcmSampleRate(viiperType) : 0;
 
-        internal int DirectSpeakerUsbipPort =>
-            Volatile.Read(ref deviceStream)?.UsbipPort ?? -1;
+        internal int DirectSpeakerUsbipPort
+        {
+            get
+            {
+                ViiperDeviceStream stream = Volatile.Read(ref deviceStream);
+                return stream?.TransportMode == ViiperTransportMode.Usbip ?
+                    stream.UsbipPort : -1;
+            }
+        }
 
         internal bool SupportsActiveVirtualMicrophone =>
             connected && activeStreamSupportsMicrophone;
@@ -580,11 +604,9 @@ namespace DS4Windows
         {
             Disconnect();
 
-            ViiperPrerequisiteStatus status = ViiperSetupManager.GetStatus(tryStartServer: true);
-            if (!status.Ready)
+            if (client.TransportMode == ViiperTransportMode.NativeUde)
             {
-                throw new IOException(
-                    $"{status.DisplayText}. Use Settings > VIIPER Virtual Controller Support to install or repair VIIPER and usbip-win2.");
+                client.ValidateNativeBackend();
             }
 
             deviceStream = CreateDeviceStreamWithServerFallback();
@@ -702,275 +724,54 @@ namespace DS4Windows
 
             if (viiperType == ViiperVirtualDeviceType.DualSense)
             {
-                if (audioOnlySidecar)
-                {
-                    try
-                    {
-                        ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
-                            "dualsenseaudioonlyduplexv4");
-                        activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
-                        activeStreamUsesFramedProtocol = true;
-                        activeStreamSupportsMicrophone = true;
-                        activeStreamSupportsDirectSpeaker = true;
-                        activeStreamSupportsAtomicAudioHaptics = true;
-                        activeStreamUsesAudioOnlyDescriptor = true;
-                        activeStreamFrameVersion = ViiperStreamFrameVersionV4;
-                        return stream;
-                    }
-                    catch (IOException ex)
-                    {
-                        AppLogger.LogToGui(
-                            $"VIIPER DualSense audio-only sidecar V4 unavailable, trying V3: {ex.Message}",
-                            false);
-                    }
-
-                    try
-                    {
-                        ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
-                            "dualsenseaudioonlyduplexv3");
-                        activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
-                        activeStreamUsesFramedProtocol = true;
-                        activeStreamSupportsMicrophone = true;
-                        activeStreamSupportsDirectSpeaker = true;
-                        activeStreamUsesAudioOnlyDescriptor = true;
-                        activeStreamFrameVersion = ViiperStreamFrameVersionV3;
-                        return stream;
-                    }
-                    catch (IOException ex)
-                    {
-                        AppLogger.LogToGui(
-                            $"VIIPER DualSense audio-only sidecar unavailable: {ex.Message}",
-                            true);
-                        throw new IOException(
-                            "The installed VIIPER build does not support the DualSense audio-only interface. Update VIIPER from Settings before using PlayStation audio with an Xbox or Switch output.",
-                            ex);
-                    }
-                }
-
-                try
-                {
-                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
-                        "dualsensecombinedaudioduplexv4");
-                    activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
-                    activeStreamUsesFramedProtocol = true;
-                    activeStreamSupportsMicrophone = true;
-                    activeStreamSupportsDirectSpeaker = true;
-                    activeStreamSupportsAtomicAudioHaptics = true;
-                    activeStreamFrameVersion = ViiperStreamFrameVersionV4;
-                    return stream;
-                }
-                catch (IOException ex)
-                {
-                    AppLogger.LogToGui(
-                        $"VIIPER DualSense atomic audio/haptics stream unavailable, trying V3: {ex.Message}",
-                        false);
-                }
-
-                try
-                {
-                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
-                        "dualsensecombinedaudioduplexv3");
-                    activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
-                    activeStreamUsesFramedProtocol = true;
-                    activeStreamSupportsMicrophone = true;
-                    activeStreamSupportsDirectSpeaker = true;
-                    activeStreamFrameVersion = ViiperStreamFrameVersionV3;
-                    return stream;
-                }
-                catch (IOException ex)
-                {
-                    AppLogger.LogToGui(
-                        $"VIIPER DualSense direct speaker stream unavailable, trying microphone V2: {ex.Message}",
-                        false);
-                }
-
-                try
-                {
-                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream("dualsensecombinedmicv2");
-                    activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
-                    activeStreamUsesFramedProtocol = true;
-                    activeStreamSupportsMicrophone = true;
-                    activeStreamFrameVersion = ViiperStreamFrameVersionV2;
-                    return stream;
-                }
-                catch (IOException ex)
-                {
-                    AppLogger.LogToGui($"VIIPER DualSense microphone input unavailable, continuing without mic-in: {ex.Message}", false);
-                }
-
-                try
-                {
-                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream("dualsensecombinedext");
-                    activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
-                    return stream;
-                }
-                catch (IOException ex)
-                {
-                    try
-                    {
-                        AppLogger.LogToGui($"VIIPER DualSense combined haptics feedback unavailable, using legacy extended feedback: {ex.Message}", false);
-                        ViiperDeviceStream stream = client.CreateDeviceAndOpenStream("dualsenseext");
-                        activeFeedbackLength = DualSenseExtendedFeedbackLength;
-                        return stream;
-                    }
-                    catch (IOException legacyEx)
-                    {
-                        AppLogger.LogToGui($"VIIPER DualSense adaptive trigger feedback unavailable, falling back to base DualSense output: {legacyEx.Message}", false);
-                        activeFeedbackLength = DualSenseBaseFeedbackLength;
-                        return client.CreateDeviceAndOpenStream("dualsense");
-                    }
-                }
+                ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
+                    audioOnlySidecar ? "dualsenseaudioonlyduplexv5" :
+                    "dualsensecombinedaudioduplexv5");
+                ConfigureDualSenseV5Stream(audioOnlySidecar);
+                return stream;
             }
 
             if (viiperType == ViiperVirtualDeviceType.DualSenseEdge)
             {
-                try
+                if (audioOnlySidecar)
                 {
-                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
-                        "dualsenseedgecombinedaudioduplexv4");
-                    activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
-                    activeStreamUsesFramedProtocol = true;
-                    activeStreamSupportsMicrophone = true;
-                    activeStreamSupportsDirectSpeaker = true;
-                    activeStreamSupportsAtomicAudioHaptics = true;
-                    activeStreamFrameVersion = ViiperStreamFrameVersionV4;
-                    return stream;
+                    throw new ViiperIdentityException(
+                        "The authoritative VIIPER contract does not expose a DualSense Edge audio-only V5 handler.");
                 }
-                catch (IOException ex)
-                {
-                    AppLogger.LogToGui(
-                        $"VIIPER DualSense Edge atomic audio/haptics stream unavailable, trying V3: {ex.Message}",
-                        false);
-                }
-
-                try
-                {
-                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
-                        "dualsenseedgecombinedaudioduplexv3");
-                    activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
-                    activeStreamUsesFramedProtocol = true;
-                    activeStreamSupportsMicrophone = true;
-                    activeStreamSupportsDirectSpeaker = true;
-                    activeStreamFrameVersion = ViiperStreamFrameVersionV3;
-                    return stream;
-                }
-                catch (IOException ex)
-                {
-                    AppLogger.LogToGui(
-                        $"VIIPER DualSense Edge direct speaker stream unavailable, trying microphone V2: {ex.Message}",
-                        false);
-                }
-
-                try
-                {
-                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream("dualsenseedgecombinedmicv2");
-                    activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
-                    activeStreamUsesFramedProtocol = true;
-                    activeStreamSupportsMicrophone = true;
-                    activeStreamFrameVersion = ViiperStreamFrameVersionV2;
-                    return stream;
-                }
-                catch (IOException ex)
-                {
-                    AppLogger.LogToGui($"VIIPER DualSense Edge microphone input unavailable, continuing without mic-in: {ex.Message}", false);
-                }
-
-                try
-                {
-                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream("dualsenseedgecombinedext");
-                    activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
-                    return stream;
-                }
-                catch (IOException ex)
-                {
-                    try
-                    {
-                        AppLogger.LogToGui($"VIIPER DualSense Edge combined haptics feedback unavailable, using legacy extended feedback: {ex.Message}", false);
-                        ViiperDeviceStream stream = client.CreateDeviceAndOpenStream("dualsenseedgeext");
-                        activeFeedbackLength = DualSenseExtendedFeedbackLength;
-                        return stream;
-                    }
-                    catch (IOException legacyEx)
-                    {
-                        AppLogger.LogToGui($"VIIPER DualSense Edge adaptive trigger feedback unavailable, falling back to base DualSense Edge output: {legacyEx.Message}", false);
-                        activeFeedbackLength = DualSenseBaseFeedbackLength;
-                        return client.CreateDeviceAndOpenStream("dualsenseedge");
-                    }
-                }
+                ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
+                    "dualsenseedgecombinedaudioduplexv5");
+                ConfigureDualSenseV5Stream(audioOnly: false);
+                return stream;
             }
 
             if (viiperType == ViiperVirtualDeviceType.DualShock4)
             {
-                if (audioOnlySidecar)
-                {
-                    try
-                    {
-                        ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
-                            "dualshock4audioonlyduplexv3", 0x05C4);
-                        activeFeedbackLength = ViiperStatePacketBuilder.GetFeedbackLength(
-                            viiperType);
-                        activeStreamUsesFramedProtocol = true;
-                        activeStreamSupportsMicrophone = true;
-                        activeStreamSupportsDirectSpeaker = true;
-                        activeStreamUsesAudioOnlyDescriptor = true;
-                        activeStreamFrameVersion = ViiperStreamFrameVersionV3;
-                        return stream;
-                    }
-                    catch (IOException ex)
-                    {
-                        AppLogger.LogToGui(
-                            $"VIIPER DualShock 4 audio-only sidecar unavailable: {ex.Message}",
-                            true);
-                        throw new IOException(
-                            "The installed VIIPER build does not support the DualShock 4 audio-only interface. Update VIIPER from Settings before using PlayStation audio with an Xbox or Switch output.",
-                            ex);
-                    }
-                }
-
-                try
-                {
-                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
-                        "dualshock4audioduplexv3", 0x05C4);
-                    activeFeedbackLength = ViiperStatePacketBuilder.GetFeedbackLength(
-                        viiperType);
-                    activeStreamUsesFramedProtocol = true;
-                    activeStreamSupportsMicrophone = true;
-                    activeStreamSupportsDirectSpeaker = true;
-                    activeStreamFrameVersion = ViiperStreamFrameVersionV3;
-                    return stream;
-                }
-                catch (IOException ex)
-                {
-                    AppLogger.LogToGui(
-                        $"VIIPER DualShock 4 direct speaker stream unavailable, trying microphone V2: {ex.Message}",
-                        false);
-                }
-
-                try
-                {
-                    ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
-                        "dualshock4micv2", 0x05C4);
-                    activeFeedbackLength = ViiperStatePacketBuilder.GetFeedbackLength(
-                        viiperType);
-                    activeStreamUsesFramedProtocol = true;
-                    activeStreamSupportsMicrophone = true;
-                    activeStreamFrameVersion = ViiperStreamFrameVersionV2;
-                    return stream;
-                }
-                catch (IOException ex)
-                {
-                    AppLogger.LogToGui(
-                        $"VIIPER DualShock 4 microphone input unavailable, continuing without mic-in: {ex.Message}",
-                        false);
-                }
-
+                ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
+                    audioOnlySidecar ? "dualshock4audioonlyduplexv3" :
+                    "dualshock4audioduplexv3", 0x05C4);
                 activeFeedbackLength = ViiperStatePacketBuilder.GetFeedbackLength(
                     viiperType);
-                return client.CreateDeviceAndOpenStream("dualshock4", 0x05C4);
+                activeStreamUsesFramedProtocol = true;
+                activeStreamSupportsMicrophone = true;
+                activeStreamSupportsDirectSpeaker = true;
+                activeStreamUsesAudioOnlyDescriptor = audioOnlySidecar;
+                activeStreamFrameVersion = ViiperStreamFrameVersionV3;
+                return stream;
             }
 
             activeFeedbackLength = ViiperStatePacketBuilder.GetFeedbackLength(viiperType);
             return client.CreateDeviceAndOpenStream(viiperType);
+        }
+
+        private void ConfigureDualSenseV5Stream(bool audioOnly)
+        {
+            activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
+            activeStreamUsesFramedProtocol = true;
+            activeStreamSupportsMicrophone = true;
+            activeStreamSupportsDirectSpeaker = true;
+            activeStreamSupportsAtomicAudioHaptics = true;
+            activeStreamUsesAudioOnlyDescriptor = audioOnly;
+            activeStreamFrameVersion = ViiperStreamFrameVersionV5;
         }
 
         private ViiperDeviceStream CreateDeviceStreamWithServerFallback()
@@ -981,13 +782,9 @@ namespace DS4Windows
             }
             catch (IOException first)
             {
-                ViiperPrerequisiteStatus status = ViiperSetupManager.GetStatus(tryStartServer: true);
-                if (!status.Ready)
-                {
-                    throw;
-                }
-
-                AppLogger.LogToGui($"VIIPER {viiperType} stream open failed once; server is available, retrying: {first.Message}", false);
+                AppLogger.LogToGui(
+                    $"VIIPER {viiperType} stream open failed once; retrying the selected {client.TransportMode} transport: {first.Message}",
+                    false);
                 Thread.Sleep(250);
                 return CreateDeviceStream();
             }
@@ -2062,8 +1859,9 @@ namespace DS4Windows
                     $"VIIPER {viiperType} stream interrupted; reopening the existing virtual device: {reason}",
                     true);
 
-                // Closing only the TCP transport wakes the old feedback reader
-                // without detaching usbip or removing the virtual controller.
+                // Closing only the authenticated/raw TCP transport wakes the
+                // old feedback reader without releasing transport ownership or
+                // removing the virtual controller.
                 // Keep the published generation and lifetime intact until a
                 // replacement transport has actually opened.
                 interruptedStream.CloseTransport();
@@ -2091,7 +1889,6 @@ namespace DS4Windows
                             client.OpenExistingDeviceStream(
                                 interruptedStream.BusId,
                                 interruptedStream.DevId,
-                                interruptedStream.UsbipPort,
                                 interruptedStream.DeviceLifetime);
                         if (writerStopRequested || !connected)
                         {
@@ -2842,7 +2639,8 @@ namespace DS4Windows
                                 break;
                             }
 
-                            if (frameType == ViiperStreamFrameOutputState)
+                            if (frameType == ViiperStreamFrameOutputState &&
+                                payloadLength == feedbackLength)
                             {
                                 int targetDeviceIndex = Volatile.Read(
                                     ref lastInputDeviceIndex);
@@ -2863,6 +2661,8 @@ namespace DS4Windows
                             }
                             else if (frameType ==
                                     ViiperStreamFrameSpeakerPcm &&
+                                activeStreamFrameVersion ==
+                                    ViiperStreamFrameVersionV3 &&
                                 payloadLength > 0 && payloadLength %
                                     (sizeof(short) * 2) == 0)
                             {
@@ -2878,6 +2678,8 @@ namespace DS4Windows
                             else if (frameType ==
                                     ViiperStreamFrameAtomicAudioHaptics &&
                                 activeStreamSupportsAtomicAudioHaptics &&
+                                activeStreamFrameVersion ==
+                                    ViiperStreamFrameVersionV5 &&
                                 payloadLength >
                                     AtomicAudioHapticsFeedbackLengthPrefix)
                             {
@@ -2888,12 +2690,15 @@ namespace DS4Windows
                                 int speakerPcmLength = payloadLength -
                                     AtomicAudioHapticsFeedbackLengthPrefix -
                                     atomicFeedbackLength;
-                                if (atomicFeedbackLength ==
-                                        DualSenseCombinedExtendedFeedbackLength &&
-                                    speakerPcmLength > 0 &&
-                                    (speakerPcmLength &
-                                        (sizeof(short) * 2 - 1)) == 0 &&
-                                    feedbackDispatchBuffer.TryEnqueueSpeaker(
+                                if (atomicFeedbackLength !=
+                                        DualSenseCombinedExtendedFeedbackLength ||
+                                    speakerPcmLength !=
+                                        DualSenseV5SpeakerPcmLength)
+                                {
+                                    throw new IOException(
+                                        "VIIPER returned a malformed V5 atomic audio/haptics payload.");
+                                }
+                                if (feedbackDispatchBuffer.TryEnqueueSpeaker(
                                         framedPayload, payloadLength,
                                         readStreamGeneration,
                                         FeedbackSpeakerKindAtomicAudioHaptics,
@@ -2901,6 +2706,25 @@ namespace DS4Windows
                                 {
                                     feedbackSpeakerSignal.Set();
                                 }
+                            }
+                            else if (IsValidV5RealtimeHapticsFrame(
+                                    activeStreamFrameVersion, frameType,
+                                    payloadLength))
+                            {
+                                if (feedbackDispatchBuffer
+                                        .TryEnqueueOrderedControl(
+                                            framedPayload, payloadLength,
+                                            readStreamGeneration,
+                                            Volatile.Read(
+                                                ref lastInputDeviceIndex)))
+                                {
+                                    feedbackControlSignal.Set();
+                                }
+                            }
+                            else
+                            {
+                                throw new IOException(
+                                    $"VIIPER returned an unsupported {activeStreamFrameVersion:X2}/{frameType:X2} framed feedback packet of {payloadLength} bytes.");
                             }
                         }
                         finally
@@ -4554,13 +4378,111 @@ namespace DS4Windows
             PropertyNameCaseInsensitive = true,
         };
 
+        private static readonly JsonSerializerOptions NativeJsonOptions =
+            new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = false,
+                UnmappedMemberHandling = JsonUnmappedMemberHandling.Skip,
+            };
+
         private readonly string host;
         private readonly int port;
+        private readonly object nativeSessionLock = new object();
+        private readonly ViiperNativeRuntimeMetadata deferredNativeMetadata;
+        private readonly IViiperCredentialProvider deferredCredentialProvider;
+        private ViiperNativeSession nativeSession;
 
         public ViiperClient(string host, int port)
+            : this(host, port, ViiperTransportSettings.GetManagedMode(), null,
+                null)
         {
-            this.host = host;
+        }
+
+        internal ViiperClient(string host, int port,
+            ViiperTransportMode transportMode,
+            ViiperNativeRuntimeMetadata metadata = null,
+            IViiperCredentialProvider credentialProvider = null)
+        {
+            this.host = string.IsNullOrWhiteSpace(host) ?
+                throw new ArgumentException("A VIIPER host is required.",
+                    nameof(host)) : host.Trim();
+            if (port <= 0 || port > ushort.MaxValue)
+            {
+                throw new ArgumentOutOfRangeException(nameof(port));
+            }
             this.port = port;
+            TransportMode = transportMode;
+            if (transportMode == ViiperTransportMode.NativeUde)
+            {
+                if (!string.Equals(this.host, "localhost",
+                        StringComparison.OrdinalIgnoreCase) &&
+                    (!System.Net.IPAddress.TryParse(this.host,
+                        out System.Net.IPAddress address) ||
+                        !System.Net.IPAddress.IsLoopback(address)))
+                {
+                    throw new ViiperIdentityException(
+                        "Managed native VIIPER connections must use a loopback address.");
+                }
+                deferredNativeMetadata = metadata;
+                deferredCredentialProvider = credentialProvider;
+            }
+        }
+
+        internal ViiperTransportMode TransportMode { get; }
+
+        internal bool HasAuthenticatedNativeConnection =>
+            nativeSession?.HasAuthenticatedConnection == true;
+
+        internal ViiperNativeBackendIdentity NativeBackendIdentity =>
+            nativeSession?.Identity;
+
+        private ViiperNativeSession GetNativeSession()
+        {
+            if (TransportMode != ViiperTransportMode.NativeUde)
+            {
+                throw new ViiperIdentityException(
+                    "An authenticated native session was requested for the explicit USB/IP client.");
+            }
+            lock (nativeSessionLock)
+            {
+                if (nativeSession == null)
+                {
+                    ViiperNativeRuntimeMetadata metadata =
+                        deferredNativeMetadata ??
+                        ViiperNativeRuntimeMetadata.LoadBundled();
+                    nativeSession = new ViiperNativeSession(
+                        new ViiperNativeRuntimeContract(metadata),
+                        deferredCredentialProvider ??
+                        new ViiperProgramDataCredentialProvider());
+                }
+                return nativeSession;
+            }
+        }
+
+        internal ViiperNativeBackendIdentity ValidateNativeBackend()
+        {
+            if (TransportMode != ViiperTransportMode.NativeUde)
+            {
+                throw new ViiperIdentityException(
+                    "Native VIIPER validation was requested for the explicit USB/IP client.");
+            }
+            string raw = SendRequestRawCore("ping", null);
+            return GetNativeSession().AdmitPing(raw, reconnect: false);
+        }
+
+        private ViiperNativeBackendIdentity RevalidateNativeBackend()
+        {
+            string raw = SendRequestRawCore("ping", null);
+            return GetNativeSession().AdmitPing(raw, reconnect: true);
+        }
+
+        private void EnsureNativeBackendValidated()
+        {
+            if (TransportMode == ViiperTransportMode.NativeUde &&
+                nativeSession?.Identity == null)
+            {
+                ValidateNativeBackend();
+            }
         }
 
         public ViiperDeviceStream CreateDeviceAndOpenStream(ViiperVirtualDeviceType deviceType)
@@ -4571,35 +4493,100 @@ namespace DS4Windows
         public ViiperDeviceStream CreateDeviceAndOpenStream(string deviceName,
             ushort? idProduct = null)
         {
-            ViiperUsbipPortManager.DetachStaleLocalViiperPorts();
+            EnsureNativeBackendValidated();
+            ushort? effectiveProductId = idProduct;
+            if (TransportMode == ViiperTransportMode.NativeUde)
+            {
+                effectiveProductId = GetNativeSession().Contract
+                    .ValidateControllerRequest(deviceName, idProduct);
+            }
+            if (TransportMode == ViiperTransportMode.Usbip)
+            {
+                ViiperUsbipPortManager.DetachStaleLocalViiperPorts();
+            }
 
-            ViiperBusCreateResponse bus = SendRequest<ViiperBusCreateResponse>("bus/create", "0");
+            ViiperBusCreateResponse bus;
+            try
+            {
+                bus = SendRequest<ViiperBusCreateResponse>("bus/create", "0");
+                if (bus == null || bus.BusId == 0)
+                {
+                    throw new ViiperIdentityException(
+                        "VIIPER returned an invalid bus identity.");
+                }
+            }
+            catch (Exception failure) when (
+                TransportMode == ViiperTransportMode.NativeUde &&
+                (failure is ViiperIdentityException || failure is JsonException))
+            {
+                GetNativeSession().InvalidateIdentity(failure);
+                throw;
+            }
             ViiperDeviceResponse device = null;
+            ViiperVirtualDeviceIdentity nativeIdentity = null;
             int usbipPort = -1;
             try
             {
                 string payload = JsonSerializer.Serialize(new ViiperDeviceCreateRequest
                 {
                     Type = deviceName,
-                    IdProduct = idProduct,
+                    IdProduct = effectiveProductId,
                 }, JsonOptions);
 
                 device = SendRequest<ViiperDeviceResponse>($"bus/{bus.BusId}/add", payload);
-                usbipPort = ViiperUsbipPortManager.FindLocalViiperPort(bus.BusId, device.DevId);
-                ViiperUsbipPortManager.RegisterActivePort(usbipPort);
-                ViiperUsbipPortManager.DetachDuplicateLocalViiperPorts(bus.BusId, device.DevId, usbipPort);
-                return OpenStream(bus.BusId, device.DevId, usbipPort);
-            }
-            catch
-            {
-                ViiperUsbipPortManager.UnregisterActivePort(usbipPort);
+                if (TransportMode == ViiperTransportMode.NativeUde)
+                {
+                    nativeIdentity =
+                        ValidateNativeDeviceIdentity(bus.BusId, device,
+                            deviceName);
+                    var lifetime = new ViiperVirtualDeviceLifetime(
+                        nativeIdentity, RemoveNativeDevice);
+                    return OpenStream(bus.BusId, device.DevId, lifetime);
+                }
 
-                if (device != null && !string.IsNullOrEmpty(device.DevId))
+                ValidateUsbipDeviceResponse(device);
+                usbipPort = ViiperUsbipPortManager.FindLocalViiperPort(
+                    bus.BusId, device.DevId);
+                ViiperUsbipPortManager.RegisterActivePort(usbipPort);
+                ViiperUsbipPortManager.DetachDuplicateLocalViiperPorts(
+                    bus.BusId, device.DevId, usbipPort);
+                ViiperVirtualDeviceIdentity usbipIdentity =
+                    CreateUsbipDeviceIdentity(bus.BusId, device, deviceName,
+                        usbipPort);
+                var usbipLifetime = new ViiperVirtualDeviceLifetime(
+                    usbipIdentity, RemoveDevice);
+                return OpenStream(bus.BusId, device.DevId, usbipLifetime);
+            }
+            catch (Exception failure)
+            {
+                if (TransportMode == ViiperTransportMode.Usbip)
+                {
+                    ViiperUsbipPortManager.UnregisterActivePort(usbipPort);
+                }
+
+                if (TransportMode == ViiperTransportMode.Usbip &&
+                    device != null && !string.IsNullOrEmpty(device.DevId))
                 {
                     TryRemoveDevice(bus.BusId, device.DevId);
                 }
 
-                TryRemoveBus(bus.BusId);
+                if (TransportMode == ViiperTransportMode.Usbip)
+                {
+                    TryRemoveBus(bus.BusId);
+                }
+                else if (nativeIdentity != null)
+                {
+                    TryRemoveNativeDevice(nativeIdentity);
+                }
+                if (TransportMode == ViiperTransportMode.NativeUde &&
+                    (failure is ViiperIdentityException ||
+                     failure is JsonException))
+                {
+                    // Keep the authenticated session usable long enough to
+                    // remove any partially-created topology, then permanently
+                    // fence it before control returns to the caller.
+                    GetNativeSession().InvalidateIdentity(failure);
+                }
                 throw;
             }
         }
@@ -4684,6 +4671,12 @@ namespace DS4Windows
         public ViiperDeviceStream OpenExistingDeviceStream(uint busId,
             string devId, int usbipPort)
         {
+            if (TransportMode != ViiperTransportMode.Usbip)
+            {
+                throw new ArgumentException(
+                    "A USB/IP port may only be supplied to an explicit USB/IP VIIPER client.",
+                    nameof(usbipPort));
+            }
             return OpenExistingDeviceStream(busId, devId, usbipPort, null);
         }
 
@@ -4691,6 +4684,11 @@ namespace DS4Windows
             string devId, int usbipPort,
             ViiperVirtualDeviceLifetime deviceLifetime)
         {
+            if (TransportMode != ViiperTransportMode.Usbip)
+            {
+                throw new ViiperIdentityException(
+                    "Native VIIPER stream reopen requires the exact captured virtual-device lifetime receipt.");
+            }
             if (string.IsNullOrWhiteSpace(devId))
             {
                 throw new ArgumentException(
@@ -4708,25 +4706,75 @@ namespace DS4Windows
                     nameof(deviceLifetime));
             }
 
-            return OpenStream(busId, devId, usbipPort, deviceLifetime);
+            deviceLifetime ??= new ViiperVirtualDeviceLifetime(busId,
+                devId, usbipPort, RemoveDevice);
+            return OpenStream(busId, devId, deviceLifetime);
+        }
+
+        internal ViiperDeviceStream OpenExistingDeviceStream(uint busId,
+            string devId, ViiperVirtualDeviceLifetime deviceLifetime)
+        {
+            if (deviceLifetime == null)
+            {
+                throw new ArgumentNullException(nameof(deviceLifetime));
+            }
+            if (string.IsNullOrWhiteSpace(devId) ||
+                deviceLifetime.BusId != busId ||
+                !string.Equals(deviceLifetime.DevId, devId,
+                    StringComparison.Ordinal) ||
+                deviceLifetime.TransportMode != TransportMode)
+            {
+                throw new ArgumentException(
+                    "The VIIPER stream identity must match its virtual-device lifetime.",
+                    nameof(deviceLifetime));
+            }
+
+            if (TransportMode == ViiperTransportMode.NativeUde)
+            {
+                try
+                {
+                    RevalidateNativeBackend();
+                    ValidateExistingNativeDevice(deviceLifetime);
+                }
+                catch (Exception failure) when (
+                    failure is ViiperIdentityException ||
+                    failure is JsonException)
+                {
+                    GetNativeSession().InvalidateIdentity(failure);
+                    throw;
+                }
+            }
+            return OpenStream(busId, devId, deviceLifetime);
         }
 
         private ViiperDeviceStream OpenStream(uint busId, string devId,
-            int usbipPort,
-            ViiperVirtualDeviceLifetime deviceLifetime = null)
+            ViiperVirtualDeviceLifetime deviceLifetime)
         {
-            TcpClient tcp = Connect(StreamReceiveTimeoutMs);
+            TcpClient tcp = Connect(TransportMode ==
+                ViiperTransportMode.NativeUde ? ApiReceiveTimeoutMs :
+                StreamReceiveTimeoutMs);
+            Stream stream = null;
             try
             {
-                NetworkStream stream = tcp.GetStream();
+                stream = tcp.GetStream();
+                if (TransportMode == ViiperTransportMode.NativeUde)
+                {
+                    stream = GetNativeSession().Authenticate(stream);
+                    tcp.ReceiveTimeout = StreamReceiveTimeoutMs;
+                }
                 byte[] request = Encoding.UTF8.GetBytes($"bus/{busId}/{devId}\0");
                 stream.Write(request, 0, request.Length);
-                deviceLifetime ??= new ViiperVirtualDeviceLifetime(busId,
-                    devId, usbipPort, RemoveDevice);
-                return new ViiperDeviceStream(tcp, stream, deviceLifetime);
+                return new ViiperDeviceStream(stream, tcp, deviceLifetime);
             }
             catch
             {
+                try
+                {
+                    stream?.Dispose();
+                }
+                catch
+                {
+                }
                 tcp.Dispose();
                 throw;
             }
@@ -4736,6 +4784,113 @@ namespace DS4Windows
         {
             TryRemoveDevice(busId, devId);
             TryRemoveBus(busId);
+        }
+
+        private void RemoveNativeDevice(
+            ViiperVirtualDeviceIdentity identity)
+        {
+            if (identity?.TransportMode != ViiperTransportMode.NativeUde ||
+                identity.NativePnpAnchor?.IsExact != true ||
+                identity.BusId == 0 ||
+                string.IsNullOrWhiteSpace(identity.DevId))
+            {
+                throw new ViiperIdentityException(
+                    "Exact native VIIPER identity is required for conditional removal.");
+            }
+
+            ViiperNativePnpAnchor anchor = identity.NativePnpAnchor;
+            string payload = JsonSerializer.Serialize(
+                new ViiperNativeRemoveRequest
+                {
+                    DevId = identity.DevId,
+                    Transport = "native-ude",
+                    NativeUde = new ViiperNativeDeviceResponse
+                    {
+                        DeviceId = anchor.NativeDeviceId.ToString(
+                            CultureInfo.InvariantCulture),
+                        DeviceGeneration = anchor.NativeDeviceGeneration,
+                        ControllerSessionId =
+                            anchor.ControllerSessionId.ToString(
+                                CultureInfo.InvariantCulture),
+                        ControllerInstanceId = anchor.ControllerInstanceId,
+                        Usb20PortNumber = anchor.Usb20PortNumber,
+                        Usb30PortNumber = anchor.Usb30PortNumber,
+                    },
+                }, NativeJsonOptions);
+            string path = $"bus/{identity.BusId}/remove-native";
+            string raw = SendRequestRaw(path, payload);
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                throw new IOException(
+                    "VIIPER returned an empty native removal response.");
+            }
+
+            ViiperNativeRuntimeContract.ValidateNoDuplicateJsonProperties(
+                raw, path);
+            using JsonDocument document = JsonDocument.Parse(raw,
+                new JsonDocumentOptions
+                {
+                    AllowTrailingCommas = false,
+                    CommentHandling = JsonCommentHandling.Disallow,
+                    MaxDepth = 8,
+                });
+            JsonElement root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                throw new IOException(
+                    "VIIPER returned a non-object native removal response.");
+            }
+
+            JsonProperty[] properties = root.EnumerateObject().ToArray();
+            if (root.TryGetProperty("status", out JsonElement status))
+            {
+                if (properties.Length == 3 &&
+                    properties.All(property => property.Name is "status" or
+                        "title" or "detail") &&
+                    status.ValueKind == JsonValueKind.Number &&
+                    status.TryGetInt32(out int statusCode) &&
+                    statusCode == 409 &&
+                    root.TryGetProperty("title", out JsonElement title) &&
+                    title.ValueKind == JsonValueKind.String &&
+                    !string.IsNullOrWhiteSpace(title.GetString()) &&
+                    root.TryGetProperty("detail", out JsonElement detail) &&
+                    detail.ValueKind == JsonValueKind.String)
+                {
+                    // The receipt is stale and a successor owns this bus/dev
+                    // key. Never retry the legacy ID-only endpoint.
+                    return;
+                }
+                throw new IOException(
+                    "VIIPER native removal returned a non-canonical API error.");
+            }
+
+            if (properties.Length != 2 ||
+                properties.Any(property => property.Name is not "busId" and
+                    not "devId") ||
+                !root.TryGetProperty("busId", out JsonElement returnedBus) ||
+                returnedBus.ValueKind != JsonValueKind.Number ||
+                !returnedBus.TryGetUInt32(out uint returnedBusId) ||
+                returnedBusId != identity.BusId ||
+                !root.TryGetProperty("devId", out JsonElement returnedDevice) ||
+                returnedDevice.ValueKind != JsonValueKind.String ||
+                !string.Equals(returnedDevice.GetString(), identity.DevId,
+                    StringComparison.Ordinal))
+            {
+                throw new IOException(
+                    "VIIPER native removal success did not echo the exact bus/device identity.");
+            }
+        }
+
+        private void TryRemoveNativeDevice(
+            ViiperVirtualDeviceIdentity identity)
+        {
+            try
+            {
+                RemoveNativeDevice(identity);
+            }
+            catch
+            {
+            }
         }
 
         private void TryRemoveDevice(uint busId, string devId)
@@ -4768,19 +4923,39 @@ namespace DS4Windows
                 throw new IOException("VIIPER returned an empty response.");
             }
 
-            ViiperApiError apiError = JsonSerializer.Deserialize<ViiperApiError>(raw, JsonOptions);
+            JsonSerializerOptions responseOptions = TransportMode ==
+                ViiperTransportMode.NativeUde ? NativeJsonOptions :
+                JsonOptions;
+            if (TransportMode == ViiperTransportMode.NativeUde)
+            {
+                ViiperNativeRuntimeContract.ValidateNoDuplicateJsonProperties(
+                    raw, path);
+            }
+            ViiperApiError apiError = JsonSerializer.Deserialize<ViiperApiError>(
+                raw, responseOptions);
             if (apiError != null && (apiError.Status != 0 || !string.IsNullOrEmpty(apiError.Title)))
             {
                 throw new IOException($"VIIPER API error {apiError.Status} {apiError.Title}: {apiError.Detail}");
             }
 
-            return JsonSerializer.Deserialize<T>(raw, JsonOptions);
+            return JsonSerializer.Deserialize<T>(raw, responseOptions);
         }
 
         private string SendRequestRaw(string path, string payload = null)
         {
+            if (!string.Equals(path, "ping", StringComparison.Ordinal))
+            {
+                EnsureNativeBackendValidated();
+            }
+            return SendRequestRawCore(path, payload);
+        }
+
+        private string SendRequestRawCore(string path, string payload)
+        {
             using TcpClient tcp = Connect(ApiReceiveTimeoutMs);
-            NetworkStream stream = tcp.GetStream();
+            using Stream stream = TransportMode == ViiperTransportMode.NativeUde ?
+                GetNativeSession().Authenticate(tcp.GetStream()) :
+                tcp.GetStream();
             string request = string.IsNullOrEmpty(payload) ? path : $"{path} {payload}";
             byte[] requestBytes = Encoding.UTF8.GetBytes(request + "\0");
             stream.Write(requestBytes, 0, requestBytes.Length);
@@ -4833,8 +5008,81 @@ namespace DS4Windows
 
         private sealed class ViiperDeviceResponse
         {
+            private int? usbipPort;
+            private string usbipOwnerSerial;
+
+            [JsonPropertyName("busId")]
+            public uint BusId { get; set; }
+
             [JsonPropertyName("devId")]
             public string DevId { get; set; }
+
+            [JsonPropertyName("vid")]
+            public string Vid { get; set; }
+
+            [JsonPropertyName("pid")]
+            public string Pid { get; set; }
+
+            [JsonPropertyName("type")]
+            public string Type { get; set; }
+
+            [JsonPropertyName("transport")]
+            public string Transport { get; set; }
+
+            [JsonPropertyName("deviceSpecific")]
+            public JsonElement DeviceSpecific { get; set; }
+
+            [JsonPropertyName("usbipPort")]
+            public int? UsbipPort
+            {
+                get => usbipPort;
+                set
+                {
+                    HasUsbipPortProperty = true;
+                    usbipPort = value;
+                }
+            }
+
+            [JsonIgnore]
+            public bool HasUsbipPortProperty { get; private set; }
+
+            [JsonPropertyName("usbipOwnerSerial")]
+            public string UsbipOwnerSerial
+            {
+                get => usbipOwnerSerial;
+                set
+                {
+                    HasUsbipOwnerSerialProperty = true;
+                    usbipOwnerSerial = value;
+                }
+            }
+
+            [JsonIgnore]
+            public bool HasUsbipOwnerSerialProperty { get; private set; }
+
+            [JsonPropertyName("nativeUde")]
+            public ViiperNativeDeviceResponse NativeUde { get; set; }
+        }
+
+        private sealed class ViiperNativeDeviceResponse
+        {
+            [JsonPropertyName("deviceId")]
+            public string DeviceId { get; set; }
+
+            [JsonPropertyName("deviceGeneration")]
+            public uint DeviceGeneration { get; set; }
+
+            [JsonPropertyName("controllerSessionId")]
+            public string ControllerSessionId { get; set; }
+
+            [JsonPropertyName("controllerInstanceId")]
+            public string ControllerInstanceId { get; set; }
+
+            [JsonPropertyName("usb20PortNumber")]
+            public uint Usb20PortNumber { get; set; }
+
+            [JsonPropertyName("usb30PortNumber")]
+            public uint Usb30PortNumber { get; set; }
         }
 
         private sealed class ViiperDeviceCreateRequest
@@ -4847,6 +5095,18 @@ namespace DS4Windows
             public ushort? IdProduct { get; set; }
         }
 
+        private sealed class ViiperNativeRemoveRequest
+        {
+            [JsonPropertyName("devId")]
+            public string DevId { get; set; }
+
+            [JsonPropertyName("transport")]
+            public string Transport { get; set; }
+
+            [JsonPropertyName("nativeUde")]
+            public ViiperNativeDeviceResponse NativeUde { get; set; }
+        }
+
         private sealed class ViiperBusDevicesResponse
         {
             [JsonPropertyName("devices")]
@@ -4855,8 +5115,54 @@ namespace DS4Windows
 
         private sealed class ViiperListedDevice
         {
+            private int? usbipPort;
+            private string usbipOwnerSerial;
+
             [JsonPropertyName("devId")]
             public string DevId { get; set; }
+
+            [JsonPropertyName("transport")]
+            public string Transport { get; set; }
+
+            [JsonPropertyName("vid")]
+            public string Vid { get; set; }
+
+            [JsonPropertyName("pid")]
+            public string Pid { get; set; }
+
+            [JsonPropertyName("type")]
+            public string Type { get; set; }
+
+            [JsonPropertyName("nativeUde")]
+            public ViiperNativeDeviceResponse NativeUde { get; set; }
+
+            [JsonPropertyName("usbipPort")]
+            public int? UsbipPort
+            {
+                get => usbipPort;
+                set
+                {
+                    HasUsbipPortProperty = true;
+                    usbipPort = value;
+                }
+            }
+
+            [JsonIgnore]
+            public bool HasUsbipPortProperty { get; private set; }
+
+            [JsonPropertyName("usbipOwnerSerial")]
+            public string UsbipOwnerSerial
+            {
+                get => usbipOwnerSerial;
+                set
+                {
+                    HasUsbipOwnerSerialProperty = true;
+                    usbipOwnerSerial = value;
+                }
+            }
+
+            [JsonIgnore]
+            public bool HasUsbipOwnerSerialProperty { get; private set; }
 
             [JsonPropertyName("deviceSpecific")]
             public JsonElement DeviceSpecific { get; set; }
@@ -4881,6 +5187,242 @@ namespace DS4Windows
 
             [JsonPropertyName("detail")]
             public string Detail { get; set; }
+        }
+
+        private ViiperVirtualDeviceIdentity ValidateNativeDeviceIdentity(
+            uint busId, ViiperDeviceResponse device, string expectedType)
+        {
+            if (device == null || string.IsNullOrWhiteSpace(device.DevId))
+            {
+                throw new ViiperIdentityException(
+                    "VIIPER native add response omitted the device ID.");
+            }
+            if (device.BusId != busId)
+            {
+                throw new ViiperIdentityException(
+                    "VIIPER native add response returned the wrong bus ID.");
+            }
+            if (!string.Equals(device.Transport, "native-ude",
+                    StringComparison.Ordinal))
+            {
+                throw new ViiperIdentityException(
+                    $"VIIPER native add response transport is '{device.Transport ?? "<missing>"}'.");
+            }
+            if (device.HasUsbipPortProperty ||
+                device.HasUsbipOwnerSerialProperty)
+            {
+                throw new ViiperIdentityException(
+                    "VIIPER native add response contained USB/IP ownership fields.");
+            }
+            if (!string.Equals(device.Type, expectedType,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ViiperIdentityException(
+                    "VIIPER native add response returned the wrong device type.");
+            }
+            if (!string.Equals(device.Type, expectedType,
+                    StringComparison.Ordinal) ||
+                !GetNativeSession().Contract.HasExactControllerIdentity(
+                    expectedType, device.Vid, device.Pid))
+            {
+                throw new ViiperIdentityException(
+                    "VIIPER native add response did not match the source-bound controller type/VID/PID identity.");
+            }
+            if (!uint.TryParse(device.DevId, NumberStyles.None,
+                    CultureInfo.InvariantCulture, out uint numericDevId) ||
+                numericDevId == 0 ||
+                !string.Equals(numericDevId.ToString(
+                        CultureInfo.InvariantCulture), device.DevId,
+                    StringComparison.Ordinal))
+            {
+                throw new ViiperIdentityException(
+                    "VIIPER native add response devId is not canonical decimal.");
+            }
+
+            ViiperNativeDeviceResponse native = device.NativeUde ??
+                throw new ViiperIdentityException(
+                    "VIIPER native add response omitted nativeUde identity.");
+            if (!ulong.TryParse(native.DeviceId, NumberStyles.None,
+                    CultureInfo.InvariantCulture, out ulong nativeDeviceId) ||
+                nativeDeviceId == 0 ||
+                !string.Equals(nativeDeviceId.ToString(
+                        CultureInfo.InvariantCulture), native.DeviceId,
+                    StringComparison.Ordinal))
+            {
+                throw new ViiperIdentityException(
+                    "VIIPER nativeUde.deviceId is not canonical decimal.");
+            }
+            ulong expectedNativeDeviceId = (ulong)busId << 32 | numericDevId;
+            if (nativeDeviceId != expectedNativeDeviceId)
+            {
+                throw new ViiperIdentityException(
+                    $"VIIPER nativeUde.deviceId={nativeDeviceId} does not match bus/dev identity {expectedNativeDeviceId}.");
+            }
+            if (native.DeviceGeneration == 0)
+            {
+                throw new ViiperIdentityException(
+                    "VIIPER nativeUde.deviceGeneration is zero.");
+            }
+            ulong controllerSessionId =
+                ViiperNativeRuntimeContract.ParseCanonicalNonZeroUInt64(
+                    native.ControllerSessionId,
+                    "nativeUde.controllerSessionId");
+            ViiperNativeRuntimeContract.ValidateControllerInstanceId(
+                native.ControllerInstanceId);
+            ViiperNativeBackendIdentity backend = GetNativeSession().Identity ??
+                throw new ViiperIdentityException(
+                    "VIIPER native backend identity is not pinned.");
+            if (!string.Equals(native.ControllerInstanceId,
+                    backend.ControllerInstanceId, StringComparison.Ordinal))
+            {
+                throw new ViiperIdentityException(
+                    "VIIPER device controller instance differs from the authenticated ping identity.");
+            }
+            if (controllerSessionId != backend.ControllerSessionId)
+            {
+                throw new ViiperIdentityException(
+                    "VIIPER device controller session differs from the authenticated ping identity.");
+            }
+            if (!(native.Usb20PortNumber != 0 ^
+                    native.Usb30PortNumber != 0))
+            {
+                throw new ViiperIdentityException(
+                    "VIIPER native device identity must contain exactly one non-zero UdeCx USB port number.");
+            }
+
+            return new ViiperVirtualDeviceIdentity
+            {
+                TransportMode = ViiperTransportMode.NativeUde,
+                BusId = busId,
+                DevId = device.DevId,
+                DeviceType = device.Type,
+                Vid = device.Vid,
+                Pid = device.Pid,
+                DeviceSerialNumber = GetDeviceSerialNumber(
+                    device.DeviceSpecific),
+                BrokerBuildIdentity = backend.DriverBuildIdentity,
+                LogicalLifetimeId = Guid.NewGuid().ToString("N"),
+                NativePnpAnchor = new ViiperNativePnpAnchor
+                {
+                    NativeDeviceId = nativeDeviceId,
+                    NativeDeviceGeneration = native.DeviceGeneration,
+                    ControllerSessionId = controllerSessionId,
+                    ControllerInstanceId = native.ControllerInstanceId,
+                    Usb20PortNumber = native.Usb20PortNumber,
+                    Usb30PortNumber = native.Usb30PortNumber,
+                },
+            };
+        }
+
+        private static void ValidateUsbipDeviceResponse(
+            ViiperDeviceResponse device)
+        {
+            if (device == null || string.IsNullOrWhiteSpace(device.DevId))
+            {
+                throw new IOException(
+                    "VIIPER USB/IP add response omitted the device ID.");
+            }
+            if (!string.IsNullOrEmpty(device.Transport) &&
+                !string.Equals(device.Transport, "usbip",
+                    StringComparison.Ordinal))
+            {
+                throw new IOException(
+                    $"VIIPER explicit USB/IP add response returned transport '{device.Transport}'.");
+            }
+            if (device.NativeUde != null)
+            {
+                throw new IOException(
+                    "VIIPER explicit USB/IP response unexpectedly contained nativeUde identity.");
+            }
+        }
+
+        private ViiperVirtualDeviceIdentity CreateUsbipDeviceIdentity(
+            uint busId, ViiperDeviceResponse device, string expectedType,
+            int usbipPort)
+        {
+            return new ViiperVirtualDeviceIdentity
+            {
+                TransportMode = ViiperTransportMode.Usbip,
+                BusId = busId,
+                DevId = device.DevId,
+                DeviceType = string.IsNullOrEmpty(device.Type) ?
+                    expectedType : device.Type,
+                Vid = device.Vid,
+                Pid = device.Pid,
+                DeviceSerialNumber = GetDeviceSerialNumber(
+                    device.DeviceSpecific),
+                LogicalLifetimeId = Guid.NewGuid().ToString("N"),
+                LegacyUsbipPort = usbipPort,
+                LegacyUsbipOwnerSerial = device.UsbipOwnerSerial,
+            };
+        }
+
+        private void ValidateExistingNativeDevice(
+            ViiperVirtualDeviceLifetime lifetime)
+        {
+            ViiperBusDevicesResponse response =
+                SendRequest<ViiperBusDevicesResponse>(
+                    $"bus/{lifetime.BusId}/list");
+            ViiperListedDevice[] matches = response?.Devices?.Where(
+                candidate => string.Equals(candidate.DevId,
+                    lifetime.DevId, StringComparison.Ordinal)).ToArray();
+            ViiperListedDevice listed = matches?.Length == 1 ? matches[0] :
+                null;
+            if (listed == null ||
+                !string.Equals(listed.Transport, "native-ude",
+                    StringComparison.Ordinal) || listed.NativeUde == null ||
+                listed.HasUsbipPortProperty ||
+                listed.HasUsbipOwnerSerialProperty ||
+                !string.Equals(listed.Type,
+                    lifetime.VirtualDeviceIdentity.DeviceType,
+                    StringComparison.Ordinal) ||
+                !string.Equals(listed.Vid,
+                    lifetime.VirtualDeviceIdentity.Vid,
+                    StringComparison.Ordinal) ||
+                !string.Equals(listed.Pid,
+                    lifetime.VirtualDeviceIdentity.Pid,
+                    StringComparison.Ordinal))
+            {
+                throw new ViiperIdentityException(
+                    "VIIPER reconnect could not prove the original native device topology.");
+            }
+            ViiperNativePnpAnchor expected =
+                lifetime.VirtualDeviceIdentity.NativePnpAnchor;
+            ViiperNativeDeviceResponse actual = listed.NativeUde;
+            if (!ulong.TryParse(actual.DeviceId, NumberStyles.None,
+                    CultureInfo.InvariantCulture, out ulong deviceId) ||
+                deviceId != expected.NativeDeviceId ||
+                !string.Equals(deviceId.ToString(
+                        CultureInfo.InvariantCulture), actual.DeviceId,
+                    StringComparison.Ordinal) ||
+                actual.DeviceGeneration != expected.NativeDeviceGeneration ||
+                !ulong.TryParse(actual.ControllerSessionId,
+                    NumberStyles.None, CultureInfo.InvariantCulture,
+                    out ulong controllerSessionId) ||
+                !string.Equals(controllerSessionId.ToString(
+                        CultureInfo.InvariantCulture),
+                    actual.ControllerSessionId, StringComparison.Ordinal) ||
+                controllerSessionId != expected.ControllerSessionId ||
+                !string.Equals(actual.ControllerInstanceId,
+                    expected.ControllerInstanceId, StringComparison.Ordinal) ||
+                actual.Usb20PortNumber != expected.Usb20PortNumber ||
+                actual.Usb30PortNumber != expected.Usb30PortNumber)
+            {
+                throw new ViiperIdentityException(
+                    "VIIPER native device identity changed across stream reconnect.");
+            }
+        }
+
+        private static string GetDeviceSerialNumber(JsonElement specific)
+        {
+            if (specific.ValueKind == JsonValueKind.Object &&
+                specific.TryGetProperty("serial_number",
+                    out JsonElement serial) &&
+                serial.ValueKind == JsonValueKind.String)
+            {
+                return serial.GetString();
+            }
+            return null;
         }
     }
 
@@ -5228,13 +5770,14 @@ namespace DS4Windows
 
     internal sealed class ViiperVirtualDeviceLifetime : IDisposable
     {
-        private readonly uint busId;
-        private readonly string devId;
-        private readonly int usbipPort;
+        private readonly ViiperVirtualDeviceIdentity virtualDeviceIdentity;
         private readonly Action<int, string> detachPort;
         private readonly Action<int> unregisterPort;
-        private readonly Action<uint, string> removeDevice;
+        private readonly Action<uint, string> removeUsbipDevice;
+        private readonly Action<ViiperVirtualDeviceIdentity>
+            removeNativeDevice;
         private readonly Action detachStalePorts;
+        private long streamGeneration;
         private int disposed;
 
         internal ViiperVirtualDeviceLifetime(uint busId, string devId,
@@ -5242,25 +5785,116 @@ namespace DS4Windows
             Action<int, string> detachPort = null,
             Action<int> unregisterPort = null,
             Action detachStalePorts = null)
+            : this(new ViiperVirtualDeviceIdentity
+            {
+                TransportMode = ViiperTransportMode.Usbip,
+                BusId = busId,
+                DevId = devId,
+                LogicalLifetimeId = Guid.NewGuid().ToString("N"),
+                LegacyUsbipPort = usbipPort,
+            }, removeDevice, null, detachPort, unregisterPort,
+                detachStalePorts)
         {
-            this.busId = busId;
-            this.devId = devId ?? throw new ArgumentNullException(nameof(devId));
-            this.usbipPort = usbipPort;
-            this.removeDevice = removeDevice;
-            this.detachPort = detachPort ?? ViiperUsbipPortManager.DetachPort;
-            this.unregisterPort = unregisterPort ??
-                ViiperUsbipPortManager.UnregisterActivePort;
-            this.detachStalePorts = detachStalePorts ??
-                ViiperUsbipPortManager.DetachStaleLocalViiperPorts;
         }
 
-        internal uint BusId => busId;
+        internal ViiperVirtualDeviceLifetime(
+            ViiperVirtualDeviceIdentity virtualDeviceIdentity,
+            Action<uint, string> removeDevice,
+            Action<int, string> detachPort = null,
+            Action<int> unregisterPort = null,
+            Action detachStalePorts = null)
+            : this(virtualDeviceIdentity, removeDevice, null, detachPort,
+                unregisterPort, detachStalePorts)
+        {
+        }
 
-        internal string DevId => devId;
+        internal ViiperVirtualDeviceLifetime(
+            ViiperVirtualDeviceIdentity virtualDeviceIdentity,
+            Action<ViiperVirtualDeviceIdentity> removeNativeDevice,
+            Action<int, string> detachPort = null,
+            Action<int> unregisterPort = null,
+            Action detachStalePorts = null)
+            : this(virtualDeviceIdentity, null, removeNativeDevice,
+                detachPort, unregisterPort, detachStalePorts)
+        {
+        }
 
-        internal int UsbipPort => usbipPort;
+        private ViiperVirtualDeviceLifetime(
+            ViiperVirtualDeviceIdentity virtualDeviceIdentity,
+            Action<uint, string> removeUsbipDevice,
+            Action<ViiperVirtualDeviceIdentity> removeNativeDevice,
+            Action<int, string> detachPort,
+            Action<int> unregisterPort,
+            Action detachStalePorts)
+        {
+            this.virtualDeviceIdentity = virtualDeviceIdentity ??
+                throw new ArgumentNullException(nameof(virtualDeviceIdentity));
+            if (virtualDeviceIdentity.BusId == 0 ||
+                string.IsNullOrWhiteSpace(virtualDeviceIdentity.DevId) ||
+                string.IsNullOrWhiteSpace(
+                    virtualDeviceIdentity.LogicalLifetimeId))
+            {
+                throw new ArgumentException(
+                    "A complete VIIPER logical device identity is required.",
+                    nameof(virtualDeviceIdentity));
+            }
+            if (virtualDeviceIdentity.TransportMode ==
+                    ViiperTransportMode.NativeUde &&
+                (virtualDeviceIdentity.NativePnpAnchor?.IsExact != true ||
+                 removeNativeDevice == null || removeUsbipDevice != null))
+            {
+                throw new ArgumentException(
+                    "Native VIIPER lifetime identity requires exact UdeCx correlation and a receipt-conditioned removal callback.",
+                    nameof(virtualDeviceIdentity));
+            }
+            if (virtualDeviceIdentity.TransportMode ==
+                ViiperTransportMode.Usbip)
+            {
+                if (removeNativeDevice != null)
+                {
+                    throw new ArgumentException(
+                        "USB/IP lifetime identity cannot use native conditional removal.",
+                        nameof(removeNativeDevice));
+                }
+                this.removeUsbipDevice = removeUsbipDevice;
+                this.detachPort = detachPort ??
+                    ViiperUsbipPortManager.DetachPort;
+                this.unregisterPort = unregisterPort ??
+                    ViiperUsbipPortManager.UnregisterActivePort;
+                this.detachStalePorts = detachStalePorts ??
+                    ViiperUsbipPortManager.DetachStaleLocalViiperPorts;
+            }
+            else
+            {
+                this.removeNativeDevice = removeNativeDevice;
+            }
+        }
+
+        internal uint BusId => virtualDeviceIdentity.BusId;
+
+        internal string DevId => virtualDeviceIdentity.DevId;
+
+        internal int UsbipPort => virtualDeviceIdentity.LegacyUsbipPort;
+
+        internal ViiperTransportMode TransportMode =>
+            virtualDeviceIdentity.TransportMode;
+
+        internal ViiperVirtualDeviceIdentity VirtualDeviceIdentity =>
+            virtualDeviceIdentity.WithStreamGeneration(
+                Interlocked.Read(ref streamGeneration));
 
         internal bool IsDisposed => Volatile.Read(ref disposed) == 1;
+
+        internal ViiperVirtualDeviceIdentity NextStreamIdentity()
+        {
+            if (IsDisposed)
+            {
+                throw new ObjectDisposedException(
+                    nameof(ViiperVirtualDeviceLifetime));
+            }
+            long generation = Interlocked.Increment(ref streamGeneration);
+            return virtualDeviceIdentity.WithStreamGeneration(generation);
+        }
 
         public void Dispose()
         {
@@ -5269,37 +5903,50 @@ namespace DS4Windows
                 return;
             }
 
+            if (TransportMode == ViiperTransportMode.Usbip)
+            {
+                try
+                {
+                    detachPort?.Invoke(UsbipPort,
+                        "DS4Windows VIIPER device stopped");
+                }
+                catch
+                {
+                }
+
+                try
+                {
+                    unregisterPort?.Invoke(UsbipPort);
+                }
+                catch
+                {
+                }
+            }
+
             try
             {
-                detachPort?.Invoke(usbipPort,
-                    "DS4Windows VIIPER device stopped");
+                if (TransportMode == ViiperTransportMode.NativeUde)
+                {
+                    removeNativeDevice?.Invoke(virtualDeviceIdentity);
+                }
+                else
+                {
+                    removeUsbipDevice?.Invoke(BusId, DevId);
+                }
             }
             catch
             {
             }
 
-            try
+            if (TransportMode == ViiperTransportMode.Usbip)
             {
-                unregisterPort?.Invoke(usbipPort);
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                removeDevice?.Invoke(busId, devId);
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                detachStalePorts?.Invoke();
-            }
-            catch
-            {
+                try
+                {
+                    detachStalePorts?.Invoke();
+                }
+                catch
+                {
+                }
             }
         }
 
@@ -5310,6 +5957,7 @@ namespace DS4Windows
         private readonly IDisposable transport;
         private readonly Stream stream;
         private readonly ViiperVirtualDeviceLifetime deviceLifetime;
+        private readonly ViiperVirtualDeviceIdentity virtualDeviceIdentity;
         private readonly object writeLock = new object();
         private readonly byte[] incomingFrameHeader =
             new byte[FrameV2HeaderLength];
@@ -5331,6 +5979,7 @@ namespace DS4Windows
         private const byte FrameVersionV2 = 0x02;
         private const byte FrameVersionV3 = 0x03;
         private const byte FrameVersionV4 = 0x04;
+        private const byte FrameVersionV5 = 0x05;
 
         public ViiperDeviceStream(TcpClient tcp, Stream stream,
             ViiperVirtualDeviceLifetime deviceLifetime)
@@ -5345,6 +5994,7 @@ namespace DS4Windows
             this.transport = transport ?? throw new ArgumentNullException(nameof(transport));
             this.deviceLifetime = deviceLifetime ??
                 throw new ArgumentNullException(nameof(deviceLifetime));
+            virtualDeviceIdentity = deviceLifetime.NextStreamIdentity();
         }
 
         public uint BusId => deviceLifetime.BusId;
@@ -5352,6 +6002,12 @@ namespace DS4Windows
         public string DevId => deviceLifetime.DevId;
 
         public int UsbipPort => deviceLifetime.UsbipPort;
+
+        internal ViiperTransportMode TransportMode =>
+            virtualDeviceIdentity.TransportMode;
+
+        internal ViiperVirtualDeviceIdentity VirtualDeviceIdentity =>
+            virtualDeviceIdentity;
 
         internal ViiperVirtualDeviceLifetime DeviceLifetime => deviceLifetime;
 
@@ -5387,7 +6043,7 @@ namespace DS4Windows
                 throw new ArgumentOutOfRangeException(nameof(data));
             }
             if (version != FrameVersionV2 && version != FrameVersionV3 &&
-                version != FrameVersionV4)
+                version != FrameVersionV4 && version != FrameVersionV5)
             {
                 throw new ArgumentOutOfRangeException(nameof(version));
             }
@@ -5637,8 +6293,9 @@ namespace DS4Windows
             {
                 ViiperVirtualDeviceType.Xbox360 => "xbox360",
                 ViiperVirtualDeviceType.DualShock4 => "dualshock4",
-                ViiperVirtualDeviceType.DualSense => "dualsenseext",
-                ViiperVirtualDeviceType.DualSenseEdge => "dualsenseedgeext",
+                ViiperVirtualDeviceType.DualSense => "dualsensegamepadv5",
+                ViiperVirtualDeviceType.DualSenseEdge =>
+                    "dualsenseedgegamepadv5",
                 ViiperVirtualDeviceType.Switch2Pro => "ns2pro",
                 _ => "xbox360",
             };

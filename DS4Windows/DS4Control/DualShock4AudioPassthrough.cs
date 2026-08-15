@@ -60,25 +60,29 @@ namespace DS4Windows
             int generation;
             ControllerAudioEndpointKind endpointKind =
                 DualSenseAudioPassthrough.GetEndpointKind(emulatedControllerType);
+            int virtualOwnerToken = ViiperPnPOwnershipRegistry.GetToken(
+                directSpeakerSource);
             DirectSpeakerRouteDecision initialRoute =
                 DualSenseAudioPassthrough.EvaluateDirectSpeakerRoute(
                     captureEndpointId, endpointKind, directSpeakerSource);
             if (initialRoute == DirectSpeakerRouteDecision.Loopback)
             {
                 directSpeakerSource = null;
+                virtualOwnerToken = -1;
             }
             lock (syncRoot)
             {
                 if (slots[slot]?.Matches(device, speakerVolume, compression,
                     bassBoost, captureEndpointId, endpointKind,
-                    directSpeakerSource) == true)
+                    directSpeakerSource, virtualOwnerToken) == true)
                 {
                     return;
                 }
 
                 if (pendingStarts[slot]?.Matches(device, speakerVolume,
                     compression, bassBoost, captureEndpointId,
-                    endpointKind, directSpeakerSource) == true)
+                    endpointKind, directSpeakerSource,
+                    virtualOwnerToken) == true)
                 {
                     return;
                 }
@@ -89,7 +93,7 @@ namespace DS4Windows
                 generation = ++startGenerations[slot];
                 pendingStarts[slot] = new StartRequest(device, speakerVolume,
                     compression, bassBoost, captureEndpointId, endpointKind,
-                    directSpeakerSource, generation);
+                    directSpeakerSource, virtualOwnerToken, generation);
             }
 
             AppLogger.LogToGui(
@@ -103,7 +107,7 @@ namespace DS4Windows
                     previous?.Dispose();
                     StartWorker(slot, device, speakerVolume, compression,
                         bassBoost, captureEndpointId, endpointKind,
-                        directSpeakerSource, generation);
+                        directSpeakerSource, virtualOwnerToken, generation);
                 }
             }, $"DualShock 4 audio startup {slot + 1}");
         }
@@ -186,7 +190,8 @@ namespace DS4Windows
         private void StartWorker(int slot, DS4Device device, byte speakerVolume,
             DualSenseSpeakerCompression compression, byte bassBoost,
             string captureEndpointId, ControllerAudioEndpointKind endpointKind,
-            ViiperOutDevice directSpeakerSource, int generation)
+            ViiperOutDevice directSpeakerSource, int virtualOwnerToken,
+            int generation)
         {
             const int attempts = 20;
             Exception lastError = null;
@@ -216,12 +221,15 @@ namespace DS4Windows
                 DirectSpeakerRouteDecision route =
                     DualSenseAudioPassthrough.EvaluateDirectSpeakerRoute(
                         captureEndpointId, endpointKind, directSpeakerSource);
+                virtualOwnerToken = ViiperPnPOwnershipRegistry.GetToken(
+                    directSpeakerSource);
                 ViiperOutDevice activeDirectSpeakerSource =
                     route == DirectSpeakerRouteDecision.Direct ?
                         directSpeakerSource : null;
                 var playback = new DualShock4BluetoothSpeakerPassthrough(device,
                     speakerVolume, compression, bassBoost, captureEndpointId,
-                    endpointKind, activeDirectSpeakerSource);
+                    endpointKind, activeDirectSpeakerSource,
+                    virtualOwnerToken);
                 try
                 {
                     playback.Start();
@@ -308,12 +316,14 @@ namespace DS4Windows
             private readonly string sourceEndpointId;
             private readonly ControllerAudioEndpointKind sourceEndpointKind;
             private readonly ViiperOutDevice directSpeakerSource;
+            private readonly int virtualOwnerToken;
 
             public StartRequest(DS4Device device, byte speakerVolume,
                 DualSenseSpeakerCompression compression, byte bassBoost,
                 string sourceEndpointId,
                 ControllerAudioEndpointKind sourceEndpointKind,
-                ViiperOutDevice directSpeakerSource, int generation)
+                ViiperOutDevice directSpeakerSource, int virtualOwnerToken,
+                int generation)
             {
                 this.device = device;
                 this.speakerVolume = speakerVolume;
@@ -326,6 +336,7 @@ namespace DS4Windows
                 this.sourceEndpointId = sourceEndpointId ?? string.Empty;
                 this.sourceEndpointKind = sourceEndpointKind;
                 this.directSpeakerSource = directSpeakerSource;
+                this.virtualOwnerToken = virtualOwnerToken;
                 Generation = generation;
             }
 
@@ -335,7 +346,8 @@ namespace DS4Windows
                 DualSenseSpeakerCompression candidateCompression,
                 byte candidateBassBoost, string candidateSourceEndpointId,
                 ControllerAudioEndpointKind candidateSourceEndpointKind,
-                ViiperOutDevice candidateDirectSpeakerSource)
+                ViiperOutDevice candidateDirectSpeakerSource,
+                int candidateVirtualOwnerToken)
             {
                 return ReferenceEquals(device, candidate) &&
                     speakerVolume == candidateVolume &&
@@ -347,6 +359,7 @@ namespace DS4Windows
                     bassBoost == Math.Min(candidateBassBoost,
                         DualSenseSpeakerProcessor.MaximumBassBoostDb) &&
                     sourceEndpointKind == candidateSourceEndpointKind &&
+                    virtualOwnerToken == candidateVirtualOwnerToken &&
                     ReferenceEquals(directSpeakerSource,
                         candidateDirectSpeakerSource) &&
                     string.Equals(sourceEndpointId,

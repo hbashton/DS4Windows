@@ -44,21 +44,41 @@ features.
 > x86 DS4Windows build. Install the x64 DS4Windows package on a 64-bit Windows
 > system before enabling any VIIPER output profile.
 
-After installing a VIIPER-capable DS4Windows build:
+After installing a production VIIPER-capable DS4Windows build:
 
 1. Open **Settings**.
-2. Under **VIIPER Virtual Controller Support**, click **Install / Repair VIIPER**.
-3. Accept the administrator prompt. The setup installs the hbashton VIIPER
-   backend and the required `usbip-win2` driver.
-4. Restart Windows if the setup installed or updated `usbip-win2`.
+2. Under **VIIPER Native Virtual Controller Support**, click
+   **Install / Repair Native UDE**.
+3. Accept the administrator prompt. The setup verifies and installs the exact
+   bundled UdeCx driver, registers the `VIIPERNativeBroker` LocalSystem
+   service, provisions its protected per-user API credential, and verifies an
+   authenticated native identity ping.
+4. Restart Windows only when the transactional setup reports the structured
+   `rebootRequired` outcome, then rerun the same repair once.
 5. Edit a profile and select **DualSense**, **DualSense Edge**, **DualShock 4**,
    **Xbox 360**, or **Switch 2 Pro**. VIIPER is the backend for every virtual
    controller type; it is not repeated in the device names.
 
-The installer also registers a hidden `RunVIIPER` task at sign-in. It starts
-the backend elevated without a recurring console or UAC popup. DS4Windows
-checks the backend at startup, starts it when possible, and opens a guided,
-self-elevating repair flow when VIIPER or usbip-win2 is missing.
+Native VIIPER does not install a `RunVIIPER` task or start a per-user server.
+Windows Service Control Manager owns the broker lifecycle. DS4Windows requires
+the exact bundled metadata, protected credential, authenticated ping, ABI,
+capability mask, driver package version, and loaded-driver build identity
+before it creates a controller.
+
+The metadata also binds the exact VIIPER controller API and descriptor family:
+DualShock 4 fixed/V3 streams, DualSense V5 streams, and DualSense Edge V5
+streams with their existing full, audio-only, or HID-only interfaces and exact
+VID/PID identities. DS4Windows does not guess an older type name or silently
+substitute a different HID/audio descriptor when that contract disagrees.
+
+Current checked-in metadata records a verified local-test package only; it is
+not production media. CI builds therefore show truthful status and block the
+normal install flow unless a release job replaces that evidence with an exact
+Microsoft HLK/WHCP-signed runtime bundle. Local-test media is accepted only
+with `DS4WINDOWS_VIIPER_ALLOW_LOCAL_TEST=1` plus the package manager's explicit
+disposable-machine switches. Use that route only on a snapshot-capable VM or a
+wipeable spare Windows 11 machine; the exact commands and rollback boundary are
+documented in [the VIIPER backend architecture](docs/viiper-backend-upgrade-path.md#disposable-windows-11-validation).
 
 The matching VIIPER backend is published at
 [hbashton/VIIPER](https://github.com/hbashton/VIIPER). Use DS4Windows' built-in
@@ -236,7 +256,10 @@ and backend tools remain available under the advanced sections.
 - [Microsoft Visual C++ 2015-2022 Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe).
 - [HidHide](https://github.com/nefarius/HidHide) is strongly recommended to
   prevent games from seeing both the physical and virtual controllers.
-- `usbip-win2` and [hbashton/VIIPER](https://github.com/hbashton/VIIPER), installed through the built-in guided setup.
+- A matching [hbashton/VIIPER](https://github.com/hbashton/VIIPER) native UDE
+  production bundle, installed through the built-in guided setup. The release
+  bundle must contain its exact Microsoft HLK/WHCP-signed driver media; the app
+  will not download or substitute a driver.
 
 Supported physical inputs include first-party DualShock 4, DualSense,
 DualSense Edge, DualShock 3, Switch Pro, and Joy-Con controllers. Some compatible
@@ -256,8 +279,10 @@ rejects its own VIIPER outputs to prevent recursive virtual controllers.
 5. Keep **Hide DS4 Controller** enabled when a game would otherwise see both the real and virtual devices.
 6. Disable overlapping PlayStation or Xbox remapping in Steam for games managed entirely by DS4Windows.
 
-Xbox Game Bar companion support requires DS4Windows to run elevated. VIIPER and
-HidHide setup may also require administrator approval.
+Xbox Game Bar companion support requires DS4Windows to run elevated. VIIPER
+native package installation/removal and HidHide setup also require
+administrator approval; day-to-day DS4Windows-to-broker traffic is
+authenticated with the protected user-readable credential.
 
 ## Updating
 
@@ -273,7 +298,7 @@ For a manual update:
 
 Profiles and logs are stored separately under `%APPDATA%\DS4Windows`, so
 replacing the application folder does not normally remove user profiles. When
-updating a VIIPER preview, run **Install / Repair VIIPER** again if the release
+updating a VIIPER preview, run **Install / Repair Native UDE** again if the release
 notes call for a matching backend update.
 
 ## Troubleshooting
@@ -282,8 +307,9 @@ notes call for a matching backend update.
   administrator, and confirm the physical controller is hidden while the
   virtual controller remains visible.
 - **A VIIPER profile will not create an output:** open **Settings**, refresh the
-  VIIPER status, run **Install / Repair VIIPER**, and reboot once if
-  `usbip-win2` was installed.
+  VIIPER status, run **Install / Repair Native UDE**, and inspect the package,
+  service, authenticated-ping, and driver-identity fields. Reboot only when
+  setup explicitly reports `rebootRequired`.
 - **Controller speaker or microphone is missing:** confirm you are using matching
   DS4Windows and VIIPER preview releases and that the profile uses a VIIPER
   DualSense, DualSense Edge, or DualShock 4 output.
@@ -304,6 +330,12 @@ The solution targets .NET 8 and publishes x64 GitHub Actions builds. Pull
 requests should keep stable behavior intact when adding preview backends and
 should include focused tests for profile persistence, controller state, or
 transport changes where practical.
+
+The normal Windows path is native UDE. The historical USB/IP route remains an
+explicit developer/ABBA validation mode only: set
+`DS4WINDOWS_VIIPER_TRANSPORT=usbip` and provision its prerequisites separately.
+It is never selected as an install fallback, does not reuse native readiness,
+and must not be used for native latency claims.
 
 ## License
 

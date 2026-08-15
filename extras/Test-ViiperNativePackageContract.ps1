@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [switch]$RequireProduction
+    [switch]$RequireProduction,
+    [switch]$RequirePackage
 )
 
 Set-StrictMode -Version Latest
@@ -42,11 +43,27 @@ foreach ($required in @(
     "'not-started'",
     "'safely-settled'",
     "'unverified-see-transaction-log'",
-    'AcknowledgeDisposableTestMachine'
+    'AcknowledgeDisposableTestMachine',
+    'local-test-certificate-evidence',
+    'Assert-LocalTestBootAdmission',
+    'testsigning\s+Yes',
+    'Get-ExactMachineCertificateCount',
+    'Ensure-ExactLocalTestTrust',
+    'Remove-NewLocalTestTrust',
+    "@('Root', 'TrustedPublisher')",
+    'Invoke-JoinedNativeProcess',
+    'Started ([ref]$processStarted)',
+    '$script:transactionStarted = $processStarted',
+    '$script:trustCleanupFailed = $true',
+    'AggregateException'
 )) {
     if ($managerSource.IndexOf($required, [StringComparison]::Ordinal) -lt 0) {
         throw "Native package manager omitted required contract token '$required'."
     }
+}
+if ($managerSource.IndexOf('& $stagedBroker @arguments',
+        [StringComparison]::Ordinal) -ge 0) {
+    throw 'Native package manager must distinguish process creation from transaction admission.'
 }
 foreach ($forbidden in @('usbip-win2', 'RunVIIPER', 'Invoke-WebRequest',
     'Invoke-RestMethod', 'DownloadFile', 'api.github.com')) {
@@ -213,7 +230,8 @@ if ($RequireProduction) {
 }
 
 $packageRoot = $metadataPackageRoot
-if ($RequireProduction -or (Test-Path -LiteralPath $packageRoot)) {
+if ($RequireProduction -or $RequirePackage -or
+    (Test-Path -LiteralPath $packageRoot)) {
     $packageRootItem = Get-Item -LiteralPath $packageRoot -Force -ErrorAction Stop
     if (-not $packageRootItem.PSIsContainer -or
         ($packageRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {

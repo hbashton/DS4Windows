@@ -201,6 +201,18 @@ namespace DS4WindowsTests
                 "controllerApiContract",
                 "dualsensecombinedaudioduplexv5",
                 "dualsenseedgecombinedaudioduplexv5",
+                "local-test-certificate-evidence",
+                "Assert-LocalTestBootAdmission",
+                "testsigning\\s+Yes",
+                "Get-ExactMachineCertificateCount",
+                "Ensure-ExactLocalTestTrust",
+                "Remove-NewLocalTestTrust",
+                "@('Root', 'TrustedPublisher')",
+                "Invoke-JoinedNativeProcess",
+                "Started ([ref]$processStarted)",
+                "$script:transactionStarted = $processStarted",
+                "$script:trustCleanupFailed = $true",
+                "AggregateException",
             })
             {
                 StringAssert.Contains(source, required);
@@ -215,6 +227,19 @@ namespace DS4WindowsTests
                 Assert.IsFalse(source.Contains(forbidden,
                     StringComparison.OrdinalIgnoreCase), forbidden);
             }
+
+            int trustMutation = source.LastIndexOf(
+                "Ensure-ExactLocalTestTrust -StoreName",
+                StringComparison.Ordinal);
+            int transactionAdmission = source.LastIndexOf(
+                "Invoke-JoinedNativeProcess", StringComparison.Ordinal);
+            Assert.IsTrue(trustMutation >= 0 &&
+                transactionAdmission > trustMutation,
+                "Exact local-test trust must be verified before transaction admission.");
+            StringAssert.Contains(source,
+                "-not $script:transactionStarted");
+            Assert.IsFalse(source.Contains("& $stagedBroker @arguments",
+                StringComparison.Ordinal));
         }
 
         [TestMethod]
@@ -240,6 +265,13 @@ namespace DS4WindowsTests
             StringAssert.Contains(generator, "$ControllerContractPath");
             StringAssert.Contains(generator,
                 "[string]$submission.driverPackageVersion");
+            string contract = File.ReadAllText(Path.Combine(root,
+                "extras", "Test-ViiperNativePackageContract.ps1"));
+            StringAssert.Contains(contract, "[switch]$RequirePackage");
+            string documentation = File.ReadAllText(Path.Combine(root,
+                "docs", "viiper-backend-upgrade-path.md"));
+            StringAssert.Contains(documentation,
+                "Test-ViiperNativePackageContract.ps1 -RequirePackage");
             Assert.IsFalse(System.Text.RegularExpressions.Regex.IsMatch(
                 generator, @"(?<![0-9])0\.1\.0\.[0-9]+(?![0-9])"));
         }

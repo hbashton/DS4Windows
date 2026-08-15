@@ -59,10 +59,27 @@ or a spare Windows 11 machine that can be wiped. Place the one exact generated
 local-test package under `extras\viiper-native-package`; do not substitute a
 certificate, broker, helper, INF, SYS, CAT, or submission manifest. First run
 the normal contract gate. Then, from an elevated 64-bit PowerShell in the
-DS4Windows directory, make the two independent acknowledgements explicit:
+DS4Windows directory, enable Windows test-signing and restart once before the
+first installation:
 
 ```powershell
-& .\extras\Test-ViiperNativePackageContract.ps1
+bcdedit.exe /set testsigning on
+```
+
+Microsoft warns that BCDEdit changes can make a machine unbootable and that
+Secure Boot can reject `TESTSIGNING`; BitLocker can also affect the change.
+On a spare physical laptop, first verify that its BitLocker recovery key is
+available and that you have local console/recovery access. Do not disable
+Secure Boot or alter BitLocker on a primary machine merely to make this test
+work—use the VM route instead. See Microsoft's
+[test-signed driver guidance](https://learn.microsoft.com/windows-hardware/drivers/install/the-testsigning-boot-configuration-option).
+
+After the restart, verify `bcdedit.exe /enum '{current}'` reports
+`testsigning Yes`, then make the two independent local-test acknowledgements
+explicit:
+
+```powershell
+& .\extras\Test-ViiperNativePackageContract.ps1 -RequirePackage
 $targetSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $env:DS4WINDOWS_VIIPER_ALLOW_LOCAL_TEST = '1'
 & .\extras\manage-viiper-native-package.ps1 `
@@ -71,6 +88,14 @@ $env:DS4WINDOWS_VIIPER_ALLOW_LOCAL_TEST = '1'
     -AllowLocalTest `
     -AcknowledgeDisposableTestMachine
 ```
+
+The manager admits only the metadata-bound public `ViiperUdeTest.cer`. Before
+the driver transaction it verifies the exact bytes and installs them in the
+Local Machine `Root` and `TrustedPublisher` stores if absent. If setup fails
+before transaction admission, it removes only certificates it added; once a
+transaction starts, it retains trust so the durable recovery path can still
+load the exact prior/candidate driver. Restoring the VM snapshot or wiping the
+spare machine removes this intentionally persistent test trust.
 
 Preserve the emitted `DS4WINDOWS_VIIPER_NATIVE_RESULT` record. Exit `3010`
 means restart at the declared safe boundary and rerun the identical command;

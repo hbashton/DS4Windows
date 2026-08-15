@@ -18,11 +18,250 @@ $expectedSchema = 1
 $localTestOptInEnvironment = 'DS4WINDOWS_VIIPER_ALLOW_LOCAL_TEST'
 $structuredOutcomeWritten = $false
 $transactionStarted = $false
+$trustCleanupFailed = $false
+$localTestCertificate = $null
+$addedLocalTestTrustStores = [Collections.Generic.List[string]]::new()
 
 function Test-IsAdministrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = [Security.Principal.WindowsPrincipal]::new($identity)
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Assert-LocalTestBootAdmission {
+    $bcdeditPath = Join-Path ([Environment]::SystemDirectory) 'bcdedit.exe'
+    $bcdOutput = (& $bcdeditPath /enum '{current}' 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0 -or
+        $bcdOutput -notmatch '(?im)^\s*testsigning\s+Yes\s*$') {
+        throw "The current boot entry does not report 'testsigning Yes'. Enable TESTSIGNING and reboot before local-test installation.`n$bcdOutput"
+    }
+}
+
+function Get-ExactMachineCertificateCount {
+    param(
+        [Parameter(Mandatory = $true)][string]$StoreName,
+        [Parameter(Mandatory = $true)]$Certificate
+    )
+
+    $store = [Security.Cryptography.X509Certificates.X509Store]::new(
+        $StoreName,
+        [Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine)
+    $matches = $null
+    try {
+        $store.Open(
+            [Security.Cryptography.X509Certificates.OpenFlags]::ReadOnly)
+        $matches = $store.Certificates.Find(
+            [Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
+            $Certificate.Thumbprint, $false)
+        $expectedBytes = [Convert]::ToBase64String($Certificate.RawData)
+        $exact = @($matches | Where-Object {
+            [Convert]::ToBase64String($_.RawData) -ceq $expectedBytes
+        })
+        if ($matches.Count -ne $exact.Count -or $exact.Count -gt 1) {
+            throw "Certificate collision in LocalMachine\$StoreName."
+        }
+        return [int]$exact.Count
+    }
+    finally {
+        if ($null -ne $matches) {
+            foreach ($match in $matches) {
+                $match.Dispose()
+            }
+        }
+        $store.Close()
+    }
+}
+
+function Ensure-ExactLocalTestTrust {
+    param(
+        [Parameter(Mandatory = $true)][string]$StoreName,
+        [Parameter(Mandatory = $true)]$Certificate
+    )
+
+    if ((Get-ExactMachineCertificateCount -StoreName $StoreName `
+            -Certificate $Certificate) -eq 1) {
+        Write-Host "local-test-trust store=$StoreName action=add result=preexisting"
+        return
+    }
+
+    # Record cleanup authority before the mutation. If Add throws after
+    # persisting the certificate, the outer trap still removes only these
+    # exact bytes while no driver transaction has begun.
+    $script:addedLocalTestTrustStores.Add($StoreName)
+    $store = [Security.Cryptography.X509Certificates.X509Store]::new(
+        $StoreName,
+        [Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine)
+    try {
+        $store.Open(
+            [Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+        $store.Add($Certificate)
+    }
+    finally {
+        $store.Close()
+    }
+    if ((Get-ExactMachineCertificateCount -StoreName $StoreName `
+            -Certificate $Certificate) -ne 1) {
+        throw "Exact local-test certificate was not installed in LocalMachine\$StoreName."
+    }
+    Write-Host "local-test-trust store=$StoreName action=add result=added"
+}
+
+function Remove-NewLocalTestTrust {
+    if ($null -eq $script:localTestCertificate) {
+        return
+    }
+    $cleanupErrors = [Collections.Generic.List[Exception]]::new()
+    foreach ($storeName in $script:addedLocalTestTrustStores) {
+        try {
+            $count = Get-ExactMachineCertificateCount -StoreName $storeName `
+                -Certificate $script:localTestCertificate
+            if ($count -eq 1) {
+                $store = [Security.Cryptography.X509Certificates.X509Store]::new(
+                    $storeName,
+                    [Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine)
+                try {
+                    $store.Open(
+                        [Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+                    $store.Remove($script:localTestCertificate)
+                }
+                finally {
+                    $store.Close()
+                }
+            }
+            if ((Get-ExactMachineCertificateCount -StoreName $storeName `
+                    -Certificate $script:localTestCertificate) -ne 0) {
+                throw "Exact local-test certificate remained in LocalMachine\$StoreName."
+            }
+            Write-Host "local-test-trust store=$StoreName action=cleanup result=absent"
+        }
+        catch {
+            Write-Host "local-test-trust store=$StoreName action=cleanup result=error"
+            $cleanupErrors.Add([InvalidOperationException]::new(
+                "LocalMachine\$StoreName trust cleanup failed.",
+                $_.Exception))
+        }
+    }
+    if ($cleanupErrors.Count -ne 0) {
+        throw [AggregateException]::new(
+            'Failed to remove one or more newly added local-test trust anchors.',
+            [Exception[]]$cleanupErrors.ToArray())
+    }
+}
+
+function ConvertTo-WindowsProcessArgument {
+    param([AllowEmptyString()][Parameter(Mandatory = $true)][string]$Value)
+
+    if ($Value.IndexOf([char]0) -ge 0) {
+        throw 'Native process argument contains NUL.'
+    }
+    if ($Value.Length -ne 0 -and $Value -notmatch '[\s"]') {
+        return $Value
+    }
+    $builder = [Text.StringBuilder]::new()
+    [void]$builder.Append([char]34)
+    $slashes = 0
+    foreach ($character in $Value.ToCharArray()) {
+        if ($character -eq [char]92) {
+            ++$slashes
+            continue
+        }
+        if ($character -eq [char]34) {
+            [void]$builder.Append([char]92, (2 * $slashes) + 1)
+            [void]$builder.Append([char]34)
+            $slashes = 0
+            continue
+        }
+        if ($slashes -ne 0) {
+            [void]$builder.Append([char]92, $slashes)
+            $slashes = 0
+        }
+        [void]$builder.Append($character)
+    }
+    if ($slashes -ne 0) {
+        [void]$builder.Append([char]92, 2 * $slashes)
+    }
+    [void]$builder.Append([char]34)
+    return $builder.ToString()
+}
+
+function Set-ExactProcessArguments {
+    param(
+        [Parameter(Mandatory = $true)][Diagnostics.ProcessStartInfo]$StartInfo,
+        [Parameter(Mandatory = $true)][string[]]$Arguments
+    )
+
+    if ($null -ne $StartInfo.PSObject.Properties['ArgumentList']) {
+        foreach ($argument in $Arguments) {
+            $StartInfo.ArgumentList.Add($argument)
+        }
+        return
+    }
+    $StartInfo.Arguments = (($Arguments | ForEach-Object {
+        ConvertTo-WindowsProcessArgument -Value $_
+    }) -join ' ')
+}
+
+function Invoke-JoinedNativeProcess {
+    param(
+        [Parameter(Mandatory = $true)][string]$FileName,
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [Parameter(Mandatory = $true)][string]$WorkingDirectory,
+        [Parameter(Mandatory = $true)][ref]$Started
+    )
+
+    $Started.Value = $false
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $FileName
+    $startInfo.WorkingDirectory = $WorkingDirectory
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    Set-ExactProcessArguments -StartInfo $startInfo -Arguments $Arguments
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    $joined = $false
+    try {
+        if (-not $process.Start()) {
+            throw 'The protected native broker process was not created.'
+        }
+        $Started.Value = $true
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        while (-not $joined) {
+            try {
+                $process.WaitForExit()
+                $joined = $true
+            }
+            catch {
+                # Never unwind while the exact mutating child may remain alive.
+                Start-Sleep -Milliseconds 250
+            }
+        }
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        $combined = @($stdout, $stderr) -join [Environment]::NewLine
+        return [pscustomobject]@{
+            ExitCode = $process.ExitCode
+            Output = @($combined -split '\r?\n' | Where-Object {
+                $_.Length -ne 0
+            })
+        }
+    }
+    finally {
+        if ($Started.Value -and -not $joined) {
+            while (-not $joined) {
+                try {
+                    $process.WaitForExit()
+                    $joined = $true
+                }
+                catch {
+                    Start-Sleep -Milliseconds 250
+                }
+            }
+        }
+        $process.Dispose()
+    }
 }
 
 function Resolve-SingleMetadataPath {
@@ -139,13 +378,15 @@ function Write-StructuredOutcome {
             'not-required'
         } elseif ($ExitCode -eq 3010) {
             'safely-settled'
+        } elseif ($script:trustCleanupFailed) {
+            'unverified-see-transaction-log'
         } elseif (-not $script:transactionStarted) {
             'not-started'
         } else {
             'unverified-see-transaction-log'
         }
-        manualRecoveryRequired = ($script:transactionStarted -and
-            $ExitCode -notin @(0, 3010))
+        manualRecoveryRequired = $script:trustCleanupFailed -or
+            ($script:transactionStarted -and $ExitCode -notin @(0, 3010))
     }
     Write-Host ('DS4WINDOWS_VIIPER_NATIVE_RESULT ' +
         ($outcome | ConvertTo-Json -Compress))
@@ -205,11 +446,31 @@ function Remove-ProtectedStage {
 }
 
 trap {
+    $primaryFailure = $_.Exception
+    $trustCleanupFailure = $null
+    if (-not $script:transactionStarted -and
+        $script:addedLocalTestTrustStores.Count -ne 0) {
+        try {
+            Remove-NewLocalTestTrust
+        }
+        catch {
+            $trustCleanupFailure = $_.Exception
+            $script:trustCleanupFailed = $true
+        }
+    }
     if (-not $script:structuredOutcomeWritten) {
         Write-StructuredOutcome -RequestedOperation $Operation -ExitCode 1
     }
     Write-Host ("VIIPER native UDE setup stopped: " +
-        $_.Exception.Message) -ForegroundColor Red
+        $primaryFailure.Message) -ForegroundColor Red
+    if ($null -ne $trustCleanupFailure) {
+        Write-Host ("VIIPER local-test trust cleanup also failed: " +
+            $trustCleanupFailure.Message) -ForegroundColor Red
+    }
+    if ($null -ne $script:localTestCertificate) {
+        $script:localTestCertificate.Dispose()
+        $script:localTestCertificate = $null
+    }
     exit 1
 }
 
@@ -418,6 +679,44 @@ if ($Operation -ceq 'Install') {
         throw 'Local-test installation requires the non-release-eligible LocalTest submission manifest.'
     }
 
+    if ($driverValidationMode -ceq 'local-test') {
+        $certificateArtifact = Get-UniqueArtifact -Metadata $metadata `
+            -Role 'local-test-certificate-evidence'
+        $certificatePath = Resolve-VerifiedArtifact `
+            -Artifact $certificateArtifact -PackageRoot $packageRoot
+        if ((Split-Path -Leaf $certificatePath) -cne 'ViiperUdeTest.cer' -or
+            [string]$submission.testSignerCertificateSha256 -cne
+                ([string]$certificateArtifact.sha256).ToLowerInvariant()) {
+            throw 'The local-test signer certificate disagrees with the source-bound package evidence.'
+        }
+        Assert-LocalTestBootAdmission
+        $script:localTestCertificate =
+            [Security.Cryptography.X509Certificates.X509Certificate2]::new(
+                $certificatePath)
+        if ($script:localTestCertificate.HasPrivateKey) {
+            throw 'The local-test package must contain only the public signer certificate.'
+        }
+        $certificateAlgorithm =
+            [Security.Cryptography.SHA256]::Create()
+        try {
+            $certificateSha256 = ([BitConverter]::ToString(
+                $certificateAlgorithm.ComputeHash(
+                    $script:localTestCertificate.RawData))).Replace(
+                        '-', '').ToLowerInvariant()
+        }
+        finally {
+            $certificateAlgorithm.Dispose()
+        }
+        if ($certificateSha256 -cne
+            ([string]$certificateArtifact.sha256).ToLowerInvariant()) {
+            throw 'The parsed local-test signer certificate bytes differ from their package hash.'
+        }
+        foreach ($storeName in @('Root', 'TrustedPublisher')) {
+            Ensure-ExactLocalTestTrust -StoreName $storeName `
+                -Certificate $script:localTestCertificate
+        }
+    }
+
     $arguments = @(
         'native-package-install',
         '--package-directory', $driverDirectory,
@@ -457,15 +756,27 @@ try {
     }
 
     Write-Host "Running VIIPER native UDE $($Operation.ToLowerInvariant()) transaction..."
-    $transactionStarted = $true
-    $output = @(& $stagedBroker @arguments 2>&1)
-    $exitCode = [int]$LASTEXITCODE
+    $processStarted = $false
+    try {
+        $processResult = Invoke-JoinedNativeProcess `
+            -FileName $stagedBroker -Arguments $arguments `
+            -WorkingDirectory $stagePath -Started ([ref]$processStarted)
+    }
+    finally {
+        $script:transactionStarted = $processStarted
+    }
+    $output = @($processResult.Output)
+    $exitCode = [int]$processResult.ExitCode
     $output | ForEach-Object { Write-Host ([string]$_) }
     Write-StructuredOutcome -RequestedOperation $Operation -ExitCode $exitCode
 } finally {
     if ($null -ne $stagePath) {
         Remove-ProtectedStage -StagePath $stagePath -ProgramDataRoot $programDataRoot
     }
+}
+if ($null -ne $script:localTestCertificate) {
+    $script:localTestCertificate.Dispose()
+    $script:localTestCertificate = $null
 }
 
 if ($exitCode -eq 0) {

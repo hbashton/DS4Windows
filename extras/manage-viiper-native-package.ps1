@@ -768,12 +768,12 @@ try {
     $output = @($processResult.Output)
     $exitCode = [int]$processResult.ExitCode
     $output | ForEach-Object { Write-Host ([string]$_) }
-    Write-StructuredOutcome -RequestedOperation $Operation -ExitCode $exitCode
 } finally {
     if ($null -ne $stagePath) {
         Remove-ProtectedStage -StagePath $stagePath -ProgramDataRoot $programDataRoot
     }
 }
+Write-StructuredOutcome -RequestedOperation $Operation -ExitCode $exitCode
 if ($null -ne $script:localTestCertificate) {
     $script:localTestCertificate.Dispose()
     $script:localTestCertificate = $null

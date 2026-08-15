@@ -11,7 +11,6 @@ the Free Software Foundation, either version 3 of the License, or
 using Microsoft.Win32;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -193,35 +192,28 @@ namespace DS4Windows
                 "the UdeCx driver and the managed LocalSystem " +
                 "VIIPERNativeBroker service.\n\n" +
                 $"Current status: {status.DisplayText}\n\n" +
-                "Install or repair the signed native package now?";
-            MessageBoxResult result = owner != null
-                ? MessageBox.Show(owner, message,
-                    "VIIPER native UDE setup", MessageBoxButton.YesNo,
-                    MessageBoxImage.Information)
-                : MessageBox.Show(message, "VIIPER native UDE setup",
-                    MessageBoxButton.YesNo, MessageBoxImage.Information);
-            return result == MessageBoxResult.Yes &&
-                LaunchInstaller(status, owner);
+                "Install or repair it with the signed DS4Windows installer " +
+                "or its installed maintenance entry, then restart " +
+                "DS4Windows. The portable runtime never elevates bundled " +
+                "scripts or package files.";
+            ShowSetupMessage(owner, message, MessageBoxImage.Information);
+            return false;
         }
 
         public static bool LaunchInstaller(
             ViiperPrerequisiteStatus status = null, Window owner = null)
         {
             status ??= GetStatus();
-            if (!status.SetupScriptFound)
-            {
-                ShowSetupMessage(owner,
-                    "DS4Windows could not find its bundled native UDE " +
-                    "package manager. Reinstall this DS4Windows build; no " +
-                    "web download or USB/IP fallback will be attempted.",
-                    MessageBoxImage.Error);
-                return false;
-            }
             if (status.LocalTestMetadata)
             {
+                string scriptDetail = status.SetupScriptFound
+                    ? "A developer may run the bundled package manager " +
+                      "manually"
+                    : "The source-bound package manager is absent, so " +
+                      "this build must be replaced";
                 ShowSetupMessage(owner,
                     "Local-test evidence is never installed by the normal UI. " +
-                    "A developer must run the bundled package manager manually " +
+                    scriptDetail + " " +
                     "with the environment opt-in plus -AllowLocalTest and " +
                     "-AcknowledgeDisposableTestMachine on a disposable VM.",
                     MessageBoxImage.Warning);
@@ -241,15 +233,21 @@ namespace DS4Windows
                 ShowSetupMessage(owner, detail, MessageBoxImage.Warning);
                 return false;
             }
-            return LaunchPackageManager(status, "Install", owner);
+            ShowSetupMessage(owner,
+                "The portable DS4Windows runtime never elevates its mutable " +
+                "package directory. Install or repair VIIPER through the " +
+                "signed DS4Windows installer or its machine-installed, " +
+                "signed maintenance entry, then restart DS4Windows.",
+                MessageBoxImage.Information);
+            return false;
         }
 
         public static bool LaunchUninstaller(
             ViiperPrerequisiteStatus status = null, Window owner = null)
         {
             status ??= GetStatus();
-            if (!status.SetupScriptFound || !status.MetadataEligible ||
-                !status.PackageBundleFound || status.LocalTestMetadata)
+            if (!status.MetadataEligible || !status.PackageBundleFound ||
+                status.LocalTestMetadata)
             {
                 ShowSetupMessage(owner,
                     "Exact signed VIIPER package metadata and helper media " +
@@ -258,60 +256,12 @@ namespace DS4Windows
                 return false;
             }
 
-            MessageBoxResult result = owner != null
-                ? MessageBox.Show(owner,
-                    "Remove the exact VIIPER native UDE driver package, " +
-                    "broker service, and protected credential?",
-                    "Remove VIIPER native UDE", MessageBoxButton.YesNo,
-                    MessageBoxImage.Warning)
-                : MessageBox.Show(
-                    "Remove the exact VIIPER native UDE driver package, " +
-                    "broker service, and protected credential?",
-                    "Remove VIIPER native UDE", MessageBoxButton.YesNo,
-                    MessageBoxImage.Warning);
-            return result == MessageBoxResult.Yes &&
-                LaunchPackageManager(status, "Uninstall", owner);
-        }
-
-        private static bool LaunchPackageManager(
-            ViiperPrerequisiteStatus status, string operation, Window owner)
-        {
-            try
-            {
-                string userSid = WindowsIdentity.GetCurrent()?.User?.Value;
-                if (string.IsNullOrWhiteSpace(userSid))
-                {
-                    throw new InvalidOperationException(
-                        "The interactive Windows user SID is unavailable.");
-                }
-
-                ProcessStartInfo startInfo = new ProcessStartInfo
-                {
-                    FileName = "powershell.exe",
-                    UseShellExecute = true,
-                    Verb = "runas",
-                    WorkingDirectory = Path.GetDirectoryName(
-                        status.SetupScriptPath),
-                };
-                startInfo.ArgumentList.Add("-NoProfile");
-                startInfo.ArgumentList.Add("-ExecutionPolicy");
-                startInfo.ArgumentList.Add("Bypass");
-                startInfo.ArgumentList.Add("-File");
-                startInfo.ArgumentList.Add(status.SetupScriptPath);
-                startInfo.ArgumentList.Add("-Operation");
-                startInfo.ArgumentList.Add(operation);
-                startInfo.ArgumentList.Add("-TargetUserSID");
-                startInfo.ArgumentList.Add(userSid);
-                Process.Start(startInfo);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                ShowSetupMessage(owner,
-                    $"Could not launch VIIPER native UDE setup: {ex.Message}",
-                    MessageBoxImage.Error);
-                return false;
-            }
+            ShowSetupMessage(owner,
+                "Remove VIIPER through the signed DS4Windows installer or " +
+                "its machine-installed, signed maintenance entry. The " +
+                "portable runtime will not elevate bundled scripts or " +
+                "helper media.", MessageBoxImage.Information);
+            return false;
         }
 
         private static void ShowSetupMessage(Window owner, string message,

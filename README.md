@@ -81,9 +81,11 @@ wipeable spare Windows 11 machine; the exact commands and rollback boundary are
 documented in [the VIIPER backend architecture](docs/viiper-backend-upgrade-path.md#disposable-windows-11-validation).
 
 The matching VIIPER backend is published at
-[hbashton/VIIPER](https://github.com/hbashton/VIIPER). Use DS4Windows' built-in
-installer when possible so the backend and driver are placed and started
-correctly.
+[hbashton/VIIPER](https://github.com/hbashton/VIIPER). Production setup belongs
+to the signed DS4Windows installer or its machine-installed signed maintenance
+entry. The portable runtime never elevates mutable scripts, metadata, or
+package files. Local-test setup remains an explicit manual operation on a
+disposable machine.
 
 ## What this fork adds
 

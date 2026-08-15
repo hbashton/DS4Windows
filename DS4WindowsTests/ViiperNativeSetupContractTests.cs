@@ -240,6 +240,30 @@ namespace DS4WindowsTests
                 "-not $script:transactionStarted");
             Assert.IsFalse(source.Contains("& $stagedBroker @arguments",
                 StringComparison.Ordinal));
+
+            int finalStageCleanup = source.LastIndexOf(
+                "Remove-ProtectedStage -StagePath $stagePath",
+                StringComparison.Ordinal);
+            int finalOutcomePublication = source.LastIndexOf(
+                "Write-StructuredOutcome -RequestedOperation $Operation -ExitCode $exitCode",
+                StringComparison.Ordinal);
+            Assert.IsTrue(finalStageCleanup >= 0 &&
+                finalOutcomePublication > finalStageCleanup,
+                "Success must be published only after protected stage cleanup succeeds.");
+
+            string setupManager = File.ReadAllText(Path.Combine(root,
+                "DS4Windows", "DS4Control", "Viiper",
+                "ViiperSetupManager.cs"));
+            StringAssert.Contains(setupManager,
+                "portable runtime never elevates");
+            StringAssert.Contains(setupManager,
+                "machine-installed, signed maintenance entry");
+            Assert.IsFalse(setupManager.Contains(
+                "LaunchPackageManager", StringComparison.Ordinal));
+            Assert.IsFalse(setupManager.Contains(
+                "FileName = \"powershell.exe\"", StringComparison.Ordinal));
+            Assert.IsFalse(setupManager.Contains(
+                "Verb = \"runas\"", StringComparison.Ordinal));
         }
 
         [TestMethod]

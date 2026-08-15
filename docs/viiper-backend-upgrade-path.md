@@ -30,13 +30,16 @@ full, audio-only, or HID-only interface profile for every type. Xbox 360 and
 Switch 2 Pro remain their existing `xbox360` and `ns2pro` handlers. The package
 gate rejects missing, extra, renamed, or descriptor-divergent registrations.
 
-Setup is self-elevating but offline. It stages the exact broker in a protected
-ProgramData directory and invokes VIIPER's hidden `native-package-install`
-boundary with manifest-bound hashes, the interactive target-user SID, and the
-production validation mode. Removal invokes the exact `uninstall --yes`
-boundary with the bundled helper hash and SID. Exit `3010` is preserved as a
-safe reboot boundary; other nonzero outcomes are reported as requiring review
-of the durable transaction/recovery log.
+The portable runtime is deliberately not self-elevating. Production setup and
+removal belong to the signed DS4Windows installer or its machine-installed,
+signed maintenance entry; a user-writable portable directory is never treated
+as an elevation trust root. That installer invokes VIIPER's hidden
+`native-package-install` or exact `uninstall --yes` boundary with its
+source-bound media, the interactive target-user SID, and production validation
+mode. Exit `3010` remains a safe reboot boundary; other nonzero outcomes require
+review of the durable transaction/recovery log. The bundled PowerShell manager
+is only the explicit disposable-machine local-test route described below, not a
+production UI elevation mechanism.
 
 The installed broker is owned by Service Control Manager. Native setup never
 creates `RunVIIPER`, launches a per-user server, downloads a backend, installs

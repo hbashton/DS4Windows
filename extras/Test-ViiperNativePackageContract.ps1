@@ -65,6 +65,16 @@ if ($managerSource.IndexOf('& $stagedBroker @arguments',
         [StringComparison]::Ordinal) -ge 0) {
     throw 'Native package manager must distinguish process creation from transaction admission.'
 }
+$finalStageCleanup = $managerSource.LastIndexOf(
+    'Remove-ProtectedStage -StagePath $stagePath',
+    [StringComparison]::Ordinal)
+$finalOutcomePublication = $managerSource.LastIndexOf(
+    'Write-StructuredOutcome -RequestedOperation $Operation -ExitCode $exitCode',
+    [StringComparison]::Ordinal)
+if ($finalStageCleanup -lt 0 -or
+    $finalOutcomePublication -le $finalStageCleanup) {
+    throw 'Native package success must be published only after protected stage cleanup succeeds.'
+}
 foreach ($forbidden in @('usbip-win2', 'RunVIIPER', 'Invoke-WebRequest',
     'Invoke-RestMethod', 'DownloadFile', 'api.github.com')) {
     if ($managerSource.IndexOf($forbidden, [StringComparison]::OrdinalIgnoreCase) -ge 0) {

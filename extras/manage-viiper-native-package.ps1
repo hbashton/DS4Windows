@@ -402,29 +402,166 @@ function Initialize-ProtectedStage {
         ($programDataItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
         throw "ProgramData is not a safe staging parent: '$programData'."
     }
-    $stage = Join-Path $programData ('VIIPER.DS4WindowsStage.' + [Guid]::NewGuid().ToString('N'))
-    [IO.Directory]::CreateDirectory($stage) | Out-Null
-
-    $administrators = [Security.Principal.SecurityIdentifier]::new(
-        [Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid, $null)
-    $system = [Security.Principal.SecurityIdentifier]::new(
-        [Security.Principal.WellKnownSidType]::LocalSystemSid, $null)
-    $inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
-        [Security.AccessControl.InheritanceFlags]::ObjectInherit
-    $acl = [Security.AccessControl.DirectorySecurity]::new()
-    $acl.SetOwner($administrators)
-    $acl.SetAccessRuleProtection($true, $false)
-    foreach ($sid in @($administrators, $system)) {
-        $rule = [Security.AccessControl.FileSystemAccessRule]::new(
-            $sid,
-            [Security.AccessControl.FileSystemRights]::FullControl,
-            $inheritance,
-            [Security.AccessControl.PropagationFlags]::None,
-            [Security.AccessControl.AccessControlType]::Allow)
-        [void]$acl.AddAccessRule($rule)
+    $stage = Join-Path $programData (
+        'VIIPER.DS4WindowsStage.' + [Guid]::NewGuid().ToString('N'))
+    if (Test-Path -LiteralPath $stage) {
+        throw "Refusing to reuse protected staging directory '$stage'."
     }
-    Set-Acl -LiteralPath $stage -AclObject $acl
+
+    # Apply the protected DACL as part of directory creation. Creating with
+    # inherited ProgramData permissions and tightening them afterward leaves
+    # a write/reparse race before Set-Acl. Windows PowerShell exposes the
+    # Directory.CreateDirectory ACL overload; modern PowerShell exposes the
+    # equivalent FileSystemAclExtensions API.
+    $expectedSecurity = [Security.AccessControl.DirectorySecurity]::new()
+    $expectedSecurity.SetSecurityDescriptorSddlForm(
+        'O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)',
+        [Security.AccessControl.AccessControlSections]::All)
+    if ($PSVersionTable.PSEdition -ceq 'Desktop') {
+        $directory = [IO.Directory]::CreateDirectory(
+            $stage, $expectedSecurity)
+        $directory.SetAccessControl($expectedSecurity)
+    } else {
+        $directory = [IO.DirectoryInfo]::new($stage)
+        [IO.FileSystemAclExtensions]::Create(
+            $directory, $expectedSecurity)
+        [IO.FileSystemAclExtensions]::SetAccessControl(
+            $directory, $expectedSecurity)
+    }
+    Assert-ProtectedStage -StagePath $stage
     return $stage
+}
+
+function Assert-ProtectedStage {
+    param([Parameter(Mandatory = $true)][string]$StagePath)
+
+    $directory = Get-Item -LiteralPath $StagePath -Force -ErrorAction Stop
+    if (-not $directory.PSIsContainer -or
+        ($directory.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "Protected staging directory is missing, not a directory, or a reparse point: '$StagePath'."
+    }
+    $security = Get-Acl -LiteralPath $directory.FullName
+    if (-not $security.AreAccessRulesProtected) {
+        throw "Protected staging directory inherited an unsafe DACL: '$StagePath'."
+    }
+    $owner = $security.GetOwner(
+        [Security.Principal.SecurityIdentifier]).Value
+    if ($owner -cne 'S-1-5-32-544') {
+        throw "Protected staging directory has an unexpected owner: '$StagePath'."
+    }
+    $rules = @($security.GetAccessRules(
+        $true, $true, [Security.Principal.SecurityIdentifier]))
+    if ($rules.Count -ne 2) {
+        throw "Protected staging directory has an unexpected access-rule count: '$StagePath'."
+    }
+    $expectedInheritance =
+        [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+        [Security.AccessControl.InheritanceFlags]::ObjectInherit
+    foreach ($expectedSid in @('S-1-5-18', 'S-1-5-32-544')) {
+        $matches = @($rules | Where-Object {
+            $_.IdentityReference.Value -ceq $expectedSid
+        })
+        if ($matches.Count -ne 1) {
+            throw "Protected staging directory is missing an exact trusted principal: '$StagePath'."
+        }
+        $rule = $matches[0]
+        if ($rule.IsInherited -or
+            $rule.AccessControlType -ne
+                [Security.AccessControl.AccessControlType]::Allow -or
+            $rule.FileSystemRights -ne
+                [Security.AccessControl.FileSystemRights]::FullControl -or
+            $rule.InheritanceFlags -ne $expectedInheritance -or
+            $rule.PropagationFlags -ne
+                [Security.AccessControl.PropagationFlags]::None) {
+            throw "Protected staging directory has an unexpected access rule: '$StagePath'."
+        }
+    }
+}
+
+function Open-VerifiedStagedBroker {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourcePath,
+        [Parameter(Mandatory = $true)][string]$DestinationDirectory,
+        [Parameter(Mandatory = $true)][long]$ExpectedLength,
+        [Parameter(Mandatory = $true)][string]$ExpectedSHA256
+    )
+
+    $destinationPath = Join-Path $DestinationDirectory 'viiper.exe'
+    $sourceStream = [IO.FileStream]::new(
+        $SourcePath, [IO.FileMode]::Open, [IO.FileAccess]::Read,
+        [IO.FileShare]::Read)
+    try {
+        if ($sourceStream.Length -ne $ExpectedLength) {
+            throw 'The manifest-bound broker changed before protected staging.'
+        }
+        $sourceAlgorithm = [Security.Cryptography.SHA256]::Create()
+        try {
+            $sourceDigest = ([BitConverter]::ToString(
+                $sourceAlgorithm.ComputeHash($sourceStream))).Replace(
+                    '-', '').ToLowerInvariant()
+        }
+        finally {
+            $sourceAlgorithm.Dispose()
+        }
+        if ($sourceDigest -cne $ExpectedSHA256) {
+            throw 'The manifest-bound broker changed before protected staging.'
+        }
+        $sourceStream.Position = 0
+        $destinationStream = [IO.FileStream]::new(
+            $destinationPath, [IO.FileMode]::CreateNew,
+            [IO.FileAccess]::Write, [IO.FileShare]::None,
+            1MB, [IO.FileOptions]::WriteThrough)
+        try {
+            $sourceStream.CopyTo($destinationStream)
+            $destinationStream.Flush($true)
+        }
+        finally {
+            $destinationStream.Dispose()
+        }
+    }
+    finally {
+        $sourceStream.Dispose()
+    }
+
+    $launchLock = $null
+    try {
+        # Hash the same open file object that remains locked through process
+        # creation and join. FileShare.Read lets the image loader read it but
+        # denies write and delete/rename opens, closing the hash-to-launch
+        # pathname race.
+        $launchLock = [IO.FileStream]::new(
+            $destinationPath, [IO.FileMode]::Open,
+            [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        $staged = Get-Item -LiteralPath $destinationPath -Force -ErrorAction Stop
+        if ($staged.PSIsContainer -or
+            ($staged.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+            $launchLock.Length -ne $ExpectedLength) {
+            throw 'The protected staged broker is not the expected ordinary file.'
+        }
+        $stagedAlgorithm = [Security.Cryptography.SHA256]::Create()
+        try {
+            $stagedDigest = ([BitConverter]::ToString(
+                $stagedAlgorithm.ComputeHash($launchLock))).Replace(
+                    '-', '').ToLowerInvariant()
+        }
+        finally {
+            $stagedAlgorithm.Dispose()
+        }
+        if ($stagedDigest -cne $ExpectedSHA256) {
+            throw 'The protected staged broker failed exact verification.'
+        }
+        $launchLock.Position = 0
+        return [pscustomobject]@{
+            Path = $destinationPath
+            LaunchLock = $launchLock
+        }
+    }
+    catch {
+        if ($null -ne $launchLock) {
+            $launchLock.Dispose()
+        }
+        throw
+    }
 }
 
 function Remove-ProtectedStage {
@@ -435,13 +572,30 @@ function Remove-ProtectedStage {
 
     $stage = [IO.Path]::GetFullPath($StagePath).TrimEnd('\')
     $programData = [IO.Path]::GetFullPath($ProgramDataRoot).TrimEnd('\')
-    $prefix = $programData + [IO.Path]::DirectorySeparatorChar + 'VIIPER.DS4WindowsStage.'
-    if (-not $stage.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -or
-        (Split-Path -Parent $stage) -ine $programData) {
+    $prefix = $programData + [IO.Path]::DirectorySeparatorChar +
+        'VIIPER.DS4WindowsStage.'
+    if (-not $stage.StartsWith(
+            $prefix, [StringComparison]::OrdinalIgnoreCase) -or
+        (Split-Path -Parent $stage) -ine $programData -or
+        (Split-Path -Leaf $stage) -cnotmatch
+            '^VIIPER\.DS4WindowsStage\.[0-9a-f]{32}$') {
         throw "Refusing to remove an unverified staging directory: '$stage'."
     }
     if (Test-Path -LiteralPath $stage) {
-        Remove-Item -LiteralPath $stage -Recurse -Force
+        Assert-ProtectedStage -StagePath $stage
+        $children = @(Get-ChildItem -LiteralPath $stage -Force)
+        if ($children.Count -gt 1 -or
+            ($children.Count -eq 1 -and
+                ($children[0].Name -cne 'viiper.exe' -or
+                    $children[0].PSIsContainer -or
+                    ($children[0].Attributes -band
+                     [IO.FileAttributes]::ReparsePoint) -ne 0))) {
+            throw "Refusing protected staging cleanup with unexpected entries: '$stage'."
+        }
+        if ($children.Count -eq 1) {
+            [IO.File]::Delete($children[0].FullName)
+        }
+        [IO.Directory]::Delete($stage, $false)
     }
 }
 
@@ -743,23 +897,20 @@ if ($Operation -ceq 'Install') {
 
 $programDataRoot = [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData)
 $stagePath = $null
+$stagedBrokerLease = $null
 $exitCode = 1
 try {
     $stagePath = Initialize-ProtectedStage -ProgramDataRoot $programDataRoot
-    $stagedBroker = Join-Path $stagePath 'viiper.exe'
-    Copy-Item -LiteralPath $brokerPath -Destination $stagedBroker -ErrorAction Stop
-    $stagedItem = Get-Item -LiteralPath $stagedBroker -Force
-    $stagedHash = (Get-FileHash -LiteralPath $stagedBroker -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($stagedItem.Length -ne [long]$brokerArtifact.length -or
-        $stagedHash -cne ([string]$brokerArtifact.sha256).ToLowerInvariant()) {
-        throw 'Protected staged VIIPER broker did not preserve the manifest-bound bytes.'
-    }
+    $stagedBrokerLease = Open-VerifiedStagedBroker `
+        -SourcePath $brokerPath -DestinationDirectory $stagePath `
+        -ExpectedLength ([long]$brokerArtifact.length) `
+        -ExpectedSHA256 ([string]$brokerArtifact.sha256).ToLowerInvariant()
 
     Write-Host "Running VIIPER native UDE $($Operation.ToLowerInvariant()) transaction..."
     $processStarted = $false
     try {
         $processResult = Invoke-JoinedNativeProcess `
-            -FileName $stagedBroker -Arguments $arguments `
+            -FileName $stagedBrokerLease.Path -Arguments $arguments `
             -WorkingDirectory $stagePath -Started ([ref]$processStarted)
     }
     finally {
@@ -769,8 +920,36 @@ try {
     $exitCode = [int]$processResult.ExitCode
     $output | ForEach-Object { Write-Host ([string]$_) }
 } finally {
+    $stageCleanupErrors = [Collections.Generic.List[Exception]]::new()
+    if ($null -ne $stagedBrokerLease) {
+        try {
+            $stagedBrokerLease.LaunchLock.Dispose()
+        }
+        catch {
+            $stageCleanupErrors.Add([InvalidOperationException]::new(
+                'Failed to release the verified staged-broker launch lock.',
+                $_.Exception))
+        }
+        $stagedBrokerLease = $null
+    }
     if ($null -ne $stagePath) {
-        Remove-ProtectedStage -StagePath $stagePath -ProgramDataRoot $programDataRoot
+        try {
+            Remove-ProtectedStage -StagePath $stagePath `
+                -ProgramDataRoot $programDataRoot
+        }
+        catch {
+            $stageCleanupErrors.Add([InvalidOperationException]::new(
+                'Failed to remove the exact protected broker stage.',
+                $_.Exception))
+        }
+    }
+    if ($stageCleanupErrors.Count -eq 1) {
+        throw $stageCleanupErrors[0]
+    }
+    if ($stageCleanupErrors.Count -gt 1) {
+        throw [AggregateException]::new(
+            'Protected broker stage cleanup had multiple failures.',
+            [Exception[]]$stageCleanupErrors.ToArray())
     }
 }
 Write-StructuredOutcome -RequestedOperation $Operation -ExitCode $exitCode

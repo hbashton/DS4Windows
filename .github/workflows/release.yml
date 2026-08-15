@@ -1,70 +1,229 @@
-name: .NET Release
+name: Signed Installer Release
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - "v*.*.*"
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
 
 jobs:
-  release:
+  test:
     runs-on: windows-2022
-    #this makes it not run if tests failed.
-    #needs: test
+    timeout-minutes: 45
     steps:
-    - uses: actions/checkout@v4
-      with:
-           ref: ${{ github.event.release.tag_name }}
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: 8.0.x
-    - name: Set up Python 3.10
-      uses: actions/setup-python@v3
-      with:
-        python-version: "3.10"
-    - name: Restore dependencies
-      run: dotnet restore
-    - name: Require production VIIPER native runtime bundle
-      shell: pwsh
-      run: .\extras\Test-ViiperNativePackageContract.ps1 -RequireProduction
-    - name: Set envars for versions
-      run: | 
-        TAG=${{ github.event.release.tag_name }}
-        VERSION=${TAG#v}
-        PROJECT_ASSEMBLY_VERSION=$(python -c "import xml.etree.ElementTree as ET; print(ET.parse('DS4Windows/DS4WinWPF.csproj').find('.//AssemblyVersion').text)")
-        PROJECT_VERSION=$(python -c "import xml.etree.ElementTree as ET; print(ET.parse('DS4Windows/DS4WinWPF.csproj').find('.//Version').text)")
-        if [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,3}(-.*)?$ ]]; then
-          BINARY_VERSION=${VERSION%%-*}
-          PACKAGE_VERSION=$VERSION
-        else
-          BINARY_VERSION=$PROJECT_ASSEMBLY_VERSION
-          PACKAGE_VERSION=$PROJECT_VERSION
-        fi
-        echo "Release: $VERSION; binary: $BINARY_VERSION; package: $PACKAGE_VERSION"
-        echo "VERSION=$VERSION" >> $GITHUB_ENV
-        echo "BINARY_VERSION=$BINARY_VERSION" >> $GITHUB_ENV
-        echo "PACKAGE_VERSION=$PACKAGE_VERSION" >> $GITHUB_ENV
-      shell: bash
-    - name: Build X64
-      run: dotnet publish .\DS4Windows\DS4WinWPF.csproj -c Release /p:platform=x64 /p:AssemblyVersion=${{ env.BINARY_VERSION }} /p:FileVersion=${{ env.BINARY_VERSION }} /p:Version=${{ env.PACKAGE_VERSION }} /p:InformationalVersion=${{ env.VERSION }} -o .\bin\x64\Release\output
-    - name: Post-Build script X64
-      run: python .\utils\post-build.py .\bin\x64\Release\output . ${{env.VERSION}}
-    - name: Name release asset
-      shell: pwsh
-      run: |
-        $source = ".\bin\x64\Release\DS4Windows_${{ env.VERSION }}_x64.zip"
-        $asset = if ("${{ env.VERSION }}" -like "VIIPER*") {
-          ".\bin\x64\Release\DS4Windows_VIIPER_x64.zip"
-        } else {
-          $source
-        }
-        if ($asset -ne $source) {
-          Move-Item -LiteralPath $source -Destination $asset -Force
-        }
-        "RELEASE_ASSET=$asset" >> $env:GITHUB_ENV
-    - name: Publish release Build X64
-      run: gh release upload ${{github.event.release.tag_name}} ${{ env.RELEASE_ASSET }} --clobber
-      env:
-        GITHUB_TOKEN: ${{ github.TOKEN }}
+      - name: Checkout tagged source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify immutable tag provenance
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          if ($tag -cnotmatch '^v\d+\.\d+\.\d+(?:\.\d+)?$') {
+            throw "Release tag must use a numeric Burn-compatible version: $tag"
+          }
+          $tagObjectType = (git cat-file -t ("refs/tags/" + $tag)).Trim()
+          if ($tagObjectType -cne "tag") { throw "Release requires an annotated tag." }
+          $tagCommit = (git rev-list -n 1 $tag).Trim()
+          $headCommit = (git rev-parse HEAD).Trim()
+          if ($tagCommit -cne $headCommit -or $headCommit -cne $env:GITHUB_SHA) {
+            throw "Checked-out source does not equal the tagged commit."
+          }
+          git fetch --no-tags origin main
+          if ($LASTEXITCODE -ne 0) { throw "Could not fetch the protected main branch." }
+          git merge-base --is-ancestor $headCommit origin/main
+          if ($LASTEXITCODE -ne 0) { throw "Release tag is not reachable from main." }
+          if (@(git status --short).Count -ne 0) { throw "Tagged checkout is dirty." }
+
+      - name: Restore and test managed code
+        shell: pwsh
+        run: |
+          dotnet restore .\DS4WindowsTests\DS4WindowsTests.csproj
+          if ($LASTEXITCODE -ne 0) { throw "Restore failed." }
+          dotnet test .\DS4WindowsTests\DS4WindowsTests.csproj -c Release -p:Platform=x64 --no-restore --verbosity normal
+          if ($LASTEXITCODE -ne 0) { throw "DS4Windows tests failed." }
+
+      - name: Validate native and installer source contracts
+        shell: pwsh
+        run: |
+          powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\extras\Test-ViiperNativePackageContract.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Windows PowerShell native contract failed." }
+          .\extras\Test-ViiperNativePackageContract.ps1
+          powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\installer\Test-InstallerSecurityContracts.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Windows PowerShell installer security contract failed." }
+          .\installer\Test-InstallerSecurityContracts.ps1
+          python .\utils\test-installer-state-machine.py
+          if ($LASTEXITCODE -ne 0) { throw "Installer state-machine tests failed." }
+          python .\utils\validate-installer.py --source-only --bundle-source .\installer\DS4Windows.Bundle\Bundle.wxs --setup-actions-source .\installer\DS4Windows.SetupActions\Program.cs --bootstrapper-source .\installer\DS4Windows.Bootstrapper\InstallerApplication.cs
+          if ($LASTEXITCODE -ne 0) { throw "Installer source validation failed." }
+
+      - name: Compile protected installer callers
+        shell: pwsh
+        run: |
+          dotnet build .\installer\DS4Windows.SetupActions\DS4Windows.SetupActions.csproj -c Release -p:Platform=x64
+          if ($LASTEXITCODE -ne 0) { throw "SetupActions build failed." }
+          dotnet build .\installer\DS4Windows.Bootstrapper\DS4Windows.Bootstrapper.csproj -c Release -p:Platform=x64
+          if ($LASTEXITCODE -ne 0) { throw "Bootstrapper build failed." }
+
+  release:
+    needs: test
+    runs-on: [self-hosted, Windows, X64, ds4w-release]
+    environment: production
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout the tested tag
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Re-verify exact release checkout
+        shell: pwsh
+        run: |
+          $tagCommit = (git rev-list -n 1 $env:GITHUB_REF_NAME).Trim()
+          $headCommit = (git rev-parse HEAD).Trim()
+          if ($tagCommit -cne $headCommit -or $headCommit -cne $env:GITHUB_SHA) {
+            throw "Release worker checkout does not equal the tested tagged commit."
+          }
+          if (@(git status --short).Count -ne 0) { throw "Release worker checkout is dirty." }
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Import protected production native package
+        shell: pwsh
+        env:
+          DS4W_NATIVE_PACKAGE_ROOT: ${{ vars.DS4W_NATIVE_PACKAGE_ROOT }}
+          DS4W_NATIVE_PACKAGE_PROVENANCE: ${{ vars.DS4W_NATIVE_PACKAGE_PROVENANCE }}
+          DS4W_NATIVE_PACKAGE_PROVENANCE_SHA256: ${{ vars.DS4W_NATIVE_PACKAGE_PROVENANCE_SHA256 }}
+        run: |
+          & .\installer\Import-ProductionNativePackage.ps1 -SourceRoot $env:DS4W_NATIVE_PACKAGE_ROOT -ProvenanceManifest $env:DS4W_NATIVE_PACKAGE_PROVENANCE -ExpectedProvenanceSha256 $env:DS4W_NATIVE_PACKAGE_PROVENANCE_SHA256
+          if ($LASTEXITCODE -ne 0) { throw "Production native package import failed." }
+          powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\extras\Test-ViiperNativePackageContract.ps1 -RequireProduction -RequirePackage
+          if ($LASTEXITCODE -ne 0) { throw "Windows PowerShell production package gate failed." }
+          .\extras\Test-ViiperNativePackageContract.ps1 -RequireProduction -RequirePackage
+
+      - name: Materialize protected Authenticode credential
+        shell: pwsh
+        env:
+          DS4W_SIGN_PFX_BASE64: ${{ secrets.DS4W_SIGN_PFX_BASE64 }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:DS4W_SIGN_PFX_BASE64)) {
+            throw "DS4W_SIGN_PFX_BASE64 is required."
+          }
+          try {
+            $bytes = [Convert]::FromBase64String($env:DS4W_SIGN_PFX_BASE64)
+          } catch {
+            throw "DS4W_SIGN_PFX_BASE64 is malformed."
+          }
+          if ($bytes.Length -eq 0) { throw "Signing certificate is empty." }
+          $path = Join-Path $env:RUNNER_TEMP "ds4windows-release-signing.pfx"
+          [IO.File]::WriteAllBytes($path, $bytes)
+          "DS4W_SIGN_CERT_PATH=$path" >> $env:GITHUB_ENV
+
+      - name: Build, sign, and verify production installer
+        shell: pwsh
+        env:
+          DS4W_SIGN_CERT_PASSWORD: ${{ secrets.DS4W_SIGN_CERT_PASSWORD }}
+          DS4W_SIGN_CERTIFICATE_SHA256: ${{ secrets.DS4W_SIGN_CERTIFICATE_SHA256 }}
+          DS4W_SIGN_TIMESTAMP_URL: ${{ secrets.DS4W_SIGN_TIMESTAMP_URL }}
+        run: |
+          $version = $env:GITHUB_REF_NAME.Substring(1)
+          $productVersion = ($version -split '-', 2)[0]
+          & .\installer\build-installer.ps1 -PublishRoot .\bin\x64\Release\installer-publish -OutputDirectory .\bin\x64\Release\installer -ProductVersion $productVersion -BundleVersion $version -DisplayVersion $version
+          if ($LASTEXITCODE -ne 0) { throw "Signed installer build failed." }
+
+      - name: Remove ephemeral signing credential
+        if: always()
+        shell: pwsh
+        run: |
+          $runnerTemp = [IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\')
+          $path = [IO.Path]::GetFullPath((Join-Path $runnerTemp "ds4windows-release-signing.pfx"))
+          if ((Split-Path -Parent $path) -cne $runnerTemp) {
+            throw "Refusing unsafe signing credential cleanup."
+          }
+          if (Test-Path -LiteralPath $path -PathType Leaf) {
+            Remove-Item -LiteralPath $path -Force
+          }
+
+      - name: Assemble immutable release inventory
+        shell: pwsh
+        env:
+          DS4W_NATIVE_PACKAGE_PROVENANCE: ${{ vars.DS4W_NATIVE_PACKAGE_PROVENANCE }}
+          DS4W_NATIVE_PACKAGE_PROVENANCE_SHA256: ${{ vars.DS4W_NATIVE_PACKAGE_PROVENANCE_SHA256 }}
+        run: |
+          $releaseRoot = Resolve-Path .\bin\x64\Release\installer
+          $nativeProvenance = Join-Path $releaseRoot "VIIPER-native-package.provenance.json"
+          Copy-Item -LiteralPath $env:DS4W_NATIVE_PACKAGE_PROVENANCE -Destination $nativeProvenance
+          if ((Get-FileHash -LiteralPath $nativeProvenance -Algorithm SHA256).Hash -cne $env:DS4W_NATIVE_PACKAGE_PROVENANCE_SHA256.ToUpperInvariant()) {
+            throw "Copied native provenance manifest differs from its release pin."
+          }
+          $files = @(Get-ChildItem -LiteralPath $releaseRoot -File | Sort-Object Name)
+          if ($files.Count -ne 3) { throw "Release inventory must contain installer and two provenance manifests before checksums." }
+          $checksumPath = Join-Path $releaseRoot "SHA256SUMS.txt"
+          $lines = @($files | ForEach-Object {
+            $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            $hash + " *" + $_.Name
+          })
+          [IO.File]::WriteAllLines($checksumPath, $lines, [Text.UTF8Encoding]::new($false))
+
+      - name: Attest release provenance
+        uses: actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45 # v2
+        with:
+          subject-path: bin/x64/Release/installer/*
+
+      - name: Retain signed release inventory
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: DS4Windows_${{ github.ref_name }}_signed-installer
+          path: bin/x64/Release/installer/*
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish new immutable GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) { throw "Release already exists; assets will not be overwritten." }
+          $assets = @(Get-ChildItem -LiteralPath .\bin\x64\Release\installer -File | ForEach-Object FullName)
+          if ($assets.Count -ne 4) { throw "Release asset inventory changed after attestation." }
+          gh release create $tag @assets --draft --verify-tag --title ("DS4Windows " + $tag.Substring(1)) --generate-notes
+          if ($LASTEXITCODE -ne 0) { throw "GitHub draft release creation or asset upload failed." }
+          gh release edit $tag --draft=false
+          if ($LASTEXITCODE -ne 0) { throw "GitHub release remained a non-public draft." }

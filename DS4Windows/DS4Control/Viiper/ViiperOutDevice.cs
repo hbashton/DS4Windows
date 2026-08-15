@@ -189,6 +189,8 @@ namespace DS4Windows
         private readonly ViiperVirtualDeviceType viiperType;
         private readonly bool audioOnlySidecar;
         private readonly ViiperClient client;
+        private readonly ViiperLiveValidationLease liveValidationLease;
+        private readonly object liveValidationObservationLock = new object();
         private readonly object pendingPacketLock = new object();
         private readonly object microphoneQueueLock = new object();
         private readonly object microphoneProcessingLock = new object();
@@ -349,6 +351,12 @@ namespace DS4Windows
         private bool physicalDualSenseIdentityVerified;
         private readonly byte[] lastR2TriggerFeedback = new byte[DualSenseTriggerEffectLength];
         private readonly byte[] lastL2TriggerFeedback = new byte[DualSenseTriggerEffectLength];
+        private byte[] liveValidationLastFeedback;
+        private long liveValidationFeedbackFrames;
+        private long liveValidationMicrophoneFramesSubmitted;
+        private long liveValidationMicrophoneBytesSubmitted;
+        private long liveValidationTransportInterruptions;
+        private long liveValidationStreamRecoveriesCompleted;
 
         private enum MicrophoneCodec : byte
         {
@@ -375,10 +383,24 @@ namespace DS4Windows
 
         public ViiperOutDevice(OutContType outputType,
             ViiperVirtualDeviceType viiperType, bool audioOnlySidecar = false)
+            : this(outputType, viiperType, audioOnlySidecar, null, null)
         {
+        }
+
+        internal ViiperOutDevice(OutContType outputType,
+            ViiperVirtualDeviceType viiperType, bool audioOnlySidecar,
+            ViiperLiveValidationLease validationLease,
+            ViiperNativeRuntimeMetadata validationMetadata)
+        {
+            if ((validationLease == null) != (validationMetadata == null))
+            {
+                throw new ArgumentException(
+                    "A live-validation lease and its exact metadata must be supplied together.");
+            }
             this.outputType = outputType;
             this.viiperType = viiperType;
             this.audioOnlySidecar = audioOnlySidecar;
+            liveValidationLease = validationLease;
             feedbackDispatchBuffer = new ViiperFeedbackDispatchBuffer(
                 // The buffer implementation requires one preallocated slot.
                 // Non-audio devices never enqueue it; their public policy is
@@ -391,7 +413,170 @@ namespace DS4Windows
                 GetFeedbackSpeakerMaximumAgeMilliseconds(viiperType),
                 IsDualSenseVirtualType(viiperType) ?
                     FeedbackOrderedControlMaximumAgeMilliseconds : 0);
-            client = new ViiperClient(DefaultHost, DefaultPort);
+            client = validationLease == null ?
+                new ViiperClient(DefaultHost, DefaultPort) :
+                new ViiperClient(DefaultHost, DefaultPort,
+                    ViiperTransportMode.NativeUde, validationMetadata);
+        }
+
+        internal ViiperLiveValidationSnapshot GetLiveValidationSnapshot(
+            ViiperLiveValidationLease lease)
+        {
+            DemandLiveValidationLease(lease);
+            byte[] feedback;
+            lock (liveValidationObservationLock)
+            {
+                feedback = liveValidationLastFeedback == null ? null :
+                    (byte[])liveValidationLastFeedback.Clone();
+            }
+
+            return new ViiperLiveValidationSnapshot
+            {
+                HandlerName = GetLiveValidationHandlerName(),
+                StreamProtocol = activeStreamFrameVersion switch
+                {
+                    ViiperStreamFrameVersionV3 => "framed-v3",
+                    ViiperStreamFrameVersionV5 => "framed-v5",
+                    _ => "inactive",
+                },
+                StreamFrameVersion = activeStreamFrameVersion,
+                Connected = connected,
+                SupportsMicrophone = activeStreamSupportsMicrophone,
+                SupportsDirectSpeaker = activeStreamSupportsDirectSpeaker,
+                SupportsAtomicAudioHaptics =
+                    activeStreamSupportsAtomicAudioHaptics,
+                BackendIdentity = client.NativeBackendIdentity,
+                DeviceIdentity = VirtualDeviceIdentity,
+                StatePacketsSubmitted = Interlocked.Read(
+                    ref submittedPacketCount),
+                StatePacketsWritten = Interlocked.Read(ref writtenPacketCount),
+                StatePacketsCoalesced = Interlocked.Read(
+                    ref replacedPendingPacketCount),
+                StreamRecoveryAttempts = Volatile.Read(
+                    ref streamRecoveryAttempts),
+                FeedbackFramesObserved = Interlocked.Read(
+                    ref liveValidationFeedbackFrames),
+                LastFeedbackPayload = feedback,
+                ValidationMicrophoneFramesSubmitted = Interlocked.Read(
+                    ref liveValidationMicrophoneFramesSubmitted),
+                ValidationMicrophoneBytesSubmitted = Interlocked.Read(
+                    ref liveValidationMicrophoneBytesSubmitted),
+                ValidationTransportInterruptions = Interlocked.Read(
+                    ref liveValidationTransportInterruptions),
+                ValidationStreamRecoveriesCompleted = Interlocked.Read(
+                    ref liveValidationStreamRecoveriesCompleted),
+                SpeakerFramesEnqueued = feedbackDispatchBuffer.SpeakerEnqueued,
+                SpeakerFramesDequeued = feedbackDispatchBuffer.SpeakerDequeued,
+                SpeakerFramesDropped = feedbackDispatchBuffer.SpeakerDropped,
+                SpeakerFramesExpired = feedbackDispatchBuffer.SpeakerExpired,
+                SpeakerFramesDelivered = Interlocked.Read(
+                    ref feedbackSpeakerDelivered),
+                SpeakerFramesStale = Interlocked.Read(
+                    ref feedbackSpeakerStale),
+                SpeakerNoSubscriberDeferrals = Interlocked.Read(
+                    ref feedbackSpeakerNoSubscriberDeferrals),
+                SpeakerCallbackFailures = Interlocked.Read(
+                    ref feedbackSpeakerCallbackFailures),
+                ControlFramesEnqueued = feedbackDispatchBuffer.ControlEnqueued,
+                ControlFramesDequeued = feedbackDispatchBuffer.ControlDequeued,
+                ControlFramesDropped = feedbackDispatchBuffer.ControlDropped,
+                OrderedControlFramesEnqueued =
+                    feedbackDispatchBuffer.OrderedControlEnqueued,
+                OrderedControlFramesDequeued =
+                    feedbackDispatchBuffer.OrderedControlDequeued,
+                OrderedControlFramesDropped =
+                    feedbackDispatchBuffer.OrderedControlDropped,
+                OrderedControlFramesExpired =
+                    feedbackDispatchBuffer.OrderedControlExpired,
+                ControlFramesDelivered = Interlocked.Read(
+                    ref feedbackControlDelivered),
+                ControlFramesStale = Interlocked.Read(
+                    ref feedbackControlStale),
+                ControlCallbackFailures = Interlocked.Read(
+                    ref feedbackControlCallbackFailures),
+            };
+        }
+
+        internal void SubmitLiveValidationMicrophonePcm(
+            ViiperLiveValidationLease lease, byte[] pcm)
+        {
+            DemandLiveValidationLease(lease);
+            int expectedLength = viiperType ==
+                ViiperVirtualDeviceType.DualShock4 ?
+                DualShock4VirtualMicrophonePcmFrameLength :
+                DualSenseMicrophonePcmFrameLength;
+            if (!connected || !activeStreamSupportsMicrophone ||
+                !activeStreamUsesFramedProtocol || pcm == null ||
+                pcm.Length != expectedLength || pcm.All(value => value == 0))
+            {
+                throw new ViiperIdentityException(
+                    $"Live validation requires one non-silent {expectedLength}-byte microphone PCM frame on an active framed PlayStation stream.");
+            }
+
+            ViiperDeviceStream stream = Volatile.Read(ref deviceStream) ??
+                throw new ObjectDisposedException(nameof(ViiperDeviceStream));
+            stream.WriteFrame(activeStreamFrameVersion,
+                ViiperStreamFrameMicrophonePcm, pcm);
+            Interlocked.Increment(
+                ref liveValidationMicrophoneFramesSubmitted);
+            Interlocked.Add(ref liveValidationMicrophoneBytesSubmitted,
+                pcm.Length);
+        }
+
+        internal void InterruptLiveValidationTransport(
+            ViiperLiveValidationLease lease)
+        {
+            DemandLiveValidationLease(lease);
+            ViiperDeviceStream stream = Volatile.Read(ref deviceStream) ??
+                throw new ObjectDisposedException(nameof(ViiperDeviceStream));
+            Interlocked.Increment(ref liveValidationTransportInterruptions);
+            stream.CloseTransport();
+        }
+
+        private void DemandLiveValidationLease(
+            ViiperLiveValidationLease lease)
+        {
+            if (liveValidationLease == null ||
+                !ReferenceEquals(liveValidationLease, lease))
+            {
+                throw new ViiperIdentityException(
+                    "The VIIPER live-validation hook is unavailable without the exact opt-in lease.");
+            }
+        }
+
+        private string GetLiveValidationHandlerName()
+        {
+            return viiperType switch
+            {
+                ViiperVirtualDeviceType.DualShock4 =>
+                    audioOnlySidecar ? "dualshock4audioonlyduplexv3" :
+                    "dualshock4audioduplexv3",
+                ViiperVirtualDeviceType.DualSense =>
+                    audioOnlySidecar ? "dualsenseaudioonlyduplexv5" :
+                    "dualsensecombinedaudioduplexv5",
+                ViiperVirtualDeviceType.DualSenseEdge =>
+                    "dualsenseedgecombinedaudioduplexv5",
+                _ => ViiperStatePacketBuilder.GetViiperDeviceName(viiperType),
+            };
+        }
+
+        private void ObserveLiveValidationFeedback(byte[] feedback,
+            int feedbackLength)
+        {
+            if (liveValidationLease == null || feedback == null ||
+                feedbackLength <= 0 || feedbackLength > feedback.Length ||
+                feedbackLength > DualSenseCombinedExtendedFeedbackLength)
+            {
+                return;
+            }
+
+            byte[] copy = new byte[feedbackLength];
+            Buffer.BlockCopy(feedback, 0, copy, 0, feedbackLength);
+            lock (liveValidationObservationLock)
+            {
+                liveValidationLastFeedback = copy;
+            }
+            Interlocked.Increment(ref liveValidationFeedbackFrames);
         }
 
         internal static int GetFeedbackSpeakerQueueCapacity(
@@ -675,6 +860,19 @@ namespace DS4Windows
             Interlocked.Exchange(ref feedbackControlDelivered, 0);
             Interlocked.Exchange(ref feedbackControlStale, 0);
             Interlocked.Exchange(ref feedbackControlCallbackFailures, 0);
+            Interlocked.Exchange(ref liveValidationFeedbackFrames, 0);
+            Interlocked.Exchange(
+                ref liveValidationMicrophoneFramesSubmitted, 0);
+            Interlocked.Exchange(
+                ref liveValidationMicrophoneBytesSubmitted, 0);
+            Interlocked.Exchange(
+                ref liveValidationTransportInterruptions, 0);
+            Interlocked.Exchange(
+                ref liveValidationStreamRecoveriesCompleted, 0);
+            lock (liveValidationObservationLock)
+            {
+                liveValidationLastFeedback = null;
+            }
             feedbackDispatchBuffer.Reset();
             lock (physicalDualSenseIdentityLock)
             {
@@ -1901,6 +2099,11 @@ namespace DS4Windows
                         {
                             deviceStream = replacement;
                             Interlocked.Increment(ref streamGeneration);
+                            if (liveValidationLease != null)
+                            {
+                                Interlocked.Increment(ref
+                                    liveValidationStreamRecoveriesCompleted);
+                            }
                             Interlocked.Exchange(ref streamRecoveryAttempts, 0);
                             // Publish the new timeline only after every old
                             // callback and reader admission has left its read
@@ -2780,8 +2983,14 @@ namespace DS4Windows
             int expectedDeviceIndex = -1)
         {
             int deviceIndex = Volatile.Read(ref lastInputDeviceIndex);
-            if ((expectedDeviceIndex >= 0 &&
-                    expectedDeviceIndex != deviceIndex) ||
+            if (expectedDeviceIndex >= 0 &&
+                    expectedDeviceIndex != deviceIndex)
+            {
+                return;
+            }
+
+            ObserveLiveValidationFeedback(feedback, feedbackLength);
+            if (
                 deviceIndex < 0 ||
                 Program.rootHub == null ||
                 deviceIndex >= Program.rootHub.DS4Controllers.Length ||

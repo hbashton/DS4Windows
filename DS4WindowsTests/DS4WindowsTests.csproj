@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DS4Windows\DS4WinWPF.csproj" />
+    <ProjectReference Include="..\tools\DS4Windows.ViiperLiveValidation\DS4Windows.ViiperLiveValidation.csproj" />
   </ItemGroup>
 
 </Project>

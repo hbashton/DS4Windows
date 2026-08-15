@@ -1,0 +1,14 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+  <PropertyGroup>
+    <Platform>x64</Platform>
+    <OutputType>Package</OutputType>
+    <OutputName>DS4Windows_$(ProductVersion)_x64</OutputName>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">5.0.2.0</ProductVersion>
+    <PublishRoot Condition="'$(PublishRoot)' == ''">$(MSBuildThisFileDirectory)..\..\bin\x64\Release\output</PublishRoot>
+    <DefineConstants>ProductVersion=$(ProductVersion);PublishRoot=$(PublishRoot)</DefineConstants>
+    <!-- Burn owns downgrade ordering. The embedded MSI permits an equal
+         three-field product version so successive CI prereleases can update
+         cleanly while a stable 5.0.0 bundle still outranks 5.0.0-ci.*. -->
+    <SuppressIces>ICE61</SuppressIces>
+  </PropertyGroup>
+</Project>

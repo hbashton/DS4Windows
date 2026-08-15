@@ -337,3 +337,6 @@ ASALocalRun/
 # Never commit local-test certificates or package binaries into DS4Windows.
 extras/viiper-native-package/
 
+# Deterministic WiX inventory generated from the signed publish tree.
+installer/DS4Windows.Package/GeneratedFiles.wxs
+

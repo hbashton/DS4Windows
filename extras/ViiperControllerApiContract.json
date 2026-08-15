@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "sourceRevision": "cece30774e9df8183dc74fe6cd25950f1a74d021",
+  "sourceRevision": "35cba66dc61a9d85240d44d5e9a2519fd471f9db",
   "implementation": "VIIPER registered controller handlers and native UDE descriptors",
   "registrations": [
     {

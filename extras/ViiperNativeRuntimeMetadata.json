@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "releaseEligibility": "local-test-evidence-only",
   "localTestOptInEnvironment": "DS4WINDOWS_VIIPER_ALLOW_LOCAL_TEST",
-  "sourceRevision": "35cba66dc61a9d85240d44d5e9a2519fd471f9db",
+  "sourceRevision": "9481f9dbfde64af99905fa325546e50b5ea03d6e",
   "driverPackageVersion": "0.1.0.38",
   "driverAbi": {
     "major": 1,
@@ -10,7 +10,7 @@
   },
   "requiredCapabilities": 61,
   "requiredCapabilitiesHex": "0x0000003d",
-  "loadedDriverBuildIdentity": "a9a8c965bee0d70e14e87d0078479e5e7a3164d4b0adbd7e96fad38257d9b3fe",
+  "loadedDriverBuildIdentity": "9f19f8acc201727ba549196edcae6f4c14122eb6fd9bd58f0da6f58af1fc9324",
   "productionSigningRoute": "HLK/WHCP dashboard signing",
   "managedBroker": {
     "serviceName": "VIIPERNativeBroker",
@@ -23,7 +23,7 @@
   },
   "controllerApiContract": {
     "schemaVersion": 1,
-    "sourceRevision": "35cba66dc61a9d85240d44d5e9a2519fd471f9db",
+    "sourceRevision": "9481f9dbfde64af99905fa325546e50b5ea03d6e",
     "implementation": "VIIPER registered controller handlers and native UDE descriptors",
     "registrations": [
       {
@@ -123,37 +123,37 @@
       "role": "broker",
       "relativePath": "viiper-native-package/viiper.exe",
       "length": 18117120,
-      "sha256": "fe3b83f1a352adb289821279c353592339c67e3476481e5d6cd26c0531768252"
+      "sha256": "786de8b46605e4af7982938e68e82b2649529e9f657764a1463e7ec41fc4b186"
     },
     {
       "role": "driver-helper",
       "relativePath": "viiper-native-package/ViiperUdeCtl.exe",
       "length": 1051648,
-      "sha256": "452c6769996a6a093343e00606b7c01527c38fc78849bb394b48cac3d12adb4d"
+      "sha256": "1a935502b48171df8850f678615a221575d1c32ad06b299cc25d8f441162a8a1"
     },
     {
       "role": "media-probe",
       "relativePath": "viiper-native-package/ViiperUdeMediaProbe.exe",
       "length": 333824,
-      "sha256": "babdba7c1f57ee3eaf269081ca2fba9ca678caccbfd5b65f698e7220fff46aec"
+      "sha256": "39d45ee6d72f85933d7cf1af476661c5efe8dbc9af6908100651955e8433b2dd"
     },
     {
       "role": "input-probe",
       "relativePath": "viiper-native-package/ViiperUdeInputProbe.exe",
       "length": 312832,
-      "sha256": "2e99217c6c35791e3907241f9b0e2f04827d02a2fb963a5e32feabf7f8bf74f7"
+      "sha256": "70eefeddf46ed52f7cb01e94defb9ff654bf09f68c09271aefe20586046cac63"
     },
     {
       "role": "live-probe-manifest",
       "relativePath": "viiper-native-package/ViiperUdeLiveProbes.manifest.json",
       "length": 311,
-      "sha256": "7cad82582db454dee06e833589bca89cad83e511a86123b892521acc46f01a18"
+      "sha256": "f060d042d4ef2a33f74654fbcf3622162a3ffca53944d2666aaf17a14aac40d2"
     },
     {
       "role": "submission-manifest",
       "relativePath": "viiper-native-package/submission-manifest.json",
       "length": 1253,
-      "sha256": "0c41b229192c5f332cca956f9fcf7b23c92094ca2a15cca31b6b2c94cf0d58fa"
+      "sha256": "f32fdb610ff3d0d1898b00a2bc6c7976887083e7c04acc522f3337864551e907"
     },
     {
       "role": "driver-inf",
@@ -165,19 +165,19 @@
       "role": "driver-sys",
       "relativePath": "viiper-native-package/driver/ViiperUde.sys",
       "length": 72664,
-      "sha256": "a8c8faa37310d328eac59befc3e46f0ff86aec24e69bb55ce501bc0d78fddde0"
+      "sha256": "edc8aa5249d582031056f3c263cb68ff5dc6c2c9fe0378edba724cb52e5a7623"
     },
     {
       "role": "driver-cat",
       "relativePath": "viiper-native-package/driver/ViiperUde.cat",
       "length": 2560,
-      "sha256": "738ed9d1f760f0aa2b009723928d604a673bcf01c251d54505630f15e6528c07"
+      "sha256": "6234f0673edf6f2cf6ed1f95f27229f4fc9f4a2f46b2395ae1ab39a68589d1f0"
     },
     {
       "role": "driver-pdb",
       "relativePath": "viiper-native-package/signed-package/ViiperUde.pdb",
       "length": 954368,
-      "sha256": "95c71ec0f8cc1cd2f171fe1cf9dd5cc2fd79b47157f9f4e8758a43d09173e6cc"
+      "sha256": "efd92c7968445ebcc4de4e6a92a7d722d1622a461800064af066a1e5ee866745"
     },
     {
       "role": "signed-driver-inf",
@@ -189,19 +189,19 @@
       "role": "signed-driver-sys",
       "relativePath": "viiper-native-package/signed-package/ViiperUde.sys",
       "length": 72664,
-      "sha256": "a8c8faa37310d328eac59befc3e46f0ff86aec24e69bb55ce501bc0d78fddde0"
+      "sha256": "edc8aa5249d582031056f3c263cb68ff5dc6c2c9fe0378edba724cb52e5a7623"
     },
     {
       "role": "signed-driver-cat",
       "relativePath": "viiper-native-package/signed-package/ViiperUde.cat",
       "length": 2560,
-      "sha256": "738ed9d1f760f0aa2b009723928d604a673bcf01c251d54505630f15e6528c07"
+      "sha256": "6234f0673edf6f2cf6ed1f95f27229f4fc9f4a2f46b2395ae1ab39a68589d1f0"
     },
     {
       "role": "local-test-package-lock",
       "relativePath": "viiper-native-package/local-test-package.lock.json",
       "length": 2739,
-      "sha256": "fd1dd14a5d78fe9636ea7b47835241d83decd93b9f64284fcb36733a17fd34eb"
+      "sha256": "16e08c31bb1c240a3612a6c4ddc8219b040d0e2dec5773e39f363d045113ab8c"
     },
     {
       "role": "local-test-certificate-evidence",

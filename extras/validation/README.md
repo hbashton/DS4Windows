@@ -36,9 +36,10 @@ Build the source-pinned SDL binary used by the latency gate before creating the
 bundle:
 
 ```powershell
-cmake -S D:\CodexTemp\viiper-cece307-fullclone\_testing\e2e\deps\SDL `
-  -B D:\CodexTemp\viiper-cece307-fullclone\_testing\e2e\deps\SDL\build -A x64
-cmake --build D:\CodexTemp\viiper-cece307-fullclone\_testing\e2e\deps\SDL\build `
+$viiperSourceRoot = '<clean VIIPER checkout at 9481f9dbfde64af99905fa325546e50b5ea03d6e>'
+cmake -S (Join-Path $viiperSourceRoot '_testing\e2e\deps\SDL') `
+  -B (Join-Path $viiperSourceRoot '_testing\e2e\deps\SDL\build') -A x64
+cmake --build (Join-Path $viiperSourceRoot '_testing\e2e\deps\SDL\build') `
   --config Debug
 ```
 
@@ -48,17 +49,17 @@ is no implicit package or network fallback.
 
 ```powershell
 & .\extras\validation\New-ViiperWin11ValidationBundle.ps1 `
-  -ViiperSourceRoot 'D:\CodexTemp\viiper-cece307-fullclone' `
-  -PackageRoot 'D:\CodexTemp\viiper-local-test-35cba66-abi14-r1' `
-  -DS4WindowsSourceRoot 'D:\CodexTemp\ds4w-native-udecx-7270672f' `
+  -ViiperSourceRoot $viiperSourceRoot `
+  -PackageRoot '<exact local-test package for 9481f9dbfde64af99905fa325546e50b5ea03d6e>' `
+  -DS4WindowsSourceRoot '<clean DS4Windows checkout at the committed revision>' `
   -DS4WindowsArtifactRoot '<clean DS4Windows publish directory>' `
   -DS4WindowsExecutableRelativePath 'app\DS4Windows.exe' `
   -DS4WindowsLiveRunnerRelativePath 'runner\DS4Windows.ViiperLiveValidation.exe' `
   -DS4WindowsLiveHarnessRelativePath 'runner\Invoke-ViiperDs4WindowsLaptopValidation.ps1' `
   -OutputDirectory 'D:\CodexTemp\viiper-win11-validation' `
-  -ExpectedViiperSourceRevision '35cba66dc61a9d85240d44d5e9a2519fd471f9db' `
+  -ExpectedViiperSourceRevision '9481f9dbfde64af99905fa325546e50b5ea03d6e' `
   -ExpectedDS4WindowsSourceRevision '<committed DS4Windows revision>' `
-  -ExpectedPackageLockSHA256 'fd1dd14a5d78fe9636ea7b47835241d83decd93b9f64284fcb36733a17fd34eb' `
+  -ExpectedPackageLockSHA256 '16e08c31bb1c240a3612a6c4ddc8219b040d0e2dec5773e39f363d045113ab8c' `
   -GitExecutable 'C:\Program Files\Git\cmd\git.exe' `
   -GoExecutable 'D:\CodexTemp\go1.26.5\go\bin\go.exe'
 ```

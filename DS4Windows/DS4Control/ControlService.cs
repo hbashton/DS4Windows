@@ -752,27 +752,11 @@ namespace DS4Windows
 
         private void DS4Devices_RequestElevation(RequestElevationArgs args)
         {
-            // Launches an elevated child process to re-enable device
-            ProcessStartInfo startInfo =
-                new ProcessStartInfo(Global.exelocation);
-            startInfo.Verb = "runas";
-            startInfo.Arguments = "re-enabledevice " + args.InstanceId;
-            startInfo.UseShellExecute = true;
-
-            try
-            {
-                Process child = Process.Start(startInfo);
-                if (!child.WaitForExit(30000))
-                {
-                    child.Kill();
-                }
-                else
-                {
-                    args.StatusCode = child.ExitCode;
-                }
-                child.Dispose();
-            }
-            catch { }
+            // Never elevate the mutable portable executable. The caller keeps
+            // the default failure status and falls back to non-exclusive input.
+            // A signed, machine-installed maintenance entry owns privileged
+            // device repair in production builds.
+            args.StatusCode = RequestElevationArgs.STATUS_INIT_FAILURE;
         }
 
         public void CheckHidHidePresence(string ExePath = "", string ExeName = "Autoprofile Exe", bool AddExe = true) // Default value for D4W Startup
@@ -1187,11 +1171,12 @@ namespace DS4Windows
         }
 
         /// <summary>
-        /// A VIIPER Sony output is a complete USB/IP HID, so an instance path
-        /// accidentally retained in HidHide's persistent blacklist makes the
-        /// virtual controller healthy and writable inside DS4Windows while it
-        /// is invisible to games. Remove only the exact before/after paths that
-        /// this process just created; physical Sony controllers stay cloaked.
+        /// A VIIPER Sony output is a complete USB composite device, so an
+        /// instance path accidentally retained in HidHide's persistent
+        /// blacklist makes the virtual controller healthy and writable inside
+        /// DS4Windows while it remains invisible to games. Remove only paths
+        /// already correlated to the output's exact PnP lifetime; physical
+        /// Sony controllers stay cloaked.
         /// </summary>
         private void EnsureHidHideDoesNotCloakVirtualSonyOutputs(
             IReadOnlyCollection<string> devicePaths)
@@ -1710,15 +1695,14 @@ namespace DS4Windows
                     AssignInitialDevices();
                     StartupDiag("AssignInitialDevices end");
 
-                    // A force-closed prior development build can leave its
-                    // USB/IP output imported. Remove those ports before HID
-                    // discovery or DS4Windows will ingest its own VIIPER DS4,
-                    // create a second output/UAC endpoint, and recurse.
-                    ViiperUsbipPortManager.DetachStaleLocalViiperPorts();
-                    // Let usbccgp/HID finish publishing removal before the
-                    // first input snapshot; otherwise a detached interface can
-                    // remain enumerable for one final discovery pass.
-                    Thread.Sleep(250);
+                    if (ViiperTransportSettings.GetManagedMode() ==
+                        ViiperTransportMode.Usbip)
+                    {
+                        // USB/IP is an explicit ABBA/dev-validation mode. Only
+                        // that mode may inspect or detach legacy imported ports.
+                        ViiperUsbipPortManager.DetachStaleLocalViiperPorts();
+                        Thread.Sleep(250);
+                    }
 
                     StartupDiag("DS4Devices.findControllers dispatch begin");
                     eventDispatcher.Invoke(() =>
@@ -2441,7 +2425,8 @@ namespace DS4Windows
                 ViiperOutDevice existing =
                     playStationFeatureOutputDevices[index];
                 if (existing?.IsRuntimeConnected == true &&
-                    existing.OutputType == desiredSidecar)
+                    existing.OutputType == desiredSidecar &&
+                    ViiperPnPOwnershipRegistry.GetToken(existing) > 0)
                 {
                     existing.BindPhysicalController(index);
                     return existing;
@@ -2450,7 +2435,7 @@ namespace DS4Windows
                 if (existing != null)
                 {
                     playStationFeatureOutputDevices[index] = null;
-                    existing.Disconnect();
+                    DisconnectOwnedViiperSource(existing);
                 }
 
                 ViiperOutDevice sidecar = new ViiperOutDevice(
@@ -2463,15 +2448,30 @@ namespace DS4Windows
                     StartupDiag(
                         $"PlayStation audio sidecar connect begin index={index} type={desiredSidecar}");
                     sidecar.Connect();
+                    int ownerToken = ViiperPnPOwnershipRegistry.
+                        AttachOrUpdate(sidecar);
+                    if (ownerToken <= 0)
+                    {
+                        throw new InvalidOperationException(
+                            "VIIPER did not return an exact native PnP identity for the audio sidecar.");
+                    }
                     sidecar.BindPhysicalController(index);
                     playStationFeatureOutputDevices[index] = sidecar;
                     StartupDiag(
-                        $"PlayStation audio sidecar ready index={index} type={desiredSidecar} port={sidecar.DirectSpeakerUsbipPort}");
+                        $"PlayStation audio sidecar ready index={index} type={desiredSidecar} ownerToken={ownerToken}");
                     return sidecar;
                 }
                 catch (Exception ex)
                 {
-                    sidecar.Disconnect();
+                    try
+                    {
+                        DisconnectOwnedViiperSource(sidecar);
+                    }
+                    catch (Exception disconnectException)
+                    {
+                        StartupDiag(
+                            $"PlayStation audio sidecar rollback disconnect failed index={index} {disconnectException.GetType().Name}: {disconnectException.Message}");
+                    }
                     AppLogger.LogToGui(
                         $"Could not create the {desiredSidecar.ToDisplayName()} audio interface for controller #{index + 1}: {ex.Message}",
                         true);
@@ -2499,7 +2499,20 @@ namespace DS4Windows
             {
                 StartupDiag(
                     $"PlayStation audio sidecar disconnect index={index} type={sidecar.OutputType}");
-                sidecar.Disconnect();
+                DisconnectOwnedViiperSource(sidecar);
+            }
+        }
+
+        private static void DisconnectOwnedViiperSource(
+            ViiperOutDevice source)
+        {
+            try
+            {
+                source?.Disconnect();
+            }
+            finally
+            {
+                ViiperPnPOwnershipRegistry.Detach(source);
             }
         }
 
@@ -2685,7 +2698,8 @@ namespace DS4Windows
                 Global.store.audioHapticsSettings[ind],
                 playStationFeatureOutputType,
                 DualSenseAudioSpeakerEndpointId[ind],
-                playStationFeatureOutput?.DirectSpeakerUsbipPort ?? -1);
+                ViiperPnPOwnershipRegistry.GetToken(
+                    playStationFeatureOutput));
 
             if (!startUp)
             {
@@ -3285,7 +3299,7 @@ namespace DS4Windows
             // The companion pointer is published before routing becomes active
             // and routing is disabled before the pointer is withdrawn. This
             // keeps the report path valid throughout VIIPER's comparatively
-            // slow USB/IP plug and unplug operations.
+            // slow virtual-device PnP plug and unplug operations.
             if (Volatile.Read(ref gameBarCompatibilityRoutingActive[index]) == 1)
             {
                 OutputDevice compatibilityOutput = Volatile.Read(
@@ -3410,7 +3424,7 @@ namespace DS4Windows
                     ref gameBarCompatibilityOutputDevices[index], compatibilityOutput);
                 // Commit routing only after the companion is fully connected
                 // and published. The native output continues receiving reports
-                // during the whole USB/IP creation interval.
+                // during the whole virtual-device creation interval.
                 Interlocked.Exchange(ref gameBarCompatibilityRoutingActive[index], 1);
                 try
                 {

@@ -1,0 +1,21 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+  <PropertyGroup>
+    <OutputType>Bundle</OutputType>
+    <Platform>x64</Platform>
+    <BundleVersion Condition="'$(BundleVersion)' == ''">5.0.2.0</BundleVersion>
+    <DisplayVersion Condition="'$(DisplayVersion)' == ''">$(BundleVersion)</DisplayVersion>
+    <OutputName>DS4Windows_$(DisplayVersion)_Setup_x64</OutputName>
+    <MsiPath Condition="'$(MsiPath)' == ''">$(MSBuildThisFileDirectory)..\DS4Windows.Package\bin\x64\Release\DS4Windows_$(BundleVersion)_x64.msi</MsiPath>
+    <BootstrapperRoot Condition="'$(BootstrapperRoot)' == ''">$(MSBuildThisFileDirectory)..\DS4Windows.Bootstrapper\bin\x64\Release\net48\win-x64</BootstrapperRoot>
+    <SetupActionsPath Condition="'$(SetupActionsPath)' == ''">$(MSBuildThisFileDirectory)..\DS4Windows.SetupActions\bin\x64\Release\net48\DS4Windows.SetupActions.exe</SetupActionsPath>
+    <RepositoryRoot Condition="'$(RepositoryRoot)' == ''">$(MSBuildThisFileDirectory)..\..</RepositoryRoot>
+    <DefineConstants>BundleVersion=$(BundleVersion);DisplayVersion=$(DisplayVersion);MsiPath=$(MsiPath);BootstrapperRoot=$(BootstrapperRoot);SetupActionsPath=$(SetupActionsPath);SetupActionsHash=$(SetupActionsHash);RepositoryRoot=$(RepositoryRoot)</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Util.wixext" Version="5.0.2" />
+  </ItemGroup>
+  <Target Name="RequireContentAddressedSetupHelper" BeforeTargets="Build">
+    <Error Condition="'$(SetupActionsHash)' == '' Or !$([System.Text.RegularExpressions.Regex]::IsMatch($(SetupActionsHash), '^[0-9A-Fa-f]{64}$'))"
+           Text="A 64-character SetupActionsHash is required; build this bundle through installer/build-installer.ps1." />
+  </Target>
+</Project>

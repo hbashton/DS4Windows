@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "sourceRevision": "06ae1ba5a52f2bbcf7de74f9d46f46bb7880870c",
+  "implementation": "VIIPER registered controller handlers and native UDE descriptors",
+  "registrations": [
+    {
+      "type": "xbox360",
+      "persona": "xbox360",
+      "defaultVid": "0x045e",
+      "defaultPid": "0x028e",
+      "ds4WindowsPid": "0x028e",
+      "interfaceProfile": "xusb-composite",
+      "streamProtocol": "fixed"
+    },
+    {
+      "type": "dualshock4",
+      "persona": "dualshock4",
+      "defaultVid": "0x054c",
+      "defaultPid": "0x09cc",
+      "ds4WindowsPid": "0x05c4",
+      "interfaceProfile": "hid-audio-duplex",
+      "streamProtocol": "fixed"
+    },
+    {
+      "type": "dualshock4audioduplexv3",
+      "persona": "dualshock4",
+      "defaultVid": "0x054c",
+      "defaultPid": "0x09cc",
+      "ds4WindowsPid": "0x05c4",
+      "interfaceProfile": "hid-audio-duplex",
+      "streamProtocol": "framed-v3"
+    },
+    {
+      "type": "dualshock4audioonlyduplexv3",
+      "persona": "dualshock4",
+      "defaultVid": "0x054c",
+      "defaultPid": "0x09cc",
+      "ds4WindowsPid": "0x05c4",
+      "interfaceProfile": "audio-duplex-only",
+      "streamProtocol": "framed-v3"
+    },
+    {
+      "type": "dualsensecombinedaudioduplexv5",
+      "persona": "dualsense",
+      "defaultVid": "0x054c",
+      "defaultPid": "0x0ce6",
+      "ds4WindowsPid": "0x0ce6",
+      "interfaceProfile": "hid-audio-duplex",
+      "streamProtocol": "framed-v5"
+    },
+    {
+      "type": "dualsenseaudioonlyduplexv5",
+      "persona": "dualsense",
+      "defaultVid": "0x054c",
+      "defaultPid": "0x0ce6",
+      "ds4WindowsPid": "0x0ce6",
+      "interfaceProfile": "audio-duplex-only",
+      "streamProtocol": "framed-v5"
+    },
+    {
+      "type": "dualsensegamepadv5",
+      "persona": "dualsense",
+      "defaultVid": "0x054c",
+      "defaultPid": "0x0ce6",
+      "ds4WindowsPid": "0x0ce6",
+      "interfaceProfile": "hid-gamepad-only",
+      "streamProtocol": "framed-v5"
+    },
+    {
+      "type": "dualsenseedgecombinedaudioduplexv5",
+      "persona": "dualsense-edge",
+      "defaultVid": "0x054c",
+      "defaultPid": "0x0df2",
+      "ds4WindowsPid": "0x0df2",
+      "interfaceProfile": "hid-audio-duplex",
+      "streamProtocol": "framed-v5"
+    },
+    {
+      "type": "dualsenseedgegamepadv5",
+      "persona": "dualsense-edge",
+      "defaultVid": "0x054c",
+      "defaultPid": "0x0df2",
+      "ds4WindowsPid": "0x0df2",
+      "interfaceProfile": "hid-gamepad-only",
+      "streamProtocol": "framed-v5"
+    },
+    {
+      "type": "ns2pro",
+      "persona": "switch2-pro",
+      "defaultVid": "0x057e",
+      "defaultPid": "0x2069",
+      "ds4WindowsPid": "0x2069",
+      "interfaceProfile": "hid-vendor-bulk",
+      "streamProtocol": "fixed"
+    }
+  ]
+}

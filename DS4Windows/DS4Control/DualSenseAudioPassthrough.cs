@@ -53,6 +53,7 @@ namespace DS4Windows
         private WaveFormat captureFormat;
         private string captureEndpointId = string.Empty;
         private ControllerAudioEndpointKind captureEndpointKind;
+        private int captureOwnerToken = -1;
         private bool disposed;
 
         public ControllerRuntimeLaneState GetStatus(int slot)
@@ -90,6 +91,9 @@ namespace DS4Windows
             {
                 return;
             }
+
+            int virtualOwnerToken = ViiperPnPOwnershipRegistry.GetToken(
+                directSpeakerSource);
 
             lock (syncRoot)
             {
@@ -140,8 +144,11 @@ namespace DS4Windows
                             return;
                         }
 
+                        Global.TryInspectViiperPnPTopology(
+                            dualSenseDevice?.HidDevice?.DevicePath,
+                            out ViiperPnPTopologyIdentity physicalTopology);
                         MMDevice endpoint = FindControllerEndpoint(slot,
-                            requestedSpeakerEndpointId);
+                            requestedSpeakerEndpointId, physicalTopology);
                         if (endpoint == null)
                         {
                             AppLogger.LogToGui(
@@ -164,7 +171,8 @@ namespace DS4Windows
                             slots[slot].SpeakerVolume = speakerVolume;
                             EnsureCaptureStarted(requestedCaptureEndpointId,
                                 endpoint.ID,
-                                GetEndpointKind(emulatedControllerType));
+                                GetEndpointKind(emulatedControllerType),
+                                virtualOwnerToken);
                             return;
                         }
                         else
@@ -192,7 +200,8 @@ namespace DS4Windows
                                 provider, outputFormat, speakerVolume);
                             EnsureCaptureStarted(requestedCaptureEndpointId,
                                 endpoint.ID,
-                                GetEndpointKind(emulatedControllerType));
+                                GetEndpointKind(emulatedControllerType),
+                                virtualOwnerToken);
                             AppLogger.LogToGui(
                                 $"DualSense audio passthrough started for controller {slot + 1}: {endpoint.FriendlyName}",
                                 false);
@@ -336,12 +345,15 @@ namespace DS4Windows
         {
             requestedCaptureEndpointId ??= string.Empty;
             ControllerAudioEndpointKind endpointKind = GetEndpointKind(emulatedControllerType);
+            int virtualOwnerToken = ViiperPnPOwnershipRegistry.GetToken(
+                directSpeakerSource);
             DirectSpeakerRouteDecision initialRoute =
                 EvaluateDirectSpeakerRoute(requestedCaptureEndpointId,
                     endpointKind, directSpeakerSource);
             if (initialRoute == DirectSpeakerRouteDecision.Loopback)
             {
                 directSpeakerSource = null;
+                virtualOwnerToken = -1;
             }
 
             int generation;
@@ -359,7 +371,7 @@ namespace DS4Windows
                     if (bluetoothSlots[slot]?.Matches(device, speakerVolume,
                         speakerCompression, speakerBassBoost,
                         requestedCaptureEndpointId, endpointKind,
-                        directSpeakerSource) == true)
+                        directSpeakerSource, virtualOwnerToken) == true)
                     {
                         return;
                     }
@@ -383,13 +395,15 @@ namespace DS4Windows
 
             _ = Task.Run(() => StartBluetoothWithRetry(slot, device, speakerVolume,
                 speakerCompression, speakerBassBoost, requestedCaptureEndpointId,
-                endpointKind, directSpeakerSource, generation));
+                endpointKind, directSpeakerSource, virtualOwnerToken,
+                generation));
         }
 
         private void StartBluetoothWithRetry(int slot, DualSenseDevice device, byte speakerVolume,
             DualSenseSpeakerCompression speakerCompression, byte speakerBassBoost,
             string requestedCaptureEndpointId, ControllerAudioEndpointKind endpointKind,
-            ViiperOutDevice directSpeakerSource, int generation)
+            ViiperOutDevice directSpeakerSource, int virtualOwnerToken,
+            int generation)
         {
             Exception lastError = null;
             for (int attempt = 0; attempt < BluetoothStartRetryAttempts;
@@ -398,7 +412,8 @@ namespace DS4Windows
                 if (TryStartBluetoothOnce(slot, device, speakerVolume,
                     speakerCompression, speakerBassBoost,
                     requestedCaptureEndpointId, endpointKind,
-                    directSpeakerSource, generation, out lastError))
+                    directSpeakerSource, virtualOwnerToken, generation,
+                    out lastError))
                 {
                     return;
                 }
@@ -436,7 +451,8 @@ namespace DS4Windows
             DualSenseSpeakerCompression speakerCompression,
             byte speakerBassBoost, string requestedCaptureEndpointId,
             ControllerAudioEndpointKind endpointKind,
-            ViiperOutDevice directSpeakerSource, int generation,
+            ViiperOutDevice directSpeakerSource, int virtualOwnerToken,
+            int generation,
             out Exception lastError)
         {
             lastError = null;
@@ -456,6 +472,8 @@ namespace DS4Windows
                 DirectSpeakerRouteDecision route =
                     EvaluateDirectSpeakerRoute(requestedCaptureEndpointId,
                         endpointKind, directSpeakerSource);
+                virtualOwnerToken = ViiperPnPOwnershipRegistry.GetToken(
+                    directSpeakerSource);
 
                 ViiperOutDevice activeDirectSpeakerSource =
                     route == DirectSpeakerRouteDecision.Direct ?
@@ -463,7 +481,7 @@ namespace DS4Windows
                 var bluetoothPlayback = new DualSenseBluetoothSpeakerPassthrough(device,
                     speakerVolume, speakerCompression, speakerBassBoost,
                     requestedCaptureEndpointId, endpointKind,
-                    activeDirectSpeakerSource);
+                    activeDirectSpeakerSource, virtualOwnerToken);
                 try
                 {
                     bluetoothPlayback.Start();
@@ -516,12 +534,14 @@ namespace DS4Windows
         }
 
         private void EnsureCaptureStarted(string requestedCaptureEndpointId,
-            string speakerEndpointId, ControllerAudioEndpointKind endpointKind)
+            string speakerEndpointId, ControllerAudioEndpointKind endpointKind,
+            int virtualOwnerToken)
         {
             requestedCaptureEndpointId ??= string.Empty;
             speakerEndpointId ??= string.Empty;
 
             if (capture != null && captureEndpointKind == endpointKind &&
+                captureOwnerToken == virtualOwnerToken &&
                 string.Equals(captureEndpointId, requestedCaptureEndpointId, StringComparison.Ordinal))
             {
                 return;
@@ -536,6 +556,7 @@ namespace DS4Windows
                     automaticSlot);
                 captureEndpointId = requestedCaptureEndpointId;
                 captureEndpointKind = endpointKind;
+                captureOwnerToken = virtualOwnerToken;
                 captureFormat = capture.WaveFormat;
                 capture.DataAvailable += Capture_DataAvailable;
                 capture.RecordingStopped += Capture_RecordingStopped;
@@ -552,6 +573,7 @@ namespace DS4Windows
                 capture = new ProcessLoopbackWaveCapture(processId);
                 captureEndpointId = requestedCaptureEndpointId;
                 captureEndpointKind = endpointKind;
+                captureOwnerToken = virtualOwnerToken;
                 captureFormat = capture.WaveFormat;
                 capture.DataAvailable += Capture_DataAvailable;
                 capture.RecordingStopped += Capture_RecordingStopped;
@@ -570,7 +592,7 @@ namespace DS4Windows
             }
 
             MMDevice sourceEndpoint = FindCaptureEndpoint(requestedCaptureEndpointId,
-                speakerEndpointId, endpointKind);
+                speakerEndpointId, endpointKind, virtualOwnerToken);
             bool expectsControllerEndpoint =
                 string.Equals(requestedCaptureEndpointId,
                     AutoDetectGameAudioEndpointId, StringComparison.Ordinal) ||
@@ -593,6 +615,7 @@ namespace DS4Windows
             capture = sourceEndpoint != null ? new WasapiLoopbackCapture(sourceEndpoint) : new WasapiLoopbackCapture();
             captureEndpointId = requestedCaptureEndpointId;
             captureEndpointKind = endpointKind;
+            captureOwnerToken = virtualOwnerToken;
             captureFormat = capture.WaveFormat;
             capture.DataAvailable += Capture_DataAvailable;
             capture.RecordingStopped += Capture_RecordingStopped;
@@ -609,6 +632,7 @@ namespace DS4Windows
             captureFormat = null;
             captureEndpointId = string.Empty;
             captureEndpointKind = ControllerAudioEndpointKind.Any;
+            captureOwnerToken = -1;
 
             if (oldCapture == null)
             {
@@ -657,7 +681,9 @@ namespace DS4Windows
             }
         }
 
-        private MMDevice FindControllerEndpoint(int slot, string requestedSpeakerEndpointId)
+        private MMDevice FindControllerEndpoint(int slot,
+            string requestedSpeakerEndpointId,
+            ViiperPnPTopologyIdentity physicalControllerTopology)
         {
             HashSet<string> usedIds = slots
                 .Where((item, index) => item != null && index != slot)
@@ -670,7 +696,10 @@ namespace DS4Windows
                 try
                 {
                     MMDevice requested = enumerator.GetDevice(requestedSpeakerEndpointId);
-                    if (requested.State == DeviceState.Active && !usedIds.Contains(requested.ID))
+                    if (requested.State == DeviceState.Active &&
+                        !usedIds.Contains(requested.ID) &&
+                        EndpointMatchesUsbDevice(requested,
+                            physicalControllerTopology))
                     {
                         return requested;
                     }
@@ -681,9 +710,14 @@ namespace DS4Windows
                 }
             }
 
-            MMDevice autoEndpoint = enumerator
+            List<MMDevice> matchingEndpoints = enumerator
                 .EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active)
-                .FirstOrDefault(device => !usedIds.Contains(device.ID) && IsDualSenseEndpoint(device));
+                .Where(device => !usedIds.Contains(device.ID) &&
+                    IsDualSenseEndpoint(device) &&
+                    EndpointMatchesUsbDevice(device,
+                        physicalControllerTopology)).ToList();
+            MMDevice autoEndpoint = matchingEndpoints.Count == 1 ?
+                matchingEndpoints[0] : null;
 
             if (autoEndpoint == null)
             {
@@ -702,8 +736,10 @@ namespace DS4Windows
             return autoEndpoint;
         }
 
-        private static MMDevice FindCaptureEndpoint(string endpointId, string speakerEndpointId,
-            ControllerAudioEndpointKind endpointKind)
+        private static MMDevice FindCaptureEndpoint(string endpointId,
+            string speakerEndpointId,
+            ControllerAudioEndpointKind endpointKind,
+            int virtualOwnerToken)
         {
             bool useSystemDefault = string.Equals(endpointId,
                 DefaultSystemAudioEndpointId, StringComparison.Ordinal) ||
@@ -721,9 +757,17 @@ namespace DS4Windows
                     string.Equals(endpointId, AutoDetectGameAudioEndpointId,
                         StringComparison.Ordinal);
                 MMDevice endpoint = autoDetect ?
-                    FindActiveGameAudioEndpoint(enumerator, null, endpointKind) :
+                    FindActiveGameAudioEndpoint(enumerator, null, endpointKind,
+                        virtualOwnerToken) :
                     enumerator.GetDevice(endpointId);
                 if (endpoint?.State != DeviceState.Active)
+                {
+                    return null;
+                }
+
+                if (IsControllerAudioEndpoint(endpoint) &&
+                    !EndpointMatchesOwnerToken(endpoint,
+                        virtualOwnerToken))
                 {
                     return null;
                 }
@@ -834,13 +878,13 @@ namespace DS4Windows
         internal static MMDevice FindActiveGameAudioEndpoint(MMDeviceEnumerator enumerator,
             string previousEndpointId = null,
             ControllerAudioEndpointKind preferredKind = ControllerAudioEndpointKind.Any,
-            int preferredUsbipPort = -1,
+            int preferredOwnerToken = -1,
             bool requireActive = true)
         {
             DeviceState endpointState = requireActive ? DeviceState.Active : DeviceState.All;
-            IEnumerable<MMDevice> endpoints = enumerator
+            List<MMDevice> endpoints = enumerator
                 .EnumerateAudioEndPoints(DataFlow.Render, endpointState)
-                .Where(IsControllerAudioEndpoint);
+                .Where(IsControllerAudioEndpoint).ToList();
 
             if (preferredKind != ControllerAudioEndpointKind.Any)
             {
@@ -848,38 +892,85 @@ namespace DS4Windows
                 {
                     ControllerAudioEndpointKind kind = ClassifyEndpoint(endpoint);
                     return kind == preferredKind || kind == ControllerAudioEndpointKind.Any;
-                });
+                }).ToList();
             }
 
-            return endpoints
-                .OrderByDescending(endpoint =>
-                    EndpointMatchesUsbipPort(endpoint, preferredUsbipPort))
-                .ThenByDescending(endpoint => EndpointScore(endpoint,
-                    preferredKind, previousEndpointId))
-                .FirstOrDefault();
+            if (preferredOwnerToken > 0)
+            {
+                List<MMDevice> ownedEndpoints = endpoints.Where(endpoint =>
+                    EndpointMatchesOwnerToken(endpoint,
+                        preferredOwnerToken)).ToList();
+                // The source contract binds to controller root + UdeCx port,
+                // not to a Windows MMDevice generation. During endpoint
+                // replacement both generations can briefly share that anchor;
+                // do not let a stale saved endpoint ID choose between them.
+                return SelectUnambiguousControllerEndpoint(ownedEndpoints,
+                    null, null);
+            }
+
+            return SelectUnambiguousControllerEndpoint(endpoints,
+                endpoint => string.Equals(endpoint.ID, previousEndpointId,
+                    StringComparison.Ordinal),
+                endpoint => !string.IsNullOrEmpty(previousEndpointId) &&
+                    EndpointReplaces(endpoint, previousEndpointId));
         }
 
-        private static bool EndpointMatchesUsbipPort(MMDevice endpoint,
-            int preferredUsbipPort)
+        // A concrete endpoint ID is exact even when multiple physical and
+        // virtual Sony devices coexist. A replacement-history match is safe
+        // only when exactly one candidate claims it. With no exact evidence,
+        // retain the historical single-controller behavior but fail closed as
+        // soon as the machine has an ambiguous second Sony endpoint.
+        internal static T SelectUnambiguousControllerEndpoint<T>(
+            IReadOnlyList<T> endpoints, Func<T, bool> exactIdMatch,
+            Func<T, bool> replacementMatch) where T : class
         {
-            if (preferredUsbipPort < 0 || endpoint == null)
+            if (endpoints == null || endpoints.Count == 0)
+            {
+                return null;
+            }
+
+            List<T> exact = exactIdMatch == null ? new List<T>() :
+                endpoints.Where(endpoint => endpoint != null &&
+                    exactIdMatch(endpoint)).ToList();
+            if (exact.Count != 0)
+            {
+                return exact.Count == 1 ? exact[0] : null;
+            }
+
+            List<T> replacements = replacementMatch == null ?
+                new List<T>() : endpoints.Where(endpoint =>
+                    endpoint != null && replacementMatch(endpoint)).ToList();
+            if (replacements.Count != 0)
+            {
+                return replacements.Count == 1 ? replacements[0] : null;
+            }
+
+            // Never use a missing (-1) owner token as "any Sony endpoint".
+            return endpoints.Count == 1 ? endpoints[0] : null;
+        }
+
+        internal static bool EndpointMatchesOwnerToken(MMDevice endpoint,
+            int preferredOwnerToken)
+        {
+            if (preferredOwnerToken <= 0 || endpoint == null)
             {
                 return false;
             }
 
-            string interfacePath = GetEndpointProperty(endpoint,
-                PropertyKeys.PKEY_Device_InterfaceKey);
-            int pathStart = interfacePath.IndexOf(@"\\?\",
-                StringComparison.Ordinal);
-            if (pathStart > 0)
-            {
-                interfacePath = interfacePath.Substring(pathStart);
-            }
+            return TryGetEndpointPnPTopology(endpoint, out _,
+                    out ViiperPnPTopologyIdentity topology) &&
+                topology.IsResolved &&
+                ViiperPnPOwnershipRegistry.Matches(preferredOwnerToken,
+                    topology);
+        }
 
-            return !string.IsNullOrEmpty(interfacePath) &&
-                Global.TryResolveUsbIpWin2Device(interfacePath,
-                    out bool usbIpAncestor, out int endpointPort) &&
-                usbIpAncestor && endpointPort == preferredUsbipPort;
+        private static bool EndpointMatchesUsbDevice(MMDevice endpoint,
+            ViiperPnPTopologyIdentity expectedUsbDevice)
+        {
+            return expectedUsbDevice.IsUsbDeviceResolved &&
+                TryGetEndpointPnPTopology(endpoint, out _,
+                    out ViiperPnPTopologyIdentity endpointTopology) &&
+                expectedUsbDevice.IsSameUsbDevice(endpointTopology);
         }
 
         internal static ControllerAudioEndpointKind GetEndpointKind(OutContType outputType)
@@ -945,7 +1036,7 @@ namespace DS4Windows
             if (automatic)
             {
                 return directStreamActive ? DirectSpeakerRouteDecision.Direct :
-                    DirectSpeakerRouteDecision.Loopback;
+                    DirectSpeakerRouteDecision.Pending;
             }
 
             return explicitEndpointOwnership switch
@@ -953,10 +1044,10 @@ namespace DS4Windows
                 DirectSpeakerEndpointOwnership.Owned when directStreamActive =>
                     DirectSpeakerRouteDecision.Direct,
                 DirectSpeakerEndpointOwnership.Owned =>
-                    DirectSpeakerRouteDecision.Loopback,
+                    DirectSpeakerRouteDecision.Pending,
                 DirectSpeakerEndpointOwnership.Unowned =>
                     DirectSpeakerRouteDecision.Loopback,
-                _ => DirectSpeakerRouteDecision.Loopback,
+                _ => DirectSpeakerRouteDecision.Pending,
             };
         }
 
@@ -1008,47 +1099,44 @@ namespace DS4Windows
                             StringComparison.Ordinal));
                     if (exactEndpoint != null)
                     {
-                        if (IsControllerEndpointSelection(
-                                ClassifyEndpoint(exactEndpoint), endpointKind))
-                        {
-                            return DirectSpeakerEndpointOwnership.Owned;
-                        }
-
                         return ResolveEndpointOwnership(exactEndpoint,
                             endpointKind, directSpeakerSource);
                     }
 
-                    DirectSpeakerEndpointOwnership replacementResult =
-                        DirectSpeakerEndpointOwnership.Unresolved;
+                    int ownedReplacementCount = 0;
+                    bool hasUnownedReplacement = false;
                     foreach (MMDevice candidate in activeEndpoints.Where(
                         endpoint => EndpointReplaces(endpoint, endpointId)))
                     {
-                        if (IsControllerEndpointSelection(
-                                ClassifyEndpoint(candidate), endpointKind))
-                        {
-                            return DirectSpeakerEndpointOwnership.Owned;
-                        }
-
                         DirectSpeakerEndpointOwnership candidateResult =
                             ResolveEndpointOwnership(candidate, endpointKind,
                                 directSpeakerSource);
                         if (candidateResult ==
                             DirectSpeakerEndpointOwnership.Owned)
                         {
-                            return candidateResult;
+                            ownedReplacementCount++;
                         }
 
-                        if (candidateResult ==
+                        else if (candidateResult ==
                             DirectSpeakerEndpointOwnership.Unowned)
                         {
-                            replacementResult = candidateResult;
+                            hasUnownedReplacement = true;
                         }
                     }
 
-                    if (replacementResult !=
-                        DirectSpeakerEndpointOwnership.Unresolved)
+                    if (ownedReplacementCount == 1)
                     {
-                        return replacementResult;
+                        return DirectSpeakerEndpointOwnership.Owned;
+                    }
+
+                    if (ownedReplacementCount > 1)
+                    {
+                        return DirectSpeakerEndpointOwnership.Unresolved;
+                    }
+
+                    if (hasUnownedReplacement)
+                    {
+                        return DirectSpeakerEndpointOwnership.Unowned;
                     }
                 }
                 finally
@@ -1063,14 +1151,7 @@ namespace DS4Windows
                 {
                     using MMDevice savedEndpoint =
                         enumerator.GetDevice(endpointId);
-                    if (savedEndpoint != null &&
-                        IsControllerEndpointSelection(
-                            ClassifyEndpoint(savedEndpoint), endpointKind))
-                    {
-                        return DirectSpeakerEndpointOwnership.Owned;
-                    }
-
-                    if (savedEndpoint?.State == DeviceState.Active)
+                    if (savedEndpoint != null)
                     {
                         return ResolveEndpointOwnership(savedEndpoint,
                             endpointKind, directSpeakerSource);
@@ -1113,34 +1194,25 @@ namespace DS4Windows
             ViiperOutDevice directSpeakerSource)
         {
             bool identityMatches = EndpointKindMatches(endpoint, endpointKind);
-            string interfacePath = GetEndpointProperty(endpoint,
-                PropertyKeys.PKEY_Device_InterfaceKey);
-            int pathStart = interfacePath.IndexOf(@"\\?\",
-                StringComparison.Ordinal);
-            if (pathStart > 0)
-            {
-                interfacePath = interfacePath.Substring(pathStart);
-            }
-
-            bool interfacePathAvailable =
-                !string.IsNullOrEmpty(interfacePath);
-            int endpointPort = -1;
-            bool usbIpAncestor = false;
-            bool usbIpQueryResolved = interfacePathAvailable &&
-                Global.TryResolveUsbIpWin2Device(interfacePath,
-                    out usbIpAncestor, out endpointPort);
+            bool topologyAvailable = TryGetEndpointPnPTopology(endpoint,
+                out bool ancestryComplete,
+                out ViiperPnPTopologyIdentity topology) &&
+                topology.IsResolved;
+            int ownerToken = ViiperPnPOwnershipRegistry.GetToken(
+                directSpeakerSource);
+            bool exactOwnerMatch = topologyAvailable &&
+                ViiperPnPOwnershipRegistry.Matches(ownerToken, topology);
 
             return ClassifyDirectSpeakerEndpointOwnership(
                 endpoint?.State == DeviceState.Active, identityMatches,
-                interfacePathAvailable, usbIpQueryResolved, usbIpAncestor,
-                endpointPort, directSpeakerSource?.DirectSpeakerUsbipPort ?? -1);
+                ownerToken > 0 && ancestryComplete && topologyAvailable,
+                exactOwnerMatch);
         }
 
         internal static DirectSpeakerEndpointOwnership
             ClassifyDirectSpeakerEndpointOwnership(bool endpointActive,
-            bool controllerIdentityMatches, bool interfacePathAvailable,
-            bool usbIpQueryResolved, bool usbIpAncestor, int endpointPort,
-            int sourcePort)
+            bool controllerIdentityMatches, bool pnpIdentityResolved,
+            bool exactOwnerMatch)
         {
             if (!endpointActive)
             {
@@ -1152,27 +1224,12 @@ namespace DS4Windows
                 return DirectSpeakerEndpointOwnership.Unowned;
             }
 
-            if (!interfacePathAvailable)
+            if (!pnpIdentityResolved)
             {
                 return DirectSpeakerEndpointOwnership.Unresolved;
             }
 
-            if (!usbIpQueryResolved)
-            {
-                return DirectSpeakerEndpointOwnership.Unresolved;
-            }
-
-            if (!usbIpAncestor)
-            {
-                return DirectSpeakerEndpointOwnership.Unowned;
-            }
-
-            if (endpointPort < 0 || sourcePort < 0)
-            {
-                return DirectSpeakerEndpointOwnership.Unresolved;
-            }
-
-            return endpointPort == sourcePort ?
+            return exactOwnerMatch ?
                 DirectSpeakerEndpointOwnership.Owned :
                 DirectSpeakerEndpointOwnership.Unowned;
         }
@@ -1264,6 +1321,70 @@ namespace DS4Windows
             }
         }
 
+        private static bool TryGetEndpointPnPTopology(MMDevice endpoint,
+            out bool ancestryComplete,
+            out ViiperPnPTopologyIdentity topology)
+        {
+            ancestryComplete = false;
+            topology = default;
+            if (endpoint == null)
+            {
+                return false;
+            }
+
+            string[] candidates =
+            {
+                GetEndpointProperty(endpoint,
+                    PropertyKeys.PKEY_Device_InterfaceKey),
+                GetEndpointProperty(endpoint,
+                    PropertyKeys.PKEY_Device_ControllerDeviceId),
+                GetEndpointProperty(endpoint,
+                    PropertyKeys.PKEY_Device_InstanceId),
+            };
+
+            foreach (string rawCandidate in candidates)
+            {
+                string candidate = NormalizeEndpointPnPPath(rawCandidate);
+                if (string.IsNullOrEmpty(candidate))
+                {
+                    continue;
+                }
+
+                if (!Global.TryInspectViiperPnPTopology(candidate,
+                        out ViiperPnPTopologyIdentity inspected))
+                {
+                    continue;
+                }
+
+                ancestryComplete = true;
+                if (inspected.IsUsbDeviceResolved)
+                {
+                    topology = inspected;
+                    return true;
+                }
+            }
+
+            return ancestryComplete;
+        }
+
+        private static string NormalizeEndpointPnPPath(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return string.Empty;
+            }
+
+            string result = value.Trim().TrimEnd('\0');
+            int pathStart = result.IndexOf(@"\\?\",
+                StringComparison.Ordinal);
+            if (pathStart > 0)
+            {
+                result = result.Substring(pathStart);
+            }
+
+            return result;
+        }
+
         private static void AddEndpointProperty(List<string> values, MMDevice endpoint,
             PropertyKey propertyKey)
         {
@@ -1279,36 +1400,6 @@ namespace DS4Windows
             {
                 // Endpoint property availability differs by Windows audio driver.
             }
-        }
-
-        private static int EndpointScore(MMDevice endpoint,
-            ControllerAudioEndpointKind preferredKind, string previousEndpointId)
-        {
-            int score = 0;
-            ControllerAudioEndpointKind actualKind = ClassifyEndpoint(endpoint);
-            if (preferredKind != ControllerAudioEndpointKind.Any && actualKind == preferredKind)
-            {
-                score += 100;
-            }
-            else if (actualKind != ControllerAudioEndpointKind.Any)
-            {
-                score += 20;
-            }
-
-            string identity = GetEndpointIdentity(endpoint);
-            if (identity.IndexOf("VIIPER", StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                score += 10;
-            }
-
-            if (!string.IsNullOrEmpty(previousEndpointId) &&
-                (string.Equals(endpoint.ID, previousEndpointId, StringComparison.Ordinal) ||
-                EndpointReplaces(endpoint, previousEndpointId)))
-            {
-                score += 1000;
-            }
-
-            return score;
         }
 
         private static bool EndpointReplaces(MMDevice endpoint, string previousEndpointId)

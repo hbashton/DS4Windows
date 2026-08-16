@@ -89,6 +89,13 @@ namespace DS4WindowsTests
   <idleDisconnectTimeout>0</idleDisconnectTimeout>
   <outputDataToDS4>True</outputDataToDS4>
   <Color>0,0,255</Color>
+  <LeftStickDriftXAxis>0</LeftStickDriftXAxis>
+  <LeftStickDriftYAxis>0</LeftStickDriftYAxis>
+  <RightStickDriftXAxis>0</RightStickDriftXAxis>
+  <RightStickDriftYAxis>0</RightStickDriftYAxis>
+  <DebouncingMs>0</DebouncingMs>
+  <InverseRumbleMotors>false</InverseRumbleMotors>
+  <UseDs3PitchRollSim>false</UseDs3PitchRollSim>
   <RumbleBoost>100</RumbleBoost>
   <RumbleAutostopTime>0</RumbleAutostopTime>
   <LightbarMode>DS4Win</LightbarMode>
@@ -187,6 +194,10 @@ namespace DS4WindowsTests
   <MouseAcceleration>True</MouseAcceleration>
   <ButtonMouseVerticalScale>100</ButtonMouseVerticalScale>
   <LaunchProgram />
+  <GameBarControllerCompatibility>False</GameBarControllerCompatibility>
+  <DualSenseMuteButtonLightEnabled>False</DualSenseMuteButtonLightEnabled>
+  <DualSenseMuteOnProfileName />
+  <DualSenseMuteOffProfileName />
   <DinputOnly>False</DinputOnly>
   <StartTouchpadOff>False</StartTouchpadOff>
   <TouchpadOutputMode>Mouse</TouchpadOutputMode>
@@ -293,6 +304,21 @@ namespace DS4WindowsTests
       <EnableGenericRumbleRescale>False</EnableGenericRumbleRescale>
       <HapticPowerLevel>0</HapticPowerLevel>
     </RumbleSettings>
+    <AudioSettings>
+      <EnableSpeakerOutput>false</EnableSpeakerOutput>
+      <HeadsetOnlyAudio>false</HeadsetOnlyAudio>
+      <SpeakerVolume>128</SpeakerVolume>
+      <SpeakerCompression>0</SpeakerCompression>
+      <SpeakerBassBoost>0</SpeakerBassBoost>
+      <HeadphoneVolume>128</HeadphoneVolume>
+      <MicrophoneVolume>128</MicrophoneVolume>
+      <MicrophoneNoiseSuppression>1</MicrophoneNoiseSuppression>
+      <CaptureEndpointId />
+      <SpeakerEndpointId />
+      <EnableMicrophonePassthrough>false</EnableMicrophonePassthrough>
+      <MicrophoneCaptureEndpointId />
+      <MicrophoneOutputEndpointId />
+    </AudioSettings>
   </DualSenseControllerSettings>
   <L2OutputCurveMode>linear</L2OutputCurveMode>
   <L2TwoStageMode>Disabled</L2TwoStageMode>
@@ -300,7 +326,11 @@ namespace DS4WindowsTests
   <L2HipFireTime>100</L2HipFireTime>
   <R2HipFireTime>100</R2HipFireTime>
   <L2TriggerEffect>None</L2TriggerEffect>
+  <L2TriggerEffectStart>0</L2TriggerEffectStart>
+  <L2TriggerEffectStrength>0</L2TriggerEffectStrength>
   <R2TriggerEffect>None</R2TriggerEffect>
+  <R2TriggerEffectStart>0</R2TriggerEffectStart>
+  <R2TriggerEffectStrength>0</R2TriggerEffectStrength>
   <R2OutputCurveMode>linear</R2OutputCurveMode>
   <SXOutputCurveMode>linear</SXOutputCurveMode>
   <SZOutputCurveMode>linear</SZOutputCurveMode>
@@ -341,7 +371,7 @@ namespace DS4WindowsTests
     <AntiRadius>0</AntiRadius>
     <SnapToCenter>True</SnapToCenter>
   </AbsMouseRegionSettings>
-  <OutputContDevice>X360</OutputContDevice>
+  <OutputContDevice>ViiperX360</OutputContDevice>
   <ProfileActions>Disconnect Controller</ProfileActions>
   <Control />
   <ShiftControl />

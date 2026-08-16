@@ -73,9 +73,20 @@
 		<Content Include="BezierCurveEditor\index.html">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</Content>
-		<Content Include="..\extras\install-viiper-backend.ps1">
-			<Link>extras\install-viiper-backend.ps1</Link>
+		<Content Include="..\extras\manage-viiper-native-package.ps1">
+			<Link>extras\manage-viiper-native-package.ps1</Link>
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+		</Content>
+		<Content Include="..\extras\ViiperNativeRuntimeMetadata.json">
+			<Link>ViiperNativeRuntimeMetadata.json</Link>
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+		</Content>
+		<Content Include="..\extras\viiper-native-package\**\*">
+			<Link>extras\viiper-native-package\%(RecursiveDir)%(Filename)%(Extension)</Link>
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
 		</Content>
 		<Content Include="Resources\ControllerArtwork.NOTICE.txt">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

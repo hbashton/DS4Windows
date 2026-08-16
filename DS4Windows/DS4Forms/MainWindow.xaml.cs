@@ -318,11 +318,8 @@ namespace DS4WinWPF.DS4Forms
                     Dispatcher.Invoke(() =>
                     {
                         MessageBox.Show(Properties.Resources.PleaseDownloadUpdater);
-                        if (!string.IsNullOrEmpty(newUpdaterVersion))
-                        {
-                            Util.StartProcessHelper(
-                                $"https://github.com/hbashton/DS4Updater/releases/tag/v{newUpdaterVersion}");
-                        }
+                        Util.StartProcessHelper(
+                            $"https://github.com/hbashton/DS4Windows/releases/tag/{version}");
                     });
                 }
             }
@@ -381,10 +378,8 @@ namespace DS4WinWPF.DS4Forms
                         Dispatcher.Invoke(() =>
                         {
                             MessageBox.Show(Properties.Resources.PleaseDownloadUpdater);
-                            if (!string.IsNullOrEmpty(newUpdaterVersion))
-                            {
-                                Util.StartProcessHelper($"https://github.com/hbashton/DS4Updater/releases/tag/v{newUpdaterVersion}");
-                            }
+                            Util.StartProcessHelper(
+                                $"https://github.com/hbashton/DS4Windows/releases/tag/{newversion}");
                         });
                     }
                 }
@@ -2049,33 +2044,14 @@ Suspend support not enabled.", true);
             Process.Start("control", "joy.cpl");
         }
 
-        private async void DriverSetupBtn_Click(object sender, RoutedEventArgs e)
+        private void DriverSetupBtn_Click(object sender, RoutedEventArgs e)
         {
-            StartStopBtn.IsEnabled = false;
-            await Task.Run(() =>
-            {
-                if (App.rootHub.running)
-                    App.rootHub.Stop();
-            });
-
-            StartStopBtn.IsEnabled = true;
-            ProcessStartInfo startInfo = new ProcessStartInfo();
-            startInfo.FileName = Global.exelocation;
-            startInfo.Arguments = "-driverinstall";
-            startInfo.Verb = "runas";
-            startInfo.UseShellExecute = true;
-            try
-            {
-                using (Process temp = Process.Start(startInfo))
-                {
-                    temp.WaitForExit();
-                    Global.RefreshHidHideInfo();
-                    Global.RefreshFakerInputInfo();
-
-                    settingsWrapVM.DriverCheckRefresh();
-                }
-            }
-            catch { }
+            MessageBox.Show(this,
+                "The portable DS4Windows runtime does not elevate itself or " +
+                "mutable driver media. Install or repair system components " +
+                "through the signed DS4Windows installer or its installed " +
+                "maintenance entry.", "DS4Windows driver setup",
+                MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
         private void ViiperSetupBtn_Click(object sender, RoutedEventArgs e)
@@ -2088,6 +2064,12 @@ Suspend support not enabled.", true);
             RefreshViiperStatusText();
         }
 
+        private void ViiperRemoveBtn_Click(object sender, RoutedEventArgs e)
+        {
+            ViiperSetupManager.LaunchUninstaller(
+                ViiperSetupManager.GetStatus(), this);
+        }
+
         private void RefreshViiperStatusText()
         {
             if (viiperStatusText == null)
@@ -2097,9 +2079,13 @@ Suspend support not enabled.", true);
 
             ViiperPrerequisiteStatus status = ViiperSetupManager.GetStatus(tryStartServer: false);
             viiperStatusText.Text = $"{status.DisplayText}. " +
-                $"VIIPER helper: {(status.ViiperInstalled ? "installed" : "missing")}; " +
-                $"usbip-win2: {(status.UsbipInstalled ? "installed" : "missing")}; " +
-                $"server: {(status.ServerRunning ? "running" : "not running")}.";
+                $"bundle: {(status.PackageBundleFound ? "exact" : "not bundled")}; " +
+                $"installed broker: {(status.BrokerHashMatches ? "exact" : "missing/mismatched")}; " +
+                $"service: {(status.BrokerServiceConfigured ? "configured" : "missing/mismatched")}/" +
+                $"{(status.BrokerServiceRunning ? "running" : "stopped")}; " +
+                $"credential: {(status.CredentialReadable ? "readable" : "unavailable")}; " +
+                $"authenticated ping: {(status.AuthenticatedPingSucceeded ? "ready" : "not ready")}; " +
+                $"driver identity: {(status.RuntimeContractCompatible ? "compatible" : "unverified")}.";
         }
 
         private void CheckUpdatesBtn_Click(object sender, RoutedEventArgs e)

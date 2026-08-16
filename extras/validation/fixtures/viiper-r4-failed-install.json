@@ -1,0 +1,27 @@
+{
+  "schema": "viiper.windows11.failed-install-fixture/v1",
+  "reportedDate": "2026-08-15 America/Chicago",
+  "predecessorEvidenceRoot": "C:\\Users\\hbash\\Documents\\Codex\\2026-08-15\\the\\outputs\\VIIPER-Win11-9481f9d-272f6a0-r4",
+  "predecessorInstallStepDirectory": "C:\\Users\\hbash\\Documents\\Codex\\2026-08-15\\the\\outputs\\VIIPER-Win11-9481f9d-272f6a0-r4\\steps\\20260816T034608909Z-install-27fffa05b7e544feb3c5a415ebd1f6c4",
+  "stateSha256": "e13c686a0cddcf66620940005568b3a7a9a41abb277f61977dd88994863d8cda",
+  "installCommandSha256": "c38579b1504c8851dd72317d49f4439d14b7878b4e19907ebe864c8ad986e3f7",
+  "installResultSha256": "1095194f448455f746b5af92b89ae4f08f8f69a7ba9fac1d17a90d73e8a971b0",
+  "installStdoutSha256": "ca95fac3b8bd6fe7871a7f42400031f01ea946dc88786e9e9a746084144c205b",
+  "installStderrSha256": "2610d56f76be3c1aea4f6b3dd4e4b38d134a1d311133ac46f389a28f8faeb520",
+  "bundleManifestSha256": "765de4fe822004e97940fa66ba73602dafd68194d14fd64e20b388444cd4c247",
+  "viiperSourceRevision": "9481f9dbfde64af99905fa325546e50b5ea03d6e",
+  "ds4WindowsSourceRevision": "272f6a05f1476d5aa9c055a234e61c292d3c1556",
+  "packageLockSha256": "16e08c31bb1c240a3612a6c4ddc8219b040d0e2dec5773e39f363d045113ab8c",
+  "certificateSha256": "09ca0c2d4d3da29268eff59cf85b6c1347d4a28ddc098b8640381694ad74c517",
+  "certificateThumbprintSha1": "1DB216A879BB695B28EE876946048836FEF86EEA",
+  "failure": {
+    "operation": "install",
+    "changed": 0,
+    "rebootRequired": 0,
+    "rollback": "not-needed",
+    "exitCode": 4,
+    "phase": "install-journal-broker-image-hash",
+    "win32Error": 23,
+    "message": "protected broker evidence differs from its immutable digest"
+  }
+}

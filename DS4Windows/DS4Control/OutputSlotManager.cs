@@ -173,15 +173,15 @@ namespace DS4Windows
                 ControlService.StartupDiag($"OutputSlotManager.DeferredPlugin emptySlot={slot + 1} inIdx={inIdx} contType={contType}");
                 if (slot != -1)
                 {
-                    // Record every VIIPER Sony output so its complete USB/IP
-                    // HID cannot be re-ingested as a physical input.
-                    HashSet<string> beforeVirtualSony = null;
-                    if (contType == OutContType.ViiperDS4 ||
+                    // Fence Sony creation until its authoritative VIIPER
+                    // lifetime can be registered. This prevents the arriving
+                    // native HID from racing input discovery.
+                    bool registerVirtualSony =
+                        contType == OutContType.ViiperDS4 ||
                         contType == OutContType.ViiperDualSense ||
-                        contType == OutContType.ViiperDualSenseEdge)
+                        contType == OutContType.ViiperDualSenseEdge;
+                    if (registerVirtualSony)
                     {
-                        beforeVirtualSony = DS4Devices.
-                            SnapshotBeforeOwnVirtualSony();
                         DS4Devices.BeginOwnVirtualSonyConnect();
                     }
 
@@ -198,7 +198,7 @@ namespace DS4Windows
                         //queuedTasks--;
                         AppLogger.LogToGui($"Failed to plug in virtual {contType.ToDisplayName()} controller: {e.Message}", true);
 
-                        if (beforeVirtualSony != null)
+                        if (registerVirtualSony)
                         {
                             DS4Devices.EndOwnVirtualSonyConnect();
                         }
@@ -208,7 +208,7 @@ namespace DS4Windows
                     catch (Exception e)
                     {
                         AppLogger.LogToGui($"Failed to plug in virtual {contType.ToDisplayName()} controller: {e.Message}", true);
-                        if (beforeVirtualSony != null)
+                        if (registerVirtualSony)
                         {
                             DS4Devices.EndOwnVirtualSonyConnect();
                         }
@@ -216,13 +216,38 @@ namespace DS4Windows
                         return;
                     }
 
-                    if (beforeVirtualSony != null)
+                    if (registerVirtualSony)
                     {
-                        DS4Devices.RegisterOwnVirtualSonyAsync(
-                            beforeVirtualSony, virtualSonyRegisteredCallback);
+                        ViiperOutDevice viiperSource =
+                            outputDevice as ViiperOutDevice;
+                        int ownerToken =
+                            ViiperPnPOwnershipRegistry.AttachOrUpdate(
+                                viiperSource);
+                        if (ownerToken <= 0)
+                        {
+                            try
+                            {
+                                outputDevice.Disconnect();
+                            }
+                            catch (Exception disconnectException)
+                            {
+                                ControlService.StartupDiag(
+                                    $"OutputSlotManager exact-identity rollback failed slot={slot + 1} type={contType} {disconnectException.GetType().Name}: {disconnectException.Message}");
+                            }
+
+                            ViiperPnPOwnershipRegistry.Detach(viiperSource);
+                            DS4Devices.EndOwnVirtualSonyConnect();
+                            AppLogger.LogToGui(
+                                $"Failed to plug in virtual {contType.ToDisplayName()} controller: VIIPER did not return the exact native PnP identity required to contain its Sony HID and audio interfaces.",
+                                true);
+                            return;
+                        }
+
+                        DS4Devices.RegisterOwnVirtualSonyAsync(viiperSource,
+                            virtualSonyRegisteredCallback);
                         // The asynchronous registration worker now owns the
                         // matching EndOwnVirtualSonyConnect call.
-                        beforeVirtualSony = null;
+                        registerVirtualSony = false;
                     }
 
                     AppLogger.LogToGui($"Plugging in virtual {contType.ToDisplayName()} Controller in output slot #{slot + 1}", false);
@@ -271,7 +296,7 @@ namespace DS4Windows
                     outputDevice.RemoveFeedbacks();
                     ControlService.StartupDiag($"OutputSlotManager.RemoveFeedbacks end slot={slot + 1}");
                     ControlService.StartupDiag($"OutputSlotManager.Disconnect begin slot={slot + 1}");
-                    outputDevice.Disconnect();
+                    DisconnectAndDetachOwnership(outputDevice);
                     ControlService.StartupDiag($"OutputSlotManager.Disconnect end slot={slot + 1}");
 
                     if (inIdx != -1)
@@ -387,7 +412,7 @@ namespace DS4Windows
                     if (device.OutputDevice != null)
                     {
                         outputDevices[slotIdx] = null;
-                        device.OutputDevice.Disconnect();
+                        DisconnectAndDetachOwnership(device.OutputDevice);
 
                         device.DetachDevice();
                         SlotUnassigned?.Invoke(this, slotIdx, outputSlots[slotIdx]);
@@ -402,6 +427,20 @@ namespace DS4Windows
             };
 
             //queuedTasks--;
+        }
+
+        private static void DisconnectAndDetachOwnership(
+            OutputDevice outputDevice)
+        {
+            try
+            {
+                outputDevice?.Disconnect();
+            }
+            finally
+            {
+                ViiperPnPOwnershipRegistry.Detach(
+                    outputDevice as ViiperOutDevice);
+            }
         }
     }
 }

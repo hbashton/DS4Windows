@@ -1,0 +1,783 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
+using System.Text;
+using System.Threading;
+using System.Windows;
+using System.Windows.Interop;
+using System.Windows.Threading;
+using WixToolset.BootstrapperApplicationApi;
+
+namespace DS4Windows.Bootstrapper
+{
+    internal sealed class InstallerApplication : BootstrapperApplication
+    {
+        private readonly Dictionary<string, PackageState> packageStates = new Dictionary<string, PackageState>(StringComparer.OrdinalIgnoreCase);
+        private InstallerWindow window;
+        private IBootstrapperCommand command;
+        private RegistrationType registrationType;
+        private LaunchAction plannedAction = LaunchAction.Install;
+        private int result;
+        private string lastError;
+        private bool infrastructureHealthy;
+        private bool infrastructureFailed;
+        private bool closingProgrammatically;
+        private bool applyCompleted;
+        private bool failureShown;
+        private bool relatedUpgradeDetected;
+        private string newerRelatedBundleVersion;
+        private bool deferInfrastructureUntilUpgradeCompletes;
+        private bool infrastructureRecoveryPass;
+        private Mutex bundleMutex;
+        private bool bundleMutexOwned;
+        private int planStarted;
+        private bool targetUserSidPrepared;
+
+        internal IEngine Engine => engine;
+
+        protected override void OnCreate(CreateEventArgs args)
+        {
+            base.OnCreate(args);
+            command = args.Command;
+        }
+
+        protected override void Run()
+        {
+            try
+            {
+                try
+                {
+                    HookEvents();
+                    window = new InstallerWindow(this);
+                    if (command.Display == Display.Full || command.Display == Display.Passive)
+                    {
+                        window.Show();
+                    }
+
+                    engine.CloseSplashScreen();
+                    engine.Detect();
+                    Dispatcher.Run();
+                }
+                catch (Exception ex)
+                {
+                    result = 1;
+                    try
+                    {
+                        engine.Log(LogLevel.Error,
+                            "Unhandled bootstrapper failure: " + ex);
+                    }
+                    catch { }
+                    try { engine.CloseSplashScreen(); } catch { }
+                }
+            }
+            finally
+            {
+                ReleaseBundleMutex();
+            }
+            engine.Quit(NormalizeExitCode(result));
+        }
+
+        private bool PrepareTargetUserSid()
+        {
+            if (targetUserSidPrepared) return true;
+
+            string sid = null;
+            try
+            {
+                sid = engine.GetVariableString(
+                    "InstalledTargetUserSid");
+            }
+            catch { }
+
+            if (string.IsNullOrWhiteSpace(sid))
+            {
+                try { sid = engine.GetVariableString("TargetUserSid"); }
+                catch { }
+            }
+
+            // A first install captures the unelevated bootstrapper user's SID.
+            // Maintenance, upgrade, and reboot resume instead preserve the SID
+            // that owns the installed protected broker credential.
+            if (string.IsNullOrWhiteSpace(sid) &&
+                command.Resume != ResumeType.Reboot &&
+                command.Relation != RelationType.Upgrade &&
+                registrationType == RegistrationType.None &&
+                command.Action != LaunchAction.Uninstall)
+            {
+                using (var identity = WindowsIdentity.GetCurrent())
+                {
+                    sid = identity.User?.Value;
+                }
+            }
+
+            if (!IsInteractiveUserSid(sid))
+            {
+                ShowFailure(1,
+                    "Setup could not recover the exact DS4Windows user " +
+                    "identity required by the native broker credential. " +
+                    "Use the signed installer that last installed this " +
+                    "machine, or reinstall from the intended user account.");
+                return false;
+            }
+            engine.SetVariableString("TargetUserSid", sid, true);
+            targetUserSidPrepared = true;
+            return true;
+        }
+
+        private static bool IsInteractiveUserSid(string value)
+        {
+            try
+            {
+                var sid = new SecurityIdentifier(value);
+                return !sid.IsWellKnown(
+                           WellKnownSidType.LocalSystemSid) &&
+                       !sid.IsWellKnown(
+                           WellKnownSidType.BuiltinAdministratorsSid) &&
+                       !sid.IsWellKnown(
+                           WellKnownSidType.LocalServiceSid) &&
+                       !sid.IsWellKnown(
+                           WellKnownSidType.NetworkServiceSid);
+            }
+            catch { return false; }
+        }
+
+        internal void Begin(LaunchAction action)
+        {
+            // The incoming Burn engine owns the transaction mutex for its
+            // complete package chain, including related-bundle removal. An
+            // outgoing bundle launched by that engine must not compete with
+            // its parent for the same lock; all top-level invocations still
+            // have to acquire it before planning anything.
+            var parentOwnedRelatedUninstall =
+                command.Relation == RelationType.Upgrade &&
+                action == LaunchAction.Uninstall;
+            if (!parentOwnedRelatedUninstall && !EnsureBundleMutex()) return;
+            StartPlan(action, () =>
+            {
+                deferInfrastructureUntilUpgradeCompletes =
+                    !infrastructureRecoveryPass &&
+                    (action == LaunchAction.Install ||
+                     action == LaunchAction.Repair) &&
+                    relatedUpgradeDetected;
+                if (deferInfrastructureUntilUpgradeCompletes)
+                {
+                    engine.Log(LogLevel.Standard,
+                        "Deferring the native package transaction until older related bundles are removed.");
+                }
+            });
+        }
+
+        private bool StartPlan(LaunchAction action, Action configure = null)
+        {
+            if (Interlocked.CompareExchange(ref planStarted, 1, 0) != 0)
+            {
+                engine.Log(LogLevel.Standard,
+                    "Ignoring a duplicate installer plan request while the current transaction is active.");
+                return false;
+            }
+
+            try
+            {
+                plannedAction = action;
+                configure?.Invoke();
+                if (command.Display == Display.Full)
+                {
+                    Ui(() => window.ShowPlanning());
+                }
+                engine.Plan(action);
+                return true;
+            }
+            catch
+            {
+                Interlocked.Exchange(ref planStarted, 0);
+                throw;
+            }
+        }
+
+        private bool TryAcquireBundleMutex(int waitMilliseconds)
+        {
+            if (bundleMutexOwned) return true;
+            try
+            {
+                bundleMutex = new Mutex(false,
+                    @"Global\DS4Windows-Installer-Transaction");
+                try
+                {
+                    bundleMutexOwned = bundleMutex.WaitOne(waitMilliseconds);
+                }
+                catch (AbandonedMutexException)
+                {
+                    bundleMutexOwned = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                engine.Log(LogLevel.Error,
+                    "Could not inspect the installer transaction mutex: " +
+                    ex.Message);
+                bundleMutexOwned = false;
+            }
+
+            if (!bundleMutexOwned)
+            {
+                bundleMutex?.Dispose();
+                bundleMutex = null;
+            }
+            return bundleMutexOwned;
+        }
+
+        private bool EnsureBundleMutex(int waitMilliseconds = 0)
+        {
+            if (TryAcquireBundleMutex(waitMilliseconds)) return true;
+            ShowFailure(1618,
+                "Another DS4Windows installation or repair is already running. Close it, then choose Retry.");
+            return false;
+        }
+
+        private void ReleaseBundleMutex()
+        {
+            if (bundleMutexOwned)
+            {
+                try { bundleMutex.ReleaseMutex(); } catch { }
+            }
+            bundleMutexOwned = false;
+            bundleMutex?.Dispose();
+            bundleMutex = null;
+        }
+
+        internal void Retry()
+        {
+            result = 0;
+            lastError = null;
+            infrastructureFailed = false;
+            infrastructureRecoveryPass = false;
+            deferInfrastructureUntilUpgradeCompletes = false;
+            applyCompleted = false;
+            failureShown = false;
+            Interlocked.Exchange(ref planStarted, 0);
+            engine.Detect();
+        }
+
+        internal void CloseWithCurrentResult() => Close(result);
+
+        internal void LaunchDs4Windows()
+        {
+            // The bootstrapper application remains in the initiating user's
+            // unelevated process while Burn's engine applies the per-machine
+            // chain. Launch directly from that original user token; no task,
+            // secondary elevation hop, mutable helper, or alternate administrator profile is
+            // involved.
+            var path = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                "DS4Windows", "DS4Windows.exe");
+            if (File.Exists(path))
+            {
+                try
+                {
+                    Process.Start(new ProcessStartInfo(path)
+                        { UseShellExecute = true })?.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    engine.Log(LogLevel.Error,
+                        "Could not launch DS4Windows: " + ex.Message);
+                }
+            }
+        }
+
+        internal void OpenLog()
+        {
+            try
+            {
+                // setup-actions.log is appended before target-user validation
+                // and before the child PowerShell script starts. It therefore
+                // cannot be a stale log from a previous child transaction when
+                // an early helper failure occurs.
+                var path = infrastructureFailed ? SetupActionsLogPath : null;
+                if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                {
+                    path = engine.GetVariableString("WixBundleLog");
+                }
+                if (!string.IsNullOrWhiteSpace(path))
+                {
+                    Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+                }
+            }
+            catch { }
+        }
+
+        internal string Diagnostics()
+        {
+            string log = null;
+            try { log = engine.GetVariableString("WixBundleLog"); } catch { }
+            var helperLog = SetupActionsLogPath;
+            return "DS4Windows Setup\r\n" +
+                   "Action: " + plannedAction + "\r\n" +
+                   "Registered: " + registrationType + "\r\n" +
+                   "Native package healthy: " + infrastructureHealthy + "\r\n" +
+                   "Error: " + (lastError ?? "none") + "\r\n" +
+                   "Bundle log: " + (log ?? "unavailable") + "\r\n" +
+                   "Setup helper log: " + helperLog + "\r\n\r\n" +
+                   "--- Setup helper tail ---\r\n" +
+                   ReadLogTail(helperLog, 12000);
+        }
+
+        internal void Close(int exitCode = 0)
+        {
+            if (window != null && !window.Dispatcher.CheckAccess())
+            {
+                window.Dispatcher.BeginInvoke(new Action(() => Close(exitCode)));
+                return;
+            }
+            result = exitCode;
+            closingProgrammatically = true;
+            window?.Close();
+            Dispatcher.ExitAllFrames();
+        }
+
+        internal void OnWindowClosed()
+        {
+            if (!closingProgrammatically && !applyCompleted && !failureShown)
+            {
+                result = 1223;
+            }
+            Dispatcher.ExitAllFrames();
+        }
+
+        internal bool RestartWindows()
+        {
+            try
+            {
+                var shutdown = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+                    "System32", "shutdown.exe");
+                Process.Start(new ProcessStartInfo(shutdown, "/r /t 0")
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                })?.Dispose();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                engine.Log(LogLevel.Error,
+                    "Could not restart Windows: " + ex.Message);
+                return false;
+            }
+        }
+
+        private void HookEvents()
+        {
+            DetectBegin += (_, e) =>
+            {
+                registrationType = e.RegistrationType;
+                packageStates.Clear();
+                relatedUpgradeDetected = false;
+                newerRelatedBundleVersion = null;
+            };
+            DetectRelatedBundle += (_, e) =>
+            {
+                if (e.RelationType == RelationType.Upgrade)
+                {
+                    var currentVersion = engine.GetVariableVersion(
+                        "WixBundleVersion");
+                    if (IsRelatedBundleNewer(e.Version, currentVersion))
+                    {
+                        newerRelatedBundleVersion = e.Version;
+                    }
+                    else
+                    {
+                        relatedUpgradeDetected = true;
+                    }
+                }
+            };
+            DetectPackageComplete += (_, e) => packageStates[e.PackageId] = e.State;
+            DetectComplete += OnDetectComplete;
+            PlanPackageBegin += OnPlanPackageBegin;
+            PlanRelatedBundle += (_, e) =>
+            {
+                if (infrastructureRecoveryPass ||
+                    (command.Relation == RelationType.Upgrade &&
+                     plannedAction == LaunchAction.Uninstall))
+                {
+                    // The incoming primary engine owns related-bundle
+                    // ordering. An outgoing bundle only removes itself, and
+                    // the isolated recovery pass only repairs infrastructure;
+                    // neither may recursively launch sibling bundle engines.
+                    e.State = RequestState.None;
+                }
+            };
+            PlanComplete += OnPlanComplete;
+            ApplyBegin += (_, __) => Ui(() => window.ShowApplying());
+            ExecutePackageBegin += (_, e) =>
+            {
+                Ui(() => window.SetCurrentPackage(e.PackageId));
+            };
+            ExecutePackageComplete += (_, e) =>
+            {
+                if ((string.Equals(e.PackageId, "ViiperNativeSetup",
+                         StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(e.PackageId, "ViiperNativeRemove",
+                         StringComparison.OrdinalIgnoreCase)) &&
+                    e.Status < 0)
+                {
+                    infrastructureFailed = true;
+                }
+            };
+            ExecuteProgress += (_, e) => Ui(() => window.SetProgress(e.OverallPercentage));
+            Error += (_, e) =>
+            {
+                lastError = string.IsNullOrWhiteSpace(e.ErrorMessage) ? "Setup error " + e.ErrorCode : e.ErrorMessage;
+                engine.Log(LogLevel.Error, lastError);
+            };
+            ApplyComplete += OnApplyComplete;
+        }
+
+        private void OnDetectComplete(object sender, DetectCompleteEventArgs e)
+        {
+            if (e.Status < 0)
+            {
+                ShowFailure(e.Status, "Setup could not inspect the current installation.");
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(newerRelatedBundleVersion))
+            {
+                ShowFailure(1638,
+                    "A newer DS4Windows installer (" +
+                    newerRelatedBundleVersion +
+                    ") is already installed. This older package will not " +
+                    "remove or replace it.");
+                return;
+            }
+
+            if (!PrepareTargetUserSid()) return;
+
+            infrastructureHealthy = InfrastructureProbe.IsHealthy();
+
+            // Burn removes related bundles after it executes this bundle's
+            // package chain. Older DS4Windows bundles own older infrastructure
+            // helpers, so installing VIIPER before those bundles are removed
+            // lets their uninstall overwrite or delete the new helper. Finish
+            // the app upgrade first, then run one isolated infrastructure
+            // recovery pass against the final machine state.
+            if (infrastructureRecoveryPass)
+            {
+                if (!EnsureBundleMutex()) return;
+                StartPlan(LaunchAction.Repair);
+                return;
+            }
+
+            var mode = registrationType == RegistrationType.Full ? InstallerMode.Repair : InstallerMode.Install;
+            if (command.Action == LaunchAction.Uninstall)
+            {
+                mode = InstallerMode.Uninstall;
+            }
+            else if (registrationType == RegistrationType.None && packageStates.TryGetValue("DS4WindowsMsi", out var msiState) && msiState == PackageState.Present)
+            {
+                mode = InstallerMode.Update;
+            }
+            else if (registrationType == RegistrationType.None &&
+                     relatedUpgradeDetected)
+            {
+                mode = InstallerMode.Update;
+            }
+
+            // Burn persists the chain state and re-launches the cached bundle
+            // after a package-requested reboot. Resume that saved action
+            // immediately, just as WixStdBA does, instead of presenting a new
+            // confirmation page and leaving the chain half-finished.
+            if (command.Resume == ResumeType.Reboot)
+            {
+                if (!EnsureBundleMutex()) return;
+                var resumeAction = command.Action == LaunchAction.Unknown
+                    ? LaunchAction.Install
+                    : command.Action;
+                StartPlan(resumeAction);
+                return;
+            }
+
+            Ui(() => window.ShowConfirmation(mode, packageStates, infrastructureHealthy));
+
+            if (command.Display != Display.Full)
+            {
+                var action = command.Action == LaunchAction.Unknown ? LaunchAction.Install : command.Action;
+                if (action == LaunchAction.Layout)
+                {
+                    var layoutDirectory = string.IsNullOrWhiteSpace(command.LayoutDirectory)
+                        ? Environment.CurrentDirectory
+                        : command.LayoutDirectory;
+                    engine.SetVariableString("WixBundleLayoutDirectory", layoutDirectory, false);
+                }
+                Begin(action);
+            }
+        }
+
+        private void OnPlanPackageBegin(object sender, PlanPackageBeginEventArgs e)
+        {
+            var packageId = e.PackageId ?? string.Empty;
+            if (string.Equals(e.PackageId, "CloseRunningApplications",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                // Quiesce managed processes before forward install/repair
+                // execution. Uninstall uses the dedicated tail preflight
+                // below because Burn unwinds its package chain in reverse.
+                e.State = !infrastructureRecoveryPass &&
+                    (plannedAction == LaunchAction.Install ||
+                     plannedAction == LaunchAction.Repair)
+                    ? RequestState.Present
+                    : RequestState.None;
+                return;
+            }
+
+            var outgoingRelatedUninstall =
+                command.Relation == RelationType.Upgrade &&
+                plannedAction == LaunchAction.Uninstall;
+            if (string.Equals(e.PackageId,
+                    "CloseRunningApplicationsForUninstall",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                // Burn uninstalls in reverse chain order. This tail package
+                // is therefore the first executable action during direct or
+                // related-bundle uninstall, before infrastructure or MSI
+                // ownership is removed.
+                e.State = !infrastructureRecoveryPass &&
+                    plannedAction == LaunchAction.Uninstall &&
+                    !outgoingRelatedUninstall
+                    ? RequestState.Present
+                    : RequestState.None;
+                return;
+            }
+
+            if (string.Equals(packageId, "ViiperNativeRemove",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                // This install-direction package is deliberately planned
+                // Present during a direct bundle uninstall. Burn unwinds the
+                // chain from the tail, so it calls the protected manager
+                // before the MSI removes Program Files media. Outgoing related
+                // bundles never tear down infrastructure owned by the incoming
+                // upgrade.
+                e.State = !infrastructureRecoveryPass &&
+                    plannedAction == LaunchAction.Uninstall &&
+                    !outgoingRelatedUninstall
+                    ? RequestState.Present
+                    : RequestState.None;
+                return;
+            }
+
+            if (infrastructureRecoveryPass)
+            {
+                if (string.Equals(packageId, "ViiperNativeSetup",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    e.State = e.CurrentState == PackageState.Present
+                        ? RequestState.Repair
+                        : RequestState.Present;
+                }
+                else
+                {
+                    // The MSI already completed in the primary transaction.
+                    // The recovery pass is deliberately limited to the native
+                    // package manager.
+                    e.State = RequestState.None;
+                }
+                return;
+            }
+
+            if (string.Equals(packageId, "ViiperNativeSetup",
+                    StringComparison.OrdinalIgnoreCase) &&
+                (deferInfrastructureUntilUpgradeCompletes ||
+                 plannedAction == LaunchAction.Uninstall))
+            {
+                e.State = RequestState.None;
+                return;
+            }
+
+            if (string.Equals(packageId, "ViiperNativeSetup",
+                    StringComparison.OrdinalIgnoreCase) &&
+                (plannedAction == LaunchAction.Install ||
+                 plannedAction == LaunchAction.Repair))
+            {
+                // Always run the signed helper after MSI mutation. It verifies
+                // the installed manifest and lets VIIPER's own transaction
+                // enforce exact hashes, ABI, driver, service, credential, and
+                // authenticated readiness contracts.
+                e.State = e.CurrentState == PackageState.Present
+                    ? RequestState.Repair
+                    : RequestState.Present;
+            }
+        }
+
+        private void OnPlanComplete(object sender, PlanCompleteEventArgs e)
+        {
+            if (e.Status < 0)
+            {
+                ShowFailure(e.Status, "Setup could not create a safe installation plan.");
+                return;
+            }
+            Ui(() => engine.Apply(new WindowInteropHelper(window).EnsureHandle()));
+        }
+
+        private void OnApplyComplete(object sender, ApplyCompleteEventArgs e)
+        {
+            result = e.Status;
+            applyCompleted = true;
+            if (e.Status < 0)
+            {
+                var detail = infrastructureFailed ?
+                    InfrastructureFailureSummary() : null;
+                var message = lastError ?? "Setup did not complete.";
+                if (!string.IsNullOrWhiteSpace(detail))
+                {
+                    message += "\r\n\r\n" + detail;
+                }
+                ShowFailure(e.Status, message);
+                return;
+            }
+
+            var restartRequired =
+                e.Restart == ApplyRestart.RestartRequired ||
+                e.Restart == ApplyRestart.RestartInitiated;
+            if (restartRequired)
+            {
+                // Quiet/passive callers must receive the same reboot contract
+                // as the full UI rather than a misleading zero exit code.
+                result = 3010;
+            }
+
+            if (!restartRequired &&
+                (plannedAction == LaunchAction.Install ||
+                 plannedAction == LaunchAction.Repair) &&
+                !InfrastructureProbe.IsHealthy())
+            {
+                if (infrastructureRecoveryPass)
+                {
+                    ShowFailure(1,
+                        "DS4Windows installed, but the native VIIPER package did not pass " +
+                        "the final post-upgrade health check.");
+                    return;
+                }
+
+                infrastructureRecoveryPass = true;
+                applyCompleted = false;
+                infrastructureFailed = false;
+                engine.Log(LogLevel.Standard,
+                    "Starting the isolated post-upgrade native package recovery pass.");
+                Ui(() => window.ShowPlanning());
+                Interlocked.Exchange(ref planStarted, 0);
+                engine.Detect();
+                return;
+            }
+
+            if (command.Display != Display.Full)
+            {
+                Close(result);
+                return;
+            }
+
+            Ui(() =>
+            {
+                if (restartRequired)
+                {
+                    window.ShowRestart();
+                }
+                else
+                {
+                    window.ShowComplete(plannedAction);
+                }
+            });
+        }
+
+        private void ShowFailure(int status, string message)
+        {
+            result = status;
+            failureShown = true;
+            lastError = message + " (0x" + status.ToString("X8") + ")";
+            if (command.Display != Display.Full)
+            {
+                Close(status);
+                return;
+            }
+            Ui(() => window.ShowFailure(lastError));
+        }
+
+        private void Ui(Action action)
+        {
+            if (window == null) return;
+            if (window.Dispatcher.CheckAccess()) action();
+            else window.Dispatcher.BeginInvoke(action);
+        }
+
+        private static int NormalizeExitCode(int exitCode)
+        {
+            return (exitCode & unchecked((int)0xFFFF0000)) == unchecked((int)0x80070000) ? exitCode & 0xFFFF : exitCode;
+        }
+
+        internal static bool IsRelatedBundleNewer(string relatedVersion,
+            string currentVersion)
+        {
+            Version related;
+            Version current;
+            return Version.TryParse(relatedVersion, out related) &&
+                   Version.TryParse(currentVersion, out current) &&
+                   related > current;
+        }
+
+        private static string SetupActionsLogPath => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "DS4Windows", "Installer", "setup-actions.log");
+
+        private static string InfrastructureFailureSummary()
+        {
+            var tail = ReadLogTail(SetupActionsLogPath, 12000);
+            if (string.IsNullOrWhiteSpace(tail)) return null;
+            var invocationMarker = "=== DS4Windows setup invocation ";
+            var invocationStart = tail.LastIndexOf(invocationMarker,
+                StringComparison.Ordinal);
+            if (invocationStart >= 0)
+            {
+                tail = tail.Substring(invocationStart);
+            }
+            var marker = "Setup could not finish:";
+            var index = tail.LastIndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (index >= 0)
+            {
+                var end = tail.IndexOfAny(new[] { '\r', '\n' }, index);
+                var summary = end < 0 ? tail.Substring(index) :
+                    tail.Substring(index, end - index);
+                return summary + "\r\nOpen Log includes the complete diagnostic record.";
+            }
+            return "Native VIIPER setup failed. Open Log includes the detailed child-process diagnostics.";
+        }
+
+        private static string ReadLogTail(string path, int maximumBytes)
+        {
+            try
+            {
+                if (!File.Exists(path)) return string.Empty;
+                using (var stream = new FileStream(path, FileMode.Open,
+                           FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                {
+                    var length = (int)Math.Min(stream.Length, maximumBytes);
+                    stream.Seek(-length, SeekOrigin.End);
+                    var buffer = new byte[length];
+                    var read = stream.Read(buffer, 0, length);
+                    return Encoding.UTF8.GetString(buffer, 0, read).Trim();
+                }
+            }
+            catch { return string.Empty; }
+        }
+    }
+
+    internal enum InstallerMode
+    {
+        Install,
+        Update,
+        Repair,
+        Uninstall,
+    }
+}

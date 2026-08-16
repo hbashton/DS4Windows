@@ -203,9 +203,10 @@ namespace DS4Windows
         {
             ViiperPrerequisiteStatus status = ViiperSetupManager.GetStatus(tryStartServer: true);
             Log($"Prerequisite status ready={status.Ready} display='{status.DisplayText}'");
-            Log($"VIIPER installed={status.ViiperInstalled} path='{status.ViiperPath}'");
-            Log($"usbip-win2 installed={status.UsbipInstalled}");
-            Log($"VIIPER server running={status.ServerRunning} endpoint={ViiperSetupManager.ApiHost}:{ViiperSetupManager.ApiPort}");
+            Log($"Native metadata found={status.MetadataFound} eligible={status.MetadataEligible} localTest={status.LocalTestMetadata} path='{status.MetadataPath}'");
+            Log($"Native broker installed={status.BrokerInstalled} exactHash={status.BrokerHashMatches} path='{status.BrokerPath}'");
+            Log($"VIIPERNativeBroker installed={status.BrokerServiceInstalled} configured={status.BrokerServiceConfigured} running={status.BrokerServiceRunning}");
+            Log($"Protected credential readable={status.CredentialReadable} authenticatedPing={status.AuthenticatedPingSucceeded} identityCompatible={status.RuntimeContractCompatible} endpoint={ViiperSetupManager.ApiHost}:{ViiperSetupManager.ApiPort}");
             Log($"Bundled setup script found={status.SetupScriptFound} path='{status.SetupScriptPath}'");
         }
 
@@ -228,6 +229,7 @@ namespace DS4Windows
 
                 using ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(type);
                 Log($"Device={type} create/open stream OK");
+                LogDeviceIdentity(type, stream.VirtualDeviceIdentity);
 
                 WritePacket(stream, type, "neutral", ViiperStatePacketBuilder.CreateNeutralState(), cancellationToken);
                 WritePacket(stream, type, "buttons", BuildButtonState(type), cancellationToken);
@@ -236,6 +238,32 @@ namespace DS4Windows
                 WritePacket(stream, type, "reset", ViiperStatePacketBuilder.CreateNeutralState(), cancellationToken);
                 Log($"Device={type} dispose temp stream begin");
             }, cancellationToken);
+        }
+
+        private void LogDeviceIdentity(ViiperVirtualDeviceType type,
+            ViiperVirtualDeviceIdentity identity)
+        {
+            if (identity == null)
+            {
+                Log($"Device={type} authoritative virtual-device identity unavailable");
+                return;
+            }
+
+            Log($"Device={type} transport={identity.TransportMode} busId={identity.BusId} devId={identity.DevId} deviceType={identity.DeviceType} vid={identity.Vid} pid={identity.Pid} logicalLifetime={identity.LogicalLifetimeId} streamGeneration={identity.StreamGeneration}");
+            if (identity.TransportMode == ViiperTransportMode.NativeUde)
+            {
+                ViiperNativePnpAnchor anchor = identity.NativePnpAnchor;
+                if (anchor == null)
+                {
+                    Log($"Device={type} native PnP anchor unavailable");
+                    return;
+                }
+
+                Log($"Device={type} nativeDeviceId={anchor.NativeDeviceId} driverGeneration={anchor.NativeDeviceGeneration} controllerSessionId={anchor.ControllerSessionId} controllerInstance='{anchor.ControllerInstanceId}' usb20Port={anchor.Usb20PortNumber} usb30Port={anchor.Usb30PortNumber} exact={anchor.IsExact}");
+                return;
+            }
+
+            Log($"Device={type} legacyUsbipPort={identity.LegacyUsbipPort} legacyOwnerIdentityPresent={!string.IsNullOrWhiteSpace(identity.LegacyUsbipOwnerSerial)}");
         }
 
         private void WritePacket(ViiperDeviceStream stream, ViiperVirtualDeviceType type, string label, DS4State state, CancellationToken cancellationToken)

@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Bundle
+      Name="DS4Windows"
+      Manufacturer="DS4Windows"
+      Version="$(var.BundleVersion)"
+      UpgradeCode="BC70CCB1-AD65-42A0-B468-8A7278A37A62"
+      IconSourceFile="$(var.RepositoryRoot)\DS4Windows\DS4W.ico"
+      Compressed="yes"
+      AboutUrl="https://github.com/hbashton/DS4Windows"
+      HelpUrl="https://github.com/hbashton/DS4Windows/issues">
+
+    <BootstrapperApplication
+        SourceFile="$(var.BootstrapperRoot)\DS4Windows.Bootstrapper.exe">
+      <Payload
+          SourceFile="$(var.BootstrapperRoot)\DS4Windows.Bootstrapper.exe.config" />
+      <Payload SourceFile="$(var.BootstrapperRoot)\mbanative.dll" />
+      <Payload
+          SourceFile="$(var.BootstrapperRoot)\WixToolset.BootstrapperApplicationApi.dll" />
+    </BootstrapperApplication>
+
+    <!-- Burn persists this non-secret SID variable across repair, direct
+         uninstall, and reboot resume. The BA sets it only for a first install
+         and otherwise restores the exact SID recorded by the protected setup
+         helper after the last successful native transaction. -->
+    <Variable Name="TargetUserSid"
+              Type="string"
+              Value=""
+              Persisted="yes" />
+
+    <util:RegistrySearch
+        Id="NativePackageReceiptSearch"
+        Variable="NativePackageReceipt"
+        Root="HKLM"
+        Key="SOFTWARE\DS4Windows"
+        Value="NativePackageReceipt"
+        Result="value"
+        Bitness="always64" />
+    <util:RegistrySearch
+        Id="InstalledTargetUserSidSearch"
+        Variable="InstalledTargetUserSid"
+        Root="HKLM"
+        Key="SOFTWARE\DS4Windows"
+        Value="NativePackageTargetUserSid"
+        Result="value"
+        Bitness="always64" />
+
+    <Chain>
+      <ExePackage
+          Id="CloseRunningApplications"
+          CacheId="DS4WindowsSetupActionsPreflight-$(var.SetupActionsHash)"
+          Name="DS4Windows.SetupActions.Preflight.exe"
+          SourceFile="$(var.SetupActionsPath)"
+          PerMachine="yes"
+          Permanent="yes"
+          Vital="yes"
+          DetectCondition="0"
+          InstallArguments="preflight">
+        <ExitCode Value="0" Behavior="success" />
+        <ExitCode Behavior="error" />
+      </ExePackage>
+
+      <MsiPackage
+          Id="DS4WindowsMsi"
+          SourceFile="$(var.MsiPath)"
+          Visible="no"
+          Vital="yes">
+        <MsiProperty Name="DS4WINDOWS_BUNDLE_MANAGED" Value="1" />
+      </MsiPackage>
+
+      <ExePackage
+          Id="ViiperNativeSetup"
+          CacheId="DS4WindowsSetupActionsNative-$(var.SetupActionsHash)"
+          Name="DS4Windows.SetupActions.Native.exe"
+          SourceFile="$(var.SetupActionsPath)"
+          PerMachine="yes"
+          Vital="yes"
+          DetectCondition="NativePackageReceipt = &quot;Installed&quot;"
+          InstallArguments="install --target-user-sid &quot;[TargetUserSid]&quot;"
+          RepairArguments="repair --target-user-sid &quot;[TargetUserSid]&quot;"
+          UninstallArguments="uninstall --target-user-sid &quot;[TargetUserSid]&quot;">
+        <ExitCode Value="0" Behavior="success" />
+        <ExitCode Value="3010" Behavior="scheduleReboot" />
+        <ExitCode Behavior="error" />
+      </ExePackage>
+
+      <!-- Burn removes packages in reverse chain order. The BA plans this
+           package Present only for direct uninstall, so the manifest-bound
+           manager runs before MSI removes its protected Program Files media.
+           Its UninstallArguments form the rollback path if later MSI removal
+           fails after a successful native teardown. -->
+      <ExePackage
+          Id="ViiperNativeRemove"
+          CacheId="DS4WindowsSetupActionsNativeRemove-$(var.SetupActionsHash)"
+          Name="DS4Windows.SetupActions.NativeRemove.exe"
+          SourceFile="$(var.SetupActionsPath)"
+          PerMachine="yes"
+          Vital="yes"
+          DetectCondition="0"
+          InstallArguments="uninstall --target-user-sid &quot;[TargetUserSid]&quot;"
+          UninstallArguments="install --target-user-sid &quot;[TargetUserSid]&quot;">
+        <ExitCode Value="0" Behavior="success" />
+        <ExitCode Value="3010" Behavior="scheduleReboot" />
+        <ExitCode Behavior="error" />
+      </ExePackage>
+
+      <ExePackage
+          Id="CloseRunningApplicationsForUninstall"
+          CacheId="DS4WindowsSetupActionsUninstallPreflight-$(var.SetupActionsHash)"
+          Name="DS4Windows.SetupActions.UninstallPreflight.exe"
+          SourceFile="$(var.SetupActionsPath)"
+          PerMachine="yes"
+          Permanent="yes"
+          Vital="yes"
+          DetectCondition="0"
+          InstallArguments="preflight">
+        <ExitCode Value="0" Behavior="success" />
+        <ExitCode Behavior="error" />
+      </ExePackage>
+    </Chain>
+  </Bundle>
+</Wix>

@@ -53,7 +53,9 @@ function Write-ViiperJsonAtomic {
             $temporary, ($Value | ConvertTo-Json -Depth 20),
             [Text.UTF8Encoding]::new($false))
         if (Test-Path -LiteralPath $fullPath -PathType Leaf) {
-            [IO.File]::Replace($temporary, $fullPath, $null, $true)
+            [IO.File]::Replace(
+                $temporary, $fullPath,
+                [Management.Automation.Language.NullString]::Value, $true)
         }
         else {
             [IO.File]::Move($temporary, $fullPath)

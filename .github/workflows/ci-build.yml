@@ -57,6 +57,14 @@ jobs:
         shell: pwsh
         run: .\extras\Test-ViiperNativePackageContract.ps1
 
+      - name: Validate Windows 11 bundle contract (Windows PowerShell 5.1)
+        shell: powershell
+        run: .\extras\validation\Test-ViiperWin11ValidationContract.ps1
+
+      - name: Validate Windows 11 bundle contract (PowerShell 7)
+        shell: pwsh
+        run: .\extras\validation\Test-ViiperWin11ValidationContract.ps1
+
       - name: Validate installer security contracts (Windows PowerShell 5.1)
         shell: powershell
         run: .\installer\Test-InstallerSecurityContracts.ps1

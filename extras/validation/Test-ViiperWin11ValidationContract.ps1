@@ -141,6 +141,24 @@ $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) (
     'viiper-validation-contract-' + [Guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($temporaryRoot)
 try {
+    # Exercise both publication branches. Windows PowerShell converts a literal
+    # $null string argument to String.Empty, so an existing destination is the
+    # required regression cut for File.Replace.
+    $atomicPath = Join-Path $temporaryRoot 'atomic-state.json'
+    Write-ViiperJsonAtomic -Path $atomicPath -Value ([ordered]@{ sequence = 1 })
+    Write-ViiperJsonAtomic -Path $atomicPath -Value ([ordered]@{ sequence = 2 })
+    $atomicState = Get-Content -LiteralPath $atomicPath -Raw -Encoding UTF8 |
+        ConvertFrom-Json -ErrorAction Stop
+    if ([int]$atomicState.sequence -ne 2) {
+        throw 'Atomic JSON replacement did not publish the second state.'
+    }
+    $atomicResidue = @(Get-ChildItem -LiteralPath $temporaryRoot -File -Force |
+        Where-Object { $_.Name -like 'atomic-state.json.*.tmp' })
+    if ($atomicResidue.Count -ne 0) {
+        throw 'Atomic JSON replacement retained a temporary state file.'
+    }
+    Remove-Item -LiteralPath $atomicPath -Force
+
     $payloadPath = Join-Path $temporaryRoot 'payload.bin'
     [IO.File]::WriteAllBytes($payloadPath, [byte[]](1, 2, 3, 4, 5))
     $sourceRevision = '0123456789abcdef0123456789abcdef01234567'

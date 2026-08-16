@@ -71,6 +71,9 @@ jobs:
           powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\extras\Test-ViiperNativePackageContract.ps1
           if ($LASTEXITCODE -ne 0) { throw "Windows PowerShell native contract failed." }
           .\extras\Test-ViiperNativePackageContract.ps1
+          powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\extras\validation\Test-ViiperWin11ValidationContract.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Windows PowerShell validation-bundle contract failed." }
+          .\extras\validation\Test-ViiperWin11ValidationContract.ps1
           powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\installer\Test-InstallerSecurityContracts.ps1
           if ($LASTEXITCODE -ne 0) { throw "Windows PowerShell installer security contract failed." }
           .\installer\Test-InstallerSecurityContracts.ps1

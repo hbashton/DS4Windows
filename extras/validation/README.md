@@ -102,6 +102,24 @@ outside OneDrive or any other sync/placeholder tree. Preserve the predecessor
 bundle and evidence read-only. Supply every reported predecessor digest; none
 is discovered or substituted:
 
+The source-bound R4 stdout proof is exactly 582 bytes of UTF-8 without a BOM:
+these five lines in this fixed order, each terminated by LF (including the
+last line). Its SHA-256 is
+`ca95fac3b8bd6fe7871a7f42400031f01ea946dc88786e9e9a746084144c205b`.
+
+```text
+local-test-trust store=Root action=add result=added
+local-test-trust store=Root action=verify-add result=present
+local-test-trust store=TrustedPublisher action=add result=added
+local-test-trust store=TrustedPublisher action=verify-add result=present
+VIIPER: error: install native driver and broker transaction: native driver helper failed with exit 4: exit status 4: result=error operation=install changed=0 rebootRequired=0 rollback=not-needed exitCode=4 phase="install-journal-broker-image-hash" win32Error=23 message="protected broker evidence differs from its immutable digest"
+```
+
+The bare canonical helper outcome is intentionally not an alternate proof.
+Arbitrary prefixes or suffixes, another VIIPER command context, near-miss
+fields, duplicate wrappers, any extra native result outcome, CRLF line endings,
+and a UTF-8 BOM are rejected.
+
 ```powershell
 & .\Invoke-ViiperWin11Validation.ps1 @common -Phase RecoverFailedInstall `
   -PredecessorEvidenceRoot '<retained predecessor evidence root>' `

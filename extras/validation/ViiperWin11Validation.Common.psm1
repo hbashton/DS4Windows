@@ -601,6 +601,7 @@ function Test-ViiperFailedInstallRecoveryEvidence {
             $lockedEvidence[$path] = [pscustomobject]@{
                 Hash = $digest
                 Text = $text
+                HadUtf8Bom = $textOffset -ne 0
             }
         }
 
@@ -668,40 +669,30 @@ function Test-ViiperFailedInstallRecoveryEvidence {
     }
 
     $stdout = [string]$lockedEvidence[$stdoutPath].Text
-    # EmitOutcome always emits this canonical prefix. Depending on how far
-    # journal initialization progressed, it may append either or both bounded
-    # recovery diagnostics in this one fixed field order. The caller still
-    # binds the entire stdout file by SHA-256 above; accepting the diagnostics
-    # here only prevents a truthful retained-journal path from invalidating the
-    # exact zero-change failure proof.
-    $quotedRecoveryPath = '"(?:[^"\\\r\n]|\\["\\]){1,32767}"'
-    $quotedRecoveryText = '"(?:[^"\\\r\n]|\\["\\]){0,4096}"'
-    $recoveryRecordProof = '(?: recoveryRecord=' + $quotedRecoveryPath +
-        ' recoveryRecordWritten=1| recoveryRecord=' + $quotedRecoveryPath +
-        ' recoveryRecordWritten=0(?: recoveryRecordPhase=' +
-        $quotedRecoveryText + ' recoveryRecordWin32Error=[0-9]{1,10} ' +
-        'recoveryRecordMessage=' + $quotedRecoveryText + ')?)?'
-    $recoveryBackupProof = '(?: recoveryBackup=' + $quotedRecoveryPath +
-        ' recoveryBackupRetained=(?:0|1))?'
-    $failureProof = '(?m)^result=error operation=install changed=0 ' +
+    # R4 captured the privileged VIIPER command, not the helper directly. Bind
+    # the complete observed stdout envelope: four trust proofs followed by the
+    # deterministic Kong/Go wrapper, each LF-terminated in UTF-8 without a BOM.
+    # Exact ordinal equality prevents a caller-selected hash from authorizing a
+    # bare outcome, arbitrary context, diagnostics, CRLF, or another result.
+    $r4TrustProofs = [string[]]@(
+        'local-test-trust store=Root action=add result=added',
+        'local-test-trust store=Root action=verify-add result=present',
+        'local-test-trust store=TrustedPublisher action=add result=added',
+        'local-test-trust store=TrustedPublisher action=verify-add result=present'
+    )
+    $r4FailureOutcome = 'result=error operation=install changed=0 ' +
         'rebootRequired=0 rollback=not-needed exitCode=4 ' +
         'phase="install-journal-broker-image-hash" win32Error=23 ' +
-        'message="protected broker evidence differs from its immutable digest"' +
-        $recoveryRecordProof + $recoveryBackupProof + '\r?$'
-    if ([regex]::Matches($stdout, $failureProof).Count -ne 1 -or
-        [regex]::Matches($stdout,
-            '(?m)^result=(?:success|error) operation=install ').Count -ne 1) {
-        throw 'Predecessor stdout does not prove the exact settled, zero-change broker-image digest rejection.'
-    }
-    foreach ($storeName in @('Root', 'TrustedPublisher')) {
-        foreach ($proof in @(
-                "local-test-trust store=$storeName action=add result=added",
-                "local-test-trust store=$storeName action=verify-add result=present")) {
-            if ([regex]::Matches($stdout,
-                    '(?m)^' + [regex]::Escape($proof) + '\r?$').Count -ne 1) {
-                throw "Predecessor stdout does not prove exact new trust in LocalMachine\$storeName."
-            }
-        }
+        'message="protected broker evidence differs from its immutable digest"'
+    $r4FailureWrapper = 'VIIPER: error: install native driver and broker ' +
+        'transaction: native driver helper failed with exit 4: exit status 4: ' +
+        $r4FailureOutcome
+    $expectedR4Stdout = [string]::Join(
+        "`n", [string[]]@($r4TrustProofs + $r4FailureWrapper)) + "`n"
+    if ([bool]$lockedEvidence[$stdoutPath].HadUtf8Bom -or
+        -not [string]::Equals($stdout, $expectedR4Stdout,
+            [StringComparison]::Ordinal)) {
+        throw 'Predecessor stdout is not the exact five-line LF-terminated R4 trust and wrapped zero-change failure proof.'
     }
 
     return [ordered]@{

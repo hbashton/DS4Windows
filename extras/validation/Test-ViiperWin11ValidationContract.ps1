@@ -322,7 +322,9 @@ foreach ($fragment in @('Building the bundle makes no runtime claim',
     'DS4Windows HID/media/reconnect',
     'lower in every observed balanced cycle on that exact machine session',
     'no iid, confidence, population, or cross-machine claim',
-    'No step downloads anything')) {
+    'No step downloads anything',
+    'bare canonical helper outcome is intentionally not an alternate proof',
+    'duplicate wrappers, any extra native result outcome')) {
     if ($readme.IndexOf($fragment, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
         throw "Validation guide lost scope boundary '$fragment'."
     }
@@ -629,13 +631,45 @@ try {
         evidenceDirectory = $predecessorInstallStep
     })
     $predecessorStdoutPath = Join-Path $predecessorInstallStep 'stdout.log'
-    [IO.File]::WriteAllLines($predecessorStdoutPath, [string[]]@(
+    $predecessorTrustProofs = [string[]]@(
         'local-test-trust store=Root action=add result=added',
         'local-test-trust store=Root action=verify-add result=present',
         'local-test-trust store=TrustedPublisher action=add result=added',
-        'local-test-trust store=TrustedPublisher action=verify-add result=present',
-        'result=error operation=install changed=0 rebootRequired=0 rollback=not-needed exitCode=4 phase="install-journal-broker-image-hash" win32Error=23 message="protected broker evidence differs from its immutable digest" recoveryRecord="C:\\ProgramData\\VIIPER\\UdeCx\\active-v2" recoveryRecordWritten=0 recoveryRecordPhase="journal-write" recoveryRecordWin32Error=112 recoveryRecordMessage="full" recoveryBackup="C:\\ProgramData\\VIIPER\\UdeCx\\backup" recoveryBackupRetained=1'
-    ), [Text.UTF8Encoding]::new($false))
+        'local-test-trust store=TrustedPublisher action=verify-add result=present'
+    )
+    $bareR4FailureOutcome = 'result=error operation=install changed=0 ' +
+        'rebootRequired=0 rollback=not-needed exitCode=4 ' +
+        'phase="install-journal-broker-image-hash" win32Error=23 ' +
+        'message="protected broker evidence differs from its immutable digest"'
+    $r4FailureWrapperPrefix = 'VIIPER: error: install native driver and broker ' +
+        'transaction: native driver helper failed with exit 4: exit status 4: '
+    $exactR4FailureWrapper = $r4FailureWrapperPrefix + $bareR4FailureOutcome
+    function Write-ContractPredecessorStdout {
+        param(
+            [Parameter(Mandatory = $true)]
+            [AllowEmptyString()]
+            [AllowEmptyCollection()]
+            [string[]]$OutcomeLines,
+            [string[]]$TrustLines = $predecessorTrustProofs,
+            [string]$LineEnding = "`n",
+            [switch]$Utf8Bom,
+            [switch]$OmitFinalLineEnding
+        )
+        $lines = [string[]]@($TrustLines + $OutcomeLines)
+        $text = [string]::Join($LineEnding, $lines)
+        if (-not $OmitFinalLineEnding) { $text += $LineEnding }
+        [IO.File]::WriteAllText($predecessorStdoutPath, $text,
+            [Text.UTF8Encoding]::new([bool]$Utf8Bom))
+    }
+    Write-ContractPredecessorStdout -OutcomeLines @($exactR4FailureWrapper)
+    $exactR4StdoutHash =
+        'ca95fac3b8bd6fe7871a7f42400031f01ea946dc88786e9e9a746084144c205b'
+    if ((Get-Item -LiteralPath $predecessorStdoutPath).Length -ne 582 -or
+        (Get-ViiperSha256 -Path $predecessorStdoutPath) -cne
+            $exactR4StdoutHash) {
+        throw 'Synthetic predecessor stdout does not reproduce the exact retained R4 bytes.'
+    }
+    $exactR4StdoutBytes = [IO.File]::ReadAllBytes($predecessorStdoutPath)
     $predecessorStderrPath = Join-Path $predecessorInstallStep 'stderr.log'
     [IO.File]::WriteAllText($predecessorStderrPath,
         'Local VIIPER driver transaction failed with exit code 4.',
@@ -674,6 +708,207 @@ try {
     if (-not $recoveryTamperRejected) {
         throw 'Failed-install recovery admitted changed predecessor evidence.'
     }
+
+    # Exercise the same semantic proof parser in Windows PowerShell 5.1 and
+    # PowerShell 7. The exact R4 wrapper is accepted above. The helper's bare
+    # canonical outcome is intentionally not an alternate proof: R4 captured
+    # the VIIPER command and its deterministic Kong/Go error context.
+    function Assert-ContractRecoveryStdoutRejected {
+        param(
+            [Parameter(Mandatory = $true)]
+            [AllowEmptyString()]
+            [AllowEmptyCollection()]
+            [string[]]$OutcomeLines,
+            [Parameter(Mandatory = $true)][string]$Label,
+            [string[]]$TrustLines = $predecessorTrustProofs,
+            [string]$LineEnding = "`n",
+            [switch]$Utf8Bom,
+            [switch]$OmitFinalLineEnding
+        )
+        Write-ContractPredecessorStdout -OutcomeLines $OutcomeLines `
+            -TrustLines $TrustLines -LineEnding $LineEnding `
+            -Utf8Bom:$Utf8Bom `
+            -OmitFinalLineEnding:$OmitFinalLineEnding
+        $arguments = $recoveryEvidenceArguments.Clone()
+        $arguments.ExpectedInstallStdoutSHA256 = Get-ViiperSha256 `
+            -Path $predecessorStdoutPath
+        $rejected = $false
+        try {
+            [void](Test-ViiperFailedInstallRecoveryEvidence @arguments)
+        }
+        catch { $rejected = $true }
+        if (-not $rejected) {
+            throw "Failed-install recovery admitted adversarial stdout: $Label."
+        }
+    }
+    function Assert-ContractRecoveryStdoutBytesRejected {
+        param(
+            [Parameter(Mandatory = $true)][byte[]]$Bytes,
+            [Parameter(Mandatory = $true)][string]$Label
+        )
+        [IO.File]::WriteAllBytes($predecessorStdoutPath, $Bytes)
+        $arguments = $recoveryEvidenceArguments.Clone()
+        $arguments.ExpectedInstallStdoutSHA256 = Get-ViiperSha256 `
+            -Path $predecessorStdoutPath
+        $rejected = $false
+        try {
+            [void](Test-ViiperFailedInstallRecoveryEvidence @arguments)
+        }
+        catch { $rejected = $true }
+        if (-not $rejected) {
+            throw "Failed-install recovery admitted adversarial bytes: $Label."
+        }
+    }
+    Assert-ContractRecoveryStdoutRejected `
+        -OutcomeLines @($bareR4FailureOutcome) `
+        -Label 'bare canonical helper outcome'
+    Assert-ContractRecoveryStdoutRejected `
+        -OutcomeLines @(('untrusted-prefix: ' + $exactR4FailureWrapper)) `
+        -Label 'exact wrapper as an arbitrary substring'
+    Assert-ContractRecoveryStdoutRejected `
+        -OutcomeLines @(($exactR4FailureWrapper +
+            ' recoveryRecord="C:\\ProgramData\\VIIPER\\UdeCx\\active-v2"' +
+            ' recoveryRecordWritten=1')) `
+        -Label 'exact wrapper with an unreported diagnostic suffix'
+    Assert-ContractRecoveryStdoutRejected `
+        -OutcomeLines @($exactR4FailureWrapper.Replace(
+            'install native driver and broker transaction',
+            'repair native driver and broker transaction')) `
+        -Label 'wrong VIIPER command context'
+    Assert-ContractRecoveryStdoutRejected `
+        -OutcomeLines @($exactR4FailureWrapper.Replace(
+            'rebootRequired=0', 'rebootRequired=1')) `
+        -Label 'near-miss zero-change outcome'
+    Assert-ContractRecoveryStdoutRejected `
+        -OutcomeLines @($exactR4FailureWrapper, $exactR4FailureWrapper) `
+        -Label 'duplicate exact wrapper outcomes'
+    Assert-ContractRecoveryStdoutRejected `
+        -OutcomeLines @($exactR4FailureWrapper,
+            'result=success operation=status changed=0') `
+        -Label 'extra native result outcome'
+    Assert-ContractRecoveryStdoutRejected `
+        -OutcomeLines @($exactR4FailureWrapper) `
+        -LineEnding "`r`n" `
+        -Label 'CRLF line endings'
+    Assert-ContractRecoveryStdoutRejected `
+        -OutcomeLines @($exactR4FailureWrapper) `
+        -Utf8Bom `
+        -Label 'UTF-8 BOM'
+    Assert-ContractRecoveryStdoutRejected `
+        -OutcomeLines @($exactR4FailureWrapper) `
+        -OmitFinalLineEnding `
+        -Label 'missing final LF'
+
+    $reorderedTrustProofs = [string[]]@(
+        $predecessorTrustProofs[1],
+        $predecessorTrustProofs[0],
+        $predecessorTrustProofs[2],
+        $predecessorTrustProofs[3]
+    )
+    Assert-ContractRecoveryStdoutRejected `
+        -OutcomeLines @($exactR4FailureWrapper) `
+        -TrustLines $reorderedTrustProofs `
+        -Label 'reordered trust lines'
+    Assert-ContractRecoveryStdoutRejected `
+        -OutcomeLines @($exactR4FailureWrapper) `
+        -TrustLines ([string[]]$predecessorTrustProofs[0..2]) `
+        -Label 'missing trust line'
+    Assert-ContractRecoveryStdoutRejected `
+        -OutcomeLines @($exactR4FailureWrapper) `
+        -TrustLines ([string[]]@($predecessorTrustProofs +
+            $predecessorTrustProofs[3])) `
+        -Label 'duplicated trust line'
+
+    Assert-ContractRecoveryStdoutRejected `
+        -OutcomeLines @('', $exactR4FailureWrapper) `
+        -Label 'extra blank line'
+    Assert-ContractRecoveryStdoutRejected `
+        -OutcomeLines @((' ' + $exactR4FailureWrapper)) `
+        -Label 'leading whitespace'
+    Assert-ContractRecoveryStdoutRejected `
+        -OutcomeLines @(($exactR4FailureWrapper + ' ')) `
+        -Label 'trailing whitespace'
+    Assert-ContractRecoveryStdoutRejected `
+        -OutcomeLines @($exactR4FailureWrapper.Insert(7, [char]0x00ad)) `
+        -Label 'culture-ignorable soft hyphen with recomputed digest'
+    Assert-ContractRecoveryStdoutRejected `
+        -OutcomeLines @($exactR4FailureWrapper.Insert(7, [char]0x0000)) `
+        -Label 'embedded NUL with recomputed digest'
+
+    $semanticMutations = @(
+        [pscustomobject]@{
+            Label = 'helper exit disagreement'
+            Value = $exactR4FailureWrapper.Replace(
+                'helper failed with exit 4', 'helper failed with exit 5')
+        },
+        [pscustomobject]@{
+            Label = 'wrapper exit-status disagreement'
+            Value = $exactR4FailureWrapper.Replace(
+                'exit status 4', 'exit status 5')
+        },
+        [pscustomobject]@{
+            Label = 'structured exit disagreement'
+            Value = $exactR4FailureWrapper.Replace('exitCode=4', 'exitCode=5')
+        },
+        [pscustomobject]@{
+            Label = 'altered result field'
+            Value = $exactR4FailureWrapper.Replace('result=error', 'result=success')
+        },
+        [pscustomobject]@{
+            Label = 'altered operation field'
+            Value = $exactR4FailureWrapper.Replace(
+                'operation=install', 'operation=uninstall')
+        },
+        [pscustomobject]@{
+            Label = 'altered changed field'
+            Value = $exactR4FailureWrapper.Replace('changed=0', 'changed=1')
+        },
+        [pscustomobject]@{
+            Label = 'altered rollback field'
+            Value = $exactR4FailureWrapper.Replace(
+                'rollback=not-needed', 'rollback=failed')
+        },
+        [pscustomobject]@{
+            Label = 'altered phase field'
+            Value = $exactR4FailureWrapper.Replace(
+                'phase="install-journal-broker-image-hash"',
+                'phase="install-journal-write"')
+        },
+        [pscustomobject]@{
+            Label = 'altered win32 field'
+            Value = $exactR4FailureWrapper.Replace('win32Error=23', 'win32Error=24')
+        },
+        [pscustomobject]@{
+            Label = 'altered message field'
+            Value = $exactR4FailureWrapper.Replace(
+                'protected broker evidence differs from its immutable digest',
+                'protected broker evidence is missing')
+        },
+        [pscustomobject]@{
+            Label = 'altered field order'
+            Value = $exactR4FailureWrapper.Replace(
+                'operation=install changed=0 rebootRequired=0',
+                'operation=install rebootRequired=0 changed=0')
+        }
+    )
+    foreach ($mutation in $semanticMutations) {
+        Assert-ContractRecoveryStdoutRejected `
+            -OutcomeLines @([string]$mutation.Value) `
+            -Label ([string]$mutation.Label)
+    }
+
+    $contradictoryRawOutcome = $bareR4FailureOutcome.Replace(
+        'result=error', 'result=success').Replace(
+        'changed=0', 'changed=1').Replace('exitCode=4', 'exitCode=0')
+    Assert-ContractRecoveryStdoutRejected `
+        -OutcomeLines @($exactR4FailureWrapper, $contradictoryRawOutcome) `
+        -Label 'wrapped failure plus contradictory raw outcome'
+
+    [byte[]]$malformedUtf8 = $exactR4StdoutBytes.Clone()
+    $malformedUtf8[0] = 0xc3
+    $malformedUtf8[1] = 0x28
+    Assert-ContractRecoveryStdoutBytesRejected -Bytes $malformedUtf8 `
+        -Label 'malformed UTF-8 with recomputed digest'
 
     [IO.File]::WriteAllBytes($payloadPath, [byte[]](1, 2, 3, 4, 6))
     $tamperRejected = $false

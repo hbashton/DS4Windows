@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Install', 'Uninstall')]
+    [ValidateSet('Install', 'Recover', 'Uninstall')]
     [string]$Operation = 'Install',
 
     [Parameter(Mandatory = $true)]
@@ -8,7 +8,12 @@ param(
     [string]$TargetUserSID,
 
     [switch]$AllowLocalTest,
-    [switch]$AcknowledgeDisposableTestMachine
+    [switch]$AcknowledgeDisposableTestMachine,
+
+    [string]$RecoveryAuthorizationPath,
+    [ValidatePattern('^[0-9a-fA-F]{64}$')]
+    [string]$ExpectedRecoveryAuthorizationSHA256,
+    [switch]$RecoveryResume
 )
 
 Set-StrictMode -Version Latest
@@ -18,14 +23,134 @@ $expectedSchema = 1
 $localTestOptInEnvironment = 'DS4WINDOWS_VIIPER_ALLOW_LOCAL_TEST'
 $structuredOutcomeWritten = $false
 $transactionStarted = $false
-$trustCleanupFailed = $false
 $localTestCertificate = $null
-$addedLocalTestTrustStores = [Collections.Generic.List[string]]::new()
+$recoveryAuthorizationLease = $null
+$recoveryPredecessorLeases = $null
 
 function Test-IsAdministrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = [Security.Principal.WindowsPrincipal]::new($identity)
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Get-TrustManagerFileSystemSecurity {
+    param(
+        [Parameter(Mandatory = $true)][IO.FileSystemInfo]$Item,
+        [Parameter(Mandatory = $true)]
+        [Security.AccessControl.AccessControlSections]$Sections
+    )
+
+    if ($null -ne $Item.PSObject.Methods['GetAccessControl']) {
+        return $Item.GetAccessControl($Sections)
+    }
+    if ($Item -is [IO.DirectoryInfo]) {
+        return [IO.FileSystemAclExtensions]::GetAccessControl(
+            [IO.DirectoryInfo]$Item, $Sections)
+    }
+    return [IO.FileSystemAclExtensions]::GetAccessControl(
+        [IO.FileInfo]$Item, $Sections)
+}
+
+if (-not ('ViiperLocalTestTrustLeaseNative' -as [type])) {
+    Add-Type -Language CSharp -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+
+public static class ViiperLocalTestTrustLeaseNative
+{
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileTime
+    {
+        public uint Low;
+        public uint High;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ByHandleFileInformation
+    {
+        public uint FileAttributes;
+        public FileTime CreationTime;
+        public FileTime LastAccessTime;
+        public FileTime LastWriteTime;
+        public uint VolumeSerialNumber;
+        public uint FileSizeHigh;
+        public uint FileSizeLow;
+        public uint NumberOfLinks;
+        public uint FileIndexHigh;
+        public uint FileIndexLow;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetFileInformationByHandle(
+        SafeFileHandle handle,
+        out ByHandleFileInformation information);
+
+    public static uint LinkCount(SafeFileHandle handle)
+    {
+        ByHandleFileInformation information;
+        if (!GetFileInformationByHandle(handle, out information))
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        return information.NumberOfLinks;
+    }
+}
+'@
+}
+
+function Assert-ExactProtectedTrustObjectSecurity {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][bool]$Directory
+    )
+
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if ($item.PSIsContainer -ne $Directory -or
+        ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "Protected trust-manager object has the wrong type or is a reparse point: '$Path'."
+    }
+    $security = Get-TrustManagerFileSystemSecurity -Item $item -Sections (
+        [Security.AccessControl.AccessControlSections]::Owner -bor
+        [Security.AccessControl.AccessControlSections]::Group -bor
+        [Security.AccessControl.AccessControlSections]::Access)
+    $owner = $security.GetOwner(
+        [Security.Principal.SecurityIdentifier]).Value
+    $group = $security.GetGroup(
+        [Security.Principal.SecurityIdentifier]).Value
+    if (-not $security.AreAccessRulesProtected -or
+        $owner -cne 'S-1-5-32-544' -or $group -cne 'S-1-5-32-544') {
+        throw "Protected trust-manager object has an unsafe owner, group, or inherited DACL: '$Path'."
+    }
+    $rules = @($security.GetAccessRules(
+        $true, $true, [Security.Principal.SecurityIdentifier]))
+    if ($rules.Count -ne 2) {
+        throw "Protected trust-manager object has an unexpected access-rule count: '$Path'."
+    }
+    $expectedInheritance = if ($Directory) {
+        [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+            [Security.AccessControl.InheritanceFlags]::ObjectInherit
+    } else {
+        [Security.AccessControl.InheritanceFlags]::None
+    }
+    foreach ($expectedSid in @('S-1-5-18', 'S-1-5-32-544')) {
+        $matches = @($rules | Where-Object {
+            $_.IdentityReference.Value -ceq $expectedSid
+        })
+        if ($matches.Count -ne 1) {
+            throw "Protected trust-manager object is missing an exact trusted principal: '$Path'."
+        }
+        $rule = $matches[0]
+        if ($rule.IsInherited -or
+            $rule.AccessControlType -ne
+                [Security.AccessControl.AccessControlType]::Allow -or
+            $rule.FileSystemRights -ne
+                [Security.AccessControl.FileSystemRights]::FullControl -or
+            $rule.InheritanceFlags -ne $expectedInheritance -or
+            $rule.PropagationFlags -ne
+                [Security.AccessControl.PropagationFlags]::None) {
+            throw "Protected trust-manager object has an unexpected access rule: '$Path'."
+        }
+    }
 }
 
 function Assert-LocalTestBootAdmission {
@@ -34,117 +159,6 @@ function Assert-LocalTestBootAdmission {
     if ($LASTEXITCODE -ne 0 -or
         $bcdOutput -notmatch '(?im)^\s*testsigning\s+Yes\s*$') {
         throw "The current boot entry does not report 'testsigning Yes'. Enable TESTSIGNING and reboot before local-test installation.`n$bcdOutput"
-    }
-}
-
-function Get-ExactMachineCertificateCount {
-    param(
-        [Parameter(Mandatory = $true)][string]$StoreName,
-        [Parameter(Mandatory = $true)]$Certificate
-    )
-
-    $store = [Security.Cryptography.X509Certificates.X509Store]::new(
-        $StoreName,
-        [Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine)
-    $matches = $null
-    try {
-        $store.Open(
-            [Security.Cryptography.X509Certificates.OpenFlags]::ReadOnly)
-        $matches = $store.Certificates.Find(
-            [Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
-            $Certificate.Thumbprint, $false)
-        $expectedBytes = [Convert]::ToBase64String($Certificate.RawData)
-        $exact = @($matches | Where-Object {
-            [Convert]::ToBase64String($_.RawData) -ceq $expectedBytes
-        })
-        if ($matches.Count -ne $exact.Count -or $exact.Count -gt 1) {
-            throw "Certificate collision in LocalMachine\$StoreName."
-        }
-        return [int]$exact.Count
-    }
-    finally {
-        if ($null -ne $matches) {
-            foreach ($match in $matches) {
-                $match.Dispose()
-            }
-        }
-        $store.Close()
-    }
-}
-
-function Ensure-ExactLocalTestTrust {
-    param(
-        [Parameter(Mandatory = $true)][string]$StoreName,
-        [Parameter(Mandatory = $true)]$Certificate
-    )
-
-    if ((Get-ExactMachineCertificateCount -StoreName $StoreName `
-            -Certificate $Certificate) -eq 1) {
-        Write-Host "local-test-trust store=$StoreName action=add result=preexisting"
-        return
-    }
-
-    # Record cleanup authority before the mutation. If Add throws after
-    # persisting the certificate, the outer trap still removes only these
-    # exact bytes while no driver transaction has begun.
-    $script:addedLocalTestTrustStores.Add($StoreName)
-    $store = [Security.Cryptography.X509Certificates.X509Store]::new(
-        $StoreName,
-        [Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine)
-    try {
-        $store.Open(
-            [Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-        $store.Add($Certificate)
-    }
-    finally {
-        $store.Close()
-    }
-    if ((Get-ExactMachineCertificateCount -StoreName $StoreName `
-            -Certificate $Certificate) -ne 1) {
-        throw "Exact local-test certificate was not installed in LocalMachine\$StoreName."
-    }
-    Write-Host "local-test-trust store=$StoreName action=add result=added"
-}
-
-function Remove-NewLocalTestTrust {
-    if ($null -eq $script:localTestCertificate) {
-        return
-    }
-    $cleanupErrors = [Collections.Generic.List[Exception]]::new()
-    foreach ($storeName in $script:addedLocalTestTrustStores) {
-        try {
-            $count = Get-ExactMachineCertificateCount -StoreName $storeName `
-                -Certificate $script:localTestCertificate
-            if ($count -eq 1) {
-                $store = [Security.Cryptography.X509Certificates.X509Store]::new(
-                    $storeName,
-                    [Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine)
-                try {
-                    $store.Open(
-                        [Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-                    $store.Remove($script:localTestCertificate)
-                }
-                finally {
-                    $store.Close()
-                }
-            }
-            if ((Get-ExactMachineCertificateCount -StoreName $storeName `
-                    -Certificate $script:localTestCertificate) -ne 0) {
-                throw "Exact local-test certificate remained in LocalMachine\$StoreName."
-            }
-            Write-Host "local-test-trust store=$StoreName action=cleanup result=absent"
-        }
-        catch {
-            Write-Host "local-test-trust store=$StoreName action=cleanup result=error"
-            $cleanupErrors.Add([InvalidOperationException]::new(
-                "LocalMachine\$StoreName trust cleanup failed.",
-                $_.Exception))
-        }
-    }
-    if ($cleanupErrors.Count -ne 0) {
-        throw [AggregateException]::new(
-            'Failed to remove one or more newly added local-test trust anchors.',
-            [Exception[]]$cleanupErrors.ToArray())
     }
 }
 
@@ -378,15 +392,13 @@ function Write-StructuredOutcome {
             'not-required'
         } elseif ($ExitCode -eq 3010) {
             'safely-settled'
-        } elseif ($script:trustCleanupFailed) {
-            'unverified-see-transaction-log'
         } elseif (-not $script:transactionStarted) {
             'not-started'
         } else {
             'unverified-see-transaction-log'
         }
-        manualRecoveryRequired = $script:trustCleanupFailed -or
-            ($script:transactionStarted -and $ExitCode -notin @(0, 3010))
+        manualRecoveryRequired = $script:transactionStarted -and
+            $ExitCode -notin @(0, 3010)
     }
     Write-Host ('DS4WINDOWS_VIIPER_NATIVE_RESULT ' +
         ($outcome | ConvertTo-Json -Compress))
@@ -564,6 +576,482 @@ function Open-VerifiedStagedBroker {
     }
 }
 
+function New-ProtectedLocalTestTrustCapability {
+    param(
+        [Parameter(Mandatory = $true)][string]$StagePath,
+        [Parameter(Mandatory = $true)][string]$SourceRevision,
+        [Parameter(Mandatory = $true)][string]$CertificatePath,
+        [Parameter(Mandatory = $true)][string]$CertificateSHA256,
+        [Parameter(Mandatory = $true)][string]$PackageLockSHA256,
+        [Parameter(Mandatory = $true)][string]$TrustJournalDirectory
+    )
+
+    Assert-ProtectedStage -StagePath $StagePath
+    $path = Join-Path $StagePath 'local-test-trust-capability.json'
+    if ((Split-Path -Parent $path) -ine $StagePath -or
+        (Test-Path -LiteralPath $path)) {
+        throw 'Refusing to reuse or redirect a local-test trust capability.'
+    }
+    $parentProcess = Get-Process -Id $PID -ErrorAction Stop
+    $parentCreationFileTime = [uint64]$parentProcess.StartTime.ToUniversalTime().ToFileTimeUtc()
+    if ($parentCreationFileTime -eq 0) {
+        throw 'The local-test trust capability parent creation time is invalid.'
+    }
+    $value = [ordered]@{
+        schema = 'viiper.native.local-test-trust-capability/v1'
+        nonce = [Guid]::NewGuid().ToString('N')
+        parentPid = [uint32]$PID
+        parentCreationFileTime = $parentCreationFileTime
+        sourceRevision = $SourceRevision.ToLowerInvariant()
+        certificatePath = [IO.Path]::GetFullPath($CertificatePath)
+        certificateSha256 = $CertificateSHA256.ToLowerInvariant()
+        packageLockSha256 = $PackageLockSHA256.ToLowerInvariant()
+        trustJournalSchema = 'viiper.native.local-test-trust-ownership/v1'
+        trustJournalDirectory = [IO.Path]::GetFullPath($TrustJournalDirectory)
+    }
+    $json = $value | ConvertTo-Json -Compress
+    if ($json.IndexOf("`r") -ge 0 -or $json.IndexOf("`n") -ge 0) {
+        throw 'The local-test trust capability is not single-line canonical JSON.'
+    }
+    $bytes = [Text.UTF8Encoding]::new($false, $true).GetBytes($json)
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = ([BitConverter]::ToString(
+            $algorithm.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $algorithm.Dispose()
+    }
+    $security = [Security.AccessControl.FileSecurity]::new()
+    $security.SetSecurityDescriptorSddlForm(
+        'O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)',
+        [Security.AccessControl.AccessControlSections]::All)
+    $stream = $null
+    try {
+        if ($PSVersionTable.PSEdition -ceq 'Desktop') {
+            $stream = [IO.FileStream]::new(
+                $path, [IO.FileMode]::CreateNew,
+                [Security.AccessControl.FileSystemRights]::FullControl,
+                [IO.FileShare]::Read, 4096,
+                [IO.FileOptions]::WriteThrough, $security)
+        } else {
+            $stream = [IO.FileSystemAclExtensions]::Create(
+                [IO.FileInfo]::new($path), [IO.FileMode]::CreateNew,
+                [Security.AccessControl.FileSystemRights]::FullControl,
+                [IO.FileShare]::Read, 4096,
+                [IO.FileOptions]::WriteThrough, $security)
+        }
+        $stream.Write($bytes, 0, $bytes.Length)
+        $stream.Flush($true)
+        Assert-ExactProtectedTrustObjectSecurity -Path $path -Directory $false
+        if ($stream.Length -ne $bytes.Length -or
+            [ViiperLocalTestTrustLeaseNative]::LinkCount(
+                $stream.SafeFileHandle) -ne 1) {
+            throw 'The protected local-test trust capability changed after creation.'
+        }
+        return [pscustomobject]@{ Path = $path; SHA256 = $hash; Stream = $stream }
+    }
+    catch {
+        if ($null -ne $stream) { $stream.Dispose() }
+        throw
+    }
+}
+
+function Assert-ExactRecoveryJsonObjectProperties {
+    param(
+        [Parameter(Mandatory = $true)]$Value,
+        [Parameter(Mandatory = $true)][string[]]$ExpectedNames,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+
+    if ($null -eq $Value -or
+        $Value -isnot [Management.Automation.PSCustomObject]) {
+        throw "Recovery authorization $Label is not one exact JSON object."
+    }
+    $actualNames = @($Value.PSObject.Properties |
+        ForEach-Object { [string]$_.Name })
+    $expected = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::Ordinal)
+    foreach ($name in $ExpectedNames) {
+        if (-not $expected.Add($name)) {
+            throw "Recovery authorization $Label contract repeats '$name'."
+        }
+    }
+    if ($actualNames.Count -ne $ExpectedNames.Count) {
+        throw "Recovery authorization $Label has missing or unknown fields."
+    }
+    foreach ($name in $actualNames) {
+        if (-not $expected.Contains($name)) {
+            throw "Recovery authorization $Label has unknown field '$name'."
+        }
+    }
+}
+
+function Assert-ExactR4FailedInstallRecoveryAuthorization {
+    param(
+        [Parameter(Mandatory = $true)][string]$AuthorizationText,
+        [Parameter(Mandatory = $true)]$Authorization,
+        [Parameter(Mandatory = $true)][string]$CurrentViiperSourceRevision,
+        [Parameter(Mandatory = $true)][string]$CurrentPackageLockSHA256,
+        [Parameter(Mandatory = $true)][string]$CurrentBundleManifestSHA256,
+        [Parameter(Mandatory = $true)][string]$CurrentCertificateSHA256,
+        [Parameter(Mandatory = $true)][string]$ExpectedMachine,
+        [Parameter(Mandatory = $true)][string]$ExpectedTargetUserSID,
+        [Parameter(Mandatory = $true)][bool]$Resume
+    )
+
+    $topNames = @(
+        'schema', 'status', 'retryPermitted', 'firstAuthorizedUtc',
+        'currentBundleManifestSha256', 'currentViiperSourceRevision',
+        'currentPackageLockSha256', 'predecessor',
+        'predecessorCertificateSha256', 'machine', 'targetUserSid',
+        'trustBeforeNativeAttempt', 'resume', 'updatedUtc'
+    )
+    if ($Resume) { $topNames += 'recoveryRootAuthorizationSha256' }
+    $predecessorNames = @(
+        'predecessorEvidenceRoot', 'installEvidenceDirectory', 'statePath',
+        'stateSha256', 'commandSha256', 'resultSha256', 'stdoutSha256',
+        'stderrSha256', 'bundleManifestSha256', 'viiperSourceRevision',
+        'ds4WindowsSourceRevision', 'packageLockSha256'
+    )
+    $trustNames = @('Root', 'TrustedPublisher')
+
+    # ConvertFrom-Json can collapse duplicate properties. Scan the same locked
+    # UTF-8 text before trusting its object model and require every simple,
+    # canonical property name exactly once across this fixed schema.
+    $allNames = @($topNames + $predecessorNames + $trustNames)
+    $allowedNames = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::Ordinal)
+    foreach ($name in $allNames) { [void]$allowedNames.Add($name) }
+    $seenNames = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::Ordinal)
+    $keyPattern = '"(?<name>(?:\\["\\/bfnrt]|\\u[0-9a-fA-F]{4}|[^"\\\x00-\x1f])*)"\s*:'
+    $keyMatches = [regex]::Matches(
+        $AuthorizationText, $keyPattern,
+        [Text.RegularExpressions.RegexOptions]::CultureInvariant)
+    foreach ($match in $keyMatches) {
+        $name = [string]$match.Groups['name'].Value
+        if ($name.IndexOf('\') -ge 0 -or
+            -not $allowedNames.Contains($name) -or
+            -not $seenNames.Add($name)) {
+            throw "Recovery authorization has an escaped, unknown, or duplicate JSON field '$name'."
+        }
+    }
+    if ($keyMatches.Count -ne $allNames.Count -or
+        $seenNames.Count -ne $allNames.Count) {
+        throw 'Recovery authorization has missing, unknown, or duplicate JSON fields.'
+    }
+
+    Assert-ExactRecoveryJsonObjectProperties -Value $Authorization `
+        -ExpectedNames $topNames -Label 'root'
+    Assert-ExactRecoveryJsonObjectProperties -Value $Authorization.predecessor `
+        -ExpectedNames $predecessorNames -Label 'predecessor'
+    Assert-ExactRecoveryJsonObjectProperties `
+        -Value $Authorization.trustBeforeNativeAttempt `
+        -ExpectedNames $trustNames -Label 'trust admission'
+
+    $r4 = [ordered]@{
+        predecessorEvidenceRoot = 'C:\Users\hbash\Documents\Codex\2026-08-15\the\outputs\VIIPER-Win11-9481f9d-272f6a0-r4'
+        installEvidenceDirectory = 'C:\Users\hbash\Documents\Codex\2026-08-15\the\outputs\VIIPER-Win11-9481f9d-272f6a0-r4\steps\20260816T034608909Z-install-27fffa05b7e544feb3c5a415ebd1f6c4'
+        statePath = 'C:\Users\hbash\Documents\Codex\2026-08-15\the\outputs\VIIPER-Win11-9481f9d-272f6a0-r4\state\validation-state.json'
+        stateSha256 = 'e13c686a0cddcf66620940005568b3a7a9a41abb277f61977dd88994863d8cda'
+        commandSha256 = 'c38579b1504c8851dd72317d49f4439d14b7878b4e19907ebe864c8ad986e3f7'
+        resultSha256 = '1095194f448455f746b5af92b89ae4f08f8f69a7ba9fac1d17a90d73e8a971b0'
+        # This exact stdout digest binds changed=0, rebootRequired=0,
+        # rollback=not-needed, exitCode=4, phase=install-journal-broker-image-hash,
+        # win32Error=23, and the immutable-broker-digest failure message.
+        stdoutSha256 = 'ca95fac3b8bd6fe7871a7f42400031f01ea946dc88786e9e9a746084144c205b'
+        stderrSha256 = '2610d56f76be3c1aea4f6b3dd4e4b38d134a1d311133ac46f389a28f8faeb520'
+        bundleManifestSha256 = '765de4fe822004e97940fa66ba73602dafd68194d14fd64e20b388444cd4c247'
+        viiperSourceRevision = '9481f9dbfde64af99905fa325546e50b5ea03d6e'
+        ds4WindowsSourceRevision = '272f6a05f1476d5aa9c055a234e61c292d3c1556'
+        packageLockSha256 = '16e08c31bb1c240a3612a6c4ddc8219b040d0e2dec5773e39f363d045113ab8c'
+        certificateSha256 = '09ca0c2d4d3da29268eff59cf85b6c1347d4a28ddc098b8640381694ad74c517'
+    }
+    $predecessor = $Authorization.predecessor
+    if ([string]$Authorization.schema -cne
+            'viiper.windows11.failed-install-recovery-progress/v1' -or
+        [string]$Authorization.status -cne 'native-attempt' -or
+        $Authorization.retryPermitted -isnot [bool] -or
+        $Authorization.retryPermitted -ne $true -or
+        $Authorization.resume -isnot [bool] -or
+        [bool]$Authorization.resume -ne $Resume -or
+        [string]$Authorization.currentViiperSourceRevision -cne
+            $CurrentViiperSourceRevision.ToLowerInvariant() -or
+        [string]$Authorization.currentPackageLockSha256 -cne
+            $CurrentPackageLockSHA256.ToLowerInvariant() -or
+        [string]$Authorization.currentBundleManifestSha256 -cne
+            $CurrentBundleManifestSHA256.ToLowerInvariant() -or
+        [string]$Authorization.predecessorCertificateSha256 -cne
+            $r4.certificateSha256 -or
+        [string]$Authorization.predecessorCertificateSha256 -cne
+            $CurrentCertificateSHA256.ToLowerInvariant() -or
+        [string]$Authorization.machine -cne $ExpectedMachine -or
+        [string]$Authorization.targetUserSid -cne $ExpectedTargetUserSID -or
+        [string]$predecessor.predecessorEvidenceRoot -ine
+            $r4.predecessorEvidenceRoot -or
+        [string]$predecessor.installEvidenceDirectory -ine
+            $r4.installEvidenceDirectory -or
+        [string]$predecessor.statePath -ine $r4.statePath -or
+        [string]$predecessor.stateSha256 -cne $r4.stateSha256 -or
+        [string]$predecessor.commandSha256 -cne $r4.commandSha256 -or
+        [string]$predecessor.resultSha256 -cne $r4.resultSha256 -or
+        [string]$predecessor.stdoutSha256 -cne $r4.stdoutSha256 -or
+        [string]$predecessor.stderrSha256 -cne $r4.stderrSha256 -or
+        [string]$predecessor.bundleManifestSha256 -cne
+            $r4.bundleManifestSha256 -or
+        [string]$predecessor.viiperSourceRevision -cne
+            $r4.viiperSourceRevision -or
+        [string]$predecessor.ds4WindowsSourceRevision -cne
+            $r4.ds4WindowsSourceRevision -or
+        [string]$predecessor.packageLockSha256 -cne
+            $r4.packageLockSha256) {
+        throw 'Recovery authorization does not bind the exact manifest-known R4 failed-install predecessor and failure proof.'
+    }
+
+    foreach ($timestampName in @('firstAuthorizedUtc', 'updatedUtc')) {
+        try {
+            $timestampValue = $Authorization.$timestampName
+            if ($timestampValue -is [DateTime]) {
+                [void]([DateTime]$timestampValue).ToUniversalTime()
+            } elseif ($timestampValue -is [DateTimeOffset]) {
+                [void]([DateTimeOffset]$timestampValue).ToUniversalTime()
+            } else {
+                [void][DateTimeOffset]::ParseExact(
+                    [string]$timestampValue, 'o',
+                    [Globalization.CultureInfo]::InvariantCulture,
+                    [Globalization.DateTimeStyles]::RoundtripKind)
+            }
+        }
+        catch {
+            throw "Recovery authorization has invalid '$timestampName'."
+        }
+    }
+    $trust = $Authorization.trustBeforeNativeAttempt
+    if (($trust.Root -isnot [int] -and $trust.Root -isnot [long]) -or
+        ($trust.TrustedPublisher -isnot [int] -and
+         $trust.TrustedPublisher -isnot [long])) {
+        throw 'Recovery authorization trust admission is not integral.'
+    }
+    if (-not $Resume -and
+        ([int]$trust.Root -ne 1 -or [int]$trust.TrustedPublisher -ne 1)) {
+        throw 'Initial recovery authorization does not bind exact trust 1/1.'
+    }
+    if ($Resume -and
+        ([int]$trust.Root -notin @(0, 1) -or
+         [int]$trust.TrustedPublisher -notin @(0, 1) -or
+         [string]$Authorization.recoveryRootAuthorizationSha256 -cnotmatch
+            '^[0-9a-f]{64}$')) {
+        throw 'Recovery retry authorization has invalid trust or root authority.'
+    }
+}
+
+function Open-ExactR4FailedInstallEvidenceLeases {
+    param(
+        [Parameter(Mandatory = $true)]$Authorization,
+        [Parameter(Mandatory = $true)][string]$ExpectedMachine,
+        [Parameter(Mandatory = $true)][string]$ExpectedTargetUserSID
+    )
+
+    $predecessor = $Authorization.predecessor
+    $evidence = @(
+        [pscustomobject]@{
+            Label = 'state'
+            Path = [string]$predecessor.statePath
+            SHA256 = [string]$predecessor.stateSha256
+            State = $true
+        },
+        [pscustomobject]@{
+            Label = 'command'
+            Path = Join-Path ([string]$predecessor.installEvidenceDirectory) `
+                'command.json'
+            SHA256 = [string]$predecessor.commandSha256
+            State = $false
+        },
+        [pscustomobject]@{
+            Label = 'result'
+            Path = Join-Path ([string]$predecessor.installEvidenceDirectory) `
+                'result.json'
+            SHA256 = [string]$predecessor.resultSha256
+            State = $false
+        },
+        [pscustomobject]@{
+            Label = 'stdout'
+            Path = Join-Path ([string]$predecessor.installEvidenceDirectory) `
+                'stdout.log'
+            SHA256 = [string]$predecessor.stdoutSha256
+            State = $false
+        },
+        [pscustomobject]@{
+            Label = 'stderr'
+            Path = Join-Path ([string]$predecessor.installEvidenceDirectory) `
+                'stderr.log'
+            SHA256 = [string]$predecessor.stderrSha256
+            State = $false
+        }
+    )
+    $streams = [Collections.Generic.List[IO.FileStream]]::new()
+    try {
+        foreach ($entry in $evidence) {
+            $item = Get-Item -LiteralPath $entry.Path -Force -ErrorAction Stop
+            if ($item.PSIsContainer -or
+                ($item.Attributes -band
+                 [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+                $item.Length -le 0 -or $item.Length -gt 16777216) {
+                throw "Exact R4 predecessor $($entry.Label) evidence is not one bounded ordinary file."
+            }
+            $stream = [IO.FileStream]::new(
+                $item.FullName, [IO.FileMode]::Open,
+                [IO.FileAccess]::Read, [IO.FileShare]::Read)
+            $streams.Add($stream)
+            if ([ViiperLocalTestTrustLeaseNative]::LinkCount(
+                    $stream.SafeFileHandle) -ne 1) {
+                throw "Exact R4 predecessor $($entry.Label) evidence has multiple hard links."
+            }
+            $algorithm = [Security.Cryptography.SHA256]::Create()
+            try {
+                $digest = ([BitConverter]::ToString(
+                    $algorithm.ComputeHash($stream))).Replace(
+                        '-', '').ToLowerInvariant()
+            }
+            finally {
+                $algorithm.Dispose()
+            }
+            $stream.Position = 0
+            if ($digest -cne ([string]$entry.SHA256).ToLowerInvariant()) {
+                throw "Exact R4 predecessor $($entry.Label) evidence differs from its compiled digest."
+            }
+            if (-not [bool]$entry.State) { continue }
+            $stateBytes = [byte[]]::new([int]$stream.Length)
+            $offset = 0
+            while ($offset -lt $stateBytes.Length) {
+                $read = $stream.Read(
+                    $stateBytes, $offset, $stateBytes.Length - $offset)
+                if ($read -le 0) {
+                    throw 'Exact R4 predecessor state ended before its locked length.'
+                }
+                $offset += $read
+            }
+            $stream.Position = 0
+            $stateText = [Text.UTF8Encoding]::new(
+                $false, $true).GetString($stateBytes)
+            $state = $stateText | ConvertFrom-Json -ErrorAction Stop
+            if ([string]$state.schema -cne
+                    'viiper.windows11.validation-state/v1' -or
+                [string]$state.machine -cne $ExpectedMachine -or
+                [string]$state.targetUserSid -cne $ExpectedTargetUserSID) {
+                throw 'Exact R4 predecessor state does not bind this machine and target user.'
+            }
+        }
+        return [IO.FileStream[]]$streams.ToArray()
+    }
+    catch {
+        for ($index = $streams.Count - 1; $index -ge 0; --$index) {
+            $streams[$index].Dispose()
+        }
+        throw
+    }
+}
+
+function Close-ExactR4FailedInstallEvidenceLeases {
+    param([IO.FileStream[]]$Streams)
+
+    if ($null -eq $Streams) { return }
+    for ($index = $Streams.Count - 1; $index -ge 0; --$index) {
+        if ($null -ne $Streams[$index]) { $Streams[$index].Dispose() }
+    }
+}
+
+function New-ProtectedFailedInstallRecoveryCapability {
+    param(
+        [Parameter(Mandatory = $true)][string]$StagePath,
+        [Parameter(Mandatory = $true)][string]$LeasePath,
+        [Parameter(Mandatory = $true)][string]$SourceRevision,
+        [Parameter(Mandatory = $true)][string]$HelperSHA256,
+        [Parameter(Mandatory = $true)][string]$CertificateSHA256,
+        [Parameter(Mandatory = $true)][string]$AuthorizationSHA256,
+        [Parameter(Mandatory = $true)][string]$RootAuthorizationSHA256,
+        [Parameter(Mandatory = $true)][string]$PackageLockSHA256,
+        [Parameter(Mandatory = $true)][string]$BundleManifestSHA256,
+        [Parameter(Mandatory = $true)][bool]$AllowPartialCertificateState
+    )
+
+    Assert-ProtectedStage -StagePath $StagePath
+    $path = Join-Path $StagePath 'failed-install-recovery-capability.json'
+    if ((Split-Path -Parent $path) -ine $StagePath -or
+        (Test-Path -LiteralPath $path)) {
+        throw 'Refusing to reuse or redirect a failed-install recovery capability.'
+    }
+    $parentProcess = Get-Process -Id $PID -ErrorAction Stop
+    $parentCreationFileTime =
+        [uint64]$parentProcess.StartTime.ToUniversalTime().ToFileTimeUtc()
+    if ($parentCreationFileTime -eq 0) {
+        throw 'The failed-install recovery capability parent creation time is invalid.'
+    }
+    $value = [ordered]@{
+        schema = 'viiper.native.failed-install-recovery-capability/v1'
+        nonce = [Guid]::NewGuid().ToString('N')
+        parentPid = [uint32]$PID
+        parentCreationFileTime = $parentCreationFileTime
+        leasePath = [IO.Path]::GetFullPath($LeasePath)
+        sourceRevision = $SourceRevision.ToLowerInvariant()
+        helperSha256 = $HelperSHA256.ToLowerInvariant()
+        certificateSha256 = $CertificateSHA256.ToLowerInvariant()
+        recoveryAuthorizationSha256 = $AuthorizationSHA256.ToLowerInvariant()
+        recoveryRootAuthorizationSha256 =
+            $RootAuthorizationSHA256.ToLowerInvariant()
+        packageLockSha256 = $PackageLockSHA256.ToLowerInvariant()
+        bundleManifestSha256 = $BundleManifestSHA256.ToLowerInvariant()
+        allowPartialCertificateState = $AllowPartialCertificateState
+    }
+    $json = $value | ConvertTo-Json -Compress
+    if ($json.IndexOf("`r") -ge 0 -or $json.IndexOf("`n") -ge 0) {
+        throw 'The failed-install recovery capability is not single-line canonical JSON.'
+    }
+    $bytes = [Text.UTF8Encoding]::new($false, $true).GetBytes($json)
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = ([BitConverter]::ToString(
+            $algorithm.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $algorithm.Dispose()
+    }
+    $security = [Security.AccessControl.FileSecurity]::new()
+    $security.SetSecurityDescriptorSddlForm(
+        'O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)',
+        [Security.AccessControl.AccessControlSections]::All)
+    $stream = $null
+    try {
+        if ($PSVersionTable.PSEdition -ceq 'Desktop') {
+            $stream = [IO.FileStream]::new(
+                $path, [IO.FileMode]::CreateNew,
+                [Security.AccessControl.FileSystemRights]::FullControl,
+                [IO.FileShare]::Read, 4096,
+                [IO.FileOptions]::WriteThrough, $security)
+        } else {
+            $stream = [IO.FileSystemAclExtensions]::Create(
+                [IO.FileInfo]::new($path), [IO.FileMode]::CreateNew,
+                [Security.AccessControl.FileSystemRights]::FullControl,
+                [IO.FileShare]::Read, 4096,
+                [IO.FileOptions]::WriteThrough, $security)
+        }
+        $stream.Write($bytes, 0, $bytes.Length)
+        $stream.Flush($true)
+        Assert-ExactProtectedTrustObjectSecurity -Path $path -Directory $false
+        if ($stream.Length -ne $bytes.Length -or
+            [ViiperLocalTestTrustLeaseNative]::LinkCount(
+                $stream.SafeFileHandle) -ne 1) {
+            throw 'The protected failed-install recovery capability changed after creation.'
+        }
+        return [pscustomobject]@{ Path = $path; SHA256 = $hash; Stream = $stream }
+    }
+    catch {
+        if ($null -ne $stream) { $stream.Dispose() }
+        throw
+    }
+}
+
 function Remove-ProtectedStage {
     param(
         [Parameter(Mandatory = $true)][string]$StagePath,
@@ -584,16 +1072,19 @@ function Remove-ProtectedStage {
     if (Test-Path -LiteralPath $stage) {
         Assert-ProtectedStage -StagePath $stage
         $children = @(Get-ChildItem -LiteralPath $stage -Force)
-        if ($children.Count -gt 1 -or
-            ($children.Count -eq 1 -and
-                ($children[0].Name -cne 'viiper.exe' -or
-                    $children[0].PSIsContainer -or
-                    ($children[0].Attributes -band
-                     [IO.FileAttributes]::ReparsePoint) -ne 0))) {
+        $allowed = @(
+            'local-test-trust-capability.json',
+            'failed-install-recovery-capability.json',
+            'viiper.exe')
+        if ($children.Count -gt 2 -or @($children | Where-Object {
+                $_.PSIsContainer -or
+                ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+                $_.Name -cnotin $allowed
+            }).Count -ne 0) {
             throw "Refusing protected staging cleanup with unexpected entries: '$stage'."
         }
-        if ($children.Count -eq 1) {
-            [IO.File]::Delete($children[0].FullName)
+        foreach ($child in $children) {
+            [IO.File]::Delete($child.FullName)
         }
         [IO.Directory]::Delete($stage, $false)
     }
@@ -601,26 +1092,20 @@ function Remove-ProtectedStage {
 
 trap {
     $primaryFailure = $_.Exception
-    $trustCleanupFailure = $null
-    if (-not $script:transactionStarted -and
-        $script:addedLocalTestTrustStores.Count -ne 0) {
-        try {
-            Remove-NewLocalTestTrust
-        }
-        catch {
-            $trustCleanupFailure = $_.Exception
-            $script:trustCleanupFailed = $true
-        }
+    if ($null -ne $script:recoveryPredecessorLeases) {
+        Close-ExactR4FailedInstallEvidenceLeases `
+            -Streams $script:recoveryPredecessorLeases
+        $script:recoveryPredecessorLeases = $null
+    }
+    if ($null -ne $script:recoveryAuthorizationLease) {
+        $script:recoveryAuthorizationLease.Dispose()
+        $script:recoveryAuthorizationLease = $null
     }
     if (-not $script:structuredOutcomeWritten) {
         Write-StructuredOutcome -RequestedOperation $Operation -ExitCode 1
     }
     Write-Host ("VIIPER native UDE setup stopped: " +
         $primaryFailure.Message) -ForegroundColor Red
-    if ($null -ne $trustCleanupFailure) {
-        Write-Host ("VIIPER local-test trust cleanup also failed: " +
-            $trustCleanupFailure.Message) -ForegroundColor Red
-    }
     if ($null -ne $script:localTestCertificate) {
         $script:localTestCertificate.Dispose()
         $script:localTestCertificate = $null
@@ -731,6 +1216,12 @@ if ($eligibility -ceq 'production') {
 } else {
     throw "Unsupported VIIPER release eligibility '$eligibility'."
 }
+if ($Operation -cne 'Recover' -and
+    (-not [string]::IsNullOrWhiteSpace($RecoveryAuthorizationPath) -or
+     -not [string]::IsNullOrWhiteSpace($ExpectedRecoveryAuthorizationSHA256) -or
+     $RecoveryResume)) {
+    throw 'Recovery authorization parameters are valid only for Operation Recover.'
+}
 
 $packageRoot = Join-Path $PSScriptRoot 'viiper-native-package'
 $packageRootItem = Get-Item -LiteralPath $packageRoot -Force -ErrorAction Stop
@@ -739,7 +1230,7 @@ if (-not $packageRootItem.PSIsContainer -or
     throw "The bundled VIIPER native package root is missing or unsafe: '$packageRoot'."
 }
 
-if ($Operation -ceq 'Install') {
+if (@('Install', 'Recover') -ccontains $Operation) {
     $boundPackageFiles = [Collections.Generic.HashSet[string]]::new(
         [StringComparer]::OrdinalIgnoreCase)
     $boundRoles = [Collections.Generic.HashSet[string]]::new(
@@ -781,8 +1272,16 @@ if ((Split-Path -Leaf $brokerPath) -cne 'viiper.exe' -or
     throw 'Native metadata must bind viiper.exe and ViiperUdeCtl.exe by their canonical names.'
 }
 
+$programDataRoot = [Environment]::GetFolderPath(
+    [Environment+SpecialFolder]::CommonApplicationData)
+$trustJournalDirectory = Join-Path $programDataRoot 'VIIPER-TrustManager'
+$trustManagerLeasePath = Join-Path $trustJournalDirectory 'lease-v1.lock'
+# PowerShell only binds these fixed paths into parent capabilities. The native
+# child initializes and lifetime-owns Trust -> Package -> Service, the durable
+# ownership journal, and all LocalMachine certificate-store mutation.
+
 $arguments = @()
-if ($Operation -ceq 'Install') {
+if (@('Install', 'Recover') -ccontains $Operation) {
     $manifestArtifact = Get-UniqueArtifact -Metadata $metadata -Role 'submission-manifest'
     $infArtifact = Get-UniqueArtifact -Metadata $metadata -Role 'driver-inf'
     $sysArtifact = Get-UniqueArtifact -Metadata $metadata -Role 'driver-sys'
@@ -836,14 +1335,19 @@ if ($Operation -ceq 'Install') {
     if ($driverValidationMode -ceq 'local-test') {
         $certificateArtifact = Get-UniqueArtifact -Metadata $metadata `
             -Role 'local-test-certificate-evidence'
+        $localTestPackageLockArtifact = Get-UniqueArtifact -Metadata $metadata `
+            -Role 'local-test-package-lock'
+        $localTestPackageLockPath = Resolve-VerifiedArtifact `
+            -Artifact $localTestPackageLockArtifact -PackageRoot $packageRoot
         $certificatePath = Resolve-VerifiedArtifact `
             -Artifact $certificateArtifact -PackageRoot $packageRoot
-        if ((Split-Path -Leaf $certificatePath) -cne 'ViiperUdeTest.cer' -or
+        if ((Split-Path -Leaf $localTestPackageLockPath) -cne
+                'local-test-package.lock.json' -or
+            (Split-Path -Leaf $certificatePath) -cne 'ViiperUdeTest.cer' -or
             [string]$submission.testSignerCertificateSha256 -cne
                 ([string]$certificateArtifact.sha256).ToLowerInvariant()) {
             throw 'The local-test signer certificate disagrees with the source-bound package evidence.'
         }
-        Assert-LocalTestBootAdmission
         $script:localTestCertificate =
             [Security.Cryptography.X509Certificates.X509Certificate2]::new(
                 $certificatePath)
@@ -865,27 +1369,150 @@ if ($Operation -ceq 'Install') {
             ([string]$certificateArtifact.sha256).ToLowerInvariant()) {
             throw 'The parsed local-test signer certificate bytes differ from their package hash.'
         }
-        foreach ($storeName in @('Root', 'TrustedPublisher')) {
-            Ensure-ExactLocalTestTrust -StoreName $storeName `
-                -Certificate $script:localTestCertificate
+        $localTestPackageLockSha256 =
+            ([string]$localTestPackageLockArtifact.sha256).ToLowerInvariant()
+        if ($Operation -ceq 'Install') {
+            Assert-LocalTestBootAdmission
         }
     }
 
-    $arguments = @(
-        'native-package-install',
-        '--package-directory', $driverDirectory,
-        '--submission-manifest', $manifestPath,
-        '--source-revision', $sourceRevision,
-        '--driver-helper', $helperPath,
-        '--expected-broker-sha-256', ([string]$brokerArtifact.sha256).ToLowerInvariant(),
-        '--expected-helper-sha-256', $helperHash,
-        '--expected-manifest-sha-256', ([string]$manifestArtifact.sha256).ToLowerInvariant(),
-        '--expected-inf-sha-256', ([string]$infArtifact.sha256).ToLowerInvariant(),
-        '--expected-sys-sha-256', ([string]$sysArtifact.sha256).ToLowerInvariant(),
-        '--expected-cat-sha-256', ([string]$catArtifact.sha256).ToLowerInvariant(),
-        '--target-user-sid', $TargetUserSID,
-        '--driver-validation-mode', $driverValidationMode
-    )
+    if ($Operation -ceq 'Install') {
+        $arguments = @(
+            'native-package-install',
+            '--package-directory', $driverDirectory,
+            '--submission-manifest', $manifestPath,
+            '--source-revision', $sourceRevision,
+            '--driver-helper', $helperPath,
+            '--expected-broker-sha-256', ([string]$brokerArtifact.sha256).ToLowerInvariant(),
+            '--expected-helper-sha-256', $helperHash,
+            '--expected-manifest-sha-256', ([string]$manifestArtifact.sha256).ToLowerInvariant(),
+            '--expected-inf-sha-256', ([string]$infArtifact.sha256).ToLowerInvariant(),
+            '--expected-sys-sha-256', ([string]$sysArtifact.sha256).ToLowerInvariant(),
+            '--expected-cat-sha-256', ([string]$catArtifact.sha256).ToLowerInvariant(),
+            '--target-user-sid', $TargetUserSID,
+            '--driver-validation-mode', $driverValidationMode
+        )
+    }
+    else {
+        # Recovery is deliberately journal-only. The source-bound package is
+        # still validated in full above, but the broker may invoke only the
+        # exact verified helper's recover path.
+        if ($driverValidationMode -cne 'local-test') {
+            throw 'Operation Recover is restricted to an exact local-test failed-install certificate rollback.'
+        }
+        if ([string]::IsNullOrWhiteSpace($RecoveryAuthorizationPath) -or
+            [string]::IsNullOrWhiteSpace(
+                $ExpectedRecoveryAuthorizationSHA256)) {
+            throw 'Operation Recover requires one exact recovery authorization path and SHA-256.'
+        }
+        $authorizationItem = Get-Item -LiteralPath $RecoveryAuthorizationPath `
+            -Force -ErrorAction Stop
+        if ($authorizationItem.PSIsContainer -or
+            ($authorizationItem.Attributes -band
+             [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw 'Recovery authorization must be an ordinary local file.'
+        }
+        $authorizationPath = $authorizationItem.FullName
+        if ((Split-Path -Leaf $authorizationPath) -cne
+                'failed-install-recovery-progress.json') {
+            throw 'Recovery authorization has the wrong canonical file name.'
+        }
+        $script:recoveryAuthorizationLease = [IO.FileStream]::new(
+            $authorizationPath, [IO.FileMode]::Open,
+            [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        if ($script:recoveryAuthorizationLease.Length -le 0 -or
+            $script:recoveryAuthorizationLease.Length -gt 262144) {
+            throw 'Recovery authorization length is outside its exact bounded contract.'
+        }
+        $authorizationBytes = [byte[]]::new(
+            [int]$script:recoveryAuthorizationLease.Length)
+        $authorizationOffset = 0
+        while ($authorizationOffset -lt $authorizationBytes.Length) {
+            $read = $script:recoveryAuthorizationLease.Read(
+                $authorizationBytes, $authorizationOffset,
+                $authorizationBytes.Length - $authorizationOffset)
+            if ($read -le 0) {
+                throw 'Recovery authorization ended before its locked length.'
+            }
+            $authorizationOffset += $read
+        }
+        $authorizationAlgorithm = [Security.Cryptography.SHA256]::Create()
+        try {
+            $authorizationHash = ([BitConverter]::ToString(
+                $authorizationAlgorithm.ComputeHash(
+                    $authorizationBytes))).Replace('-', '').ToLowerInvariant()
+        }
+        finally {
+            $authorizationAlgorithm.Dispose()
+        }
+        if ($authorizationHash -cne
+            $ExpectedRecoveryAuthorizationSHA256.ToLowerInvariant()) {
+            throw 'Recovery authorization bytes differ from their caller-bound SHA-256.'
+        }
+        $authorizationText = [Text.UTF8Encoding]::new(
+            $false, $true).GetString($authorizationBytes)
+        $authorization = $authorizationText |
+            ConvertFrom-Json -ErrorAction Stop
+        $packageLockArtifact = Get-UniqueArtifact -Metadata $metadata `
+            -Role 'local-test-package-lock'
+        $bundleManifestCandidate = Join-Path (Split-Path -Parent $PSScriptRoot) `
+            'bundle-manifest.json'
+        $bundleManifestItem = Get-Item -LiteralPath $bundleManifestCandidate `
+            -Force -ErrorAction Stop
+        if ($bundleManifestItem.PSIsContainer -or
+            ($bundleManifestItem.Attributes -band
+             [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw 'Current recovery bundle manifest must be an ordinary file.'
+        }
+        $bundleManifestHash = (Get-FileHash `
+            -LiteralPath $bundleManifestItem.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        Assert-ExactR4FailedInstallRecoveryAuthorization `
+            -AuthorizationText $authorizationText `
+            -Authorization $authorization `
+            -CurrentViiperSourceRevision $sourceRevision `
+            -CurrentPackageLockSHA256 (
+                ([string]$packageLockArtifact.sha256).ToLowerInvariant()) `
+            -CurrentBundleManifestSHA256 $bundleManifestHash `
+            -CurrentCertificateSHA256 (
+                ([string]$certificateArtifact.sha256).ToLowerInvariant()) `
+            -ExpectedMachine $env:COMPUTERNAME `
+            -ExpectedTargetUserSID $TargetUserSID `
+            -Resume ([bool]$RecoveryResume)
+        $script:recoveryPredecessorLeases = @(
+            Open-ExactR4FailedInstallEvidenceLeases `
+                -Authorization $authorization `
+                -ExpectedMachine $env:COMPUTERNAME `
+                -ExpectedTargetUserSID $TargetUserSID)
+        if ($script:recoveryPredecessorLeases.Count -ne 5) {
+            throw 'Recovery did not retain all five exact R4 predecessor evidence leases.'
+        }
+        $rootAuthorizationHash = if ($RecoveryResume) {
+            ([string]$authorization.recoveryRootAuthorizationSha256).ToLowerInvariant()
+        } else {
+            $authorizationHash
+        }
+        if ($rootAuthorizationHash -cnotmatch '^[0-9a-f]{64}$') {
+            throw 'Recovery authorization has an invalid stable root-authorization binding.'
+        }
+        $arguments = @(
+            'native-package-recover',
+            '--driver-helper', $helperPath,
+            '--expected-helper-sha-256', $helperHash,
+            '--certificate-path', $certificatePath,
+            '--expected-certificate-sha-256',
+                ([string]$certificateArtifact.sha256).ToLowerInvariant(),
+            '--recovery-authorization', $authorizationPath,
+            '--expected-recovery-authorization-sha-256', $authorizationHash,
+            '--recovery-root-authorization-sha-256', $rootAuthorizationHash,
+            '--source-revision', $sourceRevision,
+            '--current-package-lock-sha-256',
+                ([string]$packageLockArtifact.sha256).ToLowerInvariant(),
+            '--current-bundle-manifest-sha-256', $bundleManifestHash
+        )
+        if ($RecoveryResume) {
+            $arguments += '--allow-partial-certificate-state'
+        }
+    }
 } else {
     $arguments = @(
         'uninstall', '--yes',
@@ -895,9 +1522,56 @@ if ($Operation -ceq 'Install') {
     )
 }
 
-$programDataRoot = [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData)
+if ($Operation -ceq 'Uninstall' -and
+    $driverValidationMode -ceq 'local-test') {
+    $certificateArtifact = Get-UniqueArtifact -Metadata $metadata `
+        -Role 'local-test-certificate-evidence'
+    $localTestPackageLockArtifact = Get-UniqueArtifact -Metadata $metadata `
+        -Role 'local-test-package-lock'
+    $certificatePath = Resolve-VerifiedArtifact `
+        -Artifact $certificateArtifact -PackageRoot $packageRoot
+    $localTestPackageLockPath = Resolve-VerifiedArtifact `
+        -Artifact $localTestPackageLockArtifact -PackageRoot $packageRoot
+    if ((Split-Path -Leaf $certificatePath) -cne 'ViiperUdeTest.cer' -or
+        (Split-Path -Leaf $localTestPackageLockPath) -cne
+            'local-test-package.lock.json') {
+        throw 'Local-test Uninstall requires the canonical certificate and package-lock artifacts.'
+    }
+    $script:localTestCertificate =
+        [Security.Cryptography.X509Certificates.X509Certificate2]::new(
+            $certificatePath)
+    if ($script:localTestCertificate.HasPrivateKey) {
+        throw 'The local-test package must contain only the public signer certificate.'
+    }
+    $certificateAlgorithm = [Security.Cryptography.SHA256]::Create()
+    try {
+        $certificateSha256 = ([BitConverter]::ToString(
+            $certificateAlgorithm.ComputeHash(
+                $script:localTestCertificate.RawData))).Replace(
+                    '-', '').ToLowerInvariant()
+    }
+    finally {
+        $certificateAlgorithm.Dispose()
+    }
+    if ($certificateSha256 -cne
+        ([string]$certificateArtifact.sha256).ToLowerInvariant()) {
+        throw 'The parsed Uninstall certificate differs from its source-bound artifact hash.'
+    }
+    $localTestPackageLockSha256 =
+        ([string]$localTestPackageLockArtifact.sha256).ToLowerInvariant()
+    $arguments += @(
+        '--source-revision', $sourceRevision,
+        '--local-test-certificate-path', $certificatePath,
+        '--expected-local-test-certificate-sha-256', $certificateSha256,
+        '--expected-local-test-package-lock-sha-256',
+            $localTestPackageLockSha256
+    )
+}
+
 $stagePath = $null
 $stagedBrokerLease = $null
+$trustCapability = $null
+$recoveryCapability = $null
 $exitCode = 1
 try {
     $stagePath = Initialize-ProtectedStage -ProgramDataRoot $programDataRoot
@@ -905,6 +1579,39 @@ try {
         -SourcePath $brokerPath -DestinationDirectory $stagePath `
         -ExpectedLength ([long]$brokerArtifact.length) `
         -ExpectedSHA256 ([string]$brokerArtifact.sha256).ToLowerInvariant()
+    if ($Operation -ceq 'Install' -and
+        $driverValidationMode -ceq 'local-test') {
+        $trustCapability = New-ProtectedLocalTestTrustCapability `
+            -StagePath $stagePath `
+            -SourceRevision $sourceRevision `
+            -CertificatePath $certificatePath `
+            -CertificateSHA256 $certificateSha256 `
+            -PackageLockSHA256 $localTestPackageLockSha256 `
+            -TrustJournalDirectory $trustJournalDirectory
+        $arguments += @(
+            '--local-test-trust-capability', $trustCapability.Path,
+            '--expected-trust-capability-sha-256', $trustCapability.SHA256,
+            '--local-test-certificate-path', $certificatePath,
+            '--expected-local-test-certificate-sha-256', $certificateSha256,
+            '--expected-local-test-package-lock-sha-256',
+                $localTestPackageLockSha256
+        )
+    } elseif ($Operation -ceq 'Recover') {
+        $recoveryCapability = New-ProtectedFailedInstallRecoveryCapability `
+            -StagePath $stagePath -LeasePath $trustManagerLeasePath `
+            -SourceRevision $sourceRevision -HelperSHA256 $helperHash `
+            -CertificateSHA256 $certificateSha256 `
+            -AuthorizationSHA256 $authorizationHash `
+            -RootAuthorizationSHA256 $rootAuthorizationHash `
+            -PackageLockSHA256 $localTestPackageLockSha256 `
+            -BundleManifestSHA256 $bundleManifestHash `
+            -AllowPartialCertificateState ([bool]$RecoveryResume)
+        $arguments += @(
+            '--recovery-capability', $recoveryCapability.Path,
+            '--expected-recovery-capability-sha-256',
+                $recoveryCapability.SHA256
+        )
+    }
 
     Write-Host "Running VIIPER native UDE $($Operation.ToLowerInvariant()) transaction..."
     $processStarted = $false
@@ -921,6 +1628,28 @@ try {
     $output | ForEach-Object { Write-Host ([string]$_) }
 } finally {
     $stageCleanupErrors = [Collections.Generic.List[Exception]]::new()
+    if ($null -ne $recoveryCapability) {
+        try {
+            $recoveryCapability.Stream.Dispose()
+        }
+        catch {
+            $stageCleanupErrors.Add([InvalidOperationException]::new(
+                'Failed to release the parent-bound recovery capability.',
+                $_.Exception))
+        }
+        $recoveryCapability = $null
+    }
+    if ($null -ne $trustCapability) {
+        try {
+            $trustCapability.Stream.Dispose()
+        }
+        catch {
+            $stageCleanupErrors.Add([InvalidOperationException]::new(
+                'Failed to release the parent-bound trust capability.',
+                $_.Exception))
+        }
+        $trustCapability = $null
+    }
     if ($null -ne $stagedBrokerLease) {
         try {
             $stagedBrokerLease.LaunchLock.Dispose()
@@ -952,6 +1681,17 @@ try {
             [Exception[]]$stageCleanupErrors.ToArray())
     }
 }
+
+if ($null -ne $script:recoveryAuthorizationLease) {
+    $script:recoveryAuthorizationLease.Dispose()
+    $script:recoveryAuthorizationLease = $null
+}
+if ($null -ne $script:recoveryPredecessorLeases) {
+    Close-ExactR4FailedInstallEvidenceLeases `
+        -Streams $script:recoveryPredecessorLeases
+    $script:recoveryPredecessorLeases = $null
+}
+
 Write-StructuredOutcome -RequestedOperation $Operation -ExitCode $exitCode
 if ($null -ne $script:localTestCertificate) {
     $script:localTestCertificate.Dispose()
@@ -959,7 +1699,12 @@ if ($null -ne $script:localTestCertificate) {
 }
 
 if ($exitCode -eq 0) {
-    Write-Host 'VIIPER native UDE transaction completed and authenticated service readiness was verified by the package transaction.'
+    if ($Operation -ceq 'Recover') {
+        Write-Host 'VIIPER retained native journals were reconciled and the recovery admission proved no current or successor VIIPER topology.'
+    }
+    else {
+        Write-Host 'VIIPER native UDE transaction completed and authenticated service readiness was verified by the package transaction.'
+    }
 } elseif ($exitCode -eq 3010) {
     Write-Warning 'VIIPER stopped at a safe reboot boundary before mutation or after successful rollback. Restart Windows, then rerun this identical transaction.'
 } else {

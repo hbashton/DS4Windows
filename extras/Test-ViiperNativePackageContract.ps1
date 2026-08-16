@@ -30,6 +30,7 @@ foreach ($scriptPath in @($managerPath, $generatorPath)) {
 $managerSource = Get-Content -LiteralPath $managerPath -Raw
 foreach ($required in @(
     'native-package-install',
+    'native-package-recover',
     "'uninstall', '--yes'",
     '--expected-broker-sha-256',
     '--expected-helper-sha-256',
@@ -47,19 +48,42 @@ foreach ($required in @(
     'local-test-certificate-evidence',
     'Assert-LocalTestBootAdmission',
     'testsigning\s+Yes',
-    'Get-ExactMachineCertificateCount',
-    'Ensure-ExactLocalTestTrust',
-    'Remove-NewLocalTestTrust',
-    "@('Root', 'TrustedPublisher')",
+    'New-ProtectedLocalTestTrustCapability',
+    "schema = 'viiper.native.local-test-trust-capability/v1'",
+    'certificatePath = [IO.Path]::GetFullPath($CertificatePath)',
+    "trustJournalSchema = 'viiper.native.local-test-trust-ownership/v1'",
+    'trustJournalDirectory = [IO.Path]::GetFullPath($TrustJournalDirectory)',
+    '--local-test-certificate-path',
+    '--expected-local-test-certificate-sha-256',
+    '--expected-local-test-package-lock-sha-256',
     'Invoke-JoinedNativeProcess',
     'Started ([ref]$processStarted)',
     '$script:transactionStarted = $processStarted',
-    '$script:trustCleanupFailed = $true',
     'AggregateException'
 )) {
     if ($managerSource.IndexOf($required, [StringComparison]::Ordinal) -lt 0) {
         throw "Native package manager omitted required contract token '$required'."
     }
+}
+$managerMain = $managerSource.Substring($managerSource.IndexOf(
+    '$programDataRoot =', [StringComparison]::Ordinal))
+foreach ($forbiddenMutation in @(
+        'Open-ProtectedTrustManagerLease',
+        'Enter-LocalTestTrustInstallJournal',
+        'Enter-LocalTestTrustUninstallJournal',
+        'Complete-LocalTestTrustJournal',
+        'Ensure-ExactLocalTestTrust',
+        'Remove-NewLocalTestTrust',
+        '[Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite',
+        '$store.Add(', '$store.Remove(')) {
+    if ($managerMain.IndexOf($forbiddenMutation,
+            [StringComparison]::Ordinal) -ge 0) {
+        throw "Native package manager main flow still mutates parent-side trust via '$forbiddenMutation'."
+    }
+}
+if ($managerSource.IndexOf('$script:trustCleanupFailed',
+        [StringComparison]::Ordinal) -ge 0) {
+    throw 'Native package manager retained obsolete parent-side trust cleanup state.'
 }
 if ($managerSource.IndexOf('& $stagedBroker @arguments',
         [StringComparison]::Ordinal) -ge 0) {

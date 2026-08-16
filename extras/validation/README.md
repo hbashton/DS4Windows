@@ -92,6 +92,43 @@ $common = @{
 & .\Invoke-ViiperWin11Validation.ps1 @common -Phase Install
 ```
 
+### Recover an exact zero-change failed predecessor Install
+
+`RecoverFailedInstall` is a narrow migration boundary for a predecessor run
+whose immutable state and captured child evidence prove the exact
+`install-journal-broker-image-hash` rejection with `changed=0`, no reboot, and
+zero trust before Preflight. Use a newly manifest-bound bundle extracted
+outside OneDrive or any other sync/placeholder tree. Preserve the predecessor
+bundle and evidence read-only. Supply every reported predecessor digest; none
+is discovered or substituted:
+
+```powershell
+& .\Invoke-ViiperWin11Validation.ps1 @common -Phase RecoverFailedInstall `
+  -PredecessorEvidenceRoot '<retained predecessor evidence root>' `
+  -PredecessorInstallStepDirectory '<retained failed Install step directory>' `
+  -ExpectedPredecessorStateSHA256 '<validation-state.json SHA-256>' `
+  -ExpectedPredecessorInstallCommandSHA256 '<command.json SHA-256>' `
+  -ExpectedPredecessorInstallResultSHA256 '<result.json SHA-256>' `
+  -ExpectedPredecessorInstallStdoutSHA256 '<stdout.log SHA-256>' `
+  -ExpectedPredecessorInstallStderrSHA256 '<stderr.log SHA-256>' `
+  -ExpectedPredecessorBundleManifestSHA256 '<predecessor manifest SHA-256>' `
+  -ExpectedPredecessorViiperSourceRevision '<predecessor VIIPER revision>' `
+  -ExpectedPredecessorDS4WindowsSourceRevision '<predecessor DS4Windows revision>' `
+  -ExpectedPredecessorPackageLockSHA256 '<predecessor package-lock SHA-256>' `
+  -ExpectedPredecessorCertificateSHA256 '<predecessor certificate file SHA-256>'
+```
+
+The phase invokes only the current manifest-bound recovery manager; it never
+manually deletes the protected ProgramData journal or certificate stores. The
+native child lifetime-owns Trust -> Package -> Service, verifies the exact
+recordless predecessor topology, and removes only the exact certificate bytes
+whose predecessor Preflight counts establish were newly introduced. Its atomic
+`state\failed-install-recovery.json` receipt makes cuts retryable without
+creating `validation-state.json`, so a successful recovery is followed by a
+fresh `Preflight` using the same current bundle and EvidenceRoot. TESTSIGNING is
+not changed, and this verify-only recordless recovery has no reboot-success
+boundary: any nonzero native result remains a hard stop.
+
 `Preflight` captures Windows build and architecture, boot identity/uptime,
 TESTSIGNING and pending reboot state, active power plan, AC/battery state,
 VBS/HVCI/hypervisor state, free disks, and a background-process snapshot. It
@@ -155,9 +192,12 @@ Finally, uninstall and restore the prior crash policy:
 & .\Invoke-ViiperWin11Validation.ps1 @common -Phase Uninstall
 ```
 
-The uninstall phase uses the manifest-bound DS4Windows maintenance script,
-removes only local-test trust that the preflight proved was not preexisting,
-and restores the recorded crash policy. Follow its final reboot prompt.
+The uninstall phase uses the manifest-bound DS4Windows maintenance script. Its
+native child holds Trust -> Package -> Service, durably marks the exact trust
+owner `uninstalling` before topology mutation, restores only the recorded
+certificate baseline after exact topology absence, and then publishes
+`cleared`. The orchestrator only verifies that baseline and restores the
+recorded crash policy. Follow its final reboot prompt.
 
 ## Evidence behavior
 

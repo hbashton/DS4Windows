@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Status', 'Preflight', 'Install', 'Repair', 'RebootResume',
+    [ValidateSet('Status', 'RecoverFailedInstall', 'Preflight', 'Install', 'Repair', 'RebootResume',
         'ManualChecks', 'EnableVerifier', 'VerifierResume', 'Live',
         'Performance', 'LatencyMatrix', 'CollectDumps', 'Uninstall')]
     [string]$Phase,
@@ -19,7 +19,29 @@ param(
     [switch]$AcknowledgePhysicalHotplug,
     [switch]$AcknowledgeSleepWake,
     [switch]$AcknowledgeHibernateWake,
-    [switch]$AcknowledgeManualReboot
+    [switch]$AcknowledgeManualReboot,
+    [string]$PredecessorEvidenceRoot,
+    [string]$PredecessorInstallStepDirectory,
+    [ValidatePattern('^[0-9a-fA-F]{64}$')]
+    [string]$ExpectedPredecessorStateSHA256,
+    [ValidatePattern('^[0-9a-fA-F]{64}$')]
+    [string]$ExpectedPredecessorInstallCommandSHA256,
+    [ValidatePattern('^[0-9a-fA-F]{64}$')]
+    [string]$ExpectedPredecessorInstallResultSHA256,
+    [ValidatePattern('^[0-9a-fA-F]{64}$')]
+    [string]$ExpectedPredecessorInstallStdoutSHA256,
+    [ValidatePattern('^[0-9a-fA-F]{64}$')]
+    [string]$ExpectedPredecessorInstallStderrSHA256,
+    [ValidatePattern('^[0-9a-fA-F]{64}$')]
+    [string]$ExpectedPredecessorBundleManifestSHA256,
+    [ValidatePattern('^[0-9a-fA-F]{40,64}$')]
+    [string]$ExpectedPredecessorViiperSourceRevision,
+    [ValidatePattern('^[0-9a-fA-F]{40,64}$')]
+    [string]$ExpectedPredecessorDS4WindowsSourceRevision,
+    [ValidatePattern('^[0-9a-fA-F]{64}$')]
+    [string]$ExpectedPredecessorPackageLockSHA256,
+    [ValidatePattern('^[0-9a-fA-F]{64}$')]
+    [string]$ExpectedPredecessorCertificateSHA256
 )
 
 Set-StrictMode -Version Latest
@@ -255,39 +277,6 @@ function Get-ExactLocalTestTrustCount {
     }
 }
 
-function Remove-NewLocalTestTrust {
-    param([string]$StoreName, [string]$CertificatePath, [int]$PreflightCount)
-
-    if ($PreflightCount -ne 0) { return 'preserved-preexisting' }
-    $certificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new($CertificatePath)
-    $store = [Security.Cryptography.X509Certificates.X509Store]::new(
-        $StoreName, [Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine)
-    $matches = $null
-    try {
-        $store.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-        $matches = $store.Certificates.Find(
-            [Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
-            $certificate.Thumbprint, $false)
-        $expected = [Convert]::ToBase64String($certificate.RawData)
-        $exact = @($matches | Where-Object {
-            [Convert]::ToBase64String($_.RawData) -ceq $expected
-        })
-        if ($matches.Count -ne $exact.Count -or $exact.Count -gt 1) {
-            throw "Certificate collision in LocalMachine\$StoreName during uninstall cleanup."
-        }
-        if ($exact.Count -eq 1) { $store.Remove($exact[0]) }
-    }
-    finally {
-        if ($null -ne $matches) { foreach ($match in $matches) { $match.Dispose() } }
-        $store.Close()
-        $certificate.Dispose()
-    }
-    if ((Get-ExactLocalTestTrustCount -StoreName $StoreName -CertificatePath $CertificatePath) -ne 0) {
-        throw "Exact local-test certificate remained in LocalMachine\$StoreName."
-    }
-    return 'removed-or-absent'
-}
-
 function Invoke-InstallTransaction {
     param([string]$OperationName)
 
@@ -302,14 +291,45 @@ function Invoke-InstallTransaction {
 }
 
 function Invoke-UninstallTransaction {
+    param([string]$OperationName = 'uninstall')
+
     $manager = Join-Path $bundleRoot ([string]$manifest.ds4Windows.packageManagerRelativePath).Replace('/', '\')
     $priorOptIn = [Environment]::GetEnvironmentVariable('DS4WINDOWS_VIIPER_ALLOW_LOCAL_TEST', 'Process')
     try {
         $env:DS4WINDOWS_VIIPER_ALLOW_LOCAL_TEST = '1'
-        return Invoke-CapturedPowerShell -Name 'uninstall' -ScriptPath $manager -Arguments @(
+        return Invoke-CapturedPowerShell -Name $OperationName -ScriptPath $manager -Arguments @(
             '-Operation', 'Uninstall', '-TargetUserSID', $TargetUserSID,
             '-AllowLocalTest', '-AcknowledgeDisposableTestMachine'
         )
+    }
+    finally {
+        [Environment]::SetEnvironmentVariable(
+            'DS4WINDOWS_VIIPER_ALLOW_LOCAL_TEST', $priorOptIn, 'Process')
+    }
+}
+
+function Invoke-FailedInstallRecoveryTransaction {
+    param(
+        [Parameter(Mandatory = $true)][string]$AuthorizationPath,
+        [Parameter(Mandatory = $true)][string]$AuthorizationSHA256,
+        [switch]$Resume
+    )
+
+    $manager = Join-Path $bundleRoot `
+        ([string]$manifest.ds4Windows.packageManagerRelativePath).Replace('/', '\')
+    $priorOptIn = [Environment]::GetEnvironmentVariable(
+        'DS4WINDOWS_VIIPER_ALLOW_LOCAL_TEST', 'Process')
+    try {
+        $env:DS4WINDOWS_VIIPER_ALLOW_LOCAL_TEST = '1'
+        $arguments = @(
+            '-Operation', 'Recover', '-TargetUserSID', $TargetUserSID,
+            '-AllowLocalTest', '-AcknowledgeDisposableTestMachine',
+            '-RecoveryAuthorizationPath', $AuthorizationPath,
+            '-ExpectedRecoveryAuthorizationSHA256', $AuthorizationSHA256
+        )
+        if ($Resume) { $arguments += '-RecoveryResume' }
+        return Invoke-CapturedPowerShell -Name 'recover-failed-install' `
+            -ScriptPath $manager -Arguments $arguments
     }
     finally {
         [Environment]::SetEnvironmentVariable(
@@ -325,12 +345,20 @@ function Complete-UninstallCleanup {
             -Arguments @('-Mode', 'Restore', '-StatePath', $crashState)
         Assert-CapturedSuccess -Result $restore -Label 'Crash-diagnostic policy restore'
     }
+    # The source-bound native child lifetime-owns Trust -> Package -> Service
+    # and restores its durable journal baseline before releasing Trust. This
+    # orchestrator is verification-only: a successor may depend on the same
+    # certificate immediately after the native transaction returns.
     $cleanup = [ordered]@{}
-    $cleanup.Root = Remove-NewLocalTestTrust -StoreName 'Root' `
-        -CertificatePath $script:certificatePath -PreflightCount ([int]$script:state.trustBeforeInstall.Root)
-    $cleanup.TrustedPublisher = Remove-NewLocalTestTrust -StoreName 'TrustedPublisher' `
-        -CertificatePath $script:certificatePath `
-        -PreflightCount ([int]$script:state.trustBeforeInstall.TrustedPublisher)
+    foreach ($storeName in @('Root', 'TrustedPublisher')) {
+        $expected = [int]$script:state.trustBeforeInstall.$storeName
+        $actual = Get-ExactLocalTestTrustCount -StoreName $storeName `
+            -CertificatePath $script:certificatePath
+        if ($actual -ne $expected) {
+            throw "Native Uninstall did not restore the exact LocalMachine\$storeName preflight trust baseline."
+        }
+        $cleanup[$storeName] = "verified-baseline-$expected"
+    }
     Write-ViiperJsonAtomic -Path (Join-Path $script:evidence 'state\uninstall-cleanup.json') -Value $cleanup
 }
 
@@ -487,7 +515,7 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
         throw 'Existing evidence state belongs to a different bundle, user, machine, or schema.'
     }
 }
-elseif ($Phase -notin @('Preflight', 'Status')) {
+elseif ($Phase -notin @('Preflight', 'Status', 'RecoverFailedInstall')) {
     throw "Phase '$Phase' requires a successful Preflight state in '$statePath'."
 }
 
@@ -516,6 +544,291 @@ Assert-Administrator
 $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 if ($currentIdentity -cne $TargetUserSID) {
     throw "Elevated session user SID '$currentIdentity' differs from TargetUserSID '$TargetUserSID'. Use same-account elevation."
+}
+
+if ($Phase -ceq 'RecoverFailedInstall') {
+    if ($null -ne $state) {
+        throw 'RecoverFailedInstall requires an EvidenceRoot without a current validation-state.json so a fresh Preflight remains possible.'
+    }
+    $requiredRecoveryInputs = [ordered]@{
+        PredecessorEvidenceRoot = $PredecessorEvidenceRoot
+        PredecessorInstallStepDirectory = $PredecessorInstallStepDirectory
+        ExpectedPredecessorStateSHA256 = $ExpectedPredecessorStateSHA256
+        ExpectedPredecessorInstallCommandSHA256 = $ExpectedPredecessorInstallCommandSHA256
+        ExpectedPredecessorInstallResultSHA256 = $ExpectedPredecessorInstallResultSHA256
+        ExpectedPredecessorInstallStdoutSHA256 = $ExpectedPredecessorInstallStdoutSHA256
+        ExpectedPredecessorInstallStderrSHA256 = $ExpectedPredecessorInstallStderrSHA256
+        ExpectedPredecessorBundleManifestSHA256 = $ExpectedPredecessorBundleManifestSHA256
+        ExpectedPredecessorViiperSourceRevision = $ExpectedPredecessorViiperSourceRevision
+        ExpectedPredecessorDS4WindowsSourceRevision = $ExpectedPredecessorDS4WindowsSourceRevision
+        ExpectedPredecessorPackageLockSHA256 = $ExpectedPredecessorPackageLockSHA256
+        ExpectedPredecessorCertificateSHA256 = $ExpectedPredecessorCertificateSHA256
+    }
+    $missingRecoveryInputs = @($requiredRecoveryInputs.GetEnumerator() |
+        Where-Object { [string]::IsNullOrWhiteSpace([string]$_.Value) })
+    if ($missingRecoveryInputs.Count -ne 0) {
+        throw "RecoverFailedInstall is missing source-bound input '$($missingRecoveryInputs[0].Key)'."
+    }
+    $predecessor = Test-ViiperFailedInstallRecoveryEvidence `
+        -PredecessorEvidenceRoot $PredecessorEvidenceRoot `
+        -PredecessorInstallStepDirectory $PredecessorInstallStepDirectory `
+        -ExpectedStateSHA256 $ExpectedPredecessorStateSHA256 `
+        -ExpectedInstallCommandSHA256 $ExpectedPredecessorInstallCommandSHA256 `
+        -ExpectedInstallResultSHA256 $ExpectedPredecessorInstallResultSHA256 `
+        -ExpectedInstallStdoutSHA256 $ExpectedPredecessorInstallStdoutSHA256 `
+        -ExpectedInstallStderrSHA256 $ExpectedPredecessorInstallStderrSHA256 `
+        -ExpectedBundleManifestSHA256 $ExpectedPredecessorBundleManifestSHA256 `
+        -ExpectedViiperSourceRevision $ExpectedPredecessorViiperSourceRevision `
+        -ExpectedDS4WindowsSourceRevision $ExpectedPredecessorDS4WindowsSourceRevision `
+        -ExpectedPackageLockSHA256 $ExpectedPredecessorPackageLockSHA256 `
+        -ExpectedMachine $env:COMPUTERNAME -ExpectedTargetUserSID $TargetUserSID
+    $predecessorCertificateHash = $ExpectedPredecessorCertificateSHA256.ToLowerInvariant()
+    if ((Get-ViiperSha256 -Path $certificatePath) -cne $predecessorCertificateHash) {
+        throw 'The current manifest-bound certificate is not byte-identical to the exact predecessor certificate authorized for cleanup.'
+    }
+
+    $recoveryReceiptPath = Join-Path $evidence 'state\failed-install-recovery.json'
+    $recoveryProgressPath = Join-Path $evidence `
+        'state\failed-install-recovery-progress.json'
+    if (Test-Path -LiteralPath $recoveryReceiptPath -PathType Leaf) {
+        $receiptPath = Resolve-ViiperRegularFile -Path $recoveryReceiptPath `
+            -Label 'Failed-install recovery receipt'
+        $receipt = Get-Content -LiteralPath $receiptPath -Raw -Encoding UTF8 |
+            ConvertFrom-Json -ErrorAction Stop
+        if ([string]$receipt.schema -cne 'viiper.windows11.failed-install-recovery/v1' -or
+            [string]$receipt.result -cne 'complete' -or
+            [string]$receipt.machine -cne $env:COMPUTERNAME -or
+            [string]$receipt.targetUserSid -cne $TargetUserSID -or
+            [string]$receipt.currentBundleManifestSha256 -cne $actualManifestHash -or
+            [string]$receipt.predecessor.stateSha256 -cne [string]$predecessor.stateSha256 -or
+            [string]$receipt.predecessor.commandSha256 -cne [string]$predecessor.commandSha256 -or
+            [string]$receipt.predecessor.resultSha256 -cne [string]$predecessor.resultSha256 -or
+            [string]$receipt.predecessor.stdoutSha256 -cne [string]$predecessor.stdoutSha256 -or
+            [string]$receipt.predecessor.stderrSha256 -cne [string]$predecessor.stderrSha256 -or
+            [string]$receipt.predecessorCertificateSha256 -cne $predecessorCertificateHash -or
+            [int]$receipt.trustAfterRecovery.Root -ne 0 -or
+            [int]$receipt.trustAfterRecovery.TrustedPublisher -ne 0) {
+            throw 'Existing failed-install recovery receipt does not match the exact current and predecessor identities.'
+        }
+        if ((Get-ExactLocalTestTrustCount -StoreName 'Root' `
+                -CertificatePath $certificatePath) -ne 0 -or
+            (Get-ExactLocalTestTrustCount -StoreName 'TrustedPublisher' `
+                -CertificatePath $certificatePath) -ne 0) {
+            throw 'Completed recovery receipt exists but exact predecessor trust was reintroduced; refusing to claim idempotent completion.'
+        }
+        Write-Host "RecoverFailedInstall already completed with exact receipt '$receiptPath'. Next phase: Preflight."
+        return
+    }
+
+    $recoveryResume = $false
+    $firstAuthorizedUtc = [DateTime]::UtcNow.ToString('o')
+    $rootAuthorizationHash = $null
+    if (Test-Path -LiteralPath $recoveryProgressPath -PathType Leaf) {
+        $recoveryResume = $true
+        $progressPath = Resolve-ViiperRegularFile -Path $recoveryProgressPath `
+            -Label 'Failed-install recovery progress receipt'
+        $progress = Get-Content -LiteralPath $progressPath -Raw -Encoding UTF8 |
+            ConvertFrom-Json -ErrorAction Stop
+        if ([string]$progress.schema -cne
+                'viiper.windows11.failed-install-recovery-progress/v1' -or
+            [string]$progress.status -cne 'native-attempt' -or
+            [string]$progress.currentBundleManifestSha256 -cne $actualManifestHash -or
+            [string]$progress.currentViiperSourceRevision -cne
+                [string]$manifest.viiper.sourceRevision -or
+            [string]$progress.machine -cne $env:COMPUTERNAME -or
+            [string]$progress.targetUserSid -cne $TargetUserSID -or
+            [string]$progress.predecessor.stateSha256 -cne
+                [string]$predecessor.stateSha256 -or
+            [string]$progress.predecessor.commandSha256 -cne
+                [string]$predecessor.commandSha256 -or
+            [string]$progress.predecessor.resultSha256 -cne
+                [string]$predecessor.resultSha256 -or
+            [string]$progress.predecessor.stdoutSha256 -cne
+                [string]$predecessor.stdoutSha256 -or
+            [string]$progress.predecessor.stderrSha256 -cne
+                [string]$predecessor.stderrSha256 -or
+            [string]$progress.predecessorCertificateSha256 -cne
+                $predecessorCertificateHash -or
+            [string]$progress.currentPackageLockSha256 -cne
+                [string]$manifest.package.lockSha256 -or
+            $progress.retryPermitted -ne $true -or
+            [bool]$progress.resume -ne $false -and
+                [string]::IsNullOrWhiteSpace(
+                    [string]$progress.recoveryRootAuthorizationSha256)) {
+            throw 'Existing failed-install recovery progress does not match the exact current and predecessor identities.'
+        }
+        $firstAuthorizedUtc = [string]$progress.firstAuthorizedUtc
+        if ([string]::IsNullOrWhiteSpace($firstAuthorizedUtc)) {
+            throw 'Existing failed-install recovery progress lost its first authorization time.'
+        }
+        $existingProgressHash = Get-ViiperSha256 -Path $progressPath
+        $rootAuthorizationHash = if ([string]::IsNullOrWhiteSpace(
+                [string]$progress.recoveryRootAuthorizationSha256)) {
+            $existingProgressHash
+        } else {
+            ([string]$progress.recoveryRootAuthorizationSha256).ToLowerInvariant()
+        }
+        if ($rootAuthorizationHash -cnotmatch '^[0-9a-f]{64}$') {
+            throw 'Existing failed-install recovery progress has an invalid root authorization SHA-256.'
+        }
+    }
+    $trustAtAdmission = [ordered]@{
+        Root = Get-ExactLocalTestTrustCount -StoreName 'Root' `
+            -CertificatePath $certificatePath
+        TrustedPublisher = Get-ExactLocalTestTrustCount `
+            -StoreName 'TrustedPublisher' -CertificatePath $certificatePath
+    }
+    if (-not $recoveryResume -and
+        ([int]$trustAtAdmission.Root -ne 1 -or
+         [int]$trustAtAdmission.TrustedPublisher -ne 1)) {
+        throw 'Initial failed-install recovery requires exactly one matching predecessor certificate in both machine stores; no trust was changed.'
+    }
+    if ($recoveryResume -and
+        ([int]$trustAtAdmission.Root -notin @(0, 1) -or
+         [int]$trustAtAdmission.TrustedPublisher -notin @(0, 1))) {
+        throw 'Bound failed-install recovery retry permits only zero or one exact matching certificate per machine store; no trust was changed.'
+    }
+
+    # This immutable-identity attempt receipt is published before native entry.
+    # Its prior existence is the only authority to accept a cut between the two
+    # exact store deletions on a later invocation. Native code hashes and locks
+    # these bytes while it holds package -> service mutexes.
+    $progressValue = [ordered]@{
+        schema = 'viiper.windows11.failed-install-recovery-progress/v1'
+        status = 'native-attempt'
+        retryPermitted = $true
+        firstAuthorizedUtc = $firstAuthorizedUtc
+        currentBundleManifestSha256 = $actualManifestHash
+        currentViiperSourceRevision = [string]$manifest.viiper.sourceRevision
+        currentPackageLockSha256 = [string]$manifest.package.lockSha256
+        predecessor = $predecessor
+        predecessorCertificateSha256 = $predecessorCertificateHash
+        machine = $env:COMPUTERNAME
+        targetUserSid = $TargetUserSID
+        trustBeforeNativeAttempt = $trustAtAdmission
+        resume = $recoveryResume
+        updatedUtc = [DateTime]::UtcNow.ToString('o')
+    }
+    if ($recoveryResume) {
+        $progressValue.recoveryRootAuthorizationSha256 = $rootAuthorizationHash
+    }
+    Write-ViiperJsonAtomic -Path $recoveryProgressPath -Value $progressValue
+    $progressPath = Resolve-ViiperRegularFile -Path $recoveryProgressPath `
+        -Label 'Published failed-install recovery authorization'
+    $progressHash = Get-ViiperSha256 -Path $progressPath
+    if (-not $recoveryResume) {
+        $rootAuthorizationHash = $progressHash
+    }
+
+    # The manifest-bound manager invokes only the verify-only recordless helper.
+    # It never calls generic recover, remove, or uninstall, and it withholds its
+    # admission proof unless all C++ and Go broker journals are absent and the
+    # broker service, driver service,
+    # root/devnode, and Driver Store package topology are all absent. It removes
+    # the exact failed-install DER from both machine stores before releasing its
+    # package -> service mutexes, closing the successor-install race.
+    $transaction = Invoke-FailedInstallRecoveryTransaction `
+        -AuthorizationPath $progressPath -AuthorizationSHA256 $progressHash `
+        -Resume:$recoveryResume
+    Assert-CapturedSuccess -Result $transaction `
+        -Label 'Manifest-bound verify-only failed-install recovery'
+
+    $transactionResultPath = Resolve-ViiperRegularFile `
+        -Path (Join-Path ([string]$transaction.evidenceDirectory) 'result.json') `
+        -Label 'Failed-install recovery transaction result'
+    $transactionStdoutPath = Resolve-ViiperRegularFile `
+        -Path (Join-Path ([string]$transaction.evidenceDirectory) 'stdout.log') `
+        -Label 'Failed-install recovery transaction stdout'
+    $transactionStderrPath = Join-Path ([string]$transaction.evidenceDirectory) 'stderr.log'
+    $transactionStderrItem = Get-Item -LiteralPath $transactionStderrPath `
+        -Force -ErrorAction Stop
+    if ($transactionStderrItem.PSIsContainer -or
+        ($transactionStderrItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw 'Failed-install recovery transaction stderr is not a regular file.'
+    }
+    $transactionStdout = Get-Content -LiteralPath $transactionStdoutPath `
+        -Raw -Encoding UTF8
+    $resumeReceiptValue = if ($recoveryResume) { '1' } else { '0' }
+    $nativeReceiptPrefix = 'recovery-receipt operation=native-package-recover ' +
+        'activeJournal=0 devices=0 packages=0 brokerService=0 ' +
+        'driverService=0 successor=0 '
+    $nativeReceiptPattern = '(?m)^' + [regex]::Escape($nativeReceiptPrefix) +
+        'trustRootBefore=(?<root>[01]) ' +
+        'trustTrustedPublisherBefore=(?<publisher>[01]) ' +
+        'trustRootAfter=0 trustTrustedPublisherAfter=0 ' +
+        'marker=settled markerSha256=(?<marker>[0-9a-f]{64}) ' +
+        'rootAuthorizationSha256=' + [regex]::Escape($rootAuthorizationHash) + ' ' +
+        'authorizationSha256=' + [regex]::Escape($progressHash) + ' ' +
+        'certificateSha256=' + [regex]::Escape($predecessorCertificateHash) +
+        ' sourceRevision=' + [regex]::Escape(
+            [string]$manifest.viiper.sourceRevision) +
+        ' resume=' + $resumeReceiptValue + '\r?$'
+    $nativeReceiptMatches = [regex]::Matches(
+        $transactionStdout, $nativeReceiptPattern)
+    if ($nativeReceiptMatches.Count -ne 1 -or
+        $transactionStdout -match '(?m)^result=.* operation=remove ') {
+        throw 'Journal recovery did not return one exact locked successor-absence and trust-cleanup receipt.'
+    }
+    $nativeTrustBefore = [ordered]@{
+        Root = [int]$nativeReceiptMatches[0].Groups['root'].Value
+        TrustedPublisher = [int]$nativeReceiptMatches[0].Groups['publisher'].Value
+    }
+    if (-not $recoveryResume -and
+        ([int]$nativeTrustBefore.Root -ne 1 -or
+         [int]$nativeTrustBefore.TrustedPublisher -ne 1)) {
+        throw 'Initial native recovery receipt lost its exact one-per-store trust admission.'
+    }
+    $nativeReceiptLine = $nativeReceiptMatches[0].Value.TrimEnd("`r")
+    $nativeReconciliation = [ordered]@{
+        evidenceDirectory = [string]$transaction.evidenceDirectory
+        resultSha256 = Get-ViiperSha256 -Path $transactionResultPath
+        stdoutSha256 = Get-ViiperSha256 -Path $transactionStdoutPath
+        stderrSha256 = Get-ViiperSha256 -Path $transactionStderrPath
+        authorizationSha256 = $progressHash
+        rootAuthorizationSha256 = $rootAuthorizationHash
+        settledMarkerSha256 = $nativeReceiptMatches[0].Groups['marker'].Value
+        lockedTrustCleanupReceipt = $nativeReceiptLine
+    }
+    $trustAfterRecovery = [ordered]@{
+        Root = Get-ExactLocalTestTrustCount -StoreName 'Root' `
+            -CertificatePath $certificatePath
+        TrustedPublisher = Get-ExactLocalTestTrustCount `
+            -StoreName 'TrustedPublisher' -CertificatePath $certificatePath
+    }
+    if ([int]$trustAfterRecovery.Root -ne 0 -or
+        [int]$trustAfterRecovery.TrustedPublisher -ne 0) {
+        throw 'Native locked recovery receipt was emitted but exact predecessor trust is not absent.'
+    }
+    $cleanup = [ordered]@{
+        performedBy = 'native-package-recover'
+        heldPackageThenServiceMutexes = $true
+        authorizationSha256 = $progressHash
+        trustBefore = $nativeTrustBefore
+        trustAfter = $trustAfterRecovery
+    }
+    $receiptValue = [ordered]@{
+        schema = 'viiper.windows11.failed-install-recovery/v1'
+        result = 'complete'
+        completedUtc = [DateTime]::UtcNow.ToString('o')
+        machine = $env:COMPUTERNAME
+        targetUserSid = $TargetUserSID
+        currentBundleManifestSha256 = $actualManifestHash
+        currentViiperSourceRevision = [string]$manifest.viiper.sourceRevision
+        currentPackageLockSha256 = [string]$manifest.package.lockSha256
+        predecessorCertificateSha256 = $predecessorCertificateHash
+        predecessor = $predecessor
+        nativeReconciliation = $nativeReconciliation
+        trustCleanup = $cleanup
+        trustAfterRecovery = $trustAfterRecovery
+        bootIdentity = Get-ViiperBootIdentity
+        testSigningWasNotChanged = $true
+        programDataWasNotDeletedByOrchestrator = $true
+    }
+    Write-ViiperJsonAtomic -Path $recoveryReceiptPath -Value $receiptValue
+    $publishedReceipt = Resolve-ViiperRegularFile -Path $recoveryReceiptPath `
+        -Label 'Published failed-install recovery receipt'
+    Write-Host "RecoverFailedInstall completed. Receipt: '$publishedReceipt'. Next phase: Preflight with the same current bundle and EvidenceRoot."
+    return
 }
 
 if ($Phase -ceq 'Preflight') {

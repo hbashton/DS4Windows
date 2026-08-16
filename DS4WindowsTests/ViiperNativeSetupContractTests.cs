@@ -204,14 +204,19 @@ namespace DS4WindowsTests
                 "local-test-certificate-evidence",
                 "Assert-LocalTestBootAdmission",
                 "testsigning\\s+Yes",
-                "Get-ExactMachineCertificateCount",
-                "Ensure-ExactLocalTestTrust",
-                "Remove-NewLocalTestTrust",
-                "@('Root', 'TrustedPublisher')",
+                "New-ProtectedLocalTestTrustCapability",
+                "viiper.native.local-test-trust-capability/v1",
+                "viiper.native.local-test-trust-ownership/v1",
+                "--local-test-trust-capability",
+                "--expected-trust-capability-sha-256",
+                "--local-test-certificate-path",
+                "--expected-local-test-certificate-sha-256",
+                "--expected-local-test-package-lock-sha-256",
+                "New-ProtectedFailedInstallRecoveryCapability",
+                "native-package-recover",
                 "Invoke-JoinedNativeProcess",
                 "Started ([ref]$processStarted)",
                 "$script:transactionStarted = $processStarted",
-                "$script:trustCleanupFailed = $true",
                 "AggregateException",
             })
             {
@@ -222,20 +227,25 @@ namespace DS4WindowsTests
             {
                 "usbip-win2", "RunVIIPER", "Invoke-WebRequest",
                 "Invoke-RestMethod", "api.github.com",
+                "Get-ExactMachineCertificateCount",
+                "Ensure-ExactLocalTestTrust",
+                "Remove-NewLocalTestTrust",
+                "X509Store",
+                "$script:trustCleanupFailed",
             })
             {
                 Assert.IsFalse(source.Contains(forbidden,
                     StringComparison.OrdinalIgnoreCase), forbidden);
             }
 
-            int trustMutation = source.LastIndexOf(
-                "Ensure-ExactLocalTestTrust -StoreName",
+            int trustCapability = source.LastIndexOf(
+                "New-ProtectedLocalTestTrustCapability",
                 StringComparison.Ordinal);
             int transactionAdmission = source.LastIndexOf(
                 "Invoke-JoinedNativeProcess", StringComparison.Ordinal);
-            Assert.IsTrue(trustMutation >= 0 &&
-                transactionAdmission > trustMutation,
-                "Exact local-test trust must be verified before transaction admission.");
+            Assert.IsTrue(trustCapability >= 0 &&
+                transactionAdmission > trustCapability,
+                "The parent-bound native trust capability must be issued before transaction admission.");
             StringAssert.Contains(source,
                 "-not $script:transactionStarted");
             Assert.IsFalse(source.Contains("& $stagedBroker @arguments",

@@ -495,8 +495,240 @@ function Get-ViiperMachineEvidenceSnapshot {
     }
 }
 
+function Test-ViiperFailedInstallRecoveryEvidence {
+    param(
+        [Parameter(Mandatory = $true)][string]$PredecessorEvidenceRoot,
+        [Parameter(Mandatory = $true)][string]$PredecessorInstallStepDirectory,
+        [Parameter(Mandatory = $true)][string]$ExpectedStateSHA256,
+        [Parameter(Mandatory = $true)][string]$ExpectedInstallCommandSHA256,
+        [Parameter(Mandatory = $true)][string]$ExpectedInstallResultSHA256,
+        [Parameter(Mandatory = $true)][string]$ExpectedInstallStdoutSHA256,
+        [Parameter(Mandatory = $true)][string]$ExpectedInstallStderrSHA256,
+        [Parameter(Mandatory = $true)][string]$ExpectedBundleManifestSHA256,
+        [Parameter(Mandatory = $true)][string]$ExpectedViiperSourceRevision,
+        [Parameter(Mandatory = $true)][string]$ExpectedDS4WindowsSourceRevision,
+        [Parameter(Mandatory = $true)][string]$ExpectedPackageLockSHA256,
+        [Parameter(Mandatory = $true)][string]$ExpectedMachine,
+        [Parameter(Mandatory = $true)][string]$ExpectedTargetUserSID
+    )
+
+    $digests = @(
+        $ExpectedStateSHA256, $ExpectedInstallCommandSHA256,
+        $ExpectedInstallResultSHA256, $ExpectedInstallStdoutSHA256,
+        $ExpectedInstallStderrSHA256, $ExpectedBundleManifestSHA256,
+        $ExpectedPackageLockSHA256
+    )
+    if (@($digests | Where-Object { $_ -cnotmatch '^[0-9a-fA-F]{64}$' }).Count -ne 0 -or
+        $ExpectedViiperSourceRevision -cnotmatch '^[0-9a-fA-F]{40,64}$' -or
+        $ExpectedDS4WindowsSourceRevision -cnotmatch '^[0-9a-fA-F]{40,64}$' -or
+        $ExpectedTargetUserSID -cnotmatch '^S-1-5-21-(?:[0-9]+-){3}[0-9]+$') {
+        throw 'Failed-install recovery identities are not canonical hashes, revisions, and a user SID.'
+    }
+
+    $predecessorRoot = Resolve-ViiperSafeDirectory `
+        -Path $PredecessorEvidenceRoot -Label 'Predecessor evidence root'
+    $predecessorSteps = Resolve-ViiperSafeDirectory `
+        -Path (Join-Path $predecessorRoot 'steps') `
+        -Label 'Predecessor evidence steps directory'
+    $installStep = Resolve-ViiperSafeDirectory `
+        -Path $PredecessorInstallStepDirectory `
+        -Label 'Predecessor Install evidence directory'
+    if ((Split-Path -Parent $installStep) -ine $predecessorSteps) {
+        throw 'Predecessor Install evidence must be one direct child of its retained steps directory.'
+    }
+
+    $statePath = Resolve-ViiperRegularFile `
+        -Path (Join-Path $predecessorRoot 'state\validation-state.json') `
+        -Label 'Predecessor validation state'
+    $commandPath = Resolve-ViiperRegularFile `
+        -Path (Join-Path $installStep 'command.json') `
+        -Label 'Predecessor Install command evidence'
+    $resultPath = Resolve-ViiperRegularFile `
+        -Path (Join-Path $installStep 'result.json') `
+        -Label 'Predecessor Install result evidence'
+    $stdoutPath = Resolve-ViiperRegularFile `
+        -Path (Join-Path $installStep 'stdout.log') `
+        -Label 'Predecessor Install stdout evidence'
+    $stderrPath = Resolve-ViiperRegularFile `
+        -Path (Join-Path $installStep 'stderr.log') `
+        -Label 'Predecessor Install stderr evidence'
+
+    $expectedFiles = [ordered]@{
+        $statePath = $ExpectedStateSHA256
+        $commandPath = $ExpectedInstallCommandSHA256
+        $resultPath = $ExpectedInstallResultSHA256
+        $stdoutPath = $ExpectedInstallStdoutSHA256
+        $stderrPath = $ExpectedInstallStderrSHA256
+    }
+    $lockedStreams = [Collections.Generic.List[IO.FileStream]]::new()
+    $lockedEvidence = @{}
+    try {
+        foreach ($entry in $expectedFiles.GetEnumerator()) {
+            $path = [string]$entry.Key
+            $stream = [IO.FileStream]::new(
+                $path, [IO.FileMode]::Open, [IO.FileAccess]::Read,
+                [IO.FileShare]::Read)
+            $lockedStreams.Add($stream)
+            if ($stream.Length -le 0 -or $stream.Length -gt 16777216) {
+                throw "Predecessor recovery evidence length is outside its bound: '$path'."
+            }
+            $bytes = [byte[]]::new([int]$stream.Length)
+            $offset = 0
+            while ($offset -lt $bytes.Length) {
+                $read = $stream.Read($bytes, $offset, $bytes.Length - $offset)
+                if ($read -le 0) {
+                    throw "Predecessor recovery evidence ended before its locked length: '$path'."
+                }
+                $offset += $read
+            }
+            $algorithm = [Security.Cryptography.SHA256]::Create()
+            try {
+                $digest = ([BitConverter]::ToString(
+                    $algorithm.ComputeHash($bytes))).Replace(
+                        '-', '').ToLowerInvariant()
+            }
+            finally {
+                $algorithm.Dispose()
+            }
+            if ($digest -cne ([string]$entry.Value).ToLowerInvariant()) {
+                throw "Predecessor recovery evidence hash mismatch: '$path'."
+            }
+            $textOffset = if ($bytes.Length -ge 3 -and
+                $bytes[0] -eq 0xef -and $bytes[1] -eq 0xbb -and
+                $bytes[2] -eq 0xbf) { 3 } else { 0 }
+            $text = [Text.UTF8Encoding]::new($false, $true).GetString(
+                $bytes, $textOffset, $bytes.Length - $textOffset)
+            $lockedEvidence[$path] = [pscustomobject]@{
+                Hash = $digest
+                Text = $text
+            }
+        }
+
+    $state = $lockedEvidence[$statePath].Text |
+        ConvertFrom-Json -ErrorAction Stop
+    $history = @($state.history)
+    if ([string]$state.schema -cne 'viiper.windows11.validation-state/v1' -or
+        [string]$state.bundleManifestSha256 -cne
+            $ExpectedBundleManifestSHA256.ToLowerInvariant() -or
+        [string]$state.viiperSourceRevision -cne
+            $ExpectedViiperSourceRevision.ToLowerInvariant() -or
+        [string]$state.ds4WindowsSourceRevision -cne
+            $ExpectedDS4WindowsSourceRevision.ToLowerInvariant() -or
+        [string]$state.packageLockSha256 -cne
+            $ExpectedPackageLockSHA256.ToLowerInvariant() -or
+        [string]$state.machine -cne $ExpectedMachine -or
+        [string]$state.targetUserSid -cne $ExpectedTargetUserSID -or
+        [string]$state.lifecycle -cne 'transaction-failed' -or
+        [string]$state.pendingTransaction -cne 'Install' -or
+        [int]$state.trustBeforeInstall.Root -ne 0 -or
+        [int]$state.trustBeforeInstall.TrustedPublisher -ne 0 -or
+        $history.Count -eq 0 -or
+        [string]$history[-1].phase -cne 'Install' -or
+        [string]$history[-1].lifecycle -cne 'transaction-failed') {
+        throw 'Predecessor state is not the exact zero-prior-trust failed Install authorized for recovery.'
+    }
+
+    $command = $lockedEvidence[$commandPath].Text |
+        ConvertFrom-Json -ErrorAction Stop
+    $arguments = @($command.arguments | ForEach-Object { [string]$_ })
+    if ([string]$command.schema -cne 'viiper.windows11.captured-command/v1' -or
+        [string]$command.name -cne 'install') {
+        throw 'Predecessor command evidence is not the captured Install command.'
+    }
+    function Assert-UniquePredecessorArgument {
+        param([string]$Name, [string]$ExpectedValue)
+        $indexes = @()
+        for ($index = 0; $index -lt $arguments.Count; ++$index) {
+            if ($arguments[$index] -ceq $Name) { $indexes += $index }
+        }
+        if ($indexes.Count -ne 1 -or $indexes[0] + 1 -ge $arguments.Count -or
+            $arguments[$indexes[0] + 1] -cne $ExpectedValue) {
+            throw "Predecessor Install command lost its unique '$Name' identity."
+        }
+    }
+    Assert-UniquePredecessorArgument '-ExpectedSourceRevision' `
+        $ExpectedViiperSourceRevision.ToLowerInvariant()
+    Assert-UniquePredecessorArgument '-ExpectedPackageLockSHA256' `
+        $ExpectedPackageLockSHA256.ToLowerInvariant()
+    Assert-UniquePredecessorArgument '-TargetUserSID' $ExpectedTargetUserSID
+    if (@($arguments | Where-Object {
+            $_ -ceq '-AcknowledgeDisposableTestMachine'
+        }).Count -ne 1) {
+        throw 'Predecessor Install command lacks its unique disposable-machine acknowledgement.'
+    }
+
+    $result = $lockedEvidence[$resultPath].Text |
+        ConvertFrom-Json -ErrorAction Stop
+    if ([string]$result.schema -cne 'viiper.windows11.captured-result/v1' -or
+        [string]$result.name -cne 'install' -or
+        $result.started -ne $true -or [int]$result.exitCode -ne 1 -or
+        $result.success -ne $false -or $null -ne $result.launchFailure -or
+        [string]$result.evidenceDirectory -ine $installStep) {
+        throw 'Predecessor result does not prove one launched, failed Install child.'
+    }
+
+    $stdout = [string]$lockedEvidence[$stdoutPath].Text
+    # EmitOutcome always emits this canonical prefix. Depending on how far
+    # journal initialization progressed, it may append either or both bounded
+    # recovery diagnostics in this one fixed field order. The caller still
+    # binds the entire stdout file by SHA-256 above; accepting the diagnostics
+    # here only prevents a truthful retained-journal path from invalidating the
+    # exact zero-change failure proof.
+    $quotedRecoveryPath = '"(?:[^"\\\r\n]|\\["\\]){1,32767}"'
+    $quotedRecoveryText = '"(?:[^"\\\r\n]|\\["\\]){0,4096}"'
+    $recoveryRecordProof = '(?: recoveryRecord=' + $quotedRecoveryPath +
+        ' recoveryRecordWritten=1| recoveryRecord=' + $quotedRecoveryPath +
+        ' recoveryRecordWritten=0(?: recoveryRecordPhase=' +
+        $quotedRecoveryText + ' recoveryRecordWin32Error=[0-9]{1,10} ' +
+        'recoveryRecordMessage=' + $quotedRecoveryText + ')?)?'
+    $recoveryBackupProof = '(?: recoveryBackup=' + $quotedRecoveryPath +
+        ' recoveryBackupRetained=(?:0|1))?'
+    $failureProof = '(?m)^result=error operation=install changed=0 ' +
+        'rebootRequired=0 rollback=not-needed exitCode=4 ' +
+        'phase="install-journal-broker-image-hash" win32Error=23 ' +
+        'message="protected broker evidence differs from its immutable digest"' +
+        $recoveryRecordProof + $recoveryBackupProof + '\r?$'
+    if ([regex]::Matches($stdout, $failureProof).Count -ne 1 -or
+        [regex]::Matches($stdout,
+            '(?m)^result=(?:success|error) operation=install ').Count -ne 1) {
+        throw 'Predecessor stdout does not prove the exact settled, zero-change broker-image digest rejection.'
+    }
+    foreach ($storeName in @('Root', 'TrustedPublisher')) {
+        foreach ($proof in @(
+                "local-test-trust store=$storeName action=add result=added",
+                "local-test-trust store=$storeName action=verify-add result=present")) {
+            if ([regex]::Matches($stdout,
+                    '(?m)^' + [regex]::Escape($proof) + '\r?$').Count -ne 1) {
+                throw "Predecessor stdout does not prove exact new trust in LocalMachine\$storeName."
+            }
+        }
+    }
+
+    return [ordered]@{
+        predecessorEvidenceRoot = $predecessorRoot
+        installEvidenceDirectory = $installStep
+        statePath = $statePath
+        stateSha256 = [string]$lockedEvidence[$statePath].Hash
+        commandSha256 = [string]$lockedEvidence[$commandPath].Hash
+        resultSha256 = [string]$lockedEvidence[$resultPath].Hash
+        stdoutSha256 = [string]$lockedEvidence[$stdoutPath].Hash
+        stderrSha256 = [string]$lockedEvidence[$stderrPath].Hash
+        bundleManifestSha256 = $ExpectedBundleManifestSHA256.ToLowerInvariant()
+        viiperSourceRevision = $ExpectedViiperSourceRevision.ToLowerInvariant()
+        ds4WindowsSourceRevision = $ExpectedDS4WindowsSourceRevision.ToLowerInvariant()
+        packageLockSha256 = $ExpectedPackageLockSHA256.ToLowerInvariant()
+    }
+    }
+    finally {
+        for ($index = $lockedStreams.Count - 1; $index -ge 0; --$index) {
+            $lockedStreams[$index].Dispose()
+        }
+    }
+}
+
 function Get-ViiperValidationPhaseModel {
     return @(
+        [ordered]@{ phase = 'RecoverFailedInstall'; predecessor = 'exact predecessor transaction-failed Install evidence'; mutatesMachine = $true; next = 'fresh-preflight-ready-or-reboot' },
         [ordered]@{ phase = 'Preflight'; predecessor = 'new'; mutatesMachine = $false; next = 'preflight-complete' },
         [ordered]@{ phase = 'Install'; predecessor = 'preflight-complete'; mutatesMachine = $true; next = 'installed-or-reboot' },
         [ordered]@{ phase = 'Repair'; predecessor = 'installed'; mutatesMachine = $true; next = 'installed-or-reboot' },
@@ -516,6 +748,7 @@ function Get-ViiperValidationPhaseModel {
 Export-ModuleMember -Function @(
     'Get-ViiperSha256', 'Resolve-ViiperRegularFile', 'Resolve-ViiperSafeDirectory',
     'Write-ViiperJsonAtomic', 'Test-ViiperGitIdentity', 'Test-ViiperLocalTestPackage',
+    'Test-ViiperFailedInstallRecoveryEvidence',
     'Get-ViiperBootIdentity', 'Get-ViiperMachineEvidenceSnapshot',
     'Get-ViiperValidationPhaseModel'
 )

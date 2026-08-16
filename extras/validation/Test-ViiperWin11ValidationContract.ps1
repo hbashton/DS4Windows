@@ -33,7 +33,8 @@ foreach ($path in @($modulePath, $builderPath, $orchestratorPath, $managerPath))
     }
 }
 
-Import-Module -Name $modulePath -Force -ErrorAction Stop
+$validationModule = Import-Module -Name $modulePath -Force `
+    -PassThru -ErrorAction Stop
 $phaseModel = @(Get-ViiperValidationPhaseModel)
 $expectedPhases = @('RecoverFailedInstall', 'Preflight', 'Install', 'Repair', 'RebootResume', 'ManualChecks',
     'EnableVerifier', 'VerifierResume', 'Live', 'Performance', 'LatencyMatrix',
@@ -43,6 +44,56 @@ if ($phaseModel.Count -ne $expectedPhases.Count -or
         -DifferenceObject @($phaseModel | ForEach-Object { [string]$_.phase }) `
         -CaseSensitive).Count -ne 0) {
     throw 'Validation phase model is missing a boot-resume, repair, evidence, or uninstall phase.'
+}
+
+# The PendingFileRenameOperations value is optional. Exercise the private
+# property-bag helper in module scope so both Windows PowerShell 5.1 and
+# PowerShell 7 prove that absence/emptiness is benign while content is pending.
+$optionalRegistryCases = @(
+    [pscustomobject]@{
+        Label = 'absent optional value'
+        RegistryObject = [pscustomobject]@{ OtherValue = 1 }
+        Expected = $false
+    },
+    [pscustomobject]@{
+        Label = 'null optional value'
+        RegistryObject = [pscustomobject]@{
+            PendingFileRenameOperations = $null
+        }
+        Expected = $false
+    },
+    [pscustomobject]@{
+        Label = 'empty optional value collection'
+        RegistryObject = [pscustomobject]@{
+            PendingFileRenameOperations = [string[]]@()
+        }
+        Expected = $false
+    },
+    [pscustomobject]@{
+        Label = 'empty optional string'
+        RegistryObject = [pscustomobject]@{
+            PendingFileRenameOperations = ''
+        }
+        Expected = $false
+    },
+    [pscustomobject]@{
+        Label = 'nonempty optional value'
+        RegistryObject = [pscustomobject]@{
+            PendingFileRenameOperations = [string[]]@('', '\??\C:\pending.tmp')
+        }
+        Expected = $true
+    }
+)
+foreach ($case in $optionalRegistryCases) {
+    $actual = & $validationModule {
+        param($RegistryObject)
+        Test-ViiperNonemptyOptionalRegistryProperty `
+            -RegistryObject $RegistryObject `
+            -Name 'PendingFileRenameOperations'
+    } $case.RegistryObject
+    if ($actual -isnot [bool] -or $actual -ne [bool]$case.Expected) {
+        throw "Optional pending-rename registry contract failed: $($case.Label)."
+    }
 }
 
 $builder = Get-Content -LiteralPath $builderPath -Raw -Encoding UTF8
@@ -89,6 +140,7 @@ foreach ($fragment in @(
     '$ds4LiveHarnessPath',
     'Invoke-ViiperE2ELatencyMatrix.ps1',
     "'-PackageValidationMode', 'LocalTest'",
+    'Assert-ViiperPreflightPendingReboot',
     "'RecoverFailedInstall'", 'Test-ViiperFailedInstallRecoveryEvidence',
     "'-Operation', 'Recover'", "'-RecoveryAuthorizationPath'",
     "'viiper.windows11.failed-install-recovery/v1'",
@@ -112,6 +164,34 @@ if ($recoveryPhase.Contains('Remove-NewLocalTestTrust') -or
     -not $recoveryPhase.Contains('recovery-receipt operation=native-package-recover') -or
     -not $recoveryPhase.Contains('-Resume:$recoveryResume')) {
     throw 'RecoverFailedInstall must verify native locked trust cleanup and must never delete trust itself.'
+}
+$transactionPhaseStart = $orchestrator.IndexOf(
+    "if (`$Phase -in @('Install', 'Repair'))", $preflightPhaseStart,
+    [StringComparison]::Ordinal)
+if ($transactionPhaseStart -le $preflightPhaseStart) {
+    throw 'Preflight phase region is malformed.'
+}
+$preflightPhase = $orchestrator.Substring(
+    $preflightPhaseStart, $transactionPhaseStart - $preflightPhaseStart)
+$snapshotPublication = $preflightPhase.IndexOf(
+    'Write-ViiperJsonAtomic -Path $snapshotPath -Value $snapshot',
+    [StringComparison]::Ordinal)
+$pendingRebootGate = $preflightPhase.IndexOf(
+    'Assert-ViiperPreflightPendingReboot', [StringComparison]::Ordinal)
+$packagePreflight = $preflightPhase.IndexOf(
+    "Invoke-CapturedPowerShell -Name 'package-preflight'",
+    [StringComparison]::Ordinal)
+$stateCreation = $preflightPhase.IndexOf(
+    '$state = [pscustomobject][ordered]@{', [StringComparison]::Ordinal)
+$statePublication = $preflightPhase.IndexOf(
+    "Save-State -Lifecycle 'preflight-complete'", [StringComparison]::Ordinal)
+if ($snapshotPublication -lt 0 -or
+    $pendingRebootGate -le $snapshotPublication -or
+    $packagePreflight -le $pendingRebootGate -or
+    $stateCreation -le $pendingRebootGate -or
+    $statePublication -le $stateCreation -or
+    $preflightPhase.Contains('$null -ne $snapshot.pendingReboot')) {
+    throw 'Preflight pending-reboot rejection must precede package work and validation-state creation.'
 }
 foreach ($fragment in @(
     "[ValidateSet('Install', 'Recover', 'Uninstall')]",
@@ -138,6 +218,34 @@ $recoveryCommand = $manager.IndexOf("'native-package-recover'",
     [StringComparison]::Ordinal)
 if ($eligibilityEnd -lt 0 -or $recoveryCommand -le $eligibilityEnd) {
     throw 'Recovery operation selection is incorrectly chained into eligibility validation.'
+}
+$capabilityReadLeaseStart = $manager.IndexOf(
+    'function Open-VerifiedProtectedCapabilityReadLease',
+    [StringComparison]::Ordinal)
+$capabilityReadLeaseEnd = $manager.IndexOf(
+    'function New-ProtectedLocalTestTrustCapability',
+    $capabilityReadLeaseStart, [StringComparison]::Ordinal)
+if ($capabilityReadLeaseStart -lt 0 -or
+    $capabilityReadLeaseEnd -le $capabilityReadLeaseStart) {
+    throw 'Protected capability read-lease verifier is malformed.'
+}
+$capabilityReadLeaseRegion = $manager.Substring(
+    $capabilityReadLeaseStart,
+    $capabilityReadLeaseEnd - $capabilityReadLeaseStart)
+foreach ($fragment in @(
+        '[IO.FileAccess]::Read, [IO.FileShare]::Read',
+        '[ViiperLocalTestTrustLeaseNative]::FinalPath(',
+        'Assert-ProtectedStage -StagePath $expectedStage',
+        'Assert-ExactProtectedTrustObjectSecurity',
+        '$item.Length -ne $ExpectedLength',
+        '$readLease.Length -ne $ExpectedLength',
+        '[ViiperLocalTestTrustLeaseNative]::LinkCount(',
+        '$algorithm.ComputeHash($readLease)',
+        '$readLease.Position = 0',
+        '-not $readLease.CanRead -or $readLease.CanWrite')) {
+    if (-not $capabilityReadLeaseRegion.Contains($fragment)) {
+        throw "Protected capability read lease lost exact verifier '$fragment'."
+    }
 }
 $recoveryCapabilityFunctionStart = $manager.IndexOf(
     'function New-ProtectedFailedInstallRecoveryCapability',
@@ -222,6 +330,33 @@ foreach ($field in @(
         throw "Local-test trust capability lost canonical ordered field '$field'."
     }
     $localCapabilityPosition = $next
+}
+foreach ($capabilityContract in @(
+        [pscustomobject]@{
+            Label = 'local-test trust'
+            Region = $localCapabilityRegion
+        },
+        [pscustomobject]@{
+            Label = 'failed-install recovery'
+            Region = $recoveryCapabilityRegion
+        })) {
+    $creationHandleClose = $capabilityContract.Region.IndexOf(
+        '$creationStream.Dispose()', [StringComparison]::Ordinal)
+    $creationHandleRelease = $capabilityContract.Region.IndexOf(
+        '$creationStream = $null', $creationHandleClose,
+        [StringComparison]::Ordinal)
+    $readLeaseOpen = $capabilityContract.Region.IndexOf(
+        '$readLease = Open-VerifiedProtectedCapabilityReadLease',
+        [StringComparison]::Ordinal)
+    $readLeaseReturn = $capabilityContract.Region.IndexOf(
+        'Stream = $readLease', [StringComparison]::Ordinal)
+    if ($creationHandleClose -lt 0 -or
+        $creationHandleRelease -le $creationHandleClose -or
+        $readLeaseOpen -le $creationHandleRelease -or
+        $readLeaseReturn -le $readLeaseOpen -or
+        $capabilityContract.Region.Contains('Stream = $creationStream')) {
+        throw "Protected $($capabilityContract.Label) capability does not close its write-capable creation handle before retaining only the verified read lease."
+    }
 }
 $managerMainIndex = $manager.IndexOf('$programDataRoot =', [StringComparison]::Ordinal)
 $managerMain = $manager.Substring($managerMainIndex)
@@ -324,7 +459,11 @@ foreach ($fragment in @('Building the bundle makes no runtime claim',
     'no iid, confidence, population, or cross-machine claim',
     'No step downloads anything',
     'bare canonical helper outcome is intentionally not an alternate proof',
-    'duplicate wrappers, any extra native result outcome')) {
+    'duplicate wrappers, any extra native result outcome',
+    'Generic Run4 predecessor parser boundary (design only)',
+    'a contract design, not recovery authority',
+    'manager operation, native command, argument, or capability schema',
+    'must not broaden or reinterpret the frozen 582-byte R4 proof')) {
     if ($readme.IndexOf($fragment, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
         throw "Validation guide lost scope boundary '$fragment'."
     }
@@ -546,6 +685,98 @@ try {
         throw 'Atomic JSON replacement retained a temporary state file.'
     }
     Remove-Item -LiteralPath $atomicPath -Force
+
+    # Model the only permitted state-publication order: the fail-closed
+    # pending-reboot gate runs first, and validation-state.json is written only
+    # after it succeeds. Every rejection below must leave that file absent.
+    $contractPreflightStatePath = Join-Path $temporaryRoot `
+        'validation-state.json'
+    function New-ContractPendingRebootSnapshot {
+        return [ordered]@{
+            pendingReboot = [ordered]@{
+                componentBasedServicing = $false
+                windowsUpdate = $false
+                pendingFileRenameOperations = $false
+                pendingComputerRename = $false
+            }
+            collectionErrors = @()
+        }
+    }
+    function Invoke-ContractPendingRebootThenPublishState {
+        param([Parameter(Mandatory = $true)]$Snapshot)
+
+        Assert-ViiperPreflightPendingReboot -Snapshot $Snapshot `
+            -SnapshotPath (Join-Path $temporaryRoot 'machine-snapshot.json')
+        Write-ViiperJsonAtomic -Path $contractPreflightStatePath `
+            -Value ([ordered]@{ lifecycle = 'preflight-complete' })
+    }
+    function Assert-ContractPendingRebootRejectedWithoutState {
+        param(
+            [Parameter(Mandatory = $true)]$Snapshot,
+            [Parameter(Mandatory = $true)][string]$Label
+        )
+
+        if (Test-Path -LiteralPath $contractPreflightStatePath) {
+            throw "Pending-reboot contract started '$Label' with unexpected state."
+        }
+        $gatePassed = $false
+        try {
+            Assert-ViiperPreflightPendingReboot -Snapshot $Snapshot `
+                -SnapshotPath (Join-Path $temporaryRoot 'machine-snapshot.json')
+            $gatePassed = $true
+            Write-ViiperJsonAtomic -Path $contractPreflightStatePath `
+                -Value ([ordered]@{ lifecycle = 'preflight-complete' })
+        }
+        catch {}
+        if ($gatePassed) {
+            throw "Preflight admitted rejected pending-reboot evidence: $Label."
+        }
+        if (Test-Path -LiteralPath $contractPreflightStatePath) {
+            throw "Preflight created validation state after rejecting: $Label."
+        }
+    }
+
+    $clearPendingSnapshot = New-ContractPendingRebootSnapshot
+    Invoke-ContractPendingRebootThenPublishState `
+        -Snapshot $clearPendingSnapshot
+    if (-not (Test-Path -LiteralPath $contractPreflightStatePath `
+            -PathType Leaf)) {
+        throw 'All-clear pending-reboot evidence did not admit state publication.'
+    }
+    Remove-Item -LiteralPath $contractPreflightStatePath -Force
+
+    $nullPendingSnapshot = New-ContractPendingRebootSnapshot
+    $nullPendingSnapshot['pendingReboot'] = $null
+    Assert-ContractPendingRebootRejectedWithoutState `
+        -Snapshot $nullPendingSnapshot -Label 'null pendingReboot'
+
+    $collectionErrorSnapshot = New-ContractPendingRebootSnapshot
+    $collectionErrorSnapshot['collectionErrors'] = @([ordered]@{
+        section = 'pendingReboot'
+        message = 'synthetic collection failure'
+    })
+    Assert-ContractPendingRebootRejectedWithoutState `
+        -Snapshot $collectionErrorSnapshot `
+        -Label 'pendingReboot collection error'
+
+    $nullAndCollectionErrorSnapshot = New-ContractPendingRebootSnapshot
+    $nullAndCollectionErrorSnapshot['pendingReboot'] = $null
+    $nullAndCollectionErrorSnapshot['collectionErrors'] = @([ordered]@{
+        section = 'pendingReboot'
+        message = 'synthetic collection failure with null section result'
+    })
+    Assert-ContractPendingRebootRejectedWithoutState `
+        -Snapshot $nullAndCollectionErrorSnapshot `
+        -Label 'null pendingReboot plus collection error'
+
+    foreach ($pendingFlag in @(
+            'componentBasedServicing', 'windowsUpdate',
+            'pendingFileRenameOperations', 'pendingComputerRename')) {
+        $pendingSnapshot = New-ContractPendingRebootSnapshot
+        $pendingSnapshot['pendingReboot'][$pendingFlag] = $true
+        Assert-ContractPendingRebootRejectedWithoutState `
+            -Snapshot $pendingSnapshot -Label "true $pendingFlag"
+    }
 
     $payloadPath = Join-Path $temporaryRoot 'payload.bin'
     [IO.File]::WriteAllBytes($payloadPath, [byte[]](1, 2, 3, 4, 5))

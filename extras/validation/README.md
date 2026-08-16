@@ -147,6 +147,29 @@ fresh `Preflight` using the same current bundle and EvidenceRoot. TESTSIGNING is
 not changed, and this verify-only recordless recovery has no reboot-success
 boundary: any nonzero native result remains a hard stop.
 
+### Generic Run4 predecessor parser boundary (design only)
+
+The exact R4 parser above remains the only implemented failed-install
+admission path. A future DS4-side generic Run4 predecessor parser is currently
+a contract design, not recovery authority: it is not connected to a validation
+phase, manager operation, native command, argument, or capability schema.
+
+Before that API can be wired, one canonical source-bound input must name an
+exact predecessor evidence root and exact evidence files, with independently
+supplied hashes for every file. The parser must bind the predecessor manifest,
+VIIPER and DS4Windows revisions, package lock, machine, same-account target SID,
+lifecycle and pending transaction, exact command argv, captured result, and the
+complete stdout/stderr bytes. It must reject missing, extra, reordered,
+duplicated, prefixed, suffixed, malformed, or contradictory native outcomes and
+retain verified read-only, reciprocal-`FileShare.Read` leases while authority
+is consumed. Callers may provide expected identities; they may not manufacture
+authority by selecting a directory, digest, substring, or outcome grammar.
+
+No generic Run4 recovery invocation is permitted until the recovery API and
+its exact schemas are frozen together. That future contract must be introduced
+with executable PS5/PS7 adversarial fixtures before any native argv is added;
+it must not broaden or reinterpret the frozen 582-byte R4 proof.
+
 `Preflight` captures Windows build and architecture, boot identity/uptime,
 TESTSIGNING and pending reboot state, active power plan, AC/battery state,
 VBS/HVCI/hypervisor state, free disks, and a background-process snapshot. It

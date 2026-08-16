@@ -847,14 +847,8 @@ if ($Phase -ceq 'Preflight') {
         Write-Warning 'MANUAL REBOOT PROMPT: enable TESTSIGNING from an elevated prompt, reboot this disposable laptop, then rerun Preflight with the identical bundle digest and paths.'
         throw "Local-test TESTSIGNING is not active. Snapshot: '$snapshotPath'."
     }
-    if ($null -ne $snapshot.pendingReboot -and
-        ($snapshot.pendingReboot.componentBasedServicing -or
-         $snapshot.pendingReboot.windowsUpdate -or
-         $snapshot.pendingReboot.pendingFileRenameOperations -or
-         $snapshot.pendingReboot.pendingComputerRename)) {
-        Write-Warning 'MANUAL REBOOT PROMPT: Windows reports a pending reboot. Restart, rerun Preflight, and preserve the same inputs.'
-        throw "Preflight refuses a pending-reboot baseline. Snapshot: '$snapshotPath'."
-    }
+    Assert-ViiperPreflightPendingReboot `
+        -Snapshot $snapshot -SnapshotPath $snapshotPath
     $drive = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($evidence))
     if ([uint64]$drive.AvailableFreeSpace -lt 10GB) {
         throw 'Evidence volume needs at least 10 GB free before lifecycle, ETL, and dump collection.'

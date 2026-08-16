@@ -48,6 +48,7 @@ foreach ($required in @(
     'local-test-certificate-evidence',
     'Assert-LocalTestBootAdmission',
     'testsigning\s+Yes',
+    'Open-VerifiedProtectedCapabilityReadLease',
     'New-ProtectedLocalTestTrustCapability',
     "schema = 'viiper.native.local-test-trust-capability/v1'",
     'certificatePath = [IO.Path]::GetFullPath($CertificatePath)',
@@ -59,6 +60,9 @@ foreach ($required in @(
     'Invoke-JoinedNativeProcess',
     'Started ([ref]$processStarted)',
     '$script:transactionStarted = $processStarted',
+    '$creationStream.Dispose()',
+    '[IO.FileAccess]::Read, [IO.FileShare]::Read',
+    'Stream = $readLease',
     'AggregateException'
 )) {
     if ($managerSource.IndexOf($required, [StringComparison]::Ordinal) -lt 0) {
@@ -104,6 +108,94 @@ foreach ($forbidden in @('usbip-win2', 'RunVIIPER', 'Invoke-WebRequest',
     if ($managerSource.IndexOf($forbidden, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
         throw "Native package manager contains forbidden legacy/download token '$forbidden'."
     }
+}
+
+# FileShare is reciprocal on Windows. Prove the capability handoff invariant
+# without loading the manager: a write-capable creation handle prevents the
+# eventual read/FileShare.Read lease from opening, while the retained read
+# lease permits readers and denies a new writer.
+$shareContractRoot = Join-Path ([IO.Path]::GetTempPath()) (
+    'viiper-capability-share-contract-' + [Guid]::NewGuid().ToString('N'))
+[void][IO.Directory]::CreateDirectory($shareContractRoot)
+$shareContractPath = Join-Path $shareContractRoot 'capability.json'
+$creationWriter = $null
+$readLease = $null
+$secondReader = $null
+$unexpectedHandle = $null
+try {
+    $creationWriter = [IO.FileStream]::new(
+        $shareContractPath, [IO.FileMode]::CreateNew,
+        [IO.FileAccess]::Write, [IO.FileShare]::Read)
+    $creationWriter.WriteByte(0x7b)
+    $creationWriter.Flush($true)
+
+    $readWhileWriterRejected = $false
+    try {
+        $unexpectedHandle = [IO.FileStream]::new(
+            $shareContractPath, [IO.FileMode]::Open,
+            [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    }
+    catch [IO.IOException] { $readWhileWriterRejected = $true }
+    finally {
+        if ($null -ne $unexpectedHandle) {
+            $unexpectedHandle.Dispose()
+            $unexpectedHandle = $null
+        }
+    }
+    if (-not $readWhileWriterRejected) {
+        throw 'Capability read lease opened before the write-capable creation handle closed.'
+    }
+
+    $creationWriter.Dispose()
+    $creationWriter = $null
+    $readLease = [IO.FileStream]::new(
+        $shareContractPath, [IO.FileMode]::Open,
+        [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    if (-not $readLease.CanRead -or $readLease.CanWrite -or
+        $readLease.Position -ne 0) {
+        throw 'Capability lease is not a read-only stream positioned at zero.'
+    }
+
+    $secondReader = [IO.FileStream]::new(
+        $shareContractPath, [IO.FileMode]::Open,
+        [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    if (-not $secondReader.CanRead -or $secondReader.CanWrite) {
+        throw 'Reciprocal read sharing did not admit a second read-only lease.'
+    }
+
+    $writerWhileReadLeaseRejected = $false
+    try {
+        $unexpectedHandle = [IO.FileStream]::new(
+            $shareContractPath, [IO.FileMode]::Open,
+            [IO.FileAccess]::Write, [IO.FileShare]::Read)
+    }
+    catch [IO.IOException] { $writerWhileReadLeaseRejected = $true }
+    finally {
+        if ($null -ne $unexpectedHandle) {
+            $unexpectedHandle.Dispose()
+            $unexpectedHandle = $null
+        }
+    }
+    if (-not $writerWhileReadLeaseRejected) {
+        throw 'Retained capability read lease admitted a write-capable open.'
+    }
+}
+finally {
+    if ($null -ne $secondReader) { $secondReader.Dispose() }
+    if ($null -ne $readLease) { $readLease.Dispose() }
+    if ($null -ne $creationWriter) { $creationWriter.Dispose() }
+    if ($null -ne $unexpectedHandle) { $unexpectedHandle.Dispose() }
+
+    $resolvedShareContractRoot = [IO.Path]::GetFullPath($shareContractRoot)
+    $systemTemporary =
+        [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+    if (-not $resolvedShareContractRoot.StartsWith(
+            $systemTemporary, [StringComparison]::OrdinalIgnoreCase) -or
+        [IO.Path]::GetFileName($resolvedShareContractRoot) -cnotlike
+            'viiper-capability-share-contract-*') {
+        throw "Refusing to remove unverified share-contract root '$resolvedShareContractRoot'."
+    }
+    Remove-Item -LiteralPath $resolvedShareContractRoot -Recurse -Force
 }
 
 $generatorSource = Get-Content -LiteralPath $generatorPath -Raw

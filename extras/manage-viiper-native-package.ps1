@@ -56,6 +56,7 @@ if (-not ('ViiperLocalTestTrustLeaseNative' -as [type])) {
 using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Text;
 using Microsoft.Win32.SafeHandles;
 
 public static class ViiperLocalTestTrustLeaseNative
@@ -87,12 +88,35 @@ public static class ViiperLocalTestTrustLeaseNative
         SafeFileHandle handle,
         out ByHandleFileInformation information);
 
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetFinalPathNameByHandle(
+        SafeFileHandle handle,
+        StringBuilder path,
+        uint pathLength,
+        uint flags);
+
     public static uint LinkCount(SafeFileHandle handle)
     {
         ByHandleFileInformation information;
         if (!GetFileInformationByHandle(handle, out information))
             throw new Win32Exception(Marshal.GetLastWin32Error());
         return information.NumberOfLinks;
+    }
+
+    public static string FinalPath(SafeFileHandle handle)
+    {
+        int capacity = 512;
+        while (true)
+        {
+            StringBuilder path = new StringBuilder(capacity);
+            uint length = GetFinalPathNameByHandle(
+                handle, path, (uint)path.Capacity, 0);
+            if (length == 0)
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            if (length < path.Capacity)
+                return path.ToString();
+            capacity = checked((int)length + 1);
+        }
     }
 }
 '@
@@ -576,6 +600,90 @@ function Open-VerifiedStagedBroker {
     }
 }
 
+function Open-VerifiedProtectedCapabilityReadLease {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$StagePath,
+        [Parameter(Mandatory = $true)][long]$ExpectedLength,
+        [Parameter(Mandatory = $true)][string]$ExpectedSHA256
+    )
+
+    $expectedPath = [IO.Path]::GetFullPath($Path)
+    $expectedStage = [IO.Path]::GetFullPath($StagePath).TrimEnd('\')
+    if (-not [string]::Equals(
+            [IO.Path]::GetFullPath((Split-Path -Parent $expectedPath)),
+            $expectedStage, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Protected capability path escaped its exact staging directory.'
+    }
+
+    $readLease = $null
+    try {
+        # The creation handle is intentionally gone before this open. This
+        # retained handle is read-only, permits only reciprocal readers, and
+        # therefore denies subsequent write/delete/rename opens through the
+        # joined child lifetime without lending the child a write capability.
+        $readLease = [IO.FileStream]::new(
+            $expectedPath, [IO.FileMode]::Open,
+            [IO.FileAccess]::Read, [IO.FileShare]::Read)
+
+        $handlePath = [ViiperLocalTestTrustLeaseNative]::FinalPath(
+            $readLease.SafeFileHandle)
+        if ($handlePath.StartsWith(
+                '\\?\UNC\', [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Protected capability unexpectedly resolved to a UNC path.'
+        }
+        if ($handlePath.StartsWith('\\?\', [StringComparison]::Ordinal)) {
+            $handlePath = $handlePath.Substring(4)
+        }
+
+        Assert-ProtectedStage -StagePath $expectedStage
+        Assert-ExactProtectedTrustObjectSecurity `
+            -Path $expectedPath -Directory $false
+        $item = Get-Item -LiteralPath $expectedPath -Force -ErrorAction Stop
+        $itemPath = [IO.Path]::GetFullPath($item.FullName)
+        if ($item.PSIsContainer -or
+            ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+            -not [string]::Equals(
+                $itemPath, $expectedPath,
+                [StringComparison]::OrdinalIgnoreCase) -or
+            -not [string]::Equals(
+                [IO.Path]::GetFullPath($handlePath), $expectedPath,
+                [StringComparison]::OrdinalIgnoreCase) -or
+            -not [string]::Equals(
+                [IO.Path]::GetFullPath($item.DirectoryName), $expectedStage,
+                [StringComparison]::OrdinalIgnoreCase) -or
+            $item.Length -ne $ExpectedLength -or
+            $readLease.Length -ne $ExpectedLength -or
+            [ViiperLocalTestTrustLeaseNative]::LinkCount(
+                $readLease.SafeFileHandle) -ne 1 -or
+            -not $readLease.CanRead -or $readLease.CanWrite) {
+            throw 'The protected capability read lease is not the exact expected file.'
+        }
+
+        $algorithm = [Security.Cryptography.SHA256]::Create()
+        try {
+            $digest = ([BitConverter]::ToString(
+                $algorithm.ComputeHash($readLease))).Replace(
+                    '-', '').ToLowerInvariant()
+        }
+        finally {
+            $algorithm.Dispose()
+        }
+        if ($digest -cne $ExpectedSHA256.ToLowerInvariant()) {
+            throw 'The protected capability read lease failed exact hash verification.'
+        }
+        $readLease.Position = 0
+        if ($readLease.Position -ne 0) {
+            throw 'The protected capability read lease could not be rewound.'
+        }
+        return $readLease
+    }
+    catch {
+        if ($null -ne $readLease) { $readLease.Dispose() }
+        throw
+    }
+}
+
 function New-ProtectedLocalTestTrustCapability {
     param(
         [Parameter(Mandatory = $true)][string]$StagePath,
@@ -626,33 +734,44 @@ function New-ProtectedLocalTestTrustCapability {
     $security.SetSecurityDescriptorSddlForm(
         'O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)',
         [Security.AccessControl.AccessControlSections]::All)
-    $stream = $null
+    $creationStream = $null
+    $readLease = $null
     try {
         if ($PSVersionTable.PSEdition -ceq 'Desktop') {
-            $stream = [IO.FileStream]::new(
+            $creationStream = [IO.FileStream]::new(
                 $path, [IO.FileMode]::CreateNew,
                 [Security.AccessControl.FileSystemRights]::FullControl,
                 [IO.FileShare]::Read, 4096,
                 [IO.FileOptions]::WriteThrough, $security)
         } else {
-            $stream = [IO.FileSystemAclExtensions]::Create(
+            $creationStream = [IO.FileSystemAclExtensions]::Create(
                 [IO.FileInfo]::new($path), [IO.FileMode]::CreateNew,
                 [Security.AccessControl.FileSystemRights]::FullControl,
                 [IO.FileShare]::Read, 4096,
                 [IO.FileOptions]::WriteThrough, $security)
         }
-        $stream.Write($bytes, 0, $bytes.Length)
-        $stream.Flush($true)
+        $creationStream.Write($bytes, 0, $bytes.Length)
+        $creationStream.Flush($true)
         Assert-ExactProtectedTrustObjectSecurity -Path $path -Directory $false
-        if ($stream.Length -ne $bytes.Length -or
+        if ($creationStream.Length -ne $bytes.Length -or
             [ViiperLocalTestTrustLeaseNative]::LinkCount(
-                $stream.SafeFileHandle) -ne 1) {
+                $creationStream.SafeFileHandle) -ne 1) {
             throw 'The protected local-test trust capability changed after creation.'
         }
-        return [pscustomobject]@{ Path = $path; SHA256 = $hash; Stream = $stream }
+        $creationStream.Dispose()
+        $creationStream = $null
+        $readLease = Open-VerifiedProtectedCapabilityReadLease `
+            -Path $path -StagePath $StagePath -ExpectedLength $bytes.Length `
+            -ExpectedSHA256 $hash
+        return [pscustomobject]@{
+            Path = $path
+            SHA256 = $hash
+            Stream = $readLease
+        }
     }
     catch {
-        if ($null -ne $stream) { $stream.Dispose() }
+        if ($null -ne $readLease) { $readLease.Dispose() }
+        if ($null -ne $creationStream) { $creationStream.Dispose() }
         throw
     }
 }
@@ -1021,33 +1140,44 @@ function New-ProtectedFailedInstallRecoveryCapability {
     $security.SetSecurityDescriptorSddlForm(
         'O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)',
         [Security.AccessControl.AccessControlSections]::All)
-    $stream = $null
+    $creationStream = $null
+    $readLease = $null
     try {
         if ($PSVersionTable.PSEdition -ceq 'Desktop') {
-            $stream = [IO.FileStream]::new(
+            $creationStream = [IO.FileStream]::new(
                 $path, [IO.FileMode]::CreateNew,
                 [Security.AccessControl.FileSystemRights]::FullControl,
                 [IO.FileShare]::Read, 4096,
                 [IO.FileOptions]::WriteThrough, $security)
         } else {
-            $stream = [IO.FileSystemAclExtensions]::Create(
+            $creationStream = [IO.FileSystemAclExtensions]::Create(
                 [IO.FileInfo]::new($path), [IO.FileMode]::CreateNew,
                 [Security.AccessControl.FileSystemRights]::FullControl,
                 [IO.FileShare]::Read, 4096,
                 [IO.FileOptions]::WriteThrough, $security)
         }
-        $stream.Write($bytes, 0, $bytes.Length)
-        $stream.Flush($true)
+        $creationStream.Write($bytes, 0, $bytes.Length)
+        $creationStream.Flush($true)
         Assert-ExactProtectedTrustObjectSecurity -Path $path -Directory $false
-        if ($stream.Length -ne $bytes.Length -or
+        if ($creationStream.Length -ne $bytes.Length -or
             [ViiperLocalTestTrustLeaseNative]::LinkCount(
-                $stream.SafeFileHandle) -ne 1) {
+                $creationStream.SafeFileHandle) -ne 1) {
             throw 'The protected failed-install recovery capability changed after creation.'
         }
-        return [pscustomobject]@{ Path = $path; SHA256 = $hash; Stream = $stream }
+        $creationStream.Dispose()
+        $creationStream = $null
+        $readLease = Open-VerifiedProtectedCapabilityReadLease `
+            -Path $path -StagePath $StagePath -ExpectedLength $bytes.Length `
+            -ExpectedSHA256 $hash
+        return [pscustomobject]@{
+            Path = $path
+            SHA256 = $hash
+            Stream = $readLease
+        }
     }
     catch {
-        if ($null -ne $stream) { $stream.Dispose() }
+        if ($null -ne $readLease) { $readLease.Dispose() }
+        if ($null -ne $creationStream) { $creationStream.Dispose() }
         throw
     }
 }

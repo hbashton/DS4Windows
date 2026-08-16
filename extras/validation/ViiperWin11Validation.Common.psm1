@@ -253,6 +253,27 @@ function Get-ViiperFileProvenance {
     }
 }
 
+function Test-ViiperNonemptyOptionalRegistryProperty {
+    param(
+        [Parameter(Mandatory = $true)]$RegistryObject,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    # Get-ItemProperty returns an object even when an optional named value is
+    # absent. Inspect the property bag instead of dereferencing the missing
+    # property under StrictMode. Empty/null REG_MULTI_SZ elements do not prove
+    # a queued rename; any non-empty element does.
+    $property = $RegistryObject.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $false }
+    foreach ($value in @($property.Value)) {
+        if ($null -ne $value -and
+            -not [string]::IsNullOrEmpty([string]$value)) {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Get-ViiperMachineEvidenceSnapshot {
     $errors = [Collections.Generic.List[object]]::new()
     function Capture-Section {
@@ -350,20 +371,25 @@ function Get-ViiperMachineEvidenceSnapshot {
         else { [ordered]@{ present = $false; enabled = $null; locked = $null } }
     }
     $pendingReboot = Capture-Section 'pendingReboot' {
-        $pendingRename = (Get-ItemProperty `
+        $sessionManager = Get-ItemProperty `
             -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' `
-            -Name PendingFileRenameOperations -ErrorAction SilentlyContinue).PendingFileRenameOperations
-        $activeName = (Get-ItemProperty `
+            -ErrorAction Stop
+        $activeComputerName = Get-ItemProperty `
             -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName' `
-            -Name ComputerName -ErrorAction SilentlyContinue).ComputerName
-        $pendingName = (Get-ItemProperty `
+            -Name ComputerName -ErrorAction Stop
+        $pendingComputerName = Get-ItemProperty `
             -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName' `
-            -Name ComputerName -ErrorAction SilentlyContinue).ComputerName
+            -Name ComputerName -ErrorAction Stop
         [ordered]@{
             componentBasedServicing = Test-Path -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending'
             windowsUpdate = Test-Path -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
-            pendingFileRenameOperations = @($pendingRename).Count -gt 0
-            pendingComputerRename = -not [string]::Equals([string]$activeName, [string]$pendingName,
+            pendingFileRenameOperations =
+                Test-ViiperNonemptyOptionalRegistryProperty `
+                    -RegistryObject $sessionManager `
+                    -Name 'PendingFileRenameOperations'
+            pendingComputerRename = -not [string]::Equals(
+                [string]$activeComputerName.ComputerName,
+                [string]$pendingComputerName.ComputerName,
                 [StringComparison]::OrdinalIgnoreCase)
         }
     }
@@ -492,6 +518,80 @@ function Get-ViiperMachineEvidenceSnapshot {
             driverStoreEnumeration = $driverStoreEnumeration
         }
         collectionErrors = @($errors)
+    }
+}
+
+function Assert-ViiperPreflightPendingReboot {
+    param(
+        [ValidateNotNull()]
+        [Parameter(Mandatory = $true)]$Snapshot,
+        [Parameter(Mandatory = $true)][string]$SnapshotPath
+    )
+
+    function Get-RequiredPendingRebootProperty {
+        param(
+            [Parameter(Mandatory = $true)]$Object,
+            [Parameter(Mandatory = $true)][string]$Name
+        )
+
+        if ($Object -is [Collections.IDictionary]) {
+            if (-not $Object.Contains($Name)) {
+                throw "Pending-reboot evidence is missing '$Name'."
+            }
+            $value = $Object[$Name]
+        }
+        else {
+            $property = $Object.PSObject.Properties[$Name]
+            if ($null -eq $property) {
+                throw "Pending-reboot evidence is missing '$Name'."
+            }
+            $value = $property.Value
+        }
+        return [pscustomobject]@{ Value = $value }
+    }
+
+    try {
+        $collectionErrors = (Get-RequiredPendingRebootProperty `
+            -Object $Snapshot -Name 'collectionErrors').Value
+        if ($null -eq $collectionErrors) {
+            throw 'Pending-reboot collection error inventory is null.'
+        }
+        foreach ($collectionError in @($collectionErrors)) {
+            if ($null -eq $collectionError) {
+                throw 'Pending-reboot collection error inventory is malformed.'
+            }
+            $section = (Get-RequiredPendingRebootProperty `
+                -Object $collectionError -Name 'section').Value
+            if ([string]$section -ceq 'pendingReboot') {
+                throw 'Pending-reboot collection reported an error.'
+            }
+        }
+
+        $pendingReboot = (Get-RequiredPendingRebootProperty `
+            -Object $Snapshot -Name 'pendingReboot').Value
+        if ($null -eq $pendingReboot) {
+            throw 'Pending-reboot evidence is null.'
+        }
+
+        $hasPendingReboot = $false
+        foreach ($name in @(
+                'componentBasedServicing', 'windowsUpdate',
+                'pendingFileRenameOperations', 'pendingComputerRename')) {
+            $flag = (Get-RequiredPendingRebootProperty `
+                -Object $pendingReboot -Name $name).Value
+            if ($flag -isnot [bool]) {
+                throw "Pending-reboot evidence '$name' is not Boolean."
+            }
+            if ($flag) { $hasPendingReboot = $true }
+        }
+    }
+    catch {
+        throw "Preflight could not establish the pending-reboot baseline. Snapshot: '$SnapshotPath'. $($_.Exception.Message)"
+    }
+
+    if ($hasPendingReboot) {
+        Write-Warning 'MANUAL REBOOT PROMPT: Windows reports a pending reboot. Restart, rerun Preflight, and preserve the same inputs.'
+        throw "Preflight refuses a pending-reboot baseline. Snapshot: '$SnapshotPath'."
     }
 }
 
@@ -741,5 +841,5 @@ Export-ModuleMember -Function @(
     'Write-ViiperJsonAtomic', 'Test-ViiperGitIdentity', 'Test-ViiperLocalTestPackage',
     'Test-ViiperFailedInstallRecoveryEvidence',
     'Get-ViiperBootIdentity', 'Get-ViiperMachineEvidenceSnapshot',
-    'Get-ViiperValidationPhaseModel'
+    'Assert-ViiperPreflightPendingReboot', 'Get-ViiperValidationPhaseModel'
 )

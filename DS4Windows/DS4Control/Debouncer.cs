@@ -1,94 +1,206 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using DS4Windows;
 
 namespace DS4WinWPF.DS4Control;
 
-public class Debouncer(TimeSpan duration)
+/// <summary>
+/// Per-controller button debouncing with setup-time typed field selection.
+/// The report path reuses one scratch state and performs no reflection,
+/// dictionary enumeration, boxing, or managed allocation.
+/// </summary>
+public sealed class Debouncer
 {
-    private readonly Dictionary<string, DebouncerInstance> _debouncers = new();
+    private readonly List<Entry> entries = new(24);
+    private readonly DS4State scratchState = new();
+    private TimeSpan duration;
+
+    public Debouncer(TimeSpan duration)
+    {
+        this.duration = duration;
+    }
 
     public void AddDebouncer(string name)
     {
-        _debouncers[name] = new DebouncerInstance(duration);
+        Field field = ParseField(name);
+        for (int index = 0; index < entries.Count; index++)
+        {
+            if (entries[index].Field == field)
+            {
+                entries[index] = new Entry(field,
+                    new DebouncerInstance(duration));
+                return;
+            }
+        }
+        entries.Add(new Entry(field, new DebouncerInstance(duration)));
     }
 
-    public DS4State ProcessInput(DS4State cState)
+    public DS4State ProcessInput(DS4State currentState)
     {
-        if (duration.TotalMilliseconds == 0) return cState;
-
-        DS4State modifiedState = new();
-        cState.CopyTo(modifiedState);
-        foreach (var key in _debouncers.Keys)
+        ArgumentNullException.ThrowIfNull(currentState);
+        if (duration == TimeSpan.Zero)
         {
-            var field = typeof(DS4State).GetField(key)!;
-            var current = (bool)field.GetValue(modifiedState)!;
-            var debounced = _debouncers[key].ProcessInput(current, cState.ReportTimeStamp);
-            field.SetValue(modifiedState, debounced);
+            return currentState;
         }
 
-        return modifiedState;
+        currentState.CopyTo(scratchState);
+        DateTime timestamp = currentState.ReportTimeStamp;
+        for (int index = 0; index < entries.Count; index++)
+        {
+            Entry entry = entries[index];
+            bool reading = Read(scratchState, entry.Field);
+            Write(scratchState, entry.Field,
+                entry.Instance.ProcessInput(reading, timestamp));
+        }
+        return scratchState;
     }
 
     public void SetDuration(TimeSpan newDuration)
     {
-        foreach (var debouncer in _debouncers.Values)
+        duration = newDuration;
+        for (int index = 0; index < entries.Count; index++)
         {
-            debouncer.Duration = newDuration;
+            entries[index].Instance.Duration = newDuration;
         }
     }
 
-    private class DebouncerInstance(TimeSpan duration)
+    private static Field ParseField(string name) => name switch
     {
-        private bool _previousState;
-        private bool _currentlyDebouncing;
-        private DateTime _debounceStartTime;
+        nameof(DS4State.Cross) => Field.Cross,
+        nameof(DS4State.Triangle) => Field.Triangle,
+        nameof(DS4State.Circle) => Field.Circle,
+        nameof(DS4State.Square) => Field.Square,
+        nameof(DS4State.R3) => Field.R3,
+        nameof(DS4State.L3) => Field.L3,
+        nameof(DS4State.Options) => Field.Options,
+        nameof(DS4State.Share) => Field.Share,
+        nameof(DS4State.R2Btn) => Field.R2Btn,
+        nameof(DS4State.L2Btn) => Field.L2Btn,
+        nameof(DS4State.R1) => Field.R1,
+        nameof(DS4State.L1) => Field.L1,
+        nameof(DS4State.PS) => Field.PS,
+        nameof(DS4State.TouchButton) => Field.TouchButton,
+        nameof(DS4State.Capture) => Field.Capture,
+        nameof(DS4State.SideL) => Field.SideL,
+        nameof(DS4State.SideR) => Field.SideR,
+        nameof(DS4State.DpadUp) => Field.DpadUp,
+        nameof(DS4State.DpadDown) => Field.DpadDown,
+        nameof(DS4State.DpadLeft) => Field.DpadLeft,
+        nameof(DS4State.DpadRight) => Field.DpadRight,
+        _ => throw new ArgumentOutOfRangeException(nameof(name), name,
+            "Only typed DS4 button fields can be debounced."),
+    };
 
-        public TimeSpan Duration { get; set; } = duration;
+    private static bool Read(DS4State state, Field field) => field switch
+    {
+        Field.Cross => state.Cross,
+        Field.Triangle => state.Triangle,
+        Field.Circle => state.Circle,
+        Field.Square => state.Square,
+        Field.R3 => state.R3,
+        Field.L3 => state.L3,
+        Field.Options => state.Options,
+        Field.Share => state.Share,
+        Field.R2Btn => state.R2Btn,
+        Field.L2Btn => state.L2Btn,
+        Field.R1 => state.R1,
+        Field.L1 => state.L1,
+        Field.PS => state.PS,
+        Field.TouchButton => state.TouchButton,
+        Field.Capture => state.Capture,
+        Field.SideL => state.SideL,
+        Field.SideR => state.SideR,
+        Field.DpadUp => state.DpadUp,
+        Field.DpadDown => state.DpadDown,
+        Field.DpadLeft => state.DpadLeft,
+        Field.DpadRight => state.DpadRight,
+        _ => false,
+    };
 
-        /// <summary>
-        ///     Processes the input and applies debouncing if required.
-        /// </summary>
-        /// <param name="input"><c>bool</c> indicating the state of the button</param>
-        /// <param name="timestamp">Current timestamp in <c>DateTime.Ticks</c></param>
-        /// <returns>Processed input with debouncing applied</returns>
-        public bool ProcessInput(bool input, DateTime timestamp)
+    private static void Write(DS4State state, Field field, bool value)
+    {
+        switch (field)
         {
-            if (_currentlyDebouncing)
+            case Field.Cross: state.Cross = value; break;
+            case Field.Triangle: state.Triangle = value; break;
+            case Field.Circle: state.Circle = value; break;
+            case Field.Square: state.Square = value; break;
+            case Field.R3: state.R3 = value; break;
+            case Field.L3: state.L3 = value; break;
+            case Field.Options: state.Options = value; break;
+            case Field.Share: state.Share = value; break;
+            case Field.R2Btn: state.R2Btn = value; break;
+            case Field.L2Btn: state.L2Btn = value; break;
+            case Field.R1: state.R1 = value; break;
+            case Field.L1: state.L1 = value; break;
+            case Field.PS: state.PS = value; break;
+            case Field.TouchButton: state.TouchButton = value; break;
+            case Field.Capture: state.Capture = value; break;
+            case Field.SideL: state.SideL = value; break;
+            case Field.SideR: state.SideR = value; break;
+            case Field.DpadUp: state.DpadUp = value; break;
+            case Field.DpadDown: state.DpadDown = value; break;
+            case Field.DpadLeft: state.DpadLeft = value; break;
+            case Field.DpadRight: state.DpadRight = value; break;
+        }
+    }
+
+    private enum Field : byte
+    {
+        Cross, Triangle, Circle, Square, R3, L3, Options, Share,
+        R2Btn, L2Btn, R1, L1, PS, TouchButton, Capture, SideL, SideR,
+        DpadUp, DpadDown, DpadLeft, DpadRight,
+    }
+
+    private readonly struct Entry
+    {
+        internal Entry(Field field, DebouncerInstance instance)
+        {
+            Field = field;
+            Instance = instance;
+        }
+
+        internal Field Field { get; }
+        internal DebouncerInstance Instance { get; }
+    }
+
+    private sealed class DebouncerInstance
+    {
+        private bool previousState;
+        private bool currentlyDebouncing;
+        private DateTime debounceStartTime;
+
+        internal DebouncerInstance(TimeSpan duration)
+        {
+            Duration = duration;
+        }
+
+        internal TimeSpan Duration { get; set; }
+
+        internal bool ProcessInput(bool input, DateTime timestamp)
+        {
+            if (currentlyDebouncing)
             {
                 return Debounce(input, timestamp);
             }
-
-            if (_previousState != input)
+            if (previousState != input)
             {
-                StartDebouncing(input, timestamp);
-                return true;
+                currentlyDebouncing = true;
+                debounceStartTime = timestamp;
+                return Debounce(input, timestamp);
             }
 
-            _previousState = input;
+            previousState = input;
             return input;
-        }
-
-        private void StartDebouncing(bool input, DateTime timestamp)
-        {
-            _currentlyDebouncing = true;
-            _debounceStartTime = timestamp;
-            Debounce(input, timestamp);
-        }
-
-        private void StopDebouncing()
-        {
-            _currentlyDebouncing = false;
         }
 
         private bool Debounce(bool reading, DateTime timestamp)
         {
-
-            // if the duration hasn't been reached yet, we return true as if the button was pressed all this time
-            var span = timestamp - _debounceStartTime;
-            if (span.TotalMilliseconds < Duration.TotalMilliseconds) return true;
-
-            StopDebouncing();
+            if (timestamp - debounceStartTime < Duration)
+            {
+                return true;
+            }
+            currentlyDebouncing = false;
             return reading;
         }
     }

@@ -900,15 +900,15 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void ViiperControllerStateRatesUseAdaptiveOneKilohertzCeiling()
+        public void DualSenseV5UsesViipersAuthoritativePresentationClock()
         {
             const int defaultRate =
                 ViiperStateWriteRateSettings.DefaultControllerRateHz;
             Assert.AreEqual(1000, ViiperStateWriteRateSettings.GetDefaultRateHz(
                 ViiperVirtualDeviceType.DualShock4));
-            Assert.AreEqual(1000, ViiperStateWriteRateSettings.GetDefaultRateHz(
+            Assert.AreEqual(0, ViiperStateWriteRateSettings.GetDefaultRateHz(
                 ViiperVirtualDeviceType.DualSense));
-            Assert.AreEqual(1000, ViiperStateWriteRateSettings.GetDefaultRateHz(
+            Assert.AreEqual(0, ViiperStateWriteRateSettings.GetDefaultRateHz(
                 ViiperVirtualDeviceType.DualSenseEdge));
             Assert.AreEqual(1000, ViiperStateWriteRateSettings.GetDefaultRateHz(
                 ViiperVirtualDeviceType.Xbox360));
@@ -935,9 +935,15 @@ namespace DS4WindowsTests
             Assert.AreEqual(250,
                 ViiperStateWriteRateSettings.ResolveConfiguredRateHz(
                     ViiperVirtualDeviceType.DualSenseEdge, "250"));
-            Assert.AreEqual(1000,
+            Assert.AreEqual(0,
                 ViiperStateWriteRateSettings.ResolveConfiguredRateHz(
                     ViiperVirtualDeviceType.DualSense, "immediate"));
+            Assert.AreEqual(0,
+                ViiperStateWriteRateSettings.ResolveConfiguredRateHz(
+                    ViiperVirtualDeviceType.DualSense, "off"));
+            Assert.AreEqual(0,
+                ViiperStateWriteRateSettings.ResolveConfiguredRateHz(
+                    ViiperVirtualDeviceType.DualSenseEdge, "0"));
             Assert.AreEqual(100,
                 ViiperStateWriteRateSettings.ResolveConfiguredRateHz(
                     ViiperVirtualDeviceType.DualShock4, "100"));
@@ -1027,6 +1033,26 @@ namespace DS4WindowsTests
                     now: lateWrite, previousWriteStart: lateWrite,
                     minimumIntervalTicks: interval),
                 "A late write must rebase the next window instead of creating a catch-up burst.");
+        }
+
+        [TestMethod]
+        public void AbsoluteRateCursorPreservesPhaseAndReanchorsOneIntervalLate()
+        {
+            const long interval = 1_000;
+            const long initialNow = 10_000;
+            long deadline = ViiperStateWriteRateSettings.
+                AdvanceAbsoluteDeadline(0, initialNow, interval);
+            Assert.AreEqual(11_000, deadline);
+
+            deadline = ViiperStateWriteRateSettings.
+                AdvanceAbsoluteDeadline(deadline, 11_125, interval);
+            Assert.AreEqual(12_000, deadline,
+                "Sub-interval jitter must preserve the planned phase.");
+
+            deadline = ViiperStateWriteRateSettings.
+                AdvanceAbsoluteDeadline(deadline, 13_000, interval);
+            Assert.AreEqual(14_000, deadline,
+                "A complete expired interval must re-anchor without catch-up.");
         }
 
         private sealed class CleanupCounters

@@ -19,6 +19,7 @@ namespace DS4Windows
         private long preProcessorPeak;
         private long postProcessorPeak;
         private long compressedQueueHighWaterMark;
+        private long maximumTransportQueueAgeTicks;
 
         internal long LastSubmissionGapTicks =>
             Interlocked.Read(ref lastSubmissionGapTicks);
@@ -47,6 +48,9 @@ namespace DS4Windows
         internal long CompressedQueueHighWaterMark =>
             Interlocked.Read(ref compressedQueueHighWaterMark);
 
+        internal long MaximumTransportQueueAgeTicks =>
+            Interlocked.Read(ref maximumTransportQueueAgeTicks);
+
         internal void Reset()
         {
             Interlocked.Exchange(ref lastSuccessfulSubmissionTimestamp, 0);
@@ -59,6 +63,7 @@ namespace DS4Windows
             Interlocked.Exchange(ref preProcessorPeak, 0);
             Interlocked.Exchange(ref postProcessorPeak, 0);
             Interlocked.Exchange(ref compressedQueueHighWaterMark, 0);
+            Interlocked.Exchange(ref maximumTransportQueueAgeTicks, 0);
         }
 
         /// <summary>
@@ -139,6 +144,11 @@ namespace DS4Windows
 
                 previous = observed;
             }
+        }
+
+        internal void RecordTransportQueueAge(long ageTicks)
+        {
+            RecordMaximum(ref maximumTransportQueueAgeTicks, ageTicks);
         }
 
         internal static bool IsFrameAllZero(short[] samples, int sampleCount)

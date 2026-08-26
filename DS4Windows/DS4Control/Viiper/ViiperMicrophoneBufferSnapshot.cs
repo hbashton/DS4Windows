@@ -86,6 +86,25 @@ namespace DS4Windows
             return snapshot;
         }
 
+        internal static ViiperMicrophoneBufferSnapshot ParseNarrow(
+            JsonElement status)
+        {
+            var snapshot = new ViiperMicrophoneBufferSnapshot();
+            if (status.ValueKind != JsonValueKind.Object)
+            {
+                return snapshot;
+            }
+
+            snapshot.QueuedBytes = ReadInt64(status, "queuedBytes");
+            snapshot.TargetBytes = ReadInt64(status, "targetBytes");
+            snapshot.Primed = ReadBoolean(status, "primed");
+            snapshot.Underruns = ReadUInt64(status, "underruns");
+            snapshot.DroppedBytes = ReadUInt64(status, "droppedBytes");
+            snapshot.ZeroPackets = ReadUInt64(status, "zeroPackets");
+            snapshot.OverflowEvents = ReadUInt64(status, "overflowEvents");
+            return snapshot;
+        }
+
         internal string ToLogFields()
         {
             return

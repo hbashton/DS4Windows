@@ -130,6 +130,13 @@ namespace DS4Windows
         };
 
         private DS4State[] oscState = new DS4State[MAX_DS4_CONTROLLER_COUNT];
+        private readonly DS4State[] oscMonitorPreviousState =
+            new DS4State[MAX_DS4_CONTROLLER_COUNT];
+        private readonly DS4State[] oscMonitorPendingState =
+            new DS4State[MAX_DS4_CONTROLLER_COUNT];
+        private readonly OscMonitoringWorker oscMonitoringWorker;
+        private readonly ReportDiagnosticsWorker reportDiagnosticsWorker;
+        private int realtimeWorkersDisposed;
         public HandleOscPacket oscCallback;
 
         public UDPListener oscListener;
@@ -227,6 +234,8 @@ namespace DS4Windows
                 PreviousState[i] = new DS4State();
                 ExposedState[i] = new DS4StateExposed(CurrentState[i]);
                 oscState[i] = new DS4State();
+                oscMonitorPreviousState[i] = new DS4State();
+                oscMonitorPendingState[i] = new DS4State();
 
                 int tempDev = i;
                 Global.L2OutputSettings[i].TwoStageModeChanged += (sender, e) =>
@@ -254,6 +263,14 @@ namespace DS4Windows
             Global.UDPServerSmoothingBetaChanged += ChangeUdpSmoothingAttrs;
 
             CreateOSCCallback();
+            oscMonitoringWorker = new OscMonitoringWorker(
+                MAX_DS4_CONTROLLER_COUNT, OSCMonitoringPostPublication,
+                ex => LogDebug("OSC monitoring output failed: " +
+                    ex.Message));
+            reportDiagnosticsWorker = new ReportDiagnosticsWorker(
+                MAX_DS4_CONTROLLER_COUNT, ProcessReportDiagnostics,
+                ex => LogDebug("Deferred report diagnostics failed: " +
+                    ex.Message));
 
             SystemEvents.DisplaySettingsChanged += SystemEvents_DisplaySettingsChanged;
             //oscListener = new UDPListener(Global.getOSCServerPortNum(), callback: oscCallback);
@@ -765,6 +782,7 @@ namespace DS4Windows
 
         private void ShutDownCore()
         {
+            DisposeRealtimeWorkers();
             ReleaseHidHideManagedDevices();
             outputslotMan.ShutDown();
             OutputSlotPersist.WriteConfig(outputslotMan);
@@ -774,6 +792,16 @@ namespace DS4Windows
 
             eventDispatchThread.Join();
             eventDispatchThread = null;
+        }
+
+        private void DisposeRealtimeWorkers()
+        {
+            if (Interlocked.Exchange(ref realtimeWorkersDisposed, 1) != 0)
+            {
+                return;
+            }
+            oscMonitoringWorker.Dispose();
+            reportDiagnosticsWorker.Dispose();
         }
 
         private void DS4Devices_RequestElevation(RequestElevationArgs args)
@@ -1514,10 +1542,12 @@ namespace DS4Windows
             {
                 AppLogger.LogToGui("OSC SENDER STARTED AT IP: " + Global.getOSCSenderAddress() + " PORT: " + Global.getOSCSenderPortNum(), false);
                 oscSender = new UDPSender(Global.getOSCSenderAddress(), Global.getOSCSenderPortNum());
+                oscMonitoringWorker.Resume();
             }
             else
             {
                 AppLogger.LogToGui("OSC SENDER STOPPED", false);
+                oscMonitoringWorker.Pause();
                 if (oscSender == null) { return; }
                 oscSender.Close();
                 oscSender = null;
@@ -1827,6 +1857,7 @@ namespace DS4Windows
 
         private bool StartCore(bool showlog)
         {
+            reportDiagnosticsWorker.Resume();
             StartupDiag($"ControlService.Start enter showlog={showlog} running={running} inServiceTask={inServiceTask} admin={Global.IsAdministrator()}");
             inServiceTask = true;
             {
@@ -2110,6 +2141,7 @@ namespace DS4Windows
                 }
 
                 running = false;
+                reportDiagnosticsWorker.Pause();
                 runHotPlug = false;
                 inServiceTask = true;
                 StopGameBarStateTimer();
@@ -4104,22 +4136,50 @@ namespace DS4Windows
         {
             if (ind != -1)
             {
+                OutContType normalizedOutput = activeOutDevType[ind].Normalize();
+                bool latencyCriticalReport =
+                    device is InputDevices.DualSenseDevice &&
+                    (normalizedOutput == OutContType.ViiperDualSense ||
+                        normalizedOutput == OutContType.ViiperDualSenseEdge);
+                ReportDiagnosticsSnapshot deferredDiagnostics = new()
+                {
+                    Controller = ind,
+                    Device = device,
+                    ActiveOutput = normalizedOutput,
+                    Latency = device.Latency,
+                };
                 int startupReportCount = 0;
                 bool startupReportDiag = false;
                 if (Global.VerboseStartupLogging)
                 {
                     startupReportCount = ++startupReportDiagCounts[ind];
                     startupReportDiag = startupReportCount <= 5 || startupReportCount == 50;
-                    if (startupReportDiag)
+                    if (startupReportDiag && !latencyCriticalReport)
                     {
                         StartupDiag($"On_Report enter index={ind} count={startupReportCount} synced={device.isSynced()} latency={device.Latency} useDInputOnly={useDInputOnly[ind]} activeOut={activeOutDevType[ind]} outDev={outputDevices[ind]?.GetDeviceType() ?? "null"}");
+                    }
+                    else if (startupReportDiag)
+                    {
+                        deferredDiagnostics.StartupDiagnostic = true;
+                        deferredDiagnostics.StartupReportCount =
+                            startupReportCount;
+                        deferredDiagnostics.Synced = device.isSynced();
+                        deferredDiagnostics.UseDInputOnly =
+                            useDInputOnly[ind];
                     }
                 }
 
                 string devError = tempStrings[ind] = device.error;
                 if (!string.IsNullOrEmpty(devError))
                 {
-                    LogDebug(devError);
+                    if (latencyCriticalReport)
+                    {
+                        deferredDiagnostics.DeviceError = devError;
+                    }
+                    else
+                    {
+                        LogDebug(devError);
+                    }
                 }
 
                 if (inWarnMonitor[ind])
@@ -4128,12 +4188,32 @@ namespace DS4Windows
                     if (!lag[ind] && device.Latency >= flashWhenLateAt)
                     {
                         lag[ind] = true;
-                        LagFlashWarning(device, ind, true);
+                        if (latencyCriticalReport)
+                        {
+                            ApplyLagFlashState(device, ind, true);
+                            deferredDiagnostics.LagChanged = true;
+                            deferredDiagnostics.LagOn = true;
+                            deferredDiagnostics.Latency = device.Latency;
+                        }
+                        else
+                        {
+                            LagFlashWarning(device, ind, true);
+                        }
                     }
                     else if (lag[ind] && device.Latency < flashWhenLateAt)
                     {
                         lag[ind] = false;
-                        LagFlashWarning(device, ind, false);
+                        if (latencyCriticalReport)
+                        {
+                            ApplyLagFlashState(device, ind, false);
+                            deferredDiagnostics.LagChanged = true;
+                            deferredDiagnostics.LagOn = false;
+                            deferredDiagnostics.Latency = device.Latency;
+                        }
+                        else
+                        {
+                            LagFlashWarning(device, ind, false);
+                        }
                     }
                 }
                 else
@@ -4167,7 +4247,13 @@ namespace DS4Windows
                 if (device.firstReport && device.isSynced())
                 {
                     // Only send Log message when device is considered a primary device
-                    if (device.PrimaryDevice)
+                    if (device.PrimaryDevice && latencyCriticalReport)
+                    {
+                        deferredDiagnostics.FirstReport = true;
+                        deferredDiagnostics.ProfileName = ProfilePath[ind];
+                        deferredDiagnostics.Battery = device.Battery;
+                    }
+                    else if (device.PrimaryDevice)
                     {
                         if (File.Exists(Path.Combine(appdatapath, "Profiles", $"{ProfilePath[ind]}.xml")))
                         {
@@ -4188,7 +4274,15 @@ namespace DS4Windows
 
                 if (device.PrimaryDevice && Global.UseIconChoice == TrayIconChoice.Battery)
                 {
-                    InvokeBatteryChanged(cState.Battery);
+                    if (latencyCriticalReport)
+                    {
+                        deferredDiagnostics.BatteryNotification = true;
+                        deferredDiagnostics.Battery = cState.Battery;
+                    }
+                    else
+                    {
+                        InvokeBatteryChanged(cState.Battery);
+                    }
                 }
 
                 if (!device.PrimaryDevice)
@@ -4239,12 +4333,14 @@ namespace DS4Windows
 
                 cState = device.Debouncer.ProcessInput(cState);
 
-                if (startupReportDiag)
+                if (startupReportDiag && !latencyCriticalReport)
                 {
                     StartupDiag($"On_Report pre-map index={ind} count={startupReportCount} buttons Cross={cState.Cross} Circle={cState.Circle} PS={cState.PS} LX={cState.LX} LY={cState.LY} RX={cState.RX} RY={cState.RY} L2={cState.L2} R2={cState.R2}");
                 }
 
                 cState = Mapping.SetCurveAndDeadzone(ind, cState, TempState[ind]);
+
+                bool oscMonitoringPending = false;
 
                 if (!recordingMacro && (useTempProfile[ind] ||
                     containsCustomAction(ind) || containsCustomExtras(ind) ||
@@ -4255,15 +4351,18 @@ namespace DS4Windows
 
                     if (isUsingOSCSender())
                     {
-                        OSCPreMappingStep(ind, cState, tempMapState, oscMapState);
+                        tempMapState.CopyTo(oscMonitorPreviousState[ind]);
+                        OSCPreMappingStep(cState, oscMapState);
+                        cState.CopyTo(oscMonitorPendingState[ind]);
+                        oscMonitoringPending = true;
                     }
 
-                    if (startupReportDiag)
+                    if (startupReportDiag && !latencyCriticalReport)
                     {
                         StartupDiag($"On_Report MapCustom begin index={ind} count={startupReportCount}");
                     }
                     Mapping.MapCustom(ind, cState, tempMapState, ExposedState[ind], touchPad[ind], this);
-                    if (startupReportDiag)
+                    if (startupReportDiag && !latencyCriticalReport)
                     {
                         StartupDiag($"On_Report MapCustom end index={ind} count={startupReportCount}");
                     }
@@ -4308,12 +4407,12 @@ namespace DS4Windows
                     }
 
                     OutputDevice reportOutput = GetReportOutputDevice(ind);
-                    if (startupReportDiag)
+                    if (startupReportDiag && !latencyCriticalReport)
                     {
                         StartupDiag($"On_Report ConvertandSendReport begin index={ind} count={startupReportCount} outDev={reportOutput?.GetDeviceType() ?? "null"}");
                     }
                     reportOutput?.ConvertandSendReport(cState, ind);
-                    if (startupReportDiag)
+                    if (startupReportDiag && !latencyCriticalReport)
                     {
                         StartupDiag($"On_Report ConvertandSendReport end index={ind} count={startupReportCount}");
                     }
@@ -4363,24 +4462,45 @@ namespace DS4Windows
                     }
                 }
 
+                if (latencyCriticalReport && deferredDiagnostics.HasWork)
+                {
+                    deferredDiagnostics.Cross = cState.Cross;
+                    deferredDiagnostics.Circle = cState.Circle;
+                    deferredDiagnostics.PS = cState.PS;
+                    deferredDiagnostics.LX = cState.LX;
+                    deferredDiagnostics.LY = cState.LY;
+                    deferredDiagnostics.RX = cState.RX;
+                    deferredDiagnostics.RY = cState.RY;
+                    deferredDiagnostics.L2 = cState.L2;
+                    deferredDiagnostics.R2 = cState.R2;
+                    reportDiagnosticsWorker.Publish(deferredDiagnostics);
+                }
+
+                if (oscMonitoringPending)
+                {
+                    oscMonitoringWorker.Publish(ind,
+                        oscMonitorPreviousState[ind],
+                        oscMonitorPendingState[ind]);
+                }
+
                 // Output any synthetic events.
-                if (startupReportDiag)
+                if (startupReportDiag && !latencyCriticalReport)
                 {
                     StartupDiag($"On_Report Mapping.Commit begin index={ind} count={startupReportCount}");
                 }
                 Mapping.Commit(ind);
-                if (startupReportDiag)
+                if (startupReportDiag && !latencyCriticalReport)
                 {
                     StartupDiag($"On_Report Mapping.Commit end index={ind} count={startupReportCount}");
                 }
 
                 // Update the Lightbar color
-                if (startupReportDiag)
+                if (startupReportDiag && !latencyCriticalReport)
                 {
                     StartupDiag($"On_Report updateLightBar begin index={ind} count={startupReportCount}");
                 }
                 DS4LightBar.updateLightBar(device, ind);
-                if (startupReportDiag)
+                if (startupReportDiag && !latencyCriticalReport)
                 {
                     StartupDiag($"On_Report updateLightBar end index={ind} count={startupReportCount}");
                 }
@@ -4396,7 +4516,7 @@ namespace DS4Windows
                     tempControlState.Motion = device.GetRawCurrentStateRef().Motion;
                 }
 
-                if (startupReportDiag)
+                if (startupReportDiag && !latencyCriticalReport)
                 {
                     StartupDiag($"On_Report exit index={ind} count={startupReportCount}");
                 }
@@ -4428,14 +4548,9 @@ namespace DS4Windows
             tempMapState.R2 = oscMapState.R2 != 0 ? oscMapState.R2 : tempMapState.R2;
         }
 
-        private void OSCPreMappingStep(int ind, DS4State cState, DS4State tempMapState,
+        private static void OSCPreMappingStep(DS4State cState,
             DS4State oscMapState)
         {
-            if (cState.Battery != oscMapState.Battery)
-            {
-                oscSender.Send(new OscMessage("/ds4windows/monitor/" + ind + "/battery", Convert.ToInt32(cState.Battery)));
-                oscMapState.Battery = cState.Battery;
-            }
             cState.Cross |= oscMapState.Cross;
             cState.Square |= oscMapState.Square;
             cState.Circle |= oscMapState.Circle;
@@ -4457,8 +4572,20 @@ namespace DS4Windows
             cState.RX = oscMapState.RX != 128 ? oscMapState.RX : cState.RX;
             cState.RY = oscMapState.RY != 128 ? oscMapState.RY : cState.RY;
             cState.R2 = oscMapState.R2 != 0 ? oscMapState.R2 : cState.R2;
+        }
 
-            CompareAndSendChangesToOSC(ind, tempMapState, cState);
+        private void OSCMonitoringPostPublication(int index,
+            DS4State previousState, DS4State currentState)
+        {
+            DS4State oscMapState = oscState[index];
+            if (currentState.Battery != oscMapState.Battery)
+            {
+                oscSender.Send(new OscMessage(
+                    "/ds4windows/monitor/" + index + "/battery",
+                    Convert.ToInt32(currentState.Battery)));
+                oscMapState.Battery = currentState.Battery;
+            }
+            CompareAndSendChangesToOSC(index, previousState, currentState);
         }
 
         private void CompareAndSendChangesToOSC(int index, DS4State oldState, DS4State newState)
@@ -4578,12 +4705,71 @@ namespace DS4Windows
             // }
         }
 
-        private void LagFlashWarning(DS4Device device, int ind, bool on)
+        private void ProcessReportDiagnostics(
+            ReportDiagnosticsSnapshot snapshot)
+        {
+            if (!string.IsNullOrEmpty(snapshot.DeviceError))
+            {
+                LogDebug(snapshot.DeviceError);
+            }
+
+            if (snapshot.LagChanged)
+            {
+                if (snapshot.LagOn)
+                {
+                    LogDebug(string.Format(
+                        DS4WinWPF.Properties.Resources.LatencyOverTen,
+                        snapshot.Controller + 1, snapshot.Latency), true);
+                }
+                else
+                {
+                    LogDebug(DS4WinWPF.Properties.Resources.LatencyNotOverTen
+                        .Replace("*number*",
+                            (snapshot.Controller + 1).ToString()));
+                }
+            }
+
+            if (snapshot.FirstReport)
+            {
+                bool profileExists = File.Exists(Path.Combine(appdatapath,
+                    "Profiles", $"{snapshot.ProfileName}.xml"));
+                string prolog = profileExists ?
+                    string.Format(DS4WinWPF.Properties.Resources.UsingProfile,
+                        (snapshot.Controller + 1).ToString(),
+                        snapshot.ProfileName, $"{snapshot.Battery}") :
+                    string.Format(
+                        DS4WinWPF.Properties.Resources.NotUsingProfile,
+                        (snapshot.Controller + 1).ToString(),
+                        $"{snapshot.Battery}");
+                LogDebug(prolog);
+                AppLogger.LogToTray(prolog);
+            }
+
+            if (snapshot.BatteryNotification)
+            {
+                InvokeBatteryChanged((byte)snapshot.Battery);
+            }
+
+            if (snapshot.StartupDiagnostic)
+            {
+                StartupDiag($"On_Report deferred index={snapshot.Controller} " +
+                    $"count={snapshot.StartupReportCount} " +
+                    $"synced={snapshot.Synced} " +
+                    $"latency={snapshot.Latency} " +
+                    $"useDInputOnly={snapshot.UseDInputOnly} " +
+                    $"activeOut={snapshot.ActiveOutput} " +
+                    $"buttons Cross={snapshot.Cross} Circle={snapshot.Circle} " +
+                    $"PS={snapshot.PS} LX={snapshot.LX} LY={snapshot.LY} " +
+                    $"RX={snapshot.RX} RY={snapshot.RY} " +
+                    $"L2={snapshot.L2} R2={snapshot.R2}");
+            }
+        }
+
+        private void ApplyLagFlashState(DS4Device device, int ind, bool on)
         {
             if (on)
             {
                 lag[ind] = true;
-                LogDebug(string.Format(DS4WinWPF.Properties.Resources.LatencyOverTen, (ind + 1), device.Latency), true);
                 if (getFlashWhenLate())
                 {
                     DS4Color color = new DS4Color { red = 50, green = 0, blue = 0 };
@@ -4595,10 +4781,25 @@ namespace DS4Windows
             else
             {
                 lag[ind] = false;
-                LogDebug(DS4WinWPF.Properties.Resources.LatencyNotOverTen.Replace("*number*", (ind + 1).ToString()));
                 DS4LightBar.forcelight[ind] = false;
                 DS4LightBar.forcedFlash[ind] = 0;
                 device.LightBarColor = getMainColor(ind);
+            }
+        }
+
+        private void LagFlashWarning(DS4Device device, int ind, bool on)
+        {
+            ApplyLagFlashState(device, ind, on);
+            if (on)
+            {
+                LogDebug(string.Format(
+                    DS4WinWPF.Properties.Resources.LatencyOverTen,
+                    ind + 1, device.Latency), true);
+            }
+            else
+            {
+                LogDebug(DS4WinWPF.Properties.Resources.LatencyNotOverTen
+                    .Replace("*number*", (ind + 1).ToString()));
             }
         }
 

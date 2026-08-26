@@ -579,7 +579,7 @@ namespace DS4Windows
             return lastTimeElapsedDouble;
         }
 
-        public byte RightLightFastRumble
+        public virtual byte RightLightFastRumble
         {
             get { return currentHap.rumbleState.RumbleMotorStrengthRightLightFast; }
             set
@@ -589,7 +589,7 @@ namespace DS4Windows
             }
         }
 
-        public byte LeftHeavySlowRumble
+        public virtual byte LeftHeavySlowRumble
         {
             get { return currentHap.rumbleState.RumbleMotorStrengthLeftHeavySlow; }
             set
@@ -599,7 +599,7 @@ namespace DS4Windows
             }
         }
 
-        public byte getLeftHeavySlowRumble()
+        public virtual byte getLeftHeavySlowRumble()
         {
             return currentHap.rumbleState.RumbleMotorStrengthLeftHeavySlow;
         }
@@ -622,7 +622,7 @@ namespace DS4Windows
             }
         }
 
-        public DS4Color LightBarColor
+        public virtual DS4Color LightBarColor
         {
             get { return currentHap.lightbarState.LightBarColor; }
             set
@@ -2388,6 +2388,15 @@ namespace DS4Windows
         protected long RumbleCommandGeneration =>
             Interlocked.Read(ref rumbleCommandGeneration);
 
+        protected DS4ForceFeedbackState GetLatestRumbleState()
+        {
+            lock (rumbleStateLock)
+            {
+                return testRumble.IsRumbleSet() ?
+                    testRumble.rumbleState : currentHap.rumbleState;
+            }
+        }
+
         protected bool TryGetRumblePreview(out bool lightMotorActive,
             out byte lightMotorStrength, out bool heavyMotorActive,
             out byte heavyMotorStrength)
@@ -2408,7 +2417,8 @@ namespace DS4Windows
             return interfaceStillPresent;
         }
 
-        public void setRumble(byte rightLightFastMotor, byte leftHeavySlowMotor)
+        public virtual void setRumble(byte rightLightFastMotor,
+            byte leftHeavySlowMotor)
         {
             lock (rumbleStateLock)
             {
@@ -2437,7 +2447,7 @@ namespace DS4Windows
         /// present it. Active preview motors override only their own channel,
         /// while the latest game state continues to update underneath.
         /// </summary>
-        public void SetRumblePreview(bool lightMotorActive,
+        public virtual void SetRumblePreview(bool lightMotorActive,
             byte lightMotorStrength, bool heavyMotorActive,
             byte heavyMotorStrength)
         {
@@ -2474,7 +2484,7 @@ namespace DS4Windows
             }
         }
 
-        public void ClearRumblePreview()
+        public virtual void ClearRumblePreview()
         {
             lock (rumbleStateLock)
             {
@@ -2620,13 +2630,14 @@ namespace DS4Windows
         }
 
         protected DS4HapticState currentHap = new DS4HapticState();
-        public void SetHapticState(ref DS4HapticState hs)
+        public virtual void SetHapticState(ref DS4HapticState hs)
         {
             currentHap = hs;
             currentHap.dirty = true;
         }
 
-        public void SetLightbarState(ref DS4LightbarState lightState)
+        public virtual void SetLightbarState(
+            ref DS4LightbarState lightState)
         {
             if (!currentHap.lightbarState.Equals(lightState))
             {
@@ -2641,7 +2652,8 @@ namespace DS4Windows
             return ref currentHap.lightbarState;
         }
 
-        public void SetRumbleState(ref DS4ForceFeedbackState rumbleState)
+        public virtual void SetRumbleState(
+            ref DS4ForceFeedbackState rumbleState)
         {
             currentHap.rumbleState = rumbleState;
         }

@@ -182,10 +182,15 @@ namespace DS4Windows.InputDevices
         private const long InputClockTimestampOffset = 8;
         private const long InputClockSequenceOffset = 16;
         private const int OutboundCommandCapacity = HostReservoirCapacity + 16;
+        private const int OutboundCommandLeaseCapacity =
+            OutboundCommandCapacity + 8;
+        private const int MaximumOutboundCommandPayloadLength =
+            GameStateAndTemplatePayloadLength;
         private const int ControlTemplateQueueWaitMilliseconds = 250;
+        private const int ControlReportCompletionCapacity = 8;
         private const int InitialEpoch = 1;
 
-        private enum MessageKind : byte
+        internal enum MessageKind : byte
         {
             Hello = 1,
             QueueReport = 2,
@@ -213,26 +218,306 @@ namespace DS4Windows.InputDevices
             StaleEpoch = 5,
         }
 
-        private sealed class OutboundCommand
+        internal readonly struct OutboundCommand
         {
             public readonly MessageKind Kind;
-            public readonly byte[] Payload;
+            public readonly DualSenseBluetoothAudioPacerPayloadLease Payload;
+            public readonly int PayloadLength;
             public readonly long ReportId;
 
-            public OutboundCommand(MessageKind kind, byte[] payload,
-                long reportId = 0)
+            public OutboundCommand(MessageKind kind,
+                DualSenseBluetoothAudioPacerPayloadLease payload,
+                int payloadLength, long reportId = 0)
             {
                 Kind = kind;
-                Payload = payload ?? Array.Empty<byte>();
+                Payload = payload;
+                PayloadLength = payloadLength;
                 ReportId = reportId;
             }
+
+            public bool IsValid => Payload.IsValid;
         }
 
-        private sealed class PendingReportCompletion
+        private static readonly Predicate<OutboundCommand>
+            IsTemplateCommand = command =>
+                command.Kind == MessageKind.UpdateTemplate;
+        private static readonly Predicate<OutboundCommand>
+            IsCadenceCommand = command =>
+                command.Kind == MessageKind.UpdateCadence;
+        private static readonly Predicate<OutboundCommand>
+            IsControllerMediaBufferCommand = command =>
+                command.Kind == MessageKind.UpdateControllerMediaBuffer;
+        private static readonly Predicate<OutboundCommand>
+            IsMicrophoneOrTemplateCommand = command =>
+                command.Kind == MessageKind.UpdateMicrophoneStatus ||
+                command.Kind == MessageKind.UpdateTemplate;
+        private static readonly Predicate<OutboundCommand>
+            IsControllerStateOrResetCommand = command =>
+                command.Kind == MessageKind.UpdateGameStateAndTemplate ||
+                command.Kind == MessageKind.UpdateControllerState ||
+                command.Kind ==
+                    MessageKind.ResetControllerStateTransitions;
+        private static readonly Predicate<OutboundCommand>
+            IsQueuedReportCommand = command =>
+                command.Kind == MessageKind.QueueReport;
+
+        internal readonly struct ControlReportCompletionToken
         {
-            public readonly TaskCompletionSource<AcknowledgementDisposition>
-                Source = new TaskCompletionSource<AcknowledgementDisposition>(
-                    TaskCreationOptions.RunContinuationsAsynchronously);
+            internal readonly ControlReportCompletionPool Owner;
+            internal readonly int SlotIndex;
+            internal readonly long LeaseVersion;
+            internal readonly long ReportId;
+            internal readonly int Epoch;
+
+            internal ControlReportCompletionToken(
+                ControlReportCompletionPool owner, int slotIndex,
+                long leaseVersion, long reportId, int epoch)
+            {
+                Owner = owner;
+                SlotIndex = slotIndex;
+                LeaseVersion = leaseVersion;
+                ReportId = reportId;
+                Epoch = epoch;
+            }
+
+            internal bool IsValid => Owner != null && SlotIndex >= 0 &&
+                LeaseVersion != 0 && ReportId != 0 && Epoch != 0;
+        }
+
+        internal sealed class ControlReportCompletionPool : IDisposable
+        {
+            private enum SlotState : byte
+            {
+                Free,
+                Pending,
+                Completed,
+            }
+
+            private sealed class Slot : IDisposable
+            {
+                internal readonly ManualResetEvent Signal =
+                    new ManualResetEvent(false);
+                internal SlotState State;
+                internal long LeaseVersion;
+                internal long ReportId;
+                internal int Epoch;
+                internal AcknowledgementDisposition Disposition;
+                internal bool WaitClaimed;
+
+                public void Dispose()
+                {
+                    Signal.Dispose();
+                }
+            }
+
+            private readonly object syncRoot;
+            private readonly Slot[] slots;
+
+            internal ControlReportCompletionPool(object syncRoot, int capacity)
+            {
+                this.syncRoot = syncRoot ??
+                    throw new ArgumentNullException(nameof(syncRoot));
+                if (capacity <= 0)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(capacity));
+                }
+
+                slots = new Slot[capacity];
+                for (int index = 0; index < slots.Length; index++)
+                {
+                    slots[index] = new Slot();
+                }
+            }
+
+            internal bool TryAcquire(long reportId, int epoch,
+                out ControlReportCompletionToken token)
+            {
+                token = default;
+                if (reportId == 0 || epoch == 0)
+                {
+                    return false;
+                }
+
+                lock (syncRoot)
+                {
+                    for (int index = 0; index < slots.Length; index++)
+                    {
+                        Slot slot = slots[index];
+                        if (slot.State != SlotState.Free)
+                        {
+                            continue;
+                        }
+
+                        long leaseVersion = unchecked(slot.LeaseVersion + 1);
+                        if (leaseVersion == 0)
+                        {
+                            leaseVersion = 1;
+                        }
+
+                        slot.LeaseVersion = leaseVersion;
+                        slot.ReportId = reportId;
+                        slot.Epoch = epoch;
+                        slot.Disposition = AcknowledgementDisposition.Rejected;
+                        slot.WaitClaimed = false;
+                        slot.Signal.Reset();
+                        slot.State = SlotState.Pending;
+                        token = new ControlReportCompletionToken(this, index,
+                            leaseVersion, reportId, epoch);
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+            internal void Abort(ControlReportCompletionToken token)
+            {
+                lock (syncRoot)
+                {
+                    if (TryGetMatchingSlot(token, out Slot slot))
+                    {
+                        ReleaseSlot(slot);
+                    }
+                }
+            }
+
+            internal bool Complete(long reportId,
+                AcknowledgementDisposition disposition)
+            {
+                lock (syncRoot)
+                {
+                    for (int index = 0; index < slots.Length; index++)
+                    {
+                        Slot slot = slots[index];
+                        if (slot.State != SlotState.Pending ||
+                            slot.ReportId != reportId)
+                        {
+                            continue;
+                        }
+
+                        slot.Disposition = disposition;
+                        slot.State = SlotState.Completed;
+                        // ManualResetEvent has no callback surface. Publishing
+                        // it under the same short state monitor makes timeout
+                        // versus acknowledgement linearizable without letting
+                        // a released slot receive a previous lease's signal.
+                        slot.Signal.Set();
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+            internal void CompleteAll(
+                AcknowledgementDisposition disposition)
+            {
+                lock (syncRoot)
+                {
+                    foreach (Slot slot in slots)
+                    {
+                        if (slot.State != SlotState.Pending)
+                        {
+                            continue;
+                        }
+
+                        slot.Disposition = disposition;
+                        slot.State = SlotState.Completed;
+                        slot.Signal.Set();
+                    }
+                }
+            }
+
+            internal bool WaitAndRelease(ControlReportCompletionToken token,
+                int timeoutMilliseconds,
+                out AcknowledgementDisposition disposition)
+            {
+                disposition = AcknowledgementDisposition.Rejected;
+                if (token.Owner != this)
+                {
+                    return false;
+                }
+
+                Slot claimedSlot;
+                lock (syncRoot)
+                {
+                    if (!TryGetMatchingSlot(token, out claimedSlot) ||
+                        claimedSlot.WaitClaimed)
+                    {
+                        return false;
+                    }
+
+                    claimedSlot.WaitClaimed = true;
+                    if (claimedSlot.State == SlotState.Completed)
+                    {
+                        disposition = claimedSlot.Disposition;
+                        ReleaseSlot(claimedSlot);
+                        return disposition ==
+                            AcknowledgementDisposition.Presented;
+                    }
+                }
+
+                bool signalled = claimedSlot.Signal.WaitOne(
+                    Math.Max(0, timeoutMilliseconds));
+                lock (syncRoot)
+                {
+                    if (!TryGetMatchingSlot(token, out Slot current) ||
+                        !ReferenceEquals(current, claimedSlot))
+                    {
+                        return false;
+                    }
+
+                    // An acknowledgement that won the state race is truthful
+                    // even if the kernel wait returned timeout immediately
+                    // before its signal became visible.
+                    if (current.State == SlotState.Completed)
+                    {
+                        disposition = current.Disposition;
+                    }
+                    else if (!signalled)
+                    {
+                        disposition = AcknowledgementDisposition.Rejected;
+                    }
+
+                    ReleaseSlot(current);
+                    return disposition ==
+                        AcknowledgementDisposition.Presented;
+                }
+            }
+
+            private bool TryGetMatchingSlot(
+                ControlReportCompletionToken token, out Slot slot)
+            {
+                if (token.Owner == this && token.IsValid &&
+                    token.SlotIndex < slots.Length)
+                {
+                    slot = slots[token.SlotIndex];
+                    return slot.State != SlotState.Free &&
+                        slot.LeaseVersion == token.LeaseVersion &&
+                        slot.ReportId == token.ReportId &&
+                        slot.Epoch == token.Epoch;
+                }
+
+                slot = null;
+                return false;
+            }
+
+            private static void ReleaseSlot(Slot slot)
+            {
+                slot.State = SlotState.Free;
+                slot.ReportId = 0;
+                slot.Epoch = 0;
+                slot.Disposition = AcknowledgementDisposition.Rejected;
+                slot.WaitClaimed = false;
+            }
+
+            public void Dispose()
+            {
+                foreach (Slot slot in slots)
+                {
+                    slot.Dispose();
+                }
+            }
         }
 
         private readonly object stateLock = new object();
@@ -248,18 +533,24 @@ namespace DS4Windows.InputDevices
         private readonly DualSenseBluetoothAudioPacerRing<OutboundCommand>
             outboundCommands = new DualSenseBluetoothAudioPacerRing<OutboundCommand>(
                 OutboundCommandCapacity);
+        private readonly DualSenseBluetoothAudioPacerPayloadPool
+            outboundPayloads = new DualSenseBluetoothAudioPacerPayloadPool(
+                OutboundCommandLeaseCapacity,
+                MaximumOutboundCommandPayloadLength);
+        private readonly OutboundCommand[] removedOutboundCommands =
+            new OutboundCommand[OutboundCommandCapacity];
+        private readonly long[] removedQueuedReportIds =
+            new long[OutboundCommandCapacity];
         private readonly Dictionary<long, byte> outstandingReports =
             new Dictionary<long, byte>(HostReservoirCapacity);
-        private readonly Dictionary<long, PendingReportCompletion>
-            pendingReportCompletions =
-                new Dictionary<long, PendingReportCompletion>();
+        private readonly ControlReportCompletionPool controlReportCompletions;
         private readonly AutoResetEvent outboundAvailable = new AutoResetEvent(false);
         private readonly ManualResetEventSlim readyEvent = new ManualResetEventSlim(false);
         private readonly ManualResetEventSlim stoppedEvent = new ManualResetEventSlim(false);
         private readonly Thread senderThread;
         private readonly Thread receiverThread;
 
-        private byte[] latestTemplate;
+        private readonly byte[] latestTemplate = new byte[ReportLength];
         private readonly byte[] latestControllerState = new byte[
             DualSenseBluetoothPhysicalOutputSequence.
                 ControllerStatePayloadLength];
@@ -322,6 +613,8 @@ namespace DS4Windows.InputDevices
                 throw new ArgumentNullException(nameof(realtimeHaptics));
             this.usesV5PresentationCadence =
                 usesV5PresentationCadence;
+            controlReportCompletions = new ControlReportCompletionPool(
+                stateLock, ControlReportCompletionCapacity);
             senderThread = new Thread(SenderLoop)
             {
                 IsBackground = true,
@@ -670,7 +963,8 @@ namespace DS4Windows.InputDevices
                 inputMap = null;
                 inputView = null;
                 realtimeHaptics = null;
-                candidate.latestTemplate = (byte[])initialTemplate.Clone();
+                Buffer.BlockCopy(initialTemplate, 0, candidate.latestTemplate,
+                    0, ReportLength);
                 candidate.latestTemplateHapticsExpiryQpc = hapticsExpiryQpc;
                 candidate.receiverThread.Start();
                 candidate.SendHello(authenticationToken);
@@ -740,7 +1034,7 @@ namespace DS4Windows.InputDevices
             out long reportId)
         {
             return TryQueueReportCore(report, hapticsExpiryQpc,
-                completion: null, out reportId);
+                requiresCompletion: false, out reportId, out _);
         }
 
         /// <summary>
@@ -755,42 +1049,61 @@ namespace DS4Windows.InputDevices
         {
             disposition = AcknowledgementDisposition.Rejected;
             if (timeoutMilliseconds <= 0 ||
-                IsSpeakerAudioReport(report))
+                !TryQueueControlReport(report, hapticsExpiryQpc,
+                    out ControlReportCompletionToken token))
             {
                 return false;
             }
 
-            var completion = new PendingReportCompletion();
-            if (!TryQueueReportCore(report, hapticsExpiryQpc, completion,
-                out long reportId))
+            return WaitForControlReport(token, timeoutMilliseconds,
+                out disposition);
+        }
+
+        /// <summary>
+        /// Atomically admits one speaker-free ordered control report and
+        /// returns its fixed completion lease without waiting. The caller can
+        /// therefore keep report-sequence reservation and queue admission in
+        /// one short ownership section, then wait only after releasing it.
+        /// </summary>
+        internal bool TryQueueControlReport(byte[] report,
+            long hapticsExpiryQpc,
+            out ControlReportCompletionToken token)
+        {
+            token = default;
+            if (IsSpeakerAudioReport(report))
             {
                 return false;
             }
 
-            if (!completion.Source.Task.Wait(timeoutMilliseconds))
-            {
-                lock (stateLock)
-                {
-                    pendingReportCompletions.Remove(reportId);
-                }
+            return TryQueueReportCore(report, hapticsExpiryQpc,
+                requiresCompletion: true, out _, out token);
+        }
 
-                return false;
-            }
-
-            disposition = completion.Source.Task.GetAwaiter().GetResult();
-            return disposition == AcknowledgementDisposition.Presented;
+        /// <summary>
+        /// Waits for and releases one exact completion lease. Timeout detaches
+        /// the report from the fixed slot before it can be reused, so a late
+        /// acknowledgement can never wake a later generation/report token.
+        /// A token is single-consumer and can be released exactly once.
+        /// </summary>
+        internal bool WaitForControlReport(
+            ControlReportCompletionToken token, int timeoutMilliseconds,
+            out AcknowledgementDisposition disposition)
+        {
+            return controlReportCompletions.WaitAndRelease(token,
+                timeoutMilliseconds, out disposition);
         }
 
         private bool TryQueueReportCore(byte[] report, long hapticsExpiryQpc,
-            PendingReportCompletion completion, out long reportId)
+            bool requiresCompletion, out long reportId,
+            out ControlReportCompletionToken completionToken)
         {
             reportId = 0;
+            completionToken = default;
             if (report == null || report.Length != ReportLength || !IsRunning)
             {
                 return false;
             }
 
-            byte[] reportCopy = (byte[])report.Clone();
             lock (stateLock)
             {
                 if (Volatile.Read(ref stopping) != 0 ||
@@ -807,19 +1120,40 @@ namespace DS4Windows.InputDevices
                     reportId = unchecked(++nextReportId);
                 }
 
-                byte[] payload = BuildQueuePayload(reportId, currentEpoch,
-                    hapticsExpiryQpc, reportCopy);
-                var command = new OutboundCommand(MessageKind.QueueReport,
-                    payload, reportId);
-                outstandingReports.Add(reportId, 0);
-                if (completion != null)
+                if (requiresCompletion &&
+                    !controlReportCompletions.TryAcquire(reportId,
+                        currentEpoch, out completionToken))
                 {
-                    pendingReportCompletions.Add(reportId, completion);
+                    reportId = 0;
+                    return false;
                 }
+
+                const int payloadLength = sizeof(long) + sizeof(int) +
+                    sizeof(long) + ReportLength;
+                if (!TryCreateOutboundCommandLocked(MessageKind.QueueReport,
+                    payloadLength, out OutboundCommand command, reportId))
+                {
+                    if (completionToken.IsValid)
+                    {
+                        controlReportCompletions.Abort(completionToken);
+                        completionToken = default;
+                    }
+                    reportId = 0;
+                    return false;
+                }
+
+                BuildQueuePayloadInto(reportId, currentEpoch,
+                    hapticsExpiryQpc, report, command.Payload.Buffer);
+                outstandingReports.Add(reportId, 0);
                 if (!outboundCommands.TryEnqueue(command))
                 {
+                    ReleaseOutboundCommandLocked(command);
                     outstandingReports.Remove(reportId);
-                    pendingReportCompletions.Remove(reportId);
+                    if (completionToken.IsValid)
+                    {
+                        controlReportCompletions.Abort(completionToken);
+                        completionToken = default;
+                    }
                     reportId = 0;
                     return false;
                 }
@@ -978,6 +1312,7 @@ namespace DS4Windows.InputDevices
                 return false;
             }
 
+            int generation;
             lock (stateLock)
             {
                 // This callback owns only one completed rear-channel
@@ -992,11 +1327,15 @@ namespace DS4Windows.InputDevices
                         RealtimeHapticsDataLength);
                 }
                 latestTemplateHapticsExpiryQpc = hapticsExpiryQpc;
-                return realtimeHaptics.Publish(latestCombinedReport,
-                    RealtimeHapticsDataOffset,
-                    realtimeHapticsGeneration, hapticsExpiryQpc,
-                    Stopwatch.GetTimestamp());
+                generation = realtimeHapticsGeneration;
             }
+
+            // Publishing may losslessly wait for the bounded media consumer.
+            // Capture the generation under stateLock, then release it before
+            // touching that independent scheduling plane.
+            return realtimeHaptics.Publish(latestCombinedReport,
+                RealtimeHapticsDataOffset, generation, hapticsExpiryQpc,
+                Stopwatch.GetTimestamp());
         }
 
         private bool UpdateTemplateCore(byte[] latestCombinedReport,
@@ -1008,9 +1347,20 @@ namespace DS4Windows.InputDevices
                 return false;
             }
 
-            byte[] copy = (byte[])latestCombinedReport.Clone();
-            var command = new OutboundCommand(MessageKind.UpdateTemplate,
-                BuildTemplatePayload(copy, hapticsExpiryQpc));
+            const int payloadLength = sizeof(long) + ReportLength;
+            OutboundCommand command;
+            lock (stateLock)
+            {
+                if (!IsRunning || !TryCreateOutboundCommandLocked(
+                    MessageKind.UpdateTemplate, payloadLength, out command))
+                {
+                    return false;
+                }
+
+                BuildTemplatePayloadInto(latestCombinedReport,
+                    hapticsExpiryQpc, command.Payload.Buffer);
+            }
+
             long deadline = Stopwatch.GetTimestamp() +
                 Stopwatch.Frequency * ControlTemplateQueueWaitMilliseconds /
                     1000;
@@ -1020,15 +1370,17 @@ namespace DS4Windows.InputDevices
                 {
                     if (!IsRunning)
                     {
+                        ReleaseOutboundCommandLocked(command);
                         return false;
                     }
 
-                    if (outboundCommands.TryReplaceWhereWithGroup(
-                            candidate => candidate.Kind ==
-                                MessageKind.UpdateTemplate,
-                            new[] { command }))
+                    if (outboundCommands.TryReplaceWhereWithOne(
+                        IsTemplateCommand, command, removedOutboundCommands,
+                        out int removedCount))
                     {
-                        latestTemplate = copy;
+                        ReleaseRemovedOutboundCommandsLocked(removedCount);
+                        Buffer.BlockCopy(command.Payload.Buffer, sizeof(long),
+                            latestTemplate, 0, ReportLength);
                         latestTemplateHapticsExpiryQpc = hapticsExpiryQpc;
                         outboundAvailable.Set();
                         return true;
@@ -1037,6 +1389,10 @@ namespace DS4Windows.InputDevices
 
                 if (!waitForCapacity)
                 {
+                    lock (stateLock)
+                    {
+                        ReleaseOutboundCommandLocked(command);
+                    }
                     return false;
                 }
 
@@ -1048,6 +1404,10 @@ namespace DS4Windows.InputDevices
             }
             while (Stopwatch.GetTimestamp() < deadline);
 
+            lock (stateLock)
+            {
+                ReleaseOutboundCommandLocked(command);
+            }
             return false;
         }
 
@@ -1069,25 +1429,30 @@ namespace DS4Windows.InputDevices
                 return false;
             }
 
-            byte[] payload = new byte[sizeof(long) * 2];
-            BinaryPrimitives.WriteInt64LittleEndian(payload,
-                BitConverter.DoubleToInt64Bits(controllerClockRatio));
-            BinaryPrimitives.WriteInt64LittleEndian(
-                payload.AsSpan(sizeof(long), sizeof(long)),
-                Math.Max(0, inputArrivalQpc));
             lock (stateLock)
             {
-                foreach (OutboundCommand removed in
-                    outboundCommands.RemoveWhere(command =>
-                        command.Kind == MessageKind.UpdateCadence))
-                {
-                }
-
-                if (!outboundCommands.TryEnqueue(new OutboundCommand(
-                    MessageKind.UpdateCadence, payload)))
+                const int payloadLength = sizeof(long) * 2;
+                if (!TryCreateOutboundCommandLocked(MessageKind.UpdateCadence,
+                    payloadLength, out OutboundCommand command))
                 {
                     return false;
                 }
+
+                BinaryPrimitives.WriteInt64LittleEndian(
+                    command.Payload.Buffer,
+                    BitConverter.DoubleToInt64Bits(controllerClockRatio));
+                BinaryPrimitives.WriteInt64LittleEndian(
+                    command.Payload.Buffer.AsSpan(sizeof(long), sizeof(long)),
+                    Math.Max(0, inputArrivalQpc));
+                if (!outboundCommands.TryReplaceWhereWithOne(
+                    IsCadenceCommand, command, removedOutboundCommands,
+                    out int removedCount))
+                {
+                    ReleaseOutboundCommandLocked(command);
+                    return false;
+                }
+
+                ReleaseRemovedOutboundCommandsLocked(removedCount);
             }
 
             outboundAvailable.Set();
@@ -1110,22 +1475,34 @@ namespace DS4Windows.InputDevices
                 return false;
             }
 
-            byte[] payload = new byte[sizeof(long) * 2 + sizeof(byte)];
-            BinaryPrimitives.WriteInt64LittleEndian(payload,
-                observationQpc);
-            payload[sizeof(long)] = level;
-            BinaryPrimitives.WriteInt64LittleEndian(
-                payload.AsSpan(sizeof(long) + sizeof(byte), sizeof(long)),
-                BitConverter.DoubleToInt64Bits(cadenceRatio));
             lock (stateLock)
             {
-                if (!outboundCommands.TryReplaceNewestOrEnqueue(
-                    command => command.Kind ==
-                        MessageKind.UpdateControllerMediaBuffer,
-                    new OutboundCommand(
-                        MessageKind.UpdateControllerMediaBuffer, payload)))
+                const int payloadLength = sizeof(long) * 2 + sizeof(byte);
+                if (!TryCreateOutboundCommandLocked(
+                    MessageKind.UpdateControllerMediaBuffer, payloadLength,
+                    out OutboundCommand command))
                 {
                     return false;
+                }
+
+                BinaryPrimitives.WriteInt64LittleEndian(
+                    command.Payload.Buffer, observationQpc);
+                command.Payload.Buffer[sizeof(long)] = level;
+                BinaryPrimitives.WriteInt64LittleEndian(
+                    command.Payload.Buffer.AsSpan(sizeof(long) + sizeof(byte),
+                        sizeof(long)),
+                    BitConverter.DoubleToInt64Bits(cadenceRatio));
+                if (!outboundCommands.TryReplaceNewestOrEnqueue(
+                    IsControllerMediaBufferCommand, command,
+                    out OutboundCommand replaced, out bool didReplace))
+                {
+                    ReleaseOutboundCommandLocked(command);
+                    return false;
+                }
+
+                if (didReplace)
+                {
+                    ReleaseOutboundCommandLocked(replaced);
                 }
             }
 
@@ -1148,25 +1525,36 @@ namespace DS4Windows.InputDevices
                 return false;
             }
 
-            byte[] template = (byte[])latestCombinedReport.Clone();
-            byte[] status = { enabled ? (byte)1 : (byte)0 };
-
             lock (stateLock)
             {
-                var transition = new[]
+                if (!TryCreateOutboundCommandLocked(
+                        MessageKind.UpdateMicrophoneStatus, sizeof(byte),
+                        out OutboundCommand statusCommand) ||
+                    !TryCreateOutboundCommandLocked(MessageKind.UpdateTemplate,
+                        sizeof(long) + ReportLength,
+                        out OutboundCommand templateCommand))
                 {
-                    new OutboundCommand(MessageKind.UpdateMicrophoneStatus,
-                        status),
-                    new OutboundCommand(MessageKind.UpdateTemplate,
-                        BuildTemplatePayload(template, hapticsExpiryQpc)),
-                };
-                if (!outboundCommands.TryReplaceWhereWithGroup(command =>
-                        command.Kind == MessageKind.UpdateMicrophoneStatus ||
-                        command.Kind == MessageKind.UpdateTemplate,
-                    transition))
-                {
+                    if (statusCommand.IsValid)
+                    {
+                        ReleaseOutboundCommandLocked(statusCommand);
+                    }
                     return false;
                 }
+
+                statusCommand.Payload.Buffer[0] = enabled ? (byte)1 : (byte)0;
+                BuildTemplatePayloadInto(latestCombinedReport,
+                    hapticsExpiryQpc, templateCommand.Payload.Buffer);
+                if (!outboundCommands.TryReplaceWhereWithPair(
+                    IsMicrophoneOrTemplateCommand, statusCommand,
+                    templateCommand, removedOutboundCommands,
+                    out int removedCount))
+                {
+                    ReleaseOutboundCommandLocked(statusCommand);
+                    ReleaseOutboundCommandLocked(templateCommand);
+                    return false;
+                }
+
+                ReleaseRemovedOutboundCommandsLocked(removedCount);
 
                 // Intent is deliberately first: the helper freezes the
                 // physical media header in its committed mode before the new
@@ -1175,7 +1563,8 @@ namespace DS4Windows.InputDevices
                 // independently queued controller-state transition remains in
                 // FIFO order; microphone reconfiguration must never delete a
                 // pending rumble stop, trigger, or LED update.
-                latestTemplate = template;
+                Buffer.BlockCopy(latestCombinedReport, 0, latestTemplate, 0,
+                    ReportLength);
                 latestTemplateHapticsExpiryQpc = hapticsExpiryQpc;
             }
 
@@ -1197,30 +1586,37 @@ namespace DS4Windows.InputDevices
                 return false;
             }
 
-            byte[] payload = new byte[
-                DualSenseBluetoothPhysicalOutputSequence.
-                    ControllerStatePayloadLength];
-            Buffer.BlockCopy(latestCombinedReport,
-                DualSenseBluetoothPhysicalOutputSequence.
-                    ControllerStateSourceOffset,
-                payload, 0, payload.Length);
-
             lock (stateLock)
             {
+                const int payloadLength =
+                    DualSenseBluetoothPhysicalOutputSequence.
+                        ControllerStatePayloadLength;
+                int sourceOffset =
+                    DualSenseBluetoothPhysicalOutputSequence.
+                        ControllerStateSourceOffset;
                 if (latestControllerStateAvailable &&
-                    payload.AsSpan().SequenceEqual(latestControllerState))
+                    latestCombinedReport.AsSpan(sourceOffset, payloadLength).
+                        SequenceEqual(latestControllerState))
                 {
                     return true;
                 }
 
-                if (!outboundCommands.TryEnqueue(new OutboundCommand(
-                    MessageKind.UpdateControllerState, payload)))
+                if (!TryCreateOutboundCommandLocked(
+                        MessageKind.UpdateControllerState, payloadLength,
+                        out OutboundCommand command))
                 {
                     return false;
                 }
+                Buffer.BlockCopy(latestCombinedReport, sourceOffset,
+                    command.Payload.Buffer, 0, payloadLength);
+                if (!outboundCommands.TryEnqueue(command))
+                {
+                    ReleaseOutboundCommandLocked(command);
+                    return false;
+                }
 
-                Buffer.BlockCopy(payload, 0, latestControllerState, 0,
-                    payload.Length);
+                Buffer.BlockCopy(command.Payload.Buffer, 0,
+                    latestControllerState, 0, payloadLength);
                 latestControllerStateAvailable = true;
             }
 
@@ -1258,21 +1654,6 @@ namespace DS4Windows.InputDevices
             byte heavySlow = latestCombinedReport[stateOffset + 3];
             byte rumbleMode = (byte)(latestCombinedReport[
                 stateOffset + 38] & 0x04);
-            byte[] payload = new byte[
-                DualSenseBluetoothPhysicalOutputSequence.
-                    ControllerStatePayloadLength];
-            Buffer.BlockCopy(latestCombinedReport, stateOffset, payload, 0,
-                payload.Length);
-
-            // Preserve the audio-control contract that shares this physical
-            // media interval, but strip every unrelated edge-triggered field.
-            // The exact motor transition and improved-rumble mode are the only
-            // controller effects owned by this command.
-            payload[0] = (byte)((payload[0] & 0xF0) |
-                mainMotorValidity);
-            payload[1] &= 0x83;
-            payload[38] = rumbleMode;
-
             lock (stateLock)
             {
                 if (latestLocalRumbleAvailable &&
@@ -1283,9 +1664,29 @@ namespace DS4Windows.InputDevices
                     return true;
                 }
 
-                if (!outboundCommands.TryEnqueue(new OutboundCommand(
-                    MessageKind.UpdateControllerState, payload)))
+                const int payloadLength =
+                    DualSenseBluetoothPhysicalOutputSequence.
+                        ControllerStatePayloadLength;
+                if (!TryCreateOutboundCommandLocked(
+                        MessageKind.UpdateControllerState, payloadLength,
+                        out OutboundCommand command))
                 {
+                    return false;
+                }
+                Buffer.BlockCopy(latestCombinedReport, stateOffset,
+                    command.Payload.Buffer, 0, payloadLength);
+
+                // Preserve the audio-control contract that shares this
+                // physical media interval, but strip every unrelated
+                // edge-triggered field. The exact motor transition and
+                // improved-rumble mode are the only effects owned here.
+                command.Payload.Buffer[0] = (byte)((
+                    command.Payload.Buffer[0] & 0xF0) | mainMotorValidity);
+                command.Payload.Buffer[1] &= 0x83;
+                command.Payload.Buffer[38] = rumbleMode;
+                if (!outboundCommands.TryEnqueue(command))
+                {
+                    ReleaseOutboundCommandLocked(command);
                     return false;
                 }
 
@@ -1320,10 +1721,17 @@ namespace DS4Windows.InputDevices
             const int stateLength =
                 DualSenseBluetoothPhysicalOutputSequence.
                     ControllerStatePayloadLength;
-            byte[] payload = new byte[GameStateAndTemplatePayloadLength];
 
             lock (stateLock)
             {
+                if (!TryCreateOutboundCommandLocked(
+                        MessageKind.UpdateGameStateAndTemplate,
+                        GameStateAndTemplatePayloadLength,
+                        out OutboundCommand command))
+                {
+                    return false;
+                }
+
                 // The virtual DualSense SET_REPORT is already one complete
                 // validity-masked transition. Never merge it with an older
                 // session-wide command: that resurrects stale rumble and
@@ -1333,19 +1741,20 @@ namespace DS4Windows.InputDevices
                 Buffer.BlockCopy(gameStateReport,
                     DualSenseBluetoothPhysicalOutputSequence.
                         ControllerStateSourceOffset,
-                    payload, 0, stateLength);
+                    command.Payload.Buffer, 0, stateLength);
                 BinaryPrimitives.WriteInt64LittleEndian(
-                    payload.AsSpan(stateLength, sizeof(long)),
+                    command.Payload.Buffer.AsSpan(stateLength, sizeof(long)),
                     hapticsExpiryQpc);
-                Buffer.BlockCopy(quiescentTemplate, 0, payload,
+                Buffer.BlockCopy(quiescentTemplate, 0,
+                    command.Payload.Buffer,
                     stateLength + sizeof(long), ReportLength);
                 // Do not replace an older game delta in the parent FIFO. The
                 // helper composes validity-masked fields at the physical
                 // boundary; replacing here could erase a rumble stop,
                 // trigger transition, or LED release before it was observed.
-                if (!outboundCommands.TryEnqueue(new OutboundCommand(
-                    MessageKind.UpdateGameStateAndTemplate, payload)))
+                if (!outboundCommands.TryEnqueue(command))
                 {
+                    ReleaseOutboundCommandLocked(command);
                     return false;
                 }
 
@@ -1383,21 +1792,23 @@ namespace DS4Windows.InputDevices
                 latestLocalRumbleAvailable = false;
                 realtimeHapticsGeneration = NextGeneration(
                     realtimeHapticsGeneration);
-                byte[] payload = new byte[sizeof(int)];
-                BinaryPrimitives.WriteInt32LittleEndian(payload,
-                    realtimeHapticsGeneration);
-                var reset = new OutboundCommand(
-                    MessageKind.ResetControllerStateTransitions,
-                    payload);
-                if (!outboundCommands.TryReplaceWhereWithGroup(command =>
-                        command.Kind == MessageKind.UpdateGameStateAndTemplate ||
-                        command.Kind == MessageKind.UpdateControllerState ||
-                        command.Kind ==
-                            MessageKind.ResetControllerStateTransitions,
-                    new[] { reset }))
+                if (!TryCreateOutboundCommandLocked(
+                        MessageKind.ResetControllerStateTransitions,
+                        sizeof(int), out OutboundCommand reset))
                 {
                     return false;
                 }
+                BinaryPrimitives.WriteInt32LittleEndian(reset.Payload.Buffer,
+                    realtimeHapticsGeneration);
+                if (!outboundCommands.TryReplaceWhereWithOne(
+                    IsControllerStateOrResetCommand, reset,
+                    removedOutboundCommands, out int removedCount))
+                {
+                    ReleaseOutboundCommandLocked(reset);
+                    return false;
+                }
+
+                ReleaseRemovedOutboundCommandsLocked(removedCount);
             }
 
             outboundAvailable.Set();
@@ -1416,10 +1827,10 @@ namespace DS4Windows.InputDevices
                 return false;
             }
 
-            List<PendingReportCompletion> completions = null;
-            AcknowledgementDisposition completionDisposition =
-                AcknowledgementDisposition.Cleared;
             bool queued = false;
+            int removedReportCount = 0;
+            AcknowledgementDisposition removedReportDisposition =
+                AcknowledgementDisposition.Cleared;
             lock (stateLock)
             {
                 latestControllerStateAvailable = false;
@@ -1428,44 +1839,67 @@ namespace DS4Windows.InputDevices
                 realtimeHapticsGeneration = NextGeneration(
                     realtimeHapticsGeneration);
 
-                foreach (OutboundCommand removed in outboundCommands.RemoveWhere(
-                    command => command.Kind == MessageKind.QueueReport))
+                int removedCount = outboundCommands.RemoveWhereInto(
+                    IsQueuedReportCommand, removedOutboundCommands);
+                for (int index = 0; index < removedCount; index++)
                 {
+                    OutboundCommand removed = removedOutboundCommands[index];
                     outstandingReports.Remove(removed.ReportId);
-                    TakePendingCompletionLocked(removed.ReportId,
-                        ref completions);
+                    removedQueuedReportIds[removedReportCount++] =
+                        removed.ReportId;
+                    ReleaseRemovedOutboundCommandLocked(index);
                 }
 
                 // Clear is a lifecycle boundary, not merely an audio-reservoir
                 // flush. Unsent state/reset commands from the old epoch must
                 // not arrive after it and resurrect game-owned effects.
-                outboundCommands.RemoveWhere(command =>
-                    command.Kind == MessageKind.UpdateControllerState ||
-                    command.Kind == MessageKind.UpdateGameStateAndTemplate ||
-                    command.Kind ==
-                        MessageKind.ResetControllerStateTransitions);
+                removedCount = outboundCommands.RemoveWhereInto(
+                    IsControllerStateOrResetCommand, removedOutboundCommands);
+                ReleaseRemovedOutboundCommandsLocked(removedCount);
 
-                byte[] payload = new byte[sizeof(int) * 2];
-                BinaryPrimitives.WriteInt32LittleEndian(payload, currentEpoch);
-                BinaryPrimitives.WriteInt32LittleEndian(
-                    payload.AsSpan(sizeof(int), sizeof(int)),
-                    realtimeHapticsGeneration);
-                if (!outboundCommands.TryEnqueue(new OutboundCommand(
-                    MessageKind.Clear, payload)))
+                if (!TryCreateOutboundCommandLocked(MessageKind.Clear,
+                    sizeof(int) * 2, out OutboundCommand clear))
                 {
-                    SetErrorLocked("The pacer command reservoir was full during Clear.");
-                    completionDisposition =
+                    SetErrorLocked(
+                        "The pacer payload reservoir was full during Clear.");
+                    removedReportDisposition =
                         AcknowledgementDisposition.TransportFault;
-                    TakeAllPendingCompletionsLocked(ref completions);
+                    controlReportCompletions.CompleteAll(
+                        AcknowledgementDisposition.TransportFault);
+                    outstandingReports.Clear();
+                    goto ClearCompleted;
+                }
+
+                BinaryPrimitives.WriteInt32LittleEndian(clear.Payload.Buffer,
+                    currentEpoch);
+                BinaryPrimitives.WriteInt32LittleEndian(
+                    clear.Payload.Buffer.AsSpan(sizeof(int), sizeof(int)),
+                    realtimeHapticsGeneration);
+                if (!outboundCommands.TryEnqueue(clear))
+                {
+                    ReleaseOutboundCommandLocked(clear);
+                    SetErrorLocked("The pacer command reservoir was full during Clear.");
+                    removedReportDisposition =
+                        AcknowledgementDisposition.TransportFault;
+                    controlReportCompletions.CompleteAll(
+                        AcknowledgementDisposition.TransportFault);
                     outstandingReports.Clear();
                 }
                 else
                 {
                     queued = true;
                 }
+
+            ClearCompleted:;
+                for (int index = 0; index < removedReportCount; index++)
+                {
+                    controlReportCompletions.Complete(
+                        removedQueuedReportIds[index],
+                        removedReportDisposition);
+                    removedQueuedReportIds[index] = 0;
+                }
             }
 
-            CompletePendingReports(completions, completionDisposition);
             if (!queued)
             {
                 readyEvent.Set();
@@ -1485,18 +1919,24 @@ namespace DS4Windows.InputDevices
             }
 
             realtimeHaptics.RequestStop();
-            outboundCommands.Clear();
-            List<PendingReportCompletion> completions = null;
+            bool stopQueued = false;
             lock (stateLock)
             {
+                ReleaseAllOutboundCommandsLocked();
                 outstandingReports.Clear();
-                TakeAllPendingCompletionsLocked(ref completions);
+                controlReportCompletions.CompleteAll(
+                    AcknowledgementDisposition.Cleared);
+                if (TryCreateOutboundCommandLocked(MessageKind.Stop, 0,
+                        out OutboundCommand stop))
+                {
+                    stopQueued = outboundCommands.TryEnqueue(stop);
+                    if (!stopQueued)
+                    {
+                        ReleaseOutboundCommandLocked(stop);
+                    }
+                }
             }
-            CompletePendingReports(completions,
-                AcknowledgementDisposition.Cleared);
-
-            if (!outboundCommands.TryEnqueue(new OutboundCommand(
-                MessageKind.Stop, Array.Empty<byte>())))
+            if (!stopQueued)
             {
                 ClosePipeNoThrow();
                 EnsureHelperProcessExited();
@@ -1538,25 +1978,42 @@ namespace DS4Windows.InputDevices
                     bool sentAny = false;
                     while (true)
                     {
-                        OutboundCommand command = null;
+                        OutboundCommand command = default;
+                        bool claimed;
                         lock (stateLock)
                         {
-                            outboundCommands.TryDequeue(out command);
+                            claimed = outboundCommands.TryDequeue(out command);
                         }
 
                         // Realtime haptics no longer shares this queue. This
                         // pipe now carries only speaker/control/lifecycle work.
-                        if (command != null)
+                        if (claimed)
                         {
-                            SendFrame(command.Kind, command.Payload);
-                            sentAny = true;
-                            if (command.Kind == MessageKind.Stop)
+                            try
                             {
-                                return;
+                                SendFrame(command.Kind,
+                                    command.Payload.Buffer,
+                                    command.PayloadLength);
+                                sentAny = true;
+                                if (command.Kind == MessageKind.Stop)
+                                {
+                                    return;
+                                }
+                            }
+                            finally
+                            {
+                                // The sender owns this slot until the complete
+                                // frame write returns. Returning it afterward
+                                // lets producers reuse storage without holding
+                                // stateLock or a queue lock across IPC.
+                                lock (stateLock)
+                                {
+                                    ReleaseOutboundCommandLocked(command);
+                                }
                             }
                         }
 
-                        if (command == null)
+                        if (!claimed)
                         {
                             break;
                         }
@@ -1733,7 +2190,6 @@ namespace DS4Windows.InputDevices
                 BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(
                     metricOffset, sizeof(long))));
 
-            PendingReportCompletion completion = null;
             lock (stateLock)
             {
                 if (!outstandingReports.Remove(reportId))
@@ -1741,11 +2197,7 @@ namespace DS4Windows.InputDevices
                     return;
                 }
 
-                if (pendingReportCompletions.TryGetValue(reportId,
-                    out completion))
-                {
-                    pendingReportCompletions.Remove(reportId);
-                }
+                controlReportCompletions.Complete(reportId, disposition);
             }
 
             bool fatalTransportFault =
@@ -1768,8 +2220,6 @@ namespace DS4Windows.InputDevices
                     Interlocked.Increment(ref rejectedReports);
                     break;
             }
-
-            completion?.Source.TrySetResult(disposition);
 
             if (fatalTransportFault)
             {
@@ -1820,60 +2270,64 @@ namespace DS4Windows.InputDevices
             }
         }
 
-        private void TakePendingCompletionLocked(long reportId,
-            ref List<PendingReportCompletion> completions)
-        {
-            if (!pendingReportCompletions.TryGetValue(reportId,
-                out PendingReportCompletion completion))
-            {
-                return;
-            }
-
-            pendingReportCompletions.Remove(reportId);
-            completions ??= new List<PendingReportCompletion>();
-            completions.Add(completion);
-        }
-
-        private void TakeAllPendingCompletionsLocked(
-            ref List<PendingReportCompletion> completions)
-        {
-            if (pendingReportCompletions.Count == 0)
-            {
-                return;
-            }
-
-            completions ??= new List<PendingReportCompletion>(
-                pendingReportCompletions.Count);
-            foreach (PendingReportCompletion completion in
-                pendingReportCompletions.Values)
-            {
-                completions.Add(completion);
-            }
-
-            pendingReportCompletions.Clear();
-        }
-
-        private static void CompletePendingReports(
-            List<PendingReportCompletion> completions,
-            AcknowledgementDisposition disposition)
-        {
-            if (completions == null)
-            {
-                return;
-            }
-
-            foreach (PendingReportCompletion completion in completions)
-            {
-                completion.Source.TrySetResult(disposition);
-            }
-        }
-
         private void SendFrame(MessageKind kind, byte[] payload)
+        {
+            SendFrame(kind, payload, payload?.Length ?? 0);
+        }
+
+        private void SendFrame(MessageKind kind, byte[] payload,
+            int payloadLength)
         {
             lock (pipeWriteLock)
             {
-                WriteFrame(commandPipe, kind, payload);
+                WriteFrame(commandPipe, kind, payload, payloadLength);
             }
+        }
+
+        private bool TryCreateOutboundCommandLocked(MessageKind kind,
+            int payloadLength, out OutboundCommand command,
+            long reportId = 0)
+        {
+            if (!outboundPayloads.TryRent(payloadLength,
+                out DualSenseBluetoothAudioPacerPayloadLease payload))
+            {
+                command = default;
+                return false;
+            }
+
+            command = new OutboundCommand(kind, payload, payloadLength,
+                reportId);
+            return true;
+        }
+
+        private void ReleaseOutboundCommandLocked(OutboundCommand command)
+        {
+            if (command.IsValid)
+            {
+                outboundPayloads.Return(command.Payload);
+            }
+        }
+
+        private void ReleaseRemovedOutboundCommandLocked(int index)
+        {
+            OutboundCommand command = removedOutboundCommands[index];
+            removedOutboundCommands[index] = default;
+            ReleaseOutboundCommandLocked(command);
+        }
+
+        private void ReleaseRemovedOutboundCommandsLocked(int removedCount)
+        {
+            for (int index = 0; index < removedCount; index++)
+            {
+                ReleaseRemovedOutboundCommandLocked(index);
+            }
+        }
+
+        private void ReleaseAllOutboundCommandsLocked()
+        {
+            int removedCount = outboundCommands.ClearInto(
+                removedOutboundCommands);
+            ReleaseRemovedOutboundCommandsLocked(removedCount);
         }
 
         private void SetError(string error)
@@ -1881,16 +2335,15 @@ namespace DS4Windows.InputDevices
             // Wake a producer that may be losslessly backpressured on a full
             // ring after the helper has exited.
             realtimeHaptics.RequestStop();
-            List<PendingReportCompletion> completions = null;
             lock (stateLock)
             {
                 SetErrorLocked(error);
+                ReleaseAllOutboundCommandsLocked();
                 outstandingReports.Clear();
-                TakeAllPendingCompletionsLocked(ref completions);
+                controlReportCompletions.CompleteAll(
+                    AcknowledgementDisposition.TransportFault);
             }
 
-            CompletePendingReports(completions,
-                AcknowledgementDisposition.TransportFault);
             readyEvent.Set();
             stoppedEvent.Set();
         }
@@ -1903,11 +2356,9 @@ namespace DS4Windows.InputDevices
             }
         }
 
-        private static byte[] BuildQueuePayload(long reportId, int epoch,
-            long hapticsExpiryQpc, byte[] report)
+        internal static void BuildQueuePayloadInto(long reportId, int epoch,
+            long hapticsExpiryQpc, byte[] report, byte[] payload)
         {
-            byte[] payload = new byte[sizeof(long) + sizeof(int) + sizeof(long) +
-                ReportLength];
             BinaryPrimitives.WriteInt64LittleEndian(payload.AsSpan(0,
                 sizeof(long)), reportId);
             BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(sizeof(long),
@@ -1916,17 +2367,22 @@ namespace DS4Windows.InputDevices
                 sizeof(int), sizeof(long)), hapticsExpiryQpc);
             Buffer.BlockCopy(report, 0, payload,
                 sizeof(long) + sizeof(int) + sizeof(long), ReportLength);
-            return payload;
         }
 
         private static byte[] BuildTemplatePayload(byte[] template,
             long hapticsExpiryQpc)
         {
             byte[] payload = new byte[sizeof(long) + ReportLength];
+            BuildTemplatePayloadInto(template, hapticsExpiryQpc, payload);
+            return payload;
+        }
+
+        private static void BuildTemplatePayloadInto(byte[] template,
+            long hapticsExpiryQpc, byte[] payload)
+        {
             BinaryPrimitives.WriteInt64LittleEndian(payload.AsSpan(0,
                 sizeof(long)), hapticsExpiryQpc);
             Buffer.BlockCopy(template, 0, payload, sizeof(long), ReportLength);
-            return payload;
         }
 
         private static bool TryParseHelperArguments(string[] args,
@@ -2050,15 +2506,13 @@ namespace DS4Windows.InputDevices
             }
 
             realtimeHaptics.RequestStop();
-            outboundCommands.Clear();
-            List<PendingReportCompletion> completions = null;
             lock (stateLock)
             {
+                ReleaseAllOutboundCommandsLocked();
                 outstandingReports.Clear();
-                TakeAllPendingCompletionsLocked(ref completions);
+                controlReportCompletions.CompleteAll(
+                    AcknowledgementDisposition.Cleared);
             }
-            CompletePendingReports(completions,
-                AcknowledgementDisposition.Cleared);
 
             if (Volatile.Read(ref stopping) == 0)
             {
@@ -2102,6 +2556,7 @@ namespace DS4Windows.InputDevices
             outboundAvailable.Dispose();
             readyEvent.Dispose();
             stoppedEvent.Dispose();
+            controlReportCompletions.Dispose();
         }
 
         private void EnsureHelperProcessExited()
@@ -2305,8 +2760,15 @@ namespace DS4Windows.InputDevices
         private static void WriteFrame(Stream stream, MessageKind kind,
             byte[] payload)
         {
+            WriteFrame(stream, kind, payload, payload?.Length ?? 0);
+        }
+
+        private static void WriteFrame(Stream stream, MessageKind kind,
+            byte[] payload, int payloadLength)
+        {
             payload ??= Array.Empty<byte>();
-            if (payload.Length > 4096)
+            if (payloadLength < 0 || payloadLength > payload.Length ||
+                payloadLength > 4096)
             {
                 throw new InvalidDataException("Pacer IPC payload is too large.");
             }
@@ -2314,11 +2776,11 @@ namespace DS4Windows.InputDevices
             Span<byte> header = stackalloc byte[sizeof(byte) + sizeof(int)];
             header[0] = (byte)kind;
             BinaryPrimitives.WriteInt32LittleEndian(header.Slice(sizeof(byte)),
-                payload.Length);
+                payloadLength);
             stream.Write(header);
-            if (payload.Length != 0)
+            if (payloadLength != 0)
             {
-                stream.Write(payload, 0, payload.Length);
+                stream.Write(payload, 0, payloadLength);
             }
         }
 
@@ -2440,6 +2902,8 @@ namespace DS4Windows.InputDevices
             private readonly Stream commandPipe;
             private readonly Stream responsePipe;
             private readonly DualSenseBluetoothRealtimeWriter writer;
+            private readonly DualSenseBluetoothAudioPacerPhysicalWriteBoundary
+                physicalWriteBoundary;
             private readonly int parentProcessId;
             private readonly EventWaitHandle inputArrivalSignal;
             private readonly MemoryMappedViewAccessor inputClockView;
@@ -2492,6 +2956,14 @@ namespace DS4Windows.InputDevices
             private readonly byte[] controllerStatePresentation = new byte[
                 DualSenseBluetoothPhysicalOutputSequence.
                     ControllerStatePayloadLength];
+            private readonly byte[] controllerStateTemplateSnapshot =
+                new byte[ReportLength];
+            private readonly byte[] microphoneTemplateSnapshot =
+                new byte[ReportLength];
+            private readonly byte[] presentationLatestTemplateSnapshot =
+                new byte[ReportLength];
+            private readonly byte[] presentationPreviousTemplateSnapshot =
+                new byte[ReportLength];
             private readonly DualSenseNativeStateTransitionFilter
                 physicalStateTransitionFilter = new();
             private readonly DualSenseNativeStateTransitionFilter.Snapshot
@@ -2528,6 +3000,11 @@ namespace DS4Windows.InputDevices
             private bool pendingControllerStateAvailable;
             private int controllerStateReportsAhead;
             private long lastControllerStateSubmissionQpc;
+            private long controllerStateRevision;
+            private long microphoneStatusRevision;
+            private long lifecycleResetRevision;
+            private long writerClockResetRevision;
+            private int lifecycleHapticsGeneration = InitialEpoch;
             private int disposed;
             private readonly string presentationTraceDirectory;
             private readonly long[] presentationTraceQpc;
@@ -2558,6 +3035,9 @@ namespace DS4Windows.InputDevices
                 this.commandPipe = commandPipe;
                 this.responsePipe = responsePipe;
                 this.writer = writer;
+                physicalWriteBoundary =
+                    new DualSenseBluetoothAudioPacerPhysicalWriteBoundary(
+                        stateLock);
                 this.parentProcessId = parentProcessId;
                 this.inputArrivalSignal = inputArrivalSignal ??
                     throw new ArgumentNullException(nameof(inputArrivalSignal));
@@ -2870,12 +3350,10 @@ namespace DS4Windows.InputDevices
                         payload.AsSpan(sizeof(int), sizeof(int)));
                 lock (stateLock)
                 {
-                    realtimeHaptics.AcceptGeneration(hapticsGeneration,
-                        silenceFutureReports: true);
-                    physicalStateTransitionFilter.Reset();
                     pendingControllerStateAvailable = false;
                     controllerStateReportsAhead = 0;
                     lastControllerStateSubmissionQpc = 0;
+                    controllerStateRevision++;
                     currentEpoch = epoch;
                     primeRequired = true;
                     Volatile.Write(ref controllerMediaBufferLevel, -1);
@@ -2883,7 +3361,9 @@ namespace DS4Windows.InputDevices
                         ref controllerMediaBufferObservationQpc, 0);
                     Interlocked.Exchange(ref mediaBufferCadenceRatioBits,
                         BitConverter.DoubleToInt64Bits(1.0));
-                    writer.ResetSubmissionClock();
+                    lifecycleHapticsGeneration = hapticsGeneration;
+                    lifecycleResetRevision++;
+                    writerClockResetRevision = lifecycleResetRevision;
                     while (reservoir.TryDequeue(out QueuedReport report))
                     {
                         QueueAcknowledgement(report.Id,
@@ -3001,6 +3481,7 @@ namespace DS4Windows.InputDevices
                         microphoneStatusReportsAhead = 0;
                         presentationMicrophoneEnabled =
                             committedMicrophoneEnabled;
+                        microphoneStatusRevision++;
                         return;
                     }
 
@@ -3011,6 +3492,7 @@ namespace DS4Windows.InputDevices
                     }
 
                     pendingMicrophoneStatus = status;
+                    microphoneStatusRevision++;
                     // 0x39 takes its mic/audio-clock header from the second
                     // logical frame. Preserve only complete physical pairs
                     // ahead of 0x32; an odd old-mode half stays behind the
@@ -3097,9 +3579,53 @@ namespace DS4Windows.InputDevices
                             0, payloadLength);
                     }
                     pendingControllerStateAvailable = true;
+                    controllerStateRevision++;
                 }
 
                 reservoirChanged.Set();
+            }
+
+            private void ReconcileAcceptedMicrophoneStatusLocked(
+                int acceptedStatus, long claimedRevision)
+            {
+                committedMicrophoneEnabled = acceptedStatus != 0;
+                if (microphoneStatusRevision == claimedRevision &&
+                    pendingMicrophoneStatus == acceptedStatus)
+                {
+                    presentationMicrophoneEnabled =
+                        committedMicrophoneEnabled;
+                    pendingMicrophoneStatus = -1;
+                    microphoneStatusReportsAhead = 0;
+                    return;
+                }
+
+                if (pendingMicrophoneStatus < 0)
+                {
+                    presentationMicrophoneEnabled =
+                        committedMicrophoneEnabled;
+                    microphoneStatusReportsAhead = 0;
+                    return;
+                }
+
+                bool requestedEnabled = pendingMicrophoneStatus != 0;
+                if (requestedEnabled == committedMicrophoneEnabled)
+                {
+                    pendingMicrophoneStatus = -1;
+                    microphoneStatusReportsAhead = 0;
+                    presentationMicrophoneEnabled =
+                        committedMicrophoneEnabled;
+                    microphoneStatusRevision++;
+                    return;
+                }
+
+                presentationMicrophoneEnabled =
+                    GetNativeMicrophonePresentationMode(
+                        committedMicrophoneEnabled, requestedEnabled);
+                microphoneStatusReportsAhead = useNativeAudioTransport ?
+                    GetNativeMicrophoneTransitionReportsAhead(
+                        committedMicrophoneEnabled, requestedEnabled) :
+                    CompletePairedReportBoundary(reservoir.CountLeading(
+                        IsQueuedSpeakerReport));
             }
 
             private void PacerLoop()
@@ -3119,10 +3645,15 @@ namespace DS4Windows.InputDevices
                     new DualSenseV5NativePresentationScheduler(
                         Stopwatch.Frequency);
                 int nativeTransportStartupBurstReportsRemaining = 0;
+                long appliedLifecycleResetRevision = 0;
+                long appliedWriterClockResetRevision = 0;
                 try
                 {
                     while (!stopRequested.WaitOne(0))
                     {
+                        ApplyPendingLifecycleResets(
+                            ref appliedLifecycleResetRevision,
+                            ref appliedWriterClockResetRevision);
                         bool canPresent;
                         bool controlPrimeBypass;
                         bool microphoneStatusReady;
@@ -3227,10 +3758,15 @@ namespace DS4Windows.InputDevices
                         {
                             bool transportFault;
                             bool accepted;
+                            bool claimed = false;
+                            long claimedRevision = 0;
+                            long nowQpc = 0;
                             lock (stateLock)
                             {
-                                long nowQpc = Stopwatch.GetTimestamp();
+                                nowQpc = Stopwatch.GetTimestamp();
                                 bool stillReady =
+                                    lifecycleResetRevision ==
+                                        appliedLifecycleResetRevision &&
                                     pendingControllerStateAvailable &&
                                     controllerStateReportsAhead <= 0 &&
                                     (lastControllerStateSubmissionQpc == 0 ||
@@ -3246,49 +3782,67 @@ namespace DS4Windows.InputDevices
                                     latestTemplateAvailable ? latestTemplate :
                                     previousTemplateAvailable ?
                                         previousTemplate : null;
-                                if (initializationTemplate == null)
-                                {
-                                    accepted = false;
-                                    transportFault = false;
-                                }
-                                else
+                                if (initializationTemplate != null)
                                 {
                                     Buffer.BlockCopy(pendingControllerState, 0,
                                         controllerStatePresentation, 0,
                                         controllerStatePresentation.Length);
-                                    physicalStateTransitionFilter.Capture(
-                                        physicalStateTransitionBackup);
-                                    physicalStateTransitionFilter.Filter(
-                                        controllerStatePresentation, 0);
+                                    Buffer.BlockCopy(initializationTemplate, 0,
+                                        controllerStateTemplateSnapshot, 0,
+                                        ReportLength);
+                                    claimedRevision = controllerStateRevision;
+                                    claimed = true;
+                                }
+                            }
+
+                            if (!claimed)
+                            {
+                                accepted = false;
+                                transportFault = false;
+                            }
+                            else
+                            {
+                                physicalStateTransitionFilter.Capture(
+                                    physicalStateTransitionBackup);
+                                physicalStateTransitionFilter.Filter(
+                                    controllerStatePresentation, 0);
+                                physicalOutputSequence.PrepareControllerState(
+                                    controllerStatePresentation,
+                                    controllerStateTemplateSnapshot,
+                                    controllerStateReport);
+                                accepted = physicalWriteBoundary.TryWrite(writer,
+                                    controllerStateReport,
+                                    out transportFault);
+                                if (accepted)
+                                {
                                     physicalOutputSequence.
-                                        PrepareControllerState(
-                                            controllerStatePresentation,
-                                            initializationTemplate,
-                                            controllerStateReport);
-                                    accepted = writer.TryWrite(
-                                        controllerStateReport,
-                                        out transportFault);
-                                    if (accepted)
+                                        CommitControllerState();
+                                    RecordPresentationTrace(
+                                        controllerStateReport, nowQpc,
+                                        reservoir.Count);
+                                    lock (stateLock)
                                     {
-                                        physicalOutputSequence.
-                                            CommitControllerState();
-                                        pendingControllerStateAvailable =
-                                            false;
-                                        controllerStateReportsAhead = 0;
-                                        lastControllerStateSubmissionQpc =
-                                            nowQpc;
-                                        RecordPresentationTrace(
-                                            controllerStateReport, nowQpc,
-                                            reservoir.Count);
+                                        // A newer state/reset remains pending;
+                                        // completing this older claimed write
+                                        // must not clear or overwrite it.
+                                        if (controllerStateRevision ==
+                                            claimedRevision)
+                                        {
+                                            pendingControllerStateAvailable =
+                                                false;
+                                            controllerStateReportsAhead = 0;
+                                            lastControllerStateSubmissionQpc =
+                                                nowQpc;
+                                        }
                                     }
-                                    else
-                                    {
-                                        // The candidate was not accepted by
-                                        // HidBth, so none of its validity
-                                        // transitions have been consumed.
-                                        physicalStateTransitionFilter.Restore(
-                                            physicalStateTransitionBackup);
-                                    }
+                                }
+                                else
+                                {
+                                    // The candidate was not accepted by
+                                    // HidBth, so none of its validity
+                                    // transitions have been consumed.
+                                    physicalStateTransitionFilter.Restore(
+                                        physicalStateTransitionBackup);
                                 }
                             }
 
@@ -3330,9 +3884,14 @@ namespace DS4Windows.InputDevices
                         {
                             bool transportFault;
                             bool accepted;
+                            bool claimed = false;
+                            int claimedStatus = -1;
+                            long claimedRevision = 0;
                             lock (stateLock)
                             {
-                                if (pendingMicrophoneStatus < 0 ||
+                                if (lifecycleResetRevision !=
+                                        appliedLifecycleResetRevision ||
+                                    pendingMicrophoneStatus < 0 ||
                                     microphoneStatusReportsAhead > 0)
                                 {
                                     continue;
@@ -3342,40 +3901,43 @@ namespace DS4Windows.InputDevices
                                     latestTemplateAvailable ? latestTemplate :
                                     previousTemplateAvailable ?
                                         previousTemplate : null;
-                                if (initializationTemplate == null)
+                                if (initializationTemplate != null)
                                 {
-                                    accepted = false;
-                                    transportFault = false;
+                                    claimedStatus = pendingMicrophoneStatus;
+                                    claimedRevision = microphoneStatusRevision;
+                                    Buffer.BlockCopy(initializationTemplate, 0,
+                                        microphoneTemplateSnapshot, 0,
+                                        ReportLength);
+                                    claimed = true;
                                 }
-                                else
+                            }
+
+                            if (!claimed)
+                            {
+                                accepted = false;
+                                transportFault = false;
+                            }
+                            else
+                            {
+                                physicalOutputSequence.PrepareMicrophoneStatus(
+                                    claimedStatus != 0,
+                                    microphoneTemplateSnapshot,
+                                    microphoneStatusReport);
+                                accepted = physicalWriteBoundary.TryWrite(writer,
+                                    microphoneStatusReport,
+                                    out transportFault);
+                                if (accepted)
                                 {
-                                    int status = pendingMicrophoneStatus;
                                     physicalOutputSequence.
-                                        PrepareMicrophoneStatus(status != 0,
-                                            initializationTemplate,
-                                            microphoneStatusReport);
-                                    accepted = writer.TryWrite(
-                                        microphoneStatusReport,
-                                        out transportFault);
-                                    if (accepted)
+                                        CommitMicrophoneStatus();
+                                    // A mode transition can stop the
+                                    // controller's 100 Hz input clock. This
+                                    // clock has independent synchronization.
+                                    microphonePresentationClock.Reset();
+                                    lock (stateLock)
                                     {
-                                        physicalOutputSequence.
-                                            CommitMicrophoneStatus();
-                                        if (pendingMicrophoneStatus == status)
-                                        {
-                                            committedMicrophoneEnabled =
-                                                status != 0;
-                                            presentationMicrophoneEnabled =
-                                                committedMicrophoneEnabled;
-                                            // A mode transition can stop the
-                                            // controller's 100 Hz input clock.
-                                            // Require fresh post-transition
-                                            // anchors before phase-locking the
-                                            // speaker again.
-                                            microphonePresentationClock.Reset();
-                                            pendingMicrophoneStatus = -1;
-                                            microphoneStatusReportsAhead = 0;
-                                        }
+                                        ReconcileAcceptedMicrophoneStatusLocked(
+                                            claimedStatus, claimedRevision);
                                     }
                                 }
                             }
@@ -3452,97 +4014,97 @@ namespace DS4Windows.InputDevices
                             }
                             else
                             {
-                            // Byte 65 remains diagnostic telemetry. Feeding it
-                            // into steady cadence resampled audible media and
-                            // still failed to raise the measured equilibrium.
-                            // Keep the wire clock locked solely to the
-                            // controller's long-window clock estimator.
-                            scheduler.SetRateRatio(Math.Clamp(
-                                controllerClockRatio,
-                                DualSenseBluetoothAudioPacerScheduler.
-                                    MinimumRateRatio,
-                                DualSenseBluetoothAudioPacerScheduler.
-                                    MaximumRateRatio));
-                            // MeasuredTransport owns one continuous media clock and does
-                            // not phase-snap it to asynchronous HID input. The
-                            // paired 21.333 ms clock has the same requirement:
-                            // a bounded per-report HID nudge still wraps every
-                            // few reports and becomes presentation jitter. Keep
-                            // only the fractional long-window rate correction.
-                            scheduler.SetInputPhaseReference(
-                                ShouldApplyInputPhaseCorrection(
-                                    useCompactCombinedHapticsTransport,
-                                    UsePairedAudioReports) ?
-                                        Interlocked.Read(ref inputArrivalQpc) :
-                                        0);
-                            // the measured transport's Windows path owns one absolute media
-                            // deadline and never catch-up bursts. Our logical
-                            // reports can also be refreshed by high-rate HID
-                            // state, so pair availability alone is not a media
-                            // clock. Pace every physical 0x39 at the rational
-                            // deadline; advancing twice below preserves its two
-                            // 10.667 ms generations and the long-window clock
-                            // correction without relying on IRP completion as
-                            // an L2CAP credit.
-                            bool useMicrophoneClock;
-                            lock (stateLock)
-                            {
-                                useMicrophoneClock =
-                                    UseMicrophoneSequencePresentationClock &&
-                                    useCompactCombinedHapticsTransport &&
-                                    !UsePairedAudioReports &&
-                                    committedMicrophoneEnabled &&
-                                    reservoir.TryPeek(
-                                        out QueuedReport dueReport) &&
-                                    IsSpeakerAudioReport(dueReport.Report);
-                            }
-
-                            if (useMicrophoneClock)
-                            {
-                                int candidateGeneration =
-                                    microphonePresentationClock.Generation;
-                                // The microphone model is the sole owner of
-                                // duplex wire cadence once it is locked. Do
-                                // not gate its rational lattice with the
-                                // fallback scheduler: two independently
-                                // corrected clocks can manufacture a late
-                                // slot followed by a catch-up write.
-                                long earliestTransitionDeadline =
-                                    Stopwatch.GetTimestamp();
-                                if (microphonePresentationClock.TryGetNextSlot(
-                                        earliestTransitionDeadline,
-                                        out long candidateSequence,
-                                        out long candidateDeadline) &&
-                                    candidateGeneration ==
-                                        microphonePresentationClock.Generation)
+                                // Byte 65 remains diagnostic telemetry. Feeding it
+                                // into steady cadence resampled audible media and
+                                // still failed to raise the measured equilibrium.
+                                // Keep the wire clock locked solely to the
+                                // controller's long-window clock estimator.
+                                scheduler.SetRateRatio(Math.Clamp(
+                                    controllerClockRatio,
+                                    DualSenseBluetoothAudioPacerScheduler.
+                                        MinimumRateRatio,
+                                    DualSenseBluetoothAudioPacerScheduler.
+                                        MaximumRateRatio));
+                                // MeasuredTransport owns one continuous media clock and does
+                                // not phase-snap it to asynchronous HID input. The
+                                // paired 21.333 ms clock has the same requirement:
+                                // a bounded per-report HID nudge still wraps every
+                                // few reports and becomes presentation jitter. Keep
+                                // only the fractional long-window rate correction.
+                                scheduler.SetInputPhaseReference(
+                                    ShouldApplyInputPhaseCorrection(
+                                        useCompactCombinedHapticsTransport,
+                                        UsePairedAudioReports) ?
+                                            Interlocked.Read(ref inputArrivalQpc) :
+                                            0);
+                                // the measured transport's Windows path owns one absolute media
+                                // deadline and never catch-up bursts. Our logical
+                                // reports can also be refreshed by high-rate HID
+                                // state, so pair availability alone is not a media
+                                // clock. Pace every physical 0x39 at the rational
+                                // deadline; advancing twice below preserves its two
+                                // 10.667 ms generations and the long-window clock
+                                // correction without relying on IRP completion as
+                                // an L2CAP credit.
+                                bool useMicrophoneClock;
+                                lock (stateLock)
                                 {
-                                    microphoneClockedPresentation = true;
-                                    microphoneClockGeneration =
-                                        candidateGeneration;
-                                    microphoneSlotSequence = candidateSequence;
-                                    microphoneSlotDeadlineQpc =
-                                        candidateDeadline;
+                                    useMicrophoneClock =
+                                        UseMicrophoneSequencePresentationClock &&
+                                        useCompactCombinedHapticsTransport &&
+                                        !UsePairedAudioReports &&
+                                        committedMicrophoneEnabled &&
+                                        reservoir.TryPeek(
+                                            out QueuedReport dueReport) &&
+                                        IsSpeakerAudioReport(dueReport.Report);
                                 }
-                            }
 
-                            if (microphoneClockedPresentation)
-                            {
-                                // Interpolate fifteen speaker generations
-                                // uniformly across every sixteen fitted 10 ms
-                                // microphone ticks. This preserves the
-                                // controller's long-window clock while never
-                                // creating a deliberate 20 ms media hole.
-                                WaitUntil(timer, microphoneSlotDeadlineQpc,
-                                    stopRequested);
-                            }
-                            else
-                            {
-                                // Acquisition and stale-model fallback retain
-                                // the proven absolute 93.75 Hz media cadence.
-                                WaitUntil(timer,
-                                    scheduler.PresentationDeadlineQpc,
-                                    stopRequested);
-                            }
+                                if (useMicrophoneClock)
+                                {
+                                    int candidateGeneration =
+                                        microphonePresentationClock.Generation;
+                                    // The microphone model is the sole owner of
+                                    // duplex wire cadence once it is locked. Do
+                                    // not gate its rational lattice with the
+                                    // fallback scheduler: two independently
+                                    // corrected clocks can manufacture a late
+                                    // slot followed by a catch-up write.
+                                    long earliestTransitionDeadline =
+                                        Stopwatch.GetTimestamp();
+                                    if (microphonePresentationClock.TryGetNextSlot(
+                                            earliestTransitionDeadline,
+                                            out long candidateSequence,
+                                            out long candidateDeadline) &&
+                                        candidateGeneration ==
+                                            microphonePresentationClock.Generation)
+                                    {
+                                        microphoneClockedPresentation = true;
+                                        microphoneClockGeneration =
+                                            candidateGeneration;
+                                        microphoneSlotSequence = candidateSequence;
+                                        microphoneSlotDeadlineQpc =
+                                            candidateDeadline;
+                                    }
+                                }
+
+                                if (microphoneClockedPresentation)
+                                {
+                                    // Interpolate fifteen speaker generations
+                                    // uniformly across every sixteen fitted 10 ms
+                                    // microphone ticks. This preserves the
+                                    // controller's long-window clock while never
+                                    // creating a deliberate 20 ms media hole.
+                                    WaitUntil(timer, microphoneSlotDeadlineQpc,
+                                        stopRequested);
+                                }
+                                else
+                                {
+                                    // Acquisition and stale-model fallback retain
+                                    // the proven absolute 93.75 Hz media cadence.
+                                    WaitUntil(timer,
+                                        scheduler.PresentationDeadlineQpc,
+                                        stopRequested);
+                                }
                             }
                         }
                         if (stopRequested.WaitOne(0))
@@ -3594,8 +4156,25 @@ namespace DS4Windows.InputDevices
                         bool controlOnly;
                         bool controllerStatePiggybacked = false;
                         bool retainedForRetry = false;
+                        bool latestTemplateSnapshotAvailable = false;
+                        bool previousTemplateSnapshotAvailable = false;
+                        long latestTemplateSnapshotExpiryQpc = 0;
+                        long previousTemplateSnapshotExpiryQpc = 0;
+                        bool claimedPresentationMicrophoneEnabled = false;
+                        long claimedControllerStateRevision = 0;
+                        long claimedMicrophoneStatusRevision = 0;
+                        long claimedLifecycleResetRevision = 0;
+                        int claimedEpoch = 0;
+                        bool claimedLifecycleStillCurrent = false;
+                        bool resetWriterClockAfterFinalize = false;
                         lock (stateLock)
                         {
+                            if (lifecycleResetRevision !=
+                                appliedLifecycleResetRevision)
+                            {
+                                continue;
+                            }
+
                             // A profile clear or microphone transition can
                             // invalidate a token while this thread is waiting.
                             // Never let an old-clock deadline cross that state
@@ -3661,240 +4240,312 @@ namespace DS4Windows.InputDevices
                             // into the clock and slowly drain the reservoir.
                             presentedAt = Stopwatch.GetTimestamp();
                             controlOnly = !IsSpeakerAudioReport(item.Report);
+                            claimedEpoch = currentEpoch;
+                            claimedControllerStateRevision =
+                                controllerStateRevision;
+                            claimedMicrophoneStatusRevision =
+                                microphoneStatusRevision;
+                            claimedLifecycleResetRevision =
+                                lifecycleResetRevision;
+                            claimedPresentationMicrophoneEnabled =
+                                presentationMicrophoneEnabled;
+
+                            latestTemplateSnapshotAvailable =
+                                latestTemplateAvailable;
+                            if (latestTemplateSnapshotAvailable)
+                            {
+                                Buffer.BlockCopy(latestTemplate, 0,
+                                    presentationLatestTemplateSnapshot, 0,
+                                    ReportLength);
+                                latestTemplateSnapshotExpiryQpc =
+                                    latestTemplateHapticsExpiryQpc;
+                            }
+                            previousTemplateSnapshotAvailable =
+                                previousTemplateAvailable;
+                            if (previousTemplateSnapshotAvailable)
+                            {
+                                Buffer.BlockCopy(previousTemplate, 0,
+                                    presentationPreviousTemplateSnapshot, 0,
+                                    ReportLength);
+                                previousTemplateSnapshotExpiryQpc =
+                                    previousTemplateHapticsExpiryQpc;
+                            }
 
                             if (pairedItem != null)
                             {
                                 pairedItemId = pairedItem.Id;
                             }
 
-                            if (item.Epoch != currentEpoch ||
-                                (pairedItem != null &&
-                                    pairedItem.Epoch != currentEpoch))
+                            controllerStatePiggybacked =
+                                item.Epoch == claimedEpoch &&
+                                (pairedItem == null ||
+                                    pairedItem.Epoch == claimedEpoch) &&
+                                useV5PresentationCadence &&
+                                pairedItem == null && !controlOnly &&
+                                pendingControllerStateAvailable &&
+                                controllerStateReportsAhead <= 0;
+                            if (controllerStatePiggybacked)
                             {
-                                disposition =
-                                    AcknowledgementDisposition.StaleEpoch;
-                                pairedDisposition = disposition;
+                                Buffer.BlockCopy(pendingControllerState, 0,
+                                    controllerStatePresentation, 0,
+                                    controllerStatePresentation.Length);
                             }
-                            else
+                        }
+
+                        if (item.Epoch != claimedEpoch ||
+                            (pairedItem != null &&
+                                pairedItem.Epoch != claimedEpoch))
+                        {
+                            disposition =
+                                AcknowledgementDisposition.StaleEpoch;
+                            pairedDisposition = disposition;
+                        }
+                        else
+                        {
+                            DualSenseBluetoothAudioReportPatcher.PatchForPresentation(
+                                item.Report, item.HapticsExpiryQpc,
+                                pairedItem != null &&
+                                    previousTemplateSnapshotAvailable ?
+                                        presentationPreviousTemplateSnapshot :
+                                    latestTemplateSnapshotAvailable ?
+                                        presentationLatestTemplateSnapshot :
+                                        null,
+                                pairedItem != null &&
+                                    previousTemplateSnapshotAvailable ?
+                                        previousTemplateSnapshotExpiryQpc :
+                                    latestTemplateSnapshotExpiryQpc,
+                                presentedAt);
+                            if (pairedItem != null)
                             {
                                 DualSenseBluetoothAudioReportPatcher.PatchForPresentation(
-                                    item.Report, item.HapticsExpiryQpc,
-                                    pairedItem != null &&
-                                        previousTemplateAvailable ?
-                                            previousTemplate :
-                                        latestTemplateAvailable ?
-                                            latestTemplate : null,
-                                    pairedItem != null &&
-                                        previousTemplateAvailable ?
-                                            previousTemplateHapticsExpiryQpc :
-                                        latestTemplateHapticsExpiryQpc,
+                                    pairedItem.Report,
+                                    pairedItem.HapticsExpiryQpc,
+                                    latestTemplateSnapshotAvailable ?
+                                        presentationLatestTemplateSnapshot :
+                                        null,
+                                    latestTemplateSnapshotExpiryQpc,
                                     presentedAt);
-                                if (pairedItem != null)
+                            }
+
+                            if (controllerStatePiggybacked)
+                            {
+                                DualSenseBluetoothAudioReportPatcher.
+                                    ApplyControllerStateForPresentation(
+                                        item.Report,
+                                        controllerStatePresentation);
+                            }
+
+                            if (pairedItem == null && !controlOnly)
+                            {
+                                // The helper owns the physical microphone
+                                // mode. Reports may have been encoded before
+                                // or after a UI request, so derive every wire
+                                // header from the last accepted native 0x32
+                                // transition rather than stale producer state.
+                                ApplyCommittedMicrophoneMode(item.Report,
+                                    claimedPresentationMicrophoneEnabled);
+
+                                // Rear-channel audio is a sequence of
+                                // complete 512-frame waveforms, not a
+                                // mutable state bit. Bind the oldest live
+                                // generation to this exact physical media
+                                // interval after template/state composition.
+                                // A rejected HID write retains both this
+                                // report and this haptics generation.
+                                realtimeHaptics.PrepareForPresentation(
+                                    item.Report, presentedAt);
+                            }
+
+                            // Filter at the last mutable boundary, after
+                            // queued media, the current template, pending
+                            // game state, and microphone mode have been
+                            // composed. Filtering earlier allowed a later
+                            // template patch to resurrect validity strobes
+                            // for player LEDs, triggers, and other stateful
+                            // commands on every media frame.
+                            physicalStateTransitionFilter.Capture(
+                                physicalStateTransitionBackup);
+                            Buffer.BlockCopy(item.Report,
+                                DualSenseBluetoothPhysicalOutputSequence.
+                                    ControllerStateSourceOffset,
+                                physicalStatePayloadBackup, 0,
+                                physicalStatePayloadBackup.Length);
+                            physicalStateTransitionFilter.Filter(
+                                item.Report,
+                                DualSenseBluetoothPhysicalOutputSequence.
+                                    ControllerStateSourceOffset);
+
+                            bool transportFault;
+                            bool accepted;
+                            if (pairedItem == null)
+                            {
+                                byte[] physicalReport = item.Report;
+                                if (controlOnly)
                                 {
-                                    DualSenseBluetoothAudioReportPatcher.PatchForPresentation(
-                                        pairedItem.Report,
-                                        pairedItem.HapticsExpiryQpc,
-                                        latestTemplateAvailable ?
-                                            latestTemplate : null,
-                                        latestTemplateHapticsExpiryQpc,
-                                        presentedAt);
+                                    physicalOutputSequence.PrepareControl(
+                                        item.Report);
                                 }
-
-                                if (useV5PresentationCadence &&
-                                    pairedItem == null && !controlOnly &&
-                                    pendingControllerStateAvailable &&
-                                    controllerStateReportsAhead <= 0)
+                                else
                                 {
-                                    DualSenseBluetoothAudioReportPatcher.
-                                        ApplyControllerStateForPresentation(
-                                            item.Report,
-                                            pendingControllerState);
-                                    controllerStatePiggybacked = true;
-                                }
-
-                                if (pairedItem == null && !controlOnly)
-                                {
-                                    // The helper owns the physical microphone
-                                    // mode. Reports may have been encoded before
-                                    // or after a UI request, so derive every wire
-                                    // header from the last accepted native 0x32
-                                    // transition rather than stale producer state.
-                                    ApplyCommittedMicrophoneMode(item.Report,
-                                        presentationMicrophoneEnabled);
-
-                                    // Rear-channel audio is a sequence of
-                                    // complete 512-frame waveforms, not a
-                                    // mutable state bit. Bind the oldest live
-                                    // generation to this exact physical media
-                                    // interval after template/state composition.
-                                    // A rejected HID write retains both this
-                                    // report and this haptics generation.
-                                    realtimeHaptics.PrepareForPresentation(
-                                        item.Report, presentedAt);
-                                }
-
-                                // Filter at the last mutable boundary, after
-                                // queued media, the current template, pending
-                                // game state, and microphone mode have been
-                                // composed. Filtering earlier allowed a later
-                                // template patch to resurrect validity strobes
-                                // for player LEDs, triggers, and other stateful
-                                // commands on every media frame.
-                                physicalStateTransitionFilter.Capture(
-                                    physicalStateTransitionBackup);
-                                Buffer.BlockCopy(item.Report,
-                                    DualSenseBluetoothPhysicalOutputSequence.
-                                        ControllerStateSourceOffset,
-                                    physicalStatePayloadBackup, 0,
-                                    physicalStatePayloadBackup.Length);
-                                physicalStateTransitionFilter.Filter(
-                                    item.Report,
-                                    DualSenseBluetoothPhysicalOutputSequence.
-                                        ControllerStateSourceOffset);
-
-                                bool transportFault;
-                                bool accepted;
-                                if (pairedItem == null)
-                                {
-                                    byte[] physicalReport = item.Report;
-                                    if (controlOnly)
+                                    if (useMeasuredTransportAudioTransport)
                                     {
-                                        physicalOutputSequence.PrepareControl(
-                                            item.Report);
-                                    }
-                                    else
-                                    {
-                                        if (useMeasuredTransportAudioTransport)
+                                        if (useCompactCombinedHapticsTransport)
                                         {
-                                            if (useCompactCombinedHapticsTransport)
-                                            {
-                                                physicalOutputSequence.
-                                                    PrepareMeasuredTransportCombinedAudio(
-                                                        item.Report,
-                                                        measuredTransportAudioReport);
-                                            }
-                                            else
-                                            {
-                                                physicalOutputSequence.
-                                                    PrepareMeasuredTransportAudio(
-                                                        item.Report,
-                                                        measuredTransportAudioReport);
-                                            }
-
-                                            physicalReport =
-                                                measuredTransportAudioReport;
+                                            physicalOutputSequence.
+                                                PrepareMeasuredTransportCombinedAudio(
+                                                    item.Report,
+                                                    measuredTransportAudioReport);
                                         }
                                         else
                                         {
                                             physicalOutputSequence.
-                                                PrepareNativeAudio(item.Report);
+                                                PrepareMeasuredTransportAudio(
+                                                    item.Report,
+                                                    measuredTransportAudioReport);
                                         }
+
+                                        physicalReport =
+                                            measuredTransportAudioReport;
                                     }
-                                    // V5 serializes 0x32 through the same
-                                    // strict writer slot as media and commits
-                                    // once WriteFile accepts/PENDING. Draining
-                                    // every outstanding 0x36 and then waiting
-                                    // for 0x32 completion breaks that FIFO.
-                                    accepted = writer.TryWrite(physicalReport,
-                                        out transportFault);
-                                    if (accepted)
+                                    else
                                     {
-                                        RecordPresentationTrace(physicalReport,
-                                            presentedAt, reservoir.Count);
+                                        physicalOutputSequence.
+                                            PrepareNativeAudio(item.Report);
                                     }
                                 }
-                                else
+                                // V5 serializes 0x32 through the same
+                                // strict writer slot as media and commits
+                                // once WriteFile accepts/PENDING. Draining
+                                // every outstanding 0x36 and then waiting
+                                // for 0x32 completion breaks that FIFO.
+                                accepted = physicalWriteBoundary.TryWrite(
+                                    writer, physicalReport,
+                                    out transportFault);
+                                if (accepted)
                                 {
-                                    physicalOutputSequence.PreparePairedAudio(
-                                        item.Report, pairedItem.Report,
-                                        pairedAudioReport);
-                                    accepted = writer.TryWrite(
-                                        pairedAudioReport,
-                                        out transportFault);
-                                    if (accepted)
-                                    {
-                                        RecordPresentationTrace(item.Report,
-                                            presentedAt, reservoir.Count + 1);
-                                        RecordPresentationTrace(
-                                            pairedItem.Report, presentedAt,
-                                            reservoir.Count);
-                                    }
+                                    RecordPresentationTrace(physicalReport,
+                                        presentedAt, reservoir.Count);
                                 }
-
-                                // MeasuredTransport spends counters and drops the new
-                                // audio generation when its strict oldest slot
-                                // is busy. Apply that Windows transport rule to
-                                // one indivisible 0x39 pair as well. Controls
-                                // remain retriable; hard I/O faults still tear
-                                // down ownership.
-                                bool skippedSaturatedAudio =
-                                    ShouldDropSaturatedAudio(
-                                        useMeasuredTransportAudioTransport,
-                                        pairedItem != null, controlOnly,
-                                        accepted, transportFault);
-
-                                if (!accepted)
+                            }
+                            else
+                            {
+                                physicalOutputSequence.PreparePairedAudio(
+                                    item.Report, pairedItem.Report,
+                                    pairedAudioReport);
+                                accepted = physicalWriteBoundary.TryWrite(
+                                    writer, pairedAudioReport,
+                                    out transportFault);
+                                if (accepted)
                                 {
-                                    // Filtering is a transaction against the
-                                    // physical write. A rejected or deliberately
-                                    // skipped report did not consume any LED,
-                                    // trigger, lightbar, or effect transition.
-                                    physicalStateTransitionFilter.Restore(
-                                        physicalStateTransitionBackup);
-                                    Buffer.BlockCopy(
-                                        physicalStatePayloadBackup, 0,
-                                        item.Report,
-                                        DualSenseBluetoothPhysicalOutputSequence.
-                                            ControllerStateSourceOffset,
-                                        physicalStatePayloadBackup.Length);
+                                    RecordPresentationTrace(item.Report,
+                                        presentedAt, reservoir.Count + 1);
+                                    RecordPresentationTrace(
+                                        pairedItem.Report, presentedAt,
+                                        reservoir.Count);
                                 }
+                            }
 
-                                if (accepted ||
-                                    skippedSaturatedAudio)
-                                {
-                                    physicalOutputSequence.Commit(
-                                        pairedItem != null || !controlOnly);
-                                }
-                                if (accepted && pairedItem == null &&
-                                    !controlOnly)
-                                {
-                                    realtimeHaptics.CommitPrepared();
-                                }
+                            // MeasuredTransport spends counters and drops the new
+                            // audio generation when its strict oldest slot
+                            // is busy. Apply that Windows transport rule to
+                            // one indivisible 0x39 pair as well. Controls
+                            // remain retriable; hard I/O faults still tear
+                            // down ownership.
+                            bool skippedSaturatedAudio =
+                                ShouldDropSaturatedAudio(
+                                    useMeasuredTransportAudioTransport,
+                                    pairedItem != null, controlOnly,
+                                    accepted, transportFault);
 
-                                if (accepted && controllerStatePiggybacked)
+                            if (!accepted)
+                            {
+                                // Filtering is a transaction against the
+                                // physical write. A rejected or deliberately
+                                // skipped report did not consume any LED,
+                                // trigger, lightbar, or effect transition.
+                                physicalStateTransitionFilter.Restore(
+                                    physicalStateTransitionBackup);
+                                Buffer.BlockCopy(
+                                    physicalStatePayloadBackup, 0,
+                                    item.Report,
+                                    DualSenseBluetoothPhysicalOutputSequence.
+                                        ControllerStateSourceOffset,
+                                    physicalStatePayloadBackup.Length);
+                            }
+
+                            if (accepted ||
+                                skippedSaturatedAudio)
+                            {
+                                physicalOutputSequence.Commit(
+                                    pairedItem != null || !controlOnly);
+                            }
+                            if (accepted && pairedItem == null &&
+                                !controlOnly)
+                            {
+                                realtimeHaptics.CommitPrepared();
+                            }
+
+                            disposition = accepted ?
+                                AcknowledgementDisposition.Presented :
+                                transportFault ?
+                                    AcknowledgementDisposition.TransportFault :
+                                    AcknowledgementDisposition.Rejected;
+                            pairedDisposition = disposition;
+
+                            lock (stateLock)
+                            {
+                                claimedLifecycleStillCurrent =
+                                    lifecycleResetRevision ==
+                                        claimedLifecycleResetRevision &&
+                                    currentEpoch == claimedEpoch;
+                                if (accepted && controllerStatePiggybacked &&
+                                    claimedLifecycleStillCurrent &&
+                                    controllerStateRevision ==
+                                        claimedControllerStateRevision)
                                 {
                                     pendingControllerStateAvailable = false;
                                     controllerStateReportsAhead = 0;
                                     lastControllerStateSubmissionQpc =
                                         presentedAt;
                                 }
-
-                                disposition = accepted ?
-                                    AcknowledgementDisposition.Presented :
-                                    transportFault ?
-                                        AcknowledgementDisposition.TransportFault :
-                                        AcknowledgementDisposition.Rejected;
-                                pairedDisposition = disposition;
-
                                 if (!skippedSaturatedAudio &&
                                     ShouldRetainSaturatedWrite(accepted,
                                         transportFault))
                                 {
-                                    retainedForRetry = pairedItem == null ?
-                                        reservoir.TryEnqueueFront(item) :
-                                        reservoir.TryEnqueuePairFront(item,
-                                            pairedItem);
-                                    if (!retainedForRetry)
+                                    if (claimedLifecycleStillCurrent)
                                     {
-                                        throw new InvalidOperationException(
-                                            "The pacer could not restore a saturated report to the FIFO head.");
+                                        retainedForRetry = pairedItem == null ?
+                                            reservoir.TryEnqueueFront(item) :
+                                            reservoir.TryEnqueuePairFront(item,
+                                                pairedItem);
+                                        if (!retainedForRetry)
+                                        {
+                                            throw new InvalidOperationException(
+                                                "The pacer could not restore a saturated report to the FIFO head.");
+                                        }
+                                    }
+                                    else
+                                    {
+                                        disposition =
+                                            AcknowledgementDisposition.StaleEpoch;
+                                        pairedDisposition = disposition;
                                     }
                                 }
+
                             }
+                        }
+
+                        lock (stateLock)
+                        {
+                            claimedLifecycleStillCurrent =
+                                lifecycleResetRevision ==
+                                    claimedLifecycleResetRevision &&
+                                currentEpoch == claimedEpoch;
 
                             if (!retainedForRetry &&
                                 disposition ==
                                     AcknowledgementDisposition.Presented &&
+                                claimedLifecycleStillCurrent &&
                                 nativeTransportStartupBurstPresentation &&
                                 !controlOnly)
                             {
@@ -3918,9 +4569,12 @@ namespace DS4Windows.InputDevices
                             if (!retainedForRetry &&
                                 disposition ==
                                     AcknowledgementDisposition.Presented &&
+                                claimedLifecycleStillCurrent &&
                                 !controlOnly &&
                                 pendingMicrophoneStatus >= 0 &&
-                                microphoneStatusReportsAhead > 0)
+                                microphoneStatusReportsAhead > 0 &&
+                                microphoneStatusRevision ==
+                                    claimedMicrophoneStatusRevision)
                             {
                                 // Spend the boundary only for speaker media
                                 // that the physical writer accepted. Control,
@@ -3931,8 +4585,11 @@ namespace DS4Windows.InputDevices
                                     (pairedItem == null ? 1 : 2));
                             }
                             if (!retainedForRetry &&
+                                claimedLifecycleStillCurrent &&
                                 pendingControllerStateAvailable &&
-                                controllerStateReportsAhead > 0)
+                                controllerStateReportsAhead > 0 &&
+                                controllerStateRevision ==
+                                    claimedControllerStateRevision)
                             {
                                 controllerStateReportsAhead = Math.Max(0,
                                     controllerStateReportsAhead -
@@ -3940,6 +4597,7 @@ namespace DS4Windows.InputDevices
                             }
 
                             if (!retainedForRetry &&
+                                claimedLifecycleStillCurrent &&
                                 ShouldRequireAudioPrimeAfterPresentation(
                                 controlOnly, reservoir.Count))
                             {
@@ -3947,7 +4605,7 @@ namespace DS4Windows.InputDevices
                                 scheduler.Reset();
                                 if (controlOnly)
                                 {
-                                    writer.ResetSubmissionClock();
+                                    resetWriterClockAfterFinalize = true;
                                 }
                             }
 
@@ -3966,18 +4624,25 @@ namespace DS4Windows.InputDevices
                             }
 
                             advanceScheduler = !retainedForRetry &&
+                                claimedLifecycleStillCurrent &&
                                 !controlPrimeBypass &&
                                 !primeRequired &&
                                 !sourceDrivenNativePresentation &&
                                 !useV5PresentationCadence;
                             advanceV5Scheduler = !retainedForRetry &&
+                                claimedLifecycleStillCurrent &&
                                 disposition ==
                                     AcknowledgementDisposition.Presented &&
                                 !controlOnly &&
                                 !controlPrimeBypass &&
                                 !primeRequired &&
                                 useV5PresentationCadence &&
-                                !nativeTransportStartupBurstPresentation;
+                                    !nativeTransportStartupBurstPresentation;
+                        }
+
+                        if (resetWriterClockAfterFinalize)
+                        {
+                            writer.ResetSubmissionClock();
                         }
 
                         if (retainedForRetry)
@@ -4004,7 +4669,8 @@ namespace DS4Windows.InputDevices
                             nativeTransportScheduler.AdvanceAfterSend(presentedAt);
                         }
 
-                        if (microphoneClockedPresentation)
+                        if (microphoneClockedPresentation &&
+                            claimedLifecycleStillCurrent)
                         {
                             microphonePresentationClock.Advance(
                                 microphoneSlotSequence);
@@ -4095,6 +4761,7 @@ namespace DS4Windows.InputDevices
                             pendingControllerState, 0, stateLength);
                     }
                     pendingControllerStateAvailable = true;
+                    controllerStateRevision++;
                     // A V5 media generation consumes this state atomically on
                     // its next due slot. With no media pending, the normal
                     // controller-state branch emits a serialized 0x31 latch.
@@ -4117,11 +4784,46 @@ namespace DS4Windows.InputDevices
                 {
                     int hapticsGeneration =
                         BinaryPrimitives.ReadInt32LittleEndian(payload);
+                    pendingControllerStateAvailable = false;
+                    controllerStateReportsAhead = 0;
+                    controllerStateRevision++;
+                    lifecycleHapticsGeneration = hapticsGeneration;
+                    lifecycleResetRevision++;
+                }
+
+                reservoirChanged.Set();
+            }
+
+            private void ApplyPendingLifecycleResets(
+                ref long appliedLifecycleRevision,
+                ref long appliedWriterRevision)
+            {
+                long requestedLifecycleRevision;
+                long requestedWriterRevision;
+                int hapticsGeneration;
+                lock (stateLock)
+                {
+                    requestedLifecycleRevision = lifecycleResetRevision;
+                    requestedWriterRevision = writerClockResetRevision;
+                    hapticsGeneration = lifecycleHapticsGeneration;
+                }
+
+                if (requestedLifecycleRevision != appliedLifecycleRevision)
+                {
+                    // These objects are owned by the persistent pacer thread.
+                    // The command reader publishes only a generation request,
+                    // so it can admit reset/lifecycle work while HID I/O is in
+                    // flight without racing the physical compositor.
                     realtimeHaptics.AcceptGeneration(hapticsGeneration,
                         silenceFutureReports: true);
                     physicalStateTransitionFilter.Reset();
-                    pendingControllerStateAvailable = false;
-                    controllerStateReportsAhead = 0;
+                    appliedLifecycleRevision = requestedLifecycleRevision;
+                }
+
+                if (requestedWriterRevision != appliedWriterRevision)
+                {
+                    writer.ResetSubmissionClock();
+                    appliedWriterRevision = requestedWriterRevision;
                 }
             }
 
@@ -4678,6 +5380,131 @@ namespace DS4Windows.InputDevices
         private static extern bool CloseHandle(IntPtr handle);
     }
 
+    internal interface IDualSenseBluetoothAudioPacerPhysicalWriter
+    {
+        bool TryWrite(byte[] report, out bool transportFault);
+    }
+
+    /// <summary>
+    /// Makes the physical-I/O ownership boundary executable and testable. It
+    /// never acquires the helper state lock and rejects accidental calls made
+    /// while that lock is held by the current thread.
+    /// </summary>
+    internal sealed class DualSenseBluetoothAudioPacerPhysicalWriteBoundary
+    {
+        private readonly object stateLock;
+
+        public DualSenseBluetoothAudioPacerPhysicalWriteBoundary(
+            object stateLock)
+        {
+            this.stateLock = stateLock ??
+                throw new ArgumentNullException(nameof(stateLock));
+        }
+
+        public bool TryWrite(
+            IDualSenseBluetoothAudioPacerPhysicalWriter writer,
+            byte[] report, out bool transportFault)
+        {
+            if (Monitor.IsEntered(stateLock))
+            {
+                throw new InvalidOperationException(
+                    "Physical DualSense I/O cannot run while the pacer state lock is held.");
+            }
+
+            return writer.TryWrite(report, out transportFault);
+        }
+    }
+
+    /// <summary>
+    /// A fixed per-pacer payload reservoir. The owning pacer serializes every
+    /// rent and return with its state lock; the pool therefore needs no lock
+    /// of its own and never allocates after construction.
+    /// </summary>
+    internal sealed class DualSenseBluetoothAudioPacerPayloadPool
+    {
+        private readonly byte[][] payloads;
+        private readonly int[] freeSlots;
+        private readonly bool[] rented;
+        private int freeCount;
+
+        public DualSenseBluetoothAudioPacerPayloadPool(int capacity,
+            int payloadCapacity)
+        {
+            if (capacity <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(capacity));
+            }
+            if (payloadCapacity <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(payloadCapacity));
+            }
+
+            payloads = new byte[capacity][];
+            freeSlots = new int[capacity];
+            rented = new bool[capacity];
+            for (int index = 0; index < capacity; index++)
+            {
+                payloads[index] = new byte[payloadCapacity];
+                freeSlots[index] = capacity - index - 1;
+            }
+
+            freeCount = capacity;
+            PayloadCapacity = payloadCapacity;
+        }
+
+        public int Capacity => payloads.Length;
+        public int PayloadCapacity { get; }
+        public int AvailableCount => freeCount;
+
+        public bool TryRent(int payloadLength,
+            out DualSenseBluetoothAudioPacerPayloadLease lease)
+        {
+            if ((uint)payloadLength > (uint)PayloadCapacity)
+            {
+                throw new ArgumentOutOfRangeException(nameof(payloadLength));
+            }
+            if (freeCount == 0)
+            {
+                lease = default;
+                return false;
+            }
+
+            int slot = freeSlots[--freeCount];
+            rented[slot] = true;
+            lease = new DualSenseBluetoothAudioPacerPayloadLease(slot,
+                payloads[slot]);
+            return true;
+        }
+
+        public void Return(DualSenseBluetoothAudioPacerPayloadLease lease)
+        {
+            if (!lease.IsValid || (uint)lease.Slot >= (uint)payloads.Length ||
+                !ReferenceEquals(payloads[lease.Slot], lease.Buffer) ||
+                !rented[lease.Slot])
+            {
+                throw new InvalidOperationException(
+                    "The DualSense audio pacer payload lease is invalid or was already returned.");
+            }
+
+            rented[lease.Slot] = false;
+            freeSlots[freeCount++] = lease.Slot;
+        }
+    }
+
+    internal readonly struct DualSenseBluetoothAudioPacerPayloadLease
+    {
+        internal DualSenseBluetoothAudioPacerPayloadLease(int slot,
+            byte[] buffer)
+        {
+            Slot = slot;
+            Buffer = buffer;
+        }
+
+        internal int Slot { get; }
+        internal byte[] Buffer { get; }
+        internal bool IsValid => Buffer != null;
+    }
+
     /// <summary>
     /// Pure bounded FIFO used by both sides of the pacer and directly by unit
     /// tests. It never overwrites an older element when full.
@@ -4686,6 +5513,7 @@ namespace DS4Windows.InputDevices
     {
         private readonly object syncRoot = new object();
         private readonly T[] entries;
+        private readonly T[] rewriteScratch;
         private int head;
         private int count;
 
@@ -4697,6 +5525,7 @@ namespace DS4Windows.InputDevices
             }
 
             entries = new T[capacity];
+            rewriteScratch = new T[capacity];
         }
 
         public int Capacity => entries.Length;
@@ -4734,6 +5563,17 @@ namespace DS4Windows.InputDevices
         /// </summary>
         public bool TryReplaceNewestOrEnqueue(Predicate<T> predicate, T item)
         {
+            return TryReplaceNewestOrEnqueue(predicate, item, out _,
+                out _);
+        }
+
+        /// <summary>
+        /// Allocation-free replacement variant which returns ownership of the
+        /// displaced item to the caller.
+        /// </summary>
+        public bool TryReplaceNewestOrEnqueue(Predicate<T> predicate, T item,
+            out T replaced, out bool didReplace)
+        {
             if (predicate == null)
             {
                 throw new ArgumentNullException(nameof(predicate));
@@ -4746,18 +5586,24 @@ namespace DS4Windows.InputDevices
                     int index = (head + offset) % entries.Length;
                     if (predicate(entries[index]))
                     {
+                        replaced = entries[index];
                         entries[index] = item;
+                        didReplace = true;
                         return true;
                     }
                 }
 
                 if (count == entries.Length)
                 {
+                    replaced = default;
+                    didReplace = false;
                     return false;
                 }
 
                 entries[(head + count) % entries.Length] = item;
                 count++;
+                replaced = default;
+                didReplace = false;
                 return true;
             }
         }
@@ -4945,6 +5791,72 @@ namespace DS4Windows.InputDevices
         }
 
         /// <summary>
+        /// Removes matching entries without allocating. Removed ownership is
+        /// copied into the caller-provided capacity-sized scratch array.
+        /// </summary>
+        public int RemoveWhereInto(Predicate<T> predicate, T[] removed)
+        {
+            if (predicate == null)
+            {
+                throw new ArgumentNullException(nameof(predicate));
+            }
+            if (removed == null || removed.Length < entries.Length)
+            {
+                throw new ArgumentException(
+                    "Removal scratch must cover the ring capacity.",
+                    nameof(removed));
+            }
+
+            lock (syncRoot)
+            {
+                int removedCount = 0;
+                int retainedCount = 0;
+                for (int index = 0; index < count; index++)
+                {
+                    T item = entries[(head + index) % entries.Length];
+                    if (predicate(item))
+                    {
+                        removed[removedCount++] = item;
+                    }
+                    else
+                    {
+                        rewriteScratch[retainedCount++] = item;
+                    }
+                }
+
+                RewriteFromScratch(retainedCount);
+                return removedCount;
+            }
+        }
+
+        /// <summary>
+        /// Drains the FIFO into preallocated caller storage.
+        /// </summary>
+        public int ClearInto(T[] removed)
+        {
+            if (removed == null || removed.Length < entries.Length)
+            {
+                throw new ArgumentException(
+                    "Removal scratch must cover the ring capacity.",
+                    nameof(removed));
+            }
+
+            lock (syncRoot)
+            {
+                int removedCount = count;
+                for (int index = 0; index < removedCount; index++)
+                {
+                    removed[index] = entries[(head + index) % entries.Length];
+                }
+
+                Array.Clear(entries, 0, entries.Length);
+                head = 0;
+                count = 0;
+                return removedCount;
+            }
+        }
+
+        /// <summary>
         /// Replaces every matching item with one ordered group as a single
         /// capacity transaction. If the group cannot fit after the prospective
         /// removals, the FIFO is left byte-for-byte and order-for-order intact.
@@ -5000,6 +5912,92 @@ namespace DS4Windows.InputDevices
                 }
 
                 return true;
+            }
+        }
+
+        public bool TryReplaceWhereWithOne(Predicate<T> predicate,
+            T replacement, T[] removed, out int removedCount)
+        {
+            return TryReplaceWhereWithPairCore(predicate, replacement,
+                hasSecond: false, second: default, removed,
+                out removedCount);
+        }
+
+        public bool TryReplaceWhereWithPair(Predicate<T> predicate,
+            T first, T second, T[] removed, out int removedCount)
+        {
+            return TryReplaceWhereWithPairCore(predicate, first,
+                hasSecond: true, second, removed, out removedCount);
+        }
+
+        private bool TryReplaceWhereWithPairCore(Predicate<T> predicate,
+            T first, bool hasSecond, T second, T[] removed,
+            out int removedCount)
+        {
+            if (predicate == null)
+            {
+                throw new ArgumentNullException(nameof(predicate));
+            }
+            if (removed == null || removed.Length < entries.Length)
+            {
+                throw new ArgumentException(
+                    "Removal scratch must cover the ring capacity.",
+                    nameof(removed));
+            }
+
+            int replacementCount = hasSecond ? 2 : 1;
+            lock (syncRoot)
+            {
+                int removable = 0;
+                for (int index = 0; index < count; index++)
+                {
+                    if (predicate(entries[(head + index) % entries.Length]))
+                    {
+                        removable++;
+                    }
+                }
+
+                if (count - removable + replacementCount > entries.Length)
+                {
+                    removedCount = 0;
+                    return false;
+                }
+
+                removedCount = 0;
+                int retainedCount = 0;
+                for (int index = 0; index < count; index++)
+                {
+                    T item = entries[(head + index) % entries.Length];
+                    if (predicate(item))
+                    {
+                        removed[removedCount++] = item;
+                    }
+                    else
+                    {
+                        rewriteScratch[retainedCount++] = item;
+                    }
+                }
+
+                rewriteScratch[retainedCount++] = first;
+                if (hasSecond)
+                {
+                    rewriteScratch[retainedCount++] = second;
+                }
+
+                RewriteFromScratch(retainedCount);
+                return true;
+            }
+        }
+
+        private void RewriteFromScratch(int rewrittenCount)
+        {
+            Array.Clear(entries, 0, entries.Length);
+            head = 0;
+            count = rewrittenCount;
+            for (int index = 0; index < rewrittenCount; index++)
+            {
+                entries[index] = rewriteScratch[index];
+                rewriteScratch[index] = default;
             }
         }
 

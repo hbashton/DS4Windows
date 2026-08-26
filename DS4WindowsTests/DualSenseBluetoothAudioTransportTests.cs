@@ -4,8 +4,12 @@ using System.Collections;
 using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO;
+using System.IO.MemoryMappedFiles;
+using System.IO.Pipes;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace DS4WindowsTests
 {
@@ -1187,14 +1191,49 @@ namespace DS4WindowsTests
             typeof(DualSenseDevice).GetField(
                 "bluetoothCombinedHapticsGeneration",
                 BindingFlags.Instance | BindingFlags.NonPublic);
-        private static readonly FieldInfo NativeLightbarReleasedField =
+        private static readonly FieldInfo PhysicalOutputStateMailboxField =
             typeof(DualSenseDevice).GetField(
-                "nativeGameLightbarOwnershipReleased",
+                "physicalOutputStateMailbox",
                 BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo BluetoothAudioPacerField =
+            typeof(DualSenseDevice).GetField(
+                "bluetoothAudioPacer",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo PacerOutboundCommandsField =
+            typeof(DualSenseBluetoothAudioPacer).GetField(
+                "outboundCommands",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo PacerRingSyncRootField =
+            typeof(DualSenseBluetoothAudioPacerRing<
+                DualSenseBluetoothAudioPacer.OutboundCommand>).GetField(
+                    "syncRoot",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo PacerRingEntriesField =
+            typeof(DualSenseBluetoothAudioPacerRing<
+                DualSenseBluetoothAudioPacer.OutboundCommand>).GetField(
+                    "entries",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo PacerRingHeadField =
+            typeof(DualSenseBluetoothAudioPacerRing<
+                DualSenseBluetoothAudioPacer.OutboundCommand>).GetField(
+                    "head",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo PacerRingCountField =
+            typeof(DualSenseBluetoothAudioPacerRing<
+                DualSenseBluetoothAudioPacer.OutboundCommand>).GetField(
+                    "count",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly MethodInfo BuildCombinedControlReportMethod =
             typeof(DualSenseDevice).GetMethod(
                 "BuildBluetoothCombinedControlReport",
                 BindingFlags.Static | BindingFlags.NonPublic);
+        private static readonly MethodInfo
+            TryWriteCombinedControlReportMethod =
+                typeof(DualSenseDevice).GetMethods(
+                    BindingFlags.Instance | BindingFlags.NonPublic).
+                    Single(method => method.Name ==
+                        "TryWriteCachedBluetoothCombinedControlReport" &&
+                        method.GetParameters().Length == 4);
         private static readonly MethodInfo UpdateCachedCombinedStateMethod =
             typeof(DualSenseDevice).GetMethod(
                 "UpdateCachedBluetoothCombinedState",
@@ -1208,9 +1247,17 @@ namespace DS4WindowsTests
             typeof(DualSenseDevice).GetMethod(
                 "ReleaseNativeGameOutputOwnership",
                 BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly MethodInfo ClaimPhysicalOutputStateMethod =
+            typeof(DualSenseDevice).GetMethod(
+                "ClaimPhysicalOutputState",
+                BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly MethodInfo DrainQueuedInputEventsMethod =
             typeof(DualSenseDevice).GetMethod(
                 "DrainQueuedInputEvents",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly MethodInfo DrainQueuedDeviceCommandsMethod =
+            typeof(DualSenseDevice).GetMethod(
+                "DrainQueuedDeviceCommandsOnOwner",
                 BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly MethodInfo RecordBluetoothMicrophoneFrameMethod =
             typeof(DualSenseDevice).GetMethod(
@@ -1218,20 +1265,22 @@ namespace DS4WindowsTests
                 BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly MethodInfo
             ApplyBluetoothMicrophoneStreamingRequestMethod =
-                typeof(DualSenseDevice).GetMethod(
-                    "ApplyBluetoothMicrophoneStreamingRequest",
-                    BindingFlags.Instance | BindingFlags.NonPublic,
-                    binder: null, types: new[] { typeof(byte[]) },
-                    modifiers: null);
+                typeof(DualSenseDevice).GetMethods(
+                    BindingFlags.Instance | BindingFlags.NonPublic).
+                    Single(method => method.Name ==
+                        "ApplyBluetoothMicrophoneStreamingRequest" &&
+                        method.GetParameters().Length == 2);
         private static readonly MethodInfo
             RequiresCompletionAwareBluetoothControlWriteMethod =
                 typeof(DualSenseDevice).GetMethod(
                     "RequiresCompletionAwareBluetoothControlWrite",
                     BindingFlags.Static | BindingFlags.NonPublic);
         private static readonly MethodInfo ClaimBluetoothSpeakerClockMethod =
-            typeof(DualSenseDevice).GetMethod(
-                "ClaimBluetoothSpeakerClock",
-                BindingFlags.Instance | BindingFlags.NonPublic);
+            typeof(DualSenseDevice).GetMethods(
+                BindingFlags.Instance | BindingFlags.NonPublic).
+                Single(method => method.Name ==
+                    "ClaimBluetoothSpeakerClock" &&
+                    method.GetParameters().Length == 2);
         private static readonly MethodInfo
             PacerReferenceRetainsBluetoothTransportOwnershipMethod =
                 typeof(DualSenseDevice).GetMethod(
@@ -1337,6 +1386,10 @@ namespace DS4WindowsTests
 
             Assert.IsNotNull(DrainQueuedInputEventsMethod);
             DrainQueuedInputEventsMethod.Invoke(device, null);
+            Assert.AreEqual(0, invoked,
+                "The microphone/input callback executed a queued Action.");
+            Assert.IsNotNull(DrainQueuedDeviceCommandsMethod);
+            DrainQueuedDeviceCommandsMethod.Invoke(device, null);
 
             Assert.AreEqual(1, invoked);
             Assert.AreEqual(0, GetEventQueue(device).Count);
@@ -1414,8 +1467,10 @@ namespace DS4WindowsTests
             DualSenseDevice device = CreateBluetoothDevice();
             device.EnableSpeakerOutput = true;
             Assert.IsNotNull(ClaimBluetoothSpeakerClockMethod);
+            DualSensePhysicalOutputSnapshot outputState =
+                GetPublishedPhysicalOutputState(device);
             long existingClaim = (long)ClaimBluetoothSpeakerClockMethod.Invoke(
-                device, new object[] { 3000 });
+                device, new object[] { outputState, 3000 });
             long existingExpiry = GetFieldValue<long>(
                 SpeakerClockLeaseExpiryField, device);
 
@@ -1430,6 +1485,89 @@ namespace DS4WindowsTests
             Assert.AreEqual(existingExpiry, GetFieldValue<long>(
                 SpeakerClockLeaseExpiryField, device),
                 "A failed later frame falsely extended the active clock lease.");
+        }
+
+        [TestMethod]
+        public void BlockedControlCompletionCannotBePassedBySpeakerAdmission()
+        {
+            DualSenseDevice device = CreateBluetoothDevice();
+            using var pacer = new QueueOnlyPacerFixture();
+            using var controlEnqueued = new ManualResetEventSlim(false);
+            using var releaseControlConsumer = new ManualResetEventSlim(false);
+            SetFieldValue(BluetoothAudioPacerField, device, pacer.Owner);
+            device.EnableSpeakerOutput = true;
+            Assert.IsTrue(device.EnsureBluetoothCombinedOutputTransport());
+            device.BluetoothCombinedControlEnqueuedTestHook = () =>
+            {
+                controlEnqueued.Set();
+                releaseControlConsumer.Wait();
+            };
+            Task<bool> control = null;
+            try
+            {
+                control = Task.Run(() => (bool)
+                    TryWriteCombinedControlReportMethod.Invoke(device,
+                        new object[]
+                        {
+                            false,
+                            "ordered admission test",
+                            true,
+                            false,
+                        }));
+                Assert.IsTrue(controlEnqueued.Wait(2000),
+                    "The ordered control report was not admitted.");
+                Assert.IsFalse(control.IsCompleted,
+                    "The fixture must hold only the completion consumer.");
+
+                Task<bool> speaker = Task.Run(() =>
+                    device.SetBluetoothSpeakerAudioFrame(
+                        new byte[200], 200));
+                Assert.IsTrue(speaker.Wait(2000),
+                    "Speaker admission waited behind control completion.");
+                Assert.IsTrue(speaker.Result);
+
+                GetFirstTwoQueuedReports(pacer.Owner,
+                    out DualSenseBluetoothAudioPacer.OutboundCommand first,
+                    out DualSenseBluetoothAudioPacer.OutboundCommand second);
+                Assert.AreEqual((byte)0, GetCombinedSequence(first),
+                    "The control report did not retain the oldest physical sequence.");
+                Assert.AreEqual((byte)1, GetCombinedSequence(second),
+                    "The later speaker report passed the blocked control report.");
+                Assert.IsFalse(DualSenseBluetoothAudioPacer.
+                    IsSpeakerAudioReport(GetQueuedReport(first)));
+                Assert.IsTrue(DualSenseBluetoothAudioPacer.
+                    IsSpeakerAudioReport(GetQueuedReport(second)));
+
+                // Clear is the same fixed-slot lifecycle boundary used during
+                // recovery. It must release the exact pending control token
+                // while preserving both admitted physical sequence numbers.
+                Assert.IsTrue(pacer.Owner.Clear());
+                releaseControlConsumer.Set();
+                Assert.IsTrue(control.Wait(2000));
+                Assert.IsFalse(control.Result,
+                    "A lifecycle-cleared control report was reported presented.");
+                Assert.AreEqual(0, pacer.Owner.OutstandingReportCount);
+                Assert.AreEqual((byte)2, GetFieldValue<byte>(
+                    SpeakerReportSequenceField, device),
+                    "Accepted reports were rolled back after lifecycle completion.");
+            }
+            finally
+            {
+                releaseControlConsumer.Set();
+                device.BluetoothCombinedControlEnqueuedTestHook = null;
+                if (control != null && !control.IsCompleted)
+                {
+                    try
+                    {
+                        pacer.Owner.Clear();
+                        control.Wait(2000);
+                    }
+                    catch
+                    {
+                    }
+                }
+                SetFieldValue(BluetoothAudioPacerField, device, null);
+            }
         }
 
         [TestMethod]
@@ -1465,7 +1603,7 @@ namespace DS4WindowsTests
             device.LightBarColor = new DS4Color(12, 34, 56);
             byte[] report = BuildCombinedControlReport(0, 0, false);
             report[13] = 0x02;
-            report[14] = 0x08;
+            report[14] = 0x04;
             report[15] = 0x41;
             report[16] = 0x52;
             report[17] = 0x13;
@@ -1489,7 +1627,7 @@ namespace DS4WindowsTests
             byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
                 device);
             AssertV5AudioContract(cached, expectedFlag0: 0xF2,
-                expectedFlag1: 0x8B);
+                expectedFlag1: 0x87);
             Assert.AreEqual((byte)0x41, cached[15]);
             Assert.AreEqual((byte)0x52, cached[16]);
             for (int index = 23; index <= 49; index++)
@@ -1633,8 +1771,9 @@ namespace DS4WindowsTests
                 DualSenseDevice.GetNativeGameLedOwnershipUpdate(native, 13));
             device.WriteBluetoothCombinedHapticsAudioOutputReport(native, 0,
                 native.Length, hasNativeGameState: true);
-            Assert.IsFalse(GetFieldValue<bool>(NativeLightbarReleasedField,
-                device), "A native LED update did not claim visual ownership.");
+            Assert.IsFalse(GetPublishedPhysicalOutputState(device).
+                NativeGameLightbarOwnershipReleased,
+                "A native LED update did not claim visual ownership.");
 
             // Reproduce the former failure: a later DS4Windows profile output
             // attempted to replace a game's latched trigger state after 100 ms.
@@ -1723,6 +1862,10 @@ namespace DS4WindowsTests
             profile[46] = 0x11;
             profile[47] = 0x22;
             profile[48] = 0x33;
+            PublishProfileVisualState(device, playerLedMask: 0,
+                new DS4Color(0x11, 0x22, 0x33));
+            Assert.IsNotNull(ClaimPhysicalOutputStateMethod);
+            ClaimPhysicalOutputStateMethod.Invoke(device, null);
             Assert.IsTrue((bool)
                 UpdateCachedCombinedStateFromBluetoothOutputMethod.Invoke(
                     device, new object[] { profile }));
@@ -1752,6 +1895,8 @@ namespace DS4WindowsTests
             profile[47] = 0x52;
             profile[48] = 0x73;
             SetFieldValue(OutputReportField, device, profile);
+            PublishProfileVisualState(device, playerLedMask: 0x09,
+                new DS4Color(0x31, 0x52, 0x73));
 
             byte[] claimed = BuildCombinedControlReport(0, 0, false);
             claimed[14] = 0x14;
@@ -1945,6 +2090,8 @@ namespace DS4WindowsTests
 
             Assert.IsNotNull(ReleaseNativeGameOutputOwnershipMethod);
             ReleaseNativeGameOutputOwnershipMethod.Invoke(device, null);
+            Assert.IsNotNull(ClaimPhysicalOutputStateMethod);
+            ClaimPhysicalOutputStateMethod.Invoke(device, null);
             Assert.AreEqual(0L, GetFieldValue<long>(
                 NativeStateTimestampField, device));
 
@@ -2020,7 +2167,8 @@ namespace DS4WindowsTests
 
             Assert.IsNotNull(RecordBluetoothMicrophoneFrameMethod);
             RecordBluetoothMicrophoneFrameMethod.Invoke(device,
-                new object[] { microphoneReport });
+                new object[] { microphoneReport,
+                    Stopwatch.GetTimestamp() });
 
             Assert.AreEqual(0, GetFieldValue<int>(
                 MicrophoneControlPendingField, device),
@@ -2040,7 +2188,8 @@ namespace DS4WindowsTests
 
             Assert.IsNotNull(RecordBluetoothMicrophoneFrameMethod);
             RecordBluetoothMicrophoneFrameMethod.Invoke(device,
-                new object[] { microphoneReport });
+                new object[] { microphoneReport,
+                    Stopwatch.GetTimestamp() });
 
             Assert.AreEqual(1, GetFieldValue<int>(
                 MicrophoneControlPendingField, device),
@@ -2062,8 +2211,10 @@ namespace DS4WindowsTests
 
             Assert.IsNotNull(
                 ApplyBluetoothMicrophoneStreamingRequestMethod);
+            DualSensePhysicalOutputSnapshot outputState =
+                GetPublishedPhysicalOutputState(device);
             ApplyBluetoothMicrophoneStreamingRequestMethod.Invoke(device,
-                new object[] { report });
+                new object[] { report, outputState });
 
             Assert.AreNotEqual(0, report[4] & 0x01,
                 "The physical microphone stream-enable bit was not set.");
@@ -2087,8 +2238,10 @@ namespace DS4WindowsTests
 
             Assert.IsNotNull(
                 ApplyBluetoothMicrophoneStreamingRequestMethod);
+            DualSensePhysicalOutputSnapshot outputState =
+                GetPublishedPhysicalOutputState(device);
             ApplyBluetoothMicrophoneStreamingRequestMethod.Invoke(device,
-                new object[] { report });
+                new object[] { report, outputState });
 
             Assert.AreNotEqual(0, report[4] & 0x01);
             Assert.AreEqual(0, report[13] & 0x40,
@@ -2193,6 +2346,126 @@ namespace DS4WindowsTests
             }
         }
 
+        private const int QueuedReportPayloadOffset = sizeof(long) +
+            sizeof(int) + sizeof(long);
+
+        private static void GetFirstTwoQueuedReports(
+            DualSenseBluetoothAudioPacer pacer,
+            out DualSenseBluetoothAudioPacer.OutboundCommand first,
+            out DualSenseBluetoothAudioPacer.OutboundCommand second)
+        {
+            var ring = (DualSenseBluetoothAudioPacerRing<
+                DualSenseBluetoothAudioPacer.OutboundCommand>)
+                    PacerOutboundCommandsField.GetValue(pacer);
+            object syncRoot = PacerRingSyncRootField.GetValue(ring);
+            lock (syncRoot)
+            {
+                int count = (int)PacerRingCountField.GetValue(ring);
+                Assert.AreEqual(2, count,
+                    "The physical FIFO must contain exactly control then speaker.");
+                int head = (int)PacerRingHeadField.GetValue(ring);
+                var entries = (DualSenseBluetoothAudioPacer.OutboundCommand[])
+                    PacerRingEntriesField.GetValue(ring);
+                first = entries[head];
+                second = entries[(head + 1) % entries.Length];
+            }
+        }
+
+        private static byte GetCombinedSequence(
+            DualSenseBluetoothAudioPacer.OutboundCommand command)
+        {
+            return (byte)((command.Payload.Buffer[
+                QueuedReportPayloadOffset + 1] >> 4) & 0x0F);
+        }
+
+        private static byte[] GetQueuedReport(
+            DualSenseBluetoothAudioPacer.OutboundCommand command)
+        {
+            byte[] report = new byte[DualSenseBluetoothAudioPacer.ReportLength];
+            Array.Copy(command.Payload.Buffer, QueuedReportPayloadOffset,
+                report, 0, report.Length);
+            return report;
+        }
+
+        private sealed class QueueOnlyPacerFixture : IDisposable
+        {
+            internal QueueOnlyPacerFixture()
+            {
+                string prefix = "DS4Windows.Tests.CombinedAdmission." +
+                    Guid.NewGuid().ToString("N");
+                NamedPipeServerStream commandPipe = null;
+                NamedPipeServerStream responsePipe = null;
+                Process helper = null;
+                EventWaitHandle inputSignal = null;
+                MemoryMappedFile inputMap = null;
+                MemoryMappedViewAccessor inputView = null;
+                DualSenseRealtimeHapticsSharedRing realtimeHaptics = null;
+                try
+                {
+                    commandPipe = new NamedPipeServerStream(prefix + ".cmd",
+                        PipeDirection.Out, 1, PipeTransmissionMode.Byte,
+                        PipeOptions.Asynchronous);
+                    responsePipe = new NamedPipeServerStream(prefix + ".rsp",
+                        PipeDirection.In, 1, PipeTransmissionMode.Byte,
+                        PipeOptions.Asynchronous);
+                    var start = new ProcessStartInfo
+                    {
+                        FileName = Environment.GetEnvironmentVariable(
+                            "ComSpec") ?? "cmd.exe",
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                    };
+                    start.ArgumentList.Add("/d");
+                    start.ArgumentList.Add("/c");
+                    start.ArgumentList.Add("exit 0");
+                    helper = Process.Start(start);
+                    Assert.IsNotNull(helper);
+                    Assert.IsTrue(helper.WaitForExit(2000));
+                    inputSignal = new EventWaitHandle(false,
+                        EventResetMode.AutoReset);
+                    inputMap = MemoryMappedFile.CreateNew(null, 24);
+                    inputView = inputMap.CreateViewAccessor();
+                    realtimeHaptics =
+                        DualSenseRealtimeHapticsSharedRing.CreateOwner(prefix,
+                            capacity: 8);
+                    ConstructorInfo constructor =
+                        typeof(DualSenseBluetoothAudioPacer).GetConstructors(
+                            BindingFlags.Instance | BindingFlags.NonPublic).
+                            Single();
+                    Owner = (DualSenseBluetoothAudioPacer)constructor.Invoke(
+                        new object[]
+                        {
+                            commandPipe,
+                            responsePipe,
+                            helper,
+                            inputSignal,
+                            inputMap,
+                            inputView,
+                            realtimeHaptics,
+                            true,
+                        });
+                }
+                catch
+                {
+                    realtimeHaptics?.Dispose();
+                    inputView?.Dispose();
+                    inputMap?.Dispose();
+                    inputSignal?.Dispose();
+                    helper?.Dispose();
+                    responsePipe?.Dispose();
+                    commandPipe?.Dispose();
+                    throw;
+                }
+            }
+
+            internal DualSenseBluetoothAudioPacer Owner { get; }
+
+            public void Dispose()
+            {
+                Owner.Dispose();
+            }
+        }
+
         private static DualSenseDevice CreateBluetoothDevice()
         {
             var hidDevice = (HidDevice)RuntimeHelpers.GetUninitializedObject(
@@ -2200,6 +2473,31 @@ namespace DS4WindowsTests
             var device = new DualSenseDevice(hidDevice, "Bluetooth transport test");
             SetFieldValue(ConnectionTypeField, device, ConnectionType.BT);
             return device;
+        }
+
+        private static DualSensePhysicalOutputSnapshot
+            GetPublishedPhysicalOutputState(DualSenseDevice device)
+        {
+            DualSensePhysicalOutputStateMailbox mailbox =
+                GetFieldValue<DualSensePhysicalOutputStateMailbox>(
+                    PhysicalOutputStateMailboxField, device);
+            return mailbox.ReadLatest();
+        }
+
+        private static void PublishProfileVisualState(DualSenseDevice device,
+            byte playerLedMask, DS4Color color)
+        {
+            DualSensePhysicalOutputStateMailbox mailbox =
+                GetFieldValue<DualSensePhysicalOutputStateMailbox>(
+                    PhysicalOutputStateMailboxField, device);
+            DualSensePhysicalOutputSnapshot latest = mailbox.ReadLatest();
+            DS4LightbarState lightbar = latest.ProfileLightbar;
+            lightbar.LightBarColor = color;
+            Assert.IsTrue(mailbox.Publish(latest with
+            {
+                ActivePlayerLedMask = playerLedMask,
+                ProfileLightbar = lightbar,
+            }));
         }
 
         private static ICollection GetEventQueue(DualSenseDevice device)

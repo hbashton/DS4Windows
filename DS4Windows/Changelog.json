@@ -1,9 +1,36 @@
 {
-  "latest_version": "5.0.3.0",
-  "latest_version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 3},
-  "updated_at": "2026-08-08T00:00:00+0000",
+  "latest_version": "5.0.4.0",
+  "latest_version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 4},
+  "updated_at": "2026-08-27T00:00:00+0000",
   "changelog": {
     "versions": [
+    {
+      "version_str": "5.0.4.0",
+      "version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 4},
+      "base_header": "Release Candidate 4.4 - Input Fidelity, Audio Efficiency, and Mute Controls",
+      "release_date": "2026-08-27T00:00:00+0000",
+      "locales": [
+        {
+          "code": "en",
+          "header": "Release Candidate 4.4 - Input Fidelity, Audio Efficiency, and Mute Controls",
+          "log_text": [
+            "* **Ordered DualSense RAW input** - the VIIPER V5 path preserves trigger press, peak, settled-status, release, and failed-write retry order while negotiated raw-input aliases carry the complete 53-byte state and same-report metadata contract",
+            "* **Lower-latency input handoff** - the next physical HID read is armed before the completed report is parsed or mapped, and the event-driven V5 writer presents ordered edges without a four-millisecond coalescing clock",
+            "* **Efficient DualShock 4 Bluetooth audio** - the speaker path uses one bounded 8 ms owner with reusable waits, and disabling audio fully retires its capture, encoder, HID lane, and wait handles before a replacement can start",
+            "* **SteelSeries Sonar capture policy** - positively identified Sonar software routes use a short polling loopback path with normalized PCM while physical and unrelated endpoints retain the standard Windows loopback path",
+            "* **Profile mute controls** - a master Mute Button Mutes Input/Output option can target the controller microphone and built-in speaker independently, keeps the mute LED on only while muted, and is mutually exclusive with mute-button profile switching",
+            "* **Safe profile-lightbar recovery** - SDL/Steam-style native output can relinquish only an idle visual LED lease so the configured profile color returns; the lifecycle heuristic never claims a sender PID or releases triggers, rumble, haptics, or audio",
+            "* **Reliable wired HidHide reconnects** - DS4Windows tracks the live HID generation and releases only rules it inserted, allowing a wired controller whose instance identity changes to enumerate and be hidden again",
+            "* **More compatible startup repair** - exact-SID Task Scheduler XML avoids ambiguous local-account normalization, ordinary missing tasks and Run values no longer become errors, and foreign same-name tasks remain protected",
+            "* **VIIPER 0.1.2 included** - the standard installer and portable package pin the same production backend build for supported virtual-controller and PlayStation media paths",
+            "* **Release validation** - transport, audio, mute, lightbar, HidHide, startup-task, installer-state, payload-integrity, build, and regression gates are exercised before public assets are published"
+          ],
+          "editor": "hbashton",
+          "editors_note": ["RC4.4 pairs DS4Windows 5.0.4.0 with VIIPER 0.1.2 and focuses on faithful low-latency input, bounded audio ownership, explicit mute behavior, and reconnect-safe lifecycle handling."],
+          "updated_at": "2026-08-27T00:00:00+0000"
+        }
+      ]
+    },
     {
       "version_str": "5.0.3.0",
       "version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 3},

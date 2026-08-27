@@ -12,7 +12,7 @@ namespace DS4Windows.Bootstrapper
     {
         private const string ExpectedMarker = "VIIPER-0.1.2+USBIP-0.9.7.7";
         private const string ExpectedViiperVersion = "0.1.2";
-        private const string ExpectedViiperHash = "980E4D713BF141E0A85ADF83FB234E50D2FA4C54093FCC9440E0F71FA3D9C633";
+        private const string ExpectedViiperHash = "2EB92FF3E82ABE292E531B6D35B10341396BF2A83FFDE6532FAEC8374B48FB6A";
         private const string ExpectedUsbipVersion = "0.9.7.7";
         private const string ExpectedUsbipHash = "FC1660E3759D8AF4CEDE48DBE194285A5A1DE85CE6E3216724499AFD32BE92E8";
         private const string ExpectedUdeHash = "51DB440065393E588A6B2585508C50EB3E1510B7B06D9AFA6C5BDE583751EA7D";

@@ -671,8 +671,11 @@ namespace DS4Windows
                     endpointKind == ControllerAudioEndpointKind.Any);
             if (useSystemDefault)
             {
+                MMDevice defaultEndpoint = WasapiLoopbackCapture
+                    .GetDefaultLoopbackCaptureDevice();
                 sourceName = "Default audio endpoint";
-                return new WasapiLoopbackCapture();
+                return CreateEndpointLoopbackCapture(defaultEndpoint,
+                    sourceName);
             }
 
             using var enumerator = new MMDeviceEnumerator();
@@ -712,6 +715,25 @@ namespace DS4Windows
             }
 
             sourceName = endpoint.FriendlyName;
+            return CreateEndpointLoopbackCapture(endpoint, sourceName);
+        }
+
+        private static IWaveIn CreateEndpointLoopbackCapture(
+            MMDevice endpoint, string sourceName)
+        {
+            DualShock4EndpointCaptureBackend backend =
+                DualShock4EndpointCapturePolicy.SelectBackend(endpoint);
+            if (backend == DualShock4EndpointCaptureBackend.
+                    SoftwareRouterPollingLoopback)
+            {
+                var capture = new DualShock4SoftwareRouterLoopbackCapture(
+                    endpoint);
+                AppLogger.LogToGui(
+                    $"DualShock 4 Bluetooth speaker selected the 4 ms requested-buffer polling WASAPI loopback backend for the SteelSeries Sonar ROOT\\MEDIA route '{sourceName}' ({DualShock4EndpointCapturePolicy.FormatCaptureWaveFormat(capture.WaveFormat)}).",
+                    false);
+                return capture;
+            }
+
             return new WasapiLoopbackCapture(endpoint);
         }
 

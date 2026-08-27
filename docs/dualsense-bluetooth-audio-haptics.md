@@ -54,6 +54,28 @@ generation and queues that same FIFO retirement. A delayed old callback cannot
 clear or disable a newer owner, and status never reports an ended worker as
 ready.
 
+### Software render endpoints
+
+The DualShock 4 Bluetooth speaker keeps the standard Windows loopback path for
+ordinary render devices. A separate polling loopback with a 4 ms requested
+WASAPI buffer is selected only when the chosen endpoint has both SteelSeries
+Sonar product identity and the `ROOT\MEDIA` controller/interface projection
+exposed by the Sonar virtual audio adapter. `SWD\MMDEVAPI` alone is deliberately
+insufficient because Windows uses it for ordinary audio endpoints too. USB,
+HDAUDIO, or Bluetooth identity evidence forces the standard path. This keeps
+physical sound devices and unrelated virtual mixers on their established
+capture contract while avoiding the long packet bursts caused by NAudio's
+default roughly 100 ms polling buffer on the matched Sonar route. Four
+milliseconds is the requested buffer size; Windows may negotiate a different
+size, and NAudio polls at half the resulting buffer duration.
+
+The polling route is still shared-mode WASAPI loopback with Windows PCM
+conversion enabled. Its exposed format is NAudio's normalized capture format;
+in particular, Sonar's extensible 32-bit float format remains IEEE float and is
+not decoded as signed Int32. Capture binds to the endpoint resolved at start.
+This narrow policy does not yet follow a later default-device change or rebuild
+a running session when an audio router recreates its endpoint.
+
 ## In-game setup
 
 1. Install a VIIPER build containing the DualSense UAC interface.

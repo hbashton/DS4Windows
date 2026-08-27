@@ -25,6 +25,88 @@ namespace DS4WindowsTests
         }
 
         [DataTestMethod]
+        // Exact MMDevice property projection observed on the affected Sonar
+        // endpoint: InstanceId is absent, while ControllerDeviceId and
+        // InterfaceKey both project the ROOT\MEDIA adapter.
+        [DataRow("SteelSeries Sonar - Gaming SteelSeries Sonar Virtual Audio Device",
+            "", @"{1}.ROOT\MEDIA\0000",
+            @"{2}.\\?\root#media#0000#{6994ad04-93ef-11d0-a3cc-00a0c9223196}\game_wave_speaker",
+            (int)DualShock4EndpointCaptureBackend.
+                SoftwareRouterPollingLoopback)]
+        [DataRow("SteelSeries Sonar Virtual Audio Device",
+            @"ROOT\MEDIA\0000", "", "",
+            (int)DualShock4EndpointCaptureBackend.
+                SoftwareRouterPollingLoopback)]
+        [DataRow("SteelSeries Sonar Virtual Audio Device", "",
+            @"{1}.ROOT\MEDIA\0000", "",
+            (int)DualShock4EndpointCaptureBackend.
+                SoftwareRouterPollingLoopback)]
+        [DataRow("SteelSeries Sonar - Gaming", @"SWD\MMDEVAPI\{sonar}",
+            "", "", (int)DualShock4EndpointCaptureBackend.StandardLoopback)]
+        [DataRow("SteelSeries Sonar - Gaming", "", "", "",
+            (int)DualShock4EndpointCaptureBackend.StandardLoopback)]
+        [DataRow("Sonar Virtual Audio Device", @"SWD\MMDEVAPI\{sonar}",
+            "", "", (int)DualShock4EndpointCaptureBackend.StandardLoopback)]
+        [DataRow("SteelSeries Gaming Audio", @"SWD\MMDEVAPI\{steelseries}",
+            "", "", (int)DualShock4EndpointCaptureBackend.StandardLoopback)]
+        [DataRow("VB-Audio Virtual Cable", @"SWD\MMDEVAPI\{virtual}",
+            "", "", (int)DualShock4EndpointCaptureBackend.StandardLoopback)]
+        [DataRow("SteelSeries Sonar - Gaming", @"SWD\MMDEVAPI\{sonar}",
+            @"HDAUDIO\FUNC_01&VEN_10EC", "",
+            (int)DualShock4EndpointCaptureBackend.StandardLoopback)]
+        [DataRow("SteelSeries Sonar - Gaming", @"SWD\MMDEVAPI\{sonar}",
+            @"USB\VID_1038&PID_12E0", "",
+            (int)DualShock4EndpointCaptureBackend.StandardLoopback)]
+        [DataRow("SteelSeries Sonar - Gaming", @"SWD\MMDEVAPI\{sonar}",
+            @"BTHENUM\DEV_001122334455", "",
+            (int)DualShock4EndpointCaptureBackend.StandardLoopback)]
+        public void SonarPollingCaptureRequiresProductAndSoftwareDeviceEvidence(
+            string productIdentity, string instanceId,
+            string controllerDeviceId, string interfaceKey, int expected)
+        {
+            Assert.AreEqual((DualShock4EndpointCaptureBackend)expected,
+                DualShock4EndpointCapturePolicy.SelectBackend(productIdentity,
+                    instanceId, controllerDeviceId, interfaceKey));
+        }
+
+        [TestMethod]
+        public void SonarCaptureUsesPollingFlagsAndRequestedBuffer()
+        {
+            Assert.AreEqual(4,
+                DualShock4SoftwareRouterLoopbackCapture.
+                    RequestedBufferMilliseconds);
+            NAudio.CoreAudioApi.AudioClientStreamFlags flags =
+                DualShock4SoftwareRouterLoopbackCapture.CaptureStreamFlags;
+            Assert.IsTrue((flags & NAudio.CoreAudioApi.
+                AudioClientStreamFlags.Loopback) != 0);
+            Assert.IsTrue((flags & NAudio.CoreAudioApi.
+                AudioClientStreamFlags.AutoConvertPcm) != 0);
+            Assert.IsTrue((flags & NAudio.CoreAudioApi.
+                AudioClientStreamFlags.SrcDefaultQuality) != 0);
+            Assert.IsFalse((flags & NAudio.CoreAudioApi.
+                AudioClientStreamFlags.EventCallback) != 0,
+                "Software-router loopback must retain the proven polling path.");
+        }
+
+        [TestMethod]
+        public void SonarExtensibleFloatFormatIsExposedAsIeeeFloat()
+        {
+            var extensible = new NAudio.Wave.WaveFormatExtensible(48000,
+                32, 2);
+
+            NAudio.Wave.WaveFormat normalized =
+                DualShock4EndpointCapturePolicy.NormalizeCaptureWaveFormat(
+                    extensible);
+
+            Assert.AreEqual(NAudio.Wave.WaveFormatEncoding.IeeeFloat,
+                normalized.Encoding);
+            Assert.AreEqual(48000, normalized.SampleRate);
+            Assert.AreEqual(2, normalized.Channels);
+            Assert.AreEqual(32, normalized.BitsPerSample);
+            Assert.AreEqual(extensible.BlockAlign, normalized.BlockAlign);
+        }
+
+        [DataTestMethod]
         [DataRow(OutContType.ViiperDS4, (int)ControllerAudioEndpointKind.DualShock4)]
         [DataRow(OutContType.ViiperDualSense, (int)ControllerAudioEndpointKind.DualSense)]
         [DataRow(OutContType.ViiperDualSenseEdge, (int)ControllerAudioEndpointKind.DualSense)]

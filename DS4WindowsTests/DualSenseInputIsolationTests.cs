@@ -14,6 +14,26 @@ namespace DS4WindowsTests
             BindingFlags.Instance | BindingFlags.NonPublic;
 
         [TestMethod]
+        public void UsbUnknownReportIdIsRejectedWithTelemetryOnly()
+        {
+            DualSenseDevice device = CreateBluetoothDevice();
+            int reportCallbacks = 0;
+            device.Report += (_, _) => reportCallbacks++;
+            byte[] normal = new byte[64];
+            normal[0] = 0x01;
+            byte[] unknown = new byte[64];
+            unknown[0] = 0x05;
+
+            Assert.IsTrue(device.TryAcceptUsbNormalInputFrame(normal));
+            Assert.IsFalse(device.TryAcceptUsbNormalInputFrame(unknown));
+
+            Assert.AreEqual(1L, device.UsbRejectedInputFrames);
+            Assert.AreEqual(0x05, device.UsbLastRejectedInputReportId);
+            Assert.AreEqual(0, reportCallbacks,
+                "Reject telemetry must not invoke an input subscriber.");
+        }
+
+        [TestMethod]
         public void BlockingPhysicalOwnersDoNotBlockInputPublicationAndLifecycleOwnsJoin()
         {
             DualSenseDevice device = CreateBluetoothDevice();

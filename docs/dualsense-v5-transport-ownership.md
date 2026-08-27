@@ -22,24 +22,64 @@ enforces the rules; it is not a general promise about legacy output devices.
 | UI/report diagnostics on the DualSense-to-VIIPER path | One coalescing snapshot per controller | Report diagnostics worker | Store primitives/references after virtual publication, signal |
 
 Input transition entries always contain the complete final state. The same
-state drives classification and 33-byte packet serialization, including the
-final mapped L2/R2 analog values and coupled digital bits. A trigger epoch
-remembers its highest received and highest successfully transported value.
+state drives classification and packet serialization, including the final
+mapped L2/R2 analog values and coupled digital bits. Legacy V5 aliases receive
+the unchanged 33-byte state. A negotiated raw-input alias receives 53 bytes:
+legacy bytes 0..32, a flags byte at 33, the same physical report's raw sensor
+timestamp bytes 28..31 at 34..37, and normalized physical raw input bytes
+41..55 at 38..52. Flag bit 0 states that the physical observation is valid;
+bit 1 states that those bytes use the DualSense Edge layout. The latter is
+required because raw bytes 49..52 are a base-controller device timestamp but
+Edge profile/module status. It lets VIIPER preserve only a layout-compatible
+tail when physical and virtual controller families differ. USB reports use
+offset zero and Bluetooth reports use offset one after their transport report
+ID; invalid observations clear the complete extension in the reused writer
+slot.
+
+Raw bytes 56..63 are deliberately outside this transport. They are the
+physical report's eight-byte AES-CMAC/reserved authentication tail; mapped
+controls, virtual counters, and connection normalization change authenticated
+bytes, and DS4Windows/VIIPER cannot truthfully copy that tag or recompute it.
+Raw byte 55 is ordinary same-report metadata and is transported unchanged.
+
+The raw block is a non-mapped observation and is copied through constructor,
+debounce, mapping, and extra-state scratch paths without affecting control-edge
+classification. A trigger epoch remembers its highest received and highest
+successfully transported complete peak state. A peak is represented only when
+both its analog value and that trigger's physical feedback byte/effect nibble
+match; delivering `255/0x28` therefore cannot suppress a later settled
+`255/0x29` snapshot before release.
 An uncommitted writer claim is not considered presented; if its write fails,
-an epoch peak is retried in ordered position before a queued release.
+that exact logical state is retried without analog or raw-status mutation. A
+newer saved peak is queued behind the retry and before a contradictory release.
 Each peak records the physical receive ordinal of its complete snapshot. A
 shared unclaimed initial press can absorb upgrades for both L2 and R2 only when
 both maxima came from that same received snapshot. Independently timed maxima
 are emitted as chronological complete states, preventing a synthetic
 cross-time `(L2 peak, R2 peak)` combination that never physically existed.
+Strengthening or promoting a saved peak couples L2 only to physical raw byte
+43 and the high nibble of raw byte 48, and R2 only to raw byte 42 and the low
+nibble. Firmware can settle that status one report after the analog value
+first reaches its maximum; an equal-analog peak refreshes only those coupled
+fields while retaining the peak receive ordinal, timestamps, other trigger,
+and unrelated controls. Coupling also requires the same base/Edge source
+layout. A layout change is retained as a separate complete snapshot rather
+than synthesizing raw metadata across incompatible layouts. Likewise, later
+button, D-pad, or touch-contact boundaries make the newer equal peak a complete
+snapshot rather than rewriting that status into earlier queued control states.
+Only a still-unclaimed initial press may absorb a coupled peak update, and a
+status-only refresh does so only while that press remains the newest ordered
+item. If later ordered controls exist and the coupled status differs, the
+complete saved peak is promoted behind those controls instead of pulling its
+analog/status backward in chronology. Claimed and retry storage are immutable.
 
 Ring overflow is counted and is not expected in normal or loaded operation.
 If it occurs, the scheduler retains the newest rejected complete state as a
 replaceable recovery snapshot so the virtual device converges after the
 ordered ring drains rather than remaining stuck in an old pressed state.
 The ring preallocates fixed value-owned state envelopes rather than 64 separate
-managed `byte[33]` objects. Claim copies one immutable envelope into the sole
-writer's preallocated 33-byte serializer slot. This is the same slot-ownership
+managed packet arrays. Claim copies one immutable envelope into the sole
+writer's preallocated 53-byte serializer slot. This is the same slot-ownership
 contract as prebuilt packet slots, while avoiding both per-slot object headers
 and any producer mutation of claimed bytes; warmed build/classify/publish/claim
 and serialization remain allocation-free.
@@ -68,14 +108,24 @@ interruptible by due media work; immediate, off and zero configurations do not
 create a transport clock. VIIPER's interrupt endpoint remains the default
 one-millisecond presentation clock.
 
-The microphone-interface event extension is opt-in by device alias. Current
-clients first request `dualsensecombinedaudioduplexv5events`,
-`dualsenseaudioonlyduplexv5events`, or
-`dualsenseedgecombinedaudioduplexv5events`. A precisely typed unknown-device
-HTTP 400 response retries the legacy alias and enables the narrow
-`bus/{busId}/{devId}/microphone-interface` compatibility query. Legacy aliases
-never receive the otherwise-unknown frame type `0x85`. Its fixed payload is an
-active byte followed by a little-endian 64-bit stream generation.
+Raw input and microphone-interface events use explicit alias negotiation.
+Composite/audio clients first request
+`dualsensecombinedaudioduplexv5rawinputevents`,
+`dualsenseaudioonlyduplexv5rawinputevents`, or
+`dualsenseedgecombinedaudioduplexv5rawinputevents`. A precisely typed
+unknown-device HTTP 400 response falls back to the already-shipped
+`...v5events` alias, which retains 33-byte input but still carries microphone
+interface events. A second exact unknown-alias response falls back to the
+legacy alias and the narrow
+`bus/{busId}/{devId}/microphone-interface` compatibility query. Gamepad-only
+clients negotiate `dualsensegamepadv5rawinput` or
+`dualsenseedgegamepadv5rawinput` directly against their legacy alias because
+they have no microphone event lane. Connection, attach, validation, and other
+failures never trigger compatibility fallback. Only an accepted raw-input
+alias enables 53-byte input. Legacy and previously shipped `...v5events`
+aliases never receive it; legacy aliases also never receive frame type `0x85`.
+The microphone event payload is an active byte followed by a little-endian
+64-bit stream generation.
 
 ## Physical controller ownership
 
@@ -84,6 +134,10 @@ publish into bounded storage and signal workers. It does not perform physical
 HID writes, V5 socket writes, audio-pacer calls, microphone subscriber calls,
 OSC monitoring writes, broad status queries, filesystem profile diagnostics,
 or tray/logger callbacks on the DualSense-to-VIIPER path.
+USB input is parsed only after exact normal report-ID `0x01` validation.
+Unknown USB IDs increment atomic rejection count/last-ID telemetry and resume
+reading without state publication, logging, or a subscriber callback. The
+Bluetooth path retains its `0x31` tag and CRC validation before parsing.
 
 One physical output worker owns all ordinary USB/Bluetooth HID output. The
 producer-facing `DualSensePhysicalOutputStateMailbox` publishes one complete

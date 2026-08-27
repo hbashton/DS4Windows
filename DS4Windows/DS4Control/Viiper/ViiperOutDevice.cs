@@ -246,7 +246,7 @@ namespace DS4Windows
             new();
         private readonly ViiperLatencyHistogram socketWriteLatency = new();
         private readonly byte[] stateWriterPacket =
-            new byte[33];
+            new byte[53];
         private readonly ViiperHighResolutionWaiter stateRateWaiter = new();
         private readonly object pendingPacketLock = new object();
         private readonly object microphoneQueueLock = new object();
@@ -371,6 +371,7 @@ namespace DS4Windows
         private bool activeStreamUsesV5AudioSource;
         private bool activeStreamUsesAudioOnlyDescriptor;
         private bool activeStreamSupportsMicrophoneInterfaceEvents;
+        private bool activeStreamSupportsRawInputStatus;
         private byte activeStreamFrameVersion;
         private int microphoneVolume = 128;
         private int microphoneNoiseSuppression = (int)DualSenseMicrophoneNoiseSuppression.Balanced;
@@ -967,6 +968,7 @@ namespace DS4Windows
             activeStreamUsesV5AudioSource = false;
             activeStreamUsesAudioOnlyDescriptor = false;
             activeStreamSupportsMicrophoneInterfaceEvents = false;
+            activeStreamSupportsRawInputStatus = false;
             activeStreamFrameVersion = 0;
             Volatile.Write(ref virtualMicrophoneInterfaceActive, 0);
             Volatile.Write(ref virtualMicrophoneInterfaceStateKnown, 0);
@@ -981,12 +983,13 @@ namespace DS4Windows
                     "dualsenseaudioonlyduplexv5" :
                     gamepadOnly ? "dualsensegamepadv5" :
                         "dualsensecombinedaudioduplexv5";
-                string eventName = audioOnlySidecar ?
-                    "dualsenseaudioonlyduplexv5events" :
-                    "dualsensecombinedaudioduplexv5events";
-                ViiperDeviceStream stream = gamepadOnly ?
-                    client.CreateDeviceAndOpenStream(legacyName) :
-                    CreateEventAwareV5Stream(eventName, legacyName);
+                string rawInputName = GetV5RawInputDeviceName(viiperType,
+                    audioOnlySidecar, gamepadOnly);
+                string eventName = gamepadOnly ? null :
+                    GetV5EventDeviceName(viiperType, audioOnlySidecar);
+                ViiperDeviceStream stream = CreateRawInputV5Stream(
+                    rawInputName, eventName, legacyName,
+                    supportsMicrophoneInterfaceEvents: !gamepadOnly);
                 activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
                 activeStreamUsesFramedProtocol = true;
                 activeStreamSupportsMicrophone = !gamepadOnly;
@@ -1004,11 +1007,14 @@ namespace DS4Windows
                 string legacyName = gamepadOnly ?
                     "dualsenseedgegamepadv5" :
                     "dualsenseedgecombinedaudioduplexv5";
-                ViiperDeviceStream stream = gamepadOnly ?
-                    client.CreateDeviceAndOpenStream(legacyName) :
-                    CreateEventAwareV5Stream(
-                        "dualsenseedgecombinedaudioduplexv5events",
-                        legacyName);
+                string rawInputName = GetV5RawInputDeviceName(viiperType,
+                    audioOnlySidecar: false, gamepadOnly);
+                string eventName = gamepadOnly ? null :
+                    GetV5EventDeviceName(viiperType,
+                        audioOnlySidecar: false);
+                ViiperDeviceStream stream = CreateRawInputV5Stream(
+                    rawInputName, eventName, legacyName,
+                    supportsMicrophoneInterfaceEvents: !gamepadOnly);
                 activeFeedbackLength = DualSenseCombinedExtendedFeedbackLength;
                 activeStreamUsesFramedProtocol = true;
                 activeStreamSupportsMicrophone = !gamepadOnly;
@@ -1082,26 +1088,102 @@ namespace DS4Windows
             return client.CreateDeviceAndOpenStream(viiperType);
         }
 
-        private ViiperDeviceStream CreateEventAwareV5Stream(
-            string eventDeviceName, string legacyDeviceName)
+        internal static string GetV5RawInputDeviceName(
+            ViiperVirtualDeviceType type, bool audioOnlySidecar,
+            bool gamepadOnly)
         {
+            return type switch
+            {
+                ViiperVirtualDeviceType.DualSense when audioOnlySidecar =>
+                    "dualsenseaudioonlyduplexv5rawinputevents",
+                ViiperVirtualDeviceType.DualSense when gamepadOnly =>
+                    "dualsensegamepadv5rawinput",
+                ViiperVirtualDeviceType.DualSense =>
+                    "dualsensecombinedaudioduplexv5rawinputevents",
+                ViiperVirtualDeviceType.DualSenseEdge when gamepadOnly =>
+                    "dualsenseedgegamepadv5rawinput",
+                ViiperVirtualDeviceType.DualSenseEdge =>
+                    "dualsenseedgecombinedaudioduplexv5rawinputevents",
+                _ => throw new ArgumentOutOfRangeException(nameof(type)),
+            };
+        }
+
+        internal static string GetV5EventDeviceName(
+            ViiperVirtualDeviceType type, bool audioOnlySidecar)
+        {
+            return type switch
+            {
+                ViiperVirtualDeviceType.DualSense when audioOnlySidecar =>
+                    "dualsenseaudioonlyduplexv5events",
+                ViiperVirtualDeviceType.DualSense =>
+                    "dualsensecombinedaudioduplexv5events",
+                ViiperVirtualDeviceType.DualSenseEdge =>
+                    "dualsenseedgecombinedaudioduplexv5events",
+                _ => throw new ArgumentOutOfRangeException(nameof(type)),
+            };
+        }
+
+        private ViiperDeviceStream CreateRawInputV5Stream(
+            string rawInputDeviceName, string eventDeviceName,
+            string legacyDeviceName,
+            bool supportsMicrophoneInterfaceEvents)
+        {
+            ViiperDeviceStream stream = OpenRawInputV5StreamWithFallback(
+                name => client.CreateDeviceAndOpenStream(name),
+                rawInputDeviceName, eventDeviceName, legacyDeviceName,
+                supportsMicrophoneInterfaceEvents,
+                out bool rawInputStatus, out bool microphoneEvents);
+            activeStreamSupportsRawInputStatus = rawInputStatus;
+            activeStreamSupportsMicrophoneInterfaceEvents = microphoneEvents;
+            return stream;
+        }
+
+        internal static ViiperDeviceStream OpenRawInputV5StreamWithFallback(
+            Func<string, ViiperDeviceStream> open,
+            string rawInputDeviceName, string eventDeviceName,
+            string legacyDeviceName,
+            bool supportsMicrophoneInterfaceEvents,
+            out bool rawInputStatus, out bool microphoneEvents)
+        {
+            ArgumentNullException.ThrowIfNull(open);
+            rawInputStatus = false;
+            microphoneEvents = false;
             try
             {
-                ViiperDeviceStream stream = client.CreateDeviceAndOpenStream(
-                    eventDeviceName);
-                activeStreamSupportsMicrophoneInterfaceEvents = true;
+                ViiperDeviceStream stream = open(rawInputDeviceName);
+                rawInputStatus = true;
+                microphoneEvents =
+                    supportsMicrophoneInterfaceEvents;
                 return stream;
             }
             catch (ViiperApiException ex) when (
-                ex.IsUnknownDeviceType(eventDeviceName))
+                ex.IsUnknownDeviceType(rawInputDeviceName))
             {
-                // The opt-in alias is the capability negotiation. Retrying is
-                // permitted only for VIIPER's typed unknown-device response;
-                // connection, attach, validation, and lifecycle failures must
-                // remain visible to the caller.
-                activeStreamSupportsMicrophoneInterfaceEvents = false;
-                return client.CreateDeviceAndOpenStream(legacyDeviceName);
+                // The raw-input alias is an exact payload capability. Existing
+                // v5events aliases shipped with a 33-byte input contract, so
+                // they may provide microphone events but must never enable the
+                // 53-byte input frame.
             }
+
+            if (supportsMicrophoneInterfaceEvents &&
+                !string.IsNullOrEmpty(eventDeviceName))
+            {
+                try
+                {
+                    ViiperDeviceStream stream = open(eventDeviceName);
+                    microphoneEvents = true;
+                    return stream;
+                }
+                catch (ViiperApiException ex) when (
+                    ex.IsUnknownDeviceType(eventDeviceName))
+                {
+                    // Only a typed, exact unknown-alias response permits the
+                    // next compatibility tier. Every other failure remains
+                    // visible instead of silently changing the device.
+                }
+            }
+
+            return open(legacyDeviceName);
         }
 
         private ViiperDeviceStream CreateDeviceStreamWithServerFallback()
@@ -2276,12 +2358,16 @@ namespace DS4Windows
                             ViiperFrameWriteTiming writeTiming;
                             if (mappedClaim)
                             {
+                                bool includeRawInputStatus =
+                                    activeStreamSupportsRawInputStatus;
                                 ViiperStatePacketBuilder.BuildInto(
-                                    inputClaim.State, stateWriterPacket);
+                                    inputClaim.State, stateWriterPacket,
+                                    includeRawInputStatus);
                                 writeTiming = WriteState(writeStream,
                                     stateWriterPacket,
-                                    ViiperStatePacketBuilder.GetPacketSize(
-                                        viiperType));
+                                    ViiperStatePacketBuilder.
+                                        GetDualSenseInputPacketSize(
+                                            includeRawInputStatus));
                             }
                             else
                             {
@@ -7187,6 +7273,12 @@ namespace DS4Windows
         private const int X360PacketSize = 20;
         private const int DS4PacketSize = 31;
         private const int DualSensePacketSize = 33;
+        private const int DualSenseRawInputStatusPacketSize = 53;
+        private const int DualSenseRawInputStatusFlagsOffset = 33;
+        private const int DualSenseRawInputSensorTimestampOffset = 34;
+        private const int DualSenseRawInputStatusOffset = 38;
+        private const byte DualSenseRawInputStatusValidFlag = 0x01;
+        private const byte DualSenseRawInputStatusEdgeLayoutFlag = 0x02;
         private const int Switch2PacketSize = 24;
         private const int DualSenseFeedbackPacketSize = 76;
         private const int DualSenseGyroRestDeadband = 32;
@@ -7235,6 +7327,10 @@ namespace DS4Windows
                 _ => throw new ArgumentOutOfRangeException(nameof(type)),
             };
         }
+
+        internal static int GetDualSenseInputPacketSize(
+            bool includeRawInputStatus) => includeRawInputStatus ?
+                DualSenseRawInputStatusPacketSize : DualSensePacketSize;
 
         public static byte[] Build(ViiperVirtualDeviceType type, DS4State state, int device)
         {
@@ -7391,6 +7487,7 @@ namespace DS4Windows
                 R2 = r2,
                 Touch0 = BuildMappedTouch(state.TrackPadTouch0, 1920, 1080),
                 Touch1 = BuildMappedTouch(state.TrackPadTouch1, 1920, 1080),
+                RawInputStatus = state.DualSenseRawInputStatus,
             };
 
             SixAxis motion = state.Motion;
@@ -7423,10 +7520,24 @@ namespace DS4Windows
         internal static void BuildInto(in ViiperMappedInputState mapped,
             Span<byte> destination)
         {
-            if (destination.Length < DualSensePacketSize)
+            BuildInto(mapped, destination, includeRawInputStatus: false);
+        }
+
+        /// <summary>
+        /// Serializes the legacy mapped state and, for an explicitly
+        /// negotiated V5-raw-input stream, the same-report physical sensor and
+        /// status observation. Legacy peers continue to receive exactly 33
+        /// bytes.
+        /// </summary>
+        internal static void BuildInto(in ViiperMappedInputState mapped,
+            Span<byte> destination, bool includeRawInputStatus)
+        {
+            int packetSize = GetDualSenseInputPacketSize(
+                includeRawInputStatus);
+            if (destination.Length < packetSize)
             {
                 throw new ArgumentException(
-                    $"A DualSense input packet needs {DualSensePacketSize} bytes.",
+                    $"A DualSense input packet needs {packetSize} bytes.",
                     nameof(destination));
             }
 
@@ -7453,6 +7564,32 @@ namespace DS4Windows
                 mapped.AccelY);
             BinaryPrimitives.WriteInt16LittleEndian(destination.Slice(31, 2),
                 mapped.AccelZ);
+
+            if (!includeRawInputStatus)
+            {
+                return;
+            }
+
+            Span<byte> extension = destination.Slice(
+                DualSenseRawInputStatusFlagsOffset,
+                DualSenseRawInputStatusPacketSize -
+                    DualSenseRawInputStatusFlagsOffset);
+            extension.Clear();
+            if (!mapped.RawInputStatus.IsValid)
+            {
+                return;
+            }
+
+            destination[DualSenseRawInputStatusFlagsOffset] =
+                (byte)(DualSenseRawInputStatusValidFlag |
+                    (mapped.RawInputStatus.IsEdgeLayout ?
+                        DualSenseRawInputStatusEdgeLayoutFlag : 0));
+            BinaryPrimitives.WriteUInt32LittleEndian(destination.Slice(
+                DualSenseRawInputSensorTimestampOffset, sizeof(uint)),
+                mapped.RawInputStatus.SensorTimestamp);
+            mapped.RawInputStatus.WriteStatusBytes(destination.Slice(
+                DualSenseRawInputStatusOffset,
+                DualSenseRawInputStatus.StatusByteCount));
         }
 
         private static ViiperMappedTouchState BuildMappedTouch(

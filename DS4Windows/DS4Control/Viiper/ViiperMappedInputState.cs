@@ -40,6 +40,7 @@ namespace DS4Windows
         public short AccelX;
         public short AccelY;
         public short AccelZ;
+        public DualSenseRawInputStatus RawInputStatus;
 
         public readonly bool L2Pressed =>
             L2 != 0 && (Buttons & L2ButtonMask) != 0;
@@ -65,11 +66,14 @@ namespace DS4Windows
             AccelZ = -8192,
         };
 
-        internal void StrengthenTrigger(bool left, byte peak)
+        internal bool StrengthenTrigger(bool left,
+            in ViiperMappedInputState peakState)
         {
-            if (peak == 0)
+            byte peak = left ? peakState.L2 : peakState.R2;
+            if (peak == 0 || !RawInputStatus.CanCoupleTriggerFrom(
+                    peakState.RawInputStatus))
             {
-                return;
+                return false;
             }
 
             if (left)
@@ -88,6 +92,13 @@ namespace DS4Windows
                 }
                 Buttons |= R2ButtonMask;
             }
+
+            // A strengthened trigger value represents the saved physical peak
+            // report. Couple only that trigger's feedback byte and effect-mode
+            // nibble; the other trigger and the initial report's continuous
+            // clock/status fields remain truthful to their original cycles.
+            RawInputStatus.CoupleTriggerFrom(peakState.RawInputStatus, left);
+            return true;
         }
 
         public readonly bool Equals(ViiperMappedInputState other)
@@ -99,7 +110,8 @@ namespace DS4Windows
                 Touch0.Equals(other.Touch0) && Touch1.Equals(other.Touch1) &&
                 GyroX == other.GyroX && GyroY == other.GyroY &&
                 GyroZ == other.GyroZ && AccelX == other.AccelX &&
-                AccelY == other.AccelY && AccelZ == other.AccelZ;
+                AccelY == other.AccelY && AccelZ == other.AccelZ &&
+                RawInputStatus.Equals(other.RawInputStatus);
         }
 
         public override readonly bool Equals(object obj) =>
@@ -124,6 +136,7 @@ namespace DS4Windows
             hash.Add(AccelX);
             hash.Add(AccelY);
             hash.Add(AccelZ);
+            hash.Add(RawInputStatus);
             return hash.ToHashCode();
         }
     }

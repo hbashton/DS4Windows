@@ -48,6 +48,33 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void UsbReportIdGuardPrecedesPhysicalStatusAndControlParsing()
+        {
+            string source = File.ReadAllText(FindRepositoryFile(
+                "DS4Windows", "DS4Library", "InputDevices",
+                "DualSenseDevice.cs"));
+            string readLoop = Extract(source,
+                "private unsafe void ReadInput()",
+                "internal static bool TryExtractPhysicalInputStatus");
+            int guard = readLoop.IndexOf(
+                "if (!TryAcceptUsbNormalInputFrame(inputReport))",
+                System.StringComparison.Ordinal);
+            int status = readLoop.IndexOf(
+                "TryExtractPhysicalInputStatus(inputReport, reportOffset",
+                System.StringComparison.Ordinal);
+            Assert.IsTrue(guard >= 0 && status > guard,
+                "USB report ID 0x01 must be accepted before parsing raw status or controls.");
+
+            string rejection = Extract(source,
+                "internal bool TryAcceptUsbNormalInputFrame(",
+                "internal static bool IsUsbNormalInputFrame(");
+            StringAssert.Contains(rejection,
+                "Interlocked.Increment(ref usbRejectedInputFrames)");
+            AssertDoesNotContain(rejection, "Report?.Invoke");
+            AssertDoesNotContain(rejection, "AppLogger.");
+        }
+
+        [TestMethod]
         public void RemovalCallbackRunsAfterLifecycleOwnedPhysicalRetirement()
         {
             string source = File.ReadAllText(FindRepositoryFile(

@@ -46,6 +46,74 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void EnhancedPacketCarriesSameReportRawStatusAndLegacyStaysExact()
+        {
+            DS4State source = new()
+            {
+                L2 = 91,
+                R2 = 173,
+                Cross = true,
+                DualSenseRawInputStatus = DualSenseRawInputStatusTests.
+                    CreateStatus(0x62, 0x73, 0xA5, 0x44332211u,
+                        hostTimestamp: 0x88776655u,
+                        deviceTimestamp: 0xCCBBAA99u,
+                        touchTimestamp: 0x51, battery: 0xDD,
+                        connection: 0xEE, raw55: 0xF0),
+            };
+            ViiperMappedInputState mapped = ViiperStatePacketBuilder.
+                BuildMappedState(source, -1);
+            byte[] legacy = new byte[ViiperStatePacketBuilder.
+                GetDualSenseInputPacketSize(false)];
+            byte[] enhanced = new byte[ViiperStatePacketBuilder.
+                GetDualSenseInputPacketSize(true)];
+
+            ViiperStatePacketBuilder.BuildInto(mapped, legacy);
+            ViiperStatePacketBuilder.BuildInto(mapped, enhanced,
+                includeRawInputStatus: true);
+
+            Assert.AreEqual(33, legacy.Length);
+            Assert.AreEqual(53, enhanced.Length);
+            CollectionAssert.AreEqual(legacy, enhanced[..legacy.Length],
+                "Negotiation may extend, but never reinterpret, the legacy state bytes.");
+            Assert.AreEqual(0x01, enhanced[33]);
+            Assert.AreEqual(0x44332211u,
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    enhanced.AsSpan(34, 4)));
+            byte[] expectedStatus =
+            {
+                0x51, 0x62, 0x73, 0x55, 0x66, 0x77, 0x88,
+                0xA5, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xF0,
+            };
+            CollectionAssert.AreEqual(expectedStatus, enhanced[38..53]);
+            Assert.AreEqual(0xF0, enhanced[^1],
+                "Physical raw55 is transported; only raw56..63 CMAC bytes remain outside the payload.");
+
+            mapped.RawInputStatus.IsEdgeLayout = true;
+            ViiperStatePacketBuilder.BuildInto(mapped, enhanced,
+                includeRawInputStatus: true);
+            Assert.AreEqual(0x03, enhanced[33],
+                "A valid Edge-layout observation needs its distinct layout flag.");
+            Assert.AreEqual(33, ViiperStatePacketBuilder.Build(
+                ViiperVirtualDeviceType.DualSense, source, -1).Length,
+                "The allocating compatibility wrapper must remain legacy-sized.");
+        }
+
+        [TestMethod]
+        public void EnhancedPacketClearsReusedExtensionWhenStatusIsInvalid()
+        {
+            byte[] packet = new byte[ViiperStatePacketBuilder.
+                GetDualSenseInputPacketSize(true)];
+            Array.Fill(packet, (byte)0xCC);
+            ViiperMappedInputState invalid = ViiperMappedInputState.Neutral;
+            invalid.RawInputStatus.IsEdgeLayout = true;
+            ViiperStatePacketBuilder.BuildInto(invalid, packet,
+                includeRawInputStatus: true);
+
+            CollectionAssert.AreEqual(new byte[20], packet[33..53],
+                "A reused writer slot must not leak a prior report's metadata.");
+        }
+
+        [TestMethod]
         public void RapidTriggerEpochStrengthensPendingPressBeforeRelease()
         {
             ViiperInputScheduler scheduler = NewScheduler();
@@ -93,6 +161,393 @@ namespace DS4WindowsTests
             ViiperInputClaim release = Claim(scheduler);
             Assert.AreEqual(0, release.State.R2);
             scheduler.CompleteSuccess(release, 7);
+            Assert.IsFalse(scheduler.TryClaim(out _));
+        }
+
+        [TestMethod]
+        public void StrengthenedRightPeakCarriesOnlyRightCoupledStatus()
+        {
+            ViiperInputScheduler scheduler = NewScheduler();
+            ViiperMappedInputState initial = Trigger(1);
+            initial.RawInputStatus = DualSenseRawInputStatusTests.CreateStatus(
+                0x10, 0x70, 0xA1, 0x11111111u,
+                hostTimestamp: 0x12121212u, raw55: 0x11);
+            scheduler.Publish(initial, 2);
+
+            ViiperMappedInputState peak = Trigger(255);
+            peak.RawInputStatus = DualSenseRawInputStatusTests.CreateStatus(
+                0x28, 0x81, 0xC2, 0x22222222u,
+                hostTimestamp: 0x23232323u, raw55: 0x22);
+            scheduler.Publish(peak, 3);
+
+            ViiperMappedInputState falling = Trigger(80);
+            falling.RawInputStatus = DualSenseRawInputStatusTests.CreateStatus(
+                0x24, 0x88, 0xE4, 0x25252525u, raw55: 0x33);
+            scheduler.Publish(falling, 4);
+
+            ViiperMappedInputState settledPeak = Trigger(255);
+            settledPeak.RawInputStatus = DualSenseRawInputStatusTests.
+                CreateStatus(0x29, 0x92, 0xD3, 0x33333333u,
+                    hostTimestamp: 0x34343434u, raw55: 0x44);
+            scheduler.Publish(settledPeak, 5);
+            scheduler.Publish(Trigger(0), 6);
+
+            ViiperInputClaim strengthened = Claim(scheduler);
+            Assert.AreEqual(255, strengthened.State.R2);
+            Assert.AreEqual(0x29,
+                strengthened.State.RawInputStatus.RightTriggerFeedback);
+            Assert.AreEqual(0x70,
+                strengthened.State.RawInputStatus.LeftTriggerFeedback,
+                "Strengthening R2 must not import L2 status.");
+            Assert.AreEqual(0xA3,
+                strengthened.State.RawInputStatus.TriggerEffectModes,
+                "Only the R2 low effect nibble may follow the saved peak.");
+            Assert.AreEqual(0x11111111u,
+                strengthened.State.RawInputStatus.SensorTimestamp);
+            Assert.AreEqual(0x12121212u,
+                strengthened.State.RawInputStatus.HostTimestamp);
+            Assert.AreEqual(0x11,
+                strengthened.State.RawInputStatus.Raw55,
+                "Trigger peak coupling must not import unrelated raw55 from another report.");
+            scheduler.CompleteSuccess(strengthened, 7);
+
+            ViiperInputClaim release = Claim(scheduler);
+            Assert.AreEqual(0, release.State.R2);
+            scheduler.CompleteSuccess(release, 8);
+            Assert.IsFalse(scheduler.TryClaim(out _));
+        }
+
+        [TestMethod]
+        public void EqualLeftPeakStatusSurvivesOrderedTransportRetry()
+        {
+            ViiperInputScheduler scheduler = NewScheduler();
+            ViiperMappedInputState initial = DualTrigger(1, 0);
+            initial.RawInputStatus = DualSenseRawInputStatusTests.CreateStatus(
+                0x50, 0x10, 0xA1, 0x10101010u);
+            scheduler.Publish(initial, 2);
+            ViiperInputClaim presentedInitial = Claim(scheduler);
+            scheduler.CompleteSuccess(presentedInitial, 3);
+
+            ViiperMappedInputState peak = DualTrigger(255, 0);
+            peak.RawInputStatus = DualSenseRawInputStatusTests.CreateStatus(
+                0x61, 0x28, 0x2B, 0x20202020u,
+                hostTimestamp: 0x21212121u, raw55: 0x22);
+            scheduler.Publish(peak, 4);
+            ViiperMappedInputState settledPeak = DualTrigger(255, 0);
+            settledPeak.RawInputStatus = DualSenseRawInputStatusTests.
+                CreateStatus(0x72, 0x29, 0x3C, 0x30303030u,
+                    hostTimestamp: 0x31313131u, raw55: 0x33);
+            scheduler.Publish(settledPeak, 5);
+            scheduler.Publish(DualTrigger(0, 0), 6);
+
+            ViiperInputClaim promoted = Claim(scheduler);
+            Assert.AreEqual(255, promoted.State.L2);
+            Assert.AreEqual(0x29,
+                promoted.State.RawInputStatus.LeftTriggerFeedback);
+            Assert.AreEqual(0x61,
+                promoted.State.RawInputStatus.RightTriggerFeedback,
+                "Equal-peak refresh must retain unrelated R2 status from the peak snapshot.");
+            Assert.AreEqual(0x3B,
+                promoted.State.RawInputStatus.TriggerEffectModes);
+            Assert.AreEqual(0x20202020u,
+                promoted.State.RawInputStatus.SensorTimestamp,
+                "Equal-peak refresh must not change the peak receive-cycle clock.");
+            Assert.AreEqual(0x21212121u,
+                promoted.State.RawInputStatus.HostTimestamp);
+            Assert.AreEqual(0x22, promoted.State.RawInputStatus.Raw55,
+                "Promoting an equal peak retains raw55 from the saved complete peak snapshot.");
+
+            scheduler.CompleteFailure(promoted);
+            ViiperInputClaim retry = Claim(scheduler);
+            Assert.AreEqual(promoted.PublicationId, retry.PublicationId);
+            Assert.AreEqual(promoted.State.RawInputStatus,
+                retry.State.RawInputStatus);
+            scheduler.CompleteSuccess(retry, 7);
+            ViiperInputClaim release = Claim(scheduler);
+            Assert.AreEqual(0, release.State.L2);
+            scheduler.CompleteSuccess(release, 8);
+            Assert.IsFalse(scheduler.TryClaim(out _));
+        }
+
+        [TestMethod]
+        public void PresentedEqualPeakStatusIsPromotedAndRetriedBeforeRelease()
+        {
+            ViiperInputScheduler scheduler = NewScheduler();
+            ViiperMappedInputState physicalPeak = DualTrigger(255, 0);
+            physicalPeak.RawInputStatus = DualSenseRawInputStatusTests.
+                CreateStatus(0x61, 0x28, 0x2B, 0x20202020u,
+                    hostTimestamp: 0x21212121u);
+            scheduler.Publish(physicalPeak, 2);
+
+            ViiperInputClaim firstPresentation = Claim(scheduler);
+            Assert.AreEqual(0x28,
+                firstPresentation.State.RawInputStatus.LeftTriggerFeedback);
+            scheduler.CompleteSuccess(firstPresentation, 3);
+
+            ViiperMappedInputState settledPeak = DualTrigger(255, 0);
+            settledPeak.RawInputStatus = DualSenseRawInputStatusTests.
+                CreateStatus(0x72, 0x29, 0x3C, 0x30303030u,
+                    hostTimestamp: 0x31313131u);
+            scheduler.Publish(settledPeak, 4);
+            scheduler.Publish(DualTrigger(0, 0), 5);
+
+            ViiperInputClaim promoted = Claim(scheduler);
+            Assert.AreEqual(255, promoted.State.L2);
+            Assert.AreEqual(0x29,
+                promoted.State.RawInputStatus.LeftTriggerFeedback,
+                "The first analog-255 report did not present the later settled trigger status.");
+            Assert.AreEqual(0x61,
+                promoted.State.RawInputStatus.RightTriggerFeedback,
+                "Promoting settled L2 status must retain the saved peak's unrelated R2 byte.");
+            Assert.AreEqual(0x3B,
+                promoted.State.RawInputStatus.TriggerEffectModes);
+            Assert.AreEqual(0x20202020u,
+                promoted.State.RawInputStatus.SensorTimestamp,
+                "Equal-peak settlement must not synthesize unrelated clock fields.");
+
+            scheduler.CompleteFailure(promoted);
+            ViiperInputClaim retry = Claim(scheduler);
+            Assert.AreEqual(promoted.PublicationId, retry.PublicationId);
+            Assert.AreEqual(promoted.State.RawInputStatus,
+                retry.State.RawInputStatus);
+            scheduler.CompleteSuccess(retry, 6);
+
+            ViiperInputClaim release = Claim(scheduler);
+            Assert.AreEqual(0, release.State.L2);
+            scheduler.CompleteSuccess(release, 7);
+            Assert.IsFalse(scheduler.TryClaim(out _));
+        }
+
+        [TestMethod]
+        public void EqualPeakLayoutChangeRemainsASeparateTruthfulSnapshot()
+        {
+            ViiperInputScheduler scheduler = NewScheduler();
+            ViiperMappedInputState basePeak = DualTrigger(255, 0);
+            basePeak.RawInputStatus = DualSenseRawInputStatusTests.
+                CreateStatus(0x61, 0x28, 0x2B, 0x20202020u,
+                    deviceTimestamp: 0x24232221u);
+            scheduler.Publish(basePeak, 2);
+
+            ViiperMappedInputState edgePeak = DualTrigger(255, 0);
+            edgePeak.RawInputStatus = DualSenseRawInputStatusTests.
+                CreateStatus(0x72, 0x29, 0x3C, 0x30303030u,
+                    deviceTimestamp: 0x34333231u,
+                    isEdgeLayout: true);
+            scheduler.Publish(edgePeak, 3);
+            scheduler.Publish(DualTrigger(0, 0), 4);
+
+            ViiperInputClaim original = Claim(scheduler);
+            Assert.IsFalse(original.State.RawInputStatus.IsEdgeLayout);
+            Assert.AreEqual(0x28,
+                original.State.RawInputStatus.LeftTriggerFeedback,
+                "The pending base-layout report must not be mutated with Edge metadata.");
+            Assert.AreEqual(0x24232221u,
+                original.State.RawInputStatus.DeviceTimestamp);
+            scheduler.CompleteSuccess(original, 5);
+
+            ViiperInputClaim separateEdge = Claim(scheduler);
+            Assert.IsTrue(separateEdge.State.RawInputStatus.IsEdgeLayout);
+            Assert.AreEqual(255, separateEdge.State.L2);
+            Assert.AreEqual(0x29,
+                separateEdge.State.RawInputStatus.LeftTriggerFeedback);
+            Assert.AreEqual(0x34333231u,
+                separateEdge.State.RawInputStatus.DeviceTimestamp,
+                "A layout change must retain the complete newer physical snapshot.");
+            scheduler.CompleteSuccess(separateEdge, 6);
+
+            ViiperInputClaim release = Claim(scheduler);
+            Assert.AreEqual(0, release.State.L2);
+            scheduler.CompleteSuccess(release, 7);
+            Assert.IsFalse(scheduler.TryClaim(out _));
+        }
+
+        [TestMethod]
+        public void EqualPeakStatusDoesNotRewriteEarlierButtonTransitions()
+        {
+            ViiperInputScheduler scheduler = NewScheduler();
+            ViiperMappedInputState initial = DualTrigger(255, 0);
+            initial.RawInputStatus = DualSenseRawInputStatusTests.CreateStatus(
+                0x61, 0x28, 0x2B, 0x20202020u);
+            scheduler.Publish(initial, 2);
+
+            ViiperMappedInputState firstButton = initial;
+            firstButton.Buttons |= 0x01;
+            scheduler.Publish(firstButton, 3);
+            ViiperMappedInputState secondButton = firstButton;
+            secondButton.Buttons |= 0x02;
+            scheduler.Publish(secondButton, 4);
+
+            ViiperMappedInputState settled = secondButton;
+            settled.RawInputStatus = DualSenseRawInputStatusTests.CreateStatus(
+                0x72, 0x29, 0x3C, 0x30303030u);
+            scheduler.Publish(settled, 5);
+            ViiperMappedInputState release = DualTrigger(0, 0);
+            release.Buttons |= 0x03;
+            scheduler.Publish(release, 6);
+
+            ViiperInputClaim original = Claim(scheduler);
+            Assert.AreEqual(0x28,
+                original.State.RawInputStatus.LeftTriggerFeedback);
+            scheduler.CompleteSuccess(original, 7);
+            ViiperInputClaim firstOrderedButton = Claim(scheduler);
+            Assert.AreEqual(0x01u,
+                firstOrderedButton.State.Buttons & 0x03u);
+            Assert.AreEqual(0x28, firstOrderedButton.State.RawInputStatus.
+                LeftTriggerFeedback);
+            scheduler.CompleteSuccess(firstOrderedButton, 8);
+            ViiperInputClaim secondOrderedButton = Claim(scheduler);
+            Assert.AreEqual(0x03u,
+                secondOrderedButton.State.Buttons & 0x03u);
+            Assert.AreEqual(0x28, secondOrderedButton.State.RawInputStatus.
+                LeftTriggerFeedback,
+                "A later raw-status observation must not be written into an earlier button state.");
+            scheduler.CompleteSuccess(secondOrderedButton, 9);
+
+            ViiperInputClaim settledPeak = Claim(scheduler);
+            Assert.AreEqual(255, settledPeak.State.L2);
+            Assert.AreEqual(0x03u, settledPeak.State.Buttons & 0x03u,
+                "The promoted status must retain the complete latest button state.");
+            Assert.AreEqual(0x29,
+                settledPeak.State.RawInputStatus.LeftTriggerFeedback);
+            scheduler.CompleteSuccess(settledPeak, 10);
+            ViiperInputClaim released = Claim(scheduler);
+            Assert.AreEqual(0, released.State.L2);
+            scheduler.CompleteSuccess(released, 11);
+            Assert.IsFalse(scheduler.TryClaim(out _));
+        }
+
+        [TestMethod]
+        public void LowInitialWithLaterButtonsPromotesSettledPeakInChronology()
+        {
+            ViiperInputScheduler scheduler = NewScheduler();
+            ViiperMappedInputState initial = DualTrigger(1, 0);
+            initial.RawInputStatus = DualSenseRawInputStatusTests.CreateStatus(
+                0x61, 0x02, 0x1B, 0x10101010u);
+            scheduler.Publish(initial, 2);
+
+            ViiperMappedInputState buttonDown = DualTrigger(255, 0);
+            buttonDown.Buttons |= 0x01;
+            buttonDown.RawInputStatus = DualSenseRawInputStatusTests.
+                CreateStatus(0x62, 0x28, 0x2B, 0x20202020u);
+            scheduler.Publish(buttonDown, 3);
+            ViiperMappedInputState buttonUp = buttonDown;
+            buttonUp.Buttons &= ~0x01u;
+            scheduler.Publish(buttonUp, 4);
+
+            ViiperMappedInputState settled = buttonUp;
+            settled.RawInputStatus = DualSenseRawInputStatusTests.CreateStatus(
+                0x73, 0x29, 0x3C, 0x30303030u);
+            scheduler.Publish(settled, 5);
+            scheduler.Publish(DualTrigger(0, 0), 6);
+
+            ViiperInputClaim original = Claim(scheduler);
+            Assert.AreEqual(1, original.State.L2,
+                "The initial press must stay ahead of later button chronology without peak mutation.");
+            Assert.AreEqual(0x02,
+                original.State.RawInputStatus.LeftTriggerFeedback);
+            scheduler.CompleteSuccess(original, 7);
+
+            ViiperInputClaim orderedDown = Claim(scheduler);
+            Assert.AreEqual(255, orderedDown.State.L2);
+            Assert.AreEqual(0x01u, orderedDown.State.Buttons & 0x01u);
+            Assert.AreEqual(0x28,
+                orderedDown.State.RawInputStatus.LeftTriggerFeedback);
+            scheduler.CompleteSuccess(orderedDown, 8);
+            ViiperInputClaim orderedUp = Claim(scheduler);
+            Assert.AreEqual(0u, orderedUp.State.Buttons & 0x01u);
+            Assert.AreEqual(0x28,
+                orderedUp.State.RawInputStatus.LeftTriggerFeedback);
+            scheduler.CompleteSuccess(orderedUp, 9);
+
+            ViiperInputClaim settledPeak = Claim(scheduler);
+            Assert.AreEqual(255, settledPeak.State.L2);
+            Assert.AreEqual(0u, settledPeak.State.Buttons & 0x01u);
+            Assert.AreEqual(0x29,
+                settledPeak.State.RawInputStatus.LeftTriggerFeedback,
+                "The complete settled peak must follow the button transitions and precede release.");
+            scheduler.CompleteSuccess(settledPeak, 10);
+            ViiperInputClaim release = Claim(scheduler);
+            Assert.AreEqual(0, release.State.L2);
+            scheduler.CompleteSuccess(release, 11);
+            Assert.IsFalse(scheduler.TryClaim(out _));
+        }
+
+        [TestMethod]
+        public void FailedInitialRetryRemainsExactBeforeSavedPeakAndRelease()
+        {
+            ViiperInputScheduler scheduler = NewScheduler();
+            ViiperMappedInputState initial = DualTrigger(1, 0);
+            initial.RawInputStatus = DualSenseRawInputStatusTests.CreateStatus(
+                0x61, 0x10, 0x2B, 0x20202020u);
+            scheduler.Publish(initial, 2);
+            ViiperInputClaim failedInitial = Claim(scheduler);
+            scheduler.CompleteFailure(failedInitial);
+
+            ViiperMappedInputState peak = DualTrigger(255, 0);
+            peak.RawInputStatus = DualSenseRawInputStatusTests.CreateStatus(
+                0x72, 0x29, 0x3C, 0x30303030u);
+            scheduler.Publish(peak, 3);
+            scheduler.Publish(DualTrigger(0, 0), 4);
+
+            ViiperInputClaim exactRetry = Claim(scheduler);
+            Assert.AreEqual(failedInitial.PublicationId,
+                exactRetry.PublicationId);
+            Assert.AreEqual(1, exactRetry.State.L2,
+                "A previously claimed failed transition must not be peak-strengthened in retry storage.");
+            Assert.AreEqual(0x10,
+                exactRetry.State.RawInputStatus.LeftTriggerFeedback);
+            Assert.AreEqual(failedInitial.State.RawInputStatus,
+                exactRetry.State.RawInputStatus);
+            scheduler.CompleteSuccess(exactRetry, 5);
+
+            ViiperInputClaim savedPeak = Claim(scheduler);
+            Assert.AreEqual(255, savedPeak.State.L2);
+            Assert.AreEqual(0x29,
+                savedPeak.State.RawInputStatus.LeftTriggerFeedback);
+            scheduler.CompleteSuccess(savedPeak, 6);
+            ViiperInputClaim release = Claim(scheduler);
+            Assert.AreEqual(0, release.State.L2);
+            scheduler.CompleteSuccess(release, 7);
+            Assert.IsFalse(scheduler.TryClaim(out _));
+        }
+
+        [TestMethod]
+        public void ConstantLeftTriggerStatusSettlesLatestWithoutFifoGrowth()
+        {
+            ViiperInputScheduler scheduler = NewScheduler();
+            byte[] feedbackSequence = { 0x02, 0x12, 0x22, 0x28, 0x29 };
+            for (int index = 0; index < feedbackSequence.Length; index++)
+            {
+                ViiperMappedInputState state = DualTrigger(255, 0);
+                state.RawInputStatus = DualSenseRawInputStatusTests.
+                    CreateStatus(0x61, feedbackSequence[index], 0x3B,
+                        (uint)(0x40000000 + index));
+                ViiperInputPublication publication = scheduler.Publish(state,
+                    2 + index);
+                Assert.AreEqual(index == 0, publication.IsTransition,
+                    "Status-only evolution at a constant analog value is replaceable state.");
+            }
+
+            ViiperInputSchedulerSnapshot beforeRelease = scheduler.Snapshot();
+            Assert.AreEqual(1, beforeRelease.TransitionDepth);
+            Assert.AreEqual(1, beforeRelease.TransitionHighWater);
+            Assert.AreEqual(1L, beforeRelease.TransitionCount);
+            Assert.IsTrue(beforeRelease.ContinuousPending);
+
+            scheduler.Publish(DualTrigger(0, 0), 8);
+            ViiperInputClaim pressed = Claim(scheduler);
+            Assert.AreEqual(255, pressed.State.L2);
+            Assert.AreEqual(0x29,
+                pressed.State.RawInputStatus.LeftTriggerFeedback,
+                "The settled physical trigger status must be presented before release.");
+            Assert.AreEqual(0x40000000u,
+                pressed.State.RawInputStatus.SensorTimestamp,
+                "Status settlement must not rewrite the saved report's clock fields.");
+            scheduler.CompleteSuccess(pressed, 9);
+
+            ViiperInputClaim release = Claim(scheduler);
+            Assert.AreEqual(0, release.State.L2);
+            scheduler.CompleteSuccess(release, 10);
             Assert.IsFalse(scheduler.TryClaim(out _));
         }
 
@@ -432,9 +887,11 @@ namespace DS4WindowsTests
             {
                 R2 = 1,
                 R2Btn = true,
+                DualSenseRawInputStatus = DualSenseRawInputStatusTests.
+                    CreateStatus(0x20, 0x30, 0x41, 0x12345678u),
             };
-            byte[] packet = new byte[ViiperStatePacketBuilder.GetPacketSize(
-                ViiperVirtualDeviceType.DualSense)];
+            byte[] packet = new byte[ViiperStatePacketBuilder.
+                GetDualSenseInputPacketSize(true)];
             ViiperInputScheduler scheduler = NewScheduler();
 
             for (int index = 0; index < 512; index++)
@@ -513,6 +970,129 @@ namespace DS4WindowsTests
             Assert.IsFalse(new ViiperApiException(400, "Bad Request",
                 "unknown device type: dualsensecombinedaudioduplexv5")
                 .IsUnknownDeviceType(alias));
+        }
+
+        [TestMethod]
+        public void RawInputAliasNamesAreDistinctFromShippedV5EventsContracts()
+        {
+            Assert.AreEqual(
+                "dualsensecombinedaudioduplexv5rawinputevents",
+                ViiperOutDevice.GetV5RawInputDeviceName(
+                    ViiperVirtualDeviceType.DualSense,
+                    audioOnlySidecar: false, gamepadOnly: false));
+            Assert.AreEqual(
+                "dualsenseaudioonlyduplexv5rawinputevents",
+                ViiperOutDevice.GetV5RawInputDeviceName(
+                    ViiperVirtualDeviceType.DualSense,
+                    audioOnlySidecar: true, gamepadOnly: false));
+            Assert.AreEqual("dualsensegamepadv5rawinput",
+                ViiperOutDevice.GetV5RawInputDeviceName(
+                    ViiperVirtualDeviceType.DualSense,
+                    audioOnlySidecar: false, gamepadOnly: true));
+            Assert.AreEqual(
+                "dualsenseedgecombinedaudioduplexv5rawinputevents",
+                ViiperOutDevice.GetV5RawInputDeviceName(
+                    ViiperVirtualDeviceType.DualSenseEdge,
+                    audioOnlySidecar: false, gamepadOnly: false));
+            Assert.AreEqual("dualsenseedgegamepadv5rawinput",
+                ViiperOutDevice.GetV5RawInputDeviceName(
+                    ViiperVirtualDeviceType.DualSenseEdge,
+                    audioOnlySidecar: false, gamepadOnly: true));
+            Assert.AreEqual("dualsensecombinedaudioduplexv5events",
+                ViiperOutDevice.GetV5EventDeviceName(
+                    ViiperVirtualDeviceType.DualSense,
+                    audioOnlySidecar: false));
+        }
+
+        [TestMethod]
+        public void CompositeRawInputNegotiationUsesThreeExactTiers()
+        {
+            const string raw =
+                "dualsensecombinedaudioduplexv5rawinputevents";
+            const string events =
+                "dualsensecombinedaudioduplexv5events";
+            const string legacy =
+                "dualsensecombinedaudioduplexv5";
+
+            AssertNegotiationTier(successfulAttempt: 1,
+                expectedAliases: new[] { raw },
+                expectedRaw: true, expectedEvents: true);
+            AssertNegotiationTier(successfulAttempt: 2,
+                expectedAliases: new[] { raw, events },
+                expectedRaw: false, expectedEvents: true);
+            AssertNegotiationTier(successfulAttempt: 3,
+                expectedAliases: new[] { raw, events, legacy },
+                expectedRaw: false, expectedEvents: false);
+
+            void AssertNegotiationTier(int successfulAttempt,
+                string[] expectedAliases, bool expectedRaw,
+                bool expectedEvents)
+            {
+                List<string> attempts = new();
+                ViiperDeviceStream Open(string alias)
+                {
+                    attempts.Add(alias);
+                    if (attempts.Count < successfulAttempt)
+                    {
+                        throw UnknownAlias(alias);
+                    }
+                    return null;
+                }
+
+                _ = ViiperOutDevice.OpenRawInputV5StreamWithFallback(Open,
+                    raw, events, legacy,
+                    supportsMicrophoneInterfaceEvents: true,
+                    out bool rawStatus, out bool microphoneEvents);
+                CollectionAssert.AreEqual(expectedAliases, attempts);
+                Assert.AreEqual(expectedRaw, rawStatus);
+                Assert.AreEqual(expectedEvents, microphoneEvents);
+            }
+        }
+
+        [TestMethod]
+        public void GamepadRawInputFallbackSkipsIncompatibleEventsAlias()
+        {
+            const string raw = "dualsensegamepadv5rawinput";
+            const string legacy = "dualsensegamepadv5";
+            List<string> attempts = new();
+            ViiperDeviceStream Open(string alias)
+            {
+                attempts.Add(alias);
+                if (alias == raw)
+                {
+                    throw UnknownAlias(alias);
+                }
+                return null;
+            }
+
+            _ = ViiperOutDevice.OpenRawInputV5StreamWithFallback(Open, raw,
+                eventDeviceName: null, legacyDeviceName: legacy,
+                supportsMicrophoneInterfaceEvents: false,
+                out bool rawStatus, out bool microphoneEvents);
+
+            CollectionAssert.AreEqual(new[] { raw, legacy }, attempts);
+            Assert.IsFalse(rawStatus);
+            Assert.IsFalse(microphoneEvents);
+        }
+
+        [TestMethod]
+        public void RawInputNegotiationDoesNotHideNonCapabilityFailure()
+        {
+            const string raw = "dualsensegamepadv5rawinput";
+            int attempts = 0;
+            ViiperApiException failure = Assert.ThrowsException<
+                ViiperApiException>(() => ViiperOutDevice.
+                    OpenRawInputV5StreamWithFallback(alias =>
+                    {
+                        attempts++;
+                        throw new ViiperApiException(500, "Server Error",
+                            "create failed");
+                    }, raw, eventDeviceName: null,
+                    legacyDeviceName: "dualsensegamepadv5",
+                    supportsMicrophoneInterfaceEvents: false,
+                    out _, out _));
+            Assert.AreEqual(500, failure.Status);
+            Assert.AreEqual(1, attempts);
         }
 
         [TestMethod]
@@ -597,13 +1177,15 @@ namespace DS4WindowsTests
             source.R2 = 1;
             ViiperMappedInputState pressed = ViiperStatePacketBuilder.
                 BuildMappedState(source, -1);
-            ViiperStatePacketBuilder.BuildInto(pressed, packet);
+            ViiperStatePacketBuilder.BuildInto(pressed, packet,
+                includeRawInputStatus: true);
             scheduler.Publish(pressed, timestamp);
             source.R2 = 0;
             source.R2Btn = false;
             ViiperMappedInputState released = ViiperStatePacketBuilder.
                 BuildMappedState(source, -1);
-            ViiperStatePacketBuilder.BuildInto(released, packet);
+            ViiperStatePacketBuilder.BuildInto(released, packet,
+                includeRawInputStatus: true);
             scheduler.Publish(released, timestamp + 1);
             source.R2Btn = true;
 
@@ -675,5 +1257,8 @@ namespace DS4WindowsTests
             Assert.IsTrue(scheduler.TryClaim(out ViiperInputClaim claim));
             return claim;
         }
+
+        private static ViiperApiException UnknownAlias(string alias) =>
+            new(400, "Bad Request", "unknown device type: " + alias);
     }
 }

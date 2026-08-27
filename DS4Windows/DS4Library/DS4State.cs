@@ -17,6 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 using System;
+using System.Buffers.Binary;
 
 namespace DS4Windows
 {
@@ -48,6 +49,10 @@ namespace DS4Windows
         public double elapsedTime = 0.0;
         public ulong totalMicroSec = 0;
         public ushort ds4Timestamp = 0;
+        // A same-report observation of the physical DualSense vendor fields.
+        // This is metadata rather than mapped control state, so mapping and
+        // debounce scratch copies carry it unchanged to the VIIPER boundary.
+        public DualSenseRawInputStatus DualSenseRawInputStatus;
         public SixAxis Motion = null;
         public static readonly int DEFAULT_AXISDIR_VALUE = 127;
         public Int32 SASteeringWheelEmulationUnit;
@@ -160,6 +165,7 @@ namespace DS4Windows
             elapsedTime = state.elapsedTime;
             totalMicroSec = state.totalMicroSec;
             ds4Timestamp = state.ds4Timestamp;
+            DualSenseRawInputStatus = state.DualSenseRawInputStatus;
             Motion = state.Motion;
             TrackPadTouch0 = state.TrackPadTouch0;
             TrackPadTouch1 = state.TrackPadTouch1;
@@ -234,6 +240,7 @@ namespace DS4Windows
             state.elapsedTime = elapsedTime;
             state.totalMicroSec = totalMicroSec;
             state.ds4Timestamp = ds4Timestamp;
+            state.DualSenseRawInputStatus = DualSenseRawInputStatus;
             state.Motion = Motion;
             state.TrackPadTouch0 = TrackPadTouch0;
             state.TrackPadTouch1 = TrackPadTouch1;
@@ -254,6 +261,7 @@ namespace DS4Windows
             state.ds4Timestamp = ds4Timestamp;
             state.FrameCounter = FrameCounter;
             state.TouchPacketCounter = TouchPacketCounter;
+            state.DualSenseRawInputStatus = DualSenseRawInputStatus;
             state.TrackPadTouch0 = TrackPadTouch0;
             state.TrackPadTouch1 = TrackPadTouch1;
         }
@@ -297,6 +305,174 @@ namespace DS4Windows
             double tempRX = RX - 128.0, tempRY = RY - 128.0;
             RX = (Byte)(Global.Clamp(-128.0, (tempRX * cosAngle - tempRY * sinAngle), 127.0) + 128.0);
             RY = (Byte)(Global.Clamp(-128.0, (tempRX * sinAngle + tempRY * cosAngle), 127.0) + 128.0);
+        }
+    }
+
+    /// <summary>
+    /// Fixed-size physical DualSense input observation used to preserve the
+    /// sensor/status relationship in an enhanced VIIPER V5 input frame. The
+    /// fields are copied from one validated physical report: raw bytes 28..31
+    /// and 41..55 after normalizing the USB/BT transport prefix.
+    /// </summary>
+    public struct DualSenseRawInputStatus :
+        IEquatable<DualSenseRawInputStatus>
+    {
+        public const int StatusByteCount = 15;
+
+        public bool IsValid;
+        public bool IsEdgeLayout;
+        public uint SensorTimestamp;
+        public byte TouchTimestamp;
+        public byte RightTriggerFeedback;
+        public byte LeftTriggerFeedback;
+        public uint HostTimestamp;
+        public byte TriggerEffectModes;
+        public uint DeviceTimestamp;
+        public byte BatteryStatus;
+        public byte ConnectionStatus;
+        public byte Raw55;
+
+        internal static bool TryRead(ReadOnlySpan<byte> report,
+            int reportOffset, out DualSenseRawInputStatus status)
+        {
+            status = default;
+            if ((uint)reportOffset > 1u ||
+                report.Length < 56 + reportOffset)
+            {
+                return false;
+            }
+
+            status = new DualSenseRawInputStatus
+            {
+                IsValid = true,
+                SensorTimestamp = BinaryPrimitives.ReadUInt32LittleEndian(
+                    report.Slice(28 + reportOffset, sizeof(uint))),
+                TouchTimestamp = report[41 + reportOffset],
+                RightTriggerFeedback = report[42 + reportOffset],
+                LeftTriggerFeedback = report[43 + reportOffset],
+                HostTimestamp = BinaryPrimitives.ReadUInt32LittleEndian(
+                    report.Slice(44 + reportOffset, sizeof(uint))),
+                TriggerEffectModes = report[48 + reportOffset],
+                DeviceTimestamp = BinaryPrimitives.ReadUInt32LittleEndian(
+                    report.Slice(49 + reportOffset, sizeof(uint))),
+                BatteryStatus = report[53 + reportOffset],
+                ConnectionStatus = report[54 + reportOffset],
+                Raw55 = report[55 + reportOffset],
+            };
+            return true;
+        }
+
+        internal readonly void WriteStatusBytes(Span<byte> destination)
+        {
+            if (destination.Length < StatusByteCount)
+            {
+                throw new ArgumentException(
+                    $"A DualSense raw-status block needs {StatusByteCount} bytes.",
+                    nameof(destination));
+            }
+
+            destination[0] = TouchTimestamp;
+            destination[1] = RightTriggerFeedback;
+            destination[2] = LeftTriggerFeedback;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                destination.Slice(3, sizeof(uint)), HostTimestamp);
+            destination[7] = TriggerEffectModes;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                destination.Slice(8, sizeof(uint)), DeviceTimestamp);
+            destination[12] = BatteryStatus;
+            destination[13] = ConnectionStatus;
+            destination[14] = Raw55;
+        }
+
+        internal void CoupleTriggerFrom(
+            in DualSenseRawInputStatus peakStatus, bool left)
+        {
+            if (!IsValid || !peakStatus.IsValid ||
+                !CanCoupleTriggerFrom(peakStatus))
+            {
+                return;
+            }
+
+            if (left)
+            {
+                LeftTriggerFeedback = peakStatus.LeftTriggerFeedback;
+                TriggerEffectModes = (byte)((TriggerEffectModes & 0x0F) |
+                    (peakStatus.TriggerEffectModes & 0xF0));
+            }
+            else
+            {
+                RightTriggerFeedback = peakStatus.RightTriggerFeedback;
+                TriggerEffectModes = (byte)((TriggerEffectModes & 0xF0) |
+                    (peakStatus.TriggerEffectModes & 0x0F));
+            }
+        }
+
+        internal readonly bool CanCoupleTriggerFrom(
+            in DualSenseRawInputStatus other)
+        {
+            // Base DualSense and DualSense Edge assign different meanings to
+            // raw49..52. Never anchor a synthesized trigger peak to metadata
+            // from the other physical layout. Invalid observations are only
+            // compatible with other invalid observations so that a report
+            // with real metadata cannot be represented by one without it.
+            return IsEdgeLayout == other.IsEdgeLayout &&
+                IsValid == other.IsValid;
+        }
+
+        internal readonly bool TriggerCoupledEquals(
+            in DualSenseRawInputStatus other, bool left)
+        {
+            if (IsValid != other.IsValid ||
+                IsEdgeLayout != other.IsEdgeLayout)
+            {
+                return false;
+            }
+
+            if (!IsValid)
+            {
+                return true;
+            }
+
+            byte effectMask = left ? (byte)0xF0 : (byte)0x0F;
+            return (left ? LeftTriggerFeedback == other.LeftTriggerFeedback :
+                    RightTriggerFeedback == other.RightTriggerFeedback) &&
+                (TriggerEffectModes & effectMask) ==
+                    (other.TriggerEffectModes & effectMask);
+        }
+
+        public readonly bool Equals(DualSenseRawInputStatus other) =>
+            IsValid == other.IsValid &&
+            IsEdgeLayout == other.IsEdgeLayout &&
+            SensorTimestamp == other.SensorTimestamp &&
+            TouchTimestamp == other.TouchTimestamp &&
+            RightTriggerFeedback == other.RightTriggerFeedback &&
+            LeftTriggerFeedback == other.LeftTriggerFeedback &&
+            HostTimestamp == other.HostTimestamp &&
+            TriggerEffectModes == other.TriggerEffectModes &&
+            DeviceTimestamp == other.DeviceTimestamp &&
+            BatteryStatus == other.BatteryStatus &&
+            ConnectionStatus == other.ConnectionStatus &&
+            Raw55 == other.Raw55;
+
+        public override readonly bool Equals(object obj) =>
+            obj is DualSenseRawInputStatus other && Equals(other);
+
+        public override readonly int GetHashCode()
+        {
+            HashCode hash = new();
+            hash.Add(IsValid);
+            hash.Add(IsEdgeLayout);
+            hash.Add(SensorTimestamp);
+            hash.Add(TouchTimestamp);
+            hash.Add(RightTriggerFeedback);
+            hash.Add(LeftTriggerFeedback);
+            hash.Add(HostTimestamp);
+            hash.Add(TriggerEffectModes);
+            hash.Add(DeviceTimestamp);
+            hash.Add(BatteryStatus);
+            hash.Add(ConnectionStatus);
+            hash.Add(Raw55);
+            return hash.ToHashCode();
         }
     }
 }

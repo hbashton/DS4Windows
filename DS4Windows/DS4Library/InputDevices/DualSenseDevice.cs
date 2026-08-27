@@ -448,6 +448,8 @@ namespace DS4Windows.InputDevices
         private InputReportDataBytes dataBytes;
         protected new const int BT_OUTPUT_REPORT_LENGTH = 78;
         private new const int BT_INPUT_REPORT_LENGTH = 78;
+        private const int USB_INPUT_REPORT_LENGTH = 64;
+        private const byte USB_INPUT_REPORT_ID = 0x01;
         protected const int TOUCHPAD_DATA_OFFSET = 33;
         private new const int BATTERY_MAX = 8;
 
@@ -753,6 +755,8 @@ namespace DS4Windows.InputDevices
         private long bluetoothMicrophoneRequestGeneration;
         private long bluetoothRejectedInputFrames;
         private int bluetoothLastRejectedInputTag = -1;
+        private long usbRejectedInputFrames;
+        private int usbLastRejectedInputReportId = -1;
 
         // Physical input publishes only fixed-size observations. These three
         // persistent workers own physical output composition/I/O, audio-clock
@@ -886,6 +890,12 @@ namespace DS4Windows.InputDevices
 
         public int BluetoothLastRejectedInputTag =>
             Volatile.Read(ref bluetoothLastRejectedInputTag);
+
+        public long UsbRejectedInputFrames =>
+            Interlocked.Read(ref usbRejectedInputFrames);
+
+        public int UsbLastRejectedInputReportId =>
+            Volatile.Read(ref usbLastRejectedInputReportId);
 
         public long BluetoothSpeakerFramesDropped =>
             Interlocked.Read(ref bluetoothSpeakerFramesDropped);
@@ -4029,6 +4039,18 @@ namespace DS4Windows.InputDevices
                             timeoutExecuted = true;
                             continue;
                         }
+
+                        if (!TryAcceptUsbNormalInputFrame(inputReport))
+                        {
+                            // Unknown USB report IDs are neither controller
+                            // state nor same-report status. Record only fixed
+                            // telemetry here; the input thread must not log or
+                            // invoke subscribers for a rejected frame.
+                            inputReportErrorCount = 0;
+                            DrainQueuedInputEvents();
+                            readWaitEv.Reset();
+                            continue;
+                        }
                     }
 
                     long physicalReadCompletedAt = Stopwatch.GetTimestamp();
@@ -4051,6 +4073,9 @@ namespace DS4Windows.InputDevices
 
                     cState.PacketCounter = pState.PacketCounter + 1;
                     cState.ReportTimeStamp = utcNow;
+                    TryExtractPhysicalInputStatus(inputReport, reportOffset,
+                        subType == DeviceSubType.DSEdge,
+                        out cState.DualSenseRawInputStatus);
                     cState.LX = inputReport[1 + reportOffset];
                     cState.LY = inputReport[2 + reportOffset];
                     cState.RX = inputReport[3 + reportOffset];
@@ -4363,6 +4388,40 @@ namespace DS4Windows.InputDevices
 
             timeoutExecuted = true;
         }
+
+        internal static bool TryExtractPhysicalInputStatus(
+            ReadOnlySpan<byte> report, int reportOffset,
+            out DualSenseRawInputStatus status) =>
+            DualSenseRawInputStatus.TryRead(report, reportOffset, out status);
+
+        internal static bool TryExtractPhysicalInputStatus(
+            ReadOnlySpan<byte> report, int reportOffset, bool isEdgeLayout,
+            out DualSenseRawInputStatus status)
+        {
+            bool valid = DualSenseRawInputStatus.TryRead(report, reportOffset,
+                out status);
+            status.IsEdgeLayout = valid && isEdgeLayout;
+            return valid;
+        }
+
+        internal bool TryAcceptUsbNormalInputFrame(
+            ReadOnlySpan<byte> report)
+        {
+            if (IsUsbNormalInputFrame(report))
+            {
+                return true;
+            }
+
+            Interlocked.Increment(ref usbRejectedInputFrames);
+            Volatile.Write(ref usbLastRejectedInputReportId,
+                report.IsEmpty ? -1 : report[0]);
+            return false;
+        }
+
+        internal static bool IsUsbNormalInputFrame(
+            ReadOnlySpan<byte> report) =>
+            report.Length == USB_INPUT_REPORT_LENGTH &&
+            report[0] == USB_INPUT_REPORT_ID;
 
         private static bool IsBluetoothMicrophoneFrame(byte[] report)
         {

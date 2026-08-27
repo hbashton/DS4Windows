@@ -138,6 +138,13 @@ namespace DS4Windows
                     RecordPeak(ref l2Epoch, state.L2, state, timestamp,
                         receivedCount);
                 }
+                else if (state.L2 != 0 && l2Epoch.Active &&
+                    state.L2 == l2Epoch.PeakValue)
+                {
+                    RefreshEqualPeakTriggerStatus(ref l2Epoch, state,
+                        left: true, timestamp: timestamp,
+                        receiveId: receivedCount);
+                }
 
                 if (r2Began)
                 {
@@ -149,6 +156,13 @@ namespace DS4Windows
                 {
                     RecordPeak(ref r2Epoch, state.R2, state, timestamp,
                         receivedCount);
+                }
+                else if (state.R2 != 0 && r2Epoch.Active &&
+                    state.R2 == r2Epoch.PeakValue)
+                {
+                    RefreshEqualPeakTriggerStatus(ref r2Epoch, state,
+                        left: false, timestamp: timestamp,
+                        receiveId: receivedCount);
                 }
 
                 bool transition = IsTransition(baselineKnown, prior, state);
@@ -378,16 +392,16 @@ namespace DS4Windows
                 lastTransported = transported;
                 lastTransportedKnown = true;
                 if (l2Epoch.Active &&
-                    transported.L2EpochId == l2Epoch.Id &&
-                    transported.State.L2 > l2Epoch.PresentedPeakValue)
+                    transported.L2EpochId == l2Epoch.Id)
                 {
-                    l2Epoch.PresentedPeakValue = transported.State.L2;
+                    RecordPresentedPeak(ref l2Epoch, transported.State,
+                        left: true);
                 }
                 if (r2Epoch.Active &&
-                    transported.R2EpochId == r2Epoch.Id &&
-                    transported.State.R2 > r2Epoch.PresentedPeakValue)
+                    transported.R2EpochId == r2Epoch.Id)
                 {
-                    r2Epoch.PresentedPeakValue = transported.State.R2;
+                    RecordPresentedPeak(ref r2Epoch, transported.State,
+                        left: false);
                 }
                 claimPending = false;
                 claimedPeakBackupRequired = false;
@@ -474,6 +488,92 @@ namespace DS4Windows
             epoch.PeakReceiveId = receiveId;
         }
 
+        private void RefreshEqualPeakTriggerStatus(
+            ref TriggerEpoch epoch, in ViiperMappedInputState state,
+            bool left, long timestamp, long receiveId)
+        {
+            // Firmware can advance trigger feedback status one report after
+            // the analog value first reaches its maximum (for example 0x28 to
+            // 0x29 while L2 remains 255). Refresh only that trigger-coupled
+            // metadata. The peak's receive order, clock fields, other trigger,
+            // and other controls must continue to describe the saved peak
+            // report rather than a synthetic merged state.
+            if (!epoch.PeakState.RawInputStatus.CanCoupleTriggerFrom(
+                    state.RawInputStatus) ||
+                IsTransition(baselineKnown: true, epoch.PeakState, state))
+            {
+                // Base and Edge raw49..52 layouts cannot be combined. Nor may
+                // a later button/D-pad/touch-contact boundary be folded back
+                // into a saved state with different controls. Retain the newer
+                // complete state as a separate truthful peak; any older
+                // pending/presented snapshot will fail the representation
+                // check and be followed by this one before release.
+                epoch.PeakState = state;
+                epoch.PeakTimestamp = timestamp;
+                epoch.PeakReceiveId = receiveId;
+                return;
+            }
+
+            epoch.PeakState.RawInputStatus.CoupleTriggerFrom(
+                state.RawInputStatus, left);
+            RefreshUnclaimedPeakTriggerStatus(epoch, left);
+        }
+
+        private static void RecordPresentedPeak(ref TriggerEpoch epoch,
+            in ViiperMappedInputState state, bool left)
+        {
+            byte value = left ? state.L2 : state.R2;
+            byte presentedValue = epoch.PresentedPeakKnown ?
+                (left ? epoch.PresentedPeakState.L2 :
+                    epoch.PresentedPeakState.R2) : (byte)0;
+            if (value == 0 || epoch.PresentedPeakKnown &&
+                value < presentedValue)
+            {
+                return;
+            }
+
+            if (!epoch.PresentedPeakKnown || value > presentedValue ||
+                !epoch.PresentedPeakState.RawInputStatus.
+                    CanCoupleTriggerFrom(state.RawInputStatus))
+            {
+                epoch.PresentedPeakState = state;
+                epoch.PresentedPeakKnown = true;
+                return;
+            }
+
+            // Equal analog maxima can carry a later physical feedback state.
+            // Refresh only the coupled trigger fields so the recorded report
+            // is never a cross-layout or unrelated-field synthesis.
+            epoch.PresentedPeakState.RawInputStatus.CoupleTriggerFrom(
+                state.RawInputStatus, left);
+        }
+
+        private void RefreshUnclaimedPeakTriggerStatus(
+            in TriggerEpoch epoch, bool left)
+        {
+            // Only the still-unclaimed initial press may absorb a peak
+            // upgrade. Rewriting every same-epoch button transition would
+            // invent a status/control pairing that never arrived together.
+            // Retry storage is also excluded: a failed write must retry the
+            // exact same logical state that was claimed.
+            for (int index = 0; index < transitionCount; index++)
+            {
+                int slot = (transitionHead + index) % transitions.Length;
+                if (transitions[slot].PublicationId ==
+                        epoch.InitialPublicationId &&
+                    index == transitionCount - 1 &&
+                    EnvelopeHasPeakValue(transitions[slot], epoch, left) &&
+                    transitions[slot].State.RawInputStatus.
+                        CanCoupleTriggerFrom(
+                            epoch.PeakState.RawInputStatus))
+                {
+                    transitions[slot].State.RawInputStatus.CoupleTriggerFrom(
+                        epoch.PeakState.RawInputStatus, left);
+                    return;
+                }
+            }
+        }
+
         private void StrengthenPendingInitialForFallenPeaks(
             in ViiperMappedInputState state)
         {
@@ -558,7 +658,8 @@ namespace DS4Windows
 
         private bool EpochPeakRepresented(in TriggerEpoch epoch, bool left)
         {
-            if (epoch.PresentedPeakValue >= epoch.PeakValue ||
+            if (epoch.PresentedPeakKnown && StateRepresentsPeak(
+                    epoch.PresentedPeakState, epoch, left) ||
                 retryPending && EnvelopeRepresentsPeak(retry, epoch, left) ||
                 lastTransportedKnown && EnvelopeRepresentsPeak(
                     lastTransported, epoch, left))
@@ -582,11 +683,28 @@ namespace DS4Windows
         private static bool EnvelopeRepresentsPeak(
             in ViiperInputEnvelope envelope, in TriggerEpoch epoch, bool left)
         {
+            return EnvelopeHasPeakValue(envelope, epoch, left) &&
+                envelope.State.RawInputStatus.TriggerCoupledEquals(
+                    epoch.PeakState.RawInputStatus, left);
+        }
+
+        private static bool EnvelopeHasPeakValue(
+            in ViiperInputEnvelope envelope, in TriggerEpoch epoch, bool left)
+        {
             return left ?
                 envelope.L2EpochId == epoch.Id &&
                     envelope.State.L2 >= epoch.PeakValue :
                 envelope.R2EpochId == epoch.Id &&
                     envelope.State.R2 >= epoch.PeakValue;
+        }
+
+        private static bool StateRepresentsPeak(
+            in ViiperMappedInputState state, in TriggerEpoch epoch, bool left)
+        {
+            byte value = left ? state.L2 : state.R2;
+            return value >= epoch.PeakValue &&
+                state.RawInputStatus.TriggerCoupledEquals(
+                    epoch.PeakState.RawInputStatus, left);
         }
 
         private bool TryStrengthenUnclaimedInitial(long publicationId,
@@ -597,16 +715,23 @@ namespace DS4Windows
                 return false;
             }
 
-            if (retryPending && retry.PublicationId == publicationId)
-            {
-                return TryStrengthenEnvelope(ref retry, left, epoch);
-            }
-
             for (int index = 0; index < transitionCount; index++)
             {
                 int slot = (transitionHead + index) % transitions.Length;
                 if (transitions[slot].PublicationId == publicationId)
                 {
+                    if (index != transitionCount - 1 &&
+                        !transitions[slot].State.RawInputStatus.
+                            TriggerCoupledEquals(
+                                epoch.PeakState.RawInputStatus, left))
+                    {
+                        // A later physical report changed the coupled raw
+                        // trigger state after other ordered controls. Do not
+                        // pull either its analog peak or settled status ahead
+                        // of those controls; promote the complete saved peak
+                        // behind them instead.
+                        return false;
+                    }
                     return TryStrengthenEnvelope(ref transitions[slot], left,
                         epoch);
                 }
@@ -634,7 +759,10 @@ namespace DS4Windows
                 return false;
             }
 
-            envelope.State.StrengthenTrigger(left, epoch.PeakValue);
+            if (!envelope.State.StrengthenTrigger(left, epoch.PeakState))
+            {
+                return false;
+            }
             envelope.PeakUpgradeMask |= triggerBit;
             envelope.PeakUpgradeReceiveId = epoch.PeakReceiveId;
             return true;
@@ -699,8 +827,9 @@ namespace DS4Windows
             public long Id;
             public long InitialPublicationId;
             public byte PeakValue;
-            public byte PresentedPeakValue;
             public ViiperMappedInputState PeakState;
+            public bool PresentedPeakKnown;
+            public ViiperMappedInputState PresentedPeakState;
             public long PeakTimestamp;
             public long PeakReceiveId;
         }

@@ -20,6 +20,40 @@ virtual DualSense endpoint. DS4Windows selects the matching virtual render
 endpoint automatically and converts microphone PCM to the virtual endpoint's
 native sample rate and channel layout.
 
+## DualShock 4 Bluetooth speaker ownership
+
+Enabling the physical DualShock 4 speaker creates one bounded audio owner for
+the controller slot. That owner contains the Windows capture session, encoder
+thread, reusable deadline timer, and (except for the measured shared-handle
+diagnostic mode) one dedicated write-only HID session. The 8 ms production
+report clock blocks on the reusable high-resolution timer; it does not busy
+spin, raise the process-wide timer resolution, or run at `Highest` thread
+priority.
+
+Rumble and lightbar changes observed by the physical input loop are copied into
+a fixed latest-value mailbox. The input loop never drains the HID audio queue or
+waits for an overlapped completion. The audio owner submits that value ahead of
+its next speaker report and acknowledges it only after successful completion;
+failed writes remain pending, while an older completion cannot erase a newer
+effect. The final disable closes mailbox admission and drains any already
+accepted effect before the audio-mode-off barrier.
+
+Disabling speaker streaming is a terminal owner transition. DS4Windows first
+detaches and closes the Windows capture session, wakes and joins the encoder,
+cancels any fixed overlapped write that delays retirement, and sends the final
+ordered audio-mode report. It then unregisters and closes the HID lane and
+disposes every wait handle. If the controller vanishes before the final report,
+the host speaker state is still retired so ordinary rumble/lightbar output can
+never target a dead audio owner. Microphone state is preserved independently,
+and its ordered publisher prevents an old speaker-disable report from
+overwriting a newer microphone mode. Stop and immediate restart commands share
+one per-slot FIFO lifecycle executor, so the old capture and HID owner always
+retires before a replacement can register or enable its lane.
+An unexpected capture or native-write exit withdraws only its matching slot
+generation and queues that same FIFO retirement. A delayed old callback cannot
+clear or disable a newer owner, and status never reports an ended worker as
+ready.
+
 ## In-game setup
 
 1. Install a VIIPER build containing the DualSense UAC interface.

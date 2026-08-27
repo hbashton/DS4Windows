@@ -11,6 +11,7 @@ namespace DS4Windows
     public static class DualShock4BluetoothAudioProtocol
     {
         public const int SpeakerRealtimeReportLength = 142;
+        public const int AudioControlReportLength = 78;
         public const int SpeakerSmallReportLength = 270;
         public const int SpeakerLargeReportLength = 462;
         public const int SpeakerRealtimeFramesPerReport = 1;
@@ -245,8 +246,31 @@ namespace DS4Windows
             byte lightbarBlue = 0, byte flashOn = 0, byte flashOff = 0,
             byte bluetoothPollRate = 0)
         {
-            const int reportLength = 78;
-            byte[] report = new byte[reportLength];
+            byte[] report = new byte[AudioControlReportLength];
+            WriteAudioControlReport(report, speakerEnabled,
+                microphoneEnabled, speakerVolume, headphoneVolume,
+                microphoneVolume, rightFastRumble, leftSlowRumble,
+                lightbarRed, lightbarGreen, lightbarBlue, flashOn, flashOff,
+                bluetoothPollRate);
+            return report;
+        }
+
+        public static void WriteAudioControlReport(byte[] report,
+            bool speakerEnabled, bool microphoneEnabled, byte speakerVolume,
+            byte headphoneVolume, byte microphoneVolume,
+            byte rightFastRumble = 0, byte leftSlowRumble = 0,
+            byte lightbarRed = 0, byte lightbarGreen = 0,
+            byte lightbarBlue = 0, byte flashOn = 0, byte flashOff = 0,
+            byte bluetoothPollRate = 0)
+        {
+            if (report == null || report.Length != AudioControlReportLength)
+            {
+                throw new ArgumentException(
+                    $"A DS4 audio control report must be exactly {AudioControlReportLength} bytes.",
+                    nameof(report));
+            }
+
+            Array.Clear(report, 0, report.Length);
             bool audioEnabled = speakerEnabled || microphoneEnabled;
             // Audio control is specifically a 78-byte report 0x11. A DS4 may
             // also accept the 334-byte report 0x15 for ordinary effects, but
@@ -281,8 +305,7 @@ namespace DS4Windows
             report[22] = speakerEnabled ? headphoneVolume : (byte)0;
             report[23] = microphoneEnabled ? microphoneVolume : (byte)0;
             report[24] = speakerEnabled ? speakerVolume : (byte)0;
-            WriteBluetoothCrc(report, reportLength);
-            return report;
+            WriteBluetoothCrc(report, AudioControlReportLength);
         }
 
         public static int ExtractMicrophoneSbcFrames(byte[] report, int reportLength,

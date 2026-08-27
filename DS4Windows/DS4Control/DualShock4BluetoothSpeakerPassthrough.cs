@@ -2,6 +2,7 @@ using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 using SBC;
+using DS4WinWPF.DS4Control;
 using Microsoft.Win32.SafeHandles;
 using System;
 using System.Collections.Generic;
@@ -220,6 +221,8 @@ namespace DS4Windows
         private const int MaxFramesAvailableWaitMilliseconds = 20;
         private const int MeasuredTransportAsyncTailFlushIdleMilliseconds = 60;
         private const int MeasuredTransportAsyncBackpressureWaitMilliseconds = 1;
+        private const int CooperativeWorkerStopMilliseconds = 100;
+        private const int CancelledWorkerStopMilliseconds = 2000;
         private static readonly bool EnableDiagnosticCapture =
             string.Equals(Environment.GetEnvironmentVariable(
                 "DS4WINDOWS_DS4_AUDIO_DIAGNOSTIC_CAPTURE"), "1",
@@ -279,6 +282,18 @@ namespace DS4Windows
             Failed,
         }
 
+        internal enum PooledReportAudioMode
+        {
+            Standard,
+            ProductionA0,
+            ProductionDuplex,
+            ProductionReplay,
+            FifoBuffered,
+            MeasuredTransportReference,
+            MeasuredTransportSpeakerOnly,
+            CreditBuffered,
+        }
+
         private readonly object syncRoot = new object();
         private readonly DS4Device device;
         private readonly byte speakerVolume;
@@ -287,6 +302,8 @@ namespace DS4Windows
         private readonly string sourceEndpointId;
         private readonly ControllerAudioEndpointKind sourceEndpointKind;
         private readonly ViiperOutDevice directSpeakerSource;
+        private readonly Action<DualShock4BluetoothSpeakerPassthrough>
+            unexpectedWorkerExit;
         private readonly int directSpeakerSampleRate;
         private readonly DualShock4AudioDriftMode directDriftMode;
         private readonly DualShock4AudioTransportMode directTransportMode;
@@ -328,10 +345,10 @@ namespace DS4Windows
             DualShock4BluetoothAudioProtocol.SpeakerSmallReportLength];
         private readonly byte[] speakerLargeReport = new byte[
             DualShock4BluetoothAudioProtocol.SpeakerLargeReportLength];
-        private readonly byte[] speakerSharedHandleAudioReport = new byte[640];
         private readonly object speakerSharedHandleWriteGate = new object();
         private readonly AutoResetEvent captureAvailable = new AutoResetEvent(false);
         private readonly ManualResetEvent stoppingSignal = new ManualResetEvent(false);
+        private readonly Func<bool> preparePooledReport;
 
         private byte[] diagnosticPcm;
         private byte[] diagnosticSbc;
@@ -359,6 +376,8 @@ namespace DS4Windows
         private NativeOverlappedWritePool speakerWritePool;
         private SafeFileHandle speakerWriteHandle;
         private volatile bool stopping;
+        private volatile bool retireWhenWorkerExits;
+        private int disposeStarted;
         private ushort frameNumber;
         private int pendingPcmCount;
         private double resamplePhase;
@@ -367,7 +386,7 @@ namespace DS4Windows
         private long lastAudibleTick;
         private int writeFailureLogged;
         private int reportsSubmitted;
-        private bool speakerTransportEnabled;
+        private volatile bool speakerTransportEnabled;
         private bool speakerSharedHandleControlLaneRegistered;
         private bool measuredTransportReferenceInputIntervalOverrideEnabled;
         private long directPacketsReceived;
@@ -431,12 +450,28 @@ namespace DS4Windows
         private long creditBufferedSkippedTicks;
         private int creditBufferedPrimeLogged;
         private readonly byte audioTarget;
+        // Mutable preparation context owned exclusively by the single encoder
+        // worker. The delegate is cached once in the constructor so neither
+        // the direct nor loopback 8 ms presenter allocates a closure per HID
+        // report.
+        private byte[] pooledReport;
+        private int pooledReportFrameCount;
+        private bool pooledReportAllowSilence;
+        private bool pooledReportForceSilence;
+        private bool pooledReportMicrophoneEnabled;
+        private PooledReportAudioMode pooledReportAudioMode;
+        private bool pooledReportCaptureDiagnostic;
+        private bool pooledReportPrepared;
+        private bool pooledReportContainsSyntheticSilence;
+        private int pooledReportRealFrameCount;
 
         public DualShock4BluetoothSpeakerPassthrough(DS4Device device, byte speakerVolume,
             DualSenseSpeakerCompression compression, byte bassBoost,
             string sourceEndpointId, ControllerAudioEndpointKind sourceEndpointKind,
             ViiperOutDevice directSpeakerSource = null,
-            bool headsetOnlyAudio = false)
+            bool headsetOnlyAudio = false,
+            Action<DualShock4BluetoothSpeakerPassthrough>
+                unexpectedWorkerExit = null)
         {
             this.device = device ?? throw new ArgumentNullException(nameof(device));
             this.speakerVolume = speakerVolume;
@@ -448,6 +483,7 @@ namespace DS4Windows
             this.sourceEndpointId = sourceEndpointId ?? string.Empty;
             this.sourceEndpointKind = sourceEndpointKind;
             this.directSpeakerSource = directSpeakerSource;
+            this.unexpectedWorkerExit = unexpectedWorkerExit;
             audioTarget = headsetOnlyAudio ? (byte)0x24 : (byte)0x02;
             directSpeakerSampleRate = directSpeakerSource?.
                 DirectSpeakerPcmSampleRate ?? 0;
@@ -459,6 +495,7 @@ namespace DS4Windows
                     DualShock4AudioTransportSettings.EnvironmentVariableName));
             processor = new DualSenseSpeakerProcessor(this.compression,
                 this.bassBoost, CaptureSampleRate);
+            preparePooledReport = PreparePooledReport;
             var silenceEncoder = new DualShock4SbcEncoder(
                 SpeakerSampleRate);
             silenceEncoder.Encode(new short[SamplesPerSbcFrame],
@@ -485,7 +522,7 @@ namespace DS4Windows
             ViiperOutDevice candidateDirectSpeakerSource = null,
             bool candidateHeadsetOnlyAudio = false)
         {
-            return !stopping && ReferenceEquals(device, candidate) &&
+            return IsOperational && ReferenceEquals(device, candidate) &&
                 speakerVolume == candidateVolume &&
                 compression == (DualSenseSpeakerCompression)Math.Clamp(
                     (int)candidateCompression, (int)DualSenseSpeakerCompression.Off,
@@ -498,8 +535,11 @@ namespace DS4Windows
                 ReferenceEquals(directSpeakerSource,
                     candidateDirectSpeakerSource) &&
                 string.Equals(sourceEndpointId, candidateSourceEndpointId ?? string.Empty,
-                    StringComparison.Ordinal);
+                StringComparison.Ordinal);
         }
+
+        internal bool IsOperational => !stopping &&
+            Volatile.Read(ref disposeStarted) == 0 && worker?.IsAlive == true;
 
         public void Start()
         {
@@ -537,11 +577,10 @@ namespace DS4Windows
                         throw new IOException(
                             "Could not open the DualShock 4 Bluetooth audio transport.");
                     }
-                    worker = new Thread(DirectStreamLoop)
+                    worker = new Thread(RunDirectStreamWorker)
                     {
                         IsBackground = true,
                         Name = "DualShock 4 direct VIIPER SBC encoder",
-                        Priority = ThreadPriority.Highest,
                     };
                     worker.Start();
                     AppLogger.LogToGui(
@@ -575,11 +614,10 @@ namespace DS4Windows
                 ISampleProvider source = ToStereo(captureBuffer.ToSampleProvider());
                 sampleProvider = source.WaveFormat.SampleRate == CaptureSampleRate ? source :
                     new WdlResamplingSampleProvider(source, CaptureSampleRate);
-                worker = new Thread(StreamLoop)
+                worker = new Thread(RunCaptureStreamWorker)
                 {
                     IsBackground = true,
                     Name = "DualShock 4 Bluetooth SBC encoder",
-                    Priority = ThreadPriority.Highest,
                 };
                 if (!EnsureSpeakerTransportEnabled())
                 {
@@ -1032,6 +1070,74 @@ namespace DS4Windows
             pendingPcm[pendingPcmCount++] = right;
         }
 
+        private void RunDirectStreamWorker()
+        {
+            RunWorkerOwnedLoop(DirectStreamLoop);
+        }
+
+        private void RunCaptureStreamWorker()
+        {
+            RunWorkerOwnedLoop(StreamLoop);
+        }
+
+        internal static bool MustRetireAfterWorkerExit(bool stopping,
+            bool captureRetirementRequested)
+        {
+            return !stopping || captureRetirementRequested;
+        }
+
+        private void RunWorkerOwnedLoop(Action loop)
+        {
+            Exception failure = null;
+            try
+            {
+                loop();
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+            finally
+            {
+                bool unexpectedExit = MustRetireAfterWorkerExit(stopping,
+                    retireWhenWorkerExits);
+                if (unexpectedExit)
+                {
+                    if (failure != null)
+                    {
+                        AppLogger.LogToGui(
+                            $"DualShock 4 Bluetooth audio worker failed: " +
+                            failure.Message, true);
+                    }
+
+                    try
+                    {
+                        // Publish terminal admission first, then let the slot
+                        // manager enqueue retirement on the same FIFO that
+                        // orders replacement starts. This old generation must
+                        // never disable a newer owner from its media thread.
+                        RequestStop();
+                        if (unexpectedWorkerExit != null)
+                        {
+                            unexpectedWorkerExit(this);
+                        }
+                        else
+                        {
+                            // Non-managed/test ownership has no competing slot
+                            // generation and can retire directly.
+                            Dispose();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLogger.LogToGui(
+                            $"DualShock 4 Bluetooth audio retirement failed: " +
+                            ex.Message, true);
+                    }
+                }
+            }
+        }
+
         private void DirectStreamLoop()
         {
             if (directTransportMode == DualShock4AudioTransportMode.Reference)
@@ -1263,7 +1369,6 @@ namespace DS4Windows
                 captureAvailable,
                 stoppingSignal,
             };
-            timeBeginPeriod(1);
             IntPtr highResolutionTimer = CreateHighResolutionTimer();
             IntPtr mmcssHandle = RegisterMultimediaScheduler();
             long cadenceTicks = (long)Math.Round(Stopwatch.Frequency *
@@ -1373,7 +1478,6 @@ namespace DS4Windows
                 {
                     CloseNativeHandle(highResolutionTimer);
                 }
-                timeEndPeriod(1);
             }
         }
 
@@ -1384,7 +1488,6 @@ namespace DS4Windows
                 captureAvailable,
                 stoppingSignal,
             };
-            timeBeginPeriod(1);
             IntPtr highResolutionTimer = CreateHighResolutionTimer();
             IntPtr mmcssHandle = RegisterMultimediaScheduler();
             long cadenceTicks = (long)Math.Round(Stopwatch.Frequency *
@@ -1476,7 +1579,6 @@ namespace DS4Windows
                 {
                     CloseNativeHandle(highResolutionTimer);
                 }
-                timeEndPeriod(1);
             }
         }
 
@@ -1581,7 +1683,6 @@ namespace DS4Windows
                 captureAvailable,
                 stoppingSignal,
             };
-            timeBeginPeriod(1);
             IntPtr highResolutionTimer = CreateHighResolutionTimer();
             IntPtr mmcssHandle = RegisterMultimediaScheduler();
             long cadenceTicks = DualShock4AudioTransportSettings.
@@ -1699,7 +1800,6 @@ namespace DS4Windows
                 {
                     CloseNativeHandle(highResolutionTimer);
                 }
-                timeEndPeriod(1);
             }
         }
 
@@ -1787,7 +1887,6 @@ namespace DS4Windows
                 captureAvailable,
                 stoppingSignal,
             };
-            timeBeginPeriod(1);
             IntPtr highResolutionTimer = CreateHighResolutionTimer();
             IntPtr mmcssHandle = RegisterMultimediaScheduler();
             long cadenceTicks = DualShock4AudioTransportSettings.
@@ -1906,7 +2005,6 @@ namespace DS4Windows
                 {
                     CloseNativeHandle(highResolutionTimer);
                 }
-                timeEndPeriod(1);
             }
         }
 
@@ -1977,7 +2075,6 @@ namespace DS4Windows
                 captureAvailable,
                 stoppingSignal,
             };
-            timeBeginPeriod(1);
             IntPtr highResolutionTimer = CreateHighResolutionTimer();
             IntPtr mmcssHandle = RegisterMultimediaScheduler();
             long cadenceTicks = DualShock4AudioTransportSettings.
@@ -2094,7 +2191,6 @@ namespace DS4Windows
                 {
                     CloseNativeHandle(highResolutionTimer);
                 }
-                timeEndPeriod(1);
             }
         }
 
@@ -2167,7 +2263,6 @@ namespace DS4Windows
                 captureAvailable,
                 stoppingSignal,
             };
-            timeBeginPeriod(1);
             IntPtr highResolutionTimer = CreateHighResolutionTimer();
             IntPtr mmcssHandle = RegisterMultimediaScheduler();
             try
@@ -2322,7 +2417,6 @@ namespace DS4Windows
                 {
                     CloseNativeHandle(highResolutionTimer);
                 }
-                timeEndPeriod(1);
             }
         }
 
@@ -2415,17 +2509,27 @@ namespace DS4Windows
 
         private void Capture_RecordingStopped(object sender, StoppedEventArgs e)
         {
-            if (!stopping && e.Exception != null)
+            if (stopping)
+            {
+                return;
+            }
+
+            if (e.Exception != null)
             {
                 AppLogger.LogToGui(
                     $"DualShock 4 Bluetooth speaker capture stopped: {e.Exception.Message}",
                     true);
             }
+
+            // A capture session that ends by itself has no future producer.
+            // Wake the media worker and make that worker retire the HID/audio
+            // owner after it leaves its current bounded operation.
+            retireWhenWorkerExits = true;
+            RequestStop();
         }
 
         private void StreamLoop()
         {
-            timeBeginPeriod(1);
             IntPtr highResolutionTimer = CreateHighResolutionTimer();
             IntPtr mmcssHandle = RegisterMultimediaScheduler();
             long cadenceTicks = (long)Math.Round(Stopwatch.Frequency *
@@ -2502,7 +2606,6 @@ namespace DS4Windows
                 {
                     CloseNativeHandle(highResolutionTimer);
                 }
-                timeEndPeriod(1);
             }
         }
 
@@ -2646,6 +2749,97 @@ namespace DS4Windows
             return allowSilence ? availableFrames : -1;
         }
 
+        private bool PreparePooledReport()
+        {
+            lock (syncRoot)
+            {
+                if (!PreparePooledReportForSubmission(encodedFrames,
+                        speakerFrameBatch, speakerSilenceFrame, pooledReport,
+                        pooledReportFrameCount, pooledReportAllowSilence,
+                        pooledReportForceSilence, audioTarget,
+                        pooledReportMicrophoneEnabled,
+                        GetBluetoothPollRate(), pooledReportAudioMode,
+                        ref frameNumber, out int realFrameCount,
+                        out bool containsSyntheticSilence))
+                {
+                    return false;
+                }
+                pooledReportRealFrameCount = realFrameCount;
+                pooledReportContainsSyntheticSilence =
+                    containsSyntheticSilence;
+                if (pooledReportCaptureDiagnostic)
+                {
+                    CaptureDiagnosticSubmittedSbc(pooledReport,
+                        pooledReportFrameCount);
+                }
+                pooledReportPrepared = true;
+                return true;
+            }
+        }
+
+        internal static bool PreparePooledReportForSubmission(
+            Queue<byte[]> sourceFrames, byte[][] frameBatch,
+            byte[] silenceFrame, byte[] report, int frameCount,
+            bool allowSilence, bool forceSilence, byte audioTarget,
+            bool microphoneEnabled, byte bluetoothPollRate,
+            PooledReportAudioMode audioMode, ref ushort frameNumber,
+            out int realFrameCount,
+            out bool containsSyntheticSilence)
+        {
+            realFrameCount = GetRealFrameCountForSubmission(frameCount,
+                sourceFrames.Count, allowSilence, forceSilence);
+            containsSyntheticSilence = false;
+            if (realFrameCount < 0)
+            {
+                return false;
+            }
+
+            for (int index = 0; index < realFrameCount; index++)
+            {
+                frameBatch[index] = sourceFrames.Dequeue();
+            }
+            for (int index = realFrameCount; index < frameCount; index++)
+            {
+                frameBatch[index] = silenceFrame;
+            }
+
+            containsSyntheticSilence = realFrameCount < frameCount;
+            DualShock4BluetoothAudioProtocol.WriteSpeakerReport(report,
+                frameNumber, frameBatch, frameCount,
+                audioTarget: audioTarget,
+                microphoneEnabled: microphoneEnabled,
+                bluetoothPollRate: bluetoothPollRate);
+            switch (audioMode)
+            {
+                case PooledReportAudioMode.ProductionA0:
+                    ApplyProductionA0AudioMode(report);
+                    break;
+                case PooledReportAudioMode.ProductionDuplex:
+                    ApplyProductionDuplexAudioMode(report,
+                        microphoneEnabled);
+                    break;
+                case PooledReportAudioMode.ProductionReplay:
+                    ApplyProductionReplayAudioMode(report,
+                        microphoneEnabled);
+                    break;
+                case PooledReportAudioMode.FifoBuffered:
+                    ApplyFifoBufferedAudioMode(report, microphoneEnabled);
+                    break;
+                case PooledReportAudioMode.MeasuredTransportReference:
+                    ApplyMeasuredTransportReferenceAudioMode(report);
+                    break;
+                case PooledReportAudioMode.MeasuredTransportSpeakerOnly:
+                    ApplySpeakerOnlyAudioMode(report,
+                        "measured-transport-speaker-only", 0xA2);
+                    break;
+                case PooledReportAudioMode.CreditBuffered:
+                    ApplyCreditBufferedAudioMode(report);
+                    break;
+            }
+            frameNumber = unchecked((ushort)(frameNumber + frameCount));
+            return true;
+        }
+
         private void SubmitEncodedFrames(int count, bool allowSilence = false,
             bool forceSilence = false)
         {
@@ -2678,60 +2872,31 @@ namespace DS4Windows
                     SpeakerLargeFramesPerReport => speakerLargeReport,
                 _ => speakerSmallReport,
             };
-            bool containsSyntheticSilence = false;
-            int realFrameCount = 0;
-            bool prepared = false;
             bool submitted = false;
             bool hardFailure = false;
             bool saturated = false;
-            device.ReadDualShock4BluetoothAudioModeSynchronized(
-                microphoneEnabled =>
-                {
-                    submitted = speakerWritePool.TrySendPrepared(report,
-                        DualShock4AudioTransportSettings.
-                            ProductionReplaySlotCount,
-                        () =>
-                        {
-                            lock (syncRoot)
-                            {
-                                realFrameCount =
-                                    GetRealFrameCountForSubmission(count,
-                                        encodedFrames.Count, allowSilence,
-                                        forceSilence);
-                                if (realFrameCount < 0)
-                                {
-                                    return false;
-                                }
-
-                                for (int index = 0;
-                                    index < realFrameCount; index++)
-                                {
-                                    speakerFrameBatch[index] =
-                                        encodedFrames.Dequeue();
-                                }
-                                for (int index = realFrameCount;
-                                    index < count; index++)
-                                {
-                                    speakerFrameBatch[index] =
-                                        GetEncodedSilenceFrame();
-                                }
-
-                                containsSyntheticSilence =
-                                    realFrameCount < count;
-                                DualShock4BluetoothAudioProtocol.
-                                    WriteSpeakerReport(report, frameNumber,
-                                        speakerFrameBatch, count,
-                                        audioTarget: audioTarget,
-                                        microphoneEnabled:
-                                            microphoneEnabled,
-                                        bluetoothPollRate:
-                                            GetBluetoothPollRate());
-                                frameNumber += (ushort)count;
-                                prepared = true;
-                                return true;
-                            }
-                        }, out hardFailure, out saturated);
-                });
+            pooledReport = report;
+            pooledReportFrameCount = count;
+            pooledReportAllowSilence = allowSilence;
+            pooledReportForceSilence = forceSilence;
+            pooledReportAudioMode = PooledReportAudioMode.Standard;
+            pooledReportCaptureDiagnostic = false;
+            pooledReportPrepared = false;
+            pooledReportContainsSyntheticSilence = false;
+            pooledReportRealFrameCount = 0;
+            using (DualShock4BluetoothAudioState.ReadLease audioLease =
+                device.AcquireDualShock4BluetoothAudioMode())
+            {
+                pooledReportMicrophoneEnabled =
+                    audioLease.Snapshot.MicrophoneEnabled;
+                submitted = speakerWritePool.TrySendPrepared(report,
+                    DualShock4AudioTransportSettings.ProductionReplaySlotCount,
+                    preparePooledReport, out hardFailure, out saturated);
+            }
+            bool prepared = pooledReportPrepared;
+            bool containsSyntheticSilence =
+                pooledReportContainsSyntheticSilence;
+            int realFrameCount = pooledReportRealFrameCount;
 
             if (prepared)
             {
@@ -2854,57 +3019,56 @@ namespace DS4Windows
 
             bool submitted = false;
             bool hardFailure = false;
-            device.ReadDualShock4BluetoothAudioModeSynchronized(
-                microphoneEnabled =>
+            using (DualShock4BluetoothAudioState.ReadLease audioLease =
+                device.AcquireDualShock4BluetoothAudioMode())
+            {
+                bool microphoneEnabled =
+                    audioLease.Snapshot.MicrophoneEnabled;
+                if (useSharedHandle)
                 {
-                    if (useSharedHandle)
+                    lock (speakerSharedHandleWriteGate)
                     {
-                        lock (speakerSharedHandleWriteGate)
-                        {
-                            reportFrameNumber = frameNumber;
-                            DualShock4BluetoothAudioProtocol.
-                                WriteSpeakerReport(report,
-                                    reportFrameNumber, speakerFrameBatch,
-                                    count,
-                                    audioTarget: audioTarget,
-                                    microphoneEnabled: microphoneEnabled,
-                                    bluetoothPollRate:
-                                        GetBluetoothPollRate());
-                            ApplyMeasuredTransportReferenceAudioMode(report);
-                            CaptureDiagnosticSubmittedSbc(report, count);
-                            Array.Clear(speakerSharedHandleAudioReport, 0,
-                                speakerSharedHandleAudioReport.Length);
-                            Buffer.BlockCopy(report, 0,
-                                speakerSharedHandleAudioReport, 0,
-                                report.Length);
-                            long writeStarted = Stopwatch.GetTimestamp();
-                            submitted = device.HidDevice.
-                                WriteOutputReportViaInterrupt(
-                                    speakerSharedHandleAudioReport,
-                                    report.Length,
-                                    DS4Device.READ_STREAM_TIMEOUT);
-                            CaptureDiagnosticTimeline(2, writeStarted,
-                                Stopwatch.GetTimestamp(), report[0]);
-                            if (submitted)
-                            {
-                                frameNumber = unchecked((ushort)(
-                                    frameNumber + count));
-                            }
-                        }
-                        hardFailure = !submitted;
-                    }
-                    else
-                    {
-                        DualShock4BluetoothAudioProtocol.WriteSpeakerReport(
-                            report, reportFrameNumber, speakerFrameBatch,
-                            count, audioTarget: audioTarget,
-                            microphoneEnabled: microphoneEnabled,
-                            bluetoothPollRate: GetBluetoothPollRate());
+                        reportFrameNumber = frameNumber;
+                        DualShock4BluetoothAudioProtocol.
+                            WriteSpeakerReport(report,
+                                reportFrameNumber, speakerFrameBatch,
+                                count,
+                                audioTarget: audioTarget,
+                                microphoneEnabled: microphoneEnabled,
+                                bluetoothPollRate:
+                                    GetBluetoothPollRate());
+                        ApplyMeasuredTransportReferenceAudioMode(report);
                         CaptureDiagnosticSubmittedSbc(report, count);
+                        long writeStarted = Stopwatch.GetTimestamp();
+                        // The fixed pool owns the same primary HID handle in
+                        // this diagnostic mode. Routing the recurring write
+                        // through it services the latest-effect mailbox before
+                        // this audio report and keeps control/effect/audio in
+                        // one completion order.
                         submitted = speakerWritePool.SendAndWait(report,
                             out hardFailure);
+                        CaptureDiagnosticTimeline(2, writeStarted,
+                            Stopwatch.GetTimestamp(), report[0]);
+                        if (submitted)
+                        {
+                            frameNumber = unchecked((ushort)(
+                                frameNumber + count));
+                        }
                     }
-                });
+                    hardFailure = !submitted;
+                }
+                else
+                {
+                    DualShock4BluetoothAudioProtocol.WriteSpeakerReport(
+                        report, reportFrameNumber, speakerFrameBatch,
+                        count, audioTarget: audioTarget,
+                        microphoneEnabled: microphoneEnabled,
+                        bluetoothPollRate: GetBluetoothPollRate());
+                    CaptureDiagnosticSubmittedSbc(report, count);
+                    submitted = speakerWritePool.SendAndWait(report,
+                        out hardFailure);
+                }
+            }
 
             lock (syncRoot)
             {
@@ -2967,57 +3131,35 @@ namespace DS4Windows
             byte[] report = count == DualShock4BluetoothAudioProtocol.
                 SpeakerLargeFramesPerReport ? speakerLargeReport :
                 speakerSmallReport;
-            bool prepared = false;
             bool saturated = false;
             bool hardFailure = false;
             bool submitted = false;
-            device.ReadDualShock4BluetoothAudioModeSynchronized(
-                microphoneEnabled =>
-                {
-                    submitted = speakerWritePool.TrySendPrepared(report,
-                        DualShock4AudioTransportSettings.
-                            MeasuredTransportAsyncSlotCount,
-                        () =>
-                        {
-                            lock (syncRoot)
-                            {
-                                if (encodedFrames.Count < count)
-                                {
-                                    return false;
-                                }
-
-                                for (int index = 0; index < count; index++)
-                                {
-                                    speakerFrameBatch[index] =
-                                        encodedFrames.Dequeue();
-                                }
-                                DualShock4BluetoothAudioProtocol.
-                                    WriteSpeakerReport(report, frameNumber,
-                                        speakerFrameBatch, count,
-                                        audioTarget: audioTarget,
-                                        microphoneEnabled:
-                                            microphoneEnabled,
-                                        bluetoothPollRate:
-                                            GetBluetoothPollRate());
-                                if (directTransportMode ==
-                                    DualShock4AudioTransportMode.
-                                        MeasuredTransportSpeakerOnly)
-                                {
-                                    ApplySpeakerOnlyAudioMode(report,
-                                        "measured-transport-speaker-only", 0xA2);
-                                }
-                                else if (directTransportMode ==
-                                    DualShock4AudioTransportMode.
-                                        MeasuredTransportReference)
-                                {
-                                    ApplyMeasuredTransportReferenceAudioMode(report);
-                                }
-                                frameNumber += (ushort)count;
-                                prepared = true;
-                                return true;
-                            }
-                        }, out hardFailure, out saturated);
-                });
+            pooledReport = report;
+            pooledReportFrameCount = count;
+            pooledReportAllowSilence = false;
+            pooledReportForceSilence = false;
+            pooledReportAudioMode = directTransportMode ==
+                DualShock4AudioTransportMode.MeasuredTransportSpeakerOnly ?
+                    PooledReportAudioMode.MeasuredTransportSpeakerOnly :
+                directTransportMode ==
+                    DualShock4AudioTransportMode.MeasuredTransportReference ?
+                    PooledReportAudioMode.MeasuredTransportReference :
+                    PooledReportAudioMode.Standard;
+            pooledReportCaptureDiagnostic = false;
+            pooledReportPrepared = false;
+            pooledReportContainsSyntheticSilence = false;
+            pooledReportRealFrameCount = 0;
+            using (DualShock4BluetoothAudioState.ReadLease audioLease =
+                device.AcquireDualShock4BluetoothAudioMode())
+            {
+                pooledReportMicrophoneEnabled =
+                    audioLease.Snapshot.MicrophoneEnabled;
+                submitted = speakerWritePool.TrySendPrepared(report,
+                    DualShock4AudioTransportSettings.
+                        MeasuredTransportAsyncSlotCount,
+                    preparePooledReport, out hardFailure, out saturated);
+            }
+            bool prepared = pooledReportPrepared;
 
             if (prepared)
             {
@@ -3105,88 +3247,43 @@ namespace DS4Windows
                     SpeakerLargeFramesPerReport => speakerLargeReport,
                 _ => speakerSmallReport,
             };
-            bool prepared = false;
             bool saturated = false;
             bool hardFailure = false;
             bool submitted = false;
-            bool containsSyntheticSilence = false;
-            int realFrameCount = 0;
             bool productionA0 = directTransportMode ==
                 DualShock4AudioTransportMode.ProductionA0;
             bool productionDuplexA1 = DualShock4AudioTransportSettings.
                 UsesRealtimeDuplexAudioMode(directTransportMode);
             bool fifoBufferedDuplex = directTransportMode ==
                 DualShock4AudioTransportMode.FifoBuffered;
-            device.ReadDualShock4BluetoothAudioModeSynchronized(
-                microphoneEnabled =>
-                {
-                    bool effectiveMicrophoneEnabled = !productionA0 &&
-                        microphoneEnabled;
-                    submitted = speakerWritePool.TrySendPrepared(report,
-                        DualShock4AudioTransportSettings.
-                            ProductionReplaySlotCount,
-                        () =>
-                        {
-                            lock (syncRoot)
-                            {
-                                realFrameCount =
-                                    GetRealFrameCountForSubmission(count,
-                                        encodedFrames.Count, allowSilence,
-                                        forceSilence);
-                                if (realFrameCount < 0)
-                                {
-                                    return false;
-                                }
-
-                                for (int index = 0;
-                                    index < realFrameCount; index++)
-                                {
-                                    speakerFrameBatch[index] =
-                                        encodedFrames.Dequeue();
-                                }
-                                for (int index = realFrameCount;
-                                    index < count; index++)
-                                {
-                                    speakerFrameBatch[index] =
-                                        GetEncodedSilenceFrame();
-                                }
-                                containsSyntheticSilence =
-                                    realFrameCount < count;
-                                DualShock4BluetoothAudioProtocol.
-                                    WriteSpeakerReport(report, frameNumber,
-                                        speakerFrameBatch, count,
-                                        audioTarget: audioTarget,
-                                        microphoneEnabled:
-                                            effectiveMicrophoneEnabled,
-                                        bluetoothPollRate:
-                                            GetBluetoothPollRate());
-                                if (productionA0)
-                                {
-                                    ApplyProductionA0AudioMode(report);
-                                }
-                                else if (productionDuplexA1)
-                                {
-                                    ApplyProductionDuplexAudioMode(report,
-                                        effectiveMicrophoneEnabled);
-                                }
-                                else if (fifoBufferedDuplex)
-                                {
-                                    ApplyFifoBufferedAudioMode(report,
-                                        effectiveMicrophoneEnabled);
-                                }
-                                else
-                                {
-                                    ApplyProductionReplayAudioMode(report,
-                                        effectiveMicrophoneEnabled);
-                                }
-                                CaptureDiagnosticSubmittedSbc(report, count);
-                                frameNumber = unchecked((ushort)(frameNumber +
-                                    count));
-                                prepared = true;
-                                return true;
-                            }
-                        }, out hardFailure, out saturated);
-                });
+            pooledReport = report;
+            pooledReportFrameCount = count;
+            pooledReportAllowSilence = allowSilence;
+            pooledReportForceSilence = forceSilence;
+            pooledReportAudioMode = productionA0 ?
+                PooledReportAudioMode.ProductionA0 :
+                productionDuplexA1 ?
+                    PooledReportAudioMode.ProductionDuplex :
+                    fifoBufferedDuplex ?
+                        PooledReportAudioMode.FifoBuffered :
+                        PooledReportAudioMode.ProductionReplay;
+            pooledReportCaptureDiagnostic = true;
+            pooledReportPrepared = false;
+            pooledReportContainsSyntheticSilence = false;
+            pooledReportRealFrameCount = 0;
+            using (DualShock4BluetoothAudioState.ReadLease audioLease =
+                device.AcquireDualShock4BluetoothAudioMode())
+            {
+                pooledReportMicrophoneEnabled = !productionA0 &&
+                    audioLease.Snapshot.MicrophoneEnabled;
+                submitted = speakerWritePool.TrySendPrepared(report,
+                    DualShock4AudioTransportSettings.ProductionReplaySlotCount,
+                    preparePooledReport, out hardFailure, out saturated);
+            }
+            bool prepared = pooledReportPrepared;
+            bool containsSyntheticSilence =
+                pooledReportContainsSyntheticSilence;
+            int realFrameCount = pooledReportRealFrameCount;
 
             if (prepared)
             {
@@ -3285,51 +3382,29 @@ namespace DS4Windows
             const int count = DualShock4AudioTransportSettings.
                 FifoBufferedPrimeFramesPerReport;
             byte[] report = speakerLargeReport;
-            bool prepared = false;
             bool saturated = false;
             bool hardFailure = false;
             bool submitted = false;
-            device.ReadDualShock4BluetoothAudioModeSynchronized(
-                microphoneEnabled =>
-                {
-                    submitted = speakerWritePool.TrySendPrepared(report,
-                        DualShock4AudioTransportSettings.
-                            FifoBufferedPrimeSlotCount,
-                        () =>
-                        {
-                            lock (syncRoot)
-                            {
-                                int selected = DualShock4AudioTransportSettings.
-                                    SelectFifoBufferedPrimeFrameCount(
-                                        encodedFrames.Count);
-                                if (selected != count)
-                                {
-                                    return false;
-                                }
-
-                                for (int index = 0; index < count; index++)
-                                {
-                                    speakerFrameBatch[index] =
-                                        encodedFrames.Dequeue();
-                                }
-                                DualShock4BluetoothAudioProtocol.
-                                    WriteSpeakerReport(report, frameNumber,
-                                        speakerFrameBatch, count,
-                                        audioTarget: audioTarget,
-                                        microphoneEnabled:
-                                            microphoneEnabled,
-                                        bluetoothPollRate:
-                                            GetBluetoothPollRate());
-                                ApplyFifoBufferedAudioMode(report,
-                                    microphoneEnabled);
-                                frameNumber = DualShock4AudioTransportSettings.
-                                    AdvanceFifoBufferedPrimeFrameNumber(
-                                        frameNumber);
-                                prepared = true;
-                                return true;
-                            }
-                        }, out hardFailure, out saturated);
-                });
+            pooledReport = report;
+            pooledReportFrameCount = count;
+            pooledReportAllowSilence = false;
+            pooledReportForceSilence = false;
+            pooledReportAudioMode = PooledReportAudioMode.FifoBuffered;
+            pooledReportCaptureDiagnostic = false;
+            pooledReportPrepared = false;
+            pooledReportContainsSyntheticSilence = false;
+            pooledReportRealFrameCount = 0;
+            using (DualShock4BluetoothAudioState.ReadLease audioLease =
+                device.AcquireDualShock4BluetoothAudioMode())
+            {
+                pooledReportMicrophoneEnabled =
+                    audioLease.Snapshot.MicrophoneEnabled;
+                submitted = speakerWritePool.TrySendPrepared(report,
+                    DualShock4AudioTransportSettings.
+                        FifoBufferedPrimeSlotCount,
+                    preparePooledReport, out hardFailure, out saturated);
+            }
+            bool prepared = pooledReportPrepared;
 
             if (prepared)
             {
@@ -3396,64 +3471,30 @@ namespace DS4Windows
             const int count = DualShock4AudioTransportSettings.
                 CreditBufferedFramesPerReport;
             byte[] report = speakerLargeReport;
-            bool prepared = false;
             bool saturated = false;
             bool hardFailure = false;
             bool submitted = false;
-            bool containsSyntheticSilence = false;
-            int realFrameCount = 0;
-            device.ReadDualShock4BluetoothAudioModeSynchronized(
-                _ =>
-                {
-                    submitted = speakerWritePool.TrySendPrepared(report,
-                        DualShock4AudioTransportSettings.
-                            CreditBufferedSlotCount,
-                        () =>
-                        {
-                            lock (syncRoot)
-                            {
-                                realFrameCount =
-                                    GetRealFrameCountForSubmission(count,
-                                        encodedFrames.Count, allowSilence,
-                                        forceSilence);
-                                if (realFrameCount < 0)
-                                {
-                                    return false;
-                                }
-
-                                for (int index = 0;
-                                    index < realFrameCount; index++)
-                                {
-                                    speakerFrameBatch[index] =
-                                        encodedFrames.Dequeue();
-                                }
-                                for (int index = realFrameCount;
-                                    index < count; index++)
-                                {
-                                    // This is a complete SBC frame produced by
-                                    // the same encoder configuration as live
-                                    // audio, never a zero-filled HID payload.
-                                    speakerFrameBatch[index] =
-                                        GetEncodedSilenceFrame();
-                                }
-                                containsSyntheticSilence =
-                                    realFrameCount < count;
-                                DualShock4BluetoothAudioProtocol.
-                                    WriteSpeakerReport(report, frameNumber,
-                                        speakerFrameBatch, count,
-                                        audioTarget: audioTarget,
-                                        microphoneEnabled: false,
-                                        bluetoothPollRate:
-                                            GetBluetoothPollRate());
-                                ApplyCreditBufferedAudioMode(report);
-                                frameNumber = DualShock4AudioTransportSettings.
-                                    AdvanceCreditBufferedFrameNumber(
-                                        frameNumber);
-                                prepared = true;
-                                return true;
-                            }
-                        }, out hardFailure, out saturated);
-                });
+            pooledReport = report;
+            pooledReportFrameCount = count;
+            pooledReportAllowSilence = allowSilence;
+            pooledReportForceSilence = forceSilence;
+            pooledReportAudioMode = PooledReportAudioMode.CreditBuffered;
+            pooledReportCaptureDiagnostic = false;
+            pooledReportPrepared = false;
+            pooledReportContainsSyntheticSilence = false;
+            pooledReportRealFrameCount = 0;
+            using (DualShock4BluetoothAudioState.ReadLease audioLease =
+                device.AcquireDualShock4BluetoothAudioMode())
+            {
+                pooledReportMicrophoneEnabled = false;
+                submitted = speakerWritePool.TrySendPrepared(report,
+                    DualShock4AudioTransportSettings.CreditBufferedSlotCount,
+                    preparePooledReport, out hardFailure, out saturated);
+            }
+            bool prepared = pooledReportPrepared;
+            bool containsSyntheticSilence =
+                pooledReportContainsSyntheticSilence;
+            int realFrameCount = pooledReportRealFrameCount;
 
             if (prepared)
             {
@@ -3580,7 +3621,7 @@ namespace DS4Windows
         {
             // The validated clean 0x12 capture used the controller's maximum
             // (one-millisecond) input interval for the entire audio session.
-            // Propagating a slower profile interval into every 4 ms speaker
+            // Propagating a slower profile interval into every 8 ms speaker
             // report made inbound HID traffic and outbound ACL completions
             // collapse into the same periodic credit window. Keep the audio
             // lane at the Sony default while preserving the A0/A1 duplex mode.
@@ -4157,7 +4198,8 @@ namespace DS4Windows
                 if (!speakerSharedHandleControlLaneRegistered)
                 {
                     if (!device.RegisterDualShock4BluetoothAudioControlLane(
-                            this, WriteBluetoothAudioControlBarrier))
+                            this, WriteBluetoothAudioControlBarrier,
+                            PublishBluetoothAudioEffect))
                     {
                         speakerWritePool.Dispose();
                         speakerWritePool = null;
@@ -4216,7 +4258,8 @@ namespace DS4Windows
                     handle.DangerousGetHandle(),
                     DualShock4BluetoothAudioProtocol.SpeakerLargeReportLength);
                 if (!device.RegisterDualShock4BluetoothAudioControlLane(this,
-                        WriteBluetoothAudioControlBarrier))
+                        WriteBluetoothAudioControlBarrier,
+                        PublishBluetoothAudioEffect))
                 {
                     speakerWritePool.Dispose();
                     speakerWritePool = null;
@@ -4239,25 +4282,45 @@ namespace DS4Windows
 
         private bool WriteBluetoothAudioControlBarrier(byte[] report)
         {
-            if (directTransportMode ==
-                    DualShock4AudioTransportMode.MeasuredTransportReference &&
-                report != null && report.Length >= 7 && report[2] != 0)
+            // A sendOutput invocation may have captured this delegate before
+            // Stop unregistered the lane. Never let that stale callback put
+            // A0/A1 back on the wire after the explicit disable barrier.
+            if (!speakerTransportEnabled)
             {
-                ApplyMeasuredTransportReferenceAudioMode(report);
+                return false;
             }
-            else if (directTransportMode ==
-                    DualShock4AudioTransportMode.MeasuredTransportSpeakerOnly &&
-                report != null && report.Length >= 7 && report[2] != 0)
-            {
-                ApplySpeakerOnlyAudioMode(report,
-                    "measured-transport-speaker-only control", 0xA2);
-            }
+
             return TrySendBluetoothAudioControl(report, out _);
+        }
+
+        private bool PublishBluetoothAudioEffect(byte[] report)
+        {
+            // This callback runs on the physical input thread. It can only
+            // publish a fixed latest value; the audio owner performs every
+            // native submit and completion operation.
+            if (!speakerTransportEnabled)
+            {
+                return false;
+            }
+
+            NativeOverlappedWritePool pool = speakerWritePool;
+            if (pool == null ||
+                !TryNormalizeBluetoothAudioControlReport(report, out _))
+            {
+                return false;
+            }
+
+            return pool.TryPublishLatestEffect(report);
         }
 
         private bool TrySendBluetoothAudioControl(byte[] report,
             out string error)
         {
+            if (!TryNormalizeBluetoothAudioControlReport(report, out error))
+            {
+                return false;
+            }
+
             if (directTransportMode ==
                 DualShock4AudioTransportMode.MeasuredTransportReference)
             {
@@ -4271,7 +4334,27 @@ namespace DS4Windows
                 error = "audio write pool unavailable";
                 return false;
             }
+            return pool.TrySendControl(report, out error);
+        }
+
+        private bool TryNormalizeBluetoothAudioControlReport(byte[] report,
+            out string error)
+        {
+            error = "none";
             if (directTransportMode ==
+                    DualShock4AudioTransportMode.MeasuredTransportReference &&
+                report != null && report.Length >= 7 && report[2] != 0)
+            {
+                ApplyMeasuredTransportReferenceAudioMode(report);
+            }
+            else if (directTransportMode ==
+                    DualShock4AudioTransportMode.MeasuredTransportSpeakerOnly &&
+                report != null && report.Length >= 7 && report[2] != 0)
+            {
+                ApplySpeakerOnlyAudioMode(report,
+                    "measured-transport-speaker-only control", 0xA2);
+            }
+            else if (directTransportMode ==
                     DualShock4AudioTransportMode.ProductionA0 &&
                 report != null && report.Length > 2 && report[2] != 0)
             {
@@ -4326,7 +4409,7 @@ namespace DS4Windows
                 // its 0x11 enable barrier and every 0x17 data packet in A2.
                 ApplyCreditBufferedAudioMode(report);
             }
-            return pool.TrySendControl(report, out error);
+            return true;
         }
 
         private bool EnsureSpeakerTransportEnabled()
@@ -4341,11 +4424,29 @@ namespace DS4Windows
                 DualShock4AudioTransportMode.MeasuredTransportReference ?
                 EnsureMeasuredTransportReferenceSharedHandle() :
                 EnsureSpeakerWritePool();
-            if (!transportReady ||
-                !device.SetDualShock4BluetoothSpeakerStreaming(true,
-                    speakerVolume, report =>
-                        TrySendBluetoothAudioControl(report,
-                            out controlError)))
+            bool enabled = false;
+            if (transportReady)
+            {
+                // Publish writer admission before the state transition. While
+                // Update is in flight input-side leases defer; after commit no
+                // reader can observe SpeakerEnabled with a rejecting writer.
+                speakerTransportEnabled = true;
+                try
+                {
+                    enabled = device.SetDualShock4BluetoothSpeakerStreaming(
+                        true, speakerVolume, report =>
+                            TrySendBluetoothAudioControl(report,
+                                out controlError));
+                }
+                finally
+                {
+                    if (!enabled)
+                    {
+                        speakerTransportEnabled = false;
+                    }
+                }
+            }
+            if (!enabled)
             {
                 if (Interlocked.Exchange(ref writeFailureLogged, 1) == 0)
                 {
@@ -4358,26 +4459,53 @@ namespace DS4Windows
                 return false;
             }
 
-            speakerTransportEnabled = true;
             return true;
         }
 
-        private void DisableSpeakerTransport()
+        private bool DisableSpeakerTransport()
         {
-            if (!speakerTransportEnabled)
+            bool disableRequired = speakerTransportEnabled ||
+                device.BluetoothSpeakerStreaming;
+            if (!disableRequired)
             {
-                return;
+                speakerWritePool?.StopAcceptingEffects();
+                speakerTransportEnabled = false;
+                return true;
             }
 
-            speakerTransportEnabled = false;
             if (device.HidDevice?.IsOpen == true &&
                 (speakerWritePool != null ||
                     speakerSharedHandleControlLaneRegistered))
             {
-                device.SetDualShock4BluetoothSpeakerStreaming(false,
-                    speakerVolume, report =>
-                        TrySendBluetoothAudioControl(report, out _));
+                try
+                {
+                    return device.SetDualShock4BluetoothSpeakerStreaming(false,
+                        speakerVolume, report =>
+                        {
+                            // Update has already closed reader admission and
+                            // drained old-mode writers before this publisher
+                            // runs. Reject every delegate captured afterward,
+                            // then put the terminal disable on the same lane.
+                            speakerTransportEnabled = false;
+                            speakerWritePool?.StopAcceptingEffects();
+                            return TrySendBluetoothAudioControl(report, out _);
+                        });
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.LogToGui(
+                        $"DualShock 4 Bluetooth speaker disable barrier failed: {ex.Message}",
+                        true);
+                }
+                finally
+                {
+                    speakerTransportEnabled = false;
+                }
             }
+
+            speakerWritePool?.StopAcceptingEffects();
+            speakerTransportEnabled = false;
+            return false;
         }
 
         private static short FloatToPcm16(float value)
@@ -4466,24 +4594,25 @@ namespace DS4Windows
                     return;
                 }
 
-                double remainingMs = remainingTicks * 1000.0 /
-                    Stopwatch.Frequency;
-                if (remainingMs > 0.75 && highResolutionTimer != IntPtr.Zero)
+                if (highResolutionTimer != IntPtr.Zero)
                 {
-                    // Wake just ahead of the deadline, then stay resident for
-                    // the final half millisecond. This avoids the 10-15 ms
-                    // Thread.Sleep outliers observed in the physical trace
-                    // without burning a full core for the entire report period.
-                    WaitHighResolution(highResolutionTimer,
-                        remainingMs - 0.5);
+                    long dueTime = DualShock4AudioReportScheduler.
+                        GetRelativeDueTime100Nanoseconds(remainingTicks,
+                            Stopwatch.Frequency);
+                    if (SetWaitableTimer(highResolutionTimer, ref dueTime, 0,
+                            IntPtr.Zero, IntPtr.Zero, false))
+                    {
+                        WaitForNativeObject(highResolutionTimer, Infinite);
+                        continue;
+                    }
                 }
-                else if (remainingMs > 2.0)
+
+                int remainingMilliseconds = Math.Max(1,
+                    (int)Math.Ceiling(remainingTicks * 1000.0 /
+                        Stopwatch.Frequency));
+                if (stoppingSignal.WaitOne(remainingMilliseconds))
                 {
-                    if (stoppingSignal.WaitOne((int)remainingMs - 1)) return;
-                }
-                else
-                {
-                    Thread.SpinWait(16);
+                    return;
                 }
             }
         }
@@ -4493,11 +4622,11 @@ namespace DS4Windows
             try
             {
                 uint taskIndex = 0;
-                IntPtr handle = AvSetMmThreadCharacteristicsW("Pro Audio",
+                IntPtr handle = AvSetMmThreadCharacteristicsW("Audio",
                     ref taskIndex);
                 if (handle != IntPtr.Zero)
                 {
-                    AvSetMmThreadPriority(handle, AvrtPriority.Critical);
+                    AvSetMmThreadPriority(handle, AvrtPriority.Normal);
                 }
                 return handle;
             }
@@ -4523,57 +4652,37 @@ namespace DS4Windows
             return timer;
         }
 
-        private static void WaitHighResolution(IntPtr timer,
-            double milliseconds)
+        internal void RequestStop()
         {
-            if (milliseconds <= 0.0)
+            stopping = true;
+            try
             {
-                return;
+                stoppingSignal.Set();
+                captureAvailable.Set();
             }
-
-            if (timer != IntPtr.Zero)
+            catch (ObjectDisposedException)
             {
-                long dueTime = -Math.Max(1L,
-                    (long)(milliseconds * TimeSpan.TicksPerMillisecond));
-                if (SetWaitableTimer(timer, ref dueTime, 0, IntPtr.Zero,
-                    IntPtr.Zero, false))
-                {
-                    WaitForNativeObject(timer, Infinite);
-                    return;
-                }
+                // A duplicate owner command can observe an already completed
+                // retirement; the terminal state is already satisfied.
             }
-
-            Thread.Sleep(Math.Max(1, (int)Math.Round(milliseconds)));
         }
 
         public void Dispose()
         {
-            stopping = true;
+            if (Interlocked.Exchange(ref disposeStarted, 1) != 0)
+            {
+                return;
+            }
+
+            RequestStop();
             if (directSpeakerSource != null)
             {
                 directSpeakerSource.VirtualSpeakerPcmReceived -=
                     DirectSpeakerPcmReceived;
             }
-            stoppingSignal.Set();
-            captureAvailable.Set();
-            if (worker != null && worker.IsAlive &&
-                Thread.CurrentThread.ManagedThreadId != worker.ManagedThreadId)
-            {
-                worker.Join(500);
-            }
-            worker = null;
-            DisableSpeakerTransport();
-            ReleaseMeasuredTransportReferenceInputIntervalOverride();
-            device.UnregisterDualShock4BluetoothAudioControlLane(this);
-            speakerSharedHandleControlLaneRegistered = false;
-            speakerWritePool?.Dispose();
-            speakerWritePool = null;
-            if (speakerWriteHandle != null)
-            {
-                speakerWriteHandle.Dispose();
-                speakerWriteHandle = null;
-            }
-
+            // Retire WASAPI first. HID teardown can legitimately wait for a
+            // bounded native completion, but disabling the feature must close
+            // its Windows audio session immediately.
             IWaveIn oldCapture;
             lock (syncRoot)
             {
@@ -4585,7 +4694,6 @@ namespace DS4Windows
                 freeDirectPcmPackets.Clear();
                 directPcmPacketOffset = 0;
             }
-
             if (oldCapture != null)
             {
                 oldCapture.DataAvailable -= Capture_DataAvailable;
@@ -4597,9 +4705,179 @@ namespace DS4Windows
                 catch
                 {
                 }
-                oldCapture.Dispose();
+                try
+                {
+                    oldCapture.Dispose();
+                }
+                catch
+                {
+                }
             }
 
+            Thread retiringWorker = worker;
+            NativeOverlappedWritePool retiringPool = speakerWritePool;
+            SafeFileHandle retiringHandle = speakerWriteHandle;
+            bool workerRetired = retiringWorker == null ||
+                !retiringWorker.IsAlive;
+            bool dedicatedHandleClosedForCancellation = false;
+            bool speakerRetiredLocally = false;
+            if (retiringWorker != null && retiringWorker.IsAlive &&
+                Thread.CurrentThread.ManagedThreadId !=
+                    retiringWorker.ManagedThreadId)
+            {
+                workerRetired = retiringWorker.Join(
+                    CooperativeWorkerStopMilliseconds);
+                if (!workerRetired)
+                {
+                    // A synchronous HID completion can outlive the ordinary
+                    // audio period. Cancel the fixed slots and close only the
+                    // dedicated write session; the measured shared-handle
+                    // diagnostic mode must retain the controller input handle.
+                    retiringPool?.CancelPendingWrites();
+                    if (retiringHandle != null)
+                    {
+                        // First close reader admission and let every old-mode
+                        // effect/audio writer finish on the still-valid lane.
+                        // Only then may cancellation close its file handle.
+                        device.RetireDualShock4BluetoothSpeakerStreaming(
+                            speakerVolume, attemptPhysicalWrite: false);
+                        speakerRetiredLocally = true;
+                        retiringPool?.StopAcceptingEffects();
+                        speakerTransportEnabled = false;
+                        retiringHandle.Dispose();
+                        dedicatedHandleClosedForCancellation = true;
+                        speakerWriteHandle = null;
+                    }
+                    workerRetired = retiringWorker.Join(
+                        CancelledWorkerStopMilliseconds);
+                }
+            }
+            if (!workerRetired && retiringHandle != null &&
+                !dedicatedHandleClosedForCancellation)
+            {
+                if (!speakerRetiredLocally)
+                {
+                    device.RetireDualShock4BluetoothSpeakerStreaming(
+                        speakerVolume, attemptPhysicalWrite: false);
+                    speakerRetiredLocally = true;
+                    retiringPool?.StopAcceptingEffects();
+                    speakerTransportEnabled = false;
+                }
+                retiringHandle.Dispose();
+                dedicatedHandleClosedForCancellation = true;
+                speakerWriteHandle = null;
+            }
+            worker = null;
+
+            if (!workerRetired &&
+                !dedicatedHandleClosedForCancellation)
+            {
+                // The diagnostic reference transport shares the controller's
+                // primary input handle, so it cannot be closed. Retire host
+                // state in order now; its reaper emits the physical disable
+                // after the last old native writer has actually returned.
+                device.RetireDualShock4BluetoothSpeakerStreaming(
+                    speakerVolume, attemptPhysicalWrite: false);
+                speakerRetiredLocally = true;
+                retiringPool?.StopAcceptingEffects();
+                speakerTransportEnabled = false;
+            }
+
+            bool disabledOnOwnedLane = workerRetired &&
+                !dedicatedHandleClosedForCancellation &&
+                DisableSpeakerTransport();
+            if (dedicatedHandleClosedForCancellation)
+            {
+                speakerTransportEnabled = false;
+            }
+            ReleaseMeasuredTransportReferenceInputIntervalOverride();
+            retiringPool?.StopAcceptingEffects();
+            device.UnregisterDualShock4BluetoothAudioControlLane(this);
+            speakerSharedHandleControlLaneRegistered = false;
+
+            // If the ordered audio handle disappeared during its final
+            // barrier, retry on the primary HID session. Retire the local
+            // state regardless of physical presence so normal effects cannot
+            // keep targeting this disposed owner.
+            if (workerRetired &&
+                (!disabledOnOwnedLane || device.BluetoothSpeakerStreaming))
+            {
+                device.RetireDualShock4BluetoothSpeakerStreaming(
+                    speakerVolume);
+            }
+            else if (!workerRetired &&
+                dedicatedHandleClosedForCancellation)
+            {
+                // Closing the dedicated lane has already made late writes
+                // terminal, so the primary session can publish the final
+                // disable without waiting for the old worker's managed tail.
+                device.RetireDualShock4BluetoothSpeakerStreaming(
+                    speakerVolume);
+            }
+            else if (!workerRetired)
+            {
+                // Host state is already retired above. Retry the physical
+                // shared-handle disable from the ordered reaper only if no
+                // newer speaker owner has enabled meanwhile.
+            }
+
+            speakerWritePool = null;
+            speakerWriteHandle = null;
+            if (workerRetired)
+            {
+                ReleaseRetiredResources(retiringPool, retiringHandle);
+            }
+            else
+            {
+                AppLogger.LogToGui(
+                    "DualShock 4 Bluetooth audio native I/O is draining after bounded owner retirement.",
+                    true);
+                QueueDeferredResourceRetirement(retiringWorker,
+                    retiringPool, retiringHandle,
+                    publishDeferredDisable:
+                        !dedicatedHandleClosedForCancellation);
+            }
+        }
+
+        private void QueueDeferredResourceRetirement(Thread retiringWorker,
+            NativeOverlappedWritePool retiringPool,
+            SafeFileHandle retiringHandle, bool publishDeferredDisable)
+        {
+            var reaper = new Thread(() =>
+            {
+                if (retiringWorker != null && retiringWorker.IsAlive &&
+                    Thread.CurrentThread.ManagedThreadId !=
+                        retiringWorker.ManagedThreadId)
+                {
+                    retiringWorker.Join();
+                }
+                if (publishDeferredDisable)
+                {
+                    device.TryPublishRetiredDualShock4BluetoothSpeakerMode();
+                }
+                ReleaseRetiredResources(retiringPool, retiringHandle);
+            })
+            {
+                IsBackground = true,
+                Name = "DualShock 4 audio native retirement",
+                Priority = ThreadPriority.BelowNormal,
+            };
+            reaper.Start();
+        }
+
+        private void ReleaseRetiredResources(
+            NativeOverlappedWritePool retiringPool,
+            SafeFileHandle retiringHandle)
+        {
+            retiringPool?.CancelPendingWrites();
+            // Closing the dedicated file session makes every outstanding IRP
+            // terminal before its pinned buffers are released. The reference
+            // mode has no dedicated handle and retains the controller's main
+            // input session.
+            retiringHandle?.Dispose();
+            retiringPool?.Dispose();
+            captureAvailable.Dispose();
+            stoppingSignal.Dispose();
         }
 
         private void ReleaseMeasuredTransportReferenceInputIntervalOverride()
@@ -4645,8 +4923,12 @@ namespace DS4Windows
             private const uint WaitObject0 = 0;
             private const uint WaitTimeout = 258;
             private const int ErrorIoPending = 997;
+            private const int DisposeDrainMilliseconds = 500;
             private readonly object gate = new object();
             private readonly IntPtr handle;
+            private readonly DualShock4BluetoothEffectMailbox effectMailbox =
+                new DualShock4BluetoothEffectMailbox(
+                    NativeBackingBufferLength);
             private readonly byte[][] buffers = new byte[SlotCount][];
             private readonly GCHandle[] pins = new GCHandle[SlotCount];
             private readonly IntPtr[] events = new IntPtr[SlotCount];
@@ -4654,6 +4936,7 @@ namespace DS4Windows
             private readonly bool[] outstanding = new bool[SlotCount];
             private readonly int[] expectedLengths = new int[SlotCount];
             private readonly long[] submittedTimestamps = new long[SlotCount];
+            private readonly long[] effectVersions = new long[SlotCount];
             private int next;
             private volatile bool disposed;
             private long completedWrites;
@@ -4748,20 +5031,119 @@ namespace DS4Windows
                 }
 
                 this.handle = handle;
+                try
+                {
+                    for (int slot = 0; slot < SlotCount; slot++)
+                    {
+                        buffers[slot] = new byte[Math.Max(reportSize,
+                            NativeBackingBufferLength)];
+                        pins[slot] = GCHandle.Alloc(buffers[slot],
+                            GCHandleType.Pinned);
+                        events[slot] = CreateEventW(IntPtr.Zero, true, true,
+                            null);
+                        if (events[slot] == IntPtr.Zero)
+                        {
+                            throw new IOException(
+                                "Could not create a DS4 audio completion event.");
+                        }
+                        overlapped[slot] = Marshal.AllocHGlobal(
+                            OverlappedSize);
+                    }
+                }
+                catch
+                {
+                    ReleaseInitializedSlots();
+                    throw;
+                }
+            }
+
+            private void ReleaseInitializedSlots()
+            {
                 for (int slot = 0; slot < SlotCount; slot++)
                 {
-                    buffers[slot] = new byte[Math.Max(reportSize,
-                        NativeBackingBufferLength)];
-                    pins[slot] = GCHandle.Alloc(buffers[slot],
-                        GCHandleType.Pinned);
-                    events[slot] = CreateEventW(IntPtr.Zero, true, true, null);
-                    if (events[slot] == IntPtr.Zero)
+                    if (events[slot] != IntPtr.Zero)
                     {
-                        throw new IOException(
-                            "Could not create a DS4 audio completion event.");
+                        CloseHandle(events[slot]);
+                        events[slot] = IntPtr.Zero;
                     }
-                    overlapped[slot] = Marshal.AllocHGlobal(OverlappedSize);
+                    if (overlapped[slot] != IntPtr.Zero)
+                    {
+                        Marshal.FreeHGlobal(overlapped[slot]);
+                        overlapped[slot] = IntPtr.Zero;
+                    }
+                    if (pins[slot].IsAllocated)
+                    {
+                        pins[slot].Free();
+                    }
                 }
+            }
+
+            public bool TryPublishLatestEffect(byte[] report)
+            {
+                return !disposed && effectMailbox.TryPublish(report);
+            }
+
+            public void StopAcceptingEffects()
+            {
+                effectMailbox.StopAccepting();
+            }
+
+            /// <summary>
+            /// Called only by an audio/control owner while <see cref="gate"/>
+            /// is held. It puts the latest input-side effect ahead of the
+            /// owner's next audio/control report without making the input
+            /// publisher touch this native-I/O lock.
+            /// </summary>
+            private bool TrySubmitPendingEffectNoLock(out bool hardFailure)
+            {
+                hardFailure = false;
+                if (!effectMailbox.HasUnclaimed)
+                {
+                    return true;
+                }
+
+                int slot = -1;
+                for (int offset = 0; offset < SlotCount; offset++)
+                {
+                    int candidate = (next + offset) % SlotCount;
+                    if (!outstanding[candidate])
+                    {
+                        slot = candidate;
+                        break;
+                    }
+                }
+                if (slot < 0)
+                {
+                    return false;
+                }
+
+                Array.Clear(buffers[slot], 0, buffers[slot].Length);
+                if (!effectMailbox.TryClaim(buffers[slot], out int length,
+                        out long effectVersion))
+                {
+                    return true;
+                }
+
+                ResetEvent(events[slot]);
+                ZeroOverlapped(overlapped[slot], events[slot]);
+                bool submitted = WriteFile(handle,
+                    pins[slot].AddrOfPinnedObject(), (uint)length,
+                    IntPtr.Zero, overlapped[slot]);
+                if (!submitted && Marshal.GetLastWin32Error() !=
+                    ErrorIoPending)
+                {
+                    SetEvent(events[slot]);
+                    effectMailbox.Reject(effectVersion);
+                    hardFailure = true;
+                    return false;
+                }
+
+                outstanding[slot] = true;
+                expectedLengths[slot] = length;
+                submittedTimestamps[slot] = Stopwatch.GetTimestamp();
+                effectVersions[slot] = effectVersion;
+                next = (slot + 1) % SlotCount;
+                return true;
             }
 
             public bool TrySendControl(byte[] report, out string error)
@@ -4784,85 +5166,75 @@ namespace DS4Windows
                     {
                         return false;
                     }
-
-                    byte[] nativeReport = new byte[Math.Max(report.Length,
-                        NativeBackingBufferLength)];
-                    Buffer.BlockCopy(report, 0, nativeReport, 0,
-                        report.Length);
-                    GCHandle pin = GCHandle.Alloc(nativeReport,
-                        GCHandleType.Pinned);
-                    IntPtr completionEvent = CreateEventW(IntPtr.Zero, true,
-                        false, null);
-                    IntPtr controlOverlapped = Marshal.AllocHGlobal(
-                        OverlappedSize);
-                    bool leak = false;
-                    try
+                    if (!TrySubmitPendingEffectNoLock(
+                            out bool effectHardFailure))
                     {
-                        if (completionEvent == IntPtr.Zero)
-                        {
-                            error = $"CreateEvent failed: Win32 " +
-                                Marshal.GetLastWin32Error();
-                            return false;
-                        }
-
-                        ZeroOverlapped(controlOverlapped, completionEvent);
-                        bool submitted = WriteFile(handle,
-                            pin.AddrOfPinnedObject(), (uint)report.Length,
-                            IntPtr.Zero, controlOverlapped);
-                        int submitError = submitted ? 0 :
-                            Marshal.GetLastWin32Error();
-                        if (submitted)
-                        {
-                            // This is the common HIDCLASS fast path. the measured transport's
-                            // WriteOneShot returns immediately here as well; a
-                            // synchronous overlapped WriteFile need not report
-                            // the transfer count through a second result query.
-                            return true;
-                        }
-                        if (submitError != ErrorIoPending)
-                        {
-                            error = $"WriteFile failed: Win32 {submitError}";
-                            return false;
-                        }
-
-                        uint wait = WaitForSingleObject(completionEvent, 1000);
-                        // the measured transport's WriteOneShot treats a signaled OVERLAPPED
-                        // event as completion. HIDCLASS commonly reports zero
-                        // via GetOverlappedResult even though the output report
-                        // was accepted, so requiring a byte count creates false
-                        // failures and retry storms.
-                        if (wait == WaitObject0)
-                        {
-                            return true;
-                        }
-
-                        CancelIoEx(handle, controlOverlapped);
-                        leak = WaitForSingleObject(completionEvent, 250) !=
-                            WaitObject0;
-                        error = wait == WaitTimeout ?
-                            "control report timed out" :
-                            $"control wait failed: Win32 " +
-                            $"{Marshal.GetLastWin32Error()}";
+                        error = effectHardFailure ?
+                            "latest effect report write failed" :
+                            "latest effect report could not reserve a slot";
                         return false;
                     }
-                    finally
+                    if (!DrainOutstandingNoLock(1000, out error))
                     {
-                        if (!leak)
-                        {
-                            if (controlOverlapped != IntPtr.Zero)
-                            {
-                                Marshal.FreeHGlobal(controlOverlapped);
-                            }
-                            if (completionEvent != IntPtr.Zero)
-                            {
-                                CloseHandle(completionEvent);
-                            }
-                            if (pin.IsAllocated)
-                            {
-                                pin.Free();
-                            }
-                        }
+                        return false;
                     }
+
+                    // All older audio and every input-side effect admitted
+                    // before this transition are drained, so any fixed slot
+                    // is now a safe ordered mode barrier. Reuse its pinned
+                    // storage instead of allocating per control refresh.
+                    int slot = next % SlotCount;
+                    int length = Math.Min(report.Length,
+                        buffers[slot].Length);
+                    Array.Clear(buffers[slot], 0, buffers[slot].Length);
+                    Buffer.BlockCopy(report, 0, buffers[slot], 0, length);
+                    ResetEvent(events[slot]);
+                    ZeroOverlapped(overlapped[slot], events[slot]);
+                    bool submitted = WriteFile(handle,
+                        pins[slot].AddrOfPinnedObject(), (uint)length,
+                        IntPtr.Zero, overlapped[slot]);
+                    int submitError = submitted ? 0 :
+                        Marshal.GetLastWin32Error();
+                    if (submitted)
+                    {
+                        // HIDCLASS completed synchronously; the fixed slot was
+                        // never published as outstanding and is reusable now.
+                        SetEvent(events[slot]);
+                        return true;
+                    }
+                    if (submitError != ErrorIoPending)
+                    {
+                        SetEvent(events[slot]);
+                        error = $"WriteFile failed: Win32 {submitError}";
+                        return false;
+                    }
+
+                    outstanding[slot] = true;
+                    expectedLengths[slot] = length;
+                    submittedTimestamps[slot] = Stopwatch.GetTimestamp();
+                    uint wait = WaitForSingleObject(events[slot], 1000);
+                    // A signaled OVERLAPPED event is sufficient for the DS4
+                    // control contract; HIDCLASS can report a zero byte count
+                    // for an accepted interrupt OUT report.
+                    if (wait == WaitObject0)
+                    {
+                        outstanding[slot] = false;
+                        return true;
+                    }
+
+                    CancelIoEx(handle, overlapped[slot]);
+                    if (WaitForSingleObject(events[slot], 250) == WaitObject0)
+                    {
+                        outstanding[slot] = false;
+                    }
+                    // If cancellation is still pending, retain this fixed slot
+                    // as outstanding. Normal reaping or Dispose will observe
+                    // completion before releasing its pin/event/OVERLAPPED.
+                    error = wait == WaitTimeout ?
+                        "control report timed out" :
+                        $"control wait failed: Win32 " +
+                        $"{Marshal.GetLastWin32Error()}";
+                    return false;
                 }
             }
 
@@ -4880,6 +5252,19 @@ namespace DS4Windows
                     if (disposed)
                     {
                         error = "audio transport disposed";
+                        return false;
+                    }
+                    if (!DrainOutstandingNoLock(timeoutMilliseconds,
+                            out error))
+                    {
+                        return false;
+                    }
+                    if (!TrySubmitPendingEffectNoLock(
+                            out bool effectHardFailure))
+                    {
+                        error = effectHardFailure ?
+                            "latest effect report write failed" :
+                            "latest effect report could not reserve a slot";
                         return false;
                     }
                     return DrainOutstandingNoLock(timeoutMilliseconds,
@@ -4977,6 +5362,13 @@ namespace DS4Windows
                     if (completionFailures != failuresBefore)
                     {
                         hardFailure = true;
+                        return false;
+                    }
+                    if (!TrySubmitPendingEffectNoLock(
+                            out bool effectHardFailure))
+                    {
+                        hardFailure = effectHardFailure;
+                        saturated = !effectHardFailure;
                         return false;
                     }
 
@@ -5119,6 +5511,12 @@ namespace DS4Windows
                         hardFailure = true;
                         return false;
                     }
+                    if (!TrySubmitPendingEffectNoLock(
+                            out bool effectHardFailure))
+                    {
+                        hardFailure = effectHardFailure;
+                        return false;
+                    }
 
                     int slot = -1;
                     for (int offset = 0; offset < SlotCount; offset++)
@@ -5187,6 +5585,12 @@ namespace DS4Windows
                     if (completionFailures != failuresBefore)
                     {
                         hardFailure = true;
+                        return false;
+                    }
+                    if (!TrySubmitPendingEffectNoLock(
+                            out bool effectHardFailure))
+                    {
+                        hardFailure = effectHardFailure;
                         return false;
                     }
 
@@ -5368,13 +5772,23 @@ namespace DS4Windows
                     }
 
                     outstanding[slot] = false;
+                    long effectVersion = effectVersions[slot];
+                    effectVersions[slot] = 0;
                     if (!completed)
                     {
+                        if (effectVersion != 0)
+                        {
+                            effectMailbox.Reject(effectVersion);
+                        }
                         completionFailures++;
                         lastCompletionError = Marshal.GetLastWin32Error();
                         continue;
                     }
 
+                    if (effectVersion != 0)
+                    {
+                        effectMailbox.Acknowledge(effectVersion);
+                    }
                     completedWrites++;
                     lastTransferred = (int)transferred;
                     lastExpected = expectedLengths[slot];
@@ -5389,8 +5803,33 @@ namespace DS4Windows
                 }
             }
 
+            /// <summary>
+            /// Wakes a retiring producer which is blocked on one of the
+            /// pool's fixed OVERLAPPED writes. The pool owner calls this only
+            /// after stopping every producer and before Dispose, so slot
+            /// storage remains pinned for every cancellation completion.
+            /// </summary>
+            public void CancelPendingWrites()
+            {
+                if (disposed)
+                {
+                    return;
+                }
+
+                for (int slot = 0; slot < SlotCount; slot++)
+                {
+                    IntPtr operation = overlapped[slot];
+                    if (operation != IntPtr.Zero)
+                    {
+                        CancelIoEx(handle, operation);
+                    }
+                }
+            }
+
             public void Dispose()
             {
+                effectMailbox.StopAccepting();
+                List<DeferredNativeWrite> deferred = null;
                 lock (gate)
                 {
                     if (disposed)
@@ -5404,40 +5843,119 @@ namespace DS4Windows
                 {
                     for (int slot = 0; slot < SlotCount; slot++)
                     {
+                        if (events[slot] != IntPtr.Zero &&
+                            WaitForSingleObject(events[slot], 0) !=
+                                WaitObject0)
+                        {
+                            CancelIoEx(handle, overlapped[slot]);
+                        }
+                    }
+
+                    long deadline = Stopwatch.GetTimestamp() +
+                        Stopwatch.Frequency * DisposeDrainMilliseconds / 1000;
+                    for (int slot = 0; slot < SlotCount; slot++)
+                    {
                         if (events[slot] == IntPtr.Zero)
                         {
                             continue;
                         }
 
-                        if (WaitForSingleObject(events[slot], 0) != WaitObject0)
+                        uint completion = WaitForSingleObject(events[slot], 0);
+                        if (completion != WaitObject0)
                         {
-                            CancelIoEx(handle, overlapped[slot]);
+                            long remainingTicks = deadline -
+                                Stopwatch.GetTimestamp();
+                            uint remainingMilliseconds = remainingTicks <= 0 ?
+                                0U : (uint)Math.Max(1, (int)Math.Ceiling(
+                                    remainingTicks * 1000.0 /
+                                        Stopwatch.Frequency));
+                            completion = WaitForSingleObject(events[slot],
+                                remainingMilliseconds);
                         }
-                        bool drained = WaitForSingleObject(events[slot], 100) ==
-                            WaitObject0;
-                        if (!drained)
+                        if (completion != WaitObject0)
                         {
-                            // The kernel may still reference this slot. A bounded
-                            // leak on device-loss teardown is safer than freeing
-                            // memory underneath a late HID completion.
+                            deferred ??= new List<DeferredNativeWrite>();
+                            deferred.Add(new DeferredNativeWrite(events[slot],
+                                overlapped[slot], pins[slot]));
                             events[slot] = IntPtr.Zero;
                             overlapped[slot] = IntPtr.Zero;
                             pins[slot] = default;
+                            buffers[slot] = null;
                             continue;
                         }
 
                         outstanding[slot] = false;
+                        ReleaseSlotNoLock(slot);
+                    }
+                }
 
-                        CloseHandle(events[slot]);
-                        events[slot] = IntPtr.Zero;
-                        Marshal.FreeHGlobal(overlapped[slot]);
-                        overlapped[slot] = IntPtr.Zero;
-                        if (pins[slot].IsAllocated)
-                        {
-                            pins[slot].Free();
-                        }
+                QueueDeferredNativeWrites(deferred);
+            }
+
+            private void ReleaseSlotNoLock(int slot)
+            {
+                CloseHandle(events[slot]);
+                events[slot] = IntPtr.Zero;
+                Marshal.FreeHGlobal(overlapped[slot]);
+                overlapped[slot] = IntPtr.Zero;
+                if (pins[slot].IsAllocated)
+                {
+                    pins[slot].Free();
+                }
+                buffers[slot] = null;
+            }
+
+            private static void QueueDeferredNativeWrites(
+                List<DeferredNativeWrite> deferred)
+            {
+                if (deferred == null || deferred.Count == 0)
+                {
+                    return;
+                }
+
+                var reaper = new Thread(() =>
+                {
+                    foreach (DeferredNativeWrite write in deferred)
+                    {
+                        write.ReleaseAfterCompletion();
+                    }
+                })
+                {
+                    IsBackground = true,
+                    Name = "DualShock 4 audio OVERLAPPED retirement",
+                    Priority = ThreadPriority.BelowNormal,
+                };
+                reaper.Start();
+            }
+
+            private readonly struct DeferredNativeWrite
+            {
+                private readonly IntPtr completionEvent;
+                private readonly IntPtr operation;
+                private readonly GCHandle pin;
+
+                public DeferredNativeWrite(IntPtr completionEvent,
+                    IntPtr operation, GCHandle pin)
+                {
+                    this.completionEvent = completionEvent;
+                    this.operation = operation;
+                    this.pin = pin;
+                }
+
+                public void ReleaseAfterCompletion()
+                {
+                    if (WaitForSingleObject(completionEvent, Infinite) !=
+                        WaitObject0)
+                    {
+                        return;
                     }
 
+                    CloseHandle(completionEvent);
+                    Marshal.FreeHGlobal(operation);
+                    if (pin.IsAllocated)
+                    {
+                        pin.Free();
+                    }
                 }
             }
 
@@ -5488,12 +6006,6 @@ namespace DS4Windows
             [return: MarshalAs(UnmanagedType.Bool)]
             private static extern bool CloseHandle(IntPtr handle);
         }
-
-        [DllImport("winmm.dll")]
-        private static extern uint timeBeginPeriod(uint milliseconds);
-
-        [DllImport("winmm.dll")]
-        private static extern uint timeEndPeriod(uint milliseconds);
 
         private const uint CreateWaitableTimerHighResolution = 0x00000002;
         private const uint TimerAccess = 0x00000002 | 0x00100000;

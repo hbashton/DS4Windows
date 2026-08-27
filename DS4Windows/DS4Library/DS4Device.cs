@@ -201,7 +201,7 @@ namespace DS4Windows
         // feedback at about 94 Hz; forwarding every update while the physical
         // DS4 also receives 250 SBC reports per second saturates the Bluetooth
         // HID lane and starves input reports. Coalesce those effect updates at
-        // the same 30 Hz boundary while preserving the 4 ms audio clock.
+        // the same 30 Hz boundary while preserving the 8 ms audio clock.
         internal const int BLUETOOTH_EFFECT_INTERVAL_DURING_SPEAKER_MS = 33;
         // Isolated BT report can have latency as high as 15 ms
         // due to hardware.
@@ -228,11 +228,16 @@ namespace DS4Windows
         private readonly object outputReportStateLock = new object();
         private readonly DualShock4BluetoothAudioState bluetoothAudioState =
             new DualShock4BluetoothAudioState();
+        private readonly byte[] bluetoothAudioStateControlReport = new byte[
+            DualShock4BluetoothAudioProtocol.AudioControlReportLength];
+        private readonly byte[] bluetoothAudioEffectReport = new byte[
+            DualShock4BluetoothAudioProtocol.AudioControlReportLength];
         private readonly DualShock4ControllerClockDiscipline
             bluetoothControllerClock =
                 new DualShock4ControllerClockDiscipline();
         private object bluetoothAudioControlLaneOwner;
         private Func<byte[], bool> bluetoothAudioControlLaneWriter;
+        private Func<byte[], bool> bluetoothAudioEffectLanePublisher;
         private long bluetoothEffectReportsDuringAudio;
         private long bluetoothEffectReportsDeferredDuringAudio;
         private long lastBluetoothEffectReportDuringAudioTick;
@@ -333,28 +338,27 @@ namespace DS4Windows
         public bool BluetoothMicrophoneStreaming =>
             bluetoothAudioState.Current.MicrophoneEnabled;
 
-        internal void ReadDualShock4BluetoothAudioModeSynchronized(
-            Action<bool> action)
+        internal DualShock4BluetoothAudioState.ReadLease
+            AcquireDualShock4BluetoothAudioMode()
         {
-            if (action == null)
-            {
-                throw new ArgumentNullException(nameof(action));
-            }
-
-            bluetoothAudioState.ReadSynchronized(state =>
-                action(state.MicrophoneEnabled));
+            return bluetoothAudioState.AcquireRead();
         }
 
         internal bool RegisterDualShock4BluetoothAudioControlLane(
-            object owner, Func<byte[], bool> writer)
+            object owner, Func<byte[], bool> controlWriter,
+            Func<byte[], bool> effectPublisher)
         {
             if (owner == null)
             {
                 throw new ArgumentNullException(nameof(owner));
             }
-            if (writer == null)
+            if (controlWriter == null)
             {
-                throw new ArgumentNullException(nameof(writer));
+                throw new ArgumentNullException(nameof(controlWriter));
+            }
+            if (effectPublisher == null)
+            {
+                throw new ArgumentNullException(nameof(effectPublisher));
             }
 
             lock (bluetoothAudioControlLaneLock)
@@ -366,7 +370,8 @@ namespace DS4Windows
                 }
 
                 bluetoothAudioControlLaneOwner = owner;
-                bluetoothAudioControlLaneWriter = writer;
+                bluetoothAudioControlLaneWriter = controlWriter;
+                bluetoothAudioEffectLanePublisher = effectPublisher;
                 return true;
             }
         }
@@ -381,6 +386,7 @@ namespace DS4Windows
                     return;
                 }
 
+                bluetoothAudioEffectLanePublisher = null;
                 bluetoothAudioControlLaneWriter = null;
                 bluetoothAudioControlLaneOwner = null;
             }
@@ -1134,6 +1140,103 @@ namespace DS4Windows
                 speakerVolume, null, null, controlReportWriter);
         }
 
+        /// <summary>
+        /// Best-effort physical disable followed by unconditional retirement
+        /// of the host speaker state. This is intentionally different from a
+        /// normal transactional setting change: once the owning audio worker
+        /// is gone, retaining SpeakerEnabled after a failed final write would
+        /// route ordinary effects into a disposed audio lane forever.
+        /// </summary>
+        internal bool RetireDualShock4BluetoothSpeakerStreaming(
+            byte speakerVolume, bool attemptPhysicalWrite = true)
+        {
+            byte scaledSpeakerVolume = ScaleAudioVolume(speakerVolume, 0x4F);
+            if (!attemptPhysicalWrite)
+            {
+                bool retired = bluetoothAudioState.RetireSpeaker(
+                    scaledSpeakerVolume, null);
+                LastBluetoothAudioWriteStatus =
+                    "speaker lane retired locally while native I/O drains";
+                return retired;
+            }
+
+            return bluetoothAudioState.RetireSpeaker(scaledSpeakerVolume,
+                state =>
+                {
+                    if (!IsGenuineBluetoothDualShock4())
+                    {
+                        LastBluetoothAudioWriteStatus =
+                            "speaker lane retired after device removal";
+                        return false;
+                    }
+
+                    bool written = false;
+                    try
+                    {
+                        written = WriteBluetoothAudioControlReport(
+                            CreateDualShock4BluetoothAudioControlReport(state));
+                    }
+                    catch (Exception ex)
+                    {
+                        LastBluetoothAudioWriteStatus =
+                            $"speaker disable failed during retirement: {ex.Message}";
+                    }
+
+                    if (written)
+                    {
+                        LastBluetoothAudioWriteStatus =
+                            "speaker lane retired";
+                    }
+                    else
+                    {
+                        BluetoothAudioWriteFailures++;
+                        if (!LastBluetoothAudioWriteStatus.StartsWith(
+                                "speaker disable failed",
+                                StringComparison.Ordinal))
+                        {
+                            LastBluetoothAudioWriteStatus =
+                                "speaker lane retired locally after final control write failed";
+                        }
+                    }
+                    return written;
+                });
+        }
+
+        internal bool TryPublishRetiredDualShock4BluetoothSpeakerMode()
+        {
+            return bluetoothAudioState.PublishRetiredSpeakerIfStillDisabled(
+                state =>
+                {
+                    if (!IsGenuineBluetoothDualShock4())
+                    {
+                        return false;
+                    }
+
+                    bool written = false;
+                    try
+                    {
+                        written = WriteBluetoothAudioControlReportOnPrimary(
+                            CreateDualShock4BluetoothAudioControlReport(state));
+                    }
+                    catch (Exception ex)
+                    {
+                        LastBluetoothAudioWriteStatus =
+                            $"deferred speaker disable failed: {ex.Message}";
+                    }
+
+                    if (written)
+                    {
+                        LastBluetoothAudioWriteStatus =
+                            "deferred speaker disable written";
+                    }
+                    else
+                    {
+                        BluetoothAudioWriteFailures++;
+                    }
+                    return written;
+                });
+        }
+
         private bool UpdateBluetoothAudioStreaming(bool? speakerEnabled,
             bool? microphoneEnabled, byte? speakerVolume,
             byte? headphoneVolume, byte? microphoneVolume,
@@ -1195,24 +1298,29 @@ namespace DS4Windows
                 return audioLaneWriter(report);
             }
 
-            bool written;
+            return WriteBluetoothAudioControlReportOnPrimary(report);
+        }
 
+        private bool WriteBluetoothAudioControlReportOnPrimary(byte[] report)
+        {
             lock (bluetoothOutputWriteLock)
             {
                 // DS4 Bluetooth audio control is an interrupt OUT report. The
                 // working MeasuredTransport and SynchronousDs4Audio transports both send it
                 // with overlapped WriteFile; HidD_SetOutputReport does not arm
                 // the microphone lane on genuine CUH-ZCT2 hardware.
-                written = hDevice.WriteOutputReportViaSharedOverlapped(
+                return hDevice.WriteOutputReportViaSharedOverlapped(
                     report, READ_STREAM_TIMEOUT);
             }
-            return written;
         }
 
         private byte[] CreateDualShock4BluetoothAudioControlReport(
-            DualShock4BluetoothAudioState.Snapshot state)
+            DualShock4BluetoothAudioState.Snapshot state,
+            byte[] destination = null)
         {
-            return DualShock4BluetoothAudioProtocol.BuildAudioControlReport(
+            destination ??= bluetoothAudioStateControlReport;
+            DualShock4BluetoothAudioProtocol.WriteAudioControlReport(
+                destination,
                 state.SpeakerEnabled, state.MicrophoneEnabled,
                 state.SpeakerVolume, state.HeadphoneVolume,
                 state.MicrophoneVolume,
@@ -1224,18 +1332,19 @@ namespace DS4Windows
                 currentHap.lightbarState.LightBarFlashDurationOn,
                 currentHap.lightbarState.LightBarFlashDurationOff,
                 bluetoothPollRate: (byte)Math.Clamp(btPollRate, 0, 16));
+            return destination;
         }
 
         private bool WriteDualShock4BluetoothEffectThroughAudioLane(
             DualShock4BluetoothAudioState.Snapshot state)
         {
-            Func<byte[], bool> audioLaneWriter;
+            Func<byte[], bool> effectPublisher;
             lock (bluetoothAudioControlLaneLock)
             {
-                audioLaneWriter = bluetoothAudioControlLaneWriter;
+                effectPublisher = bluetoothAudioEffectLanePublisher;
             }
 
-            if (audioLaneWriter == null)
+            if (effectPublisher == null)
             {
                 return false;
             }
@@ -1245,9 +1354,12 @@ namespace DS4Windows
             // the controller's audio-plane state and makes valid SBC reports
             // disappear at the hardware decoder. Rebuild the same rumble,
             // lightbar, flash, and volume state as an A0/A1 F3 control report
-            // and serialize it through the speaker lane instead.
-            return audioLaneWriter(
-                CreateDualShock4BluetoothAudioControlReport(state));
+            // and hand its latest value to the single audio output owner. The
+            // input thread performs one bounded copy; it never drains or waits
+            // for an OVERLAPPED HID completion.
+            return effectPublisher(
+                CreateDualShock4BluetoothAudioControlReport(state,
+                    bluetoothAudioEffectReport));
         }
 
         public bool WriteBluetoothAudioOutputReport(byte[] report)
@@ -1929,8 +2041,10 @@ namespace DS4Windows
                     if (fireReport && Report != null)
                         Report(this, EventArgs.Empty);
 
-                    sendOutputReport(syncWriteReport, forceWrite);
-                    forceWrite = false;
+                    if (sendOutputReport(syncWriteReport, forceWrite))
+                    {
+                        forceWrite = false;
+                    }
 
                     if (!string.IsNullOrEmpty(currerror))
                         error = currerror;
@@ -2075,12 +2189,21 @@ namespace DS4Windows
             }
         }
 
-        private void sendOutputReport(bool synchronous, bool force = false, bool quitOutputThreadOnError = true)
+        private bool sendOutputReport(bool synchronous, bool force = false,
+            bool quitOutputThreadOnError = true)
         {
             lock (outputReportStateLock)
             {
-            bluetoothAudioState.ReadSynchronized(bluetoothAudio =>
-            {
+                if (!bluetoothAudioState.TryAcquireRead(
+                        out DualShock4BluetoothAudioState.ReadLease audioLease))
+                {
+                    return false;
+                }
+
+                using (audioLease)
+                {
+            DualShock4BluetoothAudioState.Snapshot bluetoothAudio =
+                audioLease.Snapshot;
             MergeStates();
             //setTestRumble();
             //setHapticState();
@@ -2099,12 +2222,12 @@ namespace DS4Windows
                     exitOutputThread = true;
                 }
 
-                return;
+                return true;
             }
 
             //bool output = outputPendCount > 0, change = force;
             bool change = force;
-            // Speaker streaming writes an audio report every 4 ms. A
+            // Production speaker streaming writes an audio report every 8 ms. A
             // microphone-only stream is inbound, so it still needs an A1
             // effect keepalive before the controller's roughly four-second
             // microphone-mode timeout.
@@ -2146,6 +2269,7 @@ namespace DS4Windows
                     setRumble(0, 0);
             }
 
+            bool audioEffectDeferred = false;
             if (synchronous)
             {
                 if (haptime)
@@ -2158,7 +2282,9 @@ namespace DS4Windows
                         standbySw.Restart();
                     //standbySw.Restart();
 
-                    if (usingBT)
+                    bool audioEffectPath = usingBT &&
+                        bluetoothAudio.SpeakerEnabled;
+                    if (usingBT && !audioEffectPath)
                     {
                         outReportBuffer.CopyTo(outputReport, 0);
 
@@ -2180,11 +2306,30 @@ namespace DS4Windows
 
                     try
                     {
-                        bool outputWritten = usingBT &&
-                            bluetoothAudio.SpeakerEnabled ?
-                            WriteDualShock4BluetoothEffectThroughAudioLane(
-                                bluetoothAudio) :
-                            writeOutput();
+                        bool outputWritten;
+                        if (audioEffectPath)
+                        {
+                            outputWritten =
+                                WriteDualShock4BluetoothEffectThroughAudioLane(
+                                    bluetoothAudio);
+                            if (outputWritten)
+                            {
+                                // The mailbox now owns this latest physical
+                                // state. Mark it admitted only after the fixed
+                                // copy succeeds so rejection remains pending.
+                                outReportBuffer.CopyTo(outputReport, 0);
+                            }
+                            else
+                            {
+                                audioEffectDeferred = true;
+                                Interlocked.Increment(ref
+                                    bluetoothEffectReportsDeferredDuringAudio);
+                            }
+                        }
+                        else
+                        {
+                            outputWritten = writeOutput();
+                        }
                         if (outputWritten && usingBT &&
                             (bluetoothAudio.SpeakerEnabled ||
                                 bluetoothAudio.MicrophoneEnabled))
@@ -2195,7 +2340,7 @@ namespace DS4Windows
                                 ref lastBluetoothEffectReportDuringAudioTick,
                                 Environment.TickCount64);
                         }
-                        if (!outputWritten)
+                        if (!outputWritten && !audioEffectDeferred)
                         {
                             if (quitOutputThreadOnError)
                             {
@@ -2209,7 +2354,17 @@ namespace DS4Windows
                             }
                         }
                     }
-                    catch { } // If it's dead already, don't worry about it.
+                    catch
+                    {
+                        // An audio-owner retirement is a retryable admission
+                        // race, not a primary HID failure. Keep the merged
+                        // state pending and let the state transition select
+                        // the next valid output lane.
+                        if (audioEffectPath)
+                        {
+                            audioEffectDeferred = true;
+                        }
+                    }
 
                     if (!usingBT)
                     {
@@ -2242,8 +2397,12 @@ namespace DS4Windows
                 exitOutputThread = true;
             }
 
-            currentHap.dirty = false;
-            });
+            if (!audioEffectDeferred)
+            {
+                currentHap.dirty = false;
+            }
+            return !audioEffectDeferred;
+                }
             }
         }
 

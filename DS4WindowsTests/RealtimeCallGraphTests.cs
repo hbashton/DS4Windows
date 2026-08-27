@@ -116,6 +116,225 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void DualShock4AudioUsesBlockingCadenceAndDefinitiveRetirement()
+        {
+            string source = File.ReadAllText(FindRepositoryFile(
+                "DS4Windows", "DS4Control",
+                "DualShock4BluetoothSpeakerPassthrough.cs")).
+                Replace("\r\n", "\n");
+            string wait = Extract(source,
+                "private void WaitUntil(",
+                "private static IntPtr RegisterMultimediaScheduler");
+            string dispose = Extract(source,
+                "public void Dispose()",
+                "private void QueueDeferredResourceRetirement(");
+
+            AssertDoesNotContain(source, "ThreadPriority.Highest");
+            AssertDoesNotContain(source, "Thread.SpinWait");
+            AssertDoesNotContain(source, "timeBeginPeriod");
+            AssertDoesNotContain(source, "timeEndPeriod");
+            StringAssert.Contains(wait, "SetWaitableTimer(");
+            StringAssert.Contains(wait, "stoppingSignal.WaitOne(");
+            AssertDoesNotContain(wait, "CreateHighResolutionTimer(");
+            AssertDoesNotContain(wait, "new ");
+            StringAssert.Contains(source,
+                "AvSetMmThreadCharacteristicsW(\"Audio\"");
+            StringAssert.Contains(source,
+                "AvSetMmThreadPriority(handle, AvrtPriority.Normal)");
+            StringAssert.Contains(source,
+                "new Thread(RunDirectStreamWorker)");
+            StringAssert.Contains(source,
+                "new Thread(RunCaptureStreamWorker)");
+            string workerOwner = Extract(source,
+                "private void RunDirectStreamWorker()",
+                "private void DirectStreamLoop()");
+            StringAssert.Contains(workerOwner,
+                "MustRetireAfterWorkerExit(stopping,");
+            StringAssert.Contains(workerOwner, "RequestStop();");
+            StringAssert.Contains(workerOwner,
+                "unexpectedWorkerExit(this);");
+            string captureStopped = Extract(source,
+                "private void Capture_RecordingStopped(",
+                "private void StreamLoop()");
+            StringAssert.Contains(captureStopped,
+                "retireWhenWorkerExits = true;");
+            StringAssert.Contains(captureStopped, "RequestStop();");
+
+            string productionSubmit = Extract(source,
+                "private ProductionReplaySubmissionResult\n            SubmitProductionReplayFrame(",
+                "private FifoBufferedSubmissionResult SubmitFifoBufferedSteadyFrame(");
+            StringAssert.Contains(productionSubmit,
+                "device.AcquireDualShock4BluetoothAudioMode()");
+            StringAssert.Contains(productionSubmit,
+                "preparePooledReport");
+            AssertDoesNotContain(productionSubmit,
+                "ReadDualShock4BluetoothAudioModeSynchronized");
+            AssertDoesNotContain(productionSubmit, "() =>");
+
+            string recurringSubmits = string.Concat(
+                Extract(source, "private void SubmitEncodedFrames(",
+                    "/// <summary>\n        /// Presents one complete reference-transport report"),
+                Extract(source, "private bool SubmitEncodedFramesAndWait(",
+                    "private MeasuredTransportAsyncSubmissionResult"),
+                Extract(source,
+                    "private MeasuredTransportAsyncSubmissionResult\n            SubmitEncodedFramesMeasuredTransportAsync(",
+                    "private ProductionReplaySubmissionResult"),
+                Extract(source,
+                    "private FifoBufferedSubmissionResult\n            SubmitFifoBufferedPrimeReport()",
+                    "private CreditBufferedSubmissionResult"),
+                Extract(source,
+                    "private CreditBufferedSubmissionResult\n            SubmitCreditBufferedReport(",
+                    "internal static void ApplyProductionReplayAudioMode"));
+            AssertDoesNotContain(recurringSubmits,
+                "ReadDualShock4BluetoothAudioModeSynchronized");
+            AssertDoesNotContain(recurringSubmits, "() =>");
+            string referenceSubmit = Extract(source,
+                "private bool SubmitEncodedFramesAndWait(",
+                "private MeasuredTransportAsyncSubmissionResult");
+            StringAssert.Contains(referenceSubmit,
+                "speakerWritePool.SendAndWait(report,");
+            AssertDoesNotContain(referenceSubmit,
+                "WriteOutputReportViaInterrupt(");
+
+            string controlSubmit = Extract(source,
+                "public bool TrySendControl(byte[] report, out string error)",
+                "public bool TryDrainOutstanding(");
+            StringAssert.Contains(controlSubmit, "buffers[slot]");
+            StringAssert.Contains(controlSubmit, "outstanding[slot] = true;");
+            AssertDoesNotContain(controlSubmit, "new byte[");
+            AssertDoesNotContain(controlSubmit, "GCHandle.Alloc(");
+            AssertDoesNotContain(controlSubmit, "CreateEventW(");
+            AssertDoesNotContain(controlSubmit, "Marshal.AllocHGlobal(");
+
+            int captureDispose = dispose.IndexOf("oldCapture.Dispose()",
+                System.StringComparison.Ordinal);
+            int workerJoin = dispose.IndexOf("retiringWorker.Join(",
+                System.StringComparison.Ordinal);
+            int transportDisable = dispose.IndexOf(
+                "DisableSpeakerTransport()",
+                System.StringComparison.Ordinal);
+            Assert.IsTrue(captureDispose >= 0 && workerJoin > captureDispose &&
+                transportDisable > workerJoin,
+                "WASAPI must close before bounded HID and final mode retirement.");
+            StringAssert.Contains(dispose,
+                "retiringPool?.CancelPendingWrites()");
+            AssertDoesNotContain(dispose, "retiringWorker.Join();");
+            StringAssert.Contains(dispose,
+                "CancelledWorkerStopMilliseconds");
+            StringAssert.Contains(dispose,
+                "RetireDualShock4BluetoothSpeakerStreaming(");
+
+            string release = Extract(source,
+                "private void ReleaseRetiredResources(",
+                "private void ReleaseMeasuredTransportReferenceInputIntervalOverride");
+            StringAssert.Contains(release, "captureAvailable.Dispose();");
+            StringAssert.Contains(release, "stoppingSignal.Dispose();");
+
+            string barrier = Extract(source,
+                "private bool WriteBluetoothAudioControlBarrier(",
+                "private bool TrySendBluetoothAudioControl(");
+            int staleGuard = barrier.IndexOf(
+                "if (!speakerTransportEnabled)",
+                System.StringComparison.Ordinal);
+            int physicalWrite = barrier.IndexOf(
+                "TrySendBluetoothAudioControl(report, out _)",
+                System.StringComparison.Ordinal);
+            Assert.IsTrue(staleGuard >= 0 && physicalWrite > staleGuard,
+                "A callback captured before unregister must be rejected after final disable.");
+            AssertDoesNotContain(barrier, "stopping ||");
+
+            string effectPublish = Extract(source,
+                "private bool PublishBluetoothAudioEffect(",
+                "private bool TrySendBluetoothAudioControl(");
+            StringAssert.Contains(effectPublish,
+                "pool.TryPublishLatestEffect(report)");
+            AssertDoesNotContain(effectPublish, "TrySendControl(");
+            AssertDoesNotContain(effectPublish, "WaitForSingleObject(");
+            AssertDoesNotContain(effectPublish, "DrainOutstanding");
+
+            string mailboxSubmit = Extract(source,
+                "private bool TrySubmitPendingEffectNoLock(",
+                "public bool TrySendControl(");
+            StringAssert.Contains(mailboxSubmit,
+                "effectMailbox.TryClaim(");
+            StringAssert.Contains(mailboxSubmit,
+                "effectMailbox.Reject(effectVersion)");
+            StringAssert.Contains(mailboxSubmit,
+                "effectVersions[slot] = effectVersion");
+            AssertDoesNotContain(mailboxSubmit, "WaitForSingleObject(");
+            string completionReap = Extract(source,
+                "private void ReapCompletedNoLock()",
+                "public void CancelPendingWrites()");
+            StringAssert.Contains(completionReap,
+                "effectMailbox.Reject(effectVersion)");
+            StringAssert.Contains(completionReap,
+                "effectMailbox.Acknowledge(effectVersion)");
+
+            string deviceSource = File.ReadAllText(FindRepositoryFile(
+                "DS4Windows", "DS4Library", "DS4Device.cs"));
+            string inputLoop = Extract(deviceSource,
+                "protected unsafe void performDs4Input()",
+                "protected Debouncer SetupDebouncer()");
+            string sendOutput = Extract(deviceSource,
+                "private bool sendOutputReport(",
+                "// Perform outReportBuffer copy on a separate thread");
+            StringAssert.Contains(inputLoop,
+                "if (sendOutputReport(syncWriteReport, forceWrite))");
+            Assert.IsTrue(inputLoop.IndexOf(
+                    "if (sendOutputReport(syncWriteReport, forceWrite))",
+                    System.StringComparison.Ordinal) <
+                inputLoop.IndexOf("forceWrite = false;",
+                    inputLoop.IndexOf(
+                        "if (sendOutputReport(syncWriteReport, forceWrite))",
+                        System.StringComparison.Ordinal),
+                    System.StringComparison.Ordinal),
+                "A nonblocking mode-transition deferral must retain forced physical output.");
+            StringAssert.Contains(sendOutput,
+                "bluetoothAudioState.TryAcquireRead(");
+            AssertDoesNotContain(sendOutput,
+                "bluetoothAudioState.TryReadSynchronized(");
+            AssertDoesNotContain(sendOutput, "=>");
+            StringAssert.Contains(sendOutput,
+                "audioEffectDeferred = true;");
+            StringAssert.Contains(sendOutput,
+                "if (!outputWritten && !audioEffectDeferred)");
+            StringAssert.Contains(sendOutput,
+                "return !audioEffectDeferred;");
+            Assert.IsTrue(sendOutput.IndexOf(
+                    "if (outputWritten)",
+                    System.StringComparison.Ordinal) <
+                sendOutput.IndexOf(
+                    "outReportBuffer.CopyTo(outputReport, 0);",
+                    sendOutput.IndexOf("if (outputWritten)",
+                        System.StringComparison.Ordinal),
+                    System.StringComparison.Ordinal),
+                "The last-sent effect state must advance only after mailbox admission.");
+
+            string ownerSource = File.ReadAllText(FindRepositoryFile(
+                "DS4Windows", "DS4Control",
+                "DualShock4AudioPassthrough.cs"));
+            StringAssert.Contains(ownerSource,
+                "EnqueueWhileHolding(syncRoot");
+            AssertDoesNotContain(ownerSource,
+                "slotWorkQueues[slot].Enqueue(");
+            AssertDoesNotContain(ownerSource, "slotWorkerLocks");
+            AssertDoesNotContain(ownerSource, "StartBackgroundThread");
+            AssertDoesNotContain(ownerSource, "TaskScheduler.Default");
+            StringAssert.Contains(ownerSource,
+                "Priority = ThreadPriority.BelowNormal");
+            StringAssert.Contains(ownerSource, "previous?.RequestStop();");
+            StringAssert.Contains(ownerSource, "playback?.RequestStop();");
+            StringAssert.Contains(ownerSource,
+                "slots[slot]?.IsOperational == true");
+            StringAssert.Contains(ownerSource,
+                "HandleUnexpectedWorkerExit(slot, generation, owner)");
+            StringAssert.Contains(ownerSource,
+                "TryEnqueueUnexpectedRetirementWhileHolding(");
+            StringAssert.Contains(ownerSource,
+                "queue.EnqueueWhileHolding(ownerGate, retirement)");
+        }
+
+        [TestMethod]
         public void RemovalCallbackRunsAfterLifecycleOwnedPhysicalRetirement()
         {
             string source = File.ReadAllText(FindRepositoryFile(

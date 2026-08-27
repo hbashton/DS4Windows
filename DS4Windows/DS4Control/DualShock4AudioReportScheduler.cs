@@ -10,9 +10,9 @@ namespace DS4Windows
     /// </summary>
     internal static class DualShock4AudioReportScheduler
     {
-        // WaitUntil stays resident for the final 0.5 ms. Twice that spin
-        // budget separates ordinary timer jitter from a scheduler stall while
-        // remaining only 1/16 of the direct lane's 16 ms report period.
+        // One millisecond separates ordinary waitable-timer jitter from a
+        // scheduler stall while remaining only 1/16 of the direct lane's
+        // 16 ms report period.
         internal const double DirectRebaseLatenessMilliseconds = 1.0;
         internal const double MaximumCadenceSlewFractionPerReport =
             0.00001;
@@ -26,6 +26,25 @@ namespace DS4Windows
 
             return Math.Max(1L, (long)Math.Round(frequency *
                 DirectRebaseLatenessMilliseconds / 1000.0));
+        }
+
+        internal static long GetRelativeDueTime100Nanoseconds(
+            long remainingTicks, long frequency)
+        {
+            if (remainingTicks <= 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(remainingTicks));
+            }
+            if (frequency <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(frequency));
+            }
+
+            long dueTime = Math.Max(1L, (long)Math.Ceiling(
+                remainingTicks * (double)TimeSpan.TicksPerSecond /
+                    frequency));
+            return -dueTime;
         }
 
         internal static long MapControllerClockToCadenceTicks(

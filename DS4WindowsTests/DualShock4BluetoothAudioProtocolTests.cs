@@ -795,6 +795,37 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void ReusableAudioControlReportWriterAllocatesNothing()
+        {
+            var report = new byte[
+                DualShock4BluetoothAudioProtocol.AudioControlReportLength];
+            for (int warmup = 0; warmup < 100; warmup++)
+            {
+                DualShock4BluetoothAudioProtocol.WriteAudioControlReport(
+                    report, speakerEnabled: true,
+                    microphoneEnabled: false, speakerVolume: 0x4F,
+                    headphoneVolume: 0x31, microphoneVolume: 0x40,
+                    rightFastRumble: 1, leftSlowRumble: 2,
+                    lightbarRed: 3, lightbarGreen: 4, lightbarBlue: 5);
+            }
+
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int reportIndex = 0; reportIndex < 10_000; reportIndex++)
+            {
+                DualShock4BluetoothAudioProtocol.WriteAudioControlReport(
+                    report, speakerEnabled: true,
+                    microphoneEnabled: false, speakerVolume: 0x4F,
+                    headphoneVolume: 0x31, microphoneVolume: 0x40,
+                    rightFastRumble: 1, leftSlowRumble: 2,
+                    lightbarRed: 3, lightbarGreen: 4, lightbarBlue: 5);
+            }
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.AreEqual(0L, allocated,
+                "The 30 Hz physical effect report builder must reuse its fixed buffer.");
+        }
+
+        [TestMethod]
         public void MeasuredTransportReferencePreservesMeasuredTwoOneTickCadence()
         {
             int frameThirds = 0;
@@ -1816,13 +1847,12 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public async Task SynchronizedSpeakerReadWaitsForMicrophoneModePublish()
+        public async Task RealtimeSpeakerSnapshotNeverWaitsForModeControlIo()
         {
             var state = new DualShock4BluetoothAudioState();
             state.Update(true, false, 0x4F, 0x4F, 0x40, _ => true);
             using var publishEntered = new ManualResetEventSlim(false);
             using var releasePublish = new ManualResetEventSlim(false);
-            using var readStarted = new ManualResetEventSlim(false);
             using var speakerSubmitted = new ManualResetEventSlim(false);
             DualShock4BluetoothAudioState.Snapshot observed = null;
             byte[] submittedReport = null;
@@ -1847,39 +1877,41 @@ namespace DS4WindowsTests
                 new byte[DualShock4BluetoothAudioProtocol.
                     SpeakerSbcFrameLength],
             };
-            Task speakerRead = StartDedicated(() =>
+            bool accepted = state.TryReadSynchronized(snapshot =>
             {
-                readStarted.Set();
-                state.ReadSynchronized(snapshot =>
-                {
-                    observed = snapshot;
-                    submittedReport =
-                        DualShock4BluetoothAudioProtocol.BuildSpeakerReport(
-                            0, frames, microphoneEnabled:
-                                snapshot.MicrophoneEnabled);
-                    speakerSubmitted.Set();
-                });
+                observed = snapshot;
+                submittedReport =
+                    DualShock4BluetoothAudioProtocol.BuildSpeakerReport(
+                        0, frames, microphoneEnabled:
+                            snapshot.MicrophoneEnabled);
+                speakerSubmitted.Set();
             });
 
             try
             {
-                Assert.IsTrue(readStarted.Wait(TimeSpan.FromSeconds(2)));
-                Assert.IsFalse(speakerSubmitted.Wait(100),
-                    "A speaker payload escaped while the A1 control publish still owned the audio-state gate.");
+                Assert.IsFalse(accepted,
+                    "Input-side output must defer instead of waiting behind a blocked control write.");
+                Assert.IsFalse(speakerSubmitted.IsSet);
+                Assert.IsNull(observed);
+                Assert.IsNull(submittedReport);
             }
             finally
             {
                 releasePublish.Set();
             }
 
-            await Task.WhenAll(microphoneUpdate, speakerRead);
+            await microphoneUpdate;
             Assert.IsTrue(updateResult);
-            Assert.IsNotNull(observed);
-            Assert.IsTrue(observed.SpeakerEnabled);
-            Assert.IsTrue(observed.MicrophoneEnabled);
+            Assert.IsTrue(state.TryReadSynchronized(snapshot =>
+            {
+                observed = snapshot;
+                submittedReport =
+                    DualShock4BluetoothAudioProtocol.BuildSpeakerReport(
+                        0, frames, microphoneEnabled:
+                            snapshot.MicrophoneEnabled);
+            }));
             Assert.IsNotNull(submittedReport);
-            Assert.AreEqual(0xA1, submittedReport[2],
-                "The first speaker payload after the committed microphone update must retain A1 mode.");
+            Assert.AreEqual(0xA1, submittedReport[2]);
             Assert.IsTrue(state.Current.MicrophoneEnabled);
         }
 
@@ -1975,6 +2007,739 @@ namespace DS4WindowsTests
             Assert.IsFalse(written);
             Assert.IsFalse(state.Current.SpeakerEnabled);
             Assert.AreEqual(0x4F, state.Current.SpeakerVolume);
+        }
+
+        [TestMethod]
+        public void BluetoothAudioRetirementCommitsAfterFailedFinalWrite()
+        {
+            var state = new DualShock4BluetoothAudioState();
+            Assert.IsTrue(state.Update(true, true, 0x30, 0x31, 0x32,
+                _ => true));
+            DualShock4BluetoothAudioState.Snapshot attempted = null;
+
+            bool written = state.RetireSpeaker(0x20, snapshot =>
+            {
+                attempted = snapshot;
+                return false;
+            });
+
+            Assert.IsFalse(written);
+            Assert.IsNotNull(attempted);
+            Assert.IsFalse(attempted.SpeakerEnabled);
+            Assert.IsTrue(attempted.MicrophoneEnabled,
+                "Speaker retirement must preserve an independently owned microphone lane.");
+            Assert.IsFalse(state.Current.SpeakerEnabled,
+                "A missing controller cannot leave the disposed speaker owner published locally.");
+            Assert.IsTrue(state.Current.MicrophoneEnabled);
+            Assert.AreEqual(0x20, state.Current.SpeakerVolume);
+        }
+
+        [TestMethod]
+        public async Task BluetoothAudioRetirementCannotOverwriteLaterMicrophoneMode()
+        {
+            var state = new DualShock4BluetoothAudioState();
+            Assert.IsTrue(state.Update(true, false, 0x30, 0x31, 0x32,
+                _ => true));
+            using var retirementPublishEntered =
+                new ManualResetEventSlim(false);
+            using var releaseRetirementPublish =
+                new ManualResetEventSlim(false);
+            using var microphonePublishEntered =
+                new ManualResetEventSlim(false);
+            DualShock4BluetoothAudioState.Snapshot retired = null;
+            DualShock4BluetoothAudioState.Snapshot microphone = null;
+
+            Task retirement = StartDedicated(() =>
+                state.RetireSpeaker(0x20, snapshot =>
+                {
+                    retired = snapshot;
+                    retirementPublishEntered.Set();
+                    releaseRetirementPublish.Wait();
+                    return false;
+                }));
+            Assert.IsTrue(retirementPublishEntered.Wait(
+                TimeSpan.FromSeconds(2)));
+            Assert.IsFalse(state.Current.SpeakerEnabled,
+                "Host retirement must publish locally before bounded HID teardown completes.");
+
+            Task microphoneUpdate = StartDedicated(() =>
+                state.Update(null, true, null, null, null, snapshot =>
+                {
+                    microphone = snapshot;
+                    microphonePublishEntered.Set();
+                    return true;
+                }));
+            try
+            {
+                Assert.IsFalse(microphonePublishEntered.Wait(100),
+                    "A newer mode write must remain ordered after the retiring owner's final write.");
+            }
+            finally
+            {
+                releaseRetirementPublish.Set();
+            }
+
+            await Task.WhenAll(retirement, microphoneUpdate);
+            Assert.IsNotNull(retired);
+            Assert.IsFalse(retired.SpeakerEnabled);
+            Assert.IsFalse(retired.MicrophoneEnabled);
+            Assert.IsNotNull(microphone);
+            Assert.IsFalse(microphone.SpeakerEnabled);
+            Assert.IsTrue(microphone.MicrophoneEnabled);
+            Assert.IsFalse(state.Current.SpeakerEnabled);
+            Assert.IsTrue(state.Current.MicrophoneEnabled);
+        }
+
+        [TestMethod]
+        public async Task AdmittedOldModeWriterCompletesBeforeRetirementDisable()
+        {
+            var state = new DualShock4BluetoothAudioState();
+            Assert.IsTrue(state.Update(true, false, null, null, null,
+                _ => true));
+            using var oldWriterEntered = new ManualResetEventSlim(false);
+            using var releaseOldWriter = new ManualResetEventSlim(false);
+            using var disableEntered = new ManualResetEventSlim(false);
+            var wireOrder = new List<string>();
+
+            Task oldWriter = StartDedicated(() =>
+                state.ReadSynchronized(snapshot =>
+                {
+                    Assert.IsTrue(snapshot.SpeakerEnabled);
+                    oldWriterEntered.Set();
+                    releaseOldWriter.Wait();
+                    lock (wireOrder)
+                    {
+                        wireOrder.Add("old-effect");
+                    }
+                }));
+            Assert.IsTrue(oldWriterEntered.Wait(TimeSpan.FromSeconds(2)));
+
+            Task retirement = StartDedicated(() =>
+                state.RetireSpeaker(null, snapshot =>
+                {
+                    Assert.IsFalse(snapshot.SpeakerEnabled);
+                    lock (wireOrder)
+                    {
+                        wireOrder.Add("disable");
+                    }
+                    disableEntered.Set();
+                    return true;
+                }));
+            try
+            {
+                Assert.IsFalse(disableEntered.Wait(100),
+                    "Final disable overtook an already-admitted old-mode physical writer.");
+            }
+            finally
+            {
+                releaseOldWriter.Set();
+            }
+
+            await Task.WhenAll(oldWriter, retirement);
+            CollectionAssert.AreEqual(
+                new[] { "old-effect", "disable" }, wireOrder);
+            Assert.IsFalse(state.Current.SpeakerEnabled);
+        }
+
+        [TestMethod]
+        public async Task RequestStopKeepsEffectsAdmittedUntilOrderedDisable()
+        {
+            var state = new DualShock4BluetoothAudioState();
+            Assert.IsTrue(state.Update(true, false, null, null, null,
+                _ => true));
+            bool stopping = false;
+            bool transportEnabled = true;
+            var wireOrder = new List<string>();
+            using var teardownBlocked = new ManualResetEventSlim(false);
+            using var releaseTeardown = new ManualResetEventSlim(false);
+            Func<bool> capturedControlWriter = () =>
+            {
+                if (!transportEnabled)
+                {
+                    return false;
+                }
+                wireOrder.Add("effect");
+                return true;
+            };
+
+            // RequestStop wakes the media worker, but its still-valid physical
+            // lane remains admitted until BluetoothAudioState drains readers
+            // and enters the terminal publisher.
+            stopping = true;
+            Task teardown = StartDedicated(() =>
+            {
+                teardownBlocked.Set();
+                releaseTeardown.Wait();
+                state.RetireSpeaker(null, snapshot =>
+                {
+                    transportEnabled = false;
+                    wireOrder.Add("disable");
+                    return true;
+                });
+            });
+            Assert.IsTrue(teardownBlocked.Wait(TimeSpan.FromSeconds(2)));
+            bool effectWritten = false;
+            state.ReadSynchronized(_ =>
+                effectWritten = capturedControlWriter());
+            Assert.IsTrue(stopping);
+            Assert.IsTrue(effectWritten,
+                "RequestStop alone must not masquerade as a HID write failure.");
+
+            releaseTeardown.Set();
+            await teardown;
+            Assert.IsFalse(capturedControlWriter(),
+                "The same captured delegate must reject after the ordered disable barrier.");
+            CollectionAssert.AreEqual(new[] { "effect", "disable" },
+                wireOrder);
+        }
+
+        [TestMethod]
+        public async Task EffectMailboxNeverWaitsForBlockedOutputOwner()
+        {
+            var mailbox = new DualShock4BluetoothEffectMailbox(78);
+            var first = new byte[78];
+            var second = new byte[78];
+            var ownerBuffer = new byte[78];
+            first[5] = 1;
+            second[5] = 2;
+            Assert.IsTrue(mailbox.TryPublish(first));
+            using var ownerClaimed = new ManualResetEventSlim(false);
+            using var releaseBlockedLane = new ManualResetEventSlim(false);
+            var wireOrder = new List<byte>();
+
+            Task blockedOwner = StartDedicated(() =>
+            {
+                Assert.IsTrue(mailbox.TryClaim(ownerBuffer,
+                    out int length, out long version));
+                Assert.AreEqual(78, length);
+                ownerClaimed.Set();
+                releaseBlockedLane.Wait();
+                wireOrder.Add(ownerBuffer[5]);
+                mailbox.Acknowledge(version);
+            });
+            Assert.IsTrue(ownerClaimed.Wait(TimeSpan.FromSeconds(2)));
+
+            Task<bool> nextInput = Task.Factory.StartNew(
+                () => mailbox.TryPublish(second), CancellationToken.None,
+                TaskCreationOptions.LongRunning, TaskScheduler.Default);
+            try
+            {
+                Assert.IsTrue(nextInput.Wait(TimeSpan.FromMilliseconds(250)),
+                    "The next physical input report waited behind the blocked output owner.");
+                Assert.IsTrue(nextInput.Result);
+            }
+            finally
+            {
+                releaseBlockedLane.Set();
+            }
+
+            await Task.WhenAll(blockedOwner, nextInput);
+            Assert.IsTrue(mailbox.TryClaim(ownerBuffer, out int secondLength,
+                out long secondVersion));
+            Assert.AreEqual(78, secondLength);
+            wireOrder.Add(ownerBuffer[5]);
+            mailbox.Acknowledge(secondVersion);
+            CollectionAssert.AreEqual(new byte[] { 1, 2 }, wireOrder);
+            Assert.IsFalse(mailbox.HasPending);
+        }
+
+        [TestMethod]
+        public void EffectMailboxRetriesImmediateAndAsyncFailures()
+        {
+            var mailbox = new DualShock4BluetoothEffectMailbox(78);
+            var report = new byte[78];
+            var ownerBuffer = new byte[78];
+            report[5] = 0x41;
+            Assert.IsTrue(mailbox.TryPublish(report));
+
+            Assert.IsTrue(mailbox.TryClaim(ownerBuffer, out _,
+                out long immediateVersion));
+            mailbox.Reject(immediateVersion);
+            Assert.IsTrue(mailbox.HasPending,
+                "An immediate native submit failure lost the accepted state.");
+
+            Assert.IsTrue(mailbox.TryClaim(ownerBuffer, out _,
+                out long asynchronousVersion));
+            Assert.AreEqual(immediateVersion, asynchronousVersion);
+            mailbox.Reject(asynchronousVersion);
+            Assert.IsTrue(mailbox.HasPending,
+                "An asynchronous completion failure lost the accepted state.");
+
+            Assert.IsTrue(mailbox.TryClaim(ownerBuffer, out _,
+                out long retryVersion));
+            Assert.AreEqual((byte)0x41, ownerBuffer[5]);
+            mailbox.Acknowledge(retryVersion);
+            Assert.IsFalse(mailbox.HasPending);
+        }
+
+        [TestMethod]
+        public void OldEffectCompletionCannotClearOrRestoreNewerState()
+        {
+            var mailbox = new DualShock4BluetoothEffectMailbox(78);
+            var oldReport = new byte[78];
+            var newReport = new byte[78];
+            var ownerBuffer = new byte[78];
+            oldReport[5] = 1;
+            newReport[5] = 2;
+            Assert.IsTrue(mailbox.TryPublish(oldReport));
+            Assert.IsTrue(mailbox.TryClaim(ownerBuffer, out _,
+                out long oldVersion));
+
+            Assert.IsTrue(mailbox.TryPublish(newReport));
+            mailbox.Acknowledge(oldVersion);
+            Assert.IsTrue(mailbox.HasPending);
+            Assert.IsTrue(mailbox.TryClaim(ownerBuffer, out _,
+                out long newVersion));
+            Assert.AreEqual((byte)2, ownerBuffer[5]);
+
+            mailbox.Reject(oldVersion);
+            Assert.IsFalse(mailbox.TryClaim(ownerBuffer, out _, out _),
+                "An old failure must not make an already-claimed newer value duplicate.");
+            mailbox.Acknowledge(newVersion);
+            Assert.IsFalse(mailbox.HasPending);
+        }
+
+        [TestMethod]
+        public void EffectMailboxFinalBarrierDrainsThenRejectsStalePublisher()
+        {
+            var mailbox = new DualShock4BluetoothEffectMailbox(78);
+            var effect = new byte[78];
+            var stale = new byte[78];
+            var ownerBuffer = new byte[78];
+            effect[5] = 0x55;
+            Assert.IsTrue(mailbox.TryPublish(effect));
+
+            mailbox.StopAccepting();
+            Assert.IsFalse(mailbox.TryPublish(stale));
+            Assert.IsTrue(mailbox.TryClaim(ownerBuffer, out _,
+                out long effectVersion));
+            var wireOrder = new List<string>
+            {
+                $"effect-{ownerBuffer[5]:X2}",
+            };
+            mailbox.Acknowledge(effectVersion);
+            wireOrder.Add("disable");
+
+            CollectionAssert.AreEqual(
+                new[] { "effect-55", "disable" }, wireOrder);
+            Assert.IsFalse(mailbox.HasPending);
+        }
+
+        [TestMethod]
+        public void EffectMailboxSteadyStateAllocatesNothing()
+        {
+            var mailbox = new DualShock4BluetoothEffectMailbox(78);
+            var report = new byte[78];
+            var ownerBuffer = new byte[78];
+            for (int warmup = 0; warmup < 100; warmup++)
+            {
+                Assert.IsTrue(mailbox.TryPublish(report));
+                Assert.IsTrue(mailbox.TryClaim(ownerBuffer, out _,
+                    out long version));
+                mailbox.Acknowledge(version);
+            }
+
+            int completed = 0;
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int reportIndex = 0; reportIndex < 10_000; reportIndex++)
+            {
+                if (mailbox.TryPublish(report) &&
+                    mailbox.TryClaim(ownerBuffer, out _, out long version))
+                {
+                    mailbox.Acknowledge(version);
+                    completed++;
+                }
+            }
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.AreEqual(10_000, completed);
+            Assert.AreEqual(0L, allocated,
+                "The fixed input-to-audio-owner mailbox must not allocate per effect.");
+        }
+
+        [TestMethod]
+        public void UnexpectedAudioWorkerOrCaptureExitOwnsRetirement()
+        {
+            Assert.IsTrue(DualShock4BluetoothSpeakerPassthrough.
+                MustRetireAfterWorkerExit(stopping: false,
+                    captureRetirementRequested: false),
+                "A spontaneous native/media failure must not leave the lane published.");
+            Assert.IsTrue(DualShock4BluetoothSpeakerPassthrough.
+                MustRetireAfterWorkerExit(stopping: true,
+                    captureRetirementRequested: true),
+                "A stopped capture must retire after waking its media worker.");
+            Assert.IsFalse(DualShock4BluetoothSpeakerPassthrough.
+                MustRetireAfterWorkerExit(stopping: true,
+                    captureRetirementRequested: false),
+                "An ordinary user stop remains owned by the per-slot FIFO cleanup command.");
+        }
+
+        [TestMethod]
+        public async Task OrderedAudioOwnerRetriesAfterModeTransitionWithoutLoss()
+        {
+            var state = new DualShock4BluetoothAudioState();
+            Assert.IsTrue(state.Update(true, false, null, null, null,
+                _ => true));
+            using var publishEntered = new ManualResetEventSlim(false);
+            using var releasePublish = new ManualResetEventSlim(false);
+            using var ownerReadEntered = new ManualResetEventSlim(false);
+            int submittedFrames = 0;
+
+            Task transition = StartDedicated(() =>
+                state.Update(null, true, null, null, null, _ =>
+                {
+                    publishEntered.Set();
+                    releasePublish.Wait();
+                    return true;
+                }));
+            Assert.IsTrue(publishEntered.Wait(TimeSpan.FromSeconds(2)));
+
+            Task ownerRead = StartDedicated(() =>
+                state.ReadSynchronized(snapshot =>
+                {
+                    Assert.IsTrue(snapshot.MicrophoneEnabled);
+                    Interlocked.Add(ref submittedFrames, 4);
+                    ownerReadEntered.Set();
+                }));
+            try
+            {
+                Assert.IsFalse(ownerReadEntered.Wait(100),
+                    "The ordered media owner entered during a mode transition.");
+                Assert.AreEqual(0, Volatile.Read(ref submittedFrames),
+                    "SBC ownership changed before the ordered lease was acquired.");
+            }
+            finally
+            {
+                releasePublish.Set();
+            }
+
+            await Task.WhenAll(transition, ownerRead);
+            Assert.AreEqual(4, Volatile.Read(ref submittedFrames),
+                "The same queued SBC batch must be submitted after transition, not dropped.");
+        }
+
+        [TestMethod]
+        public void RealtimeSnapshotLeaseDoesNotAllocatePerInputReport()
+        {
+            var state = new DualShock4BluetoothAudioState();
+            Assert.IsTrue(state.Update(true, false, null, null, null,
+                _ => true));
+
+            // Warm the JIT and the monitor sync block before measuring the
+            // same acquire/read/release shape used by sendOutputReport.
+            for (int report = 0; report < 100; report++)
+            {
+                Assert.IsTrue(state.TryAcquireRead(out var warmLease));
+                using (warmLease)
+                {
+                    Assert.IsTrue(warmLease.Snapshot.SpeakerEnabled);
+                }
+            }
+
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            int observed = 0;
+            for (int report = 0; report < 10_000; report++)
+            {
+                if (!state.TryAcquireRead(out var lease))
+                {
+                    Assert.Fail("No publisher exists during the allocation measurement.");
+                }
+                using (lease)
+                {
+                    if (lease.Snapshot.SpeakerEnabled)
+                    {
+                        observed++;
+                    }
+                }
+            }
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.AreEqual(10_000, observed);
+            Assert.AreEqual(0L, allocated,
+                "Physical input must not allocate a closure or delegate per report.");
+        }
+
+        [TestMethod]
+        public void RealtimeReportBuildAndQueueSubmissionAllocatesNothing()
+        {
+            var sourceFrames = new Queue<byte[]>(1);
+            sourceFrames.Enqueue(new byte[
+                DualShock4BluetoothAudioProtocol.SpeakerSbcFrameLength]);
+            var frameBatch = new byte[
+                DualShock4BluetoothAudioProtocol.
+                    SpeakerLargeFramesPerReport][];
+            byte[] silenceFrame = new byte[
+                DualShock4BluetoothAudioProtocol.SpeakerSbcFrameLength];
+            byte[] report = new byte[
+                DualShock4BluetoothAudioProtocol.
+                    SpeakerRealtimeReportLength];
+            ushort frameNumber = 0;
+
+            for (int warmup = 0; warmup < 100; warmup++)
+            {
+                Assert.IsTrue(DualShock4BluetoothSpeakerPassthrough.
+                    PreparePooledReportForSubmission(sourceFrames, frameBatch,
+                        silenceFrame, report,
+                        DualShock4BluetoothAudioProtocol.
+                            SpeakerRealtimeFramesPerReport,
+                        allowSilence: false, forceSilence: false,
+                        audioTarget: 0x02, microphoneEnabled: false,
+                        bluetoothPollRate: 0,
+                        DualShock4BluetoothSpeakerPassthrough.
+                            PooledReportAudioMode.ProductionDuplex,
+                        ref frameNumber, out _, out _));
+                sourceFrames.Enqueue(frameBatch[0]);
+                frameBatch[0] = null;
+            }
+
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            int prepared = 0;
+            int realFrames = 0;
+            for (int reportIndex = 0; reportIndex < 10_000; reportIndex++)
+            {
+                if (DualShock4BluetoothSpeakerPassthrough.
+                    PreparePooledReportForSubmission(sourceFrames, frameBatch,
+                        silenceFrame, report,
+                        DualShock4BluetoothAudioProtocol.
+                            SpeakerRealtimeFramesPerReport,
+                        allowSilence: false, forceSilence: false,
+                        audioTarget: 0x02, microphoneEnabled: false,
+                        bluetoothPollRate: 0,
+                        DualShock4BluetoothSpeakerPassthrough.
+                            PooledReportAudioMode.ProductionDuplex,
+                        ref frameNumber, out int submittedRealFrames,
+                        out bool syntheticSilence))
+                {
+                    prepared++;
+                    realFrames += submittedRealFrames;
+                    if (syntheticSilence)
+                    {
+                        realFrames = int.MinValue;
+                    }
+                }
+                sourceFrames.Enqueue(frameBatch[0]);
+                frameBatch[0] = null;
+            }
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.AreEqual(10_000, prepared);
+            Assert.AreEqual(10_000, realFrames);
+            Assert.AreEqual(0L, allocated,
+                "The warmed 8 ms SBC dequeue, report build, and recycle path must allocate zero bytes.");
+        }
+
+        [TestMethod]
+        public async Task DeferredDisableIsOrderedBeforeAWaitingNewEnable()
+        {
+            var state = new DualShock4BluetoothAudioState();
+            Assert.IsTrue(state.RetireSpeaker(null, null));
+            using var disableEntered = new ManualResetEventSlim(false);
+            using var releaseDisable = new ManualResetEventSlim(false);
+            using var enableEntered = new ManualResetEventSlim(false);
+            var wireOrder = new List<string>();
+
+            Task deferredDisable = StartDedicated(() =>
+                state.PublishRetiredSpeakerIfStillDisabled(snapshot =>
+                {
+                    Assert.IsFalse(snapshot.SpeakerEnabled);
+                    disableEntered.Set();
+                    releaseDisable.Wait();
+                    lock (wireOrder)
+                    {
+                        wireOrder.Add("disable");
+                    }
+                    return true;
+                }));
+            Assert.IsTrue(disableEntered.Wait(TimeSpan.FromSeconds(2)));
+
+            Task newEnable = StartDedicated(() =>
+                state.Update(true, null, null, null, null, snapshot =>
+                {
+                    Assert.IsTrue(snapshot.SpeakerEnabled);
+                    lock (wireOrder)
+                    {
+                        wireOrder.Add("enable");
+                    }
+                    enableEntered.Set();
+                    return true;
+                }));
+            try
+            {
+                Assert.IsFalse(enableEntered.Wait(100),
+                    "A newer enable overtook the deferred physical disable.");
+            }
+            finally
+            {
+                releaseDisable.Set();
+            }
+
+            await Task.WhenAll(deferredDisable, newEnable);
+            CollectionAssert.AreEqual(new[] { "disable", "enable" },
+                wireOrder);
+            Assert.IsTrue(state.Current.SpeakerEnabled);
+
+            bool staleDisableInvoked = false;
+            Assert.IsFalse(state.PublishRetiredSpeakerIfStillDisabled(_ =>
+            {
+                staleDisableInvoked = true;
+                return true;
+            }));
+            Assert.IsFalse(staleDisableInvoked,
+                "A deferred old owner must not disable a newer active speaker.");
+        }
+
+        [TestMethod]
+        public async Task AudioSlotQueueRetiresOldOwnerBeforeImmediateRestart()
+        {
+            var queue = new DualShock4AudioSlotWorkQueue();
+            var ownerGate = new object();
+            Assert.ThrowsException<InvalidOperationException>(() =>
+                queue.EnqueueWhileHolding(ownerGate, () => { }));
+            Task admitted;
+            lock (ownerGate)
+            {
+                admitted = queue.EnqueueWhileHolding(ownerGate, () => { });
+            }
+            await admitted;
+
+            using var oldDisposeEntered = new ManualResetEventSlim(false);
+            using var releaseOldDispose = new ManualResetEventSlim(false);
+            using var newStartEntered = new ManualResetEventSlim(false);
+            var lifecycle = new List<string>();
+            int oldDisposals = 0;
+            int newStarts = 0;
+
+            Task stop = queue.Enqueue(() =>
+            {
+                oldDisposeEntered.Set();
+                releaseOldDispose.Wait();
+                lifecycle.Add("old-dispose");
+                lifecycle.Add("old-unregister");
+                Interlocked.Increment(ref oldDisposals);
+            });
+            Assert.IsTrue(oldDisposeEntered.Wait(TimeSpan.FromSeconds(2)));
+
+            // Queue the new start while cleanup is deliberately blocked. A
+            // Monitor-based implementation could let this waiter win; the
+            // explicit continuation chain cannot overtake its predecessor.
+            Task restart = queue.Enqueue(() =>
+            {
+                lifecycle.Add("new-register");
+                lifecycle.Add("new-enable");
+                Interlocked.Increment(ref newStarts);
+                newStartEntered.Set();
+            });
+            try
+            {
+                Assert.IsFalse(newStartEntered.Wait(100),
+                    "A new owner registered before the old lane retired.");
+            }
+            finally
+            {
+                releaseOldDispose.Set();
+            }
+
+            await Task.WhenAll(stop, restart);
+            CollectionAssert.AreEqual(new[]
+            {
+                "old-dispose", "old-unregister",
+                "new-register", "new-enable",
+            }, lifecycle);
+            Assert.AreEqual(1, Volatile.Read(ref oldDisposals));
+            Assert.AreEqual(1, Volatile.Read(ref newStarts));
+        }
+
+        [TestMethod]
+        public async Task UnexpectedWorkerExitCannotRaceOrClearReplacement()
+        {
+            var queue = new DualShock4AudioSlotWorkQueue();
+            var ownerGate = new object();
+            var oldOwner = new object();
+            var newOwner = new object();
+            var owners = new[] { oldOwner };
+            var generations = new[] { 7 };
+            using var oldCleanupEntered = new ManualResetEventSlim(false);
+            using var releaseOldCleanup = new ManualResetEventSlim(false);
+            using var newEnableEntered = new ManualResetEventSlim(false);
+            var lifecycle = new List<string>();
+
+            lock (ownerGate)
+            {
+                Assert.IsTrue(DualShock4AudioPassthrough.
+                    TryEnqueueUnexpectedRetirementWhileHolding(ownerGate,
+                        owners, generations, 0, 7, oldOwner, queue, () =>
+                        {
+                            oldCleanupEntered.Set();
+                            releaseOldCleanup.Wait();
+                            lifecycle.Add("old-disable");
+                            lifecycle.Add("old-unregister");
+                        }));
+            }
+            Assert.IsTrue(oldCleanupEntered.Wait(TimeSpan.FromSeconds(2)));
+
+            Task newStart;
+            lock (ownerGate)
+            {
+                owners[0] = newOwner;
+                generations[0]++;
+                newStart = queue.EnqueueWhileHolding(ownerGate, () =>
+                {
+                    lifecycle.Add("new-register");
+                    lifecycle.Add("new-enable");
+                    newEnableEntered.Set();
+                });
+
+                Assert.IsFalse(DualShock4AudioPassthrough.
+                    TryEnqueueUnexpectedRetirementWhileHolding(ownerGate,
+                        owners, generations, 0, 7, oldOwner, queue,
+                        () => lifecycle.Add("stale-old-cleanup")),
+                    "A delayed old exit callback must not withdraw a newer owner.");
+                Assert.AreSame(newOwner, owners[0]);
+            }
+
+            try
+            {
+                Assert.IsFalse(newEnableEntered.Wait(100),
+                    "The replacement enabled before FIFO-owned old cleanup completed.");
+            }
+            finally
+            {
+                releaseOldCleanup.Set();
+            }
+
+            await newStart;
+            CollectionAssert.AreEqual(new[]
+            {
+                "old-disable", "old-unregister",
+                "new-register", "new-enable",
+            }, lifecycle);
+            Assert.AreSame(newOwner, owners[0]);
+        }
+
+        [TestMethod]
+        public void BlockingAudioDeadlineConversionPreservesEightMillisecondCadence()
+        {
+            const long frequency = 10_000_000;
+            const long cadence = 80_000;
+            Assert.AreEqual(-80_000,
+                DualShock4AudioReportScheduler.
+                    GetRelativeDueTime100Nanoseconds(cadence, frequency));
+            Assert.AreEqual(-1,
+                DualShock4AudioReportScheduler.
+                    GetRelativeDueTime100Nanoseconds(1, frequency));
+
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            long sum = 0;
+            for (int report = 0; report < 10_000; report++)
+            {
+                sum += DualShock4AudioReportScheduler.
+                    GetRelativeDueTime100Nanoseconds(cadence, frequency);
+            }
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.AreEqual(-800_000_000L, sum);
+            Assert.AreEqual(0L, allocated,
+                "The reusable waitable-timer cadence must not allocate per audio report.");
         }
 
         [TestMethod]

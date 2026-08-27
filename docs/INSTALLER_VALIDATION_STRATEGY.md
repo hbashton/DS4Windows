@@ -101,3 +101,8 @@ build host.
 - Mandatory Authenticode verification for public release artifacts; release
   composition is blocked when signing material or a first-party signature is
   missing.
+- WiX Burn's two-part signature sequence: detach/sign the cached engine,
+  reattach it, then sign the whole bundle. Composition verifies the detached
+  engine's signature before reattachment, then extracts/hash-checks the final
+  attached payload container after outer signing and before the installer
+  becomes visible at the atomic publication point.

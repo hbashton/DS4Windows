@@ -307,10 +307,41 @@ def main() -> int:
         '$signature.TimeStamperCertificate',
         'else { "http://timestamp.digicert.com" }',
         'Invoke-SignAndVerify $msiPath',
+        'Resolve-WixExecutable $bundleProject',
+        "'burn', 'detach', $builtInstaller",
+        'Invoke-SignAndVerify $detachedBurnEngine',
+        "'burn', 'reattach', $builtInstaller",
         'Invoke-SignAndVerify $pendingInstaller',
+        'Assert-BurnBundleIntegrity $wixExecutable $pendingInstaller',
+        "'burn', 'extract', $bundlePath",
+        'Extracted Burn payload does not match its signed source',
     ]:
         if contract not in build_script:
             raise SystemExit("Installer build identity contract missing: " + contract)
+    burn_detach = build_script.find("'burn', 'detach', $builtInstaller")
+    burn_engine_sign = build_script.find(
+        'Invoke-SignAndVerify $detachedBurnEngine', burn_detach
+    )
+    burn_reattach = build_script.find(
+        "'burn', 'reattach', $builtInstaller", burn_engine_sign
+    )
+    burn_bundle_sign = build_script.find(
+        'Invoke-SignAndVerify $pendingInstaller', burn_reattach
+    )
+    burn_integrity = build_script.rfind(
+        'Assert-BurnBundleIntegrity $wixExecutable $pendingInstaller'
+    )
+    if not (
+        burn_detach
+        < burn_engine_sign
+        < burn_reattach
+        < burn_bundle_sign
+        < burn_integrity
+    ):
+        raise SystemExit(
+            "Burn signing must detach, sign the engine, reattach, sign the "
+            "whole bundle, and verify the final attached container in order."
+        )
     manifest_commit = build_script.rfind(
         "Publish-InstallerFileAtomically $pendingManifest $finalManifest"
     )

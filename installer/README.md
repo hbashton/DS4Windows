@@ -46,6 +46,13 @@ unsigned; its fixed SHA-256 and complete source/build provenance are validated
 instead. GitHub release jobs require the `DS4W_SIGN_CERT_BASE64`,
 `DS4W_SIGN_CERT_PASSWORD`, and `DS4W_SIGN_EXPECTED_THUMBPRINT` secrets.
 
+Signed Burn bundles use WiX's required two-part flow: detach and sign the
+cached engine, reattach that engine to the original bundle, then sign the
+whole bundle. Composition verifies the detached engine immediately after
+signing it. After outer signing and before atomic publication, it extracts the
+final attached container and checks the MSI, setup-actions host, and
+bootstrapper hashes against their signed inputs.
+
 The PowerShell infrastructure backend is the sole VIIPER/USB-IP mutation
 engine. Burn and the in-app repair surface only validate, stage, elevate, and
 report that same engine. HidHide and FakerInput are optional non-vital packages:

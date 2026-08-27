@@ -134,6 +134,89 @@ function Invoke-SignOrVerify([string]$path) {
     Invoke-SignAndVerify $path
 }
 
+function Resolve-WixExecutable([string]$projectPath) {
+    [xml]$project = Get-Content -Raw -LiteralPath $projectPath
+    $sdk = [string]$project.Project.Sdk
+    if ($sdk -notmatch '^WixToolset\.Sdk/([0-9]+(?:\.[0-9]+){2})$') {
+        throw "Could not determine the exact WiX SDK version from $projectPath"
+    }
+
+    $packageRoot = if (-not [string]::IsNullOrWhiteSpace(
+            $env:NUGET_PACKAGES)) {
+        $env:NUGET_PACKAGES.Trim()
+    }
+    else {
+        Join-Path ([Environment]::GetFolderPath('UserProfile')) `
+            '.nuget\packages'
+    }
+    $candidate = Join-Path $packageRoot (
+        "wixtoolset.sdk\$($Matches[1])\tools\net472\x64\wix.exe")
+    if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+        throw "The WiX SDK executable was not found: $candidate"
+    }
+    return [IO.Path]::GetFullPath($candidate)
+}
+
+function Invoke-WixBurn(
+        [string]$wixExecutable,
+        [string[]]$wixArguments,
+        [string]$failureMessage) {
+    & $wixExecutable @wixArguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "$failureMessage (WiX exit code $LASTEXITCODE)."
+    }
+}
+
+function Assert-BurnBundleIntegrity(
+        [string]$wixExecutable,
+        [string]$bundlePath,
+        [string]$workRoot,
+        [string]$expectedMsiPath,
+        [string]$expectedSetupActionsPath,
+        [string]$expectedBootstrapperPath) {
+    $verifyRoot = Join-Path $workRoot 'verify'
+    $verifyIntermediate = Join-Path $verifyRoot 'intermediate'
+    $extractRoot = Join-Path $verifyRoot 'payloads'
+    $bootstrapperRoot = Join-Path $verifyRoot 'bootstrapper'
+    New-Item -ItemType Directory -Path $verifyIntermediate -Force |
+        Out-Null
+    New-Item -ItemType Directory -Path $extractRoot -Force | Out-Null
+    New-Item -ItemType Directory -Path $bootstrapperRoot -Force |
+        Out-Null
+
+    Invoke-WixBurn $wixExecutable @(
+        'burn', 'extract', $bundlePath,
+        '-o', $extractRoot,
+        '-outba', $bootstrapperRoot,
+        '-intermediateFolder', $verifyIntermediate
+    ) 'Could not extract the final Burn attached container'
+
+    $attachedRoot = Join-Path $extractRoot 'WixAttachedContainer'
+    $extractedMsi = Join-Path $attachedRoot (
+        Split-Path -Leaf $expectedMsiPath)
+    $extractedSetupActions = Join-Path $attachedRoot `
+        'DS4Windows.SetupActions.Preflight.exe'
+    $extractedBootstrapper = Join-Path $bootstrapperRoot `
+        'DS4Windows.Bootstrapper.exe'
+    $requiredPairs = @(
+        @($extractedMsi, $expectedMsiPath),
+        @($extractedSetupActions, $expectedSetupActionsPath),
+        @($extractedBootstrapper, $expectedBootstrapperPath)
+    )
+    foreach ($pair in $requiredPairs) {
+        if (-not (Test-Path -LiteralPath $pair[0] -PathType Leaf)) {
+            throw "The final Burn bundle did not extract '$($pair[0])'."
+        }
+        $actualHash = (Get-FileHash -LiteralPath $pair[0] `
+            -Algorithm SHA256).Hash
+        $expectedHash = (Get-FileHash -LiteralPath $pair[1] `
+            -Algorithm SHA256).Hash
+        if ($actualHash -ne $expectedHash) {
+            throw "Extracted Burn payload does not match its signed source: $($pair[0])"
+        }
+    }
+}
+
 $buildMutex = [Threading.Mutex]::new($false,
     "Global\DS4Windows-Installer-Build")
 $buildMutexOwned = $false
@@ -275,6 +358,7 @@ if ($setupActionsHash -notmatch '^[0-9A-F]{64}$') {
 }
 $extrasRoot = Join-Path $repoRoot "extras"
 $bundleProject = Join-Path $repoRoot "installer\DS4Windows.Bundle\DS4Windows.Bundle.wixproj"
+$wixExecutable = Resolve-WixExecutable $bundleProject
 & dotnet build $bundleProject -t:Rebuild -c Release -p:Platform=x64 `
     -p:Version=$ProductVersion -p:BundleVersion=$BundleVersion `
     -p:DisplayVersion=$DisplayVersion `
@@ -290,6 +374,16 @@ $finalManifest = Join-Path $outputPath "package-manifest.json"
 $publishId = [Guid]::NewGuid().ToString("N")
 $pendingInstaller = $finalInstaller + ".pending-" + $publishId
 $pendingManifest = $finalManifest + ".pending-" + $publishId
+$burnWorkRoot = [IO.Path]::GetFullPath((Join-Path $outputPath `
+    (".burn-sign-" + $publishId)))
+$outputPrefix = $outputPath.TrimEnd(
+    [IO.Path]::DirectorySeparatorChar,
+    [IO.Path]::AltDirectorySeparatorChar) +
+    [IO.Path]::DirectorySeparatorChar
+if (-not $burnWorkRoot.StartsWith(
+        $outputPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Burn signing workspace escaped the installer output directory."
+}
 
 function Publish-InstallerFileAtomically(
         [string]$source, [string]$destination) {
@@ -310,8 +404,41 @@ function Publish-InstallerFileAtomically(
 }
 
 try {
-    Copy-Item -LiteralPath $builtInstaller -Destination $pendingInstaller
     Copy-Item -LiteralPath $manifestPath -Destination $pendingManifest
+    New-Item -ItemType Directory -Path $burnWorkRoot -Force | Out-Null
+
+    if ($signingEnabled) {
+        # A Burn bundle must be signed in two pieces. Signing the completed
+        # bundle directly leaves its cached engine unable to locate the
+        # attached payload container during elevated apply.
+        $signRoot = Join-Path $burnWorkRoot 'sign'
+        $signIntermediate = Join-Path $signRoot 'intermediate'
+        New-Item -ItemType Directory -Path $signIntermediate -Force |
+            Out-Null
+        $detachedBurnEngine = Join-Path $signRoot 'burn-engine.exe'
+        Invoke-WixBurn $wixExecutable @(
+            'burn', 'detach', $builtInstaller,
+            '-engine', $detachedBurnEngine,
+            '-intermediateFolder', $signIntermediate
+        ) 'Could not detach the Burn engine for signing'
+        Invoke-SignAndVerify $detachedBurnEngine
+
+        Invoke-WixBurn $wixExecutable @(
+            'burn', 'reattach', $builtInstaller,
+            '-engine', $detachedBurnEngine,
+            '-o', $pendingInstaller,
+            '-intermediateFolder', $signIntermediate
+        ) 'Could not reattach the signed Burn engine'
+        Invoke-SignAndVerify $pendingInstaller
+    }
+    else {
+        Copy-Item -LiteralPath $builtInstaller `
+            -Destination $pendingInstaller
+    }
+
+    Assert-BurnBundleIntegrity $wixExecutable $pendingInstaller `
+        $burnWorkRoot $msiPath $setupActions `
+        (Join-Path $baRoot 'DS4Windows.Bootstrapper.exe')
 
 & (Join-Path $env:SystemRoot `
     "System32\WindowsPowerShell\v1.0\powershell.exe") `
@@ -332,7 +459,6 @@ if ($LASTEXITCODE -ne 0) {
     --installer $pendingInstaller --bundle-source (Join-Path $repoRoot "installer\DS4Windows.Bundle\Bundle.wxs")
 if ($LASTEXITCODE -ne 0) { throw "Installer validation failed." }
 
-Invoke-SignAndVerify $pendingInstaller
 Assert-ReleaseSignature $pendingInstaller
 
     # The installer EXE is the externally visible commit point. Publish its
@@ -346,6 +472,9 @@ finally {
         if (Test-Path -LiteralPath $pending) {
             Remove-Item -LiteralPath $pending -Force
         }
+    }
+    if (Test-Path -LiteralPath $burnWorkRoot) {
+        Remove-Item -LiteralPath $burnWorkRoot -Recurse -Force
     }
 }
 

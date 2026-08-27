@@ -91,7 +91,7 @@
 		AfterTargets="Publish"
 		BeforeTargets="GenerateManagedFileManifest">
 		<PropertyGroup>
-			<_BundledViiperName>VIIPER-0.1.1-x64.exe</_BundledViiperName>
+			<_BundledViiperName>VIIPER-0.1.2-x64.exe</_BundledViiperName>
 			<_BundledViiperPath>$(PublishDir)extras\$(_BundledViiperName)</_BundledViiperPath>
 			<_BundledViiperHashPath>$(_BundledViiperPath).sha256</_BundledViiperHashPath>
 		</PropertyGroup>
@@ -136,18 +136,18 @@
 		<EmbeddedResource Include="..\extras\install-viiper-backend.ps1">
 			<LogicalName>DS4Windows.install-viiper-backend.ps1</LogicalName>
 		</EmbeddedResource>
-		<Content Include="..\extras\VIIPER-0.1.1-x64.exe">
-			<Link>extras\VIIPER-0.1.1-x64.exe</Link>
+		<Content Include="..\extras\VIIPER-0.1.2-x64.exe">
+			<Link>extras\VIIPER-0.1.2-x64.exe</Link>
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
 		</Content>
-		<Content Include="..\extras\VIIPER-0.1.1-LICENSES.txt">
-			<Link>extras\VIIPER-0.1.1-LICENSES.txt</Link>
+		<Content Include="..\extras\VIIPER-0.1.2-LICENSES.txt">
+			<Link>extras\VIIPER-0.1.2-LICENSES.txt</Link>
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
 		</Content>
-		<Content Include="..\extras\VIIPER-0.1.1-PROVENANCE.txt">
-			<Link>extras\VIIPER-0.1.1-PROVENANCE.txt</Link>
+		<Content Include="..\extras\VIIPER-0.1.2-PROVENANCE.txt">
+			<Link>extras\VIIPER-0.1.2-PROVENANCE.txt</Link>
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
 		</Content>

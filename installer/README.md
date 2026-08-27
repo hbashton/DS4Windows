@@ -35,12 +35,16 @@ One transaction ID is preserved across Burn, setup actions, the infrastructure
 backend, and reboot resume so those logs can be correlated without timestamp
 guesswork.
 
-Set `DS4W_SIGN_CERT_PATH`, `DS4W_SIGN_CERT_PASSWORD`, and optionally
-`DS4W_SIGN_TIMESTAMP_URL` to Authenticode-sign the application, setup hosts,
-MSI, and final EXE in a protected release environment. Public release builds
-pass `-RequireSigning`; they fail closed unless DS4Windows and the packaged
-VIIPER binary both have valid signatures. GitHub release jobs require the
-`DS4W_SIGN_CERT_BASE64` and `DS4W_SIGN_CERT_PASSWORD` secrets.
+Set `DS4W_SIGN_CERT_PATH` plus `DS4W_SIGN_CERT_PASSWORD`, or use
+`DS4W_SIGN_CERT_THUMBPRINT` for a protected certificate-store identity. Set
+`DS4W_SIGN_EXPECTED_THUMBPRINT` to the independently approved signer and,
+optionally, set `DS4W_SIGN_TIMESTAMP_URL`. Public release builds pass
+`-RequireSigning`; they fail closed unless the first-party DS4Windows
+application, setup hosts, MSI, and final EXE have that valid timestamped
+signature. The bundled upstream VIIPER executable remains byte-identical and
+unsigned; its fixed SHA-256 and complete source/build provenance are validated
+instead. GitHub release jobs require the `DS4W_SIGN_CERT_BASE64`,
+`DS4W_SIGN_CERT_PASSWORD`, and `DS4W_SIGN_EXPECTED_THUMBPRINT` secrets.
 
 The PowerShell infrastructure backend is the sole VIIPER/USB-IP mutation
 engine. Burn and the in-app repair surface only validate, stage, elevate, and

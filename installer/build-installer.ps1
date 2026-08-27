@@ -17,13 +17,52 @@ if (-not $OutputDirectory) {
     $OutputDirectory = Join-Path $repoRoot "bin\x64\Release\installer"
 }
 $outputPath = [IO.Path]::GetFullPath($OutputDirectory)
-$signingEnabled = -not [string]::IsNullOrWhiteSpace(
-    $env:DS4W_SIGN_CERT_PATH)
+$signingCertificatePath = $env:DS4W_SIGN_CERT_PATH
+$signingCertificateThumbprint = $env:DS4W_SIGN_CERT_THUMBPRINT
+$approvedSignerThumbprint = $env:DS4W_SIGN_EXPECTED_THUMBPRINT
+if ([string]::IsNullOrWhiteSpace($signingCertificatePath)) {
+    $signingCertificatePath = $null
+}
+else {
+    $signingCertificatePath = $signingCertificatePath.Trim()
+}
+if ([string]::IsNullOrWhiteSpace($signingCertificateThumbprint)) {
+    $signingCertificateThumbprint = $null
+}
+else {
+    $signingCertificateThumbprint =
+        $signingCertificateThumbprint.Trim().ToUpperInvariant()
+}
+if ([string]::IsNullOrWhiteSpace($approvedSignerThumbprint)) {
+    $approvedSignerThumbprint = $null
+}
+else {
+    $approvedSignerThumbprint =
+        $approvedSignerThumbprint.Trim().ToUpperInvariant()
+}
+$signingEnabled =
+    $null -ne $signingCertificatePath -or
+    $null -ne $signingCertificateThumbprint
+if ($null -ne $signingCertificatePath -and
+        $null -ne $signingCertificateThumbprint) {
+    throw "Configure either a signing PFX or a certificate-store thumbprint, not both."
+}
 if ($RequireSigning -and -not $signingEnabled) {
     throw (
         "Release signing is required, but DS4W_SIGN_CERT_PATH is not set. " +
         "Unsigned public installers are intentionally blocked."
     )
+}
+if ($RequireSigning -and
+        $approvedSignerThumbprint -notmatch '^[0-9A-Fa-f]{40}$') {
+    throw (
+        "Release signing requires DS4W_SIGN_EXPECTED_THUMBPRINT to pin " +
+        "the approved 40-character signer identity."
+    )
+}
+if ($RequireSigning -and $signingCertificateThumbprint -and
+        $signingCertificateThumbprint -ne $approvedSignerThumbprint) {
+    throw "Certificate-store signing identity does not match the approved signer."
 }
 $signtool = $null
 if ($signingEnabled) {
@@ -35,9 +74,18 @@ function Invoke-SignAndVerify([string]$path) {
     $timestampUrl = if ($env:DS4W_SIGN_TIMESTAMP_URL) {
         $env:DS4W_SIGN_TIMESTAMP_URL
     }
-    else { "https://timestamp.digicert.com" }
-    & $signtool sign /fd SHA256 /f $env:DS4W_SIGN_CERT_PATH `
-        /p $env:DS4W_SIGN_CERT_PASSWORD /tr $timestampUrl /td SHA256 $path
+    else { "http://timestamp.digicert.com" }
+    if ($signingCertificateThumbprint) {
+        if ($signingCertificateThumbprint -notmatch '^[0-9A-F]{40}$') {
+            throw "Signing certificate thumbprint must contain exactly 40 hexadecimal characters."
+        }
+        & $signtool sign /fd SHA256 /s My /sha1 `
+            $signingCertificateThumbprint /tr $timestampUrl /td SHA256 $path
+    }
+    else {
+        & $signtool sign /fd SHA256 /f $signingCertificatePath `
+            /p $env:DS4W_SIGN_CERT_PASSWORD /tr $timestampUrl /td SHA256 $path
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "Authenticode signing failed: $path"
     }
@@ -45,6 +93,14 @@ function Invoke-SignAndVerify([string]$path) {
     if ($signature.Status -ne
             [Management.Automation.SignatureStatus]::Valid) {
         throw "Authenticode verification failed for '$path': $($signature.StatusMessage)"
+    }
+    if ($approvedSignerThumbprint -and
+            $signature.SignerCertificate.Thumbprint -ne
+            $approvedSignerThumbprint) {
+        throw "Authenticode signer is not the approved release identity: $path"
+    }
+    if (-not $signature.TimeStamperCertificate) {
+        throw "Authenticode timestamp is missing: $path"
     }
 }
 
@@ -55,6 +111,27 @@ function Assert-ReleaseSignature([string]$path) {
             [Management.Automation.SignatureStatus]::Valid) {
         throw "Required first-party signature is invalid for '$path': $($signature.StatusMessage)"
     }
+    if ($signature.SignerCertificate.Thumbprint -ne
+            $approvedSignerThumbprint) {
+        throw "Required signature does not use the approved release identity: $path"
+    }
+    if (-not $signature.TimeStamperCertificate) {
+        throw "Required release timestamp is missing: $path"
+    }
+}
+
+function Invoke-SignOrVerify([string]$path) {
+    if (-not $signingEnabled) { return }
+    $signature = Get-AuthenticodeSignature -LiteralPath $path
+    if ($RequireSigning -and
+            $signature.Status -eq
+                [Management.Automation.SignatureStatus]::Valid -and
+            $signature.SignerCertificate.Thumbprint -eq
+                $approvedSignerThumbprint -and
+            $signature.TimeStamperCertificate) {
+        return
+    }
+    Invoke-SignAndVerify $path
 }
 
 $buildMutex = [Threading.Mutex]::new($false,
@@ -140,10 +217,14 @@ if (-not $SkipApplicationPublish) {
 if (-not (Test-Path -LiteralPath (Join-Path $publishPath "DS4Windows.exe") -PathType Leaf)) {
     throw "DS4Windows publish output is incomplete: $publishPath"
 }
-Invoke-SignAndVerify (Join-Path $publishPath "DS4Windows.exe")
+Invoke-SignOrVerify (Join-Path $publishPath "DS4Windows.exe")
 # VIIPER is an immutable upstream release payload. Its compiled-in SHA-256
 # and generated package sidecar are validated below; signing it here would
 # mutate the executable after DS4Windows has pinned that identity.
+$bundledViiper = Join-Path $publishPath "extras\VIIPER-0.1.1-x64.exe"
+if (-not (Test-Path -LiteralPath $bundledViiper -PathType Leaf)) {
+    throw "Published VIIPER payload is missing: $bundledViiper"
+}
 $releaseMarker = Join-Path $publishPath "DS4Windows.release"
 if (-not (Test-Path -LiteralPath $releaseMarker -PathType Leaf)) {
     throw "DS4Windows publish output has no release identity: $releaseMarker"

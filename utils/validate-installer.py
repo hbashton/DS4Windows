@@ -302,6 +302,10 @@ def main() -> int:
         'test-installer-state-machine.py',
         '[switch]$RequireSigning',
         'Unsigned public installers are intentionally blocked',
+        'DS4W_SIGN_EXPECTED_THUMBPRINT',
+        '$signature.SignerCertificate.Thumbprint',
+        '$signature.TimeStamperCertificate',
+        'else { "http://timestamp.digicert.com" }',
         'Invoke-SignAndVerify $msiPath',
         'Invoke-SignAndVerify $pendingInstaller',
     ]:
@@ -325,15 +329,36 @@ def main() -> int:
     ).read_text(encoding="utf-8")
     for contract in [
         'DS4W_SIGN_CERT_BASE64: ${{ secrets.DS4W_SIGN_CERT_BASE64 }}',
-        "DS4W_SIGNING_ENABLED=false",
+        'DS4W_SIGN_EXPECTED_THUMBPRINT: ${{ secrets.DS4W_SIGN_EXPECTED_THUMBPRINT }}',
+        'RELEASE_TAG: ${{ github.event.release.tag_name }}',
+        'TAG="$RELEASE_TAG"',
+        "Public release signing material or approved signer identity is missing.",
         '$firstPartyBinaries = @(".\\bin\\x64\\Release\\output\\DS4Windows.exe")',
         "First-party release signing failed for $path.",
-        '$parameters.RequireSigning = $true',
+        'RequireSigning = $true',
+        '$signature.SignerCertificate.Thumbprint -ne $approvedThumbprint',
+        '-not $signature.TimeStamperCertificate',
+        'if: always()',
+        '$certificatePath = Join-Path $env:RUNNER_TEMP "ds4windows-release.pfx"',
+        'Remove-Item -LiteralPath $certificatePath -Force',
         "VIIPER is an immutable release input",
     ]:
         if contract not in release_workflow:
             raise SystemExit(
                 "First-party release signing contract missing: " + contract
+            )
+    forbidden_release_interpolation = [
+        "TAG=${{ github.event.release.tag_name }}",
+        "/p:AssemblyVersion=${{ env.BINARY_VERSION }}",
+        "post-build.py .\\bin\\x64\\Release\\output . ${{env.VERSION}}",
+        "gh release upload ${{github.event.release.tag_name}}",
+        "DS4W_SIGNING_ENABLED=false",
+    ]
+    for contract in forbidden_release_interpolation:
+        if contract in release_workflow:
+            raise SystemExit(
+                "Release workflow embeds untrusted context or permits unsigned publication: "
+                + contract
             )
     if "Portable" in bundle or "InstallFolder" in bundle or "destination" in bundle.lower():
         raise SystemExit("The standard installer must not expose a portable or destination-selection path.")

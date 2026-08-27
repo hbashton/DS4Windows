@@ -27,9 +27,15 @@ jobs:
     - name: Restore dependencies
       run: dotnet restore
     - name: Set envars for versions
+      env:
+        RELEASE_TAG: ${{ github.event.release.tag_name }}
       run: | 
-        TAG=${{ github.event.release.tag_name }}
-        VERSION=${TAG#v}
+        TAG="$RELEASE_TAG"
+        VERSION="${TAG#v}"
+        if [[ ! "$VERSION" =~ ^[0-9A-Za-z][0-9A-Za-z._-]{0,79}$ ]]; then
+          echo "Release tag does not produce a filename-safe version." >&2
+          exit 1
+        fi
         PROJECT_ASSEMBLY_VERSION=$(python -c "import xml.etree.ElementTree as ET; print(ET.parse('DS4Windows/DS4WinWPF.csproj').find('.//AssemblyVersion').text)")
         PROJECT_VERSION=$(python -c "import xml.etree.ElementTree as ET; print(ET.parse('DS4Windows/DS4WinWPF.csproj').find('.//Version').text)")
         if [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,3}(-.*)?$ ]]; then
@@ -40,25 +46,33 @@ jobs:
           PACKAGE_VERSION=$PROJECT_VERSION
         fi
         echo "Release: $VERSION; binary: $BINARY_VERSION; package: $PACKAGE_VERSION"
-        echo "VERSION=$VERSION" >> $GITHUB_ENV
-        echo "BINARY_VERSION=$BINARY_VERSION" >> $GITHUB_ENV
-        echo "PACKAGE_VERSION=$PACKAGE_VERSION" >> $GITHUB_ENV
+        printf '%s\n' "VERSION=$VERSION" >> "$GITHUB_ENV"
+        printf '%s\n' "BINARY_VERSION=$BINARY_VERSION" >> "$GITHUB_ENV"
+        printf '%s\n' "PACKAGE_VERSION=$PACKAGE_VERSION" >> "$GITHUB_ENV"
       shell: bash
     - name: Build X64
-      run: dotnet publish .\DS4Windows\DS4WinWPF.csproj -c Release /p:platform=x64 -r win-x64 --self-contained true /p:AssemblyVersion=${{ env.BINARY_VERSION }} /p:FileVersion=${{ env.BINARY_VERSION }} /p:Version=${{ env.PACKAGE_VERSION }} /p:InformationalVersion=${{ env.VERSION }} -o .\bin\x64\Release\output
+      shell: pwsh
+      run: |
+        dotnet publish .\DS4Windows\DS4WinWPF.csproj -c Release `
+          /p:platform=x64 -r win-x64 --self-contained true `
+          "-p:AssemblyVersion=$env:BINARY_VERSION" `
+          "-p:FileVersion=$env:BINARY_VERSION" `
+          "-p:Version=$env:PACKAGE_VERSION" `
+          "-p:InformationalVersion=$env:VERSION" `
+          -o .\bin\x64\Release\output
     - name: Sign and verify release binaries
       shell: pwsh
       env:
         DS4W_SIGN_CERT_BASE64: ${{ secrets.DS4W_SIGN_CERT_BASE64 }}
         DS4W_SIGN_CERT_PASSWORD: ${{ secrets.DS4W_SIGN_CERT_PASSWORD }}
+        DS4W_SIGN_EXPECTED_THUMBPRINT: ${{ secrets.DS4W_SIGN_EXPECTED_THUMBPRINT }}
       run: |
-        if ([string]::IsNullOrWhiteSpace($env:DS4W_SIGN_CERT_BASE64)) {
-          Write-Warning (
-            "Authenticode secrets are not configured; publishing the " +
-            "hash-verified unsigned package.")
-          "DS4W_SIGNING_ENABLED=false" >> $env:GITHUB_ENV
-          exit 0
+        if ([string]::IsNullOrWhiteSpace($env:DS4W_SIGN_CERT_BASE64) -or
+            [string]::IsNullOrWhiteSpace($env:DS4W_SIGN_CERT_PASSWORD) -or
+            $env:DS4W_SIGN_EXPECTED_THUMBPRINT -notmatch '^[0-9A-Fa-f]{40}$') {
+          throw "Public release signing material or approved signer identity is missing."
         }
+        $approvedThumbprint = $env:DS4W_SIGN_EXPECTED_THUMBPRINT.ToUpperInvariant()
         $certificatePath = Join-Path $env:RUNNER_TEMP "ds4windows-release.pfx"
         [IO.File]::WriteAllBytes($certificatePath,
           [Convert]::FromBase64String($env:DS4W_SIGN_CERT_BASE64))
@@ -68,42 +82,43 @@ jobs:
         $firstPartyBinaries = @(".\bin\x64\Release\output\DS4Windows.exe")
         foreach ($path in $firstPartyBinaries) {
           & $signtool sign /fd SHA256 /f $certificatePath `
-            /p $env:DS4W_SIGN_CERT_PASSWORD /tr https://timestamp.digicert.com `
+            /p $env:DS4W_SIGN_CERT_PASSWORD /tr http://timestamp.digicert.com `
             /td SHA256 $path
           if ($LASTEXITCODE -ne 0) {
             throw "First-party release signing failed for $path."
           }
           $signature = Get-AuthenticodeSignature -LiteralPath $path
-          if ($signature.Status -ne "Valid") {
+          if ($signature.Status -ne "Valid" -or
+              $signature.SignerCertificate.Thumbprint -ne $approvedThumbprint -or
+              -not $signature.TimeStamperCertificate) {
             throw "Required release signature is invalid for ${path}: $($signature.StatusMessage)"
           }
         }
         "DS4W_SIGN_CERT_PATH=$certificatePath" >> $env:GITHUB_ENV
-        "DS4W_SIGNING_ENABLED=true" >> $env:GITHUB_ENV
     - name: Post-Build script X64
-      run: python .\utils\post-build.py .\bin\x64\Release\output . ${{env.VERSION}}
+      shell: pwsh
+      run: python .\utils\post-build.py .\bin\x64\Release\output . $env:VERSION
     - name: Build standard installer X64
       shell: pwsh
       env:
         DS4W_SIGN_CERT_PASSWORD: ${{ secrets.DS4W_SIGN_CERT_PASSWORD }}
+        DS4W_SIGN_EXPECTED_THUMBPRINT: ${{ secrets.DS4W_SIGN_EXPECTED_THUMBPRINT }}
       run: |
         $parameters = @{
           PublishRoot = ".\bin\x64\Release\DS4Windows"
-          ProductVersion = "${{ env.BINARY_VERSION }}"
-          BundleVersion = "${{ env.BINARY_VERSION }}"
-          DisplayVersion = "${{ env.VERSION }}"
+          ProductVersion = $env:BINARY_VERSION
+          BundleVersion = $env:BINARY_VERSION
+          DisplayVersion = $env:VERSION
           OutputDirectory = ".\bin\x64\Release\installer"
           SkipApplicationPublish = $true
-        }
-        if ($env:DS4W_SIGNING_ENABLED -eq "true") {
-          $parameters.RequireSigning = $true
+          RequireSigning = $true
         }
         .\installer\build-installer.ps1 @parameters
     - name: Name release asset
       shell: pwsh
       run: |
-        $source = ".\bin\x64\Release\DS4Windows_${{ env.VERSION }}_x64.zip"
-        $asset = if ("${{ env.VERSION }}" -like "VIIPER*") {
+        $source = ".\bin\x64\Release\DS4Windows_$($env:VERSION)_x64.zip"
+        $asset = if ($env:VERSION -like "VIIPER*") {
           ".\bin\x64\Release\DS4Windows_VIIPER_x64.zip"
         } else {
           $source
@@ -111,14 +126,24 @@ jobs:
         if ($asset -ne $source) {
           Move-Item -LiteralPath $source -Destination $asset -Force
         }
-        $installerSource = ".\bin\x64\Release\installer\DS4Windows_${{ env.VERSION }}_Setup_x64.exe"
-        $installerAsset = ".\bin\x64\Release\installer\DS4Windows_${{ env.BINARY_VERSION }}_Setup_x64.exe"
+        $installerSource = ".\bin\x64\Release\installer\DS4Windows_$($env:VERSION)_Setup_x64.exe"
+        $installerAsset = ".\bin\x64\Release\installer\DS4Windows_$($env:BINARY_VERSION)_Setup_x64.exe"
         if ($installerAsset -ne $installerSource) {
           Move-Item -LiteralPath $installerSource -Destination $installerAsset -Force
         }
         "RELEASE_ASSET=$asset" >> $env:GITHUB_ENV
         "INSTALLER_ASSET=$installerAsset" >> $env:GITHUB_ENV
     - name: Publish release Build X64
-      run: gh release upload ${{github.event.release.tag_name}} ${{ env.RELEASE_ASSET }} ${{ env.INSTALLER_ASSET }} --clobber
+      shell: pwsh
+      run: gh release upload "$env:RELEASE_TAG" "$env:RELEASE_ASSET" "$env:INSTALLER_ASSET" --clobber
       env:
         GITHUB_TOKEN: ${{ github.TOKEN }}
+        RELEASE_TAG: ${{ github.event.release.tag_name }}
+    - name: Remove signing material
+      if: always()
+      shell: pwsh
+      run: |
+        $certificatePath = Join-Path $env:RUNNER_TEMP "ds4windows-release.pfx"
+        if (Test-Path -LiteralPath $certificatePath -PathType Leaf) {
+          Remove-Item -LiteralPath $certificatePath -Force
+        }

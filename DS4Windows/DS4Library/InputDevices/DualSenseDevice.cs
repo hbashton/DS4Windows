@@ -681,6 +681,7 @@ namespace DS4Windows.InputDevices
         private const int BluetoothMicrophonePayloadLength = 71;
         private const int PhysicalOutputCommandCapacity = 64;
         private const int MaximumPhysicalCommandBurst = 8;
+        private const int BluetoothControlTemplateQueueWaitMilliseconds = 250;
         private const int DeviceStatusChargingChanged = 0x01;
         private const int DeviceStatusBatteryChanged = 0x02;
         private const byte BluetoothNormalInputBit = 0x01;
@@ -722,6 +723,13 @@ namespace DS4Windows.InputDevices
         private int bluetoothCombinedTemplateUpdateClaimed;
         private readonly byte[] bluetoothCombinedGameStateWorkingReport =
             new byte[BluetoothCombinedOutputReportLength];
+        private readonly byte[] pendingBluetoothNativeGameExactState =
+            new byte[BluetoothCombinedOutputReportLength];
+        private readonly byte[] pendingBluetoothNativeGameQuiescentTemplate =
+            new byte[BluetoothCombinedOutputReportLength];
+        private long pendingBluetoothNativeGameRevision;
+        private long pendingBluetoothNativeGameHapticsGeneration;
+        private long pendingBluetoothNativeGameHapticsExpiryQpc;
         private readonly byte[] bluetoothCombinedNativeStateScratch =
             new byte[BluetoothCombinedNativeStateLength];
         private bool bluetoothCombinedSpeakerReportAvailable;
@@ -878,6 +886,7 @@ namespace DS4Windows.InputDevices
         internal Func<long, bool> BluetoothOutputRecoveryIterationTestHook;
         internal Action<long> BluetoothOutputRecoveryBeforeWaitTestHook;
         internal Action BluetoothCombinedControlEnqueuedTestHook;
+        internal Action PhysicalBluetoothOutputTransportLockedTestHook;
 
         private enum PhysicalInputFailureKind : byte
         {
@@ -1841,15 +1850,25 @@ namespace DS4Windows.InputDevices
 
                     lock (bluetoothCombinedSpeakerReportLock)
                     {
-                        if (bluetoothCombinedSpeakerReportAvailable)
+                        if (pendingBluetoothNativeGameRevision > 0)
+                        {
+                            Array.Copy(
+                                pendingBluetoothNativeGameQuiescentTemplate,
+                                initialTemplate, initialTemplate.Length);
+                            initialHapticsExpiry =
+                                pendingBluetoothNativeGameHapticsExpiryQpc;
+                        }
+                        else if (bluetoothCombinedSpeakerReportAvailable)
                         {
                             Array.Copy(latestBluetoothCombinedSpeakerReport,
                                 initialTemplate, initialTemplate.Length);
+                            initialHapticsExpiry =
+                                PersistentBluetoothHapticsExpiryQpc;
                         }
-
-                        initialHapticsExpiry =
-                            bluetoothCombinedSpeakerReportAvailable ?
-                                PersistentBluetoothHapticsExpiryQpc : 0;
+                        else
+                        {
+                            initialHapticsExpiry = 0;
+                        }
                     }
                 }
 
@@ -1906,6 +1925,45 @@ namespace DS4Windows.InputDevices
                         }
                         bluetoothAudioPacer = candidate;
                         candidate = null;
+                    }
+
+                    // The candidate was started without holding the transport
+                    // monitor. First admit any exact native transaction that
+                    // existed before or during replacement, then resnapshot
+                    // the mutable latest cache into a following nonblocking
+                    // template command. No speaker/control producer can enter
+                    // between these two admissions.
+                    if (TryPublishPendingBluetoothNativeGameTransition())
+                    {
+                        long latestHapticsExpiry;
+                        lock (bluetoothCombinedSpeakerReportLock)
+                        {
+                            if (bluetoothCombinedSpeakerReportAvailable)
+                            {
+                                Array.Copy(
+                                    latestBluetoothCombinedSpeakerReport,
+                                    initialTemplate,
+                                    initialTemplate.Length);
+                                latestHapticsExpiry =
+                                    PersistentBluetoothHapticsExpiryQpc;
+                            }
+                            else
+                            {
+                                latestHapticsExpiry = 0;
+                            }
+                        }
+
+                        DualSensePhysicalOutputSnapshot latestOutputState =
+                            physicalOutputStateMailbox.ReadLatest();
+                        ApplyBluetoothSpeakerVolumeAndRoutingCore(
+                            initialTemplate,
+                            latestOutputState.SpeakerVolume,
+                            latestOutputState.HeadsetOnlyAudio,
+                            latestOutputState.HeadphoneVolume);
+                        ApplyBluetoothMicrophoneStreamingRequest(
+                            initialTemplate, latestOutputState);
+                        TryUpdateBluetoothAudioPacerTemplate(initialTemplate,
+                            latestHapticsExpiry, out _);
                     }
 
                     bluetoothAudioPacerLastError = string.Empty;
@@ -2020,6 +2078,19 @@ namespace DS4Windows.InputDevices
                 !IsBluetoothOutputRecoveryGenerationActive(workerGeneration))
             {
                 return false;
+            }
+
+            // A native game transition that could not enter the old helper
+            // owns a fixed exact/quiescent transaction. Admit it before the
+            // latest coalesced cache, under the same ordering monitor used by
+            // every producer. The completion-aware cache commit below waits
+            // only after this monitor has been released.
+            lock (bluetoothCombinedTransportWriteLock)
+            {
+                if (!TryPublishPendingBluetoothNativeGameTransition())
+                {
+                    return false;
+                }
             }
 
             // Recovery starts a fresh physical FIFO. Commit the latest
@@ -2372,40 +2443,113 @@ namespace DS4Windows.InputDevices
             try
             {
                 byte[] template = bluetoothCombinedTemplateUpdateReport;
-                long hapticsExpiryQpc;
-                lock (bluetoothCombinedTransportWriteLock)
+                if (realtimeHaptics)
                 {
-                    lock (bluetoothCombinedSpeakerReportLock)
+                    long realtimeHapticsExpiryQpc;
+                    lock (bluetoothCombinedTransportWriteLock)
                     {
-                        if (!bluetoothCombinedSpeakerReportAvailable)
+                        lock (bluetoothCombinedSpeakerReportLock)
                         {
-                            return false;
+                            if (!bluetoothCombinedSpeakerReportAvailable)
+                            {
+                                return false;
+                            }
+
+                            Array.Copy(latestBluetoothCombinedSpeakerReport,
+                                template, template.Length);
+                            realtimeHapticsExpiryQpc =
+                                PersistentBluetoothHapticsExpiryQpc;
                         }
 
-                        Array.Copy(latestBluetoothCombinedSpeakerReport,
-                            template, template.Length);
-                        hapticsExpiryQpc =
-                            PersistentBluetoothHapticsExpiryQpc;
+                        ApplyBluetoothSpeakerVolumeAndRoutingCore(template,
+                            outputState.SpeakerVolume,
+                            outputState.HeadsetOnlyAudio,
+                            outputState.HeadphoneVolume);
+                        ApplyBluetoothMicrophoneStreamingRequest(template,
+                            outputState);
                     }
 
-                    ApplyBluetoothSpeakerVolumeAndRoutingCore(template,
-                        outputState.SpeakerVolume,
-                        outputState.HeadsetOnlyAudio,
-                        outputState.HeadphoneVolume);
-                    ApplyBluetoothMicrophoneStreamingRequest(template,
-                        outputState);
-                }
+                    // The realtime rear-channel ring can wait for media
+                    // capacity. It carries no controller-state transition, so
+                    // publish it after releasing the state admission monitor.
+                    bool realtimeUpdated =
+                        TryUpdateBluetoothAudioPacerTemplate(template,
+                            realtimeHapticsExpiryQpc,
+                            out bool realtimePacerOwnsTransport,
+                            realtimeHaptics: true);
+                    if (realtimePacerOwnsTransport && realtimeUpdated)
+                    {
+                        return true;
+                    }
 
-                bool updated = TryUpdateBluetoothAudioPacerTemplate(template,
-                    hapticsExpiryQpc, out bool pacerOwnsTransport,
-                    realtimeHaptics, waitForCapacity);
-                if (!pacerOwnsTransport || !updated)
-                {
                     RequestUnifiedBluetoothOutputTransportRecovery();
                     return false;
                 }
 
-                return true;
+                long deadline = waitForCapacity ?
+                    Stopwatch.GetTimestamp() + Stopwatch.Frequency *
+                        BluetoothControlTemplateQueueWaitMilliseconds / 1000 :
+                    0;
+                do
+                {
+                    bool pendingAdmitted;
+                    bool updated = false;
+                    bool pacerOwnsTransport = false;
+                    lock (bluetoothCombinedTransportWriteLock)
+                    {
+                        pendingAdmitted =
+                            TryPublishPendingBluetoothNativeGameTransition();
+                        if (pendingAdmitted)
+                        {
+                            long hapticsExpiryQpc;
+                            lock (bluetoothCombinedSpeakerReportLock)
+                            {
+                                if (!bluetoothCombinedSpeakerReportAvailable)
+                                {
+                                    return false;
+                                }
+
+                                Array.Copy(
+                                    latestBluetoothCombinedSpeakerReport,
+                                    template, template.Length);
+                                hapticsExpiryQpc =
+                                    PersistentBluetoothHapticsExpiryQpc;
+                            }
+
+                            ApplyBluetoothSpeakerVolumeAndRoutingCore(template,
+                                outputState.SpeakerVolume,
+                                outputState.HeadsetOnlyAudio,
+                                outputState.HeadphoneVolume);
+                            ApplyBluetoothMicrophoneStreamingRequest(template,
+                                outputState);
+                            // Each capacity attempt owns the ordering monitor
+                            // only for a nonblocking queue admission. A newer
+                            // native transition can neither be passed nor
+                            // leave a stale snapshot to enqueue after it.
+                            updated = TryUpdateBluetoothAudioPacerTemplate(
+                                template, hapticsExpiryQpc,
+                                out pacerOwnsTransport);
+                        }
+                    }
+
+                    if (pendingAdmitted && pacerOwnsTransport && updated)
+                    {
+                        return true;
+                    }
+
+                    if (!waitForCapacity || !pendingAdmitted ||
+                        !pacerOwnsTransport ||
+                        Stopwatch.GetTimestamp() >= deadline)
+                    {
+                        break;
+                    }
+
+                    Thread.Sleep(1);
+                }
+                while (true);
+
+                RequestUnifiedBluetoothOutputTransportRecovery();
+                return false;
             }
             finally
             {
@@ -2425,9 +2569,14 @@ namespace DS4Windows.InputDevices
             try
             {
                 byte[] template = bluetoothCombinedTemplateUpdateReport;
-                long hapticsExpiryQpc;
                 lock (bluetoothCombinedTransportWriteLock)
                 {
+                    if (!TryPublishPendingBluetoothNativeGameTransition())
+                    {
+                        return false;
+                    }
+
+                    long hapticsExpiryQpc;
                     lock (bluetoothCombinedSpeakerReportLock)
                     {
                         if (!bluetoothCombinedSpeakerReportAvailable)
@@ -2447,21 +2596,20 @@ namespace DS4Windows.InputDevices
                         outputState.HeadphoneVolume);
                     ApplyBluetoothMicrophoneStreamingRequest(template,
                         outputState);
-                }
-
-                if (!TryClaimBluetoothAudioPacer(
-                        out DualSenseBluetoothAudioPacer pacer, out _))
-                {
-                    return false;
-                }
-                try
-                {
-                    return pacer.UpdateMicrophoneTransition(template,
-                        hapticsExpiryQpc, enabled);
-                }
-                finally
-                {
-                    ReleaseBluetoothAudioPacerClaim();
+                    if (!TryClaimBluetoothAudioPacer(
+                            out DualSenseBluetoothAudioPacer pacer, out _))
+                    {
+                        return false;
+                    }
+                    try
+                    {
+                        return pacer.UpdateMicrophoneTransition(template,
+                            hapticsExpiryQpc, enabled);
+                    }
+                    finally
+                    {
+                        ReleaseBluetoothAudioPacerClaim();
+                    }
                 }
             }
             finally
@@ -2908,6 +3056,10 @@ namespace DS4Windows.InputDevices
                 // every report-scoped ownership token even if the same
                 // DualSenseDevice object is reused.
                 Interlocked.Increment(ref nativeGameOutputRevision);
+                lock (bluetoothCombinedTransportWriteLock)
+                {
+                    ClearPendingBluetoothNativeGameTransition();
+                }
                 Volatile.Write(ref bluetoothOutputTransportStopping, 0);
                 Volatile.Write(ref physicalOutputStopRequested, 0);
                 Volatile.Write(ref bluetoothObservationStopRequested, 0);
@@ -3338,10 +3490,10 @@ namespace DS4Windows.InputDevices
                             Interlocked.Read(ref nativeGameOutputRevision),
                             HasPendingPhysicalOutputCommand()))
                     {
-                        // Do not compose a local mute/LED generation onto a
-                        // stale validity-masked native report while a newer
-                        // admitted USB command is waiting in this same FIFO.
-                        // Drain to the newest native revision first.
+                        // Do not let a local mute/LED generation precede the
+                        // first native template or compose onto a stale one
+                        // while a newer admitted USB command is waiting in
+                        // this same FIFO. Drain to the newest revision first.
                         continue;
                     }
 
@@ -3376,26 +3528,7 @@ namespace DS4Windows.InputDevices
                         }
                         else
                         {
-                            if (conType == ConnectionType.BT &&
-                                Interlocked.Read(ref
-                                    pendingNativeGameLedReleaseRevision) > 0)
-                            {
-                                // Native combined reports publish directly
-                                // under this monitor. Serialize the revision
-                                // check and profile LED restore with them so a
-                                // new report either cancels the request before
-                                // it writes or follows it and reclaims LEDs.
-                                lock (bluetoothCombinedTransportWriteLock)
-                                {
-                                    PrepareOutReport();
-                                    FlushPreparedOutputReport(requested);
-                                }
-                            }
-                            else
-                            {
-                                PrepareOutReport();
-                                FlushPreparedOutputReport(requested);
-                            }
+                            PrepareAndFlushPhysicalOutput(requested);
                         }
                     }
                     catch (Exception ex)
@@ -3422,6 +3555,55 @@ namespace DS4Windows.InputDevices
                     completedGeneration = requested;
                 }
             }
+        }
+
+        private void PrepareAndFlushPhysicalOutput(
+            long ownerRequestGeneration)
+        {
+            if (conType == ConnectionType.BT)
+            {
+                bool transportReady =
+                    EnsureBluetoothCombinedOutputTransport();
+                bool cacheAdmitted;
+                bool prepared = false;
+                // Native combined reports publish directly under this
+                // monitor. Every local cache merge must share that admission
+                // boundary: an LED release can arrive after the worker chose
+                // this pass, and a newer native report must either precede
+                // the cache merge or follow it. Publication and any optional
+                // completion wait happen after this short boundary.
+                lock (bluetoothCombinedTransportWriteLock)
+                {
+                    if (Volatile.Read(
+                            ref bluetoothAudioLifecycleTransitioning) != 0)
+                    {
+                        cacheAdmitted = false;
+                    }
+                    else
+                    {
+                        PhysicalBluetoothOutputTransportLockedTestHook?.Invoke();
+                        PrepareOutReport();
+                        cacheAdmitted = !outputDirty ||
+                            transportReady &&
+                            UpdateCachedBluetoothCombinedStateFromBluetoothOutput(
+                                outputReport);
+                        prepared = true;
+                    }
+                }
+
+                if (!prepared)
+                {
+                    SchedulePhysicalOutputRetry();
+                    return;
+                }
+
+                FlushPreparedOutputReport(ownerRequestGeneration,
+                    bluetoothCacheAdmitted: cacheAdmitted);
+                return;
+            }
+
+            PrepareOutReport();
+            FlushPreparedOutputReport(ownerRequestGeneration);
         }
 
         private bool TryQueuePhysicalOutputCommand(byte[] report, int offset,
@@ -3524,6 +3706,32 @@ namespace DS4Windows.InputDevices
             }
         }
 
+        private bool HasPendingPhysicalOutputCommand(
+            long expectedNativeOutputRevision)
+        {
+            if (expectedNativeOutputRevision <= 0)
+            {
+                return false;
+            }
+
+            lock (physicalOutputCommandLock)
+            {
+                for (int index = 0; index < physicalOutputCommandCount;
+                     index++)
+                {
+                    int slot = (physicalOutputCommandHead + index) %
+                        PhysicalOutputCommandCapacity;
+                    if (physicalOutputCommandRevisions[slot] ==
+                        expectedNativeOutputRevision)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        }
+
         private void ClaimPhysicalOutputState()
         {
             ApplyPendingNativeGameLedOwnershipRelease();
@@ -3584,22 +3792,76 @@ namespace DS4Windows.InputDevices
         {
             long expectedLedReleaseRevision = Interlocked.Exchange(
                 ref pendingNativeGameLedReleaseRevision, 0);
-            bool usbNativeStateIsCurrent = conType != ConnectionType.USB ||
-                latestUsbNativeGameOutputAvailable &&
-                latestUsbNativeGameOutputRevision ==
-                    expectedLedReleaseRevision;
-            if (usbNativeStateIsCurrent &&
-                ShouldApplyNativeGameLedOwnershipRelease(
-                    expectedLedReleaseRevision,
-                    Interlocked.Read(ref nativeGameOutputRevision)))
+            if (expectedLedReleaseRevision <= 0)
             {
-                // This changes only the visual ownership bit. Unlike the
-                // whole-session release path, it does not clear cached native
-                // triggers/haptics, reset the audio pacer, or touch rumble,
-                // audio, microphone, and mute state.
-                physicalOutputStateMailbox.
-                    SetNativeGameLightbarOwnershipReleased(true);
+                return;
             }
+
+            long currentNativeOutputRevision = Interlocked.Read(
+                ref nativeGameOutputRevision);
+            if (!ShouldApplyNativeGameLedOwnershipRelease(
+                    expectedLedReleaseRevision,
+                    currentNativeOutputRevision))
+            {
+                return;
+            }
+
+            if (conType == ConnectionType.USB &&
+                (!latestUsbNativeGameOutputAvailable ||
+                 latestUsbNativeGameOutputRevision !=
+                    expectedLedReleaseRevision))
+            {
+                // The dispatcher can admit the first USB command after this
+                // worker has already drained its FIFO for the current pass.
+                // Keep the visual release behind that exact command until a
+                // successful physical write establishes its cached template.
+                // If the command is no longer admitted, drop the request so a
+                // missing command cannot create an output-generation spin.
+                if (HasPendingPhysicalOutputCommand(
+                        expectedLedReleaseRevision) &&
+                    TryPublishNewestNativeGameLedReleaseRevision(
+                        ref pendingNativeGameLedReleaseRevision,
+                        expectedLedReleaseRevision))
+                {
+                    QueuePhysicalOutputUpdate();
+                }
+
+                return;
+            }
+
+            // This changes only the visual ownership bit. Unlike the
+            // whole-session release path, it does not clear cached native
+            // triggers/haptics, reset the audio pacer, or touch rumble,
+            // audio, microphone, and mute state.
+            physicalOutputStateMailbox.
+                SetNativeGameLightbarOwnershipReleased(true);
+        }
+
+        internal static bool TryPublishNewestNativeGameLedReleaseRevision(
+            ref long pendingRevision, long candidateRevision)
+        {
+            if (candidateRevision <= 0)
+            {
+                return false;
+            }
+
+            long observedRevision = Interlocked.Read(ref pendingRevision);
+            while (observedRevision < candidateRevision)
+            {
+                long exchangedRevision = Interlocked.CompareExchange(
+                    ref pendingRevision, candidateRevision,
+                    observedRevision);
+                if (exchangedRevision == observedRevision)
+                {
+                    return true;
+                }
+
+                observedRevision = exchangedRevision;
+            }
+
+            // An identical request is already pending. A newer request must
+            // never be replaced by an older foreground-exit observation.
+            return observedRevision == candidateRevision;
         }
 
         internal static bool ShouldApplyNativeGameLedOwnershipRelease(
@@ -3613,8 +3875,9 @@ namespace DS4Windows.InputDevices
             bool isUsb, bool nativeCacheAvailable, long cachedRevision,
             long admittedRevision, bool nativeCommandPending)
         {
-            return isUsb && nativeCacheAvailable && nativeCommandPending &&
-                cachedRevision != admittedRevision;
+            return isUsb && nativeCommandPending &&
+                (!nativeCacheAvailable ||
+                 cachedRevision != admittedRevision);
         }
 
         internal static byte GetProfileMuteReleaseStrobes(
@@ -3650,6 +3913,7 @@ namespace DS4Windows.InputDevices
 
         private void ApplyNativeGameOutputReleaseOnPhysicalOwner()
         {
+            ClearPendingBluetoothNativeGameTransition();
             latestUsbNativeGameOutputRevision = 0;
             latestUsbNativeGameOutputAvailable = false;
             Array.Clear(latestUsbNativeGameOutputReport, 0,
@@ -3690,30 +3954,49 @@ namespace DS4Windows.InputDevices
         {
             if (conType == ConnectionType.BT)
             {
-                bool cacheAdmitted =
-                    EnsureBluetoothCombinedOutputTransport() &&
-                    UpdateCachedBluetoothCombinedState(report, 0);
-                bool published = cacheAdmitted &&
-                    TryPublishCachedBluetoothCombinedState(
-                        includeNativeHaptics: true,
-                        activeStatus:
-                            "Merged game output state into the unified Bluetooth stream.",
-                        idleReportDescription: "native controller state",
-                        out _);
-                if (!published)
+                if (!EnsureBluetoothCombinedOutputTransport())
                 {
                     RequestUnifiedBluetoothOutputTransportRecovery();
+                    return false;
                 }
 
-                // Once the exact delta is in the unified cache, recovery and
-                // its media clock own delivery. Retrying this FIFO head after
-                // an immediate publication failure would merge/re-emit its
-                // one-shot validity fields a second time. Before admission,
-                // the transactional cache helper has made no state change, so
-                // retaining the head is safe.
-                return ResolveBluetoothRawCommandOutcome(
-                        cacheAdmitted, published) !=
-                    BluetoothRawCommandOutcome.NotAdmitted;
+                lock (bluetoothCombinedTransportWriteLock)
+                {
+                    if (Volatile.Read(
+                            ref bluetoothAudioLifecycleTransitioning) != 0)
+                    {
+                        return false;
+                    }
+
+                    // Never merge B into the mutable cache while an exact A
+                    // still waits for helper admission. Returning false keeps
+                    // B at the existing fixed FIFO head without replaying any
+                    // validity-masked field.
+                    if (!TryPublishPendingBluetoothNativeGameTransition() ||
+                        !UpdateCachedBluetoothCombinedState(report, 0))
+                    {
+                        RequestUnifiedBluetoothOutputTransportRecovery();
+                        return false;
+                    }
+
+                    long hapticsGeneration;
+                    lock (bluetoothCombinedSpeakerReportLock)
+                    {
+                        hapticsGeneration =
+                            bluetoothCombinedHapticsGeneration;
+                    }
+
+                    bool published =
+                        TryPublishAtomicNativeGameStateTransition(
+                            nativeOutputRevision, hapticsGeneration);
+                    // A failed immediate publish has copied the exact and
+                    // quiescent pair into a fixed transaction before this
+                    // FIFO head is committed. Mutable cache admission alone
+                    // is deliberately not considered durable.
+                    return published ||
+                        pendingBluetoothNativeGameRevision ==
+                            nativeOutputRevision;
+                }
             }
 
             if (outputReport.Length < USB_OUTPUT_CHANGE_LENGTH)
@@ -5564,8 +5847,13 @@ namespace DS4Windows.InputDevices
                 return false;
             }
 
-            Interlocked.Exchange(ref pendingNativeGameLedReleaseRevision,
-                expectedNativeOutputRevision);
+            if (!TryPublishNewestNativeGameLedReleaseRevision(
+                    ref pendingNativeGameLedReleaseRevision,
+                    expectedNativeOutputRevision))
+            {
+                return false;
+            }
+
             QueuePhysicalOutputUpdate();
             return true;
         }
@@ -5673,59 +5961,81 @@ namespace DS4Windows.InputDevices
                 return false;
             }
 
-            lock (bluetoothCombinedTransportWriteLock)
+            if (hasNativeGameState)
             {
-                if (hasNativeGameState)
+                lock (bluetoothCombinedTransportWriteLock)
                 {
+                    if (Volatile.Read(
+                            ref bluetoothAudioLifecycleTransitioning) != 0)
+                    {
+                        return false;
+                    }
+
+                    // A later game report may not replace the mutable cache
+                    // until an earlier exact transition is owned by the
+                    // helper. A pre-admission failure leaves the revision at
+                    // zero so VIIPER can retain B in its ordered raw FIFO.
+                    if (!TryPublishPendingBluetoothNativeGameTransition())
+                    {
+                        return false;
+                    }
+
                     // Register before the native transition is exposed. A
                     // concurrently pending SDL LED expiry must either observe
                     // this revision and cancel or finish first, after which
                     // this report is the later visual owner.
                     nativeOutputRevision = Interlocked.Increment(
                         ref nativeGameOutputRevision);
-                }
-                long hapticsGeneration =
-                    CacheBluetoothCombinedSpeakerReport(report, offset,
-                        hasNativeGameState);
-
-                if (hasNativeGameState)
-                {
+                    long nativeHapticsGeneration =
+                        CacheBluetoothCombinedSpeakerReport(report, offset,
+                            hasNativeGameState: true);
                     bool published =
-                        TryPublishAtomicNativeGameStateTransition();
+                        TryPublishAtomicNativeGameStateTransition(
+                            nativeOutputRevision,
+                            nativeHapticsGeneration);
                     if (published)
                     {
                         MarkBluetoothCombinedHapticsSubmitted(
-                            hapticsGeneration);
+                            nativeHapticsGeneration);
                     }
                     return published;
                 }
-
-                bool written = TryPublishCachedBluetoothCombinedState(
-                    includeNativeHaptics: true,
-                    activeStatus:
-                        "Cached native Bluetooth haptics for the next speaker-clocked frame.",
-                    idleReportDescription: "combined haptics/audio",
-                    out bool deferredToSpeakerClock,
-                    realtimeHaptics: true);
-                if (written && !deferredToSpeakerClock)
-                {
-                    MarkBluetoothCombinedHapticsSubmitted(hapticsGeneration);
-                }
-
-                return written;
             }
+
+            long hapticsGeneration;
+            lock (bluetoothCombinedTransportWriteLock)
+            {
+                hapticsGeneration = CacheBluetoothCombinedSpeakerReport(
+                    report, offset, hasNativeGameState: false);
+            }
+
+            // Realtime haptics publication can wait for the bounded shared
+            // media ring. The cache mutation above is ordered with native
+            // state, but that independent capacity wait must never retain the
+            // controller-state admission monitor.
+            bool written = TryPublishCachedBluetoothCombinedState(
+                includeNativeHaptics: true,
+                activeStatus:
+                    "Cached native Bluetooth haptics for the next speaker-clocked frame.",
+                idleReportDescription: "combined haptics/audio",
+                out bool deferredToSpeakerClock,
+                realtimeHaptics: true);
+            if (written && !deferredToSpeakerClock)
+            {
+                MarkBluetoothCombinedHapticsSubmitted(hapticsGeneration);
+            }
+
+            return written;
         }
 
-        private bool TryPublishAtomicNativeGameStateTransition()
+        private bool TryPublishAtomicNativeGameStateTransition(
+            long nativeOutputRevision, long hapticsGeneration)
         {
             DualSensePhysicalOutputSnapshot outputState =
                 physicalOutputStateMailbox.ReadLatest();
             byte[] exactState = bluetoothCombinedGameStateWorkingReport;
             byte[] quiescentTemplate =
                 bluetoothCombinedSpeakerWorkingReport;
-            byte originalFlag0;
-            byte originalFlag1;
-            byte originalFlag2;
             lock (bluetoothCombinedSpeakerReportLock)
             {
                 if (!bluetoothCombinedSpeakerReportAvailable)
@@ -5735,12 +6045,6 @@ namespace DS4Windows.InputDevices
 
                 Array.Copy(latestBluetoothCombinedSpeakerReport, exactState,
                     exactState.Length);
-                originalFlag0 = latestBluetoothCombinedSpeakerReport[
-                    BluetoothCombinedStateOffset];
-                originalFlag1 = latestBluetoothCombinedSpeakerReport[
-                    BluetoothCombinedStateOffset + 1];
-                originalFlag2 = latestBluetoothCombinedSpeakerReport[
-                    BluetoothCombinedStateOffset + 38];
                 ConsumeNativeGameStateValidity(
                     latestBluetoothCombinedSpeakerReport,
                     BluetoothCombinedStateOffset);
@@ -5759,6 +6063,7 @@ namespace DS4Windows.InputDevices
             ApplyBluetoothMicrophoneStreamingRequest(quiescentTemplate,
                 outputState);
 
+            long hapticsExpiryQpc = PersistentBluetoothHapticsExpiryQpc;
             bool published = false;
             if (TryClaimBluetoothAudioPacer(out DualSenseBluetoothAudioPacer
                     pacer, out _))
@@ -5767,7 +6072,7 @@ namespace DS4Windows.InputDevices
                 {
                     published = pacer.UpdateGameStateAndTemplate(
                         exactState, quiescentTemplate,
-                        PersistentBluetoothHapticsExpiryQpc);
+                        hapticsExpiryQpc);
                 }
                 finally
                 {
@@ -5777,15 +6082,22 @@ namespace DS4Windows.InputDevices
 
             if (!published)
             {
-                lock (bluetoothCombinedSpeakerReportLock)
-                {
-                    latestBluetoothCombinedSpeakerReport[
-                        BluetoothCombinedStateOffset] = originalFlag0;
-                    latestBluetoothCombinedSpeakerReport[
-                        BluetoothCombinedStateOffset + 1] = originalFlag1;
-                    latestBluetoothCombinedSpeakerReport[
-                        BluetoothCombinedStateOffset + 38] = originalFlag2;
-                }
+                // The mutable latest cache is already quiescent. Retain this
+                // exact one-shot transition in its own fixed transaction so a
+                // later media/local merge cannot overwrite it before helper
+                // admission. Callers hold the transport monitor, and they
+                // drain any older transaction before entering this method.
+                Array.Copy(exactState,
+                    pendingBluetoothNativeGameExactState,
+                    exactState.Length);
+                Array.Copy(quiescentTemplate,
+                    pendingBluetoothNativeGameQuiescentTemplate,
+                    quiescentTemplate.Length);
+                pendingBluetoothNativeGameHapticsGeneration =
+                    hapticsGeneration;
+                pendingBluetoothNativeGameHapticsExpiryQpc =
+                    hapticsExpiryQpc;
+                pendingBluetoothNativeGameRevision = nativeOutputRevision;
                 LastBluetoothHapticsWriteStatus =
                     "Could not atomically publish native game state to the unified Bluetooth compositor.";
                 RequestUnifiedBluetoothOutputTransportRecovery();
@@ -5795,6 +6107,54 @@ namespace DS4Windows.InputDevices
             LastBluetoothHapticsWriteStatus =
                 "Merged exact native game state into the next unified Bluetooth frame.";
             return true;
+        }
+
+        private bool TryPublishPendingBluetoothNativeGameTransition()
+        {
+            if (pendingBluetoothNativeGameRevision <= 0)
+            {
+                return true;
+            }
+
+            bool published = false;
+            if (TryClaimBluetoothAudioPacer(out DualSenseBluetoothAudioPacer
+                    pacer, out _))
+            {
+                try
+                {
+                    published = pacer.UpdateGameStateAndTemplate(
+                        pendingBluetoothNativeGameExactState,
+                        pendingBluetoothNativeGameQuiescentTemplate,
+                        pendingBluetoothNativeGameHapticsExpiryQpc);
+                }
+                finally
+                {
+                    ReleaseBluetoothAudioPacerClaim();
+                }
+            }
+
+            if (!published)
+            {
+                LastBluetoothHapticsWriteStatus =
+                    "Could not admit the retained native game state to the unified Bluetooth compositor.";
+                RequestUnifiedBluetoothOutputTransportRecovery();
+                return false;
+            }
+
+            long hapticsGeneration =
+                pendingBluetoothNativeGameHapticsGeneration;
+            ClearPendingBluetoothNativeGameTransition();
+            MarkBluetoothCombinedHapticsSubmitted(hapticsGeneration);
+            LastBluetoothHapticsWriteStatus =
+                "Admitted retained native game state to the unified Bluetooth compositor.";
+            return true;
+        }
+
+        private void ClearPendingBluetoothNativeGameTransition()
+        {
+            pendingBluetoothNativeGameRevision = 0;
+            pendingBluetoothNativeGameHapticsGeneration = 0;
+            pendingBluetoothNativeGameHapticsExpiryQpc = 0;
         }
 
         internal static void ConsumeNativeGameStateValidity(byte[] report,
@@ -6050,7 +6410,8 @@ namespace DS4Windows.InputDevices
         }
 
         private void FlushPreparedOutputReport(
-            long ownerRequestGeneration = 0)
+            long ownerRequestGeneration = 0,
+            bool bluetoothCacheAdmitted = false)
         {
             if (outputDirty)
             {
@@ -6059,9 +6420,7 @@ namespace DS4Windows.InputDevices
                 // even while speaker and microphone media are idle.
                 if (conType == ConnectionType.BT)
                 {
-                    published = EnsureBluetoothCombinedOutputTransport() &&
-                        UpdateCachedBluetoothCombinedStateFromBluetoothOutput(
-                            outputReport);
+                    published = bluetoothCacheAdmitted;
                     if (published &&
                         preparedProfileMuteReleaseStrobes != 0)
                     {
@@ -6653,6 +7012,13 @@ namespace DS4Windows.InputDevices
                         return false;
                     }
 
+                    if (!TryPublishPendingBluetoothNativeGameTransition())
+                    {
+                        LastBluetoothHapticsWriteStatus =
+                            $"Deferred {reportDescription}: an earlier native game transition still owns helper admission.";
+                        return false;
+                    }
+
                     byte[] combined = bluetoothCombinedControlCommitReport;
                     lock (bluetoothCombinedSpeakerReportLock)
                     {
@@ -6835,6 +7201,11 @@ namespace DS4Windows.InputDevices
         {
             if (conType != ConnectionType.BT ||
                 !outputState.EnableSpeakerOutput)
+            {
+                return false;
+            }
+
+            if (!TryPublishPendingBluetoothNativeGameTransition())
             {
                 return false;
             }

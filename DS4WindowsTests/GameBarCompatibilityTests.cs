@@ -96,6 +96,36 @@ namespace DS4WindowsTests
         }
 
         [DataTestMethod]
+        [DataRow("GameBar")]
+        [DataRow("XboxGameBar")]
+        [DataRow("GameBarFTServer")]
+        [DataRow("GameBarWidgets")]
+        [DataRow("XboxGameBarWidgets")]
+        [DataRow("GameBarElevatedFT_Alias")]
+        public void NativeOwnerFilterReusesCanonicalGameBarProcessNames(
+            string processName)
+        {
+            Assert.IsTrue(GameBarIntegration.
+                IsStrictGameBarProcessName(processName));
+            Assert.IsTrue(ViiperOutDevice.
+                IsExcludedNativeGameOwner(processName));
+        }
+
+        [DataTestMethod]
+        [DataRow("GameBarPresenceWriter")]
+        [DataRow("SpotifyXboxGamebarWebView")]
+        public void NativeOwnerFilterExcludesAuxiliaryGameBarHosts(
+            string processName)
+        {
+            Assert.IsFalse(GameBarIntegration.
+                IsStrictGameBarProcessName(processName),
+                "Auxiliary hosts must not broaden the strict compatibility " +
+                "window classifier.");
+            Assert.IsTrue(ViiperOutDevice.
+                IsExcludedNativeGameOwner(processName));
+        }
+
+        [DataTestMethod]
         [DataRow(true, false, false, false, true)]
         [DataRow(true, false, true, false, true)]
         [DataRow(true, true, false, false, true)]

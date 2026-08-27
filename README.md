@@ -64,10 +64,10 @@ selector.
 
 DS4Windows 5 release candidates include virtual DualSense output, advanced
 haptics, controller audio, microphone capture, and the redesigned interface.
-Release Candidate 4.1, **Bugfixes and Lower-Latency Audio/Vibration**, lowers
-input and feedback latency, improves per-app audio recovery, fixes profile and
-rumble races, and hardens the all-in-one installer while retaining RC4's native
-game feedback and cross-output features.
+Release Candidate 4.4, **Input Fidelity, Audio Efficiency, and Mute Controls**,
+adds ordered raw DualSense trigger fidelity, read-ahead input, bounded
+DualShock 4 audio, per-target mute controls, and safer lightbar, HidHide, and
+installer lifecycle handling.
 They appear as pre-releases on the
 [DS4Windows Releases page](https://github.com/hbashton/DS4Windows/releases).
 Choose the newest release-candidate build when you want to test these features.
@@ -163,8 +163,9 @@ DualSense or DualShock 4 selected by the profile. Supported paths include:
   microphone, with automatic conversion to the emulated controller's native
   capture format.
 - Microphone level and noise-suppression controls.
-- A profile option that lets the DualSense mute button mute and restore the
-  microphone while keeping the recording stream active.
+- A profile master option that lets the DualSense mute button independently
+  mute and restore the controller microphone and built-in speaker while their
+  recording/playback transports remain active.
 
 Audio, microphone, and advanced haptics support require matching DS4Windows 5
 and VIIPER 0.1.2 builds.

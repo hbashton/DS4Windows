@@ -137,6 +137,13 @@ namespace DS4Windows
 
     public sealed class ViiperOutDevice : OutputDevice
     {
+        internal enum NativeGameOwnerProcessLiveness
+        {
+            Unknown,
+            Running,
+            ConfirmedExited,
+        }
+
         private const string DefaultHost = "127.0.0.1";
         private const int DefaultPort = 3242;
         private const int DualSenseBaseFeedbackLength = 6;
@@ -238,12 +245,20 @@ namespace DS4Windows
             new byte[DualSenseNativeOutputReportLength];
         private long lastNativeGameOutputTimestamp;
         private long lastNativeGameOutputRevision;
+        private long lastNativeGameOutputStreamGeneration;
+        private DualSenseDevice lastNativeGameOutputTargetDevice;
         private long sdlAutomaticLedCandidateRevision;
         private long sdlAutomaticLedCandidateStreamGeneration;
         private DualSenseDevice sdlAutomaticLedCandidateTargetDevice;
         private int nativeGameOutputSessionActive;
         private int nativeGameOutputRealFeedbackEpoch;
         private Process nativeGameOutputOwnerProcess;
+        private int nativeGameOutputOwnerProcessId;
+        private long nativeGameOutputOwnerRevision;
+        private long nativeGameOutputOwnerStreamGeneration;
+        private DualSenseDevice nativeGameOutputOwnerTargetDevice;
+        private bool nativeGameOutputOwnerHasVerifiedVisualClaim;
+        private bool nativeGameOutputOwnerHasUnverifiedVisualClaim;
 
         private readonly OutContType outputType;
         private readonly ViiperVirtualDeviceType viiperType;
@@ -274,6 +289,7 @@ namespace DS4Windows
         private readonly object feedbackCallbackAdmissionLock = new object();
         private readonly ManualResetEvent feedbackCallbacksIdle =
             new ManualResetEvent(true);
+        internal Action NativeGameLedReleaseAdmissionTestHook;
         private int activeFeedbackCallbacks;
         private readonly object physicalDualSenseIdentityLock = new object();
         private readonly object microphoneSourceLock = new object();
@@ -434,6 +450,7 @@ namespace DS4Windows
         private DateTime lastWriterHealthLogUtc = DateTime.MinValue;
         private DateTime lastMicrophoneHealthLogUtc = DateTime.MinValue;
         private int lastInputDeviceIndex = -1;
+        private DualSenseDevice publishedPhysicalControllerTargetDevice;
         private int submitFailureLogged;
         private int microphoneUnavailableLogged;
         private int microphoneNoiseSuppressionUnavailableLogged;
@@ -830,11 +847,59 @@ namespace DS4Windows
             {
                 ReleaseTriggerLabRumbleOverrides(previousDeviceIndex);
             }
-            Volatile.Write(ref lastInputDeviceIndex, deviceIndex);
+            PublishPhysicalControllerBinding(deviceIndex);
             if (connected)
             {
                 ResetState();
             }
+        }
+
+        private void PublishPhysicalControllerBinding(int deviceIndex)
+        {
+            DualSenseDevice targetDevice = ResolvePhysicalControllerTarget(
+                deviceIndex);
+            if (Volatile.Read(ref lastInputDeviceIndex) == deviceIndex &&
+                ReferenceEquals(Volatile.Read(
+                    ref publishedPhysicalControllerTargetDevice),
+                    targetDevice))
+            {
+                return;
+            }
+
+            // A visual-release commit uses this same short admission boundary.
+            // The old physical target therefore either receives the release
+            // before this binding change, or the exact-target recheck rejects
+            // it after the change. Publish the exact object as well as its
+            // slot: a reconnect may replace A with B in the same array index.
+            // The 1 kHz input path locks only on a real slot or identity
+            // transition.
+            lock (feedbackCallbackAdmissionLock)
+            {
+                targetDevice = ResolvePhysicalControllerTarget(deviceIndex);
+                if (Volatile.Read(ref lastInputDeviceIndex) != deviceIndex ||
+                    !ReferenceEquals(Volatile.Read(
+                        ref publishedPhysicalControllerTargetDevice),
+                        targetDevice))
+                {
+                    Volatile.Write(ref lastInputDeviceIndex, deviceIndex);
+                    Volatile.Write(
+                        ref publishedPhysicalControllerTargetDevice,
+                        targetDevice);
+                }
+            }
+        }
+
+        private static DualSenseDevice ResolvePhysicalControllerTarget(
+            int deviceIndex)
+        {
+            if (Program.rootHub == null || deviceIndex < 0 ||
+                deviceIndex >= Program.rootHub.DS4Controllers.Length)
+            {
+                return null;
+            }
+
+            return Program.rootHub.DS4Controllers[deviceIndex] as
+                DualSenseDevice;
         }
 
         public override void Connect()
@@ -858,6 +923,7 @@ namespace DS4Windows
             Volatile.Write(ref microphoneProcessingFailureLogged, 0);
             Volatile.Write(ref microphoneMuted, 0);
             Volatile.Write(ref lastInputDeviceIndex, -1);
+            Volatile.Write(ref publishedPhysicalControllerTargetDevice, null);
             Interlocked.Exchange(ref streamRecoveryAttempts, 0);
             Interlocked.Exchange(ref replacedPendingPacketCount, 0);
             Interlocked.Exchange(ref submittedPacketCount, 0);
@@ -1228,6 +1294,8 @@ namespace DS4Windows
                 Interlocked.Increment(ref feedbackDispatchGeneration);
                 connected = false;
                 feedbackDispatchStopRequested = true;
+                Volatile.Write(ref publishedPhysicalControllerTargetDevice,
+                    null);
             }
             // A worker generation is an ownership boundary. Never carry a
             // failed disable into a replacement VIIPER device where the same
@@ -1332,27 +1400,158 @@ namespace DS4Windows
 
         private bool RequestNativeDualSenseLedOwnershipRelease(
             DualSenseDevice expectedTargetDevice,
-            long expectedNativeOutputRevision)
+            long expectedNativeOutputRevision,
+            long expectedStreamGeneration)
         {
             if (!IsDualSenseType() || audioOnlySidecar ||
                 expectedTargetDevice == null ||
-                expectedNativeOutputRevision <= 0 || Program.rootHub == null)
+                expectedNativeOutputRevision <= 0 ||
+                expectedStreamGeneration <= 0 || Program.rootHub == null)
             {
                 return false;
             }
 
-            int deviceIndex = Volatile.Read(ref lastInputDeviceIndex);
-            if (deviceIndex < 0 ||
-                deviceIndex >= Program.rootHub.DS4Controllers.Length ||
-                !ReferenceEquals(
-                    Program.rootHub.DS4Controllers[deviceIndex],
-                    expectedTargetDevice))
+            lock (feedbackCallbackAdmissionLock)
+            {
+                if (!connected || feedbackDispatchStopRequested ||
+                    activeFeedbackCallbacks != 0 ||
+                    expectedStreamGeneration != Interlocked.Read(
+                        ref streamGeneration))
+                {
+                    return false;
+                }
+
+                int deviceIndex = Volatile.Read(ref lastInputDeviceIndex);
+                if (deviceIndex < 0 ||
+                    deviceIndex >= Program.rootHub.DS4Controllers.Length ||
+                    !ReferenceEquals(Volatile.Read(
+                        ref publishedPhysicalControllerTargetDevice),
+                        expectedTargetDevice) ||
+                    !ReferenceEquals(
+                        Program.rootHub.DS4Controllers[deviceIndex],
+                        expectedTargetDevice))
+                {
+                    return false;
+                }
+
+                NativeGameLedReleaseAdmissionTestHook?.Invoke();
+                return expectedTargetDevice.
+                    RequestNativeGameLedOwnershipRelease(
+                        expectedNativeOutputRevision);
+            }
+        }
+
+        private bool TryReleaseExitedForegroundOwnerLedOwnership(
+            Process expectedOwnerProcess,
+            NativeGameOwnerProcessLiveness ownerProcessLiveness)
+        {
+            if (expectedOwnerProcess == null || ownerProcessLiveness !=
+                    NativeGameOwnerProcessLiveness.ConfirmedExited ||
+                !IsDualSenseType() || audioOnlySidecar ||
+                Program.rootHub == null)
             {
                 return false;
             }
 
-            return expectedTargetDevice.RequestNativeGameLedOwnershipRelease(
-                expectedNativeOutputRevision);
+            Process ownerToDispose = null;
+            bool releaseQueued = false;
+            lock (feedbackCallbackAdmissionLock)
+            {
+                // The legacy reader applies reports directly rather than on
+                // the ordered control worker. An already admitted callback
+                // must finish Trace/Capture before an exit can be committed.
+                if (!connected || feedbackDispatchStopRequested ||
+                    activeFeedbackCallbacks != 0)
+                {
+                    return false;
+                }
+
+                DualSenseDevice targetDevice;
+                long nativeOutputRevision;
+                long ownerStreamGeneration;
+                bool releaseIsCurrent;
+                lock (nativeGameOutputTraceLock)
+                {
+                    targetDevice = nativeGameOutputOwnerTargetDevice;
+                    nativeOutputRevision = nativeGameOutputOwnerRevision;
+                    ownerStreamGeneration =
+                        nativeGameOutputOwnerStreamGeneration;
+                    int deviceIndex = Volatile.Read(
+                        ref lastInputDeviceIndex);
+                    bool targetBindingMatches = targetDevice != null &&
+                        deviceIndex >= 0 && deviceIndex <
+                            Program.rootHub.DS4Controllers.Length &&
+                        ReferenceEquals(Volatile.Read(
+                            ref publishedPhysicalControllerTargetDevice),
+                            targetDevice) &&
+                        ReferenceEquals(
+                            Program.rootHub.DS4Controllers[deviceIndex],
+                            targetDevice);
+                    releaseIsCurrent =
+                        ShouldReleaseForegroundOwnerLedOwnership(
+                            ownerProcessLiveness,
+                            retainedOwnerStillCurrent: ReferenceEquals(
+                                nativeGameOutputOwnerProcess,
+                                expectedOwnerProcess),
+                            ownerTargetMatchesLatest: ReferenceEquals(
+                                targetDevice,
+                                lastNativeGameOutputTargetDevice),
+                            targetBindingMatches: targetBindingMatches,
+                            latestReportControlsVisuals:
+                                NativeReportControlsVisuals(
+                                    lastNativeGameOutputReport, 0),
+                            verifiedVisualClaim:
+                                nativeGameOutputOwnerHasVerifiedVisualClaim,
+                            unverifiedVisualClaim:
+                                nativeGameOutputOwnerHasUnverifiedVisualClaim,
+                            ownerStreamGeneration: ownerStreamGeneration,
+                            latestReportStreamGeneration:
+                                lastNativeGameOutputStreamGeneration,
+                            currentStreamGeneration: Interlocked.Read(
+                                ref streamGeneration),
+                            ownerRevision: nativeOutputRevision,
+                            currentRevision: lastNativeGameOutputRevision);
+                }
+
+                if (!releaseIsCurrent)
+                {
+                    // A confirmed-dead lease that failed an identity,
+                    // newest-report, visual-claim, or stream fence can never
+                    // become safe again. Retire it without touching the
+                    // controller so it cannot poll forever or block a later
+                    // same-slot game from being captured.
+                    lock (nativeGameOutputTraceLock)
+                    {
+                        ownerToDispose =
+                            DetachNativeGameOutputOwnerNoLock(
+                                expectedOwnerProcess);
+                    }
+                }
+                else
+                {
+                    // No callback can begin while this admission lease is
+                    // held. The device request is a bounded CAS + signal
+                    // publication; it performs no HID I/O or wait.
+                    NativeGameLedReleaseAdmissionTestHook?.Invoke();
+                    releaseQueued = targetDevice.
+                        RequestNativeGameLedOwnershipRelease(
+                            nativeOutputRevision);
+
+                    // A device-side revision rejection is terminal too: some
+                    // newer native command already won. Clear the dead
+                    // heuristic in either case; only an active callback above
+                    // is a transient condition that retains it for retry.
+                    lock (nativeGameOutputTraceLock)
+                    {
+                        ownerToDispose =
+                            DetachNativeGameOutputOwnerNoLock(
+                                expectedOwnerProcess);
+                    }
+                }
+            }
+
+            ownerToDispose?.Dispose();
+            return releaseQueued;
         }
 
         private bool IsCurrentNativeOutputTarget(
@@ -1366,6 +1565,9 @@ namespace DS4Windows
             int deviceIndex = Volatile.Read(ref lastInputDeviceIndex);
             return deviceIndex >= 0 &&
                 deviceIndex < Program.rootHub.DS4Controllers.Length &&
+                NativeOutputTargetBindingMatches(expectedTargetDevice,
+                    Volatile.Read(
+                        ref publishedPhysicalControllerTargetDevice)) &&
                 NativeOutputTargetBindingMatches(expectedTargetDevice,
                     Program.rootHub.DS4Controllers[deviceIndex]);
         }
@@ -1645,7 +1847,7 @@ namespace DS4Windows
 
         public override void ConvertandSendReport(DS4State state, int device)
         {
-            Volatile.Write(ref lastInputDeviceIndex, device);
+            PublishPhysicalControllerBinding(device);
             if (!connected)
             {
                 return;
@@ -2224,7 +2426,8 @@ namespace DS4Windows
                 try
                 {
                     ApplyFeedback(payload, length, targetDeviceIndex,
-                        freshNativeOutput: true, nativeOutputScratch);
+                        freshNativeOutput: true, nativeOutputScratch,
+                        nativeOutputStreamGeneration: streamItemGeneration);
                     Interlocked.Increment(ref feedbackControlDelivered);
                 }
                 catch (Exception ex)
@@ -3830,7 +4033,9 @@ namespace DS4Windows
                             {
                                 ApplyFeedback(buffer, feedbackLength,
                                     freshNativeOutput: true,
-                                    nativeOutputScratch: nativeOutputScratch);
+                                    nativeOutputScratch: nativeOutputScratch,
+                                    nativeOutputStreamGeneration:
+                                        readStreamGeneration);
                             }
                             finally
                             {
@@ -3875,7 +4080,8 @@ namespace DS4Windows
         private void ApplyFeedback(byte[] feedback, int feedbackLength,
             int expectedDeviceIndex = -1,
             bool freshNativeOutput = true,
-            byte[] nativeOutputScratch = null)
+            byte[] nativeOutputScratch = null,
+            long nativeOutputStreamGeneration = 0)
         {
             int deviceIndex = Volatile.Read(ref lastInputDeviceIndex);
             if ((expectedDeviceIndex >= 0 &&
@@ -3941,7 +4147,8 @@ namespace DS4Windows
                         if (nativeForwardingAllowed &&
                             TryApplyBluetoothCombinedHapticsOutputReport(device,
                                 deviceIndex, feedback, feedbackLength,
-                                freshNativeOutput, nativeOutputScratch))
+                                freshNativeOutput, nativeOutputScratch,
+                                nativeOutputStreamGeneration))
                         {
                             break;
                         }
@@ -3956,7 +4163,8 @@ namespace DS4Windows
                         if (nativeForwardingAllowed &&
                             TryApplyNativeDualSenseOutputReport(device,
                                 deviceIndex, feedback, feedbackLength,
-                                nativeOutputScratch))
+                                nativeOutputScratch,
+                                nativeOutputStreamGeneration))
                         {
                             break;
                         }
@@ -4889,7 +5097,8 @@ namespace DS4Windows
 
         private bool TryApplyNativeDualSenseOutputReport(DS4Device device,
             int deviceIndex, byte[] feedback, int feedbackLength,
-            byte[] nativeOutputScratch)
+            byte[] nativeOutputScratch,
+            long nativeOutputStreamGeneration)
         {
             if (feedbackLength < DualSenseBluetoothHapticsReportOffset ||
                 device is not DualSenseDevice dualSenseDevice ||
@@ -4911,7 +5120,8 @@ namespace DS4Windows
             {
                 TraceNativeGameOutput(feedback,
                     DualSenseNativeOutputReportOffset,
-                    nativeOutputRevision, dualSenseDevice);
+                    nativeOutputRevision, dualSenseDevice,
+                    nativeOutputStreamGeneration);
             }
             return applied;
         }
@@ -4985,7 +5195,8 @@ namespace DS4Windows
         private bool TryApplyBluetoothCombinedHapticsOutputReport(
             DS4Device device, int deviceIndex, byte[] feedback,
             int feedbackLength, bool freshNativeOutput,
-            byte[] nativeOutputScratch)
+            byte[] nativeOutputScratch,
+            long nativeOutputStreamGeneration)
         {
             if (feedbackLength < DualSenseCombinedExtendedFeedbackLength ||
                 device is not DualSenseDevice dualSenseDevice ||
@@ -5041,7 +5252,8 @@ namespace DS4Windows
             {
                 TraceNativeGameOutput(feedback,
                     DualSenseNativeOutputReportOffset,
-                    nativeOutputRevision, dualSenseDevice);
+                    nativeOutputRevision, dualSenseDevice,
+                    nativeOutputStreamGeneration);
             }
 
             // Once the combined compositor assigns a revision, its recovery
@@ -5054,11 +5266,13 @@ namespace DS4Windows
         }
 
         private void TraceNativeGameOutput(byte[] feedback, int offset,
-            long nativeOutputRevision, DualSenseDevice targetDevice)
+            long nativeOutputRevision, DualSenseDevice targetDevice,
+            long nativeOutputStreamGeneration)
         {
             if (feedback == null || offset < 0 ||
                 offset + DualSenseNativeOutputReportLength > feedback.Length ||
-                nativeOutputRevision <= 0 || targetDevice == null)
+                nativeOutputRevision <= 0 || targetDevice == null ||
+                nativeOutputStreamGeneration <= 0)
             {
                 return;
             }
@@ -5068,8 +5282,45 @@ namespace DS4Windows
             bool sdlAutomaticLedInitialization =
                 IsExactSdlDualSenseAutomaticLedInitialization(feedback,
                     offset);
-            bool captureForegroundOwner;
+            int visualOwnershipUpdate =
+                GetNativeReportVisualOwnershipUpdate(feedback, offset);
+            bool controlsVisuals = visualOwnershipUpdate > 0;
+            Process observedOwnerForVisualClaim = null;
+            int observedOwnerProcessId = 0;
+            uint observedForegroundProcessId = 0;
+            if (controlsVisuals)
+            {
+                lock (nativeGameOutputTraceLock)
+                {
+                    observedOwnerForVisualClaim =
+                        nativeGameOutputOwnerProcess;
+                    observedOwnerProcessId = nativeGameOutputOwnerProcessId;
+                }
+                observedForegroundProcessId =
+                    GetForegroundProcessId();
+            }
+
+            // PID is not present on the HID wire. For a newer visual claim,
+            // use the retained foreground lifetime only as a conservative
+            // association: only the same foreground PID is affirmative
+            // evidence. Game Bar and shell exclusions are negative capture
+            // filters, never proof that the retained game authored a report.
+            // Any other claim fences the old process from restoring over a
+            // potentially newer writer.
+            bool retainedOwnerVisualClaimVerified = controlsVisuals &&
+                observedOwnerForVisualClaim != null &&
+                IsForegroundCompatibleWithRetainedOwner(
+                    observedOwnerForVisualClaim,
+                    observedOwnerProcessId,
+                    observedForegroundProcessId);
+            DualSenseDevice foregroundCaptureTargetDevice = null;
+            long foregroundCaptureRevision = 0;
+            long foregroundCaptureStreamGeneration = 0;
+            bool foregroundCaptureRequiresSameLiveOwner = false;
+            bool foregroundCaptureVisualClaimVerified = false;
+            uint foregroundCaptureVisualProcessId = 0;
             bool sessionStarted = false;
+            long traceStreamGeneration = nativeOutputStreamGeneration;
             lock (nativeGameOutputTraceLock)
             {
                 // VIIPER publishes one neutral 0x02 snapshot while the
@@ -5104,6 +5355,37 @@ namespace DS4Windows
                 nativeGameOutputSessionActive = 1;
                 lastNativeGameOutputTimestamp = Stopwatch.GetTimestamp();
                 lastNativeGameOutputRevision = nativeOutputRevision;
+                lastNativeGameOutputStreamGeneration =
+                    traceStreamGeneration;
+                lastNativeGameOutputTargetDevice = targetDevice;
+
+                // Make the ambiguity sticky before testing target/stream.
+                // A visual claim on B or S+1 must remain a fence if capture
+                // fails and a later neutral report rebinds the old PID.
+                UpdateForegroundOwnerVisualLeaseState(
+                    visualOwnershipUpdate,
+                    nativeGameOutputOwnerProcess != null,
+                    ReferenceEquals(nativeGameOutputOwnerProcess,
+                        observedOwnerForVisualClaim) &&
+                    retainedOwnerVisualClaimVerified,
+                    ref nativeGameOutputOwnerHasVerifiedVisualClaim,
+                    ref nativeGameOutputOwnerHasUnverifiedVisualClaim);
+
+                // The retained foreground process is only a lifecycle
+                // heuristic, but its visual lease still has to follow the
+                // newest native revision on the exact target and stream it was
+                // bound to. Hades II, for example, finishes with a neutral
+                // report rather than Sony's explicit LED-release bit.
+                if (ShouldAdvanceForegroundOwnerLease(
+                        nativeGameOutputOwnerProcess != null,
+                        ReferenceEquals(nativeGameOutputOwnerTargetDevice,
+                            targetDevice),
+                        nativeGameOutputOwnerStreamGeneration,
+                        traceStreamGeneration,
+                        nativeOutputRevision))
+                {
+                    nativeGameOutputOwnerRevision = nativeOutputRevision;
+                }
 
                 // SDL assigns the first virtual PS5 pad its stock blue
                 // player-index LEDs during enumeration. Its public
@@ -5118,7 +5400,7 @@ namespace DS4Windows
                 {
                     sdlAutomaticLedCandidateRevision = nativeOutputRevision;
                     sdlAutomaticLedCandidateStreamGeneration =
-                        Volatile.Read(ref streamGeneration);
+                        traceStreamGeneration;
                     sdlAutomaticLedCandidateTargetDevice = targetDevice;
                 }
                 else
@@ -5129,14 +5411,45 @@ namespace DS4Windows
                     nativeGameOutputRealFeedbackEpoch = 1;
                 }
 
-                captureForegroundOwner = meaningfulOutput &&
-                    !sdlAutomaticLedInitialization &&
-                    (sessionStarted || nativeGameOutputOwnerProcess == null);
+                bool captureForegroundOwner =
+                    ShouldCaptureForegroundOwnerLease(
+                        meaningfulOutput,
+                        sdlAutomaticLedInitialization,
+                        sessionStarted,
+                        nativeGameOutputOwnerProcess != null,
+                        ReferenceEquals(
+                            nativeGameOutputOwnerTargetDevice,
+                            targetDevice),
+                        nativeGameOutputOwnerStreamGeneration,
+                        traceStreamGeneration);
+                if (captureForegroundOwner)
+                {
+                    foregroundCaptureTargetDevice = targetDevice;
+                    foregroundCaptureRevision = nativeOutputRevision;
+                    foregroundCaptureStreamGeneration =
+                        traceStreamGeneration;
+                    foregroundCaptureRequiresSameLiveOwner =
+                        !meaningfulOutput;
+                    foregroundCaptureVisualClaimVerified =
+                        controlsVisuals &&
+                        ReferenceEquals(nativeGameOutputOwnerProcess,
+                        observedOwnerForVisualClaim) &&
+                        retainedOwnerVisualClaimVerified;
+                    foregroundCaptureVisualProcessId = controlsVisuals
+                        ? observedForegroundProcessId
+                        : 0;
+                }
             }
 
-            if (captureForegroundOwner)
+            if (foregroundCaptureTargetDevice != null)
             {
-                CaptureForegroundNativeGameOutputOwner();
+                CaptureForegroundNativeGameOutputOwner(
+                    foregroundCaptureTargetDevice,
+                    foregroundCaptureRevision,
+                    foregroundCaptureStreamGeneration,
+                    foregroundCaptureRequiresSameLiveOwner,
+                    foregroundCaptureVisualClaimVerified,
+                    foregroundCaptureVisualProcessId);
             }
         }
 
@@ -5160,6 +5473,91 @@ namespace DS4Windows
             }
 
             return false;
+        }
+
+        internal static int GetNativeReportVisualOwnershipUpdate(
+            byte[] feedback, int offset)
+        {
+            const int nativeStateOffset = 1;
+            return feedback != null && offset >= 0 &&
+                offset + DualSenseNativeOutputReportLength <=
+                    feedback.Length &&
+                feedback[offset] == 0x02
+                ? DualSenseDevice.GetNativeGameLedOwnershipUpdate(feedback,
+                    offset + nativeStateOffset)
+                : 0;
+        }
+
+        internal static bool NativeReportControlsVisuals(byte[] feedback,
+            int offset)
+        {
+            return GetNativeReportVisualOwnershipUpdate(feedback, offset) > 0;
+        }
+
+        internal static void UpdateForegroundOwnerVisualLeaseState(
+            int visualOwnershipUpdate, bool retainedOwnerPresent,
+            bool retainedOwnerVerifiedForReport, ref bool verifiedClaim,
+            ref bool unverifiedClaim)
+        {
+            if (!retainedOwnerPresent || visualOwnershipUpdate == 0)
+            {
+                return;
+            }
+
+            if (visualOwnershipUpdate < 0)
+            {
+                // Sony's explicit release is authoritative. Once the
+                // controller has returned visual ownership to the profile,
+                // an older foreground association must not authorize a later
+                // heuristic release.
+                verifiedClaim = false;
+                unverifiedClaim = false;
+                return;
+            }
+
+            if (retainedOwnerVerifiedForReport)
+            {
+                verifiedClaim = true;
+                unverifiedClaim = false;
+            }
+            else
+            {
+                unverifiedClaim = true;
+            }
+        }
+
+        internal static void RebindForegroundOwnerVisualLeaseState(
+            bool targetChanged, int latestVisualOwnershipUpdate,
+            bool latestVisualClaimVerified,
+            ref bool verifiedClaim, ref bool unverifiedClaim)
+        {
+            if (targetChanged)
+            {
+                // Visual proof is scoped to one physical controller. A
+                // neutral A-to-B rebind may carry lifecycle and ambiguity,
+                // but never A's positive authority.
+                verifiedClaim = false;
+            }
+
+            UpdateForegroundOwnerVisualLeaseState(
+                latestVisualOwnershipUpdate,
+                retainedOwnerPresent: true,
+                retainedOwnerVerifiedForReport:
+                    latestVisualClaimVerified,
+                ref verifiedClaim, ref unverifiedClaim);
+        }
+
+        internal static bool UpdateForegroundOwnerVisualClaimFence(
+            bool previousUnverifiedClaim, bool reportControlsVisuals,
+            bool retainedOwnerPresent, bool retainedOwnerVerifiedForReport)
+        {
+            bool verifiedClaim = false;
+            bool unverifiedClaim = previousUnverifiedClaim;
+            UpdateForegroundOwnerVisualLeaseState(
+                reportControlsVisuals ? 1 : 0, retainedOwnerPresent,
+                retainedOwnerVerifiedForReport, ref verifiedClaim,
+                ref unverifiedClaim);
+            return unverifiedClaim;
         }
 
         internal static bool
@@ -5209,11 +5607,82 @@ namespace DS4Windows
                 graceTicks > 0 && elapsedTicks >= graceTicks;
         }
 
+        internal static bool ShouldAdvanceForegroundOwnerLease(
+            bool retainedOwnerPresent, bool ownerTargetMatchesReport,
+            long ownerStreamGeneration, long reportStreamGeneration,
+            long nativeOutputRevision)
+        {
+            return retainedOwnerPresent && ownerTargetMatchesReport &&
+                ownerStreamGeneration == reportStreamGeneration &&
+                nativeOutputRevision > 0;
+        }
+
+        internal static bool ShouldCaptureForegroundOwnerLease(
+            bool meaningfulOutput, bool automaticLedInitialization,
+            bool sessionStarted, bool retainedOwnerPresent,
+            bool ownerTargetMatchesReport, long ownerStreamGeneration,
+            long reportStreamGeneration)
+        {
+            bool retainedBindingChanged = retainedOwnerPresent &&
+                (!ownerTargetMatchesReport ||
+                 ownerStreamGeneration != reportStreamGeneration);
+            return !automaticLedInitialization &&
+                reportStreamGeneration > 0 &&
+                (meaningfulOutput &&
+                    (sessionStarted || !retainedOwnerPresent ||
+                     retainedBindingChanged) ||
+                 !meaningfulOutput && retainedBindingChanged);
+        }
+
+        internal static bool ShouldInstallForegroundOwnerLease(
+            bool retainedOwnerUnchanged, bool targetMatchesLatest,
+            bool targetBindingMatches,
+            long expectedStreamGeneration, long latestReportStreamGeneration,
+            long currentStreamGeneration,
+            long expectedRevision, long latestRevision)
+        {
+            return retainedOwnerUnchanged && targetMatchesLatest &&
+                targetBindingMatches && expectedStreamGeneration > 0 &&
+                expectedStreamGeneration == latestReportStreamGeneration &&
+                expectedStreamGeneration == currentStreamGeneration &&
+                expectedRevision > 0 && expectedRevision == latestRevision;
+        }
+
+        internal static bool ShouldReleaseForegroundOwnerLedOwnership(
+            NativeGameOwnerProcessLiveness ownerProcessLiveness,
+            bool retainedOwnerStillCurrent,
+            bool ownerTargetMatchesLatest, bool targetBindingMatches,
+            bool latestReportControlsVisuals,
+            bool verifiedVisualClaim,
+            bool unverifiedVisualClaim,
+            long ownerStreamGeneration, long latestReportStreamGeneration,
+            long currentStreamGeneration,
+            long ownerRevision, long currentRevision)
+        {
+            // Foreground-window association is not writer attribution. Its
+            // only permitted consequence is therefore a revision-fenced
+            // lightbar/player restore. Every identity and ordering fence must
+            // still name the exact retained process lease, physical target,
+            // virtual stream, and newest admitted native report.
+            return ownerProcessLiveness ==
+                    NativeGameOwnerProcessLiveness.ConfirmedExited &&
+                retainedOwnerStillCurrent &&
+                ownerTargetMatchesLatest && targetBindingMatches &&
+                !latestReportControlsVisuals && verifiedVisualClaim &&
+                !unverifiedVisualClaim &&
+                ownerStreamGeneration == latestReportStreamGeneration &&
+                ownerStreamGeneration == currentStreamGeneration &&
+                ownerRevision > 0 && ownerRevision == currentRevision;
+        }
+
         private void TraceNativeGameOutputIdleBoundary(
             long controlAdmissionRevision)
         {
             Process ownerProcess;
             bool captureOwnerAtBoundary;
+            DualSenseDevice foregroundCaptureTargetDevice = null;
+            long foregroundCaptureRevision = 0;
+            long foregroundCaptureStreamGeneration = 0;
             bool automaticLedExpiryCandidate = false;
             long automaticLedRevision = 0;
             long automaticLedStreamGeneration = 0;
@@ -5228,6 +5697,15 @@ namespace DS4Windows
                     lastNativeGameOutputTimestamp > 0 &&
                     HasMeaningfulNativeGameOutput(
                         lastNativeGameOutputReport, 0);
+                if (captureOwnerAtBoundary)
+                {
+                    foregroundCaptureTargetDevice =
+                        lastNativeGameOutputTargetDevice;
+                    foregroundCaptureRevision =
+                        lastNativeGameOutputRevision;
+                    foregroundCaptureStreamGeneration =
+                        lastNativeGameOutputStreamGeneration;
+                }
                 automaticLedElapsedTicks =
                     lastNativeGameOutputTimestamp > 0 ?
                         now - lastNativeGameOutputTimestamp : 0;
@@ -5301,12 +5779,6 @@ namespace DS4Windows
                         ReferenceEquals(
                             sdlAutomaticLedCandidateTargetDevice,
                             automaticLedTargetDevice);
-                    if (traceFenceCurrent)
-                    {
-                        sdlAutomaticLedCandidateRevision = 0;
-                        sdlAutomaticLedCandidateStreamGeneration = 0;
-                        sdlAutomaticLedCandidateTargetDevice = null;
-                    }
                 }
 
                 if (traceFenceCurrent)
@@ -5314,7 +5786,26 @@ namespace DS4Windows
                     automaticLedReleaseQueued =
                         RequestNativeDualSenseLedOwnershipRelease(
                             automaticLedTargetDevice,
-                            automaticLedRevision);
+                            automaticLedRevision,
+                            automaticLedStreamGeneration);
+                    if (automaticLedReleaseQueued)
+                    {
+                        lock (nativeGameOutputTraceLock)
+                        {
+                            if (sdlAutomaticLedCandidateRevision ==
+                                    automaticLedRevision &&
+                                sdlAutomaticLedCandidateStreamGeneration ==
+                                    automaticLedStreamGeneration &&
+                                ReferenceEquals(
+                                    sdlAutomaticLedCandidateTargetDevice,
+                                    automaticLedTargetDevice))
+                            {
+                                sdlAutomaticLedCandidateRevision = 0;
+                                sdlAutomaticLedCandidateStreamGeneration = 0;
+                                sdlAutomaticLedCandidateTargetDevice = null;
+                            }
+                        }
+                    }
                 }
             }
 
@@ -5329,32 +5820,59 @@ namespace DS4Windows
             // one-shot LED/trigger claim still receives a process lifetime.
             if (captureOwnerAtBoundary && ownerProcess == null)
             {
-                CaptureForegroundNativeGameOutputOwner();
+                CaptureForegroundNativeGameOutputOwner(
+                    foregroundCaptureTargetDevice,
+                    foregroundCaptureRevision,
+                    foregroundCaptureStreamGeneration);
                 lock (nativeGameOutputTraceLock)
                 {
                     ownerProcess = nativeGameOutputOwnerProcess;
                 }
             }
 
-            if (ownerProcess == null || IsProcessAlive(ownerProcess))
+            NativeGameOwnerProcessLiveness ownerProcessLiveness =
+                GetNativeGameOwnerProcessLiveness(ownerProcess);
+            if (ownerProcess == null || ownerProcessLiveness !=
+                    NativeGameOwnerProcessLiveness.ConfirmedExited)
             {
                 return;
             }
 
-            lock (nativeGameOutputTraceLock)
+            // The control-admission revision is the linearization fence for
+            // the exit heuristic. A report admitted before this observation
+            // cancels the stale restore; a report admitted afterward is
+            // ordered later and either follows it or defeats the device-side
+            // native revision check.
+            if (!feedbackDispatchBuffer.TryObserveControlIdle(
+                    controlAdmissionRevision))
             {
-                if (ReferenceEquals(nativeGameOutputOwnerProcess,
-                        ownerProcess))
-                {
-                    nativeGameOutputOwnerProcess = null;
-                }
+                return;
             }
 
-            ownerProcess.Dispose();
+            // Keep the exact dead lease only if callback admission is
+            // temporarily blocked. A later idle pass retries it. Successful
+            // visual admission retires the Process handle; a permanent
+            // target/stream/revision/visual fence retires the dead heuristic
+            // without touching controller state.
+            TryReleaseExitedForegroundOwnerLedOwnership(ownerProcess,
+                ownerProcessLiveness);
         }
 
-        private void CaptureForegroundNativeGameOutputOwner()
+        private void CaptureForegroundNativeGameOutputOwner(
+            DualSenseDevice expectedTargetDevice,
+            long expectedNativeOutputRevision,
+            long expectedStreamGeneration,
+            bool requireSameLiveOwner = false,
+            bool reportVisualClaimVerified = false,
+            uint reportVisualForegroundProcessId = 0)
         {
+            if (expectedTargetDevice == null ||
+                expectedNativeOutputRevision <= 0 ||
+                expectedStreamGeneration <= 0)
+            {
+                return;
+            }
+
             Process candidate = TryOpenForegroundGameProcess();
             if (candidate == null)
             {
@@ -5372,6 +5890,18 @@ namespace DS4Windows
                 return;
             }
 
+            bool candidateMatchesReportVisualProcess =
+                ForegroundCandidateMatchesObservedVisualProcess(
+                    reportVisualForegroundProcessId, candidateId);
+            if (reportVisualForegroundProcessId > 0 &&
+                !candidateMatchesReportVisualProcess)
+            {
+                // Foreground changed after the report was observed. Never
+                // retroactively assign that visual claim to the later window.
+                candidate.Dispose();
+                return;
+            }
+
             Process observedOwner;
             lock (nativeGameOutputTraceLock)
             {
@@ -5379,15 +5909,112 @@ namespace DS4Windows
             }
 
             bool sameLiveOwner = false;
-            if (observedOwner != null && IsProcessAlive(observedOwner))
+            if (observedOwner != null)
             {
-                try
+                NativeGameOwnerProcessLiveness observedOwnerLiveness =
+                    GetNativeGameOwnerProcessLiveness(observedOwner);
+                if (observedOwnerLiveness ==
+                    NativeGameOwnerProcessLiveness.Unknown)
                 {
-                    sameLiveOwner = observedOwner.Id == candidateId;
+                    // A transient Process query failure is not evidence that
+                    // the retained lifecycle candidate ended. Keep its lease
+                    // and retry on a later idle boundary.
+                    candidate.Dispose();
+                    return;
                 }
-                catch
+
+                if (observedOwnerLiveness ==
+                    NativeGameOwnerProcessLiveness.Running)
                 {
-                    sameLiveOwner = false;
+                    try
+                    {
+                        sameLiveOwner = observedOwner.Id == candidateId;
+                    }
+                    catch
+                    {
+                        candidate.Dispose();
+                        return;
+                    }
+                }
+            }
+
+            // A neutral report carries no writer identity at all. It may move
+            // an already retained game's lease across an internal stream or
+            // physical-target replacement only when Windows still identifies
+            // the exact same live foreground PID. Never let an unrelated
+            // foreground process inherit a neutral transport report.
+            if (!ShouldAcceptForegroundOwnerCandidate(
+                    requireSameLiveOwner, sameLiveOwner))
+            {
+                candidate.Dispose();
+                return;
+            }
+
+            bool targetBindingMatches =
+                IsCurrentNativeOutputTarget(expectedTargetDevice);
+            bool installed = false;
+            lock (nativeGameOutputTraceLock)
+            {
+                bool leaseCommitIsCurrent =
+                    ShouldInstallForegroundOwnerLease(
+                        retainedOwnerUnchanged: ReferenceEquals(
+                            nativeGameOutputOwnerProcess, observedOwner),
+                        targetMatchesLatest: ReferenceEquals(
+                            lastNativeGameOutputTargetDevice,
+                            expectedTargetDevice),
+                        targetBindingMatches: targetBindingMatches,
+                        expectedStreamGeneration:
+                            expectedStreamGeneration,
+                        latestReportStreamGeneration:
+                            lastNativeGameOutputStreamGeneration,
+                        currentStreamGeneration:
+                            Volatile.Read(ref streamGeneration),
+                        expectedRevision: expectedNativeOutputRevision,
+                        latestRevision: lastNativeGameOutputRevision);
+                if (leaseCommitIsCurrent)
+                {
+                    // A stream recovery or physical-controller rebind keeps
+                    // the same game process alive. Retain that exact Process
+                    // object, but move its visual lease to the freshly
+                    // validated report target/stream/revision. The redundant
+                    // foreground Process handle is disposed below.
+                    bool targetChanged =
+                        nativeGameOutputOwnerProcess != null &&
+                        !ReferenceEquals(nativeGameOutputOwnerTargetDevice,
+                            expectedTargetDevice);
+                    int latestVisualOwnershipUpdate =
+                        GetNativeReportVisualOwnershipUpdate(
+                            lastNativeGameOutputReport, 0);
+                    if (!sameLiveOwner)
+                    {
+                        nativeGameOutputOwnerProcess = candidate;
+                        nativeGameOutputOwnerProcessId = candidateId;
+                        nativeGameOutputOwnerHasVerifiedVisualClaim = false;
+                        nativeGameOutputOwnerHasUnverifiedVisualClaim = false;
+                        UpdateForegroundOwnerVisualLeaseState(
+                            latestVisualOwnershipUpdate,
+                            retainedOwnerPresent: true,
+                            retainedOwnerVerifiedForReport:
+                                candidateMatchesReportVisualProcess,
+                            ref nativeGameOutputOwnerHasVerifiedVisualClaim,
+                            ref nativeGameOutputOwnerHasUnverifiedVisualClaim);
+                        installed = true;
+                    }
+                    else
+                    {
+                        RebindForegroundOwnerVisualLeaseState(
+                            targetChanged,
+                            latestVisualOwnershipUpdate,
+                            reportVisualClaimVerified &&
+                                candidateMatchesReportVisualProcess,
+                            ref nativeGameOutputOwnerHasVerifiedVisualClaim,
+                            ref nativeGameOutputOwnerHasUnverifiedVisualClaim);
+                    }
+                    nativeGameOutputOwnerTargetDevice = expectedTargetDevice;
+                    nativeGameOutputOwnerRevision =
+                        expectedNativeOutputRevision;
+                    nativeGameOutputOwnerStreamGeneration =
+                        expectedStreamGeneration;
                 }
             }
 
@@ -5395,17 +6022,6 @@ namespace DS4Windows
             {
                 candidate.Dispose();
                 return;
-            }
-
-            bool installed = false;
-            lock (nativeGameOutputTraceLock)
-            {
-                if (ReferenceEquals(nativeGameOutputOwnerProcess,
-                        observedOwner))
-                {
-                    nativeGameOutputOwnerProcess = candidate;
-                    installed = true;
-                }
             }
 
             if (!installed)
@@ -5417,16 +6033,38 @@ namespace DS4Windows
             observedOwner?.Dispose();
         }
 
+        private Process DetachNativeGameOutputOwnerNoLock(
+            Process expectedOwnerProcess)
+        {
+            if (!ReferenceEquals(nativeGameOutputOwnerProcess,
+                    expectedOwnerProcess))
+            {
+                return null;
+            }
+
+            Process owner = nativeGameOutputOwnerProcess;
+            nativeGameOutputOwnerProcess = null;
+            nativeGameOutputOwnerProcessId = 0;
+            nativeGameOutputOwnerRevision = 0;
+            nativeGameOutputOwnerStreamGeneration = 0;
+            nativeGameOutputOwnerTargetDevice = null;
+            nativeGameOutputOwnerHasVerifiedVisualClaim = false;
+            nativeGameOutputOwnerHasUnverifiedVisualClaim = false;
+            return owner;
+        }
+
         private void ClearNativeGameOutputProcessLease()
         {
             Process owner;
             lock (nativeGameOutputTraceLock)
             {
-                owner = nativeGameOutputOwnerProcess;
-                nativeGameOutputOwnerProcess = null;
+                owner = DetachNativeGameOutputOwnerNoLock(
+                    nativeGameOutputOwnerProcess);
                 nativeGameOutputSessionActive = 0;
                 lastNativeGameOutputTimestamp = 0;
                 lastNativeGameOutputRevision = 0;
+                lastNativeGameOutputStreamGeneration = 0;
+                lastNativeGameOutputTargetDevice = null;
                 sdlAutomaticLedCandidateRevision = 0;
                 sdlAutomaticLedCandidateStreamGeneration = 0;
                 sdlAutomaticLedCandidateTargetDevice = null;
@@ -5434,6 +6072,62 @@ namespace DS4Windows
             }
 
             owner?.Dispose();
+        }
+
+        private static bool IsForegroundCompatibleWithRetainedOwner(
+            Process retainedOwnerProcess, int retainedOwnerProcessId,
+            uint foregroundProcessId)
+        {
+            if (retainedOwnerProcess == null ||
+                retainedOwnerProcessId <= 0 ||
+                foregroundProcessId != (uint)retainedOwnerProcessId)
+            {
+                return false;
+            }
+
+            // Check the retained Process object last. A numeric PID can be
+            // reused only after the old process exits, so a reused foreground
+            // PID must not verify a dead lifecycle lease.
+            return ForegroundProcessMatchesRetainedOwner(
+                retainedOwnerProcessId, foregroundProcessId,
+                GetNativeGameOwnerProcessLiveness(retainedOwnerProcess));
+        }
+
+        private static uint GetForegroundProcessId()
+        {
+            IntPtr window = GetForegroundWindow();
+            if (window == IntPtr.Zero)
+            {
+                return 0;
+            }
+
+            GetWindowThreadProcessId(window, out uint rawProcessId);
+            return rawProcessId;
+        }
+
+        internal static bool ForegroundProcessMatchesRetainedOwner(
+            int retainedOwnerProcessId, uint foregroundProcessId,
+            NativeGameOwnerProcessLiveness retainedOwnerLiveness)
+        {
+            return retainedOwnerProcessId > 0 &&
+                foregroundProcessId == (uint)retainedOwnerProcessId &&
+                retainedOwnerLiveness ==
+                    NativeGameOwnerProcessLiveness.Running;
+        }
+
+        internal static bool ForegroundCandidateMatchesObservedVisualProcess(
+            uint observedForegroundProcessId, int candidateProcessId)
+        {
+            return observedForegroundProcessId > 0 &&
+                observedForegroundProcessId <= int.MaxValue &&
+                candidateProcessId > 0 &&
+                candidateProcessId == (int)observedForegroundProcessId;
+        }
+
+        internal static bool ShouldAcceptForegroundOwnerCandidate(
+            bool requireSameLiveOwner, bool sameLiveOwner)
+        {
+            return !requireSameLiveOwner || sameLiveOwner;
         }
 
         private static Process TryOpenForegroundGameProcess()
@@ -5471,15 +6165,37 @@ namespace DS4Windows
             }
         }
 
-        private static bool IsProcessAlive(Process process)
+        internal static NativeGameOwnerProcessLiveness
+            ClassifyNativeGameOwnerProcessLiveness(
+                bool queryCompleted, bool hasExited)
         {
+            if (!queryCompleted)
+            {
+                return NativeGameOwnerProcessLiveness.Unknown;
+            }
+
+            return hasExited ?
+                NativeGameOwnerProcessLiveness.ConfirmedExited :
+                NativeGameOwnerProcessLiveness.Running;
+        }
+
+        private static NativeGameOwnerProcessLiveness
+            GetNativeGameOwnerProcessLiveness(Process process)
+        {
+            if (process == null)
+            {
+                return NativeGameOwnerProcessLiveness.Unknown;
+            }
+
             try
             {
-                return process != null && !process.HasExited;
+                return ClassifyNativeGameOwnerProcessLiveness(
+                    queryCompleted: true, hasExited: process.HasExited);
             }
             catch
             {
-                return false;
+                return ClassifyNativeGameOwnerProcessLiveness(
+                    queryCompleted: false, hasExited: false);
             }
         }
 
@@ -5490,7 +6206,13 @@ namespace DS4Windows
                 return true;
             }
 
-            return processName.Equals("explorer",
+            return GameBarIntegration.IsStrictGameBarProcessName(
+                    processName) ||
+                processName.Equals("GameBarPresenceWriter",
+                    StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("SpotifyXboxGamebarWebView",
+                    StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("explorer",
                        StringComparison.OrdinalIgnoreCase) ||
                 processName.Equals("dwm",
                     StringComparison.OrdinalIgnoreCase) ||

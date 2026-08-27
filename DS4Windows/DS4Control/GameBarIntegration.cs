@@ -1231,7 +1231,7 @@ namespace DS4Windows
             return strictProcessGenericOverlayWindow;
         }
 
-        private static bool IsStrictGameBarProcessName(string processName)
+        internal static bool IsStrictGameBarProcessName(string processName)
         {
             return processName.Equals("GameBar", StringComparison.OrdinalIgnoreCase) ||
                 processName.Equals("XboxGameBar", StringComparison.OrdinalIgnoreCase) ||

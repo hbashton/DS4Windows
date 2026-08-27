@@ -219,9 +219,16 @@ and only then signals or invokes the owner.
   report-ID/epoch-bound token and pacer active-operation claim after releasing
   the combined admission lock. Timeout, HID completion and lifecycle clearing
   occur outside every state/generation lock; accepted admission is never rolled
-  back because a following report may already own the next sequence. Ordinary
-  latest-state template publication is likewise admitted under the same short
-  combined boundary but never waits there. Starting/replacing
+  back because a following report may already own the next sequence. A native
+  controller transition is durable only after its exact report and
+  validity-consumed quiescent template have entered the helper, or after both
+  are retained in one fixed pending transaction. Mutating the replaceable
+  latest cache alone is not admission. While transition A is pending, later
+  native transition B, local overlays, helper replacement, and recovery drain A
+  before mutating controller state; realtime haptics may continue because it
+  updates only the independent media ring. Ordinary latest-state template
+  publication is likewise admitted under the same short combined boundary but
+  never waits there. Starting/replacing
   physical workers uses an atomic lifecycle election; joins, final output and
   thread creation occur outside every lifecycle monitor. Before a replacement
   lifecycle thread is published, the elected starter drains any signal left by
@@ -250,17 +257,29 @@ and only then signals or invokes the owner.
   happen after the trace lock is released.
 - Windows does not identify the process behind a virtual HID output callback.
   A foreground process is tracked only as a lifecycle heuristic and never
-  authorizes a destructive native-state release. The exact 48-byte SDL
-  player-zero LED report observed during automatic enumeration receives one
-  narrow exception: if no other native report establishes a real feedback
-  epoch, a one-second, stream/device/revision-fenced policy restores only the
-  profile lightbar and player LEDs. SDL's public player-index API can emit the
-  same bytes, so this is an explicit visual-domain recovery tradeoff, not
-  sender provenance or a zero-false-positive classifier. Each successfully
-  admitted USB native delta is retained across a failed physical write and has
-  at most one successful physical emission; afterward the physical owner keeps
-  a command-validity-consumed template for local audio/mute/LED overlays.
-  Bluetooth merges those fields into its existing native snapshot.
+  authorizes a destructive native-state release. Two narrow visual-only
+  policies may restore the profile lightbar and player LEDs. First, the exact
+  48-byte SDL player-zero report observed during automatic enumeration may
+  expire after one second only if no other native report establishes a real
+  feedback epoch and its stream/device/revision fences still match. SDL's
+  public player-index API can emit the same bytes, so this is an explicit
+  visual-domain recovery tradeoff, not sender provenance or a
+  zero-false-positive classifier. Second, a retained foreground lifecycle
+  candidate may restore visuals only after the exact Process was positively
+  associated with a visual claim while running, later reached a final
+  nonvisual report, and was then confirmed exited. Callback admission, exact
+  physical target, stream generation, latest revision, and absence of an
+  unverified newer visual claim are revalidated atomically. Sony's explicit
+  LED-release bit retires the proof, and positive visual proof never migrates
+  to a replacement physical controller without a fresh same-process visual
+  association. Game Bar and shell processes are exclusion filters only: when
+  an overlay owns the foreground window during a new visual claim, ambiguity
+  deliberately prevents automatic restoration. Each successfully admitted USB
+  native delta is retained across a failed physical write and has at most one
+  successful physical emission; afterward the physical owner keeps a
+  command-validity-consumed template for local audio/mute/LED overlays.
+  Bluetooth uses the fixed pending transition described above rather than
+  treating a replaceable-cache merge as durable delivery.
   Neither path clears triggers, rumble, audio, microphone, haptics, timestamps,
   or pacer state.
 - OSC and report-diagnostic locks protect one pending snapshot per controller.

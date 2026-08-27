@@ -58,6 +58,61 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void BluetoothPhysicalOutputLocksMergeButNotCompletionWait()
+        {
+            string source = File.ReadAllText(FindRepositoryFile(
+                "DS4Windows", "DS4Library", "InputDevices",
+                "DualSenseDevice.cs"));
+            string physicalLoop = Extract(source,
+                "private void PhysicalOutputLoop(long generation)",
+                "private void PrepareAndFlushPhysicalOutput(");
+            string physicalCommit = Extract(source,
+                "private void PrepareAndFlushPhysicalOutput(",
+                "private bool TryQueuePhysicalOutputCommand(");
+
+            StringAssert.Contains(physicalLoop,
+                "PrepareAndFlushPhysicalOutput(requested)");
+            AssertDoesNotContain(physicalLoop,
+                "pendingNativeGameLedReleaseRevision");
+            AssertDoesNotContain(physicalCommit,
+                "pendingNativeGameLedReleaseRevision");
+
+            int bluetoothBranch = physicalCommit.IndexOf(
+                "if (conType == ConnectionType.BT)",
+                System.StringComparison.Ordinal);
+            int transportLock = physicalCommit.IndexOf(
+                "lock (bluetoothCombinedTransportWriteLock)",
+                System.StringComparison.Ordinal);
+            int prepare = physicalCommit.IndexOf("PrepareOutReport()",
+                System.StringComparison.Ordinal);
+            int cacheMerge = physicalCommit.IndexOf(
+                "UpdateCachedBluetoothCombinedStateFromBluetoothOutput(",
+                System.StringComparison.Ordinal);
+            int flush = physicalCommit.IndexOf(
+                "FlushPreparedOutputReport(ownerRequestGeneration,",
+                System.StringComparison.Ordinal);
+            int cacheCallEnd = physicalCommit.IndexOf("outputReport);",
+                cacheMerge, System.StringComparison.Ordinal);
+            int shortLockEnd = physicalCommit.IndexOf("}", cacheCallEnd,
+                System.StringComparison.Ordinal);
+            Assert.IsTrue(bluetoothBranch >= 0 &&
+                transportLock > bluetoothBranch && prepare > transportLock &&
+                cacheMerge > prepare && cacheCallEnd > cacheMerge &&
+                shortLockEnd > cacheCallEnd &&
+                flush > shortLockEnd,
+                "BT Prepare+cache merge must own the unconditional " +
+                "combined-transport admission boundary, while Flush remains outside it.");
+            AssertDoesNotContain(physicalCommit,
+                "WaitForBluetoothControlThroughAudioPacer(");
+
+            string completionWait = Extract(source,
+                "private bool WaitForBluetoothControlThroughAudioPacer(",
+                "private bool RefreshBluetoothAudioPacerTemplateFromCache(");
+            AssertDoesNotContain(completionWait,
+                "lock (bluetoothCombinedTransportWriteLock)");
+        }
+
+        [TestMethod]
         public void UsbReportIdGuardPrecedesPhysicalStatusAndControlParsing()
         {
             string source = File.ReadAllText(FindRepositoryFile(
@@ -558,14 +613,128 @@ namespace DS4WindowsTests
                 "internal static bool HasMeaningfulNativeGameOutput");
             string idle = Extract(source,
                 "private void TraceNativeGameOutputIdleBoundary(",
-                "private void CaptureForegroundNativeGameOutputOwner()");
+                "private void CaptureForegroundNativeGameOutputOwner(");
             string capture = Extract(source,
-                "private void CaptureForegroundNativeGameOutputOwner()",
+                "private void CaptureForegroundNativeGameOutputOwner(",
                 "private void ClearNativeGameOutputProcessLease()");
+            string release = Extract(source,
+                "private bool RequestNativeDualSenseLedOwnershipRelease(",
+                "private bool TryReleaseExitedForegroundOwnerLedOwnership(");
+            string exitedOwnerRelease = Extract(source,
+                "private bool TryReleaseExitedForegroundOwnerLedOwnership(",
+                "private bool IsCurrentNativeOutputTarget(");
+            string controlDispatch = Extract(source,
+                "private void DispatchFeedbackControl(",
+                "private void StartStateWriter(");
+            string directReader = Extract(source,
+                "private void FeedbackReadLoop(",
+                "private void ApplyFeedback(");
+            string foregroundCompatibility = Extract(source,
+                "private static bool IsForegroundCompatibleWithRetainedOwner(",
+                "private static uint GetForegroundProcessId(");
 
             AssertDoesNotContain(trace, "AppLogger.LogToGui(");
             AssertDoesNotContain(idle, "AppLogger.LogToGui(");
-            Assert.IsTrue(capture.IndexOf("IsProcessAlive(observedOwner)",
+            AssertDoesNotContain(trace,
+                "Volatile.Read(ref streamGeneration)");
+            StringAssert.Contains(trace,
+                "long nativeOutputStreamGeneration");
+            StringAssert.Contains(trace,
+                "traceStreamGeneration = nativeOutputStreamGeneration");
+            StringAssert.Contains(controlDispatch,
+                "nativeOutputStreamGeneration: streamItemGeneration");
+            StringAssert.Contains(directReader,
+                "nativeOutputStreamGeneration:");
+            StringAssert.Contains(directReader,
+                "readStreamGeneration");
+            StringAssert.Contains(release,
+                "lock (feedbackCallbackAdmissionLock)");
+            StringAssert.Contains(release,
+                "expectedStreamGeneration != Interlocked.Read(");
+            StringAssert.Contains(release,
+                "RequestNativeGameLedOwnershipRelease(");
+            AssertDoesNotContain(release, "nativeGameOutputTraceLock");
+            AssertDoesNotContain(release, "feedbackDispatchBuffer");
+            StringAssert.Contains(release,
+                "activeFeedbackCallbacks != 0");
+            StringAssert.Contains(release,
+                "publishedPhysicalControllerTargetDevice");
+            StringAssert.Contains(exitedOwnerRelease,
+                "lock (feedbackCallbackAdmissionLock)");
+            StringAssert.Contains(exitedOwnerRelease,
+                "activeFeedbackCallbacks != 0");
+            StringAssert.Contains(exitedOwnerRelease,
+                "lock (nativeGameOutputTraceLock)");
+            StringAssert.Contains(exitedOwnerRelease,
+                "NativeReportControlsVisuals(");
+            StringAssert.Contains(exitedOwnerRelease,
+                "nativeGameOutputOwnerHasUnverifiedVisualClaim");
+            int physicalRelease = exitedOwnerRelease.IndexOf(
+                "RequestNativeGameLedOwnershipRelease(",
+                System.StringComparison.Ordinal);
+            int ownerClear = exitedOwnerRelease.LastIndexOf(
+                "DetachNativeGameOutputOwnerNoLock(",
+                System.StringComparison.Ordinal);
+            Assert.IsTrue(physicalRelease >= 0 && ownerClear > physicalRelease,
+                "A rejected visual release discarded its retained retry " +
+                "lease before physical admission.");
+            Assert.IsTrue(trace.Contains(
+                "ShouldAdvanceForegroundOwnerLease("));
+            int reportTimeVerification = trace.IndexOf(
+                "foregroundCaptureVisualClaimVerified =",
+                System.StringComparison.Ordinal);
+            int captureCall = trace.LastIndexOf(
+                "CaptureForegroundNativeGameOutputOwner(",
+                System.StringComparison.Ordinal);
+            int verificationArgument = trace.IndexOf(
+                "foregroundCaptureVisualClaimVerified,", captureCall,
+                System.StringComparison.Ordinal);
+            int processIdArgument = trace.IndexOf(
+                "foregroundCaptureVisualProcessId", captureCall,
+                System.StringComparison.Ordinal);
+            Assert.IsTrue(reportTimeVerification >= 0 &&
+                captureCall > reportTimeVerification &&
+                verificationArgument > captureCall &&
+                processIdArgument > verificationArgument,
+                "Report-time visual attribution was not carried with the " +
+                "exact revision into foreground capture.");
+            Assert.IsTrue(capture.Contains(
+                "ShouldInstallForegroundOwnerLease("));
+            StringAssert.Contains(capture,
+                "bool reportVisualClaimVerified = false");
+            StringAssert.Contains(capture,
+                "ForegroundCandidateMatchesObservedVisualProcess(");
+            StringAssert.Contains(capture,
+                "reportVisualClaimVerified &&");
+            StringAssert.Contains(capture,
+                "RebindForegroundOwnerVisualLeaseState(");
+            int foregroundPidCheck = foregroundCompatibility.IndexOf(
+                "foregroundProcessId !=",
+                System.StringComparison.Ordinal);
+            int retainedLivenessCheck = foregroundCompatibility.IndexOf(
+                "GetNativeGameOwnerProcessLiveness(retainedOwnerProcess)",
+                System.StringComparison.Ordinal);
+            Assert.IsTrue(foregroundPidCheck >= 0 &&
+                retainedLivenessCheck > foregroundPidCheck,
+                "A reused foreground PID was trusted before the retained " +
+                "Process object was proven live.");
+            int sameOwnerComparison = capture.IndexOf(
+                "sameLiveOwner = observedOwner.Id == candidateId",
+                System.StringComparison.Ordinal);
+            int leaseCommit = capture.IndexOf(
+                "bool leaseCommitIsCurrent =",
+                System.StringComparison.Ordinal);
+            int redundantCandidateDispose = capture.LastIndexOf(
+                "if (sameLiveOwner)",
+                System.StringComparison.Ordinal);
+            Assert.IsTrue(sameOwnerComparison >= 0 &&
+                leaseCommit > sameOwnerComparison &&
+                redundantCandidateDispose > leaseCommit,
+                "A retained live PID must validate and commit its new " +
+                "target/stream lease before the redundant foreground " +
+                "Process handle is disposed.");
+            Assert.IsTrue(capture.IndexOf(
+                    "GetNativeGameOwnerProcessLiveness(observedOwner)",
                     System.StringComparison.Ordinal) <
                 capture.LastIndexOf("lock (nativeGameOutputTraceLock)",
                     System.StringComparison.Ordinal));
@@ -577,6 +746,26 @@ namespace DS4WindowsTests
                     System.StringComparison.Ordinal) >
                 capture.LastIndexOf("lock (nativeGameOutputTraceLock)",
                     System.StringComparison.Ordinal));
+            Assert.IsTrue(capture.IndexOf(
+                    "bool targetBindingMatches =",
+                    System.StringComparison.Ordinal) <
+                capture.LastIndexOf("lock (nativeGameOutputTraceLock)",
+                    System.StringComparison.Ordinal),
+                "Root-hub target resolution must occur before the capture " +
+                "commit acquires the trace snapshot lock.");
+            string binding = Extract(source,
+                "private void PublishPhysicalControllerBinding(",
+                "public override void Connect()");
+            StringAssert.Contains(binding,
+                "lock (feedbackCallbackAdmissionLock)");
+            StringAssert.Contains(binding,
+                "Volatile.Write(ref lastInputDeviceIndex, deviceIndex)");
+            StringAssert.Contains(binding,
+                "publishedPhysicalControllerTargetDevice");
+            StringAssert.Contains(binding,
+                "targetDevice = ResolvePhysicalControllerTarget(deviceIndex)");
+            StringAssert.Contains(source,
+                "PublishPhysicalControllerBinding(device);");
         }
 
         [TestMethod]
@@ -601,9 +790,13 @@ namespace DS4WindowsTests
 
             string idleExpiry = Extract(outDevice,
                 "private void TraceNativeGameOutputIdleBoundary(",
-                "private void CaptureForegroundNativeGameOutputOwner()");
+                "private void CaptureForegroundNativeGameOutputOwner(");
             AssertDoesNotContain(idleExpiry,
                 "ReleaseNativeDualSenseFeedbackOwnership(");
+            AssertDoesNotContain(idleExpiry,
+                "ReleaseNativeGameOutputOwnership(");
+            Assert.IsTrue(idleExpiry.Contains(
+                "RequestNativeDualSenseLedOwnershipRelease("));
 
             string ledOnlyPhysical = Extract(physical,
                 "private void ApplyPendingNativeGameLedOwnershipRelease()",

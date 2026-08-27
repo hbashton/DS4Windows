@@ -1199,10 +1199,23 @@ namespace DS4WindowsTests
             typeof(DualSenseDevice).GetField(
                 "nativeGameOutputRevision",
                 BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo PendingNativeGameRevisionField =
+            typeof(DualSenseDevice).GetField(
+                "pendingBluetoothNativeGameRevision",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo PendingNativeGameExactStateField =
+            typeof(DualSenseDevice).GetField(
+                "pendingBluetoothNativeGameExactState",
+                BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo PhysicalOutputStateMailboxField =
             typeof(DualSenseDevice).GetField(
                 "physicalOutputStateMailbox",
                 BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo
+            BluetoothCombinedTransportWriteLockField =
+                typeof(DualSenseDevice).GetField(
+                    "bluetoothCombinedTransportWriteLock",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo BluetoothAudioPacerField =
             typeof(DualSenseDevice).GetField(
                 "bluetoothAudioPacer",
@@ -1259,6 +1272,15 @@ namespace DS4WindowsTests
             typeof(DualSenseDevice).GetMethod(
                 "ClaimPhysicalOutputState",
                 BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly MethodInfo PrepareAndFlushPhysicalOutputMethod =
+            typeof(DualSenseDevice).GetMethod(
+                "PrepareAndFlushPhysicalOutput",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly MethodInfo
+            TryPublishPendingNativeGameTransitionMethod =
+                typeof(DualSenseDevice).GetMethod(
+                    "TryPublishPendingBluetoothNativeGameTransition",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly MethodInfo DrainQueuedInputEventsMethod =
             typeof(DualSenseDevice).GetMethod(
                 "DrainQueuedInputEvents",
@@ -1644,8 +1666,12 @@ namespace DS4WindowsTests
 
             byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
                 device);
-            AssertV5AudioContract(cached, expectedFlag0: 0xF2,
-                expectedFlag1: 0x87);
+            AssertV5AudioContract(cached, expectedFlag0: 0xF0,
+                expectedFlag1: 0x83);
+            byte[] pendingExact = GetFieldValue<byte[]>(
+                PendingNativeGameExactStateField, device);
+            Assert.AreEqual((byte)0xF2, pendingExact[13]);
+            Assert.AreEqual((byte)0x87, pendingExact[14]);
             Assert.AreEqual((byte)0x41, cached[15]);
             Assert.AreEqual((byte)0x52, cached[16]);
             for (int index = 23; index <= 49; index++)
@@ -1662,7 +1688,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void DeferredCombinedNativeAdmissionDoesNotQueueStaleRawFallback()
+        public void DeferredCombinedNativeAdmissionRetainsAThenOrdersRawB()
         {
             DualSenseDevice device = CreateBluetoothDevice();
             SetFieldValue(OutputTransportStoppingField, device, 1);
@@ -1679,14 +1705,21 @@ namespace DS4WindowsTests
                 "The fixture did not defer immediate publication.");
             Assert.AreEqual(0, GetFieldValue<int>(
                 PhysicalOutputCommandCountField, device),
-                "The cache-admitted report was duplicated into the raw FIFO.");
+                "The retained report was duplicated into the raw FIFO.");
             Assert.AreEqual(1L, GetFieldValue<long>(
                 NativeGameOutputRevisionField, device),
                 "The first native state was admitted more than once.");
+            Assert.AreEqual(1L, GetFieldValue<long>(
+                PendingNativeGameRevisionField, device),
+                "Immediate pacer backpressure did not retain exact A.");
+            byte[] pendingExact = GetFieldValue<byte[]>(
+                PendingNativeGameExactStateField, device);
+            Assert.AreEqual((byte)0x21, pendingExact[23],
+                "The fixed pending transaction did not retain exact A.");
             byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
                 device);
             Assert.AreEqual((byte)0x21, cached[23],
-                "The deferred first state was not retained by the recovery cache.");
+                "The latest cache lost A before any later update.");
             StringAssert.Contains(device.LastBluetoothHapticsWriteStatus,
                 "Could not atomically publish",
                 "The fixture did not exercise the deferred-publication path.");
@@ -1694,16 +1727,235 @@ namespace DS4WindowsTests
             byte[] second = BuildAtomicNativeFeedback(0x52);
             Assert.IsTrue(ApplyCombinedThenRawFallback(output, device,
                 second, nativeScratch));
-            Assert.AreEqual(0, GetFieldValue<int>(
+            Assert.AreEqual(1, GetFieldValue<int>(
                 PhysicalOutputCommandCountField, device),
-                "An older raw fallback remained eligible after the newer combined state was admitted.");
+                "B was not retained behind the already-admitted exact A.");
             Assert.AreEqual(2L, GetFieldValue<long>(
                 NativeGameOutputRevisionField, device),
                 "The two native states did not receive exactly one revision each.");
 
             cached = GetFieldValue<byte[]>(CachedCombinedReportField, device);
-            Assert.AreEqual((byte)0x52, cached[23],
-                "The deferred first state became authoritative again after the newer state was admitted.");
+            Assert.AreEqual((byte)0x21, cached[23],
+                "B overwrote mutable cache state before retained A entered the helper FIFO.");
+
+            using var pacer = new QueueOnlyPacerFixture();
+            SetFieldValue(BluetoothAudioPacerField, device, pacer.Owner);
+            SetFieldValue(OutputTransportStoppingField, device, 0);
+            try
+            {
+                Assert.AreEqual(
+                    DualSenseDevice.PhysicalOutputCommandProcessResult.
+                        Published,
+                    device.ProcessNextPhysicalOutputCommand(),
+                    "The physical worker did not drain A before admitting raw B.");
+                Assert.AreEqual(0, GetFieldValue<int>(
+                    PhysicalOutputCommandCountField, device));
+                Assert.AreEqual(0L, GetFieldValue<long>(
+                    PendingNativeGameRevisionField, device));
+
+                DualSenseBluetoothAudioPacer.OutboundCommand[] commands =
+                    GetQueuedCommands(pacer.Owner);
+                Assert.AreEqual(2, commands.Length,
+                    "Recovery must queue exactly retained A then raw B.");
+                Assert.AreEqual(
+                    DualSenseBluetoothAudioPacer.MessageKind.
+                        UpdateGameStateAndTemplate,
+                    commands[0].Kind);
+                Assert.AreEqual(
+                    DualSenseBluetoothAudioPacer.MessageKind.
+                        UpdateGameStateAndTemplate,
+                    commands[1].Kind);
+                Assert.AreEqual((byte)0x21,
+                    commands[0].Payload.Buffer[10],
+                    "A was not first in the helper FIFO.");
+                Assert.AreEqual((byte)0x52,
+                    commands[1].Payload.Buffer[10],
+                    "B did not follow A exactly once.");
+
+                cached = GetFieldValue<byte[]>(CachedCombinedReportField,
+                    device);
+                Assert.AreEqual((byte)0x52, cached[23],
+                    "The latest cache did not advance to B after ordered admission.");
+            }
+            finally
+            {
+                SetFieldValue(BluetoothAudioPacerField, device, null);
+            }
+        }
+
+        [TestMethod]
+        public void DeferredNativeTransitionPrecedesLocalVisualRestore()
+        {
+            const int nativeReportOffset = 28;
+            DualSenseDevice device = CreateBluetoothDevice();
+            SetFieldValue(OutputTransportStoppingField, device, 1);
+            SetFieldValue(OutputReportField, device, new byte[78]);
+            PublishProfileVisualState(device, playerLedMask: 0x04,
+                new DS4Color(0xFF, 0x25, 0x00));
+            var output = new ViiperOutDevice(OutContType.None,
+                ViiperVirtualDeviceType.DualSense);
+            byte[] nativeScratch = new byte[48];
+            byte[] first = BuildAtomicNativeFeedback(0x31);
+            first[nativeReportOffset + 2] = 0x14;
+            first[nativeReportOffset + 44] = 0x01;
+            first[nativeReportOffset + 45] = 0x02;
+            first[nativeReportOffset + 46] = 0x04;
+            first[nativeReportOffset + 47] = 0x80;
+
+            Assert.IsTrue(ApplyCombinedThenRawFallback(output, device,
+                first, nativeScratch));
+            long firstRevision = GetFieldValue<long>(
+                NativeGameOutputRevisionField, device);
+            Assert.AreEqual(firstRevision, GetFieldValue<long>(
+                PendingNativeGameRevisionField, device));
+            Assert.IsTrue(device.RequestNativeGameLedOwnershipRelease(
+                firstRevision));
+
+            Assert.IsNotNull(PrepareAndFlushPhysicalOutputMethod);
+            PrepareAndFlushPhysicalOutputMethod.Invoke(device,
+                new object[] { 0L });
+
+            byte[] pendingExact = GetFieldValue<byte[]>(
+                PendingNativeGameExactStateField, device);
+            Assert.AreEqual((byte)0x02, pendingExact[57]);
+            Assert.AreEqual((byte)0x04, pendingExact[58]);
+            Assert.AreEqual((byte)0x80, pendingExact[59],
+                "The local restore mutated retained exact A.");
+            byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
+                device);
+            Assert.AreEqual((byte)0xFF, cached[57]);
+            Assert.AreEqual((byte)0x25, cached[58]);
+            Assert.AreEqual((byte)0x00, cached[59],
+                "The local profile restore was not retained behind A.");
+
+            using var pacer = new QueueOnlyPacerFixture();
+            SetFieldValue(BluetoothAudioPacerField, device, pacer.Owner);
+            SetFieldValue(OutputTransportStoppingField, device, 0);
+            try
+            {
+                Assert.IsNotNull(
+                    TryPublishPendingNativeGameTransitionMethod);
+                object transportLock = GetFieldValue<object>(
+                    BluetoothCombinedTransportWriteLockField, device);
+                lock (transportLock)
+                {
+                    Assert.IsTrue((bool)
+                        TryPublishPendingNativeGameTransitionMethod.Invoke(
+                            device, null));
+                }
+
+                Assert.IsTrue((bool)
+                    TryWriteCombinedControlReportMethod.Invoke(device,
+                        new object[]
+                        {
+                            true,
+                            "post-native local visual restore",
+                            false,
+                            false,
+                        }));
+
+                DualSenseBluetoothAudioPacer.OutboundCommand[] commands =
+                    GetQueuedCommands(pacer.Owner);
+                Assert.AreEqual(2, commands.Length,
+                    "Recovery must admit exact A before the newer local restore.");
+                Assert.AreEqual(
+                    DualSenseBluetoothAudioPacer.MessageKind.
+                        UpdateGameStateAndTemplate,
+                    commands[0].Kind);
+                Assert.AreEqual(
+                    DualSenseBluetoothAudioPacer.MessageKind.UpdateTemplate,
+                    commands[1].Kind);
+                Assert.AreEqual((byte)0x02,
+                    commands[0].Payload.Buffer[44]);
+                Assert.AreEqual((byte)0x04,
+                    commands[0].Payload.Buffer[45]);
+                Assert.AreEqual((byte)0x80,
+                    commands[0].Payload.Buffer[46]);
+                const int templateReportOffset = sizeof(long);
+                Assert.AreEqual((byte)0xFF,
+                    commands[1].Payload.Buffer[
+                        templateReportOffset + 57]);
+                Assert.AreEqual((byte)0x25,
+                    commands[1].Payload.Buffer[
+                        templateReportOffset + 58]);
+                Assert.AreEqual((byte)0x00,
+                    commands[1].Payload.Buffer[
+                        templateReportOffset + 59]);
+            }
+            finally
+            {
+                SetFieldValue(BluetoothAudioPacerField, device, null);
+            }
+        }
+
+        [TestMethod]
+        public void RealtimeHapticsDoesNotAdmitQuiescentStateBeforePendingExact()
+        {
+            DualSenseDevice device = CreateBluetoothDevice();
+            SetFieldValue(OutputTransportStoppingField, device, 1);
+            var output = new ViiperOutDevice(OutContType.None,
+                ViiperVirtualDeviceType.DualSense);
+            byte[] nativeScratch = new byte[48];
+            byte[] first = BuildAtomicNativeFeedback(0x39);
+            Assert.IsTrue(ApplyCombinedThenRawFallback(output, device,
+                first, nativeScratch));
+            long firstRevision = GetFieldValue<long>(
+                PendingNativeGameRevisionField, device);
+            Assert.IsTrue(firstRevision > 0);
+
+            using var pacer = new QueueOnlyPacerFixture();
+            SetFieldValue(BluetoothAudioPacerField, device, pacer.Owner);
+            SetFieldValue(OutputTransportStoppingField, device, 0);
+            device.EnableSpeakerOutput = true;
+            Assert.IsNotNull(ClaimBluetoothSpeakerClockMethod);
+            long speakerClaim = (long)ClaimBluetoothSpeakerClockMethod.Invoke(
+                device, new object[]
+                {
+                    GetPublishedPhysicalOutputState(device),
+                    3000,
+                });
+            Assert.IsTrue(speakerClaim > 0);
+
+            try
+            {
+                byte[] media = BuildCombinedControlReport(0, 0, false);
+                for (int index = 0; index < 64; index++)
+                {
+                    media[78 + index] = (byte)(0x80 + index);
+                }
+                Assert.IsTrue(
+                    device.WriteBluetoothCombinedHapticsAudioOutputReport(
+                        media, 0, media.Length,
+                        hasNativeGameState: false));
+                Assert.AreEqual(firstRevision, GetFieldValue<long>(
+                    PendingNativeGameRevisionField, device),
+                    "The independent realtime haptics lane consumed native state ownership.");
+                Assert.AreEqual(0, GetQueuedCommands(pacer.Owner).Length,
+                    "Realtime haptics incorrectly enqueued a quiescent controller template before exact N.");
+
+                object transportLock = GetFieldValue<object>(
+                    BluetoothCombinedTransportWriteLockField, device);
+                lock (transportLock)
+                {
+                    Assert.IsTrue((bool)
+                        TryPublishPendingNativeGameTransitionMethod.Invoke(
+                            device, null));
+                }
+
+                DualSenseBluetoothAudioPacer.OutboundCommand[] commands =
+                    GetQueuedCommands(pacer.Owner);
+                Assert.AreEqual(1, commands.Length);
+                Assert.AreEqual(
+                    DualSenseBluetoothAudioPacer.MessageKind.
+                        UpdateGameStateAndTemplate,
+                    commands[0].Kind);
+                Assert.AreEqual((byte)0x39,
+                    commands[0].Payload.Buffer[10]);
+            }
+            finally
+            {
+                SetFieldValue(BluetoothAudioPacerField, device, null);
+            }
         }
 
         [TestMethod]
@@ -1753,8 +2005,12 @@ namespace DS4WindowsTests
 
             byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
                 device);
-            AssertV5AudioContract(cached, expectedFlag0: 0xF2,
-                expectedFlag1: 0xF7);
+            AssertV5AudioContract(cached, expectedFlag0: 0xF0,
+                expectedFlag1: 0x83);
+            byte[] pendingExact = GetFieldValue<byte[]>(
+                PendingNativeGameExactStateField, device);
+            Assert.AreEqual((byte)0xF2, pendingExact[13]);
+            Assert.AreEqual((byte)0xF7, pendingExact[14]);
         }
 
         [TestMethod]
@@ -1860,9 +2116,15 @@ namespace DS4WindowsTests
             Assert.AreEqual((byte)0xFC, cached[24]);
             Assert.AreEqual((byte)0x22, cached[34]);
             Assert.AreEqual((byte)0xFD, cached[35]);
-            Assert.AreEqual((byte)0xFC, cached[13],
-                "The profile writer replaced the game's native validity bits.");
-            Assert.AreEqual((byte)0x97, cached[14]);
+            Assert.AreEqual((byte)0xF0, cached[13],
+                "The quiescent cache replayed the game's one-shot validity bits.");
+            Assert.AreEqual((byte)0x97, cached[14],
+                "The newer local visual restore was not retained behind exact game state.");
+            byte[] pendingExact = GetFieldValue<byte[]>(
+                PendingNativeGameExactStateField, device);
+            Assert.AreEqual((byte)0xFC, pendingExact[13],
+                "The profile writer replaced retained exact game validity.");
+            Assert.AreEqual((byte)0x97, pendingExact[14]);
         }
 
         [TestMethod]
@@ -1950,6 +2212,8 @@ namespace DS4WindowsTests
         public void NativeReleasePublishesProfileLedsInSameAtomicCarrier()
         {
             DualSenseDevice device = CreateBluetoothDevice();
+            using var pacer = new QueueOnlyPacerFixture();
+            SetFieldValue(BluetoothAudioPacerField, device, pacer.Owner);
             byte[] profile = new byte[78];
             profile[0] = 0x31;
             profile[3] = 0x14;
@@ -1967,21 +2231,146 @@ namespace DS4WindowsTests
             claimed[57] = 0xA1;
             claimed[58] = 0xA2;
             claimed[59] = 0xA3;
-            device.WriteBluetoothCombinedHapticsAudioOutputReport(claimed, 0,
-                claimed.Length, hasNativeGameState: true);
+            Assert.IsTrue(
+                device.WriteBluetoothCombinedHapticsAudioOutputReport(
+                    claimed, 0, claimed.Length,
+                    hasNativeGameState: true));
 
             byte[] released = BuildCombinedControlReport(0, 0, false);
             released[14] = 0x08;
-            device.WriteBluetoothCombinedHapticsAudioOutputReport(released, 0,
-                released.Length, hasNativeGameState: true);
+            Assert.IsTrue(
+                device.WriteBluetoothCombinedHapticsAudioOutputReport(
+                    released, 0, released.Length,
+                    hasNativeGameState: true));
 
             byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
                 device);
-            Assert.AreEqual((byte)0x14, (byte)(cached[14] & 0x1C));
+            Assert.AreEqual((byte)0x00, (byte)(cached[14] & 0x1C),
+                "The steady cache retained the one-shot profile restore validity.");
             Assert.AreEqual((byte)0x09, cached[56]);
             Assert.AreEqual((byte)0x31, cached[57]);
             Assert.AreEqual((byte)0x52, cached[58]);
             Assert.AreEqual((byte)0x73, cached[59]);
+
+            DualSenseBluetoothAudioPacer.OutboundCommand[] commands =
+                GetQueuedCommands(pacer.Owner);
+            Assert.AreEqual(2, commands.Length);
+            Assert.AreEqual((byte)0x14,
+                (byte)(commands[1].Payload.Buffer[1] & 0x1C),
+                "The exact release did not carry profile LED validity.");
+            SetFieldValue(BluetoothAudioPacerField, device, null);
+        }
+
+        [TestMethod]
+        public void LateLedReleaseAndNewerNativeStateShareBtAdmissionBoundary()
+        {
+            DualSenseDevice device = CreateBluetoothDevice();
+            using var pacer = new QueueOnlyPacerFixture();
+            SetFieldValue(BluetoothAudioPacerField, device, pacer.Owner);
+            byte[] profile = new byte[78];
+            profile[0] = 0x31;
+            SetFieldValue(OutputReportField, device, profile);
+            PublishProfileVisualState(device, playerLedMask: 0x04,
+                new DS4Color(0xFF, 0x25, 0x00));
+
+            byte[] first = BuildCombinedControlReport(0, 0, false);
+            first[14] = 0x14;
+            first[23] = 0x41;
+            first[34] = 0x42;
+            first[56] = 0x01;
+            first[57] = 0x00;
+            first[58] = 0x00;
+            first[59] = 0x40;
+            device.WriteBluetoothCombinedHapticsAudioOutputReport(
+                first, 0, first.Length, hasNativeGameState: true,
+                out long firstRevision);
+            Assert.IsTrue(firstRevision > 0);
+
+            byte[] newer = BuildCombinedControlReport(0, 0, false);
+            newer[14] = 0x14;
+            newer[23] = 0x51;
+            newer[34] = 0x52;
+            newer[56] = 0x02;
+            newer[57] = 0x12;
+            newer[58] = 0x34;
+            newer[59] = 0x56;
+
+            using var physicalCommitEntered =
+                new ManualResetEventSlim(false);
+            using var releasePhysicalCommit =
+                new ManualResetEventSlim(false);
+            device.PhysicalBluetoothOutputTransportLockedTestHook = () =>
+            {
+                physicalCommitEntered.Set();
+                Assert.IsTrue(releasePhysicalCommit.Wait(2000));
+            };
+            Task physicalCommit = null;
+            Task newerNativeCommit = null;
+            try
+            {
+                Assert.IsNotNull(PrepareAndFlushPhysicalOutputMethod);
+                physicalCommit = Task.Run(() =>
+                    PrepareAndFlushPhysicalOutputMethod.Invoke(device,
+                        new object[] { 0L }));
+                Assert.IsTrue(physicalCommitEntered.Wait(2000));
+
+                object transportLock = GetFieldValue<object>(
+                    BluetoothCombinedTransportWriteLockField, device);
+                bool enteredTransportLock = Monitor.TryEnter(transportLock);
+                if (enteredTransportLock)
+                {
+                    Monitor.Exit(transportLock);
+                }
+                Assert.IsFalse(enteredTransportLock,
+                    "The BT physical merge reached Prepare without owning " +
+                    "the combined transport admission lock.");
+
+                // This request arrives after the physical worker has chosen
+                // its BT publication path. The newer native state must wait
+                // until that visual restore is merged into the shared cache.
+                Assert.IsTrue(device.RequestNativeGameLedOwnershipRelease(
+                    firstRevision));
+                newerNativeCommit = Task.Run(() =>
+                    device.WriteBluetoothCombinedHapticsAudioOutputReport(
+                        newer, 0, newer.Length,
+                        hasNativeGameState: true,
+                        out _));
+
+                releasePhysicalCommit.Set();
+                Assert.IsTrue(physicalCommit.Wait(2000));
+                Assert.IsTrue(newerNativeCommit.Wait(2000));
+
+                byte[] cached = GetFieldValue<byte[]>(
+                    CachedCombinedReportField, device);
+                Assert.AreEqual((byte)0x51, cached[23]);
+                Assert.AreEqual((byte)0x52, cached[34]);
+                Assert.AreEqual((byte)0x02, cached[56]);
+                Assert.AreEqual((byte)0x12, cached[57]);
+                Assert.AreEqual((byte)0x34, cached[58]);
+                Assert.AreEqual((byte)0x56, cached[59]);
+                Assert.IsFalse(GetPublishedPhysicalOutputState(device).
+                    NativeGameLightbarOwnershipReleased,
+                    "The stale profile restore overwrote the newer native " +
+                    "visual owner.");
+                Assert.AreEqual(firstRevision + 1,
+                    GetFieldValue<long>(NativeGameOutputRevisionField,
+                        device));
+            }
+            finally
+            {
+                releasePhysicalCommit.Set();
+                device.PhysicalBluetoothOutputTransportLockedTestHook = null;
+                if (physicalCommit != null && !physicalCommit.IsCompleted)
+                {
+                    physicalCommit.Wait(2000);
+                }
+                if (newerNativeCommit != null &&
+                    !newerNativeCommit.IsCompleted)
+                {
+                    newerNativeCommit.Wait(2000);
+                }
+                SetFieldValue(BluetoothAudioPacerField, device, null);
+            }
         }
 
         [TestMethod]
@@ -2116,28 +2505,42 @@ namespace DS4WindowsTests
         public void NativeCombinedCarrierRetainsGameLightbarAcrossUnrelatedState()
         {
             DualSenseDevice device = CreateBluetoothDevice();
+            using var pacer = new QueueOnlyPacerFixture();
+            SetFieldValue(BluetoothAudioPacerField, device, pacer.Owner);
             byte[] lightbar = BuildCombinedControlReport(0, 0, false);
             lightbar[13] = 0x00;
             lightbar[14] = 0x04;
             lightbar[57] = 0x31;
             lightbar[58] = 0x52;
             lightbar[59] = 0x73;
-            device.WriteBluetoothCombinedHapticsAudioOutputReport(lightbar, 0,
-                lightbar.Length, hasNativeGameState: true);
+            Assert.IsTrue(
+                device.WriteBluetoothCombinedHapticsAudioOutputReport(
+                    lightbar, 0, lightbar.Length,
+                    hasNativeGameState: true));
 
             byte[] unrelated = BuildCombinedControlReport(0, 0, false);
             unrelated[13] = 0x00;
             unrelated[14] = 0x40;
             unrelated[50] = 0x4A;
-            device.WriteBluetoothCombinedHapticsAudioOutputReport(unrelated,
-                0, unrelated.Length, hasNativeGameState: true);
+            Assert.IsTrue(
+                device.WriteBluetoothCombinedHapticsAudioOutputReport(
+                    unrelated, 0, unrelated.Length,
+                    hasNativeGameState: true));
 
             byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
                 device);
-            Assert.AreEqual((byte)0x04, (byte)(cached[14] & 0x04));
+            Assert.AreEqual((byte)0x00, (byte)(cached[14] & 0x04));
             Assert.AreEqual((byte)0x31, cached[57]);
             Assert.AreEqual((byte)0x52, cached[58]);
             Assert.AreEqual((byte)0x73, cached[59]);
+
+            DualSenseBluetoothAudioPacer.OutboundCommand[] commands =
+                GetQueuedCommands(pacer.Owner);
+            Assert.AreEqual(2, commands.Length);
+            Assert.AreEqual((byte)0x04,
+                (byte)(commands[1].Payload.Buffer[1] & 0x04),
+                "The unrelated exact state did not retain the persistent game lightbar.");
+            SetFieldValue(BluetoothAudioPacerField, device, null);
         }
 
         [TestMethod]
@@ -2397,6 +2800,7 @@ namespace DS4WindowsTests
                         feedback.Length,
                         true,
                         nativeScratch,
+                        1L,
                     });
             if (handled)
             {
@@ -2412,6 +2816,7 @@ namespace DS4WindowsTests
                     feedback,
                     feedback.Length,
                     nativeScratch,
+                    1L,
                 });
         }
 
@@ -2483,6 +2888,29 @@ namespace DS4WindowsTests
                     PacerRingEntriesField.GetValue(ring);
                 first = entries[head];
                 second = entries[(head + 1) % entries.Length];
+            }
+        }
+
+        private static DualSenseBluetoothAudioPacer.OutboundCommand[]
+            GetQueuedCommands(DualSenseBluetoothAudioPacer pacer)
+        {
+            var ring = (DualSenseBluetoothAudioPacerRing<
+                DualSenseBluetoothAudioPacer.OutboundCommand>)
+                    PacerOutboundCommandsField.GetValue(pacer);
+            object syncRoot = PacerRingSyncRootField.GetValue(ring);
+            lock (syncRoot)
+            {
+                int count = (int)PacerRingCountField.GetValue(ring);
+                int head = (int)PacerRingHeadField.GetValue(ring);
+                var entries = (DualSenseBluetoothAudioPacer.OutboundCommand[])
+                    PacerRingEntriesField.GetValue(ring);
+                var result =
+                    new DualSenseBluetoothAudioPacer.OutboundCommand[count];
+                for (int index = 0; index < count; index++)
+                {
+                    result[index] = entries[(head + index) % entries.Length];
+                }
+                return result;
             }
         }
 

@@ -44,13 +44,22 @@ installer lifecycle handling.
   mute LED follows the conventional state: on means muted and off means live.
   Enabling this mode disables and greys out mute-button profile switching so
   one button press cannot own both actions.
-- **Safe visual-only lightbar recovery.** When SDL/Steam-style native output
-  stops refreshing the visual LED lane, DS4Windows can restore the configured
-  profile lightbar. This is deliberately limited to visual state. Foreground
-  association is a lifecycle heuristic, not sender-PID attribution, so it
-  never claims an exact writer and never releases triggers, rumble, advanced
-  haptics, or audio. Explicit Sony release and transport boundaries remain
-  authoritative for those lanes.
+- **Fenced profile-lightbar restoration after game exit.** When the exact
+  retained foreground lifecycle candidate is confirmed to have exited,
+  DS4Windows can restore only the configured profile lightbar and player LEDs,
+  even when the game's final native report was neutral. The candidate must
+  first have been positively associated with a visual claim while its exact
+  Process was still running; its physical target, VIIPER stream, feedback
+  admission, final nonvisual report, and newest native revision must all still
+  match. A newer or unverified visual writer wins. Game Bar and shell hosts are
+  negative capture filters, not proof of who wrote a report: if an overlay owns
+  the foreground window while a new visual claim arrives, DS4Windows safely
+  leaves that visual state alone. Triggers, rumble, haptics, audio,
+  microphone/mute, and pacer state remain untouched. The separate exact SDL
+  bootstrap signature may expire only before any real feedback epoch; neither
+  policy is sender-PID attribution.
+- **Quieter routine logging.** Native-session, idle-report hex, foreground PID
+  association, and normal process-exit messages no longer crowd the GUI log.
 - **Reconnect-safe wired HidHide ownership.** DS4Windows records the live HID
   identity before PnP removal and removes only persistent entries that it
   inserted. A wired controller that returns under a new HID instance can
@@ -83,11 +92,13 @@ package-owned files. Portable users can continue using the release ZIP.
 Release coverage exercises ordered trigger epochs, raw-alias negotiation,
 failed-write retry, USB and Bluetooth input parsing, the read-ahead lifecycle,
 audio start/stop and reconnect races, Sonar endpoint selection and PCM format,
-mute persistence and runtime policy, visual LED lease recovery, HidHide
-generation changes, and startup-task ownership. Publication also gates on the
-Release build and regression suite, installer state-machine and restart
-simulations, package manifests, pinned payload hashes, and public signing
-requirements.
+mute persistence and runtime policy, confirmed-exit and unknown-liveness LED
+fences, same-process stream/target rebinding, first-command and failed-write USB
+ordering, Bluetooth combined-admission ordering, absence of routine lifecycle
+logging, HidHide generation changes, and startup-task ownership. Publication
+also gates on the Release build and regression suite, installer state-machine
+and restart simulations, package manifests, pinned payload hashes, and public
+signing requirements.
 
 ## Downloads
 

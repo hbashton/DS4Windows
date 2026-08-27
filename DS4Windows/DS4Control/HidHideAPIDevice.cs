@@ -60,24 +60,35 @@ namespace DS4WinWPF.DS4Control
 
         public bool GetActiveState()
         {
-            bool result = false;
+            return TryGetActiveState(out bool state) && state;
+        }
+
+        public bool TryGetActiveState(out bool state)
+        {
+            return TryGetBoolean(IOCTL_GET_ACTIVE, out state);
+        }
+
+        private bool TryGetBoolean(uint controlCode, out bool state)
+        {
+            state = false;
+            if (!IsOpen()) return false;
 
             unsafe
             {
+                bool value = false;
                 int bytesReturned = 0;
-                NativeMethods.DeviceIoControl(hidHideHandle.DangerousGetHandle(),
-                    HidHideAPIDevice.IOCTL_GET_ACTIVE,
+                bool result = NativeMethods.DeviceIoControl(
+                    hidHideHandle.DangerousGetHandle(),
+                    controlCode,
                     IntPtr.Zero,
                     0,
-                    new IntPtr(&result),
+                    new IntPtr(&value),
                     1,
                     ref bytesReturned,
                     IntPtr.Zero);
-
-                //int error = Marshal.GetLastWin32Error();
+                state = value;
+                return result && bytesReturned >= 1;
             }
-
-            return result;
         }
 
         public bool SetActiveState(bool state)
@@ -104,44 +115,19 @@ namespace DS4WinWPF.DS4Control
 
         public List<string> GetBlacklist()
         {
-            List<string> instances = new List<string>();
+            return TryGetBlacklist(out List<string> instances) ? instances :
+                new List<string>();
+        }
 
-            int bytesReturned = 0;
-            bool result = NativeMethods.DeviceIoControl(hidHideHandle.DangerousGetHandle(),
-                HidHideAPIDevice.IOCTL_GET_BLACKLIST,
-                IntPtr.Zero,
-                0,
-                IntPtr.Zero,
-                0,
-                ref bytesReturned,
-                IntPtr.Zero);
-
-            if (bytesReturned > 0)
-            {
-                byte[] dataBuffer = new byte[bytesReturned];
-                int requiredBytes = bytesReturned;
-                bytesReturned = 0;
-
-                IntPtr buffer = Marshal.AllocHGlobal(requiredBytes);
-
-                result = NativeMethods.DeviceIoControl(hidHideHandle.DangerousGetHandle(),
-                    HidHideAPIDevice.IOCTL_GET_BLACKLIST,
-                    IntPtr.Zero,
-                    0,
-                    buffer,
-                    requiredBytes,
-                    ref bytesReturned,
-                    IntPtr.Zero);
-
-                //int error = Marshal.GetLastWin32Error();
-                Marshal.Copy(buffer, dataBuffer, 0, requiredBytes);
-                string tempstring = Encoding.Unicode.GetString(dataBuffer).TrimEnd(char.MinValue);
-                instances = tempstring.Split(char.MinValue).ToList();
-
-                Marshal.FreeHGlobal(buffer);
-            }
-
-            return instances;
+        /// <summary>
+        /// Reads the persistent blacklist without conflating a driver/query
+        /// failure with a valid empty list.  Callers performing read-modify-
+        /// write must use this method so an unavailable HidHide device can
+        /// never erase entries owned by the user or another application.
+        /// </summary>
+        public bool TryGetBlacklist(out List<string> instances)
+        {
+            return TryGetStringList(IOCTL_GET_BLACKLIST, out instances);
         }
 
         public bool SetBlacklist(List<string> instances)
@@ -209,44 +195,61 @@ namespace DS4WinWPF.DS4Control
 
         public List<string> GetWhitelist()
         {
-            List<string> instances = new List<string>();
+            return TryGetWhitelist(out List<string> instances) ? instances :
+                new List<string>();
+        }
 
-            int bytesReturned = 0;
-            bool result = NativeMethods.DeviceIoControl(hidHideHandle.DangerousGetHandle(),
-                IOCTL_GET_WHITELIST,
-                IntPtr.Zero,
-                0,
-                IntPtr.Zero,
-                0,
-                ref bytesReturned,
+        public bool TryGetWhitelist(out List<string> instances)
+        {
+            return TryGetStringList(IOCTL_GET_WHITELIST, out instances);
+        }
+
+        private bool TryGetStringList(uint controlCode,
+            out List<string> instances)
+        {
+            instances = new List<string>();
+            if (!IsOpen()) return false;
+
+            int requiredBytes = 0;
+            bool sizeQuery = NativeMethods.DeviceIoControl(
+                hidHideHandle.DangerousGetHandle(), controlCode,
+                IntPtr.Zero, 0, IntPtr.Zero, 0, ref requiredBytes,
                 IntPtr.Zero);
-
-            if (bytesReturned > 0)
+            if (requiredBytes <= 0)
             {
-                byte[] dataBuffer = new byte[bytesReturned];
-                int requiredBytes = bytesReturned;
-                bytesReturned = 0;
-
-                IntPtr buffer = Marshal.AllocHGlobal(requiredBytes);
-
-                result = NativeMethods.DeviceIoControl(hidHideHandle.DangerousGetHandle(),
-                    IOCTL_GET_WHITELIST,
-                    IntPtr.Zero,
-                    0,
-                    buffer,
-                    requiredBytes,
-                    ref bytesReturned,
-                    IntPtr.Zero);
-
-                //int error = Marshal.GetLastWin32Error();
-                Marshal.Copy(buffer, dataBuffer, 0, requiredBytes);
-                string tempstring = Encoding.Unicode.GetString(dataBuffer).TrimEnd(char.MinValue);
-                instances = tempstring.Split(char.MinValue).ToList();
-
-                Marshal.FreeHGlobal(buffer);
+                return sizeQuery;
             }
 
-            return instances;
+            IntPtr buffer = Marshal.AllocHGlobal(requiredBytes);
+            try
+            {
+                int bytesReturned = 0;
+                bool result = NativeMethods.DeviceIoControl(
+                    hidHideHandle.DangerousGetHandle(), controlCode,
+                    IntPtr.Zero, 0, buffer, requiredBytes,
+                    ref bytesReturned, IntPtr.Zero);
+                if (!result)
+                {
+                    return false;
+                }
+
+                int bytesToCopy = bytesReturned > 0 ?
+                    Math.Min(bytesReturned, requiredBytes) : requiredBytes;
+                byte[] data = new byte[bytesToCopy];
+                Marshal.Copy(buffer, data, 0, bytesToCopy);
+                string value = Encoding.Unicode.GetString(data)
+                    .TrimEnd(char.MinValue);
+                if (value.Length > 0)
+                {
+                    instances.AddRange(value.Split(char.MinValue)
+                        .Where(item => !string.IsNullOrWhiteSpace(item)));
+                }
+                return true;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
         }
 
         public bool SetWhitelist(List<string> instances)
@@ -274,24 +277,12 @@ namespace DS4WinWPF.DS4Control
 
         public bool GetWhiteListInverseState()
         {
-            bool result = false;
+            return TryGetWhitelistInverseState(out bool state) && state;
+        }
 
-            unsafe
-            {
-                int bytesReturned = 0;
-                NativeMethods.DeviceIoControl(hidHideHandle.DangerousGetHandle(),
-                    HidHideAPIDevice.IOCTL_GET_WL_INVERT,
-                    IntPtr.Zero,
-                    0,
-                    new IntPtr(&result),
-                    1,
-                    ref bytesReturned,
-                    IntPtr.Zero);
-
-                //int error = Marshal.GetLastWin32Error();
-            }
-
-            return result;
+        public bool TryGetWhitelistInverseState(out bool state)
+        {
+            return TryGetBoolean(IOCTL_GET_WL_INVERT, out state);
         }
 
         public bool SetWhitelistInverseState(bool state)

@@ -114,6 +114,7 @@ namespace DS4Windows
             public bool LaunchProgram;
             public string ProfileName = string.Empty;
             public Action<bool> AfterLoad;
+            public Func<bool> LoadGuard;
             public long Revision;
         }
 
@@ -861,7 +862,8 @@ namespace DS4Windows
         //private const double MOUSESTICKMINVELOCITY = 40.0;
 
         private static void RequestProfileSwitch(int device, string profileName, bool tempProfile,
-            bool launchProgram, ControlService ctrl, Action<bool> afterLoad = null)
+            bool launchProgram, ControlService ctrl, Action<bool> afterLoad = null,
+            Func<bool> loadGuard = null)
         {
             if (device < 0 || device >= Global.MAX_DS4_CONTROLLER_COUNT)
             {
@@ -877,6 +879,7 @@ namespace DS4Windows
                 request.LaunchProgram = launchProgram;
                 request.ProfileName = profileName ?? string.Empty;
                 request.AfterLoad = afterLoad;
+                request.LoadGuard = loadGuard;
 
                 if (request.Running)
                 {
@@ -908,10 +911,10 @@ namespace DS4Windows
         /// </summary>
         public static void RequestTemporaryProfileLoad(int device,
             string profileName, bool launchProgram, ControlService ctrl,
-            Action<bool> afterLoad = null)
+            Action<bool> afterLoad = null, Func<bool> loadGuard = null)
         {
             RequestProfileSwitch(device, profileName, true, launchProgram,
-                ctrl, afterLoad);
+                ctrl, afterLoad, loadGuard);
         }
 
         public static void ExecuteSerializedProfileMutation(int device,
@@ -937,6 +940,7 @@ namespace DS4Windows
                 bool launchProgram;
                 string profileName;
                 Action<bool> afterLoad;
+                Func<bool> loadGuard;
                 long revision;
 
                 lock (profileSwitchRequestLocks[device])
@@ -953,21 +957,23 @@ namespace DS4Windows
                     launchProgram = request.LaunchProgram;
                     profileName = request.ProfileName;
                     afterLoad = request.AfterLoad;
+                    loadGuard = request.LoadGuard;
                     revision = request.Revision;
                     request.AfterLoad = null;
+                    request.LoadGuard = null;
                 }
 
                 bool loaded = false;
+                bool requestAccepted = false;
                 try
                 {
-                    lock (profileMutationLocks[device])
-                    {
-                        loaded = tempProfile ?
+                    loaded = TryExecuteCurrentProfileSwitchRequest(device,
+                        revision, loadGuard, () => tempProfile ?
                             LoadTempProfile(device, profileName, launchProgram,
                                 ctrl, transitionRevision: revision) :
                             LoadProfile(device, launchProgram, ctrl,
-                                transitionRevision: revision);
-                    }
+                                transitionRevision: revision),
+                        out requestAccepted);
                 }
                 catch (Exception ex)
                 {
@@ -976,8 +982,9 @@ namespace DS4Windows
 
                 try
                 {
-                    if (Global.IsCurrentProfileSwitchRevision(device,
-                        revision))
+                    if (requestAccepted &&
+                        Global.IsCurrentProfileSwitchRevision(device,
+                            revision))
                     {
                         afterLoad?.Invoke(loaded);
                     }
@@ -986,6 +993,38 @@ namespace DS4Windows
                 {
                     AppLogger.LogToGui($"Profile switch post-load action failed: {ex.Message}", false);
                 }
+            }
+        }
+
+        internal static bool TryExecuteCurrentProfileSwitchRequest(int device,
+            long revision, Func<bool> loadGuard, Func<bool> load,
+            out bool requestAccepted)
+        {
+            requestAccepted = false;
+            if (load == null || device < 0 ||
+                device >= Global.MAX_DS4_CONTROLLER_COUNT)
+            {
+                return false;
+            }
+
+            lock (profileMutationLocks[device])
+            {
+                // Live profile edits can invalidate a queued mute-button
+                // switch before this worker reaches the mutation boundary.
+                // Check while holding that same boundary so stale work cannot
+                // reset or map profile globals after the edit has completed.
+                if (!Global.IsCurrentProfileSwitchRevision(device, revision))
+                {
+                    return false;
+                }
+
+                if (loadGuard != null && !loadGuard())
+                {
+                    return false;
+                }
+
+                requestAccepted = true;
+                return load();
             }
         }
 

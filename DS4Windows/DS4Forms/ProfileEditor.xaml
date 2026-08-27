@@ -2357,8 +2357,12 @@
                                                     <CheckBox Content="Headset only (mute controller speaker)"
                                                               IsChecked="{Binding DualSenseHeadsetOnlyAudio}"
                                                               IsEnabled="{Binding DualSenseEnableSpeakerOutput}"
-                                                              Margin="20,2,3,7"
+                                                              Margin="20,2,3,2"
                                                               ToolTip="Mutes the built-in speaker while continuing the same stream through a headset connected to the controller's AUX port." />
+                                                    <CheckBox Content="Mute controller speaker with mute button"
+                                                              IsChecked="{Binding DualSenseMuteButtonMutesSpeaker}"
+                                                              Margin="20,2,3,7"
+                                                              ToolTip="When Mute Button Mutes Input/Output is enabled, a lit mute LED turns off controller-speaker output. The setting has no effect while the master toggle is off." />
                                                 </StackPanel>
                                                 <Label Content="Audio source:" Grid.Row="1" Grid.Column="0"
                                                        ToolTip="For game audio, select the virtual Wireless Controller endpoint created by a VIIPER PlayStation output. The first stereo pair is mirrored to the physical controller speaker." />
@@ -2407,6 +2411,10 @@
                                                               IsChecked="{Binding DualSenseEnableMicrophonePassthrough}"
                                                               IsEnabled="{Binding CanChangeControllerMicrophoneInput}"
                                                               ToolTip="{Binding ControllerMicrophoneDescription}" />
+                                                    <CheckBox Content="Mute controller microphone with mute button"
+                                                              IsChecked="{Binding DualSenseMuteButtonMutesMicrophone}"
+                                                              Margin="20,4,0,0"
+                                                              ToolTip="When Mute Button Mutes Input/Output is enabled, a lit mute LED turns off controller-microphone input. The setting has no effect while the master toggle is off." />
                                                     <TextBlock Text="{Binding ControllerMicrophoneAvailabilityText}"
                                                                Visibility="{Binding ShowControllerMicrophoneAvailabilityMessage, Converter={StaticResource BooleanToVisibilityConverter}}"
                                                                Margin="20,4,0,3" FontSize="11" TextWrapping="Wrap"
@@ -2480,34 +2488,40 @@
                                                     <RowDefinition Height="30" />
                                                     <RowDefinition Height="30" />
                                                     <RowDefinition Height="30" />
+                                                    <RowDefinition Height="30" />
                                                 </Grid.RowDefinitions>
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition />
                                                 </Grid.ColumnDefinitions>
 
-                                                <CheckBox Content="Enable mute button light" IsChecked="{Binding DualSenseMuteButtonLightEnabled}"
-                                                          IsEnabled="{Binding IsChecked, ElementName=MuteMicCheck, Converter={StaticResource InverseBoolConverter}}"
+                                                <CheckBox x:Name="MuteInputOutputCheck" Content="Mute Button Mutes Input/Output"
+                                                          IsChecked="{Binding DualSenseMuteButtonMutesInputOutput}"
                                                           Grid.Row="0" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}"
+                                                          ToolTip="Uses the controller mute button as a master for the speaker and microphone targets selected above. The mute LED is on while those targets are muted and off while they are live." />
+                                                <CheckBox Content="Enable mute button light" IsChecked="{Binding DualSenseMuteButtonLightEnabled}"
+                                                          IsEnabled="{Binding IsChecked, ElementName=MuteInputOutputCheck, Converter={StaticResource InverseBoolConverter}}"
+                                                          Grid.Row="1" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}"
                                                           ToolTip="Mirrors the physical DualSense mute button state to the controller mute LED while this profile is active. This only controls the light, not Windows microphone routing." />
-                                                <Label Content="Mute on profile:" Grid.Row="1" Grid.Column="0"
-                                                       IsEnabled="{Binding IsChecked, ElementName=MuteMicCheck, Converter={StaticResource InverseBoolConverter}}"
+                                                <CheckBox Content="Mute button switches profiles"
+                                                          IsChecked="{Binding DualSenseMuteButtonSwitchesProfiles}"
+                                                          IsEnabled="{Binding IsChecked, ElementName=MuteInputOutputCheck, Converter={StaticResource InverseBoolConverter}}"
+                                                          Grid.Row="2" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}"
+                                                          ToolTip="Switches between the selected profiles when mute changes. Enabling Mute Button Mutes Input/Output turns this option off and greys it out without erasing the saved profile choices." />
+                                                <Label Content="Mute on profile:" Grid.Row="3" Grid.Column="0"
+                                                       IsEnabled="{Binding DualSenseMuteButtonSwitchesProfiles}"
                                                        ToolTip="Optional. Switch to this profile when the physical DualSense mute button toggles on." />
                                                 <ComboBox ItemsSource="{Binding OptionalProfileChoices}" SelectedItem="{Binding DualSenseMuteOnProfileName}"
-                                                          IsEnabled="{Binding IsChecked, ElementName=MuteMicCheck, Converter={StaticResource InverseBoolConverter}}"
-                                                          Grid.Row="1" Grid.Column="1" Margin="{StaticResource spaceMargin}"
+                                                          IsEnabled="{Binding DualSenseMuteButtonSwitchesProfiles}"
+                                                          Grid.Row="3" Grid.Column="1" Margin="{StaticResource spaceMargin}"
                                                           ToolTip="Leave blank to avoid changing profiles when mute turns on." />
-                                                <Label Content="Mute off profile:" Grid.Row="2" Grid.Column="0"
-                                                       IsEnabled="{Binding IsChecked, ElementName=MuteMicCheck, Converter={StaticResource InverseBoolConverter}}"
+                                                <Label Content="Mute off profile:" Grid.Row="4" Grid.Column="0"
+                                                       IsEnabled="{Binding DualSenseMuteButtonSwitchesProfiles}"
                                                        ToolTip="Optional. Switch to this profile when the physical DualSense mute button toggles off." />
                                                 <ComboBox ItemsSource="{Binding OptionalProfileChoices}" SelectedItem="{Binding DualSenseMuteOffProfileName}"
-                                                          IsEnabled="{Binding IsChecked, ElementName=MuteMicCheck, Converter={StaticResource InverseBoolConverter}}"
-                                                          Grid.Row="2" Grid.Column="1" Margin="{StaticResource spaceMargin}"
+                                                          IsEnabled="{Binding DualSenseMuteButtonSwitchesProfiles}"
+                                                          Grid.Row="4" Grid.Column="1" Margin="{StaticResource spaceMargin}"
                                                           ToolTip="Leave blank to avoid changing profiles when mute turns off." />
-                                                <CheckBox x:Name="MuteMicCheck" Content="Mute button mutes the mic"
-                                                          IsChecked="{Binding DualSenseMuteButtonMutesMicrophone}"
-                                                          Grid.Row="3" Grid.ColumnSpan="2" Margin="{StaticResource spaceMargin}"
-                                                          ToolTip="Uses the DualSense mute button for microphone mute instead of profile switching. A lit mute LED means the controller microphone is muted; pressing it again turns the LED off and restores microphone audio." />
                                             </Grid>
                                         </GroupBox>
 

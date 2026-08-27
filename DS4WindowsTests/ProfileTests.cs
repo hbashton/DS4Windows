@@ -407,7 +407,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void CheckMuteButtonMicrophoneModeDefaultsAndRoundTrip()
+        public void CheckMuteButtonInputOutputModeDefaultsAndRoundTrip()
         {
             var store = new BackingStore();
             var dto = new ProfileDTO
@@ -416,11 +416,21 @@ namespace DS4WindowsTests
             };
 
             dto.MapTo(store);
+            Assert.IsFalse(store.dualSenseMuteButtonMutesInputOutput[0]);
             Assert.IsFalse(store.dualSenseMuteButtonMutesMicrophone[0]);
+            Assert.IsFalse(store.dualSenseMuteButtonMutesSpeaker[0]);
+            Assert.IsFalse(store.dualSenseMuteButtonSwitchesProfiles[0]);
 
+            dto.DualSenseMuteButtonMutesInputOutputString = bool.TrueString;
             dto.DualSenseMuteButtonMutesMicrophoneString = bool.TrueString;
+            dto.DualSenseMuteButtonMutesSpeakerString = bool.TrueString;
+            dto.DualSenseMuteButtonSwitchesProfilesString = bool.TrueString;
             dto.MapTo(store);
+            Assert.IsTrue(store.dualSenseMuteButtonMutesInputOutput[0]);
             Assert.IsTrue(store.dualSenseMuteButtonMutesMicrophone[0]);
+            Assert.IsTrue(store.dualSenseMuteButtonMutesSpeaker[0]);
+            Assert.IsFalse(store.dualSenseMuteButtonSwitchesProfiles[0],
+                "Input/output muting must take precedence over profile switching.");
 
             var roundTrip = new ProfileDTO
             {
@@ -428,14 +438,120 @@ namespace DS4WindowsTests
             };
             roundTrip.MapFrom(store);
             Assert.AreEqual(bool.TrueString,
+                roundTrip.DualSenseMuteButtonMutesInputOutputString);
+            Assert.AreEqual(bool.TrueString,
                 roundTrip.DualSenseMuteButtonMutesMicrophoneString);
+            Assert.AreEqual(bool.TrueString,
+                roundTrip.DualSenseMuteButtonMutesSpeakerString);
+            Assert.AreEqual(bool.FalseString,
+                roundTrip.DualSenseMuteButtonSwitchesProfilesString);
 
             var serializer = new XmlSerializer(typeof(ProfileDTO),
                 ProfileDTO.GetAttributeOverrides());
             using var writer = new StringWriter();
             serializer.Serialize(writer, roundTrip);
             StringAssert.Contains(writer.ToString(),
+                "<DualSenseMuteButtonMutesInputOutput>True</DualSenseMuteButtonMutesInputOutput>");
+            StringAssert.Contains(writer.ToString(),
                 "<DualSenseMuteButtonMutesMicrophone>True</DualSenseMuteButtonMutesMicrophone>");
+            StringAssert.Contains(writer.ToString(),
+                "<DualSenseMuteButtonMutesSpeaker>True</DualSenseMuteButtonMutesSpeaker>");
+            StringAssert.Contains(writer.ToString(),
+                "<DualSenseMuteButtonSwitchesProfiles>False</DualSenseMuteButtonSwitchesProfiles>");
+        }
+
+        [TestMethod]
+        public void LegacyMuteButtonModesMigrateWithoutLosingProfileChoices()
+        {
+            var store = new BackingStore();
+            var serializer = new XmlSerializer(typeof(ProfileDTO),
+                ProfileDTO.GetAttributeOverrides());
+            const string legacyMicrophoneXml =
+                "<DS4Windows>" +
+                "<DualSenseMuteButtonMutesMicrophone>True</DualSenseMuteButtonMutesMicrophone>" +
+                "<DualSenseMuteOnProfileName>Muted</DualSenseMuteOnProfileName>" +
+                "<DualSenseMuteOffProfileName>Live</DualSenseMuteOffProfileName>" +
+                "</DS4Windows>";
+            using var legacyMicrophoneReader = new StringReader(
+                legacyMicrophoneXml);
+            var legacyMicrophoneMode = (ProfileDTO)serializer.Deserialize(
+                legacyMicrophoneReader);
+            legacyMicrophoneMode.DeviceIndex = 0;
+
+            legacyMicrophoneMode.MapTo(store);
+
+            Assert.IsTrue(store.dualSenseMuteButtonMutesInputOutput[0],
+                "The old microphone mode represented the master and mic target together.");
+            Assert.IsTrue(store.dualSenseMuteButtonMutesMicrophone[0]);
+            Assert.IsFalse(store.dualSenseMuteButtonMutesSpeaker[0]);
+            Assert.IsFalse(store.dualSenseMuteButtonSwitchesProfiles[0]);
+            Assert.AreEqual("Muted", store.dualSenseMuteOnProfileName[0]);
+            Assert.AreEqual("Live", store.dualSenseMuteOffProfileName[0]);
+
+            const string legacySwitchXml =
+                "<DS4Windows>" +
+                "<DualSenseMuteButtonLightEnabled>True</DualSenseMuteButtonLightEnabled>" +
+                "<DualSenseMuteOnProfileName>Muted</DualSenseMuteOnProfileName>" +
+                "<DualSenseMuteOffProfileName>Live</DualSenseMuteOffProfileName>" +
+                "</DS4Windows>";
+            using var legacySwitchReader = new StringReader(legacySwitchXml);
+            var legacyProfileSwitch = (ProfileDTO)serializer.Deserialize(
+                legacySwitchReader);
+            legacyProfileSwitch.DeviceIndex = 0;
+
+            legacyProfileSwitch.MapTo(store);
+
+            Assert.IsFalse(store.dualSenseMuteButtonMutesInputOutput[0]);
+            Assert.IsTrue(store.dualSenseMuteButtonSwitchesProfiles[0],
+                "Old profile names should opt into the explicit profile-switch mode.");
+
+            legacyProfileSwitch.DualSenseMuteButtonMutesInputOutputString =
+                bool.FalseString;
+            legacyProfileSwitch.DualSenseMuteButtonSwitchesProfilesString =
+                bool.FalseString;
+            legacyProfileSwitch.MapTo(store);
+
+            Assert.IsFalse(store.dualSenseMuteButtonSwitchesProfiles[0],
+                "An explicit modern off value must not be re-inferred from saved names.");
+
+            var preparedMicrophoneTarget = new ProfileDTO
+            {
+                DeviceIndex = 0,
+                DualSenseMuteButtonMutesInputOutputString = bool.FalseString,
+                DualSenseMuteButtonMutesMicrophoneString = bool.TrueString,
+            };
+
+            preparedMicrophoneTarget.MapTo(store);
+
+            Assert.IsFalse(store.dualSenseMuteButtonMutesInputOutput[0],
+                "A modern profile may prepare a target while its master remains off.");
+            Assert.IsTrue(store.dualSenseMuteButtonMutesMicrophone[0]);
+        }
+
+        [TestMethod]
+        public void LegacyInactiveMuteButtonNamesRemainDisabled()
+        {
+            var store = new BackingStore();
+            var serializer = new XmlSerializer(typeof(ProfileDTO),
+                ProfileDTO.GetAttributeOverrides());
+            const string legacyInactiveXml =
+                "<DS4Windows>" +
+                "<DualSenseMuteButtonLightEnabled>False</DualSenseMuteButtonLightEnabled>" +
+                "<DualSenseMuteButtonMutesMicrophone>False</DualSenseMuteButtonMutesMicrophone>" +
+                "<DualSenseMuteOnProfileName>Muted</DualSenseMuteOnProfileName>" +
+                "<DualSenseMuteOffProfileName>Live</DualSenseMuteOffProfileName>" +
+                "</DS4Windows>";
+            using var reader = new StringReader(legacyInactiveXml);
+            var legacyInactive = (ProfileDTO)serializer.Deserialize(reader);
+            legacyInactive.DeviceIndex = 0;
+
+            legacyInactive.MapTo(store);
+
+            Assert.IsFalse(store.dualSenseMuteButtonMutesInputOutput[0]);
+            Assert.IsFalse(store.dualSenseMuteButtonSwitchesProfiles[0],
+                "Saved names from a disabled legacy mode must remain inert after upgrade.");
+            Assert.AreEqual("Muted", store.dualSenseMuteOnProfileName[0]);
+            Assert.AreEqual("Live", store.dualSenseMuteOffProfileName[0]);
         }
 
         [TestMethod]

@@ -773,11 +773,125 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             set => Global.DualSenseMuteButtonLightEnabled[device] = value;
         }
 
+        public bool DualSenseMuteButtonMutesInputOutput
+        {
+            get => Global.DualSenseMuteButtonMutesInputOutput[device];
+            set
+            {
+                bool changed = false;
+                bool profileSwitchChanged = false;
+                void Mutate()
+                {
+                    if (Global.DualSenseMuteButtonMutesInputOutput[device] !=
+                        value)
+                    {
+                        Global.DualSenseMuteButtonMutesInputOutput[device] =
+                            value;
+                        changed = true;
+                    }
+
+                    if (value &&
+                        Global.DualSenseMuteButtonSwitchesProfiles[device])
+                    {
+                        Global.DualSenseMuteButtonSwitchesProfiles[device] =
+                            false;
+                        profileSwitchChanged = true;
+                    }
+
+                    if (changed || profileSwitchChanged)
+                    {
+                        Global.AdvanceDualSenseMuteButtonModeEpoch(device);
+                    }
+                }
+
+                if (device >= 0 &&
+                    device < Global.MAX_DS4_CONTROLLER_COUNT)
+                {
+                    Mapping.ExecuteSerializedProfileMutation(device, Mutate);
+                }
+                else
+                {
+                    // The offline/new-profile editor uses the extra backing
+                    // store slot, which has no runtime mutation worker.
+                    Mutate();
+                }
+
+                if (!changed && !profileSwitchChanged)
+                {
+                    return;
+                }
+
+                if (profileSwitchChanged)
+                {
+                    DualSenseMuteButtonSwitchesProfilesChanged?.Invoke(this,
+                        EventArgs.Empty);
+                }
+
+                if (changed)
+                {
+                    DualSenseMuteButtonMutesInputOutputChanged?.Invoke(this,
+                        EventArgs.Empty);
+                }
+            }
+        }
+
+        public event EventHandler DualSenseMuteButtonMutesInputOutputChanged;
+
         public bool DualSenseMuteButtonMutesMicrophone
         {
             get => Global.DualSenseMuteButtonMutesMicrophone[device];
             set => Global.DualSenseMuteButtonMutesMicrophone[device] = value;
         }
+
+        public bool DualSenseMuteButtonMutesSpeaker
+        {
+            get => Global.DualSenseMuteButtonMutesSpeaker[device];
+            set => Global.DualSenseMuteButtonMutesSpeaker[device] = value;
+        }
+
+        public bool DualSenseMuteButtonSwitchesProfiles
+        {
+            get => Global.DualSenseMuteButtonSwitchesProfiles[device];
+            set
+            {
+                bool changed = false;
+                void Mutate()
+                {
+                    bool normalized = value &&
+                        !Global.DualSenseMuteButtonMutesInputOutput[device];
+                    if (Global.DualSenseMuteButtonSwitchesProfiles[device] ==
+                        normalized)
+                    {
+                        return;
+                    }
+
+                    Global.DualSenseMuteButtonSwitchesProfiles[device] =
+                        normalized;
+                    changed = true;
+                    Global.AdvanceDualSenseMuteButtonModeEpoch(device);
+                }
+
+                if (device >= 0 &&
+                    device < Global.MAX_DS4_CONTROLLER_COUNT)
+                {
+                    Mapping.ExecuteSerializedProfileMutation(device, Mutate);
+                }
+                else
+                {
+                    Mutate();
+                }
+
+                if (!changed)
+                {
+                    return;
+                }
+
+                DualSenseMuteButtonSwitchesProfilesChanged?.Invoke(this,
+                    EventArgs.Empty);
+            }
+        }
+
+        public event EventHandler DualSenseMuteButtonSwitchesProfilesChanged;
 
         public string DualSenseMuteOnProfileName
         {

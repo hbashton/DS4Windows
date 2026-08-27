@@ -2680,10 +2680,28 @@ namespace DS4Windows
             set => m_Config.dualSenseMuteButtonLightEnabled = value;
         }
 
+        public static bool[] DualSenseMuteButtonMutesInputOutput
+        {
+            get => m_Config.dualSenseMuteButtonMutesInputOutput;
+            set => m_Config.dualSenseMuteButtonMutesInputOutput = value;
+        }
+
         public static bool[] DualSenseMuteButtonMutesMicrophone
         {
             get => m_Config.dualSenseMuteButtonMutesMicrophone;
             set => m_Config.dualSenseMuteButtonMutesMicrophone = value;
+        }
+
+        public static bool[] DualSenseMuteButtonMutesSpeaker
+        {
+            get => m_Config.dualSenseMuteButtonMutesSpeaker;
+            set => m_Config.dualSenseMuteButtonMutesSpeaker = value;
+        }
+
+        public static bool[] DualSenseMuteButtonSwitchesProfiles
+        {
+            get => m_Config.dualSenseMuteButtonSwitchesProfiles;
+            set => m_Config.dualSenseMuteButtonSwitchesProfiles = value;
         }
 
         public static string[] DualSenseMuteOnProfileName
@@ -3024,6 +3042,27 @@ namespace DS4Windows
             return device >= 0 && device < MAX_DS4_CONTROLLER_COUNT &&
                 revision > 0 &&
                 Interlocked.Read(ref profileSwitchRevisions[device]) == revision;
+        }
+
+        internal static long ReadDualSenseMuteButtonModeEpoch(int device)
+        {
+            return device >= 0 && device < MAX_DS4_CONTROLLER_COUNT ?
+                Interlocked.Read(ref m_Config.
+                    dualSenseMuteButtonModeEpoch[device]) : -1;
+        }
+
+        internal static long AdvanceDualSenseMuteButtonModeEpoch(int device)
+        {
+            return device >= 0 && device < MAX_DS4_CONTROLLER_COUNT ?
+                Interlocked.Increment(ref m_Config.
+                    dualSenseMuteButtonModeEpoch[device]) : -1;
+        }
+
+        internal static bool IsCurrentDualSenseMuteButtonModeEpoch(
+            int device, long epoch)
+        {
+            return epoch >= 0 &&
+                ReadDualSenseMuteButtonModeEpoch(device) == epoch;
         }
 
         public static bool LoadProfile(int device, bool launchprogram, ControlService control,
@@ -3992,7 +4031,12 @@ namespace DS4Windows
         public bool[] gameBarControllerCompatibility = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
         public string[] gameBarProfileName = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
         public bool[] dualSenseMuteButtonLightEnabled = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
+        public bool[] dualSenseMuteButtonMutesInputOutput = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
         public bool[] dualSenseMuteButtonMutesMicrophone = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
+        public bool[] dualSenseMuteButtonMutesSpeaker = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
+        public bool[] dualSenseMuteButtonSwitchesProfiles = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
+        public long[] dualSenseMuteButtonModeEpoch =
+            new long[Global.TEST_PROFILE_ITEM_COUNT];
         public string[] dualSenseMuteOnProfileName = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
         public string[] dualSenseMuteOffProfileName = new string[Global.TEST_PROFILE_ITEM_COUNT] { "", "", "", "", "", "", "", "", "" };
         //
@@ -4946,7 +4990,10 @@ namespace DS4Windows
                 XmlNode xmlLaunchProgram = m_Xdoc.CreateNode(XmlNodeType.Element, "LaunchProgram", null); xmlLaunchProgram.InnerText = launchProgram[device].ToString(); rootElement.AppendChild(xmlLaunchProgram);
                 XmlNode xmlGameBarControllerCompatibility = m_Xdoc.CreateNode(XmlNodeType.Element, "GameBarControllerCompatibility", null); xmlGameBarControllerCompatibility.InnerText = gameBarControllerCompatibility[device].ToString(); rootElement.AppendChild(xmlGameBarControllerCompatibility);
                 XmlNode xmlDualSenseMuteButtonLightEnabled = m_Xdoc.CreateNode(XmlNodeType.Element, "DualSenseMuteButtonLightEnabled", null); xmlDualSenseMuteButtonLightEnabled.InnerText = dualSenseMuteButtonLightEnabled[device].ToString(); rootElement.AppendChild(xmlDualSenseMuteButtonLightEnabled);
+                XmlNode xmlDualSenseMuteButtonMutesInputOutput = m_Xdoc.CreateNode(XmlNodeType.Element, "DualSenseMuteButtonMutesInputOutput", null); xmlDualSenseMuteButtonMutesInputOutput.InnerText = dualSenseMuteButtonMutesInputOutput[device].ToString(); rootElement.AppendChild(xmlDualSenseMuteButtonMutesInputOutput);
                 XmlNode xmlDualSenseMuteButtonMutesMicrophone = m_Xdoc.CreateNode(XmlNodeType.Element, "DualSenseMuteButtonMutesMicrophone", null); xmlDualSenseMuteButtonMutesMicrophone.InnerText = dualSenseMuteButtonMutesMicrophone[device].ToString(); rootElement.AppendChild(xmlDualSenseMuteButtonMutesMicrophone);
+                XmlNode xmlDualSenseMuteButtonMutesSpeaker = m_Xdoc.CreateNode(XmlNodeType.Element, "DualSenseMuteButtonMutesSpeaker", null); xmlDualSenseMuteButtonMutesSpeaker.InnerText = dualSenseMuteButtonMutesSpeaker[device].ToString(); rootElement.AppendChild(xmlDualSenseMuteButtonMutesSpeaker);
+                XmlNode xmlDualSenseMuteButtonSwitchesProfiles = m_Xdoc.CreateNode(XmlNodeType.Element, "DualSenseMuteButtonSwitchesProfiles", null); xmlDualSenseMuteButtonSwitchesProfiles.InnerText = dualSenseMuteButtonSwitchesProfiles[device].ToString(); rootElement.AppendChild(xmlDualSenseMuteButtonSwitchesProfiles);
                 XmlNode xmlDualSenseMuteOnProfileName = m_Xdoc.CreateNode(XmlNodeType.Element, "DualSenseMuteOnProfileName", null); xmlDualSenseMuteOnProfileName.InnerText = dualSenseMuteOnProfileName[device]; rootElement.AppendChild(xmlDualSenseMuteOnProfileName);
                 XmlNode xmlDualSenseMuteOffProfileName = m_Xdoc.CreateNode(XmlNodeType.Element, "DualSenseMuteOffProfileName", null); xmlDualSenseMuteOffProfileName.InnerText = dualSenseMuteOffProfileName[device]; rootElement.AppendChild(xmlDualSenseMuteOffProfileName);
                 XmlNode xmlDinput = m_Xdoc.CreateNode(XmlNodeType.Element, "DinputOnly", null); xmlDinput.InnerText = dinputOnly[device].ToString(); rootElement.AppendChild(xmlDinput);
@@ -6821,6 +6868,22 @@ namespace DS4Windows
                 }
                 catch { dualSenseMuteButtonMutesMicrophone[device] = false; missingSetting = true; }
 
+                bool muteInputOutputSettingPresent = false;
+                try
+                {
+                    Item = m_Xdoc.SelectSingleNode("/" + rootname + "/DualSenseMuteButtonMutesInputOutput");
+                    muteInputOutputSettingPresent = Item != null;
+                    bool.TryParse(Item.InnerText, out dualSenseMuteButtonMutesInputOutput[device]);
+                }
+                catch { dualSenseMuteButtonMutesInputOutput[device] = false; missingSetting = true; }
+
+                try
+                {
+                    Item = m_Xdoc.SelectSingleNode("/" + rootname + "/DualSenseMuteButtonMutesSpeaker");
+                    bool.TryParse(Item.InnerText, out dualSenseMuteButtonMutesSpeaker[device]);
+                }
+                catch { dualSenseMuteButtonMutesSpeaker[device] = false; missingSetting = true; }
+
                 try
                 {
                     Item = m_Xdoc.SelectSingleNode("/" + rootname + "/DualSenseMuteOnProfileName");
@@ -6834,6 +6897,45 @@ namespace DS4Windows
                     dualSenseMuteOffProfileName[device] = Item.InnerText;
                 }
                 catch { dualSenseMuteOffProfileName[device] = string.Empty; missingSetting = true; }
+
+                bool muteProfileSwitchSettingPresent = false;
+                try
+                {
+                    Item = m_Xdoc.SelectSingleNode("/" + rootname + "/DualSenseMuteButtonSwitchesProfiles");
+                    muteProfileSwitchSettingPresent = Item != null;
+                    bool.TryParse(Item.InnerText, out dualSenseMuteButtonSwitchesProfiles[device]);
+                }
+                catch { dualSenseMuteButtonSwitchesProfiles[device] = false; missingSetting = true; }
+
+                // Before the input/output master existed, the microphone flag
+                // selected the whole mute-button mode. Preserve that behavior.
+                if (!muteInputOutputSettingPresent)
+                {
+                    dualSenseMuteButtonMutesInputOutput[device] =
+                        dualSenseMuteButtonMutesMicrophone[device];
+                }
+
+                // Older profiles selected switching simply by naming an on or
+                // off profile. Keep the names, but make the mode explicit.
+                if (!muteProfileSwitchSettingPresent)
+                {
+                    dualSenseMuteButtonSwitchesProfiles[device] =
+                        !dualSenseMuteButtonMutesInputOutput[device] &&
+                        dualSenseMuteButtonLightEnabled[device] &&
+                        (!string.IsNullOrWhiteSpace(
+                            dualSenseMuteOnProfileName[device]) ||
+                         !string.IsNullOrWhiteSpace(
+                            dualSenseMuteOffProfileName[device]));
+                }
+
+                // Input/output muting has deterministic precedence over
+                // profile switching for malformed or hand-edited profiles.
+                if (dualSenseMuteButtonMutesInputOutput[device])
+                {
+                    dualSenseMuteButtonSwitchesProfiles[device] = false;
+                }
+                Interlocked.Increment(
+                    ref dualSenseMuteButtonModeEpoch[device]);
 
                 if (launchprogram == true && launchProgram[device] != string.Empty)
                 {
@@ -10176,9 +10278,17 @@ namespace DS4Windows
             gameBarProfileName[device] = string.Empty;
             gameBarControllerCompatibility[device] = false;
             dualSenseMuteButtonLightEnabled[device] = false;
+            dualSenseMuteButtonMutesInputOutput[device] = false;
             dualSenseMuteButtonMutesMicrophone[device] = false;
+            dualSenseMuteButtonMutesSpeaker[device] = false;
+            dualSenseMuteButtonSwitchesProfiles[device] = false;
             dualSenseMuteOnProfileName[device] = string.Empty;
             dualSenseMuteOffProfileName[device] = string.Empty;
+            // ResetProfile is itself an observable mode mutation on the input
+            // thread. Fence requests captured from the source profile even
+            // before the target DTO/legacy mapper publishes its final mode.
+            Interlocked.Increment(
+                ref dualSenseMuteButtonModeEpoch[device]);
             touchpadJitterCompensation[device] = DEFAULT_TOUCHPAD_JITTER_COMP;
             lowerRCOn[device] = false;
             touchClickPassthru[device] = false;

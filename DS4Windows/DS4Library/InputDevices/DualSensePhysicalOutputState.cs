@@ -38,6 +38,8 @@ namespace DS4Windows.InputDevices
         byte MuteLedByte,
         bool MicrophoneMuteOverride,
         bool MicrophoneMuted,
+        bool SpeakerMuteOverride,
+        bool SpeakerMuted,
         bool MuteLedOverride,
         bool MuteLedOn,
         byte ActivePlayerLedMask,
@@ -65,6 +67,8 @@ namespace DS4Windows.InputDevices
             MuteLedByte: 0,
             MicrophoneMuteOverride: false,
             MicrophoneMuted: false,
+            SpeakerMuteOverride: false,
+            SpeakerMuted: false,
             MuteLedOverride: false,
             MuteLedOn: false,
             ActivePlayerLedMask: 0,
@@ -320,6 +324,57 @@ namespace DS4Windows.InputDevices
                 {
                     MicrophoneMuteOverride = enabled,
                     MicrophoneMuted = enabled && muted,
+                });
+            }
+        }
+
+        internal bool SetProfileMuteButtonState(bool muteLedOverride,
+            bool muteLedOn, bool microphoneMuteOverride,
+            bool microphoneMuted, bool speakerMuteOverride,
+            bool speakerMuted, byte speakerVolume)
+        {
+            lock (syncRoot)
+            {
+                return PublishLocked(latest with
+                {
+                    MuteLedOverride = muteLedOverride,
+                    MuteLedOn = muteLedOverride && muteLedOn,
+                    MicrophoneMuteOverride = microphoneMuteOverride,
+                    MicrophoneMuted = microphoneMuteOverride &&
+                        microphoneMuted,
+                    SpeakerMuteOverride = speakerMuteOverride,
+                    SpeakerMuted = speakerMuteOverride && speakerMuted,
+                    // Muting the built-in speaker is a gain-only operation.
+                    // EnableSpeakerOutput, HeadphoneVolume, and the live media
+                    // carrier remain untouched so AUX audio, haptics, and the
+                    // real-time capture/encoder lifecycle do not restart.
+                    SpeakerVolume = speakerVolume,
+                });
+            }
+        }
+
+        internal bool SetProfileAudioAndMuteButtonState(
+            bool enableSpeakerOutput, byte speakerVolume,
+            byte headphoneVolume, bool headsetOnlyAudio,
+            bool muteLedOverride, bool muteLedOn,
+            bool microphoneMuteOverride, bool microphoneMuted,
+            bool speakerMuteOverride, bool speakerMuted)
+        {
+            lock (syncRoot)
+            {
+                return PublishLocked(latest with
+                {
+                    EnableSpeakerOutput = enableSpeakerOutput,
+                    SpeakerVolume = speakerVolume,
+                    HeadphoneVolume = headphoneVolume,
+                    HeadsetOnlyAudio = headsetOnlyAudio,
+                    MuteLedOverride = muteLedOverride,
+                    MuteLedOn = muteLedOverride && muteLedOn,
+                    MicrophoneMuteOverride = microphoneMuteOverride,
+                    MicrophoneMuted = microphoneMuteOverride &&
+                        microphoneMuted,
+                    SpeakerMuteOverride = speakerMuteOverride,
+                    SpeakerMuted = speakerMuteOverride && speakerMuted,
                 });
             }
         }

@@ -548,7 +548,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void NativeOutputTraceFormatsLogsAndQueriesProcessesOutsideTraceLock()
+        public void NativeOutputTraceAvoidsDiagnosticLogsAndQueriesProcessesOutsideTraceLock()
         {
             string source = File.ReadAllText(FindRepositoryFile(
                 "DS4Windows", "DS4Control", "Viiper",
@@ -557,20 +557,14 @@ namespace DS4WindowsTests
                 "private void TraceNativeGameOutput(byte[] feedback",
                 "internal static bool HasMeaningfulNativeGameOutput");
             string idle = Extract(source,
-                "private void TraceNativeGameOutputIdleBoundary()",
+                "private void TraceNativeGameOutputIdleBoundary(",
                 "private void CaptureForegroundNativeGameOutputOwner()");
             string capture = Extract(source,
                 "private void CaptureForegroundNativeGameOutputOwner()",
                 "private void ClearNativeGameOutputProcessLease()");
 
-            Assert.IsTrue(trace.IndexOf("AppLogger.LogToGui(",
-                    System.StringComparison.Ordinal) >
-                trace.IndexOf("if (sessionStarted)",
-                    System.StringComparison.Ordinal));
-            Assert.IsTrue(idle.IndexOf("AppLogger.LogToGui(",
-                    System.StringComparison.Ordinal) >
-                idle.IndexOf("if (logIdleBoundary)",
-                    System.StringComparison.Ordinal));
+            AssertDoesNotContain(trace, "AppLogger.LogToGui(");
+            AssertDoesNotContain(idle, "AppLogger.LogToGui(");
             Assert.IsTrue(capture.IndexOf("IsProcessAlive(observedOwner)",
                     System.StringComparison.Ordinal) <
                 capture.LastIndexOf("lock (nativeGameOutputTraceLock)",
@@ -583,6 +577,45 @@ namespace DS4WindowsTests
                     System.StringComparison.Ordinal) >
                 capture.LastIndexOf("lock (nativeGameOutputTraceLock)",
                     System.StringComparison.Ordinal));
+        }
+
+        [TestMethod]
+        public void NativeLedExpiryUsesNoCallbackUnderQueueLockOrFullRelease()
+        {
+            string outDevice = File.ReadAllText(FindRepositoryFile(
+                "DS4Windows", "DS4Control", "Viiper",
+                "ViiperOutDevice.cs"));
+            string dispatchBuffer = File.ReadAllText(FindRepositoryFile(
+                "DS4Windows", "DS4Control", "Viiper",
+                "ViiperFeedbackDispatchBuffer.cs"));
+            string physical = File.ReadAllText(FindRepositoryFile(
+                "DS4Windows", "DS4Library", "InputDevices",
+                "DualSenseDevice.cs"));
+
+            string idleObservation = Extract(dispatchBuffer,
+                "internal bool TryObserveControlIdle(",
+                "internal void ClearPending()");
+            AssertDoesNotContain(idleObservation, "Func<");
+            AssertDoesNotContain(idleObservation, "Action<");
+            AssertDoesNotContain(idleObservation, "commit(");
+
+            string idleExpiry = Extract(outDevice,
+                "private void TraceNativeGameOutputIdleBoundary(",
+                "private void CaptureForegroundNativeGameOutputOwner()");
+            AssertDoesNotContain(idleExpiry,
+                "ReleaseNativeDualSenseFeedbackOwnership(");
+
+            string ledOnlyPhysical = Extract(physical,
+                "private void ApplyPendingNativeGameLedOwnershipRelease()",
+                "internal static bool ShouldApplyNativeGameLedOwnershipRelease");
+            AssertDoesNotContain(ledOnlyPhysical,
+                "nativeSessionReleasePending");
+            AssertDoesNotContain(ledOnlyPhysical,
+                "latestBluetoothCombinedNativeStateTimestamp");
+            AssertDoesNotContain(ledOnlyPhysical, "AudioPacer");
+            AssertDoesNotContain(ledOnlyPhysical, "Array.Clear");
+            Assert.IsTrue(ledOnlyPhysical.Contains(
+                "SetNativeGameLightbarOwnershipReleased(true)"));
         }
 
         [TestMethod]

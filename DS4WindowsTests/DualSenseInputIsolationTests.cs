@@ -281,9 +281,14 @@ namespace DS4WindowsTests
             long oldGeneration = -1;
             long replacementGeneration = -1;
             int attempts = 0;
+            int recoveryUsedThreadPool = 0;
 
             device.BluetoothOutputRecoveryIterationTestHook = generation =>
             {
+                if (Thread.CurrentThread.IsThreadPoolThread)
+                {
+                    Volatile.Write(ref recoveryUsedThreadPool, 1);
+                }
                 int attempt = Interlocked.Increment(ref attempts);
                 if (attempt == 1)
                 {
@@ -337,6 +342,8 @@ namespace DS4WindowsTests
             Assert.IsTrue(((ManualResetEvent)GetField(device,
                 "bluetoothAudioRecoveryWorkerIdle")).WaitOne(1000));
             Assert.AreEqual(2, Volatile.Read(ref attempts));
+            Assert.AreEqual(0, Volatile.Read(ref recoveryUsedThreadPool),
+                "A retrying transport owner must not occupy or depend on the shared ThreadPool.");
             Assert.AreNotEqual(Interlocked.Read(ref oldGeneration),
                 Interlocked.Read(ref replacementGeneration));
 

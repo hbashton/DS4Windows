@@ -3066,6 +3066,8 @@ namespace DS4Windows
                 }
                 dualsense.HapticPowerLevel = DualSenseHapticPowerLevel[ind];
                 bool speakerEnabled = IsControllerSpeakerEnabled(ind);
+                DualSenseMuteButtonRuntimePolicy muteButtonPolicy =
+                    ResolveDualSenseMuteButtonPolicy(ind);
                 bool audioHapticsEnabled =
                     Global.store.audioHapticsSettings[ind]?.Enabled == true;
                 bool silentHapticsCarrier =
@@ -3076,18 +3078,44 @@ namespace DS4Windows
                     silentHapticsCarrier;
                 string speakerCaptureEndpointId =
                     GetControllerSpeakerCaptureEndpointId(ind);
-                byte activeSpeakerVolume = speakerEnabled ?
-                    DualSenseSpeakerVolume[ind] : (byte)0;
-                byte activeHeadphoneVolume = speakerEnabled ?
-                    DualSenseHeadphoneVolume[ind] : (byte)0;
-                dualsense.EnableSpeakerOutput = mediaCarrierEnabled;
-                dualsense.SpeakerVolume = activeSpeakerVolume;
-                dualsense.HeadphoneVolume = activeHeadphoneVolume;
                 bool headsetOnlyAudio = speakerEnabled &&
                     IsControllerHeadsetOnlyAudio(ind);
+                DualSenseSpeakerTransportState speakerTransportState =
+                    DualSenseSpeakerTransportState.Resolve(
+                        speakerEnabled, headsetOnlyAudio,
+                        DualSenseSpeakerVolume[ind],
+                        dualSenseMuteLedOn[ind], muteButtonPolicy);
+                byte activeHeadphoneVolume = speakerEnabled ?
+                    DualSenseHeadphoneVolume[ind] : (byte)0;
                 bool headsetOutputRouteChanged =
                     dualsense.HeadsetOnlyAudio != headsetOnlyAudio;
-                dualsense.HeadsetOnlyAudio = headsetOnlyAudio;
+                bool muteLatched = dualSenseMuteLedOn[ind];
+                bool speakerMuteOverride = muteButtonPolicy.
+                    CanMuteBuiltInSpeaker(speakerEnabled,
+                        headsetOnlyAudio);
+                // Publish the carrier gate, route, both gains, and every mute
+                // override as one immutable compositor state. In particular,
+                // a reconnect into an already-muted slot can never expose the
+                // default speaker gain between enabling the carrier and
+                // applying the zero-gain mute.
+                dualsense.SetProfileAudioAndMuteButtonState(
+                    mediaCarrierEnabled,
+                    speakerTransportState.PhysicalSpeakerVolume,
+                    activeHeadphoneVolume,
+                    headsetOnlyAudio,
+                    muteButtonPolicy.OverridesMuteLed,
+                    muteLatched,
+                    muteButtonPolicy.MutesMicrophone,
+                    muteButtonPolicy.MutesMicrophone && muteLatched,
+                    speakerMuteOverride,
+                    speakerMuteOverride && muteLatched);
+                // CheckProfileOptions can run outside the input callback. Its
+                // compound profile snapshot may race a newer mute edge, so it
+                // must invalidate the input-side publication cache after the
+                // mailbox write. The next report then republishes the
+                // authoritative latch instead of trusting a stale signature.
+                InvalidateDualSenseMuteOutputSignature(
+                    ref dualSenseMuteOutputSignatures[ind]);
                 bool useViiperControllerMicrophone =
                     ControllerMicrophoneRoutePolicy.CanRouteDirectViiperMicrophone(
                         DualSenseEnableMicrophonePassthrough[ind], dualsense,
@@ -3110,7 +3138,7 @@ namespace DS4Windows
                     // hardware volume guarantees that no speaker or AUX audio
                     // leaks from the disabled UI setting.
                     dualSenseAudioPassthrough.Start(ind, dualsense,
-                        activeSpeakerVolume,
+                        speakerTransportState.TransportVolume,
                         (DualSenseSpeakerCompression)Global.DualSenseSpeakerCompression[ind],
                         Global.DualSenseSpeakerBassBoost[ind],
                         speakerCaptureEndpointId,
@@ -3682,9 +3710,22 @@ namespace DS4Windows
         private DateTime gameBarVerboseLastDetectionLogUtc = DateTime.MinValue;
         private bool[] dualSenseMuteButtonWasDown = new bool[MAX_DS4_CONTROLLER_COUNT] { false, false, false, false, false, false, false, false };
         private bool[] dualSenseMuteLedOn = new bool[MAX_DS4_CONTROLLER_COUNT] { false, false, false, false, false, false, false, false };
-        private bool[] dualSenseMuteLedOverrideActive = new bool[MAX_DS4_CONTROLLER_COUNT] { false, false, false, false, false, false, false, false };
+        private readonly InputDevices.DualSenseDevice[]
+            dualSenseMuteOutputDevices =
+                new InputDevices.DualSenseDevice[MAX_DS4_CONTROLLER_COUNT];
+        private readonly int[] dualSenseMuteOutputSignatures =
+        {
+            -1, -1, -1, -1, -1, -1, -1, -1,
+        };
+        private readonly object[] dualSenseMuteProfileLocks = new object[MAX_DS4_CONTROLLER_COUNT]
+        {
+            new object(), new object(), new object(), new object(),
+            new object(), new object(), new object(), new object(),
+        };
         private bool[] dualSenseMuteProfilePending = new bool[MAX_DS4_CONTROLLER_COUNT] { false, false, false, false, false, false, false, false };
         private string[] dualSenseMuteRequestedProfileName = new string[MAX_DS4_CONTROLLER_COUNT] { string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty };
+        private long[] dualSenseMuteRequestedModeEpoch =
+            new long[MAX_DS4_CONTROLLER_COUNT];
         private string[] dualSenseMuteRememberedOffProfileName = new string[MAX_DS4_CONTROLLER_COUNT] { string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty };
 
         public ControllerRuntimeSignals GetControllerRuntimeSignals(int index)
@@ -4237,9 +4278,12 @@ namespace DS4Windows
         {
             for (int i = 0; i < MAX_DS4_CONTROLLER_COUNT; i++)
             {
-                if (dualSenseMuteProfilePending[i])
+                lock (dualSenseMuteProfileLocks[i])
                 {
-                    return true;
+                    if (dualSenseMuteProfilePending[i])
+                    {
+                        return true;
+                    }
                 }
             }
 
@@ -4260,22 +4304,44 @@ namespace DS4Windows
                 return;
             }
 
-            dualSenseMuteRequestedProfileName[ind] = profileName;
-            dualSenseMuteProfilePending[ind] = true;
+            long modeEpoch =
+                Global.ReadDualSenseMuteButtonModeEpoch(ind);
+            lock (dualSenseMuteProfileLocks[ind])
+            {
+                dualSenseMuteRequestedProfileName[ind] = profileName;
+                dualSenseMuteRequestedModeEpoch[ind] = modeEpoch;
+                dualSenseMuteProfilePending[ind] = true;
+            }
         }
 
         private void ProcessPendingDualSenseMuteProfiles()
         {
             for (int i = 0; i < MAX_DS4_CONTROLLER_COUNT; i++)
             {
-                if (!dualSenseMuteProfilePending[i])
+                string profileName;
+                long modeEpoch;
+                lock (dualSenseMuteProfileLocks[i])
                 {
+                    if (!dualSenseMuteProfilePending[i])
+                    {
+                        continue;
+                    }
+
+                    profileName = dualSenseMuteRequestedProfileName[i];
+                    modeEpoch = dualSenseMuteRequestedModeEpoch[i];
+                    dualSenseMuteProfilePending[i] = false;
+                    dualSenseMuteRequestedProfileName[i] = string.Empty;
+                    dualSenseMuteRequestedModeEpoch[i] = 0;
+                }
+
+                if (!IsCurrentDualSenseMuteProfileRequest(i, modeEpoch))
+                {
+                    // A profile or live editor change can enable the master
+                    // after this request was queued. Recheck at execution so
+                    // stale work can never escape input/output mode.
                     continue;
                 }
 
-                string profileName = dualSenseMuteRequestedProfileName[i];
-                dualSenseMuteProfilePending[i] = false;
-                dualSenseMuteRequestedProfileName[i] = string.Empty;
                 int deviceIndex = i;
                 Mapping.RequestTemporaryProfileLoad(deviceIndex, profileName,
                     false, this, loaded =>
@@ -4285,33 +4351,153 @@ namespace DS4Windows
                             LogDebug($"DualSense mute profile action failed to load " +
                                 $"'{profileName}'.", true);
                         }
-                    });
+                    }, loadGuard: () =>
+                        IsCurrentDualSenseMuteProfileRequest(
+                            deviceIndex, modeEpoch));
             }
+        }
+
+        internal static bool IsCurrentDualSenseMuteProfileRequest(
+            int device, long modeEpoch)
+        {
+            return Global.IsCurrentDualSenseMuteButtonModeEpoch(
+                    device, modeEpoch) &&
+                ResolveDualSenseMuteButtonPolicy(device).SwitchesProfiles;
+        }
+
+        internal static string UpdateDualSenseRememberedOffProfileName(
+            string rememberedOffProfileName, bool controllerConnected,
+            bool inputOutputModeEnabled)
+        {
+            // ResetProfile temporarily exposes a no-handler policy before the
+            // target profile is mapped. That transient must not erase the
+            // source profile needed by a blank mute-off target. Only a real
+            // disconnect or explicit takeover by input/output mode ends the
+            // profile-switch lifecycle.
+            return controllerConnected && !inputOutputModeEnabled ?
+                rememberedOffProfileName ?? string.Empty : string.Empty;
+        }
+
+        internal static string ResolveDualSenseMuteOffProfileName(
+            string configuredOffProfileName,
+            string rememberedOffProfileName)
+        {
+            return string.IsNullOrEmpty(configuredOffProfileName) ?
+                rememberedOffProfileName ?? string.Empty :
+                configuredOffProfileName;
+        }
+
+        private static DualSenseMuteButtonRuntimePolicy
+            ResolveDualSenseMuteButtonPolicy(int ind)
+        {
+            return DualSenseMuteButtonRuntimePolicy.Resolve(
+                Global.DualSenseMuteButtonMutesInputOutput[ind],
+                Global.DualSenseMuteButtonMutesMicrophone[ind],
+                Global.DualSenseMuteButtonMutesSpeaker[ind],
+                Global.DualSenseMuteButtonSwitchesProfiles[ind],
+                Global.DualSenseMuteButtonLightEnabled[ind]);
+        }
+
+        internal static bool IsCurrentDualSenseMuteOutputPublication(
+            InputDevices.DualSenseDevice cachedDevice, int cachedSignature,
+            InputDevices.DualSenseDevice currentDevice, int currentSignature)
+        {
+            return ReferenceEquals(cachedDevice, currentDevice) &&
+                cachedSignature == currentSignature;
+        }
+
+        internal static void InvalidateDualSenseMuteOutputSignature(
+            ref int cachedSignature)
+        {
+            Interlocked.Exchange(ref cachedSignature, -1);
+        }
+
+        private bool ApplyDualSenseMuteButtonOutputState(int ind,
+            InputDevices.DualSenseDevice dualSenseDevice,
+            in DualSenseMuteButtonRuntimePolicy policy,
+            bool controllerAudioEnabled, bool headsetOnly)
+        {
+            bool muteLatched = dualSenseMuteLedOn[ind];
+            bool speakerMuteOverride = policy.CanMuteBuiltInSpeaker(
+                controllerAudioEnabled, headsetOnly);
+            bool builtInSpeakerEnabled = controllerAudioEnabled &&
+                !headsetOnly;
+            byte configuredSpeakerVolume = builtInSpeakerEnabled ?
+                DualSenseSpeakerVolume[ind] : (byte)0;
+            byte resolvedSpeakerVolume = policy.ResolveSpeakerVolume(
+                configuredSpeakerVolume, muteLatched);
+            bool microphoneMuted = policy.MutesMicrophone && muteLatched;
+            bool speakerMuted = speakerMuteOverride && muteLatched;
+            int publicationSignature = resolvedSpeakerVolume << 8 |
+                (policy.OverridesMuteLed ? 1 : 0) |
+                (muteLatched ? 1 << 1 : 0) |
+                (policy.MutesMicrophone ? 1 << 2 : 0) |
+                (microphoneMuted ? 1 << 3 : 0) |
+                (speakerMuteOverride ? 1 << 4 : 0) |
+                (speakerMuted ? 1 << 5 : 0);
+            if (IsCurrentDualSenseMuteOutputPublication(
+                    Volatile.Read(ref dualSenseMuteOutputDevices[ind]),
+                    Volatile.Read(ref dualSenseMuteOutputSignatures[ind]),
+                    dualSenseDevice, publicationSignature))
+            {
+                return false;
+            }
+
+            dualSenseDevice.SetProfileMuteButtonState(
+                policy.OverridesMuteLed,
+                muteLatched,
+                policy.MutesMicrophone,
+                microphoneMuted,
+                speakerMuteOverride,
+                speakerMuted,
+                resolvedSpeakerVolume);
+            Volatile.Write(ref dualSenseMuteOutputDevices[ind],
+                dualSenseDevice);
+            Volatile.Write(ref dualSenseMuteOutputSignatures[ind],
+                publicationSignature);
+            return true;
         }
 
         private void CheckDualSenseMuteButtonProfileActions(int ind, DS4State cState)
         {
             if (!(DS4Controllers[ind] is InputDevices.DualSenseDevice dualSenseDevice))
             {
+                bool hadDualSenseOutputDevice =
+                    dualSenseMuteOutputDevices[ind] != null;
                 dualSenseMuteButtonWasDown[ind] = false;
-                dualSenseMuteLedOverrideActive[ind] = false;
-                dualSenseMuteRememberedOffProfileName[ind] = string.Empty;
+                dualSenseMuteOutputDevices[ind] = null;
+                dualSenseMuteOutputSignatures[ind] = -1;
+                dualSenseMuteRememberedOffProfileName[ind] =
+                    UpdateDualSenseRememberedOffProfileName(
+                        dualSenseMuteRememberedOffProfileName[ind],
+                        controllerConnected: false,
+                        inputOutputModeEnabled: false);
+                if (hadDualSenseOutputDevice)
+                {
+                    lock (dualSenseMuteProfileLocks[ind])
+                    {
+                        dualSenseMuteProfilePending[ind] = false;
+                        dualSenseMuteRequestedProfileName[ind] = string.Empty;
+                        dualSenseMuteRequestedModeEpoch[ind] = 0;
+                    }
+                }
                 return;
             }
 
-            bool muteMicrophoneEnabled = Global.DualSenseMuteButtonMutesMicrophone[ind];
-            bool muteLightEnabled = Global.DualSenseMuteButtonLightEnabled[ind] ||
-                muteMicrophoneEnabled;
-            if (!muteLightEnabled)
+            DualSenseMuteButtonRuntimePolicy policy =
+                ResolveDualSenseMuteButtonPolicy(ind);
+            if (!policy.HandlesButton)
             {
-                if (dualSenseMuteLedOverrideActive[ind])
-                {
-                    dualSenseDevice.SetProfileMuteLedState(false, false);
-                    dualSenseMuteLedOverrideActive[ind] = false;
-                }
-
-                dualSenseDevice.SetProfileMicrophoneMuteState(false, false);
+                ApplyDualSenseMuteButtonOutputState(ind, dualSenseDevice,
+                    policy, IsControllerSpeakerEnabled(ind),
+                    IsControllerHeadsetOnlyAudio(ind));
                 dualSenseMuteButtonWasDown[ind] = cState.Mute;
+                dualSenseMuteRememberedOffProfileName[ind] =
+                    UpdateDualSenseRememberedOffProfileName(
+                        dualSenseMuteRememberedOffProfileName[ind],
+                        controllerConnected: true,
+                        inputOutputModeEnabled:
+                            policy.InputOutputModeEnabled);
                 return;
             }
 
@@ -4319,10 +4505,8 @@ namespace DS4Windows
             if (muteDown && !dualSenseMuteButtonWasDown[ind])
             {
                 dualSenseMuteLedOn[ind] = !dualSenseMuteLedOn[ind];
-                dualSenseDevice.SetProfileMuteLedState(true, dualSenseMuteLedOn[ind]);
-                dualSenseMuteLedOverrideActive[ind] = true;
 
-                if (!muteMicrophoneEnabled)
+                if (policy.SwitchesProfiles)
                 {
                     string requestedProfileName;
                     if (dualSenseMuteLedOn[ind])
@@ -4332,27 +4516,38 @@ namespace DS4Windows
                     }
                     else
                     {
-                        requestedProfileName = Global.DualSenseMuteOffProfileName[ind];
-                        if (string.IsNullOrEmpty(requestedProfileName))
-                        {
-                            requestedProfileName = dualSenseMuteRememberedOffProfileName[ind];
-                        }
+                        requestedProfileName =
+                            ResolveDualSenseMuteOffProfileName(
+                                Global.DualSenseMuteOffProfileName[ind],
+                                dualSenseMuteRememberedOffProfileName[ind]);
                     }
 
                     QueueDualSenseMuteProfile(ind, requestedProfileName);
                 }
             }
-            else if (!dualSenseMuteLedOverrideActive[ind])
-            {
-                dualSenseDevice.SetProfileMuteLedState(true, dualSenseMuteLedOn[ind]);
-                dualSenseMuteLedOverrideActive[ind] = true;
-            }
 
-            dualSenseDevice.SetProfileMicrophoneMuteState(muteMicrophoneEnabled,
-                dualSenseMuteLedOn[ind]);
-            if (muteMicrophoneEnabled)
+            bool muteOutputStateChanged =
+                ApplyDualSenseMuteButtonOutputState(ind, dualSenseDevice,
+                    policy, IsControllerSpeakerEnabled(ind),
+                    IsControllerHeadsetOnlyAudio(ind));
+            if (policy.InputOutputModeEnabled)
             {
-                dualSenseMuteRememberedOffProfileName[ind] = string.Empty;
+                // Cancel a profile action queued by the previous settings or
+                // profile before the periodic dispatcher can observe it.
+                if (muteOutputStateChanged)
+                {
+                    lock (dualSenseMuteProfileLocks[ind])
+                    {
+                        dualSenseMuteProfilePending[ind] = false;
+                        dualSenseMuteRequestedProfileName[ind] = string.Empty;
+                        dualSenseMuteRequestedModeEpoch[ind] = 0;
+                    }
+                }
+                dualSenseMuteRememberedOffProfileName[ind] =
+                    UpdateDualSenseRememberedOffProfileName(
+                        dualSenseMuteRememberedOffProfileName[ind],
+                        controllerConnected: true,
+                        inputOutputModeEnabled: true);
                 dualSenseMuteButtonWasDown[ind] = muteDown;
                 return;
             }

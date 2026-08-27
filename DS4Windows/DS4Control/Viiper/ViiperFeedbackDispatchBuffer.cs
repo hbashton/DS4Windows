@@ -66,6 +66,7 @@ namespace DS4Windows
         private long orderedControlExpired;
         private long orderedControlHighWater;
         private long orderedControlMaximumQueueAgeTicks;
+        private long controlAdmissionRevision;
 
         internal ViiperFeedbackDispatchBuffer(int speakerCapacity,
             int speakerSlotLength, int controlSlotLength,
@@ -181,6 +182,16 @@ namespace DS4Windows
             Interlocked.Read(ref orderedControlExpired);
         internal long OrderedControlHighWater =>
             Interlocked.Read(ref orderedControlHighWater);
+        internal long ControlAdmissionRevision
+        {
+            get
+            {
+                lock (syncRoot)
+                {
+                    return controlAdmissionRevision;
+                }
+            }
+        }
         internal double OrderedControlMaximumQueueAgeMilliseconds =>
             StopwatchTicksToMilliseconds(
                 Interlocked.Read(ref orderedControlMaximumQueueAgeTicks));
@@ -315,6 +326,7 @@ namespace DS4Windows
 
             lock (syncRoot)
             {
+                controlAdmissionRevision++;
                 if (controlPending)
                 {
                     Interlocked.Increment(ref controlCoalesced);
@@ -347,6 +359,7 @@ namespace DS4Windows
 
             lock (syncRoot)
             {
+                controlAdmissionRevision++;
                 if (orderedControlCount == orderedControlSlots.Length)
                 {
                     // Advanced haptics are also real-time data. If the physical
@@ -485,10 +498,20 @@ namespace DS4Windows
             }
         }
 
+        internal bool TryObserveControlIdle(long expectedAdmissionRevision)
+        {
+            lock (syncRoot)
+            {
+                return controlAdmissionRevision == expectedAdmissionRevision &&
+                    !controlPending && orderedControlCount == 0;
+            }
+        }
+
         internal void ClearPending()
         {
             lock (syncRoot)
             {
+                controlAdmissionRevision++;
                 Array.Clear(speakerLengths, 0, speakerLengths.Length);
                 Array.Clear(speakerGenerations, 0,
                     speakerGenerations.Length);

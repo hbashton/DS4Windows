@@ -146,6 +146,15 @@ namespace DS4Windows
         private const int DualSenseTriggerEffectLength = 11;
         private const int DualSenseCompatExtendedFeedbackLength = DualSenseBaseFeedbackLength + (DualSenseTriggerEffectLength * 2);
         private const int DualSenseNativeOutputReportLength = 48;
+        private static readonly byte[] SdlDualSenseAutomaticPlayerZeroLedReport =
+        {
+            0x02, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x24, 0x00, 0x00, 0x40,
+        };
         private const int DualSenseNativeOutputReportOffset = DualSenseCompatExtendedFeedbackLength;
         private const int DualSenseBluetoothHapticsReportLength = 141;
         private const int DualSenseBluetoothHapticsReportOffset = DualSenseNativeOutputReportOffset + DualSenseNativeOutputReportLength;
@@ -228,9 +237,13 @@ namespace DS4Windows
         private readonly byte[] lastNativeGameOutputReport =
             new byte[DualSenseNativeOutputReportLength];
         private long lastNativeGameOutputTimestamp;
+        private long lastNativeGameOutputRevision;
+        private long sdlAutomaticLedCandidateRevision;
+        private long sdlAutomaticLedCandidateStreamGeneration;
+        private DualSenseDevice sdlAutomaticLedCandidateTargetDevice;
         private int nativeGameOutputSessionActive;
+        private int nativeGameOutputRealFeedbackEpoch;
         private Process nativeGameOutputOwnerProcess;
-        private string nativeGameOutputOwnerName;
 
         private readonly OutContType outputType;
         private readonly ViiperVirtualDeviceType viiperType;
@@ -1317,6 +1330,53 @@ namespace DS4Windows
             dualSenseDevice.ReleaseNativeGameOutputOwnership();
         }
 
+        private bool RequestNativeDualSenseLedOwnershipRelease(
+            DualSenseDevice expectedTargetDevice,
+            long expectedNativeOutputRevision)
+        {
+            if (!IsDualSenseType() || audioOnlySidecar ||
+                expectedTargetDevice == null ||
+                expectedNativeOutputRevision <= 0 || Program.rootHub == null)
+            {
+                return false;
+            }
+
+            int deviceIndex = Volatile.Read(ref lastInputDeviceIndex);
+            if (deviceIndex < 0 ||
+                deviceIndex >= Program.rootHub.DS4Controllers.Length ||
+                !ReferenceEquals(
+                    Program.rootHub.DS4Controllers[deviceIndex],
+                    expectedTargetDevice))
+            {
+                return false;
+            }
+
+            return expectedTargetDevice.RequestNativeGameLedOwnershipRelease(
+                expectedNativeOutputRevision);
+        }
+
+        private bool IsCurrentNativeOutputTarget(
+            DualSenseDevice expectedTargetDevice)
+        {
+            if (expectedTargetDevice == null || Program.rootHub == null)
+            {
+                return false;
+            }
+
+            int deviceIndex = Volatile.Read(ref lastInputDeviceIndex);
+            return deviceIndex >= 0 &&
+                deviceIndex < Program.rootHub.DS4Controllers.Length &&
+                NativeOutputTargetBindingMatches(expectedTargetDevice,
+                    Program.rootHub.DS4Controllers[deviceIndex]);
+        }
+
+        internal static bool NativeOutputTargetBindingMatches(
+            object expectedTarget, object currentTarget)
+        {
+            return expectedTarget != null &&
+                ReferenceEquals(expectedTarget, currentTarget);
+        }
+
         private void StopFeedbackReader()
         {
             Thread thread;
@@ -2124,7 +2184,8 @@ namespace DS4Windows
 
                     if (!dequeued)
                     {
-                        TraceNativeGameOutputIdleBoundary();
+                        TraceNativeGameOutputIdleBoundary(
+                            feedbackDispatchBuffer.ControlAdmissionRevision);
                         feedbackControlSignal.WaitOne(100);
                         continue;
                     }
@@ -2492,6 +2553,9 @@ namespace DS4Windows
                 ViiperDeviceStream stream = deviceStream;
                 try
                 {
+                    ApplyFinalMicrophoneMuteInPlace(
+                        microphoneTransportPayload, payloadLength,
+                        Volatile.Read(ref microphoneMuted) == 1);
                     stream.WriteFrameFromOwnerTimed(
                         activeStreamFrameVersion,
                         ViiperStreamFrameMicrophonePcm,
@@ -2523,6 +2587,22 @@ namespace DS4Windows
             }
 
             return false;
+        }
+
+        internal static void ApplyFinalMicrophoneMuteInPlace(byte[] payload,
+            int payloadLength, bool muted)
+        {
+            if (!muted)
+            {
+                return;
+            }
+            if (payload == null || payloadLength < 0 ||
+                payloadLength > payload.Length)
+            {
+                throw new ArgumentOutOfRangeException(nameof(payloadLength));
+            }
+
+            Array.Clear(payload, 0, payloadLength);
         }
 
         private void EnsureMicrophoneWriterAlive()
@@ -4040,11 +4120,19 @@ namespace DS4Windows
                 {
                     attachedDualSense.BluetoothMicrophoneOpusFrameReceived +=
                         BluetoothMicrophoneOpusFrameReceived;
+                    attachedDualSense.ProfileMicrophoneMuteStateChanged +=
+                        ProfileMicrophoneMuteStateChanged;
+                    // Subscribe before the second read. A transition racing
+                    // attachment is therefore observed either here or by the
+                    // callback, with no polling-sized mute window.
+                    Volatile.Write(ref microphoneMuted,
+                        attachedDualSense.IsProfileMicrophoneMuted ? 1 : 0);
                 }
                 else
                 {
                     source.BluetoothMicrophoneSbcFrameReceived +=
                         BluetoothMicrophoneSbcFrameReceived;
+                    Volatile.Write(ref microphoneMuted, 0);
                 }
             }
             Interlocked.Increment(ref microphoneControlEpoch);
@@ -4470,6 +4558,8 @@ namespace DS4Windows
                     {
                         dualSenseSource.BluetoothMicrophoneOpusFrameReceived -=
                             BluetoothMicrophoneOpusFrameReceived;
+                        dualSenseSource.ProfileMicrophoneMuteStateChanged -=
+                            ProfileMicrophoneMuteStateChanged;
                     }
                     else
                     {
@@ -4546,6 +4636,24 @@ namespace DS4Windows
             if (retainDisableRetry)
             {
                 MaintainPendingBluetoothMicrophoneDisables(workerGeneration);
+            }
+        }
+
+        private void ProfileMicrophoneMuteStateChanged(
+            object sender, EventArgs e)
+        {
+            lock (microphoneSourceLock)
+            {
+                if (!connected ||
+                    !(sender is DualSenseDevice dualSenseSource) ||
+                    !ReferenceEquals(microphoneSourceDevice,
+                        dualSenseSource))
+                {
+                    return;
+                }
+
+                Volatile.Write(ref microphoneMuted,
+                    dualSenseSource.IsProfileMicrophoneMuted ? 1 : 0);
             }
         }
 
@@ -4792,14 +4900,20 @@ namespace DS4Windows
                 return false;
             }
 
-            TraceNativeGameOutput(feedback,
-                DualSenseNativeOutputReportOffset);
             PrepareNativeDualSenseOutputReportForProfileInto(feedback,
                 deviceIndex, nativeOutputScratch);
-            return dualSenseDevice.WriteRawOutputReportFromGame(
+            bool applied = dualSenseDevice.WriteRawOutputReportFromGame(
                 nativeOutputScratch,
                 0,
-                DualSenseNativeOutputReportLength);
+                DualSenseNativeOutputReportLength,
+                out long nativeOutputRevision);
+            if (applied)
+            {
+                TraceNativeGameOutput(feedback,
+                    DualSenseNativeOutputReportOffset,
+                    nativeOutputRevision, dualSenseDevice);
+            }
+            return applied;
         }
 
         internal static void PrepareNativeDualSenseOutputReportForProfileInto(
@@ -4894,8 +5008,6 @@ namespace DS4Windows
                 feedback[DualSenseNativeOutputReportOffset] == 0x02;
             if (hasNativeGameState)
             {
-                TraceNativeGameOutput(feedback,
-                    DualSenseNativeOutputReportOffset);
                 // VIIPER's combined carrier contains the persistent media
                 // snapshot. This callback represents one exact game-authored
                 // SET_REPORT, so replace its common-state section before the
@@ -4917,26 +5029,47 @@ namespace DS4Windows
                     feedback[0]);
             }
 
-            return dualSenseDevice.WriteBluetoothCombinedHapticsAudioOutputReport(report,
+            bool publishedImmediately = dualSenseDevice.
+                WriteBluetoothCombinedHapticsAudioOutputReport(report,
                 DualSenseCombinedBluetoothReportOffset,
                 DualSenseCombinedBluetoothReportLength,
-                hasNativeGameState);
+                hasNativeGameState,
+                out long nativeOutputRevision);
+            bool nativeStateAdmitted = hasNativeGameState &&
+                nativeOutputRevision > 0;
+            if (nativeStateAdmitted)
+            {
+                TraceNativeGameOutput(feedback,
+                    DualSenseNativeOutputReportOffset,
+                    nativeOutputRevision, dualSenseDevice);
+            }
+
+            // Once the combined compositor assigns a revision, its recovery
+            // cache owns this exact native state even if the current pacer
+            // cannot publish it immediately. Falling through to the raw FIFO
+            // would admit the same SET_REPORT twice and could let that stale
+            // fallback follow a newer combined state. Only failures before
+            // revision assignment remain eligible for raw fallback.
+            return publishedImmediately || nativeStateAdmitted;
         }
 
-        private void TraceNativeGameOutput(byte[] feedback, int offset)
+        private void TraceNativeGameOutput(byte[] feedback, int offset,
+            long nativeOutputRevision, DualSenseDevice targetDevice)
         {
             if (feedback == null || offset < 0 ||
-                offset + DualSenseNativeOutputReportLength > feedback.Length)
+                offset + DualSenseNativeOutputReportLength > feedback.Length ||
+                nativeOutputRevision <= 0 || targetDevice == null)
             {
                 return;
             }
 
             bool meaningfulOutput = HasMeaningfulNativeGameOutput(feedback,
                 offset);
+            bool sdlAutomaticLedInitialization =
+                IsExactSdlDualSenseAutomaticLedInitialization(feedback,
+                    offset);
             bool captureForegroundOwner;
             bool sessionStarted = false;
-            Span<byte> sessionLogReport =
-                stackalloc byte[DualSenseNativeOutputReportLength];
             lock (nativeGameOutputTraceLock)
             {
                 // VIIPER publishes one neutral 0x02 snapshot while the
@@ -4948,6 +5081,19 @@ namespace DS4Windows
                     nativeGameOutputSessionActive == 0 &&
                     nativeGameOutputOwnerProcess == null)
                 {
+                    // A later neutral report still fences an already tracked
+                    // exact SDL candidate. Ignore only the virtual pad's
+                    // initial neutral arming snapshot; never let a fresh
+                    // revision leave an older visual lease eligible.
+                    if (sdlAutomaticLedCandidateRevision > 0)
+                    {
+                        sdlAutomaticLedCandidateRevision = 0;
+                        sdlAutomaticLedCandidateStreamGeneration = 0;
+                        sdlAutomaticLedCandidateTargetDevice = null;
+                        lastNativeGameOutputRevision =
+                            nativeOutputRevision;
+                        nativeGameOutputRealFeedbackEpoch = 1;
+                    }
                     return;
                 }
 
@@ -4957,20 +5103,35 @@ namespace DS4Windows
                     DualSenseNativeOutputReportLength);
                 nativeGameOutputSessionActive = 1;
                 lastNativeGameOutputTimestamp = Stopwatch.GetTimestamp();
-                captureForegroundOwner = meaningfulOutput &&
-                    (sessionStarted || nativeGameOutputOwnerProcess == null);
-                if (sessionStarted)
-                {
-                    lastNativeGameOutputReport.AsSpan().CopyTo(
-                        sessionLogReport);
-                }
-            }
+                lastNativeGameOutputRevision = nativeOutputRevision;
 
-            if (sessionStarted)
-            {
-                AppLogger.LogToGui(
-                    $"DualSense native game-output session started: report={Convert.ToHexString(sessionLogReport)}",
-                    false);
+                // SDL assigns the first virtual PS5 pad its stock blue
+                // player-index LEDs during enumeration. Its public
+                // SDL_SetJoystickPlayerIndex path can emit the identical
+                // bytes, so this is a deliberately narrow recovery policy,
+                // not sender provenance or a zero-false-positive classifier.
+                // Track only the exact all-zero player-zero signature. Any
+                // other native report establishes a real feedback epoch and
+                // permanently fences this visual-only expiry.
+                if (sdlAutomaticLedInitialization &&
+                    nativeGameOutputRealFeedbackEpoch == 0)
+                {
+                    sdlAutomaticLedCandidateRevision = nativeOutputRevision;
+                    sdlAutomaticLedCandidateStreamGeneration =
+                        Volatile.Read(ref streamGeneration);
+                    sdlAutomaticLedCandidateTargetDevice = targetDevice;
+                }
+                else
+                {
+                    sdlAutomaticLedCandidateRevision = 0;
+                    sdlAutomaticLedCandidateStreamGeneration = 0;
+                    sdlAutomaticLedCandidateTargetDevice = null;
+                    nativeGameOutputRealFeedbackEpoch = 1;
+                }
+
+                captureForegroundOwner = meaningfulOutput &&
+                    !sdlAutomaticLedInitialization &&
+                    (sessionStarted || nativeGameOutputOwnerProcess == null);
             }
 
             if (captureForegroundOwner)
@@ -5001,45 +5162,165 @@ namespace DS4Windows
             return false;
         }
 
-        private void TraceNativeGameOutputIdleBoundary()
+        internal static bool
+            IsExactSdlDualSenseAutomaticLedInitialization(byte[] feedback,
+                int offset)
+        {
+            if (feedback == null || offset < 0 ||
+                offset + SdlDualSenseAutomaticPlayerZeroLedReport.Length >
+                    feedback.Length)
+            {
+                return false;
+            }
+
+            for (int index = 0;
+                 index < SdlDualSenseAutomaticPlayerZeroLedReport.Length;
+                 index++)
+            {
+                if (feedback[offset + index] !=
+                    SdlDualSenseAutomaticPlayerZeroLedReport[index])
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        internal static bool ShouldExpireSdlAutomaticLedInitialization(
+            bool exactCandidate, bool realFeedbackEpoch,
+            bool foregroundCandidatePresent,
+            bool targetBindingMatches,
+            long candidateStreamGeneration, long currentStreamGeneration,
+            long candidateRevision, long currentRevision,
+            long elapsedTicks, long graceTicks)
+        {
+            // Windows' HID callback does not expose the writer PID, so the
+            // foreground candidate is accepted only to prove it cannot alter
+            // this decision. It is useful lifecycle telemetry but never
+            // verified provenance. Only the exact SDL bootstrap report can
+            // expire, and a stream change or one newer report fences it.
+            _ = foregroundCandidatePresent;
+            return exactCandidate && !realFeedbackEpoch &&
+                targetBindingMatches &&
+                candidateStreamGeneration == currentStreamGeneration &&
+                candidateRevision > 0 &&
+                candidateRevision == currentRevision &&
+                graceTicks > 0 && elapsedTicks >= graceTicks;
+        }
+
+        private void TraceNativeGameOutputIdleBoundary(
+            long controlAdmissionRevision)
         {
             Process ownerProcess;
-            string ownerName;
             bool captureOwnerAtBoundary;
-            bool logIdleBoundary = false;
-            Span<byte> idleLogReport =
-                stackalloc byte[DualSenseNativeOutputReportLength];
+            bool automaticLedExpiryCandidate = false;
+            long automaticLedRevision = 0;
+            long automaticLedStreamGeneration = 0;
+            long automaticLedElapsedTicks = 0;
+            DualSenseDevice automaticLedTargetDevice = null;
             lock (nativeGameOutputTraceLock)
             {
                 long now = Stopwatch.GetTimestamp();
                 captureOwnerAtBoundary =
+                    nativeGameOutputRealFeedbackEpoch != 0 &&
                     nativeGameOutputOwnerProcess == null &&
                     lastNativeGameOutputTimestamp > 0 &&
                     HasMeaningfulNativeGameOutput(
                         lastNativeGameOutputReport, 0);
+                automaticLedElapsedTicks =
+                    lastNativeGameOutputTimestamp > 0 ?
+                        now - lastNativeGameOutputTimestamp : 0;
+                automaticLedRevision =
+                    sdlAutomaticLedCandidateRevision;
+                automaticLedStreamGeneration =
+                    sdlAutomaticLedCandidateStreamGeneration;
+                automaticLedTargetDevice =
+                    sdlAutomaticLedCandidateTargetDevice;
+                automaticLedExpiryCandidate =
+                    ShouldExpireSdlAutomaticLedInitialization(
+                        automaticLedRevision > 0 &&
+                            IsExactSdlDualSenseAutomaticLedInitialization(
+                                lastNativeGameOutputReport, 0),
+                        nativeGameOutputRealFeedbackEpoch != 0,
+                        nativeGameOutputOwnerProcess != null,
+                        IsCurrentNativeOutputTarget(
+                            automaticLedTargetDevice),
+                        automaticLedStreamGeneration,
+                        Volatile.Read(ref streamGeneration),
+                        automaticLedRevision,
+                        lastNativeGameOutputRevision,
+                        automaticLedElapsedTicks,
+                        Stopwatch.Frequency);
                 if (nativeGameOutputSessionActive != 0 &&
                     lastNativeGameOutputTimestamp > 0 &&
-                    now - lastNativeGameOutputTimestamp >=
-                        Stopwatch.Frequency)
+                    automaticLedElapsedTicks >= Stopwatch.Frequency)
                 {
                     nativeGameOutputSessionActive = 0;
                     lastNativeGameOutputTimestamp = 0;
-                    lastNativeGameOutputReport.AsSpan().CopyTo(idleLogReport);
-                    logIdleBoundary = true;
                     // A quiet HID interval is not an ownership release. Games
                     // commonly latch their LED and trigger state, then stop
                     // writing until it changes.
                 }
 
                 ownerProcess = nativeGameOutputOwnerProcess;
-                ownerName = nativeGameOutputOwnerName;
             }
 
-            if (logIdleBoundary)
+            bool automaticLedReleaseQueued = false;
+            if (automaticLedExpiryCandidate &&
+                feedbackDispatchBuffer.TryObserveControlIdle(
+                    controlAdmissionRevision))
             {
-                AppLogger.LogToGui(
-                    $"DualSense native game-output stream idle for 1 second: finalReport={Convert.ToHexString(idleLogReport)}",
-                    false);
+                // This short buffer observation is the admission
+                // linearization point; it executes no callback. A control
+                // report admitted afterward is logically later, and the sole
+                // dispatcher plus the device revision fence ensures that it
+                // follows or cancels this visual-only request.
+                bool traceFenceCurrent = false;
+                lock (nativeGameOutputTraceLock)
+                {
+                    traceFenceCurrent =
+                        ShouldExpireSdlAutomaticLedInitialization(
+                            sdlAutomaticLedCandidateRevision > 0 &&
+                                IsExactSdlDualSenseAutomaticLedInitialization(
+                                    lastNativeGameOutputReport, 0),
+                            nativeGameOutputRealFeedbackEpoch != 0,
+                            nativeGameOutputOwnerProcess != null,
+                            IsCurrentNativeOutputTarget(
+                                sdlAutomaticLedCandidateTargetDevice),
+                            sdlAutomaticLedCandidateStreamGeneration,
+                            Volatile.Read(ref streamGeneration),
+                            sdlAutomaticLedCandidateRevision,
+                            lastNativeGameOutputRevision,
+                            automaticLedElapsedTicks,
+                            Stopwatch.Frequency) &&
+                        sdlAutomaticLedCandidateRevision ==
+                            automaticLedRevision &&
+                        sdlAutomaticLedCandidateStreamGeneration ==
+                            automaticLedStreamGeneration &&
+                        ReferenceEquals(
+                            sdlAutomaticLedCandidateTargetDevice,
+                            automaticLedTargetDevice);
+                    if (traceFenceCurrent)
+                    {
+                        sdlAutomaticLedCandidateRevision = 0;
+                        sdlAutomaticLedCandidateStreamGeneration = 0;
+                        sdlAutomaticLedCandidateTargetDevice = null;
+                    }
+                }
+
+                if (traceFenceCurrent)
+                {
+                    automaticLedReleaseQueued =
+                        RequestNativeDualSenseLedOwnershipRelease(
+                            automaticLedTargetDevice,
+                            automaticLedRevision);
+                }
+            }
+
+            if (automaticLedReleaseQueued)
+            {
+                return;
             }
 
             // A freshly launched game can publish its first SET_REPORT before
@@ -5052,7 +5333,6 @@ namespace DS4Windows
                 lock (nativeGameOutputTraceLock)
                 {
                     ownerProcess = nativeGameOutputOwnerProcess;
-                    ownerName = nativeGameOutputOwnerName;
                 }
             }
 
@@ -5061,28 +5341,16 @@ namespace DS4Windows
                 return;
             }
 
-            bool released = false;
             lock (nativeGameOutputTraceLock)
             {
                 if (ReferenceEquals(nativeGameOutputOwnerProcess,
                         ownerProcess))
                 {
                     nativeGameOutputOwnerProcess = null;
-                    nativeGameOutputOwnerName = null;
-                    nativeGameOutputSessionActive = 0;
-                    lastNativeGameOutputTimestamp = 0;
-                    released = true;
                 }
             }
 
             ownerProcess.Dispose();
-            if (released)
-            {
-                ReleaseNativeDualSenseFeedbackOwnership();
-                AppLogger.LogToGui(
-                    $"DualSense native game-output owner {ownerName ?? "game"} exited; restored the active profile lightbar, player LEDs, triggers, and rumble.",
-                    false);
-            }
         }
 
         private void CaptureForegroundNativeGameOutputOwner()
@@ -5093,11 +5361,9 @@ namespace DS4Windows
                 return;
             }
 
-            string candidateName;
             int candidateId;
             try
             {
-                candidateName = candidate.ProcessName;
                 candidateId = candidate.Id;
             }
             catch
@@ -5138,7 +5404,6 @@ namespace DS4Windows
                         observedOwner))
                 {
                     nativeGameOutputOwnerProcess = candidate;
-                    nativeGameOutputOwnerName = candidateName;
                     installed = true;
                 }
             }
@@ -5150,9 +5415,6 @@ namespace DS4Windows
             }
 
             observedOwner?.Dispose();
-            AppLogger.LogToGui(
-                $"DualSense native game-output ownership associated with {candidateName} (PID {candidateId}).",
-                false);
         }
 
         private void ClearNativeGameOutputProcessLease()
@@ -5162,9 +5424,13 @@ namespace DS4Windows
             {
                 owner = nativeGameOutputOwnerProcess;
                 nativeGameOutputOwnerProcess = null;
-                nativeGameOutputOwnerName = null;
                 nativeGameOutputSessionActive = 0;
                 lastNativeGameOutputTimestamp = 0;
+                lastNativeGameOutputRevision = 0;
+                sdlAutomaticLedCandidateRevision = 0;
+                sdlAutomaticLedCandidateStreamGeneration = 0;
+                sdlAutomaticLedCandidateTargetDevice = null;
+                nativeGameOutputRealFeedbackEpoch = 0;
             }
 
             owner?.Dispose();

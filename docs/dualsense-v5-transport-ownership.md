@@ -248,6 +248,21 @@ and only then signals or invokes the owner.
 - Native-output trace locks protect only report/process-reference snapshots.
   Hex formatting, UI logging, process liveness queries and `Process.Dispose`
   happen after the trace lock is released.
+- Windows does not identify the process behind a virtual HID output callback.
+  A foreground process is tracked only as a lifecycle heuristic and never
+  authorizes a destructive native-state release. The exact 48-byte SDL
+  player-zero LED report observed during automatic enumeration receives one
+  narrow exception: if no other native report establishes a real feedback
+  epoch, a one-second, stream/device/revision-fenced policy restores only the
+  profile lightbar and player LEDs. SDL's public player-index API can emit the
+  same bytes, so this is an explicit visual-domain recovery tradeoff, not
+  sender provenance or a zero-false-positive classifier. Each successfully
+  admitted USB native delta is retained across a failed physical write and has
+  at most one successful physical emission; afterward the physical owner keeps
+  a command-validity-consumed template for local audio/mute/LED overlays.
+  Bluetooth merges those fields into its existing native snapshot.
+  Neither path clears triggers, rumble, audio, microphone, haptics, timestamps,
+  or pacer state.
 - OSC and report-diagnostic locks protect one pending snapshot per controller.
   UDP, JSON/filesystem, logging, tray and callback work occurs after claim.
 - Shutdown publishes a generation/stop boundary first, signals every owner,

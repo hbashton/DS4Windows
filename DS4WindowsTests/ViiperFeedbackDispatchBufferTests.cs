@@ -449,6 +449,50 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
+        public void ControlIdleCommitRejectsJustAdmittedOrderedReport()
+        {
+            var buffer = new ViiperFeedbackDispatchBuffer(2, 8, 16, 2);
+            long observedIdleRevision = buffer.ControlAdmissionRevision;
+            Assert.IsTrue(buffer.TryEnqueueOrderedControl(
+                new byte[] { 0x02 }, 1, 7, 0));
+
+            Assert.IsFalse(buffer.TryObserveControlIdle(
+                observedIdleRevision));
+        }
+
+        [TestMethod]
+        public void ControlIdleObservationAcceptsUnchangedEmptyAdmission()
+        {
+            var buffer = new ViiperFeedbackDispatchBuffer(2, 8, 16, 2);
+            long observedIdleRevision = buffer.ControlAdmissionRevision;
+            Assert.IsTrue(buffer.TryObserveControlIdle(
+                observedIdleRevision));
+        }
+
+        [TestMethod]
+        public void ControlIdleObservationRejectsJustAdmittedLatestState()
+        {
+            var buffer = new ViiperFeedbackDispatchBuffer(2, 8, 16, 2);
+            long observedIdleRevision = buffer.ControlAdmissionRevision;
+            Assert.IsTrue(buffer.QueueControl(
+                new byte[] { 0x02 }, 1, 7, 0));
+
+            Assert.IsFalse(buffer.TryObserveControlIdle(
+                observedIdleRevision));
+        }
+
+        [TestMethod]
+        public void ClearingControlLanesInvalidatesPriorIdleObservation()
+        {
+            var buffer = new ViiperFeedbackDispatchBuffer(2, 8, 16, 2);
+            long beforeBoundary = buffer.ControlAdmissionRevision;
+
+            buffer.ClearPending();
+
+            Assert.IsFalse(buffer.TryObserveControlIdle(beforeBoundary));
+        }
+
+        [TestMethod]
         public void HotSpeakerHandoffDoesNotAllocateAfterWarmup()
         {
             var buffer = new ViiperFeedbackDispatchBuffer(2, 32, 16);

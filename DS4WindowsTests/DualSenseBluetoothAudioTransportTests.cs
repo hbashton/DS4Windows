@@ -1191,6 +1191,14 @@ namespace DS4WindowsTests
             typeof(DualSenseDevice).GetField(
                 "bluetoothCombinedHapticsGeneration",
                 BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo PhysicalOutputCommandCountField =
+            typeof(DualSenseDevice).GetField(
+                "physicalOutputCommandCount",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo NativeGameOutputRevisionField =
+            typeof(DualSenseDevice).GetField(
+                "nativeGameOutputRevision",
+                BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo PhysicalOutputStateMailboxField =
             typeof(DualSenseDevice).GetField(
                 "physicalOutputStateMailbox",
@@ -1286,6 +1294,16 @@ namespace DS4WindowsTests
                 typeof(DualSenseDevice).GetMethod(
                     "PacerReferenceRetainsBluetoothTransportOwnership",
                     BindingFlags.Static | BindingFlags.NonPublic);
+        private static readonly MethodInfo
+            TryApplyBluetoothCombinedHapticsOutputReportMethod =
+                typeof(ViiperOutDevice).GetMethod(
+                    "TryApplyBluetoothCombinedHapticsOutputReport",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly MethodInfo
+            TryApplyNativeDualSenseOutputReportMethod =
+                typeof(ViiperOutDevice).GetMethod(
+                    "TryApplyNativeDualSenseOutputReport",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
 
         [TestMethod]
         public void DiagnosticPcmTraceHasRecoverableStreamingHeaderImmediately()
@@ -1641,6 +1659,51 @@ namespace DS4WindowsTests
             Assert.AreEqual((byte)92, cached[13 + 46]);
             Assert.IsTrue(GetFieldValue<long>(NativeStateTimestampField,
                 device) > 0);
+        }
+
+        [TestMethod]
+        public void DeferredCombinedNativeAdmissionDoesNotQueueStaleRawFallback()
+        {
+            DualSenseDevice device = CreateBluetoothDevice();
+            SetFieldValue(OutputTransportStoppingField, device, 1);
+            var output = new ViiperOutDevice(OutContType.None,
+                ViiperVirtualDeviceType.DualSense);
+            byte[] nativeScratch = new byte[48];
+
+            byte[] first = BuildAtomicNativeFeedback(0x21);
+            Assert.IsTrue(ApplyCombinedThenRawFallback(output, device,
+                first, nativeScratch),
+                "A cache-admitted native report was exposed to raw fallback when immediate pacer publication was unavailable.");
+            Assert.IsNull(GetFieldValue<DualSenseBluetoothAudioPacer>(
+                BluetoothAudioPacerField, device),
+                "The fixture did not defer immediate publication.");
+            Assert.AreEqual(0, GetFieldValue<int>(
+                PhysicalOutputCommandCountField, device),
+                "The cache-admitted report was duplicated into the raw FIFO.");
+            Assert.AreEqual(1L, GetFieldValue<long>(
+                NativeGameOutputRevisionField, device),
+                "The first native state was admitted more than once.");
+            byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
+                device);
+            Assert.AreEqual((byte)0x21, cached[23],
+                "The deferred first state was not retained by the recovery cache.");
+            StringAssert.Contains(device.LastBluetoothHapticsWriteStatus,
+                "Could not atomically publish",
+                "The fixture did not exercise the deferred-publication path.");
+
+            byte[] second = BuildAtomicNativeFeedback(0x52);
+            Assert.IsTrue(ApplyCombinedThenRawFallback(output, device,
+                second, nativeScratch));
+            Assert.AreEqual(0, GetFieldValue<int>(
+                PhysicalOutputCommandCountField, device),
+                "An older raw fallback remained eligible after the newer combined state was admitted.");
+            Assert.AreEqual(2L, GetFieldValue<long>(
+                NativeGameOutputRevisionField, device),
+                "The two native states did not receive exactly one revision each.");
+
+            cached = GetFieldValue<byte[]>(CachedCombinedReportField, device);
+            Assert.AreEqual((byte)0x52, cached[23],
+                "The deferred first state became authoritative again after the newer state was admitted.");
         }
 
         [TestMethod]
@@ -2298,6 +2361,58 @@ namespace DS4WindowsTests
             Assert.IsNotNull(BuildCombinedControlReportMethod);
             return (byte[])BuildCombinedControlReportMethod.Invoke(null,
                 new object[] { sequence, packetSequence, microphoneEnabled });
+        }
+
+        private static byte[] BuildAtomicNativeFeedback(
+            byte rightTriggerMode)
+        {
+            const int nativeReportOffset = 28;
+            const int combinedReportOffset = nativeReportOffset + 48;
+            byte[] feedback =
+                new byte[ViiperOutDevice.DualSenseAtomicFeedbackLength];
+            feedback[nativeReportOffset] = 0x02;
+            feedback[nativeReportOffset + 1] = 0x04;
+            feedback[nativeReportOffset + 11] = rightTriggerMode;
+            feedback[nativeReportOffset + 12] = 0xFF;
+
+            byte[] combined = BuildCombinedControlReport(0, 0, false);
+            Buffer.BlockCopy(combined, 0, feedback, combinedReportOffset,
+                combined.Length);
+            return feedback;
+        }
+
+        private static bool ApplyCombinedThenRawFallback(
+            ViiperOutDevice output, DualSenseDevice device, byte[] feedback,
+            byte[] nativeScratch)
+        {
+            Assert.IsNotNull(
+                TryApplyBluetoothCombinedHapticsOutputReportMethod);
+            bool handled = (bool)
+                TryApplyBluetoothCombinedHapticsOutputReportMethod.Invoke(
+                    output, new object[]
+                    {
+                        device,
+                        0,
+                        feedback,
+                        feedback.Length,
+                        true,
+                        nativeScratch,
+                    });
+            if (handled)
+            {
+                return true;
+            }
+
+            Assert.IsNotNull(TryApplyNativeDualSenseOutputReportMethod);
+            return (bool)TryApplyNativeDualSenseOutputReportMethod.Invoke(
+                output, new object[]
+                {
+                    device,
+                    0,
+                    feedback,
+                    feedback.Length,
+                    nativeScratch,
+                });
         }
 
         private static byte[] BuildExpectedDefaultState()

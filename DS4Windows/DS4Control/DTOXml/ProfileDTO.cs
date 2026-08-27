@@ -793,6 +793,20 @@ namespace DS4WinWPF.DS4Control.DTOXml
             set => _dualSenseMuteButtonLightEnabled = XmlDataUtilities.StrToBool(value);
         }
 
+        private bool _dualSenseMuteButtonMutesInputOutput;
+        private bool _dualSenseMuteButtonMutesInputOutputSpecified;
+        [XmlElement("DualSenseMuteButtonMutesInputOutput")]
+        public string DualSenseMuteButtonMutesInputOutputString
+        {
+            get => _dualSenseMuteButtonMutesInputOutput.ToString();
+            set
+            {
+                _dualSenseMuteButtonMutesInputOutput =
+                    XmlDataUtilities.StrToBool(value);
+                _dualSenseMuteButtonMutesInputOutputSpecified = true;
+            }
+        }
+
         private bool _dualSenseMuteButtonMutesMicrophone;
         [XmlElement("DualSenseMuteButtonMutesMicrophone")]
         public string DualSenseMuteButtonMutesMicrophoneString
@@ -804,6 +818,29 @@ namespace DS4WinWPF.DS4Control.DTOXml
         public bool ShouldSerializeDualSenseMuteButtonMutesMicrophoneString()
         {
             return _dualSenseMuteButtonMutesMicrophone;
+        }
+
+        private bool _dualSenseMuteButtonMutesSpeaker;
+        [XmlElement("DualSenseMuteButtonMutesSpeaker")]
+        public string DualSenseMuteButtonMutesSpeakerString
+        {
+            get => _dualSenseMuteButtonMutesSpeaker.ToString();
+            set => _dualSenseMuteButtonMutesSpeaker =
+                XmlDataUtilities.StrToBool(value);
+        }
+
+        private bool _dualSenseMuteButtonSwitchesProfiles;
+        private bool _dualSenseMuteButtonSwitchesProfilesSpecified;
+        [XmlElement("DualSenseMuteButtonSwitchesProfiles")]
+        public string DualSenseMuteButtonSwitchesProfilesString
+        {
+            get => _dualSenseMuteButtonSwitchesProfiles.ToString();
+            set
+            {
+                _dualSenseMuteButtonSwitchesProfiles =
+                    XmlDataUtilities.StrToBool(value);
+                _dualSenseMuteButtonSwitchesProfilesSpecified = true;
+            }
         }
 
         [XmlElement("DualSenseMuteOnProfileName")]
@@ -1717,7 +1754,16 @@ namespace DS4WinWPF.DS4Control.DTOXml
             _gameBarControllerCompatibility = source.gameBarControllerCompatibility[deviceIndex];
             GameBarProfileName = string.Empty;
             _dualSenseMuteButtonLightEnabled = source.dualSenseMuteButtonLightEnabled[deviceIndex];
+            _dualSenseMuteButtonMutesInputOutput =
+                source.dualSenseMuteButtonMutesInputOutput[deviceIndex];
+            _dualSenseMuteButtonMutesInputOutputSpecified = true;
             _dualSenseMuteButtonMutesMicrophone = source.dualSenseMuteButtonMutesMicrophone[deviceIndex];
+            _dualSenseMuteButtonMutesSpeaker =
+                source.dualSenseMuteButtonMutesSpeaker[deviceIndex];
+            _dualSenseMuteButtonSwitchesProfiles =
+                !_dualSenseMuteButtonMutesInputOutput &&
+                source.dualSenseMuteButtonSwitchesProfiles[deviceIndex];
+            _dualSenseMuteButtonSwitchesProfilesSpecified = true;
             DualSenseMuteOnProfileName = source.dualSenseMuteOnProfileName[deviceIndex];
             DualSenseMuteOffProfileName = source.dualSenseMuteOffProfileName[deviceIndex];
             _dinputOnly = source.dinputOnly[deviceIndex];
@@ -2338,9 +2384,26 @@ namespace DS4WinWPF.DS4Control.DTOXml
                 _gameBarControllerCompatibility || legacyGameBarSwitcherConfigured;
             destination.gameBarProfileName[deviceIndex] = string.Empty;
             destination.dualSenseMuteButtonLightEnabled[deviceIndex] = _dualSenseMuteButtonLightEnabled;
+            bool muteInputOutput =
+                _dualSenseMuteButtonMutesInputOutputSpecified
+                    ? _dualSenseMuteButtonMutesInputOutput
+                    : _dualSenseMuteButtonMutesMicrophone;
+            destination.dualSenseMuteButtonMutesInputOutput[deviceIndex] =
+                muteInputOutput;
             destination.dualSenseMuteButtonMutesMicrophone[deviceIndex] = _dualSenseMuteButtonMutesMicrophone;
+            destination.dualSenseMuteButtonMutesSpeaker[deviceIndex] =
+                _dualSenseMuteButtonMutesSpeaker;
             destination.dualSenseMuteOnProfileName[deviceIndex] = DualSenseMuteOnProfileName ?? string.Empty;
             destination.dualSenseMuteOffProfileName[deviceIndex] = DualSenseMuteOffProfileName ?? string.Empty;
+            destination.dualSenseMuteButtonSwitchesProfiles[deviceIndex] =
+                !muteInputOutput &&
+                (_dualSenseMuteButtonSwitchesProfilesSpecified
+                    ? _dualSenseMuteButtonSwitchesProfiles
+                    : _dualSenseMuteButtonLightEnabled &&
+                      (!string.IsNullOrWhiteSpace(DualSenseMuteOnProfileName) ||
+                       !string.IsNullOrWhiteSpace(DualSenseMuteOffProfileName)));
+            System.Threading.Interlocked.Increment(
+                ref destination.dualSenseMuteButtonModeEpoch[deviceIndex]);
             destination.dinputOnly[deviceIndex] = _dinputOnly;
             destination.startTouchpadOff[deviceIndex] = _startTouchpadOff;
             destination.sATriggers[deviceIndex] = SATriggers;

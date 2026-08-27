@@ -32,8 +32,14 @@ namespace DS4Windows
         private string serial = null;
         private SafeFileHandle safeReadHandle;
         private readonly object handleLock = new object();
+        private readonly object readTransferLock = new object();
+        private readonly object interruptWriteTransferLock = new object();
+        private EventWaitHandle readCompletionEvent;
+        private EventWaitHandle interruptWriteCompletionEvent;
         private bool isOpen;
         private bool isExclusive;
+        private bool disposed;
+        private long transferEpoch;
         private const string BLANK_SERIAL = "00:00:00:00:00:00";
 
         internal HidDevice(string devicePath, string description = null, string parentPath = null)
@@ -81,6 +87,7 @@ namespace DS4Windows
         {
             lock (handleLock)
             {
+                ObjectDisposedException.ThrowIf(disposed, this);
                 if (IsOpen) return;
                 try
                 {
@@ -176,6 +183,11 @@ namespace DS4Windows
             lock (handleLock)
             {
                 handle = safeReadHandle;
+                // This is the logical close boundary for every transfer that
+                // holds a DangerousAddRef. SafeHandle.IsClosed does not become
+                // true until its final dangerous reference is released, so an
+                // explicit epoch must reject submissions that cross Close.
+                Interlocked.Increment(ref transferEpoch);
                 safeReadHandle = null;
                 IsOpen = false;
                 IsExclusive = false;
@@ -186,24 +198,101 @@ namespace DS4Windows
                 return;
             }
 
+            bool added = false;
             try
             {
                 if (!handle.IsClosed && !handle.IsInvalid)
                 {
-                    NativeMethods.CancelIoEx(handle.DangerousGetHandle(), IntPtr.Zero);
+                    // Keep the native handle alive while marking the
+                    // SafeHandle disposed and issuing the handle-wide cancel.
+                    // The transfer epoch above, rather than IsClosed, is the
+                    // logical close boundary while dangerous leases exist.
+                    handle.DangerousAddRef(ref added);
+                    IntPtr nativeHandle = handle.DangerousGetHandle();
+                    handle.Dispose();
+                    NativeMethods.CancelIoEx(nativeHandle, IntPtr.Zero);
                 }
             }
             finally
             {
-                handle?.Dispose();
+                if (added)
+                {
+                    handle.DangerousRelease();
+                }
+                handle.Dispose();
             }
         }
 
         public void Dispose()
         {
+            lock (handleLock)
+            {
+                if (disposed)
+                {
+                    return;
+                }
+                disposed = true;
+            }
             CloseDevice();
+            lock (readTransferLock)
+            {
+                Interlocked.Exchange(ref readCompletionEvent, null)?.Dispose();
+            }
+            lock (interruptWriteTransferLock)
+            {
+                Interlocked.Exchange(ref interruptWriteCompletionEvent,
+                    null)?.Dispose();
+            }
             GC.SuppressFinalize(this);
         }
+
+        private SafeFileHandle AcquireTransferHandle(bool exclusive,
+            out IntPtr nativeHandle, out long capturedTransferEpoch)
+        {
+            lock (handleLock)
+            {
+                ObjectDisposedException.ThrowIf(disposed, this);
+                if (safeReadHandle == null || safeReadHandle.IsClosed ||
+                    safeReadHandle.IsInvalid)
+                {
+                    safeReadHandle?.Dispose();
+                    safeReadHandle = OpenHandle(_devicePath, exclusive,
+                        enumerate: false);
+                    IsOpen = safeReadHandle != null &&
+                        !safeReadHandle.IsClosed &&
+                        !safeReadHandle.IsInvalid;
+                    IsExclusive = IsOpen && exclusive;
+                }
+
+                SafeFileHandle handle = safeReadHandle;
+                if (handle == null || handle.IsClosed || handle.IsInvalid)
+                {
+                    throw new InvalidOperationException(
+                        "The HID transfer handle could not be opened.");
+                }
+
+                bool added = false;
+                try
+                {
+                    handle.DangerousAddRef(ref added);
+                    nativeHandle = handle.DangerousGetHandle();
+                    capturedTransferEpoch = Interlocked.Read(
+                        ref transferEpoch);
+                    return handle;
+                }
+                catch
+                {
+                    if (added)
+                    {
+                        handle.DangerousRelease();
+                    }
+                    throw;
+                }
+            }
+        }
+
+        internal bool IsTransferEpochCurrent(long capturedTransferEpoch) =>
+            capturedTransferEpoch == Interlocked.Read(ref transferEpoch);
 
         public void CancelIO()
         {
@@ -268,45 +357,114 @@ namespace DS4Windows
 
         public unsafe ReadStatus ReadFile(Span<byte> inputBuffer, uint timeout = uint.MaxValue)
         {
-            SafeReadHandle ??= OpenHandle(_devicePath, true, false);
-
-            using AutoResetEvent wait = new(false);
-
-            var ov = new NativeOverlapped { EventHandle = wait.SafeWaitHandle.DangerousGetHandle() };
-
-            fixed (byte* buffer = inputBuffer)
+            lock (readTransferLock)
             {
-                if (NativeMethods.ReadFilePinned(
-                    SafeReadHandle.DangerousGetHandle(), buffer,
-                    (uint)inputBuffer.Length, null, &ov))
+                SafeFileHandle transferHandle = AcquireTransferHandle(
+                    exclusive: true, out IntPtr nativeHandle,
+                    out long capturedTransferEpoch);
+                EventWaitHandle wait = GetOrCreateReadCompletionEvent();
+                try
                 {
-                    return ReadStatus.Success;
-                }
-
-                if (Marshal.GetLastWin32Error() !=
-                    (uint)WIN32_ERROR.ERROR_IO_PENDING)
-                {
-                    return ReadStatus.ReadError;
-                }
-
-                if (!PInvoke.GetOverlappedResultEx(SafeReadHandle, ov, out _,
-                    timeout, true))
-                {
-                    uint error = (uint)Marshal.GetLastWin32Error();
-                    if (error == NativeMethods.WAIT_TIMEOUT)
+                    wait.Reset();
+                    var ov = new NativeOverlapped
                     {
-                        // Both the buffer and OVERLAPPED stay pinned/alive until
-                        // the exact pending IRP has been cancelled and drained.
-                        NativeMethods.CancelIoEx(
-                            SafeReadHandle.DangerousGetHandle(), (IntPtr)(&ov));
-                        PInvoke.GetOverlappedResult(SafeReadHandle, ov, out _, true);
-                        return ReadStatus.WaitTimedOut;
+                        EventHandle = wait.SafeWaitHandle.
+                            DangerousGetHandle(),
+                    };
+
+                    fixed (byte* buffer = inputBuffer)
+                    {
+                        if (!IsTransferEpochCurrent(capturedTransferEpoch) ||
+                            transferHandle.IsClosed)
+                        {
+                            return ReadStatus.ReadError;
+                        }
+                        if (NativeMethods.ReadFilePinned(nativeHandle, buffer,
+                            (uint)inputBuffer.Length, null, &ov))
+                        {
+                            return !IsTransferEpochCurrent(
+                                    capturedTransferEpoch) ||
+                                transferHandle.IsClosed ?
+                                ReadStatus.ReadError : ReadStatus.Success;
+                        }
+
+                        if (Marshal.GetLastWin32Error() !=
+                            (uint)WIN32_ERROR.ERROR_IO_PENDING)
+                        {
+                            return ReadStatus.ReadError;
+                        }
+
+                        if (!IsTransferEpochCurrent(capturedTransferEpoch) ||
+                            transferHandle.IsClosed)
+                        {
+                            NativeMethods.CancelIoEx(nativeHandle,
+                                (IntPtr)(&ov));
+                            NativeMethods.GetOverlappedResultPinned(
+                                nativeHandle, &ov, out _, true);
+                            return ReadStatus.ReadError;
+                        }
+
+                        if (!NativeMethods.GetOverlappedResultExPinned(
+                            nativeHandle, &ov, out _, timeout, false))
+                        {
+                            uint error = (uint)Marshal.GetLastWin32Error();
+                            if (error == NativeMethods.WAIT_TIMEOUT)
+                            {
+                                // Both the buffer and OVERLAPPED stay pinned
+                                // and alive until the exact pending IRP has
+                                // been cancelled and drained.
+                                NativeMethods.CancelIoEx(nativeHandle,
+                                    (IntPtr)(&ov));
+                                NativeMethods.GetOverlappedResultPinned(
+                                    nativeHandle, &ov, out _, true);
+                                return ReadStatus.WaitTimedOut;
+                            }
+
+                            return ReadStatus.ReadError;
+                        }
+
+                        return ReadStatus.Success;
                     }
-
-                    return ReadStatus.ReadError;
                 }
+                finally
+                {
+                    transferHandle.DangerousRelease();
+                }
+            }
+        }
 
-                return ReadStatus.Success;
+        private EventWaitHandle GetOrCreateReadCompletionEvent()
+        {
+            return readCompletionEvent ??= new EventWaitHandle(false,
+                EventResetMode.ManualReset);
+        }
+
+        internal PipelinedInputReportReader CreatePipelinedInputReportReader(
+            byte[] initialBuffer)
+        {
+            if (initialBuffer == null || initialBuffer.Length == 0)
+            {
+                throw new ArgumentException(
+                    "A non-empty physical input buffer is required.",
+                    nameof(initialBuffer));
+            }
+
+            byte[][] buffers =
+            {
+                initialBuffer,
+                new byte[initialBuffer.Length],
+            };
+            SafeFileHandle transferHandle = AcquireTransferHandle(
+                exclusive: true, out _, out long capturedTransferEpoch);
+            try
+            {
+                var backend = new NativePipelinedInputReadBackend(
+                    this, transferHandle, capturedTransferEpoch, buffers);
+                return new PipelinedInputReportReader(buffers, backend);
+            }
+            finally
+            {
+                transferHandle.DangerousRelease();
             }
         }
 
@@ -331,43 +489,85 @@ namespace DS4Windows
             {
                 return false;
             }
-            SafeReadHandle ??= OpenHandle(_devicePath, true, false);
-            using AutoResetEvent wait = new(false);
-            var ov = new NativeOverlapped { EventHandle = wait.SafeWaitHandle.DangerousGetHandle() };
-
-            fixed (byte* buffer = outputBuffer)
+            lock (interruptWriteTransferLock)
             {
-                if (NativeMethods.WriteFilePinned(
-                    SafeReadHandle.DangerousGetHandle(), buffer,
-                    (uint)reportLength, null, &ov))
+                SafeFileHandle transferHandle = AcquireTransferHandle(
+                    exclusive: true, out IntPtr nativeHandle,
+                    out long capturedTransferEpoch);
+                EventWaitHandle wait =
+                    GetOrCreateInterruptWriteCompletionEvent();
+                try
                 {
-                    return true;
-                }
-
-                if (Marshal.GetLastWin32Error() !=
-                    (uint)WIN32_ERROR.ERROR_IO_PENDING)
-                {
-                    return false;
-                }
-
-                uint waitMilliseconds = timeout < 0 ? uint.MaxValue :
-                    (uint)timeout;
-                if (!PInvoke.GetOverlappedResultEx(SafeReadHandle, ov, out _,
-                    waitMilliseconds, true))
-                {
-                    uint error = (uint)Marshal.GetLastWin32Error();
-                    if (error == NativeMethods.WAIT_TIMEOUT)
+                    wait.Reset();
+                    var ov = new NativeOverlapped
                     {
-                        NativeMethods.CancelIoEx(
-                            SafeReadHandle.DangerousGetHandle(), (IntPtr)(&ov));
-                        PInvoke.GetOverlappedResult(SafeReadHandle, ov, out _, true);
+                        EventHandle = wait.SafeWaitHandle.
+                            DangerousGetHandle(),
+                    };
+
+                    fixed (byte* buffer = outputBuffer)
+                    {
+                        if (!IsTransferEpochCurrent(capturedTransferEpoch) ||
+                            transferHandle.IsClosed)
+                        {
+                            return false;
+                        }
+                        if (NativeMethods.WriteFilePinned(nativeHandle, buffer,
+                            (uint)reportLength, null, &ov))
+                        {
+                            return IsTransferEpochCurrent(
+                                capturedTransferEpoch) &&
+                                !transferHandle.IsClosed;
+                        }
+
+                        if (Marshal.GetLastWin32Error() !=
+                            (uint)WIN32_ERROR.ERROR_IO_PENDING)
+                        {
+                            return false;
+                        }
+
+                        if (!IsTransferEpochCurrent(capturedTransferEpoch) ||
+                            transferHandle.IsClosed)
+                        {
+                            NativeMethods.CancelIoEx(nativeHandle,
+                                (IntPtr)(&ov));
+                            NativeMethods.GetOverlappedResultPinned(
+                                nativeHandle, &ov, out _, true);
+                            return false;
+                        }
+
+                        uint waitMilliseconds = timeout < 0 ? uint.MaxValue :
+                            (uint)timeout;
+                        if (!NativeMethods.GetOverlappedResultExPinned(
+                            nativeHandle, &ov, out _, waitMilliseconds,
+                            false))
+                        {
+                            uint error = (uint)Marshal.GetLastWin32Error();
+                            if (error == NativeMethods.WAIT_TIMEOUT)
+                            {
+                                NativeMethods.CancelIoEx(nativeHandle,
+                                    (IntPtr)(&ov));
+                                NativeMethods.GetOverlappedResultPinned(
+                                    nativeHandle, &ov, out _, true);
+                            }
+
+                            return false;
+                        }
+
+                        return true;
                     }
-
-                    return false;
                 }
-
-                return true;
+                finally
+                {
+                    transferHandle.DangerousRelease();
+                }
             }
+        }
+
+        private EventWaitHandle GetOrCreateInterruptWriteCompletionEvent()
+        {
+            return interruptWriteCompletionEvent ??= new EventWaitHandle(
+                false, EventResetMode.ManualReset);
         }
 
         /// <summary>

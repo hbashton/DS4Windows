@@ -1347,7 +1347,14 @@ namespace DS4Windows
             }
         }
 
-        public double Latency = 0.0;
+        private long latencyBits;
+        public double Latency
+        {
+            get => BitConverter.Int64BitsToDouble(
+                Interlocked.Read(ref latencyBits));
+            protected set => Interlocked.Exchange(ref latencyBits,
+                BitConverter.DoubleToInt64Bits(value));
+        }
         public string error;
         public bool firstReport = true;
         public bool oldCharging = false;

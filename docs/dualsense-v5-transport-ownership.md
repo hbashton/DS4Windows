@@ -20,6 +20,7 @@ enforces the rules; it is not a general promise about legacy output devices.
 | Battery and charging notifications | Coalesced atomic status bits | Device-command worker | Update mapped battery fields, then signal only after virtual publication |
 | OSC monitoring | One replaceable snapshot per controller | OSC monitoring worker | Fixed-state copy after virtual publication, signal |
 | UI/report diagnostics on the DualSense-to-VIIPER path | One coalescing snapshot per controller | Report diagnostics worker | Store primitives/references after virtual publication, signal |
+| Physical HID input | Exactly one read ahead, two fixed pinned buffers | DualSense input thread | Rearm the alternate buffer before parsing or publishing the completed report |
 
 Input transition entries always contain the complete final state. The same
 state drives classification and packet serialization, including the final
@@ -138,6 +139,15 @@ USB input is parsed only after exact normal report-ID `0x01` validation.
 Unknown USB IDs increment atomic rejection count/last-ID telemetry and resume
 reading without state publication, logging, or a subscriber callback. The
 Bluetooth path retains its `0x31` tag and CRC validation before parsing.
+Each physical-input generation owns two fixed report buffers, one manual-reset
+completion event, and one unmanaged `OVERLAPPED`. Once a report completes, the
+input owner submits the alternate pinned buffer before it exposes the completed
+buffer to parsing, mapping, or `Report`. There is never more than one IRP in
+flight and no intermediate polling, timer, or report FIFO. Stop cancels and
+drains that exact IRP before either buffer, the event, the `OVERLAPPED`, or the
+HID handle reference is released. The compatibility `HidDevice.ReadFile` and
+interrupt-output paths likewise reuse one manual-reset event per device rather
+than allocating a managed object and kernel handle for every transfer.
 
 One physical output worker owns all ordinary USB/Bluetooth HID output. The
 producer-facing `DualSensePhysicalOutputStateMailbox` publishes one complete
@@ -149,6 +159,12 @@ perform their read-modify-write under the same mailbox monitor. Only the
 physical owner claims that value and mutates its private `currentHap`
 compositor copy. Native VIIPER output is built into a fixed dispatch-owner
 scratch buffer, including the combined-carrier path.
+Every state producer signals that worker when its mailbox value changes. The
+physical input loop does not wake it for unchanged state on every report. A
+successful Bluetooth rumble write instead publishes one atomic four-second
+keepalive deadline; the input loop claims that deadline at most once and
+signals the owner, preserving Sony's rumble keepalive without a 250/1000 Hz
+event and full-compositor traversal competing with the next physical read.
 
 The dedicated lifecycle worker first prevents new-generation work, then retires
 the output, observation and microphone workers with definitive join barriers.
@@ -215,6 +231,14 @@ and only then signals or invokes the owner.
   uses one reusable interruptible wait, and owns an idle barrier. Stop closes
   admission and waits for that owner outside its short admission monitor before
   a replacement generation can clear the transport-stopping flag.
+- The pipelined physical reader is single-owner and takes no application lock
+  while waiting for input. Its HID handle is held by a `SafeFileHandle`
+  reference for the reader generation. Completion is observed, the same
+  `OVERLAPPED` is reset, and the alternate buffer is submitted before mapping;
+  only cancellation/drain may precede reuse or release. A monotonic HID
+  transfer epoch is advanced before device-close cancellation; every native
+  submit validates that epoch on both sides of the call and exactly
+  cancels/drains a request that crossed the close boundary.
 - Physical microphone attach/detach/retry records an intent epoch, snapshots
   source identity under its one short lock, and performs the physical call
   afterward. A completion made stale by a concurrent attach/detach repairs the
@@ -244,7 +268,13 @@ count, p50, p95, p99, p99.9 and observed maximum for:
 - publication to writer claim;
 - claim to socket-write start;
 - socket-write duration;
+- input-loop observation interval between accepted physical reports (not the
+  unavailable kernel completion timestamp);
+- read-call to observation of the already-armed physical read;
+- physical input completion to alternate-buffer rearm;
 - physical HID read completion to report callback;
+- report callback/mapping/publication duration;
+- physical HID completion observation through `Report` callback return;
 - physical output queue age and HID-write duration;
 - physical microphone extraction to subscriber dispatch.
 

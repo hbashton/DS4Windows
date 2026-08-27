@@ -288,14 +288,14 @@
                             <TextBlock Text="CONNECTION" Style="{StaticResource OverviewEyebrowStyle}" />
                             <TextBlock Text="{Binding SelectedControllerConnection}" Margin="0,11,0,3"
                                        Style="{StaticResource OverviewValueStyle}" />
-                            <TextBlock Text="Latency · polling rate" Margin="0,5,0,2"
+                            <TextBlock Text="Observed physical report interval · rate" Margin="0,5,0,2"
                                        FontSize="11"
                                        Foreground="{DynamicResource MutedForegroundColor}" />
                             <TextBlock Text="{Binding SelectedControllerLatency}"
                                        FontSize="12" FontWeight="SemiBold"
                                        Foreground="{DynamicResource AccentColor}"
                                        TextWrapping="Wrap"
-                                       ToolTip="Observed input interval and effective polling frequency" />
+                                       ToolTip="Input-loop observation interval and effective physical source frequency; this is not kernel completion time or end-to-end game latency" />
                         </StackPanel>
                     </Border>
 

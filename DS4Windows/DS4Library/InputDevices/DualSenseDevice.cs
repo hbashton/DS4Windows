@@ -646,6 +646,8 @@ namespace DS4Windows.InputDevices
         private const int BluetoothSpeakerClockPresentedLeaseMilliseconds =
             3000;
         private const int BluetoothAudioPacerStartupRetryMilliseconds = 2000;
+        private const int PhysicalRumbleKeepaliveMilliseconds = 4000;
+        private const int PhysicalOutputRetryMilliseconds = 100;
         private const int BluetoothInputPhasePublishMilliseconds = 100;
         private const int BluetoothMediaBufferPublishMilliseconds = 50;
         private const uint BluetoothFinalControlWriteTimeoutMilliseconds = 1000;
@@ -782,6 +784,17 @@ namespace DS4Windows.InputDevices
             new();
         private readonly ViiperLatencyHistogram physicalReadToReportLatency =
             new();
+        private readonly ViiperLatencyHistogram
+            physicalReportObservationIntervalLatency =
+            new();
+        private readonly ViiperLatencyHistogram physicalReadObservationWaitLatency =
+            new();
+        private readonly ViiperLatencyHistogram physicalReadRearmLatency =
+            new();
+        private readonly ViiperLatencyHistogram physicalReportCallbackLatency =
+            new();
+        private readonly ViiperLatencyHistogram physicalReadToReportReturnLatency =
+            new();
         private readonly object bluetoothMicrophoneFrameLock = new();
         private readonly object physicalOutputCommandLock = new();
         private readonly byte[][] bluetoothMicrophoneFrameSlots =
@@ -807,6 +820,7 @@ namespace DS4Windows.InputDevices
         private long physicalOutputGeneration;
         private long physicalOutputRequestedGeneration;
         private long physicalOutputQueuedTimestamp;
+        private long physicalOutputKeepaliveDueQpc;
         private long physicalOutputMaximumQueueAgeTicks;
         private long physicalOutputMaximumWriteDurationTicks;
         private int physicalOutputStopRequested = 1;
@@ -884,6 +898,22 @@ namespace DS4Windows.InputDevices
 
         internal ViiperLatencySnapshot PhysicalReadToReportLatencySnapshot =>
             physicalReadToReportLatency.Snapshot();
+
+        internal ViiperLatencySnapshot
+            PhysicalReportObservationIntervalLatencySnapshot =>
+                physicalReportObservationIntervalLatency.Snapshot();
+
+        internal ViiperLatencySnapshot PhysicalReadObservationWaitLatencySnapshot =>
+            physicalReadObservationWaitLatency.Snapshot();
+
+        internal ViiperLatencySnapshot PhysicalReadRearmLatencySnapshot =>
+            physicalReadRearmLatency.Snapshot();
+
+        internal ViiperLatencySnapshot PhysicalReportCallbackLatencySnapshot =>
+            physicalReportCallbackLatency.Snapshot();
+
+        internal ViiperLatencySnapshot PhysicalReadToReportReturnLatencySnapshot =>
+            physicalReadToReportReturnLatency.Snapshot();
 
         public long BluetoothRejectedInputFrames =>
             Interlocked.Read(ref bluetoothRejectedInputFrames);
@@ -2771,6 +2801,7 @@ namespace DS4Windows.InputDevices
                 physicalLifecycleCompleted.Reset();
                 Interlocked.Exchange(ref physicalOutputRequestedGeneration, 0);
                 Interlocked.Exchange(ref physicalOutputQueuedTimestamp, 0);
+                Interlocked.Exchange(ref physicalOutputKeepaliveDueQpc, 0);
                 claimedPhysicalOutputStateVersion = 0;
                 activePhysicalOutputState =
                     DualSensePhysicalOutputSnapshot.Default;
@@ -2855,6 +2886,15 @@ namespace DS4Windows.InputDevices
                     // retired lifecycle thread while this replacement was
                     // being constructed. Re-signal after publication.
                     physicalLifecycleSignal.Set();
+                }
+                else
+                {
+                    // Profile and device settings can be published while the
+                    // old generation is stopped, in which case their normal
+                    // producer signals are intentionally rejected. Admit one
+                    // complete latest-state application after every new
+                    // physical owner is fully published.
+                    QueuePhysicalOutputUpdate();
                 }
             }
             finally
@@ -3082,6 +3122,27 @@ namespace DS4Windows.InputDevices
             physicalOutputSignal.Set();
         }
 
+        private void QueuePhysicalOutputKeepaliveIfDue()
+        {
+            if (!TryClaimPhysicalOutputKeepalive(
+                    ref physicalOutputKeepaliveDueQpc,
+                    Stopwatch.GetTimestamp()))
+            {
+                return;
+            }
+
+            QueuePhysicalOutputUpdate();
+        }
+
+        internal static bool TryClaimPhysicalOutputKeepalive(
+            ref long dueAtQpc, long nowQpc)
+        {
+            long dueAt = Interlocked.Read(ref dueAtQpc);
+            return dueAt > 0 && nowQpc >= dueAt &&
+                Interlocked.CompareExchange(ref dueAtQpc, -1, dueAt) ==
+                    dueAt;
+        }
+
         private void PhysicalOutputLoop(long generation)
         {
             long completedGeneration = 0;
@@ -3151,6 +3212,12 @@ namespace DS4Windows.InputDevices
                     }
                     catch (Exception ex)
                     {
+                        // A failed trigger/lightbar/audio update needs a
+                        // bounded retry even when rumble is not active. The
+                        // ordinary keepalive helper intentionally clears its
+                        // deadline for non-rumble state, so it cannot own
+                        // failure recovery.
+                        SchedulePhysicalOutputRetry();
                         if (Global.VerboseStartupLogging)
                         {
                             AppLogger.LogToGui(
@@ -3868,11 +3935,16 @@ namespace DS4Windows.InputDevices
                 firstActive = DateTime.UtcNow;
                 NativeMethods.HidD_SetNumInputBuffers(hDevice.SafeReadHandle.DangerousGetHandle(),
                     conType == ConnectionType.BT ? 64 : 3);
-                Queue<double> latencyQueue = new Queue<double>(21); // Set capacity at max + 1 to avoid any resizing
+                using PipelinedInputReportReader inputReader =
+                    hDevice.CreatePipelinedInputReportReader(inputReport);
+                double[] latencySamples = new double[20];
+                int latencySampleIndex = 0;
                 int tempLatencyCount = 0;
+                Latency = 0.0;
+                lastTimeElapsedDouble = 0.0;
+                lastTimeElapsed = 0;
                 long oldtime = 0;
                 string currerror = string.Empty;
-                long curtime = 0;
                 long testelapsed = 0;
                 timeoutEvent = false;
                 ds4InactiveFrame = true;
@@ -3908,28 +3980,28 @@ namespace DS4Windows.InputDevices
                     currerror = string.Empty;
                     bool idleDisconnectPending = false;
 
-                    if (tempLatencyCount >= 20)
-                    {
-                        latencySum -= latencyQueue.Dequeue();
-                        tempLatencyCount--;
-                    }
-
-                    // Preserve the fractional part of the observed HID input
-                    // interval. Truncating every sample to an integer made a
-                    // 1.4 ms cadence look like 1.0 ms (1000 Hz) in the UI.
-                    latencySum += lastTimeElapsedDouble;
-                    latencyQueue.Enqueue(lastTimeElapsedDouble);
-                    tempLatencyCount++;
-
-                    //Latency = latencyQueue.Average();
-                    Latency = latencySum / (double)tempLatencyCount;
-
                     readWaitEv.Set();
 
                     if (conType == ConnectionType.BT)
                     {
                         timeoutEvent = false;
-                        HidDevice.ReadStatus res = hDevice.ReadFile(inputReport);
+                    }
+
+                    long readWaitStartedAt = Stopwatch.GetTimestamp();
+                    HidDevice.ReadStatus res = inputReader.ReadNext(
+                        out byte[] completedReport, out int readWinError,
+                        out long physicalReadObservedAt,
+                        out long readRearmDuration);
+                    if (res == HidDevice.ReadStatus.Success)
+                    {
+                        inputReport = completedReport;
+                        physicalReadObservationWaitLatency.Observe(
+                            physicalReadObservedAt - readWaitStartedAt);
+                        physicalReadRearmLatency.Observe(readRearmDuration);
+                    }
+
+                    if (conType == ConnectionType.BT)
+                    {
                         if (res == HidDevice.ReadStatus.Success)
                         {
                             if (IsBluetoothMicrophoneFrame(inputReport))
@@ -4001,7 +4073,7 @@ namespace DS4Windows.InputDevices
                         {
                             int winError = res ==
                                 HidDevice.ReadStatus.WaitTimedOut ? 0 :
-                                Marshal.GetLastWin32Error();
+                                readWinError;
 
                             exitInputThread = true;
                             readWaitEv.Reset();
@@ -4020,12 +4092,11 @@ namespace DS4Windows.InputDevices
                     }
                     else
                     {
-                        HidDevice.ReadStatus res = hDevice.ReadFile(inputReport);
                         if (res != HidDevice.ReadStatus.Success)
                         {
                             int winError = res ==
                                 HidDevice.ReadStatus.WaitTimedOut ? 0 :
-                                Marshal.GetLastWin32Error();
+                                readWinError;
 
                             exitInputThread = true;
                             readWaitEv.Reset();
@@ -4052,16 +4123,34 @@ namespace DS4Windows.InputDevices
                             continue;
                         }
                     }
-
-                    long physicalReadCompletedAt = Stopwatch.GetTimestamp();
                     readWaitEv.Wait();
                     readWaitEv.Reset();
 
-                    curtime = Stopwatch.GetTimestamp();
-                    testelapsed = curtime - oldtime;
-                    lastTimeElapsedDouble = testelapsed * (1.0 / Stopwatch.Frequency) * 1000.0;
-                    lastTimeElapsed = (long)lastTimeElapsedDouble;
-                    oldtime = curtime;
+                    if (oldtime != 0)
+                    {
+                        testelapsed = physicalReadObservedAt - oldtime;
+                        lastTimeElapsedDouble = testelapsed *
+                            (1.0 / Stopwatch.Frequency) * 1000.0;
+                        lastTimeElapsed = (long)lastTimeElapsedDouble;
+                        physicalReportObservationIntervalLatency.Observe(
+                            testelapsed);
+
+                        if (tempLatencyCount == latencySamples.Length)
+                        {
+                            latencySum -= latencySamples[latencySampleIndex];
+                        }
+                        else
+                        {
+                            tempLatencyCount++;
+                        }
+                        latencySamples[latencySampleIndex] =
+                            lastTimeElapsedDouble;
+                        latencySum += lastTimeElapsedDouble;
+                        latencySampleIndex = (latencySampleIndex + 1) %
+                            latencySamples.Length;
+                        Latency = latencySum / tempLatencyCount;
+                    }
+                    oldtime = physicalReadObservedAt;
 
                     if (conType == ConnectionType.BT && inputReport[0] != 0x31)
                     {
@@ -4349,10 +4438,17 @@ namespace DS4Windows.InputDevices
 
                     if (fireReport)
                     {
+                        long reportStartedAt = Stopwatch.GetTimestamp();
                         physicalReadToReportLatency.Observe(
-                            Stopwatch.GetTimestamp() -
-                                physicalReadCompletedAt);
+                            reportStartedAt - physicalReadObservedAt);
                         Report?.Invoke(this, EventArgs.Empty);
+                        long publicationCompletedAt =
+                            Stopwatch.GetTimestamp();
+                        physicalReportCallbackLatency.Observe(
+                            publicationCompletedAt - reportStartedAt);
+                        physicalReadToReportReturnLatency.Observe(
+                            publicationCompletedAt -
+                                physicalReadObservedAt);
                     }
 
                     // Mapping and virtual scheduler publication complete in
@@ -4365,7 +4461,7 @@ namespace DS4Windows.InputDevices
                             bluetoothObservationArrivalQpc,
                             bluetoothObservationMediaBuffer);
                     }
-                    QueuePhysicalOutputUpdate();
+                    QueuePhysicalOutputKeepaliveIfDue();
                     //forceWrite = false;
 
                     if (!string.IsNullOrEmpty(currerror))
@@ -4810,7 +4906,8 @@ namespace DS4Windows.InputDevices
 
                     //outReportBuffer.CopyTo(outputReport, 0);
                 }
-                else if (rumbleSet && standbySw.ElapsedMilliseconds >= 4000L)
+                else if (rumbleSet && standbySw.ElapsedMilliseconds >=
+                    PhysicalRumbleKeepaliveMilliseconds)
                 {
                     outputDirty = true;
                     standbySw.Restart();
@@ -5514,7 +5611,7 @@ namespace DS4Windows.InputDevices
                 }
                 else
                 {
-                    WriteReport();
+                    published = WriteReport();
                 }
 
                 if (!published)
@@ -5523,12 +5620,15 @@ namespace DS4Windows.InputDevices
                     // cannot turn the latest light/rumble state into a silent
                     // permanent loss.
                     RequestUnifiedBluetoothOutputTransportRecovery();
+                    SchedulePhysicalOutputRetry();
                     return;
                 }
 
                 previousHapticState = currentHap;
                 submittedLocalRumbleGeneration =
                     preparedLocalRumbleGeneration;
+                SchedulePhysicalOutputKeepalive(
+                    PhysicalRumbleKeepaliveMilliseconds);
             }
 
             if (ownerRequestGeneration == 0 ||
@@ -5538,6 +5638,34 @@ namespace DS4Windows.InputDevices
                 outputDirty = false;
                 currentHap.dirty = false;
             }
+        }
+
+        private void SchedulePhysicalOutputKeepalive(int delayMilliseconds)
+        {
+            if (!currentHap.IsRumbleSet())
+            {
+                Interlocked.Exchange(ref physicalOutputKeepaliveDueQpc, 0);
+                return;
+            }
+
+            SchedulePhysicalOutputDue(ref physicalOutputKeepaliveDueQpc,
+                Stopwatch.GetTimestamp(), Stopwatch.Frequency,
+                delayMilliseconds);
+        }
+
+        private void SchedulePhysicalOutputRetry()
+        {
+            SchedulePhysicalOutputDue(ref physicalOutputKeepaliveDueQpc,
+                Stopwatch.GetTimestamp(), Stopwatch.Frequency,
+                PhysicalOutputRetryMilliseconds);
+        }
+
+        internal static void SchedulePhysicalOutputDue(ref long dueAtQpc,
+            long nowQpc, long frequency, int delayMilliseconds)
+        {
+            long delayTicks = Math.Max(1,
+                frequency * delayMilliseconds / 1000);
+            Interlocked.Exchange(ref dueAtQpc, nowQpc + delayTicks);
         }
 
         private void DrainQueuedInputEvents()

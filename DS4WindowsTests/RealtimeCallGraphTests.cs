@@ -29,12 +29,22 @@ namespace DS4WindowsTests
             AssertDoesNotContain(readLoop, "ChargingChanged?.Invoke");
             AssertDoesNotContain(readLoop, "BatteryChanged?.Invoke");
             AssertDoesNotContain(readLoop, "DisconnectBT(");
+            StringAssert.Contains(readLoop,
+                "CreatePipelinedInputReportReader(inputReport)");
+            StringAssert.Contains(readLoop, "inputReader.ReadNext(");
+            AssertDoesNotContain(readLoop, "hDevice.ReadFile(");
+            AssertDoesNotContain(readLoop, "QueuePhysicalOutputUpdate();");
             StringAssert.Contains(readLoop, "RequestPhysicalRemoval(");
+            Assert.IsTrue(readLoop.LastIndexOf("inputReader.ReadNext(",
+                    System.StringComparison.Ordinal) <
+                readLoop.LastIndexOf("Report?.Invoke",
+                    System.StringComparison.Ordinal),
+                "The alternate HID read must be armed before mapping and publication.");
             Assert.IsTrue(readLoop.LastIndexOf("Report?.Invoke",
                     System.StringComparison.Ordinal) <
-                readLoop.LastIndexOf("QueuePhysicalOutputUpdate()",
+                readLoop.LastIndexOf("QueuePhysicalOutputKeepaliveIfDue()",
                     System.StringComparison.Ordinal),
-                "Virtual mapping/publication must precede physical output signaling.");
+                "Virtual mapping/publication must precede physical output maintenance signaling.");
             Assert.IsTrue(readLoop.LastIndexOf("Report?.Invoke",
                     System.StringComparison.Ordinal) <
                 readLoop.LastIndexOf("DrainQueuedInputEvents();",
@@ -72,6 +82,37 @@ namespace DS4WindowsTests
                 "Interlocked.Increment(ref usbRejectedInputFrames)");
             AssertDoesNotContain(rejection, "Report?.Invoke");
             AssertDoesNotContain(rejection, "AppLogger.");
+        }
+
+        [TestMethod]
+        public void PhysicalHidTransfersReuseCompletionEvents()
+        {
+            string source = File.ReadAllText(FindRepositoryFile(
+                "DS4Windows", "HidLibrary", "HidDevice.cs"));
+            string read = Extract(source,
+                "public unsafe ReadStatus ReadFile(",
+                "private EventWaitHandle GetOrCreateReadCompletionEvent");
+            string write = Extract(source,
+                "public unsafe bool WriteOutputReportViaInterrupt(byte[] outputBuffer,",
+                "private EventWaitHandle GetOrCreateInterruptWriteCompletionEvent");
+
+            AssertDoesNotContain(read, "new AutoResetEvent");
+            AssertDoesNotContain(read, "new EventWaitHandle");
+            StringAssert.Contains(read, "GetOrCreateReadCompletionEvent");
+            StringAssert.Contains(read, "AcquireTransferHandle");
+            StringAssert.Contains(read, "IsTransferEpochCurrent");
+            StringAssert.Contains(read, "transferHandle.IsClosed");
+            StringAssert.Contains(read, "CancelIoEx");
+            StringAssert.Contains(read, "GetOverlappedResultPinned");
+            AssertDoesNotContain(write, "new AutoResetEvent");
+            AssertDoesNotContain(write, "new EventWaitHandle");
+            StringAssert.Contains(write,
+                "GetOrCreateInterruptWriteCompletionEvent");
+            StringAssert.Contains(write, "AcquireTransferHandle");
+            StringAssert.Contains(write, "IsTransferEpochCurrent");
+            StringAssert.Contains(write, "transferHandle.IsClosed");
+            StringAssert.Contains(write, "CancelIoEx");
+            StringAssert.Contains(write, "GetOverlappedResultPinned");
         }
 
         [TestMethod]

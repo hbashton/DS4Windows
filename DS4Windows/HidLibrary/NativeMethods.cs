@@ -102,6 +102,21 @@ namespace DS4Windows
             uint* lpNumberOfBytesRead,
             System.Threading.NativeOverlapped* lpOverlapped);
 
+        [DllImport("kernel32.dll", SetLastError = true,
+            EntryPoint = "GetOverlappedResult")]
+        internal static extern unsafe bool GetOverlappedResultPinned(
+            IntPtr hFile,
+            System.Threading.NativeOverlapped* lpOverlapped,
+            out uint lpNumberOfBytesTransferred, bool bWait);
+
+        [DllImport("kernel32.dll", SetLastError = true,
+            EntryPoint = "GetOverlappedResultEx")]
+        internal static extern unsafe bool GetOverlappedResultExPinned(
+            IntPtr hFile,
+            System.Threading.NativeOverlapped* lpOverlapped,
+            out uint lpNumberOfBytesTransferred, uint dwMilliseconds,
+            bool bAlertable);
+
         [DllImport("kernel32.dll")]
         static internal extern uint WaitForSingleObject(IntPtr hHandle, int dwMilliseconds);
 

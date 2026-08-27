@@ -3415,8 +3415,19 @@ namespace DS4Windows
                         DualSenseDevice physical)
                 {
                     latencyDistributions += " " +
+                        physical.
+                            PhysicalReportObservationIntervalLatencySnapshot.
+                            Format("physicalReportObservationInterval") + " " +
+                        physical.PhysicalReadObservationWaitLatencySnapshot.
+                            Format("readCall->completionObservation") + " " +
+                        physical.PhysicalReadRearmLatencySnapshot.Format(
+                            "physicalReadRearm") + " " +
                         physical.PhysicalReadToReportLatencySnapshot.Format(
-                            "hidRead->report") + " " +
+                            "hidReadObservation->reportEntry") + " " +
+                        physical.PhysicalReportCallbackLatencySnapshot.Format(
+                            "reportCallback") + " " +
+                        physical.PhysicalReadToReportReturnLatencySnapshot.
+                            Format("hidReadObservation->reportReturn") + " " +
                         physical.PhysicalOutputQueueLatencySnapshot.Format(
                             "physicalOutputQueue") + " " +
                         physical.PhysicalOutputWriteLatencySnapshot.Format(

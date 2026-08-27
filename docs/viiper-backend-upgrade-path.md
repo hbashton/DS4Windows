@@ -20,6 +20,23 @@ live in the dedicated, protected `%ProgramFiles%\DS4Windows` tree; the
 installer never rewrites access controls on an arbitrary ZIP extraction
 directory.
 
+Task registration uses a schema-validated Task Scheduler XML definition. Its
+principal contains the already validated target-user SID, `InteractiveToken`
+logon type, and `HighestAvailable` run level; the logon trigger is deliberately
+user-neutral. This avoids the ScheduledTasks CIM provider normalizing a local
+SID to an ambiguous, unqualified account name on some Windows installations.
+Verification enumerates the task library and then matches the exact root path
+and allowlisted name, so an as-yet-unregistered task is ordinary absence rather
+than a misleading failed CIM query. Actual Task Scheduler/CIM failures still
+fail closed.
+
+Each new task carries a durable DS4Windows ownership marker. Setup preflights
+both fixed names before a pair registration or removal, upgrades only marked or
+fully verified legacy DS4Windows tasks, and refuses to overwrite, disable, or
+delete a foreign same-name task. A second-name collision therefore cannot
+partially create or remove the first task. Failure containment may disable a
+marker-owned malformed task, but it preserves unmarked foreign tasks.
+
 Install / Repair copies a managed recovery build into Program Files, but its
 `RunDS4Windows` task points to the exact executable that launched setup. If the
 user later opens a different portable copy, DS4Windows asks once for

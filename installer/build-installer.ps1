@@ -449,6 +449,15 @@ if ($LASTEXITCODE -ne 0) {
     throw "USB-IP reboot-boundary simulation failed."
 }
 
+& (Join-Path $env:SystemRoot `
+    "System32\WindowsPowerShell\v1.0\powershell.exe") `
+    -NoLogo -NoProfile -ExecutionPolicy Bypass `
+    -File (Join-Path $repoRoot "utils\test-startup-task-registration.ps1") `
+    -BackendScript (Join-Path $repoRoot "extras\install-viiper-backend.ps1")
+if ($LASTEXITCODE -ne 0) {
+    throw "Startup-task registration simulation failed."
+}
+
 & python (Join-Path $repoRoot "utils\test-installer-state-machine.py")
 if ($LASTEXITCODE -ne 0) {
     throw "Installer state-machine simulation failed."

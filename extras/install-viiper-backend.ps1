@@ -934,12 +934,9 @@ function Remove-MismatchedUsbipPackage($entry, [Version]$installedVersion,
 }
 
 function Disable-ViiperStartup {
-    try {
-        Unregister-ScheduledTask -TaskPath "\" -TaskName "RunVIIPER" `
-            -Confirm:$false `
-            -ErrorAction SilentlyContinue
-    }
-    catch { }
+    $managedViiperPath = Join-Path $script:InstallDir "viiper.exe"
+    [void](Remove-ManagedStartupTask "RunVIIPER" $managedViiperPath `
+        "server" $script:InstallDir)
     try {
         Remove-ItemProperty `
             -LiteralPath $script:TargetRunKeyPath `
@@ -1748,91 +1745,377 @@ function Convert-AccountToSid([string]$identity) {
     catch { return $null }
 }
 
-function Test-HighestLogonTask([string]$taskName,
+function Assert-ManagedStartupTaskName([string]$taskName) {
+    $allowed = [string]::Equals($taskName, "RunVIIPER",
+            [StringComparison]::Ordinal) -or
+        [string]::Equals($taskName, "RunDS4Windows",
+            [StringComparison]::Ordinal)
+    if (-not $allowed) {
+        throw "Refusing an unmanaged root scheduled-task name: '$taskName'."
+    }
+}
+
+function Get-RootScheduledTask([string]$taskName) {
+    Assert-ManagedStartupTaskName $taskName
+
+    # An exact Get-ScheduledTask query turns ordinary absence into a
+    # CmdletizationQuery_NotFound error. Enumerate first so a task that has
+    # not yet been registered is represented by $null, while real CIM/service
+    # failures still terminate and reach the caller's containment logging.
+    $matches = @(Get-ScheduledTask -ErrorAction Stop | Where-Object {
+        [string]::Equals([string]$_.TaskPath, "\",
+            [StringComparison]::Ordinal) -and
+        [string]::Equals([string]$_.TaskName, $taskName,
+            [StringComparison]::OrdinalIgnoreCase)
+    })
+    if ($matches.Count -gt 1) {
+        throw "Multiple root scheduled tasks matched '$taskName'."
+    }
+
+    return $matches | Select-Object -First 1
+}
+
+function Test-HighestLogonTaskDefinition($registered,
         [string]$executablePath, [string]$arguments,
         [string]$workingDirectory, [bool]$requireEnabled = $true) {
-    $registered = Get-ScheduledTask -TaskPath "\" -TaskName $taskName `
-        -ErrorAction Stop
-    if (@($registered.Actions).Count -ne 1 -or
-            @($registered.Triggers).Count -ne 1) {
-        return $false
-    }
-    $registeredAction = $registered.Actions | Select-Object -First 1
-    $expectedArguments = if ($null -eq $arguments) { "" } else {
-        $arguments.Trim()
-    }
-    $actualArguments = if ($null -eq $registeredAction.Arguments) { "" }
-        else { ([string]$registeredAction.Arguments).Trim() }
-    $expectedWorkingDirectory = if (
-            [string]::IsNullOrWhiteSpace($workingDirectory)) { "" }
-        else { [IO.Path]::GetFullPath($workingDirectory).TrimEnd('\') }
-    $actualWorkingDirectory = if (
-            [string]::IsNullOrWhiteSpace($registeredAction.WorkingDirectory)) {
-            ""
+    try {
+        if (-not $registered -or @($registered.Actions).Count -ne 1 -or
+                @($registered.Triggers).Count -ne 1) {
+            return $false
         }
-        else {
+        $registeredAction = $registered.Actions | Select-Object -First 1
+        $expectedArguments = if ($null -eq $arguments) { "" } else {
+            $arguments.Trim()
+        }
+        $actualArguments = if ($null -eq $registeredAction.Arguments) { "" }
+            else { ([string]$registeredAction.Arguments).Trim() }
+        $expectedWorkingDirectory = if (
+                [string]::IsNullOrWhiteSpace($workingDirectory)) { "" }
+            else { [IO.Path]::GetFullPath($workingDirectory).TrimEnd('\') }
+        $actualWorkingDirectory = if ([string]::IsNullOrWhiteSpace(
+                $registeredAction.WorkingDirectory)) { "" } else {
             [IO.Path]::GetFullPath(
                 [string]$registeredAction.WorkingDirectory).TrimEnd('\')
         }
-    $principalSid = Convert-AccountToSid `
-        ([string]$registered.Principal.UserId)
-    $matchingTrigger = @($registered.Triggers | Where-Object {
-        if ($_.CimClass.CimClassName -ne 'MSFT_TaskLogonTrigger') {
+        $principalSid = Convert-AccountToSid `
+            ([string]$registered.Principal.UserId)
+        $matchingTrigger = @($registered.Triggers | Where-Object {
+            if ($_.CimClass.CimClassName -ne 'MSFT_TaskLogonTrigger') {
+                return $false
+            }
+            # A user-neutral logon trigger avoids Task Scheduler's ambiguous
+            # UserId name resolution. The exact principal still restricts
+            # execution to the intended user's interactive token.
+            $triggerUser = [string]$_.UserId
+            return [string]::IsNullOrWhiteSpace($triggerUser) -or
+                (Convert-AccountToSid $triggerUser) -eq $script:TargetUserSid
+        }).Count -gt 0
+
+        return (-not $requireEnabled -or $registered.Settings.Enabled) -and
+            [string]::Equals(
+                [IO.Path]::GetFullPath([string]$registeredAction.Execute),
+                [IO.Path]::GetFullPath($executablePath),
+                [StringComparison]::OrdinalIgnoreCase) -and
+            [string]::Equals($actualArguments, $expectedArguments,
+                [StringComparison]::Ordinal) -and
+            [string]::Equals($actualWorkingDirectory,
+                $expectedWorkingDirectory,
+                [StringComparison]::OrdinalIgnoreCase) -and
+            $registered.Principal.RunLevel -eq 'Highest' -and
+            $registered.Principal.LogonType -eq 'Interactive' -and
+            $principalSid -eq $script:TargetUserSid -and $matchingTrigger
+    }
+    catch { return $false }
+}
+
+function Test-HighestLogonTask([string]$taskName,
+        [string]$executablePath, [string]$arguments,
+        [string]$workingDirectory, [bool]$requireEnabled = $true) {
+    $registered = Get-RootScheduledTask $taskName
+    return Test-HighestLogonTaskDefinition $registered $executablePath `
+        $arguments $workingDirectory $requireEnabled
+}
+
+function Test-ManagedStartupTaskMarker($registered) {
+    return $registered -and [string]::Equals(
+        [string]$registered.Description,
+        "DS4Windows managed startup task v1",
+        [StringComparison]::Ordinal)
+}
+
+function Test-LegacyManagedStartupTask($registered, [string]$taskName) {
+    Assert-ManagedStartupTaskName $taskName
+    try {
+        # Pre-marker DS4Windows releases did not set Description. Any other
+        # description belongs to a different owner and is never migrated.
+        if (-not $registered -or -not [string]::IsNullOrWhiteSpace(
+                [string]$registered.Description) -or
+                @($registered.Actions).Count -ne 1) {
             return $false
         }
-        # A user-neutral logon trigger avoids Task Scheduler's ambiguous
-        # UserId name resolution when the local account and computer have the
-        # same name. The principal below remains pinned to the exact SID, so
-        # the task can still execute only in the intended interactive token.
-        $triggerUser = [string]$_.UserId
-        return [string]::IsNullOrWhiteSpace($triggerUser) -or
-            (Convert-AccountToSid $triggerUser) -eq $script:TargetUserSid
-    }).Count -gt 0
+        $action = $registered.Actions | Select-Object -First 1
+        $executablePath = [IO.Path]::GetFullPath([string]$action.Execute)
+        $workingDirectory = [IO.Path]::GetFullPath(
+            [string]$action.WorkingDirectory).TrimEnd('\')
+        $expectedWorkingDirectory = [IO.Path]::GetDirectoryName(
+            $executablePath).TrimEnd('\')
+        $isViiper = [string]::Equals($taskName, "RunVIIPER",
+            [StringComparison]::Ordinal)
+        $expectedFileName = if ($isViiper) { "viiper.exe" } else {
+            "DS4Windows.exe"
+        }
+        $expectedArguments = if ($isViiper) { "server" } else { "-m" }
+        $expectedProduct = if ($isViiper) { "VIIPER" } else { "DS4Windows" }
 
-    return (-not $requireEnabled -or $registered.Settings.Enabled) -and
-        [string]::Equals(
-            [IO.Path]::GetFullPath([string]$registeredAction.Execute),
-            [IO.Path]::GetFullPath($executablePath),
-            [StringComparison]::OrdinalIgnoreCase) -and
-        [string]::Equals($actualArguments, $expectedArguments,
-            [StringComparison]::Ordinal) -and
-        [string]::Equals($actualWorkingDirectory, $expectedWorkingDirectory,
-            [StringComparison]::OrdinalIgnoreCase) -and
-        $registered.Principal.RunLevel -eq 'Highest' -and
-        $registered.Principal.LogonType -eq 'Interactive' -and
-        $principalSid -eq $script:TargetUserSid -and $matchingTrigger
+        if (-not [string]::Equals(
+                [IO.Path]::GetFileName($executablePath), $expectedFileName,
+                [StringComparison]::OrdinalIgnoreCase) -or
+                -not [string]::Equals($workingDirectory,
+                    $expectedWorkingDirectory,
+                    [StringComparison]::OrdinalIgnoreCase) -or
+                -not (Test-RecognizedProductExecutable $executablePath `
+                    $expectedProduct) -or
+                ($isViiper -and -not (Test-ManagedViiperPath `
+                    $executablePath))) {
+            return $false
+        }
+
+        # This validates one neutral logon trigger, one exact action, the
+        # target SID, Interactive/Highest, and all action fields.
+        return Test-HighestLogonTaskDefinition $registered $executablePath `
+            $expectedArguments $expectedWorkingDirectory $false
+    }
+    catch { return $false }
+}
+
+function Test-ManagedStartupTaskOwnership($registered, [string]$taskName,
+        [string]$legacyExecutablePath = $null,
+        [string]$legacyArguments = $null,
+        [string]$legacyWorkingDirectory = $null) {
+    Assert-ManagedStartupTaskName $taskName
+    if (Test-ManagedStartupTaskMarker $registered) { return $true }
+    if (-not [string]::IsNullOrWhiteSpace(
+            [string]$registered.Description) -or
+            [string]::IsNullOrWhiteSpace($legacyExecutablePath)) {
+        return $false
+    }
+    try {
+        $isViiperRequest = [string]::Equals($taskName, "RunVIIPER",
+            [StringComparison]::Ordinal)
+        $expectedRequestFile = if ($isViiperRequest) { "viiper.exe" } else {
+            "DS4Windows.exe"
+        }
+        $expectedRequestArguments = if ($isViiperRequest) { "server" } else {
+            "-m"
+        }
+        $requestedWorkingDirectory = [IO.Path]::GetFullPath(
+            $legacyWorkingDirectory).TrimEnd('\')
+        $requestedExecutableDirectory = [IO.Path]::GetDirectoryName(
+            [IO.Path]::GetFullPath($legacyExecutablePath)).TrimEnd('\')
+        if (-not [string]::Equals(
+                [IO.Path]::GetFileName($legacyExecutablePath),
+                $expectedRequestFile,
+                [StringComparison]::OrdinalIgnoreCase) -or
+                -not [string]::Equals($legacyArguments,
+                    $expectedRequestArguments,
+                    [StringComparison]::Ordinal) -or
+                -not [string]::Equals($requestedWorkingDirectory,
+                    $requestedExecutableDirectory,
+                    [StringComparison]::OrdinalIgnoreCase) -or
+                ($isViiperRequest -and -not (Test-ManagedViiperPath `
+                    $legacyExecutablePath))) {
+            return $false
+        }
+    }
+    catch { return $false }
+    # Deliberate one-time migration for pre-marker releases: accept only the
+    # tightly recognized previous contract. It may point at an older portable
+    # DS4Windows copy, which preserves documented retargeting; VIIPER must
+    # still point at the canonical managed executable.
+    return Test-LegacyManagedStartupTask $registered $taskName
+}
+
+function Assert-StartupTaskMutationAllowed([string]$taskName,
+        [string]$legacyExecutablePath = $null,
+        [string]$legacyArguments = $null,
+        [string]$legacyWorkingDirectory = $null) {
+    $registered = Get-RootScheduledTask $taskName
+    if ($registered -and -not (Test-ManagedStartupTaskOwnership `
+            $registered $taskName $legacyExecutablePath $legacyArguments `
+            $legacyWorkingDirectory)) {
+        throw "Refusing to overwrite, disable, or remove foreign root task " +
+            "'$taskName'. Rename or remove that task manually, then rerun " +
+            "Install / Repair."
+    }
+    return $registered
+}
+
+function Remove-ManagedStartupTask([string]$taskName,
+        [string]$legacyExecutablePath = $null,
+        [string]$legacyArguments = $null,
+        [string]$legacyWorkingDirectory = $null) {
+    $registered = Assert-StartupTaskMutationAllowed $taskName `
+        $legacyExecutablePath $legacyArguments $legacyWorkingDirectory
+    if (-not $registered) { return $false }
+
+    Unregister-ScheduledTask -TaskPath "\" -TaskName $taskName `
+        -Confirm:$false -ErrorAction Stop
+    if (Get-RootScheduledTask $taskName) {
+        throw "Managed startup task '$taskName' remained after removal."
+    }
+    return $true
+}
+
+function Remove-ManagedStartupTaskPair([string]$viiperPath,
+        [string]$ds4WindowsPath) {
+    $viiperDirectory = Split-Path -Parent $viiperPath
+    $ds4WindowsDirectory = Split-Path -Parent $ds4WindowsPath
+    # Validate the entire ownership set before deleting either fixed name.
+    # This prevents a foreign second-name collision from causing a partial
+    # deletion of the first DS4Windows-owned task.
+    [void](Assert-StartupTaskMutationAllowed "RunVIIPER" $viiperPath `
+        "server" $viiperDirectory)
+    [void](Assert-StartupTaskMutationAllowed "RunDS4Windows" `
+        $ds4WindowsPath "-m" $ds4WindowsDirectory)
+    [void](Remove-ManagedStartupTask "RunVIIPER" $viiperPath `
+        "server" $viiperDirectory)
+    [void](Remove-ManagedStartupTask "RunDS4Windows" $ds4WindowsPath `
+        "-m" $ds4WindowsDirectory)
+}
+
+function Add-ScheduledTaskXmlElement([Xml.XmlDocument]$document,
+        [Xml.XmlNode]$parent, [string]$name,
+        [AllowNull()][string]$value = $null) {
+    $element = $document.CreateElement($name, $parent.NamespaceURI)
+    if ($null -ne $value) { $element.InnerText = $value }
+    [void]$parent.AppendChild($element)
+    return $element
+}
+
+function New-HighestLogonTaskXml([string]$executablePath,
+        [string]$arguments, [string]$workingDirectory) {
+    if ([string]::IsNullOrWhiteSpace($executablePath)) {
+        throw "A scheduled-task executable path is required."
+    }
+
+    try {
+        $principalSid = ([Security.Principal.SecurityIdentifier]::new(
+            $script:TargetUserSid)).Value
+    }
+    catch {
+        throw "The scheduled-task principal SID is invalid."
+    }
+
+    # Do not construct the principal through the ScheduledTasks CIM principal
+    # object cmdlet.
+    # The ScheduledTasks CIM provider can normalize an exact local-account SID
+    # to an unqualified account name before registration. On affected Windows
+    # account layouts that makes Task Scheduler reject an otherwise valid
+    # InteractiveToken task with ERROR_INVALID_PARAMETER. XML registration is
+    # part of the public Register-ScheduledTask contract and preserves the
+    # already-validated SID byte-for-byte. The neutral logon trigger remains
+    # intentional: the exact principal still limits execution to that user's
+    # existing interactive token.
+    $namespace = "http://schemas.microsoft.com/windows/2004/02/mit/task"
+    $document = [Xml.XmlDocument]::new()
+    [void]$document.AppendChild(
+        $document.CreateXmlDeclaration("1.0", "UTF-16", $null))
+
+    $task = $document.CreateElement("Task", $namespace)
+    [void]$task.SetAttribute("version", "1.2")
+    [void]$document.AppendChild($task)
+
+    $registrationInfo = Add-ScheduledTaskXmlElement $document $task `
+        "RegistrationInfo"
+    [void](Add-ScheduledTaskXmlElement $document $registrationInfo `
+        "Author" "DS4Windows")
+    [void](Add-ScheduledTaskXmlElement $document $registrationInfo `
+        "Description" "DS4Windows managed startup task v1")
+
+    $triggers = Add-ScheduledTaskXmlElement $document $task "Triggers"
+    $logonTrigger = Add-ScheduledTaskXmlElement $document $triggers `
+        "LogonTrigger"
+    [void](Add-ScheduledTaskXmlElement $document $logonTrigger `
+        "Enabled" "true")
+
+    $principals = Add-ScheduledTaskXmlElement $document $task "Principals"
+    $principal = Add-ScheduledTaskXmlElement $document $principals "Principal"
+    [void]$principal.SetAttribute("id", "Author")
+    [void](Add-ScheduledTaskXmlElement $document $principal `
+        "UserId" $principalSid)
+    [void](Add-ScheduledTaskXmlElement $document $principal `
+        "LogonType" "InteractiveToken")
+    [void](Add-ScheduledTaskXmlElement $document $principal `
+        "RunLevel" "HighestAvailable")
+
+    # Keep the Settings definition compact and deterministic; omitted settings
+    # retain Task Scheduler defaults.
+    $settings = Add-ScheduledTaskXmlElement $document $task "Settings"
+    [void](Add-ScheduledTaskXmlElement $document $settings `
+        "MultipleInstancesPolicy" "IgnoreNew")
+    [void](Add-ScheduledTaskXmlElement $document $settings `
+        "DisallowStartIfOnBatteries" "false")
+    [void](Add-ScheduledTaskXmlElement $document $settings `
+        "StopIfGoingOnBatteries" "false")
+    [void](Add-ScheduledTaskXmlElement $document $settings `
+        "AllowStartOnDemand" "true")
+    [void](Add-ScheduledTaskXmlElement $document $settings "Enabled" "true")
+    [void](Add-ScheduledTaskXmlElement $document $settings `
+        "ExecutionTimeLimit" "PT0S")
+
+    $actions = Add-ScheduledTaskXmlElement $document $task "Actions"
+    [void]$actions.SetAttribute("Context", "Author")
+    $exec = Add-ScheduledTaskXmlElement $document $actions "Exec"
+    [void](Add-ScheduledTaskXmlElement $document $exec `
+        "Command" $executablePath)
+    if ($null -ne $arguments) {
+        [void](Add-ScheduledTaskXmlElement $document $exec `
+            "Arguments" $arguments)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($workingDirectory)) {
+        [void](Add-ScheduledTaskXmlElement $document $exec `
+            "WorkingDirectory" $workingDirectory)
+    }
+
+    return $document.OuterXml
 }
 
 function Register-HighestLogonTask([string]$taskName,
         [string]$executablePath, [string]$arguments,
         [string]$workingDirectory) {
+    Assert-ManagedStartupTaskName $taskName
+    $registeredBefore = Assert-StartupTaskMutationAllowed $taskName `
+        $executablePath $arguments $workingDirectory
+    if ($registeredBefore -and
+            (Test-ManagedStartupTaskMarker $registeredBefore) -and
+            (Test-HighestLogonTaskDefinition $registeredBefore `
+                $executablePath $arguments $workingDirectory $true)) {
+        Write-SetupLog "Startup task '$taskName' is already exact." Green
+        return $true
+    }
+
+    $replaceExisting = [bool]$registeredBefore
     for ($attempt = 1; $attempt -le 3; $attempt++) {
+      $registrationStage = "build exact-SID task XML"
       try {
-        $taskActionParameters = @{
-            Execute = $executablePath
-            Argument = $arguments
-        }
-        if (-not [string]::IsNullOrWhiteSpace($workingDirectory)) {
-            $taskActionParameters.WorkingDirectory = $workingDirectory
-        }
-        $taskAction = New-ScheduledTaskAction @taskActionParameters
-        $taskTrigger = New-ScheduledTaskTrigger -AtLogOn
-        $taskPrincipal = New-ScheduledTaskPrincipal `
-            -UserId $script:TargetUserSid `
-            -RunLevel Highest -LogonType Interactive
-        $taskSettings = New-ScheduledTaskSettingsSet `
-            -AllowStartIfOnBatteries `
-            -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) `
-            -MultipleInstances IgnoreNew
+        $taskXml = New-HighestLogonTaskXml $executablePath $arguments `
+            $workingDirectory
 
-        Register-ScheduledTask -TaskPath "\" -TaskName $taskName `
-            -Action $taskAction -Trigger $taskTrigger `
-            -Principal $taskPrincipal -Settings $taskSettings -Force | Out-Null
-        Enable-ScheduledTask -TaskPath "\" -TaskName $taskName `
-            -ErrorAction Stop | Out-Null
+        $registrationStage = "register exact-SID task XML"
+        $registerParameters = @{
+            TaskPath = "\"
+            TaskName = $taskName
+            Xml = $taskXml
+            ErrorAction = "Stop"
+        }
+        if ($replaceExisting) { $registerParameters.Force = $true }
+        Register-ScheduledTask @registerParameters | Out-Null
 
-        if (-not (Test-HighestLogonTask $taskName $executablePath `
-                $arguments $workingDirectory)) {
+        $registrationStage = "verify registered task"
+        $registeredAfter = Get-RootScheduledTask $taskName
+        if (-not (Test-ManagedStartupTaskMarker $registeredAfter) -or
+                -not (Test-HighestLogonTaskDefinition $registeredAfter `
+                    $executablePath $arguments $workingDirectory $true)) {
             throw "Task registration verification failed."
         }
         Write-SetupLog (
@@ -1842,15 +2125,37 @@ function Register-HighestLogonTask([string]$taskName,
         return $true
       }
       catch {
+        $registrationFailure = $_
         Write-SetupLog (
             "Startup task '$taskName' registration attempt $attempt of 3 " +
-            "failed: $($_.Exception.Message)"
+            "failed during $registrationStage`: " +
+            $registrationFailure.Exception.Message
         ) Yellow
-        try {
-          Unregister-ScheduledTask -TaskPath "\" -TaskName $taskName `
-              -Confirm:$false -ErrorAction SilentlyContinue
+
+        # Re-enumeration distinguishes a task this attempt created from a
+        # foreign same-name collision. Never clean up an unowned task.
+        $observed = Get-RootScheduledTask $taskName
+        if ($observed -and -not (Test-ManagedStartupTaskOwnership `
+                $observed $taskName $executablePath $arguments `
+                $workingDirectory)) {
+            throw "Startup task '$taskName' became a foreign same-name " +
+                "collision during registration. It was left unchanged."
         }
-        catch { }
+        if ($observed -and (Test-ManagedStartupTaskMarker $observed) -and
+                (Test-HighestLogonTaskDefinition $observed `
+                    $executablePath $arguments $workingDirectory $true)) {
+            Write-SetupLog (
+                "Startup task '$taskName' verified after a transient " +
+                "registration response."
+            ) Green
+            return $true
+        }
+        if (-not $registeredBefore -and $observed) {
+            [void](Remove-ManagedStartupTask $taskName $executablePath `
+                $arguments $workingDirectory)
+            $observed = $null
+        }
+        $replaceExisting = [bool]$observed
         if ($attempt -lt 3) {
           Start-Sleep -Milliseconds (250 * $attempt)
         }
@@ -1868,6 +2173,39 @@ function Register-ViiperRunTask([string]$viiperPath, [string]$taskName) {
 function Register-Ds4WindowsRunTask([string]$ds4WindowsPath) {
     return Register-HighestLogonTask "RunDS4Windows" $ds4WindowsPath "-m" `
         (Split-Path -Parent $ds4WindowsPath)
+}
+
+function Register-ManagedStartupTaskPair([string]$viiperPath,
+        [string]$ds4WindowsPath) {
+    # Detect either fixed-name collision before registering the first task.
+    # A foreign RunDS4Windows task must not cause a newly created RunVIIPER
+    # task to appear and then require rollback.
+    $viiperBefore = Assert-StartupTaskMutationAllowed "RunVIIPER" `
+        $viiperPath "server" (Split-Path -Parent $viiperPath)
+    [void](Assert-StartupTaskMutationAllowed "RunDS4Windows" `
+        $ds4WindowsPath "-m" (Split-Path -Parent $ds4WindowsPath))
+
+    if (-not (Register-ViiperRunTask $viiperPath "RunVIIPER")) {
+        throw "Could not create the elevated RunVIIPER startup task."
+    }
+    try {
+        if (-not (Register-Ds4WindowsRunTask $ds4WindowsPath)) {
+            throw "Could not register the elevated RunDS4Windows startup task."
+        }
+    }
+    catch {
+        $registrationFailure = $_
+        # Roll back only RunVIIPER created by this pair transaction. Preserve
+        # an exact pre-existing owned task and let outer failure containment
+        # disable it if required.
+        if (-not $viiperBefore) {
+            [void](Remove-ManagedStartupTask "RunVIIPER" $viiperPath `
+                "server" (Split-Path -Parent $viiperPath))
+        }
+        throw $registrationFailure
+    }
+
+    return $true
 }
 
 function Suspend-StartupTasksUntilInfrastructureReady(
@@ -1898,9 +2236,8 @@ function Suspend-StartupTasksUntilInfrastructureReady(
 
     foreach ($contract in $contracts) {
         $taskName = [string]$contract[0]
-        $disabled = Get-ScheduledTask -TaskPath "\" -TaskName $taskName `
-            -ErrorAction Stop
-        if ($disabled.Settings.Enabled -or
+        $disabled = Get-RootScheduledTask $taskName
+        if (-not $disabled -or $disabled.Settings.Enabled -or
                 -not (Test-HighestLogonTask $taskName `
                     ([string]$contract[1]) ([string]$contract[2]) `
                     ([string]$contract[3]) $false)) {
@@ -1926,20 +2263,39 @@ function Set-InfrastructureStartupFailClosed(
     foreach ($contract in $contracts) {
         $taskName = [string]$contract[0]
         try {
-            if (Test-HighestLogonTask $taskName `
-                    ([string]$contract[1]) ([string]$contract[2]) `
-                    ([string]$contract[3]) $false) {
-                Disable-ScheduledTask -TaskPath "\" -TaskName $taskName `
-                    -ErrorAction Stop | Out-Null
-                $observed = Get-ScheduledTask -TaskPath "\" `
-                    -TaskName $taskName -ErrorAction Stop
+            $registered = Get-RootScheduledTask $taskName
+            if (-not $registered) { continue }
+            $owned = Test-ManagedStartupTaskOwnership $registered `
+                $taskName ([string]$contract[1]) `
+                ([string]$contract[2]) ([string]$contract[3])
+            if (-not $owned) {
+                Write-SetupLog (
+                    "Failure containment preserved foreign same-name task " +
+                    "'$taskName'."
+                ) Red
+                continue
+            }
+
+            # The durable marker is sufficient ownership for containment even
+            # if a failed -Force update left an action that no longer passes
+            # the full expected contract.
+            Disable-ScheduledTask -TaskPath "\" -TaskName $taskName `
+                -ErrorAction Stop | Out-Null
+            $observed = Get-RootScheduledTask $taskName
+            if ($observed) {
+                $stillOwned = Test-ManagedStartupTaskOwnership $observed `
+                    $taskName ([string]$contract[1]) `
+                    ([string]$contract[2]) ([string]$contract[3])
+                if (-not $stillOwned) {
+                    throw "task identity changed during containment"
+                }
                 if ($observed.Settings.Enabled) {
                     throw "task remained enabled"
                 }
-                Write-SetupLog (
-                    "Failure containment verified '$taskName' is disabled."
-                ) Yellow
             }
+            Write-SetupLog (
+                "Failure containment verified '$taskName' is disabled or absent."
+            ) Yellow
         }
         catch {
             Write-SetupLog (
@@ -2442,28 +2798,16 @@ try {
     # Burn installer retains its existing startup-enabled default because it
     # does not pass -SkipStartupTasks.
     if ($script:RunAtStartupEnabled) {
-        if (-not (Register-ViiperRunTask $viiperPath "RunVIIPER")) {
-            throw "Could not create the elevated RunVIIPER startup task."
-        }
-        if (-not (Register-Ds4WindowsRunTask `
-                $script:Ds4WindowsRestartPath)) {
-            Unregister-ScheduledTask -TaskPath "\" -TaskName "RunVIIPER" `
-                -Confirm:$false `
-                -ErrorAction SilentlyContinue
-            throw "Could not register the elevated RunDS4Windows startup task."
-        }
+        [void](Register-ManagedStartupTaskPair $viiperPath `
+            $script:Ds4WindowsRestartPath)
         Write-SetupLog (
             "Registered and verified enabled elevated RunVIIPER and " +
             "RunDS4Windows tasks for $script:TargetUserName before driver setup."
         ) Green
     }
     else {
-        Unregister-ScheduledTask -TaskPath "\" -TaskName "RunVIIPER" `
-            -Confirm:$false `
-            -ErrorAction SilentlyContinue
-        Unregister-ScheduledTask -TaskPath "\" -TaskName "RunDS4Windows" `
-            -Confirm:$false `
-            -ErrorAction SilentlyContinue
+        Remove-ManagedStartupTaskPair $viiperPath `
+            $script:Ds4WindowsRestartPath
         Write-SetupLog (
             "Run at Startup is disabled; no DS4Windows or VIIPER logon " +
             "task was retained."
@@ -2697,10 +3041,9 @@ try {
         }
         else {
             $unexpectedTasks = @(
-                Get-ScheduledTask -TaskPath "\" -ErrorAction SilentlyContinue |
-                    Where-Object { $_.TaskName -in @(
-                        "RunVIIPER", "RunDS4Windows") }
-            )
+                Get-RootScheduledTask "RunVIIPER"
+                Get-RootScheduledTask "RunDS4Windows"
+            ) | Where-Object { $null -ne $_ }
             if ($unexpectedTasks.Count -gt 0) {
                 throw "A startup task was recreated while Run at Startup is disabled."
             }

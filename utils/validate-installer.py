@@ -305,6 +305,7 @@ def main() -> int:
         'does not match the completed',
         '-p:Version=$ProductVersion -p:InformationalVersion=$DisplayVersion',
         'test-viiper-reboot-boundary.ps1',
+        'test-startup-task-registration.ps1',
         'test-installer-state-machine.py',
         '[switch]$RequireSigning',
         'Unsigned public installers are intentionally blocked',
@@ -505,7 +506,19 @@ def main() -> int:
         'pinned USB-IP package and runtime ABI pass after reboot',
         'registration attempt " +',
         'retrying the same packaged executable directly',
-        'New-ScheduledTaskTrigger -AtLogOn',
+        'Assert-ManagedStartupTaskName',
+        'Assert-StartupTaskMutationAllowed',
+        'Get-RootScheduledTask',
+        'New-HighestLogonTaskXml',
+        '[Xml.XmlDocument]::new()',
+        '"InteractiveToken"',
+        '"HighestAvailable"',
+        '"DS4Windows managed startup task v1"',
+        'Register-ManagedStartupTaskPair',
+        'Remove-ManagedStartupTaskPair',
+        'Xml = $taskXml',
+        'ErrorAction = "Stop"',
+        'if ($replaceExisting) { $registerParameters.Force = $true }',
         'infrastructure-actions.log',
         '[string]::IsNullOrWhiteSpace($triggerUser)',
         "sourceInfo.Length -eq $destinationInfo.Length",
@@ -519,6 +532,16 @@ def main() -> int:
         if contract not in backend_script:
             raise SystemExit(
                 "Backend installer safety contract missing: " + contract
+            )
+    for forbidden_contract in [
+        "New-ScheduledTaskPrincipal",
+        "New-ScheduledTaskTrigger -AtLogOn",
+    ]:
+        if forbidden_contract in backend_script:
+            raise SystemExit(
+                "Backend installer must preserve the exact startup-task SID "
+                "through XML registration; normalized CIM construction found: "
+                + forbidden_contract
             )
     legacy_network_contracts = [
         "api.github.com/repos/hbashton/VIIPER",

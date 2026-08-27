@@ -35,6 +35,13 @@ One transaction ID is preserved across Burn, setup actions, the infrastructure
 backend, and reboot resume so those logs can be correlated without timestamp
 guesswork.
 
+Installer composition also runs a non-mutating startup-task simulation. It
+schema-parses the exact-SID XML in memory, mocks registration and verification,
+checks value escaping and the two-name root-task allowlist, preserves foreign
+same-name collisions across registration/removal/containment, verifies partial
+pair rollback, and proves that normal absence does not become a failed CIM
+query while genuine enumeration failures remain fatal.
+
 Set `DS4W_SIGN_CERT_PATH` plus `DS4W_SIGN_CERT_PASSWORD`, or use
 `DS4W_SIGN_CERT_THUMBPRINT` for a protected certificate-store identity. Set
 `DS4W_SIGN_EXPECTED_THUMBPRINT` to the independently approved signer and,

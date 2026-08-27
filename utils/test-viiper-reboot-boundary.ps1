@@ -83,7 +83,32 @@ try {
         )
         return $script:FakeStartupTasks.ContainsKey($taskName) -and
             (-not $requireEnabled -or
-             $script:FakeStartupTasks[$taskName])
+            $script:FakeStartupTasks[$taskName])
+    }
+    function Test-ManagedStartupTaskMarker {
+        param($registered)
+        return $null -ne $registered
+    }
+    function Test-ManagedStartupTaskOwnership {
+        param($registered, [string]$taskName)
+        return $null -ne $registered
+    }
+    function Test-HighestLogonTaskDefinition {
+        return $true
+    }
+    function Get-RootScheduledTask {
+        param([string]$taskName)
+        if (-not $script:FakeStartupTasks.ContainsKey($taskName)) {
+            return $null
+        }
+        return [pscustomobject]@{
+            TaskPath = "\"
+            TaskName = $taskName
+            Description = "DS4Windows managed startup task v1"
+            Settings = [pscustomobject]@{
+                Enabled = $script:FakeStartupTasks[$taskName]
+            }
+        }
     }
     function Disable-ScheduledTask {
         param(

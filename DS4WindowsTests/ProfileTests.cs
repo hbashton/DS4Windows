@@ -640,5 +640,57 @@ namespace DS4WindowsTests
             Assert.AreEqual(OutContType.ViiperX360,
                 roundTripStore.outputDevType[0]);
         }
+
+        [TestMethod]
+        public void CheckShiftExtrasWrittenOnSave()
+        {
+            // Shift-modifier extras stored in the BackingStore must survive MapFrom
+            // into the DTO's ShiftControl.Extras so they get serialized.
+            string shiftExtras = "1,255,0,0,255,0,0,1,0";
+            BackingStore tempStore = new BackingStore();
+            tempStore.UpdateDS4CExtra(0, "Cross", true, shiftExtras);
+
+            ProfileDTO dto = new ProfileDTO();
+            dto.DeviceIndex = 0;
+            dto.MapFrom(tempStore);
+
+            Assert.IsNotNull(dto.ShiftControl.Extras);
+            Assert.IsTrue(dto.ShiftControl.Extras.CustomMapExtras.ContainsKey(DS4Controls.Cross));
+            Assert.AreEqual(shiftExtras, dto.ShiftControl.Extras.CustomMapExtras[DS4Controls.Cross]);
+        }
+
+        [TestMethod]
+        public void CheckShiftExtrasReadIntoShiftSlot()
+        {
+            // ShiftControl/Extras in the profile XML must load into the control's
+            // shift extras slot without clobbering its normal extras.
+            string normalExtras = "1,255,0,0,255,0,0,1,0";
+            string shiftExtras = "1,0,255,0,255,0,0,1,0";
+            string profileXml = $@"<?xml version=""1.0"" encoding=""utf-8""?>
+<DS4Windows config_version=""5"">
+  <Control>
+    <Extras>
+      <Cross>{normalExtras}</Cross>
+    </Extras>
+  </Control>
+  <ShiftControl>
+    <Extras>
+      <Cross>{shiftExtras}</Cross>
+    </Extras>
+  </ShiftControl>
+</DS4Windows>";
+
+            XmlSerializer serializer = new XmlSerializer(typeof(ProfileDTO),
+                ProfileDTO.GetAttributeOverrides());
+            using StringReader sr = new StringReader(profileXml);
+            ProfileDTO dto = serializer.Deserialize(sr) as ProfileDTO;
+            dto.DeviceIndex = 0;
+            BackingStore tempStore = new BackingStore();
+            dto.MapTo(tempStore);
+
+            DS4ControlSettings dcs = tempStore.GetDS4CSetting(0, "Cross");
+            Assert.AreEqual(normalExtras, dcs.extras);
+            Assert.AreEqual(shiftExtras, dcs.shiftExtras);
+        }
     }
 }

@@ -2114,6 +2114,11 @@ namespace DS4WinWPF.DS4Control.DTOXml
                         }
                     }
                 }
+
+                if (hasExtrasValue)
+                {
+                    shiftExtrasSerializer.CustomMapExtras.Add(dcs.control, dcs.shiftExtras);
+                }
             }
 
             if (buttonSerializer.CustomMapButtons.Count > 0)
@@ -2798,7 +2803,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
                     foreach (KeyValuePair<DS4Controls, string> pair in ShiftControl.Extras.CustomMapExtras)
                     {
                         destination.UpdateDS4CExtra(deviceIndex,
-                            pair.Key.ToString(), false, pair.Value);
+                            pair.Key.ToString(), true, pair.Value);
                     }
                 }
 

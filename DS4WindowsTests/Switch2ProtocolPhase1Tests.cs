@@ -468,39 +468,47 @@ public class Switch2ProtocolPhase1Tests
     }
 
     [TestMethod]
-    public void SanitizedUsbBcd0201GoldenConvertsAndReplaysRawPlusFour()
+    public void DerivedUsbBcd0201GoldenRetainsOnlyProtocolFields()
     {
         string path = Path.Combine(AppContext.BaseDirectory, "TestData",
             "Switch2", "pro-controller2-usb-bcd0201-common05.json");
         string json = File.ReadAllText(path);
         Assert.IsFalse(json.Contains("devicePathSha256",
             StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(json.Contains("sourceSha256",
+            StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(json.Contains("exactBytes",
+            StringComparison.OrdinalIgnoreCase));
 
         using JsonDocument document = JsonDocument.Parse(json);
         JsonElement root = document.RootElement;
         Assert.AreEqual(Switch2FixtureEnvelope.CurrentSchemaVersion,
             root.GetProperty("schemaVersion").GetInt32());
-        string captureId = root.GetProperty("captureId").GetString();
-        string sourceSha256 = root.GetProperty("sourceSha256").GetString();
-        ushort redactionRevision = root.GetProperty(
-            "redactionManifestVersion").GetUInt16();
+        Assert.AreEqual("derivedGolden",
+            root.GetProperty("sourceKind").GetString());
+        string derivedSourceId = root.GetProperty(
+            "derivedSourceId").GetString();
+        Assert.AreEqual(2, root.GetProperty(
+            "derivationManifestVersion").GetInt32());
         string clockDomain = root.GetProperty("hostClockDomain").GetString();
         long frequency = root.GetProperty(
             "hostTimestampFrequency").GetInt64();
-        var source = Switch2FixtureSource.SanitizedCapture(captureId,
-            sourceSha256, redactionRevision);
+        var source = Switch2FixtureSource.DerivedGolden(derivedSourceId,
+            root.GetProperty("derivationManifestVersion").GetUInt16());
         var fixtures = new List<Switch2FixtureEnvelope>();
 
         foreach (JsonElement record in root.GetProperty("records")
                      .EnumerateArray())
         {
+            byte[] packet = Convert.FromHexString(
+                record.GetProperty("derivedBytes").GetString());
+            AssertDerivedGoldenHasOnlyRetainedFields(packet);
             fixtures.Add(Switch2FixtureEnvelope.CreateUsb(GoldenStreamId,
                 source, Switch2ControllerModel.ProController2, "unknown",
                 record.GetProperty("deviceGeneration").GetUInt64(), 0,
                 clockDomain, frequency,
                 record.GetProperty("hostTimestampTicks").GetInt64(),
-                Convert.FromHexString(
-                    record.GetProperty("exactBytes").GetString())));
+                packet));
         }
 
         var collector = new ReplayCollector();
@@ -521,6 +529,24 @@ public class Switch2ProtocolPhase1Tests
         Assert.AreEqual(Switch2CounterSequenceKind.Forward,
             collector.Events[1].CounterSequence,
             "A live USB +4 is raw forward movement, not packet loss.");
+    }
+
+    private static void AssertDerivedGoldenHasOnlyRetainedFields(
+        byte[] packet)
+    {
+        Assert.AreEqual(Switch2InputCodec.UsbPacketLength, packet.Length);
+
+        for (int offset = 0x09; offset <= 0x0A; offset++)
+        {
+            Assert.AreEqual((byte)0, packet[offset],
+                $"Uninterpreted packet byte 0x{offset:X2} must be zero.");
+        }
+
+        for (int offset = 0x11; offset < packet.Length; offset++)
+        {
+            Assert.AreEqual((byte)0, packet[offset],
+                $"Environmental/opaque packet byte 0x{offset:X2} must be zero.");
+        }
     }
 
     [TestMethod]
@@ -633,6 +659,19 @@ public class Switch2ProtocolPhase1Tests
         Assert.ThrowsException<ArgumentException>(() =>
             Switch2FixtureSource.SanitizedCapture(SanitizedCaptureId,
                 new string('A', 64), 0));
+        Assert.ThrowsException<ArgumentException>(() =>
+            Switch2FixtureSource.DerivedGolden(
+                "fact-ce006a25b40d468e90570a6e811a54f6", 2));
+        Assert.ThrowsException<ArgumentException>(() =>
+            Switch2FixtureSource.DerivedGolden(
+                "golden-ce006a25b40d468e90570a6e811a54f6", 0));
+
+        var derived = Switch2FixtureSource.DerivedGolden(
+            "golden-ce006a25b40d468e90570a6e811a54f6", 2);
+        Assert.AreEqual(Switch2FixtureEvidence.ProjectOwnedDerivedGolden,
+            derived.Evidence);
+        Assert.AreEqual((ushort)2, derived.DerivationManifestVersion);
+        Assert.AreEqual(string.Empty, derived.SourceSha256);
 
         var source = Switch2FixtureSource.Synthetic(SyntheticSourceId);
         Assert.ThrowsException<ArgumentException>(() =>

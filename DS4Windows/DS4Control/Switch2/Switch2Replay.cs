@@ -7,16 +7,20 @@ public enum Switch2FixtureEvidence : byte
 {
     SyntheticProtocolFact = 1,
     ProjectOwnedSanitizedCapture = 2,
+    ProjectOwnedDerivedGolden = 3,
 }
 
 /// <summary>
-/// Structured fixture provenance. Hardware fixtures require a source digest
-/// and a redaction-manifest revision; arbitrary provenance prose is excluded.
+/// Structured fixture provenance. Minimally sanitized captures require a
+/// source digest and redaction revision; derived goldens instead require a
+/// byte-transformation revision and cannot retain the raw-source digest.
+/// Arbitrary provenance prose is excluded.
 /// </summary>
 public sealed class Switch2FixtureSource
 {
     private Switch2FixtureSource(Switch2FixtureEvidence evidence,
-        string sourceId, string sourceSha256, ushort redactionManifestVersion)
+        string sourceId, string sourceSha256, ushort redactionManifestVersion,
+        ushort derivationManifestVersion)
     {
         if (evidence == Switch2FixtureEvidence.SyntheticProtocolFact)
         {
@@ -28,7 +32,7 @@ public sealed class Switch2FixtureSource
             }
 
             if (!string.IsNullOrEmpty(sourceSha256) ||
-                redactionManifestVersion != 0)
+                redactionManifestVersion != 0 || derivationManifestVersion != 0)
             {
                 throw new ArgumentException(
                     "Synthetic facts cannot claim a capture digest or redaction revision.");
@@ -48,6 +52,28 @@ public sealed class Switch2FixtureSource
                 throw new ArgumentException(
                     "Sanitized captures require a SHA-256 digest and redaction revision.");
             }
+
+            if (derivationManifestVersion != 0)
+            {
+                throw new ArgumentException(
+                    "Sanitized captures cannot claim a derivation revision.");
+            }
+        }
+        else if (evidence == Switch2FixtureEvidence.ProjectOwnedDerivedGolden)
+        {
+            if (!Switch2FixtureEnvelope.HasOpaqueIdPrefix(sourceId, "golden"))
+            {
+                throw new ArgumentException(
+                    "Derived source ID must use the golden-<128-bit nonce> format.",
+                    nameof(sourceId));
+            }
+
+            if (!string.IsNullOrEmpty(sourceSha256) ||
+                redactionManifestVersion != 0 || derivationManifestVersion == 0)
+            {
+                throw new ArgumentException(
+                    "Derived golden vectors require a derivation revision and cannot carry a capture digest or redaction revision.");
+            }
         }
         else
         {
@@ -58,6 +84,7 @@ public sealed class Switch2FixtureSource
         SourceId = sourceId;
         SourceSha256 = sourceSha256?.ToUpperInvariant() ?? string.Empty;
         RedactionManifestVersion = redactionManifestVersion;
+        DerivationManifestVersion = derivationManifestVersion;
     }
 
     public Switch2FixtureEvidence Evidence { get; }
@@ -68,14 +95,21 @@ public sealed class Switch2FixtureSource
 
     public ushort RedactionManifestVersion { get; }
 
+    public ushort DerivationManifestVersion { get; }
+
     public static Switch2FixtureSource Synthetic(string factId) =>
         new(Switch2FixtureEvidence.SyntheticProtocolFact, factId,
-            string.Empty, 0);
+            string.Empty, 0, 0);
 
     public static Switch2FixtureSource SanitizedCapture(string captureId,
         string sourceSha256, ushort redactionManifestVersion) =>
         new(Switch2FixtureEvidence.ProjectOwnedSanitizedCapture, captureId,
-            sourceSha256, redactionManifestVersion);
+            sourceSha256, redactionManifestVersion, 0);
+
+    public static Switch2FixtureSource DerivedGolden(string derivedSourceId,
+        ushort derivationManifestVersion) =>
+        new(Switch2FixtureEvidence.ProjectOwnedDerivedGolden,
+            derivedSourceId, string.Empty, 0, derivationManifestVersion);
 
     private static bool IsSha256(string value)
     {
@@ -617,6 +651,8 @@ public static class Switch2ReplayEngine
             SourceSha256 = fixture.Source.SourceSha256;
             RedactionManifestVersion =
                 fixture.Source.RedactionManifestVersion;
+            DerivationManifestVersion =
+                fixture.Source.DerivationManifestVersion;
             HostClockDomain = fixture.HostClockDomain;
             HostTimestampFrequency = fixture.HostTimestampFrequency;
             PairEpoch = fixture.PairEpoch;
@@ -636,6 +672,8 @@ public static class Switch2ReplayEngine
 
         private ushort RedactionManifestVersion { get; }
 
+        private ushort DerivationManifestVersion { get; }
+
         private string HostClockDomain { get; }
 
         private long HostTimestampFrequency { get; }
@@ -645,6 +683,7 @@ public static class Switch2ReplayEngine
         public bool Equals(StreamIdentity other) => Model == other.Model &&
             Transport == other.Transport && Evidence == other.Evidence &&
             RedactionManifestVersion == other.RedactionManifestVersion &&
+            DerivationManifestVersion == other.DerivationManifestVersion &&
             HostTimestampFrequency == other.HostTimestampFrequency &&
             PairEpoch == other.PairEpoch &&
             string.Equals(Firmware, other.Firmware, StringComparison.Ordinal) &&
@@ -660,7 +699,8 @@ public static class Switch2ReplayEngine
         public override int GetHashCode() => HashCode.Combine(
             HashCode.Combine(Model, Transport, Firmware, Evidence),
             HashCode.Combine(SourceId, SourceSha256,
-                RedactionManifestVersion, HostClockDomain),
+                RedactionManifestVersion, DerivationManifestVersion),
+            HostClockDomain,
             HostTimestampFrequency, PairEpoch);
     }
 }

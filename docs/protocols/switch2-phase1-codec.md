@@ -119,27 +119,30 @@ On 2026-08-29, a physical Switch 2 Pro Controller enumerated read-only as USB
 write, serial query, association, or memory command was performed.
 
 Two passive USB HID captures were kept outside Git and decoded with the exact
-compiled strict codec:
+compiled strict codec. Their digests remain in the out-of-tree lab manifest so
+a committed test vector cannot be used as a stable link to raw hardware data:
 
-- 2,048 records, source SHA-256
-  `FF00B4A066CE00F4D8BBC11B1E1F4979EAB794B372ADAFD63CC3CF0F0D5D7CBC`:
-  all were exact 64-byte report `0x05` and all decoded. Raw counter deltas were
-  `+4` 2,043 times, `+3` twice, `+5` once, and `+556` once; the `+556` followed
-  a 0.683-second host-capture gap.
-- 4,096 records, source SHA-256
-  `6731B888836A955AD5722B4C37DD89E8D830EBAC45641C19227778659B202829`:
-  all were exact 64-byte report `0x05`, all decoded, and every raw counter delta
-  was `+4`.
+- all 2,048 reports in the first run were exact 64-byte report `0x05` and
+  decoded. Raw counter deltas were `+4` 2,043 times, `+3` twice, `+5` once, and
+  `+556` once; the `+556` followed a 0.683-second host-capture gap; and
+- all 4,096 reports in the second run were exact 64-byte report `0x05`, all
+  decoded, and every raw counter delta was `+4`.
 
 No wrap was observed in hardware; 8-bit and 32-bit wrap behavior is verified
 with synthetic vectors. A raw `+4` is therefore classified as forward movement,
 not four packets lost. Duplicate/backward classification uses a documented
 half-range modular ordering policy, not a firmware guarantee.
 
-The committed golden fixture contains only two adjacent records from the
-second capture plus non-identifying enumeration facts. It omits the raw
-capture's device path and derived path hash. Its counter, sticks, framing, and
-`+4` replay classification are asserted. The full captures are not committed.
+The committed golden fixture contains two **derived** vectors, not captured
+reports. The deterministic derivation retains complete-packet byte `0x00`
+(report ID), `0x01..0x04` (counter), `0x05..0x08` (button field), and
+`0x0B..0x10` (the two packed stick slots). It zeros `0x09..0x0A` and every byte
+from `0x11..0x3F`, removing mouse, magnetometer, battery/current, timestamp,
+temperature, accelerometer, gyroscope, reserved, and other environmental or
+uninterpreted values. Capture timestamps are replaced with synthetic ordinal
+ticks. The fixture omits the raw source digest, device path/path hash, serial,
+MAC, key, host, console, and account identifiers. Tests verify every zeroed
+range before replaying the retained counter/stick fields and `+4` ordering.
 
 Coordinate note: an observed change at complete USB packet offset `0x3C` is
 body offset `0x3B` after removing report ID `0x05`, i.e. the high byte of gyro
@@ -155,10 +158,13 @@ Defensive policies, not undocumented firmware claims:
   transiently with the selected radio address and returns only an enum;
 - calibration decodes every exact nine-byte record but `IsUsable` rejects zero
   or saturated 12-bit components;
-- stream, clock, synthetic-fact, and capture IDs require type-specific prefixes
-  plus caller-generated 128-bit lowercase nonces; formatted MAC addresses and
-  arbitrary provenance prose are rejected; firmware is `unknown` or a bounded
-  numeric `fw-` version;
+- stream, clock, synthetic-fact, derived-golden, and capture IDs require
+  type-specific prefixes plus caller-generated 128-bit lowercase nonces;
+  formatted MAC addresses and arbitrary provenance prose are rejected;
+  firmware is `unknown` or a bounded numeric `fw-` version;
+- derived golden sources carry a nonzero derivation-manifest revision but no
+  raw-capture digest or redaction revision, so they cannot masquerade as either
+  synthetic protocol facts or minimally redacted hardware captures;
 - project-owned hardware sources additionally require a source SHA-256 and
   nonzero redaction-manifest revision;
 - timestamps are monotonic per declared host-clock domain, device generation

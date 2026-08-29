@@ -499,7 +499,16 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public void ChangeSelectedProfile()
         {
-            if (IsSynchronizingRuntimeProfile || selectedIndex == -1)
+            if (IsSynchronizingRuntimeProfile || selectedIndex < 0 ||
+                selectedIndex >= ProfileListCol.Count)
+            {
+                return;
+            }
+
+            ProfileEntity targetEntity = ProfileListCol[selectedIndex];
+            if (IsProfileSelectionApplied(SelectedProfile,
+                    Global.ProfilePath[devIndex], selectedEntity,
+                    targetEntity))
             {
                 return;
             }
@@ -509,7 +518,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 HookEvents(false);
             }
 
-            string prof = Global.ProfilePath[devIndex] = ProfileListCol[selectedIndex].Name;
+            string prof = Global.ProfilePath[devIndex] = targetEntity.Name;
             if (LinkedProfile)
             {
                 Global.changeLinkedProfile(device.getMacAddress(), Global.ProfilePath[devIndex]);
@@ -521,7 +530,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             }
 
             SelectedProfile = prof;
-            this.selectedEntity = profileListHolder.ProfileListCol.SingleOrDefault(x => x.Name == prof);
+            this.selectedEntity = targetEntity;
             if (this.selectedEntity != null)
             {
                 selectedIndex = profileListHolder.ProfileListCol.IndexOf(this.selectedEntity);
@@ -532,27 +541,71 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 loaded => CompleteProfileReload(loaded, prof, logSelection: true));
         }
 
+        /// <summary>
+        /// Publishes and applies a profile selection without relying on a
+        /// realized ComboBox to turn the model change into a runtime reload.
+        /// </summary>
+        public void SelectAndApplyProfile(int profileIndex)
+        {
+            if (IsSynchronizingRuntimeProfile || profileIndex < 0 ||
+                profileIndex >= ProfileListCol.Count)
+            {
+                return;
+            }
+
+            // A realized ComboBox can synchronously raise SelectionChanged
+            // while the source index is published. Fence that UI callback;
+            // this method owns the one direct application below. The core is
+            // idempotent as an additional guard against deferred callbacks.
+            IsSynchronizingRuntimeProfile = true;
+            try
+            {
+                SelectedIndex = profileIndex;
+            }
+            finally
+            {
+                IsSynchronizingRuntimeProfile = false;
+            }
+
+            ChangeSelectedProfile();
+        }
+
+        internal static bool IsProfileSelectionApplied(
+            string selectedProfile, string runtimeProfile,
+            ProfileEntity selectedEntity, ProfileEntity targetEntity)
+        {
+            return targetEntity != null &&
+                ReferenceEquals(selectedEntity, targetEntity) &&
+                string.Equals(selectedProfile, targetEntity.Name,
+                    StringComparison.Ordinal) &&
+                string.Equals(runtimeProfile, targetEntity.Name,
+                    StringComparison.Ordinal);
+        }
+
+        internal bool IsUsingProfile(ProfileEntity profile)
+        {
+            return profile != null &&
+                (ReferenceEquals(selectedEntity, profile) ||
+                 string.Equals(SelectedProfile, profile.Name,
+                     StringComparison.Ordinal) ||
+                 (!Global.useTempProfile[devIndex] &&
+                  string.Equals(Global.ProfilePath[devIndex], profile.Name,
+                     StringComparison.Ordinal)));
+        }
+
         public bool SynchronizeRuntimeProfile()
         {
             string runtimeProfile = Global.useTempProfile[devIndex]
                 ? Global.tempprofilename[devIndex] ?? string.Empty
                 : Global.ProfilePath[devIndex] ?? string.Empty;
-            if (SelectedProfile == runtimeProfile &&
-                ((string.IsNullOrEmpty(runtimeProfile) &&
-                    selectedEntity == null && selectedIndex == -1) ||
-                 selectedEntity?.Name == runtimeProfile))
-            {
-                return false;
-            }
-
             ProfileEntity runtimeEntity = profileListHolder.ProfileListCol
                 .SingleOrDefault(item => item.Name == runtimeProfile);
             int runtimeIndex = runtimeEntity == null
                 ? -1
                 : profileListHolder.ProfileListCol.IndexOf(runtimeEntity);
-            if (SelectedProfile == runtimeProfile &&
-                ReferenceEquals(selectedEntity, runtimeEntity) &&
-                selectedIndex == runtimeIndex)
+            if (IsRuntimeProfileSynchronized(SelectedProfile,
+                    runtimeProfile, selectedEntity, runtimeEntity,
+                    selectedIndex, runtimeIndex))
             {
                 return false;
             }
@@ -582,27 +635,80 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             }
         }
 
+        internal static bool IsRuntimeProfileSynchronized(
+            string selectedProfile, string runtimeProfile,
+            ProfileEntity selectedEntity, ProfileEntity runtimeEntity,
+            int selectedIndex, int runtimeIndex)
+        {
+            return string.Equals(selectedProfile, runtimeProfile,
+                    StringComparison.Ordinal) &&
+                ReferenceEquals(selectedEntity, runtimeEntity) &&
+                selectedIndex == runtimeIndex;
+        }
+
         private void HookEvents(bool state)
         {
             if (state)
             {
                 selectedEntity.ProfileSaved += SelectedEntity_ProfileSaved;
-                selectedEntity.ProfileDeleted += SelectedEntity_ProfileDeleted;
             }
             else
             {
                 selectedEntity.ProfileSaved -= SelectedEntity_ProfileSaved;
-                selectedEntity.ProfileDeleted -= SelectedEntity_ProfileDeleted;
             }
         }
 
-        private void SelectedEntity_ProfileDeleted(object sender, EventArgs e)
+        internal void ApplyProfileDeletionFallback(
+            ProfileEntity deletedEntity)
         {
-            HookEvents(false);
-            ProfileEntity entity = profileListHolder.ProfileListCol.FirstOrDefault();
-            if (entity != null)
+            if (selectedEntity != null)
             {
-                SelectedIndex = profileListHolder.ProfileListCol.IndexOf(entity);
+                HookEvents(false);
+            }
+
+            selectedEntity = null;
+            ProfileEntity fallback = FindProfileDeletionFallback(
+                profileListHolder.ProfileListCol, deletedEntity);
+            if (fallback != null)
+            {
+                int fallbackIndex =
+                    profileListHolder.ProfileListCol.IndexOf(fallback);
+                SelectAndApplyProfile(fallbackIndex);
+            }
+            else
+            {
+                ClearSelectedProfileAfterDeletion();
+            }
+        }
+
+        internal static ProfileEntity FindProfileDeletionFallback(
+            IEnumerable<ProfileEntity> profiles,
+            ProfileEntity deletedEntity)
+        {
+            return profiles?.FirstOrDefault(entity => entity != null &&
+                !ReferenceEquals(entity, deletedEntity));
+        }
+
+        private void ClearSelectedProfileAfterDeletion()
+        {
+            Mapping.ExecuteSerializedProfileMutation(devIndex, () =>
+            {
+                Global.BeginProfileSwitchRevision(devIndex);
+                Global.ProfilePath[devIndex] = string.Empty;
+                Global.OlderProfilePath[devIndex] = string.Empty;
+                Global.LoadBlankDevProfile(devIndex, false, App.rootHub,
+                    false);
+            });
+
+            SelectedProfile = string.Empty;
+            IsSynchronizingRuntimeProfile = true;
+            try
+            {
+                SelectedIndex = -1;
+            }
+            finally
+            {
+                IsSynchronizingRuntimeProfile = false;
             }
         }
 
@@ -730,7 +836,9 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             ProfileEntity temp = profileListHolder.ProfileListCol.SingleOrDefault(x => x.Name == loadprofile);
             if (temp != null)
             {
-                SelectedIndex = profileListHolder.ProfileListCol.IndexOf(temp);
+                int profileIndex =
+                    profileListHolder.ProfileListCol.IndexOf(temp);
+                SelectAndApplyProfile(profileIndex);
             }
         }
 

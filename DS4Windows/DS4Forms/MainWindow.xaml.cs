@@ -436,7 +436,8 @@ namespace DS4WinWPF.DS4Forms
             CompositeDeviceModel devitem = conLvViewModel.ControllerDict[idx];
             if (devitem != null)
             {
-                devitem.ChangeSelectedProfile(profile);
+                ApplyProfileSelection(devitem,
+                    () => devitem.ChangeSelectedProfile(profile));
             }
         }
 
@@ -880,17 +881,38 @@ Suspend support not enabled.", true);
                     continue;
                 }
 
+                bool forward;
                 if (slide == "left")
                 {
-                    item.SelectedIndex = ComputeSwipeProfileIndex(item,
-                        forward: false);
+                    forward = false;
                 }
                 else if (slide == "right")
                 {
-                    item.SelectedIndex = ComputeSwipeProfileIndex(item,
-                        forward: true);
+                    forward = true;
                 }
+                else
+                {
+                    continue;
+                }
+
+                int targetIndex = ComputeSwipeProfileIndex(item, forward);
+                ApplyProfileSelection(item,
+                    () => item.SelectAndApplyProfile(targetIndex));
             }
+        }
+
+        private void ApplyProfileSelection(CompositeDeviceModel item,
+            Action apply)
+        {
+            if (item == null || apply == null)
+            {
+                return;
+            }
+
+            FlushOverviewQuickSettings(item.DevIndex, false);
+            apply();
+            mainWinVM.RefreshRuntimeState(App.rootHub);
+            trayIconVM.PopulateContextMenu();
         }
 
         /// <summary>
@@ -1754,14 +1776,12 @@ Suspend support not enabled.", true);
             int idx = Convert.ToInt32(box.Tag);
             if (idx > -1 && conLvViewModel.ControllerDict.ContainsKey(idx))
             {
-                FlushOverviewQuickSettings(idx, false);
                 CompositeDeviceModel item = conLvViewModel.ControllerDict[idx];
                 if (!item.IsSynchronizingRuntimeProfile &&
                     item.SelectedIndex > -1)
                 {
-                    item.ChangeSelectedProfile();
-                    mainWinVM.RefreshRuntimeState(App.rootHub);
-                    trayIconVM.PopulateContextMenu();
+                    ApplyProfileSelection(item,
+                        () => item.ChangeSelectedProfile());
                 }
             }
         }
@@ -1980,7 +2000,10 @@ Suspend support not enabled.", true);
 
                                             if (idx >= 0 && tdevice < conLvViewModel.ControllerCol.Count)
                                             {
-                                                conLvViewModel.ControllerCol[tdevice].ChangeSelectedProfile(strData[2]);
+                                                CompositeDeviceModel item =
+                                                    conLvViewModel.ControllerCol[tdevice];
+                                                ApplyProfileSelection(item,
+                                                    () => item.ChangeSelectedProfile(strData[2]));
                                             }
                                             else
                                             {
@@ -2582,8 +2605,23 @@ Suspend support not enabled.", true);
                     Properties.Resources.DeleteProfile,
                     MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
                 {
+                    CompositeDeviceModel[] affectedControllers =
+                        conLvViewModel.ControllerCol.Where(item =>
+                            item.IsUsingProfile(entity)).ToArray();
+                    foreach (CompositeDeviceModel item in affectedControllers)
+                    {
+                        FlushOverviewQuickSettings(item.DevIndex, false);
+                    }
+
                     entity.DeleteFile();
                     profileListHolder.ProfileListCol.Remove(entity);
+                    foreach (CompositeDeviceModel item in affectedControllers)
+                    {
+                        item.ApplyProfileDeletionFallback(entity);
+                    }
+
+                    mainWinVM.RefreshRuntimeState(App.rootHub);
+                    trayIconVM.PopulateContextMenu();
                 }
             }
         }
@@ -2815,7 +2853,10 @@ Suspend support not enabled.", true);
             int devnum = sender.DeviceNum;
             if (devnum >= 0 && devnum+1 <= conLvViewModel.ControllerCol.Count)
             {
-                conLvViewModel.ControllerCol[devnum].ChangeSelectedProfile(profile);
+                CompositeDeviceModel item =
+                    conLvViewModel.ControllerCol[devnum];
+                ApplyProfileSelection(item,
+                    () => item.ChangeSelectedProfile(profile));
             }
         }
 

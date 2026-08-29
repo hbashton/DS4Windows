@@ -51,7 +51,7 @@ namespace DS4WindowsTests
                 transportGeneration: 0x2122232425262728,
                 ownershipEpoch: 0x3132333435363738,
                 timestampMicroseconds: 0x4142434445464748,
-                timeToLiveMicroseconds: 0x5152535455565758);
+                timeToLiveMicroseconds: 250_000);
             Span<byte> packet = stackalloc byte[
                 ControllerFeedbackFrame.SerializedLength];
 
@@ -122,6 +122,10 @@ namespace DS4WindowsTests
                 command: ControllerFeedbackCommand.Neutral,
                 bodyLow: 1));
             Assert.IsFalse(TryCreate(out _, timeToLiveMicroseconds: 0));
+            Assert.IsTrue(TryCreate(out _, timeToLiveMicroseconds:
+                ControllerFeedbackFrame.MaxTimeToLiveMicroseconds));
+            Assert.IsFalse(TryCreate(out _, timeToLiveMicroseconds:
+                ControllerFeedbackFrame.MaxTimeToLiveMicroseconds + 1));
             Assert.IsFalse(default(ControllerFeedbackFrame).
                 HasValidInvariants());
         }

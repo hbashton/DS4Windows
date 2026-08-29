@@ -168,6 +168,7 @@ namespace DS4Windows
         internal const ushort CurrentVersion = 1;
         internal const int SerializedLength = 72;
         internal const ulong MaxFutureSkewMicroseconds = 5_000;
+        internal const ulong MaxTimeToLiveMicroseconds = 250_000;
 
         private ControllerFeedbackFrame(ControllerFeedbackSource source,
             ControllerFeedbackCommand command,
@@ -243,7 +244,8 @@ namespace DS4Windows
                 Actuators != ControllerFeedbackActuators.All ||
                 Sequence == 0 || DeviceGeneration == 0 ||
                 TransportGeneration == 0 || OwnershipEpoch == 0 ||
-                TimeToLiveMicroseconds == 0)
+                TimeToLiveMicroseconds == 0 ||
+                TimeToLiveMicroseconds > MaxTimeToLiveMicroseconds)
             {
                 return false;
             }

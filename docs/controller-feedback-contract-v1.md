@@ -70,7 +70,11 @@ Version 1 is exactly 72 bytes:
 | 56 | 8 | monotonic timestamp, microseconds |
 | 64 | 8 | time to live, microseconds |
 
-Sequence, all three lifecycle fences, and TTL are non-zero. Timestamp and TTL
+Sequence and all three lifecycle fences are non-zero. TTL is in the inclusive
+range 1..250,000 microseconds; producers must refresh an unchanged live effect
+before that lease expires. This 250 ms protocol ceiling bounds actuator state
+after a producer failure instead of trusting an effectively infinite lease.
+Timestamp and TTL
 use clock domain `windows-qpc-host-v1`: the system-wide Windows
 `QueryPerformanceCounter` value converted as
 `floor(counter * 1,000,000 / QueryPerformanceFrequency)`. The QPC origin and

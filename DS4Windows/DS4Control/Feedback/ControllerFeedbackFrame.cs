@@ -15,6 +15,7 @@ GNU General Public License for more details.
 
 using System;
 using System.Buffers.Binary;
+using System.Diagnostics;
 
 namespace DS4Windows
 {
@@ -45,22 +46,21 @@ namespace DS4Windows
         Apply = 1,
 
         /// <summary>
-        /// Set the selected actuators to zero while retaining the current
+        /// Set every actuator to zero while retaining the current
         /// feedback ownership lease.
         /// </summary>
         Neutral = 2,
 
         /// <summary>
-        /// Set the selected actuators to zero and retire their current
+        /// Set every actuator to zero and retire the current
         /// feedback ownership lease.
         /// </summary>
         Stop = 3,
     }
 
     /// <summary>
-    /// Semantic actuator capabilities carried by a feedback source. A target
-    /// translator intersects this mask with its own capabilities instead of
-    /// inferring channels from a byte-array length.
+    /// Canonical actuator channel names. Version one requires All in every
+    /// valid frame; zero values represent inactive or unsupported channels.
     /// </summary>
     [Flags]
     internal enum ControllerFeedbackActuators : byte
@@ -71,6 +71,77 @@ namespace DS4Windows
         LeftTrigger = 0x04,
         RightTrigger = 0x08,
         All = 0x0F,
+    }
+
+    /// <summary>
+    /// State transition returned by a feedback-mailbox claim. Release is an
+    /// obligation to locally zero every physical actuator, not simply the
+    /// absence of a fresh frame.
+    /// </summary>
+    internal enum ControllerFeedbackClaimDisposition : byte
+    {
+        None = 0,
+        Frame = 1,
+        Release = 2,
+    }
+
+    /// <summary>
+    /// Independently remembers frame application and expiry-release delivery.
+    /// The zero value is ready for use.
+    /// </summary>
+    internal struct ControllerFeedbackClaimCursor
+    {
+        internal ulong Revision;
+        internal ulong ReleaseRevision;
+    }
+
+    /// <summary>
+    /// Normative cross-process clock for CFBK v1. On Windows,
+    /// Stopwatch.GetTimestamp is QueryPerformanceCounter; conversion by the
+    /// system QueryPerformanceFrequency gives a host-wide value with a common
+    /// origin and unit in every process. Process-relative elapsed-time origins
+    /// are not compatible with this clock domain.
+    /// </summary>
+    internal static class ControllerFeedbackClock
+    {
+        internal const string Domain = "windows-qpc-host-v1";
+        private const ulong MicrosecondsPerSecond = 1_000_000;
+
+        internal static bool TryGetTimestampMicroseconds(
+            out ulong timestampMicroseconds)
+        {
+            long timestamp = Stopwatch.GetTimestamp();
+            long frequency = Stopwatch.Frequency;
+            if (timestamp < 0 || frequency <= 0)
+            {
+                timestampMicroseconds = 0;
+                return false;
+            }
+
+            return TryConvertQpcTicks((ulong)timestamp, (ulong)frequency,
+                out timestampMicroseconds);
+        }
+
+        internal static bool TryConvertQpcTicks(ulong counter,
+            ulong frequency, out ulong timestampMicroseconds)
+        {
+            if (frequency == 0)
+            {
+                timestampMicroseconds = 0;
+                return false;
+            }
+
+            UInt128 scaled = (UInt128)counter * MicrosecondsPerSecond;
+            UInt128 converted = scaled / frequency;
+            if (converted > ulong.MaxValue)
+            {
+                timestampMicroseconds = 0;
+                return false;
+            }
+
+            timestampMicroseconds = (ulong)converted;
+            return true;
+        }
     }
 
     /// <summary>
@@ -94,11 +165,9 @@ namespace DS4Windows
         // Little-endian bytes spell "CFBK". The independent version field is
         // authoritative; the magic only rejects a packet for another lane.
         private const uint WireMagic = 0x4B424643;
-        private const byte DefinedActuatorBits =
-            (byte)ControllerFeedbackActuators.All;
-
         internal const ushort CurrentVersion = 1;
         internal const int SerializedLength = 72;
+        internal const ulong MaxFutureSkewMicroseconds = 5_000;
 
         private ControllerFeedbackFrame(ControllerFeedbackSource source,
             ControllerFeedbackCommand command,
@@ -171,8 +240,7 @@ namespace DS4Windows
                 Source > ControllerFeedbackSource.DualShock4VirtualDevice ||
                 Command < ControllerFeedbackCommand.Apply ||
                 Command > ControllerFeedbackCommand.Stop ||
-                Actuators == ControllerFeedbackActuators.None ||
-                (((byte)Actuators) & ~DefinedActuatorBits) != 0 ||
+                Actuators != ControllerFeedbackActuators.All ||
                 Sequence == 0 || DeviceGeneration == 0 ||
                 TransportGeneration == 0 || OwnershipEpoch == 0 ||
                 TimeToLiveMicroseconds == 0)
@@ -199,14 +267,24 @@ namespace DS4Windows
         }
 
         /// <summary>
-        /// Expiration uses subtraction only after establishing timestamp order,
-        /// so values near ulong.MaxValue cannot wrap into a fresh frame.
+        /// A bounded future timestamp tolerates only producer/consumer sample
+        /// races. Farther-future values fail closed rather than remaining live.
         /// </summary>
+        internal bool IsFreshAt(ulong nowMicroseconds)
+        {
+            if (TimestampMicroseconds > nowMicroseconds)
+            {
+                return TimestampMicroseconds - nowMicroseconds <=
+                    MaxFutureSkewMicroseconds;
+            }
+
+            return nowMicroseconds - TimestampMicroseconds <
+                TimeToLiveMicroseconds;
+        }
+
         internal bool IsExpiredAt(ulong nowMicroseconds)
         {
-            return nowMicroseconds >= TimestampMicroseconds &&
-                nowMicroseconds - TimestampMicroseconds >=
-                    TimeToLiveMicroseconds;
+            return !IsFreshAt(nowMicroseconds);
         }
 
         internal bool TryWriteTo(Span<byte> destination)
@@ -376,7 +454,7 @@ namespace DS4Windows
             {
                 frame = latest;
                 currentRevision = revision;
-                if (hasValue && !latest.IsExpiredAt(nowMicroseconds))
+                if (hasValue && latest.IsFreshAt(nowMicroseconds))
                 {
                     return true;
                 }
@@ -386,21 +464,47 @@ namespace DS4Windows
             }
         }
 
-        internal bool TryClaimFresh(ulong nowMicroseconds,
-            ref ulong claimedRevision, out ControllerFeedbackFrame frame)
+        /// <summary>
+        /// Returns each fresh revision once as Frame. Once that revision
+        /// expires or is implausibly future-dated, returns Release exactly
+        /// once—even if Frame was already returned while it was fresh.
+        /// Physical translation and release I/O happen after this lock.
+        /// </summary>
+        internal ControllerFeedbackClaimDisposition Claim(
+            ulong nowMicroseconds, ref ControllerFeedbackClaimCursor cursor,
+            out ControllerFeedbackFrame frame)
         {
             lock (syncRoot)
             {
-                frame = latest;
-                if (!hasValue || claimedRevision == revision ||
-                    latest.IsExpiredAt(nowMicroseconds))
+                if (!hasValue)
                 {
                     frame = default;
-                    return false;
+                    return ControllerFeedbackClaimDisposition.None;
                 }
 
-                claimedRevision = revision;
-                return true;
+                if (latest.IsFreshAt(nowMicroseconds))
+                {
+                    if (cursor.Revision == revision)
+                    {
+                        frame = default;
+                        return ControllerFeedbackClaimDisposition.None;
+                    }
+
+                    cursor.Revision = revision;
+                    frame = latest;
+                    return ControllerFeedbackClaimDisposition.Frame;
+                }
+
+                if (cursor.ReleaseRevision == revision)
+                {
+                    frame = default;
+                    return ControllerFeedbackClaimDisposition.None;
+                }
+
+                cursor.Revision = revision;
+                cursor.ReleaseRevision = revision;
+                frame = default;
+                return ControllerFeedbackClaimDisposition.Release;
             }
         }
 

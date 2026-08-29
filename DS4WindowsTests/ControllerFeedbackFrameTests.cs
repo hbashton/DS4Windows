@@ -111,6 +111,10 @@ namespace DS4WindowsTests
                 actuators: (ControllerFeedbackActuators)0x80,
                 bodyLow: 1));
             Assert.IsFalse(TryCreate(out _,
+                actuators: ControllerFeedbackActuators.BodyLow,
+                bodyLow: 1, bodyHigh: 0, leftTrigger: 0,
+                rightTrigger: 0));
+            Assert.IsFalse(TryCreate(out _,
                 command: ControllerFeedbackCommand.Apply,
                 bodyLow: 0, bodyHigh: 0, leftTrigger: 0,
                 rightTrigger: 0));
@@ -127,8 +131,6 @@ namespace DS4WindowsTests
         {
             ControllerFeedbackFrame neutral = CreateFrame(
                 command: ControllerFeedbackCommand.Neutral,
-                actuators: ControllerFeedbackActuators.BodyLow |
-                    ControllerFeedbackActuators.BodyHigh,
                 bodyLow: 0, bodyHigh: 0, leftTrigger: 0,
                 rightTrigger: 0);
             ControllerFeedbackFrame stop = CreateFrame(
@@ -153,13 +155,43 @@ namespace DS4WindowsTests
             Assert.IsFalse(ordinary.IsExpiredAt(1_249));
             Assert.IsTrue(ordinary.IsExpiredAt(1_250));
 
+            ControllerFeedbackFrame futureBoundary = CreateFrame(
+                timestampMicroseconds: 10_000,
+                timeToLiveMicroseconds: 250);
+            Assert.IsFalse(futureBoundary.IsExpiredAt(5_000));
+            Assert.IsTrue(futureBoundary.IsExpiredAt(4_999));
+
             ControllerFeedbackFrame nearLimit = CreateFrame(
                 timestampMicroseconds: ulong.MaxValue - 20,
                 timeToLiveMicroseconds: 10);
-            Assert.IsFalse(nearLimit.IsExpiredAt(5),
-                "A wrapped wall-clock style comparison marked a future QPC sample stale.");
+            Assert.IsTrue(nearLimit.IsExpiredAt(5),
+                "An implausibly future timestamp remained live.");
+            Assert.IsFalse(nearLimit.IsExpiredAt(ulong.MaxValue - 21));
             Assert.IsFalse(nearLimit.IsExpiredAt(ulong.MaxValue - 11));
             Assert.IsTrue(nearLimit.IsExpiredAt(ulong.MaxValue - 10));
+        }
+
+        [TestMethod]
+        public void QpcConversionVectorsMatchViiperWithoutOverflow()
+        {
+            Assert.AreEqual("windows-qpc-host-v1",
+                ControllerFeedbackClock.Domain);
+            Assert.IsTrue(ControllerFeedbackClock.TryConvertQpcTicks(
+                0, 10_000_000, out ulong zero));
+            Assert.AreEqual(0UL, zero);
+            Assert.IsTrue(ControllerFeedbackClock.TryConvertQpcTicks(
+                12_345_678, 10_000_000, out ulong fractional));
+            Assert.AreEqual(1_234_567UL, fractional);
+            Assert.IsTrue(ControllerFeedbackClock.TryConvertQpcTicks(
+                ulong.MaxValue, ulong.MaxValue, out ulong maximum));
+            Assert.AreEqual(1_000_000UL, maximum);
+            Assert.IsFalse(ControllerFeedbackClock.TryConvertQpcTicks(
+                1, 0, out _));
+            Assert.IsFalse(ControllerFeedbackClock.TryConvertQpcTicks(
+                ulong.MaxValue, 1, out _));
+            Assert.IsTrue(ControllerFeedbackClock.
+                TryGetTimestampMicroseconds(out ulong sampled));
+            Assert.IsTrue(sampled > 0);
         }
 
         [TestMethod]
@@ -200,36 +232,64 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void FreshClaimDoesNotExposeExpiredStateOrConsumeItsRevision()
+        public void ClaimEmitsOneReleaseWhenAppliedRevisionExpires()
         {
             ControllerFeedbackMailbox mailbox = new();
-            ulong claimedRevision = 0;
+            ControllerFeedbackClaimCursor cursor = default;
             Assert.IsTrue(mailbox.TryPublish(CreateFrame(sequence: 1,
                 timestampMicroseconds: 1_000,
                 timeToLiveMicroseconds: 50)));
-            Assert.IsTrue(mailbox.TryClaimFresh(1_049, ref claimedRevision,
-                out ControllerFeedbackFrame first));
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.Frame,
+                mailbox.Claim(1_049, ref cursor,
+                    out ControllerFeedbackFrame first));
             Assert.AreEqual(1UL, first.Sequence);
-            Assert.IsFalse(mailbox.TryClaimFresh(1_049, ref claimedRevision,
-                out _));
+            Assert.AreEqual(1UL, cursor.Revision);
+            Assert.AreEqual(0UL, cursor.ReleaseRevision);
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.None,
+                mailbox.Claim(1_049, ref cursor, out _));
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.Release,
+                mailbox.Claim(1_050, ref cursor,
+                    out ControllerFeedbackFrame released));
+            Assert.AreEqual(default(ControllerFeedbackFrame), released);
+            Assert.AreEqual(1UL, cursor.ReleaseRevision);
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.None,
+                mailbox.Claim(2_000, ref cursor, out _));
 
             Assert.IsTrue(mailbox.TryPublish(CreateFrame(sequence: 2,
                 timestampMicroseconds: 1_050,
                 timeToLiveMicroseconds: 50)));
-            Assert.IsFalse(mailbox.TryClaimFresh(1_100,
-                ref claimedRevision, out ControllerFeedbackFrame expired));
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.Release,
+                mailbox.Claim(1_100, ref cursor,
+                    out ControllerFeedbackFrame expired));
             Assert.AreEqual(default(ControllerFeedbackFrame), expired);
-            Assert.AreEqual(1UL, claimedRevision);
+            Assert.AreEqual(2UL, cursor.Revision);
+            Assert.AreEqual(2UL, cursor.ReleaseRevision);
             Assert.IsFalse(mailbox.TryReadFresh(1_100, out _, out ulong staleRevision));
             Assert.AreEqual(2UL, staleRevision);
 
             Assert.IsTrue(mailbox.TryPublish(CreateFrame(sequence: 3,
                 timestampMicroseconds: 1_100,
                 timeToLiveMicroseconds: 50)));
-            Assert.IsTrue(mailbox.TryClaimFresh(1_100,
-                ref claimedRevision, out ControllerFeedbackFrame recovered));
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.Frame,
+                mailbox.Claim(1_100, ref cursor,
+                    out ControllerFeedbackFrame recovered));
             Assert.AreEqual(3UL, recovered.Sequence);
-            Assert.AreEqual(3UL, claimedRevision);
+            Assert.AreEqual(3UL, cursor.Revision);
+        }
+
+        [TestMethod]
+        public void FarFutureFrameProducesOneRelease()
+        {
+            ControllerFeedbackMailbox mailbox = new();
+            ControllerFeedbackClaimCursor cursor = default;
+            Assert.IsTrue(mailbox.TryPublish(CreateFrame(
+                timestampMicroseconds: 10_001)));
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.Release,
+                mailbox.Claim(5_000, ref cursor,
+                    out ControllerFeedbackFrame released));
+            Assert.AreEqual(default(ControllerFeedbackFrame), released);
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.None,
+                mailbox.Claim(5_000, ref cursor, out _));
         }
 
         [TestMethod]
@@ -281,6 +341,7 @@ namespace DS4WindowsTests
         {
             const ulong iterations = 20_000;
             ControllerFeedbackMailbox mailbox = new();
+            ControllerFeedbackClaimCursor cursor = default;
             Span<byte> packet = stackalloc byte[
                 ControllerFeedbackFrame.SerializedLength];
 
@@ -289,6 +350,8 @@ namespace DS4WindowsTests
                 ControllerFeedbackFrame frame = CreatePatternFrame(sequence);
                 mailbox.TryPublish(frame);
                 mailbox.TryReadLatest(out _, out _);
+                mailbox.Claim(frame.TimestampMicroseconds, ref cursor,
+                    out _);
                 frame.TryWriteTo(packet);
                 ControllerFeedbackFrame.TryReadFrom(packet, out _);
             }
@@ -300,6 +363,11 @@ namespace DS4WindowsTests
                 ControllerFeedbackFrame frame = CreatePatternFrame(sequence);
                 mailbox.TryPublish(frame);
                 mailbox.TryReadLatest(out _, out _);
+                if (mailbox.Claim(frame.TimestampMicroseconds, ref cursor,
+                    out _) != ControllerFeedbackClaimDisposition.Frame)
+                {
+                    throw new InvalidOperationException("claim failed");
+                }
                 frame.TryWriteTo(packet);
                 ControllerFeedbackFrame.TryReadFrom(packet, out _);
             }

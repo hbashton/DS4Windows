@@ -19,11 +19,12 @@ The four actuator amplitudes are normalized unsigned 16-bit values:
 - `LeftTrigger`: left impulse-trigger actuator;
 - `RightTrigger`: right impulse-trigger actuator.
 
-The actuator mask has fixed values `BodyLow=0x01`, `BodyHigh=0x02`,
-`LeftTrigger=0x04`, and `RightTrigger=0x08`. It declares which source channels
-are meaningful. Values outside that mask must be zero. Translators intersect
-the mask with physical-target capabilities rather than inferring capabilities
-from a report length.
+The actuator-mask bits retain fixed wire values `BodyLow=0x01`,
+`BodyHigh=0x02`, `LeftTrigger=0x04`, and `RightTrigger=0x08`. Every valid v1
+frame must carry `All=0x0f`: v1 is a complete four-channel snapshot, never a
+patch. A source writes zero for an inactive or unsupported channel. A target
+translator then selects the channels it can express. This prevents an older
+non-zero channel from surviving a later partial stop.
 
 Source identifiers are fixed as follows:
 
@@ -38,9 +39,9 @@ Source identifiers are fixed as follows:
 | 6 | DualShock 4 virtual device |
 
 Command values are `Apply=1`, `Neutral=2`, and `Stop=3`. `Apply` requires at
-least one non-zero in-mask amplitude. `Neutral` explicitly zeros the selected
-actuators while keeping the current ownership lease. `Stop` explicitly zeros
-them and retires the ownership lease. Both require zero in every amplitude.
+least one non-zero amplitude. `Neutral` explicitly zeros every actuator while
+keeping the current ownership lease. `Stop` explicitly zeros every actuator
+and retires the ownership lease. Both require zero in every amplitude.
 `Stop` is terminal within an ownership epoch; another apply requires a newer
 epoch.
 
@@ -70,10 +71,20 @@ Version 1 is exactly 72 bytes:
 | 64 | 8 | time to live, microseconds |
 
 Sequence, all three lifecycle fences, and TTL are non-zero. Timestamp and TTL
-use monotonic microseconds rather than a process-specific stopwatch frequency.
-Expiry is inclusive at `timestamp + TTL`; consumers must not apply an expired
-frame. `Stop` is also freshness-bounded so a delayed command cannot cross a
-device, transport, or ownership replacement.
+use clock domain `windows-qpc-host-v1`: the system-wide Windows
+`QueryPerformanceCounter` value converted as
+`floor(counter * 1,000,000 / QueryPerformanceFrequency)`. The QPC origin and
+frequency are common to processes on one host; a process-relative stopwatch
+origin, wall clock, or raw unconverted QPC tick is not compatible. The
+conversion must avoid intermediate integer overflow and truncate
+sub-microsecond precision.
+
+Expiry is inclusive at `timestamp + TTL`. A timestamp up to 5,000 microseconds
+ahead of the consumer sample is tolerated as a producer/consumer sampling
+race. A timestamp farther in the future is invalid for application and follows
+the expiry-release path; this prevents a malformed maximum timestamp from
+remaining fresh indefinitely. `Stop` is freshness-bounded too, so a delayed
+command cannot cross a device, transport, or ownership replacement.
 
 ## Ownership and hot-path rules
 
@@ -84,7 +95,19 @@ ownership epoch. An expired value remains the ordering watermark, preventing
 an older frame from becoming valid merely because its newer successor aged
 out.
 
-Publication, latest-state read, fresh-state claim, and span serialization copy
-only value types under one short monitor and allocate no managed memory after
-warmup. Translators, callbacks, waits, logging, socket writes, and physical HID
-I/O must remain outside that monitor.
+Publication, latest-state read, state-transition claim, and span serialization
+copy only value types under one short monitor and allocate no managed memory
+after warmup. A claim cursor tracks applied and released revisions separately:
+
+- each new live revision yields `Frame` once;
+- when that same revision expires, it yields `Release` once even if it was
+  already applied;
+- a revision first observed expired or more than 5,000 microseconds in the
+  future yields `Release` once without exposing its amplitudes;
+- subsequent claims of that state yield `None`.
+
+`Release` obligates the translator to issue a local all-actuator zero/stop. It
+is not merely “no frame available.” `TryReadFresh` is diagnostic and cannot
+drive a physical output lease because it has no one-shot expiry transition.
+Translators, callbacks, waits, logging, socket writes, release writes, and
+physical HID I/O must remain outside the mailbox monitor.

@@ -21,4 +21,9 @@
     <ProjectReference Include="..\DS4Windows\DS4WinWPF.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="TestData\Switch2\pro-controller2-usb-bcd0201-common05.json"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

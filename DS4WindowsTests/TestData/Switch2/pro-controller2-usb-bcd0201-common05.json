@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "captureId": "capture-ce006a25b40d468e90570a6e811a54f6",
+  "sourceSha256": "6731B888836A955AD5722B4C37DD89E8D830EBAC45641C19227778659B202829",
+  "redactionManifestVersion": 1,
+  "redactions": [
+    "device paths and derived device-path hashes omitted",
+    "serial number not queried",
+    "no MAC, key, host, console, or account identifier collected"
+  ],
+  "hardware": {
+    "vendorId": "0x057E",
+    "productId": "0x2069",
+    "usbBcdDevice": "0x0201",
+    "interface": "HID MI_00",
+    "reportBytes": 64,
+    "writesPerformed": false
+  },
+  "hostClockDomain": "clock-0b1dd3f8780a4574a5785fe8738cc83d",
+  "hostTimestampFrequency": 10000000,
+  "records": [
+    {
+      "ordinal": 0,
+      "deviceGeneration": 1,
+      "hostTimestampTicks": 30877,
+      "exactBytes": "0505200500000000000000E13783546881000000000000000000000000000000BE0D3400000000000000012AA9FD13070037003EFD1310FFFFFCFF0800000000"
+    },
+    {
+      "ordinal": 1,
+      "deviceGeneration": 1,
+      "hostTimestampTicks": 51482,
+      "exactBytes": "0509200500000000000000E03783537881000000000000000000000000000000BE0D340000000000000001D0B7FD13070034003EFD12100000FCFF0900000000"
+    }
+  ]
+}

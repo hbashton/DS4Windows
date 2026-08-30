@@ -640,5 +640,32 @@ namespace DS4WindowsTests
             Assert.AreEqual(OutContType.ViiperX360,
                 roundTripStore.outputDevType[0]);
         }
+
+        [TestMethod]
+        public void CheckLegacyPerChannelColorRead()
+        {
+            // Old profiles store the lightbar colour as separate <Red>/<Green>/<Blue>
+            // elements rather than a combined <Color>. Each channel must be parsed
+            // from its own element.
+            string legacyColorProfileXml = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<DS4Windows config_version=""5"">
+  <Red>10</Red>
+  <Green>20</Green>
+  <Blue>30</Blue>
+</DS4Windows>";
+
+            XmlSerializer serializer = new XmlSerializer(typeof(ProfileDTO),
+                ProfileDTO.GetAttributeOverrides());
+            using StringReader sr = new StringReader(legacyColorProfileXml);
+            ProfileDTO dto = serializer.Deserialize(sr) as ProfileDTO;
+            dto.DeviceIndex = 0;
+            BackingStore tempStore = new BackingStore();
+            dto.MapTo(tempStore);
+
+            DS4Color led = tempStore.lightbarSettingInfo[0].ds4winSettings.m_Led;
+            Assert.AreEqual((byte)10, led.red);
+            Assert.AreEqual((byte)20, led.green);
+            Assert.AreEqual((byte)30, led.blue);
+        }
     }
 }

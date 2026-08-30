@@ -18,6 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 using System.Configuration;
 using System;
+using System.Globalization;
 using System.Text;
 using System.Xml;
 using System.Xml.Serialization;
@@ -132,7 +133,7 @@ namespace DS4WindowsTests
             dto.MapTo(tempStore);
 
             // Check settings
-            DateTime.TryParse(dto.LastCheckString, out DateTime tempLastChecked);
+            DateTime.TryParse(dto.LastCheckString, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime tempLastChecked);
             Assert.AreEqual(tempLastChecked, tempStore.lastChecked);
         }
 

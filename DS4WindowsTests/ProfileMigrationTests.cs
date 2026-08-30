@@ -20,6 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 using System.Text;
 using System.Xml;
 using System.Xml.Serialization;
+using System.Xml.Linq;
 using DS4Windows;
 using DS4WinWPF.DS4Control.DTOXml;
 
@@ -457,6 +458,138 @@ namespace DS4WindowsTests
             }
 
             return testStr;
+        }
+
+        private static XDocument GetMigratedDocument(ProfileMigration migration)
+        {
+            return XDocument.Parse(migration.CurrentMigrationText);
+        }
+
+        [TestMethod]
+        public void RequiresMigration_ReturnsTrueForOldAndAbsentConfigVersion()
+        {
+            Assert.IsTrue(new ProfileMigration(@"<DS4Windows config_version=""1""></DS4Windows>").RequiresMigration());
+            Assert.IsTrue(new ProfileMigration(@"<DS4Windows><LSAntiDeadZone>20</LSAntiDeadZone></DS4Windows>").RequiresMigration());
+        }
+
+        [TestMethod]
+        public void RequiresMigration_ReturnsFalseForCurrentVersion_AndUsedMigrationStaysFalse()
+        {
+            ProfileMigration migration = new ProfileMigration($@"<DS4Windows config_version=""{Global.CONFIG_VERSION}""></DS4Windows>");
+            Assert.IsFalse(migration.RequiresMigration());
+            migration.Migrate();
+            Assert.IsFalse(migration.UsedMigration);
+            migration.Close();
+        }
+
+        [TestMethod]
+        public void Migrate_TransformsVersion0002_DeadzoneDefaults()
+        {
+            string version1Profile =
+                @"<DS4Windows config_version=""1"">
+                    <LSDeadZone>0</LSDeadZone>
+                    <RSDeadZone>5</RSDeadZone>
+                  </DS4Windows>";
+
+            ProfileMigration migration = new ProfileMigration(version1Profile);
+            migration.Migrate();
+
+            Assert.IsTrue(migration.UsedMigration);
+
+            XDocument profileDocument = GetMigratedDocument(migration);
+            Assert.AreEqual(Global.CONFIG_VERSION.ToString(), profileDocument.Root?.Attribute("config_version")?.Value);
+            // A non-positive LSDeadZone is normalized to the default; a positive RSDeadZone is left as-is.
+            Assert.AreEqual(StickDeadZoneInfo.DEFAULT_DEADZONE.ToString(), profileDocument.Root?.Element("LSDeadZone")?.Value);
+            Assert.AreEqual("5", profileDocument.Root?.Element("RSDeadZone")?.Value);
+
+            migration.Close();
+        }
+
+        [TestMethod]
+        public void Migrate_TransformsVersion0004_GyroSmoothingGroups()
+        {
+            string version2Profile =
+                @"<DS4Windows config_version=""2"">
+                    <GyroSmoothing>True</GyroSmoothing>
+                    <GyroSmoothingWeight>15</GyroSmoothingWeight>
+                    <GyroMouseStickSmoothing>False</GyroMouseStickSmoothing>
+                    <GyroMouseStickSmoothingWeight>20</GyroMouseStickSmoothingWeight>
+                  </DS4Windows>";
+
+            ProfileMigration migration = new ProfileMigration(version2Profile);
+            migration.Migrate();
+
+            Assert.IsTrue(migration.UsedMigration);
+
+            XDocument profileDocument = GetMigratedDocument(migration);
+            Assert.AreEqual(Global.CONFIG_VERSION.ToString(), profileDocument.Root?.Attribute("config_version")?.Value);
+
+            XElement gyroMouseSmoothing = profileDocument.Root?.Element("GyroMouseSmoothingSettings");
+            Assert.IsNotNull(gyroMouseSmoothing);
+            Assert.AreEqual("True", gyroMouseSmoothing.Element("UseSmoothing")?.Value);
+            Assert.AreEqual("weighted-average", gyroMouseSmoothing.Element("SmoothingMethod")?.Value);
+            Assert.AreEqual("15", gyroMouseSmoothing.Element("SmoothingWeight")?.Value);
+
+            XElement gyroMouseStickSmoothing = profileDocument.Root?.Element("GyroMouseStickSmoothingSettings");
+            Assert.IsNotNull(gyroMouseStickSmoothing);
+            Assert.AreEqual("False", gyroMouseStickSmoothing.Element("UseSmoothing")?.Value);
+            Assert.IsNull(gyroMouseStickSmoothing.Element("SmoothingMethod"));
+            Assert.AreEqual("20", gyroMouseStickSmoothing.Element("SmoothingWeight")?.Value);
+
+            Assert.IsNull(profileDocument.Root?.Element("GyroSmoothing"));
+            Assert.IsNull(profileDocument.Root?.Element("GyroSmoothingWeight"));
+            Assert.IsNull(profileDocument.Root?.Element("GyroMouseStickSmoothing"));
+            Assert.IsNull(profileDocument.Root?.Element("GyroMouseStickSmoothingWeight"));
+
+            migration.Close();
+        }
+
+        [TestMethod]
+        public void Migrate_TransformsVersion0005_UseTPforControls()
+        {
+            string version4Profile =
+                @"<DS4Windows config_version=""4"">
+                    <UseTPforControls>True</UseTPforControls>
+                  </DS4Windows>";
+
+            ProfileMigration migration = new ProfileMigration(version4Profile);
+            migration.Migrate();
+
+            Assert.IsTrue(migration.UsedMigration);
+
+            XDocument profileDocument = GetMigratedDocument(migration);
+            Assert.AreEqual(Global.CONFIG_VERSION.ToString(), profileDocument.Root?.Attribute("config_version")?.Value);
+            Assert.AreEqual(TouchpadOutMode.Controls.ToString(),
+                profileDocument.Root?.Element("TouchpadOutputMode")?.Value);
+            Assert.IsNull(profileDocument.Root?.Element("UseTPforControls"));
+
+            migration.Close();
+        }
+
+        [TestMethod]
+        public void DetermineProfileVersion_DetectsVersion2ForConfigVersionAbsentWithLSAntiDeadZone()
+        {
+            string noVersionProfile =
+                @"<DS4Windows>
+                    <LSAntiDeadZone>20</LSAntiDeadZone>
+                    <LSDeadZone>0</LSDeadZone>
+                  </DS4Windows>";
+
+            ProfileMigration migration = new ProfileMigration(noVersionProfile);
+
+            Assert.IsTrue(migration.RequiresMigration());
+
+            migration.Migrate();
+
+            XDocument profileDocument = GetMigratedDocument(migration);
+            Assert.AreEqual(Global.CONFIG_VERSION.ToString(), profileDocument.Root?.Attribute("config_version")?.Value);
+
+            // If this were version 1, Version0002 would map LSDeadZone 0 -> default.
+            // Version 2 detection via LSAntiDeadZone keeps the original 0 value.
+            Assert.AreEqual("0", profileDocument.Root?.Element("LSDeadZone")?.Value);
+            Assert.AreEqual("20", profileDocument.Root?.Element("LSAntiDeadZone")?.Value);
+
+            migration.Close();
         }
     }
 }

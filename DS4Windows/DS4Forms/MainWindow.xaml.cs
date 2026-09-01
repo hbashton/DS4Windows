@@ -1,4 +1,4 @@
-﻿/*
+/*
 DS4Windows
 Copyright (C) 2023  Travis Nickles
 
@@ -2405,6 +2405,12 @@ Suspend support not enabled.", true);
                     App.rootHub.ChangeMotionEventStatus(status);
                 });
             }
+        }
+
+        private void UseDSXUdpServerCk_Click(object sender, RoutedEventArgs e)
+        {
+            bool status = useDSXUdpServerCk.IsChecked == true;
+            App.rootHub.ChangeDSXUDPStatus(status);
         }
 
         private void ProfFolderBtn_Click(object sender, RoutedEventArgs e)

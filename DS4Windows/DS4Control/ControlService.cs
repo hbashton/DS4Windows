@@ -1,4 +1,4 @@
-﻿/*
+/*
 DS4Windows
 Copyright (C) 2023  Travis Nickles
 
@@ -101,6 +101,8 @@ namespace DS4Windows
         public bool suspending;
 
         private UdpServer _udpServer;
+        private DSXUdpServer _dsxUdpServer;
+        private readonly bool[] dsxTriggerOverrideActive = new bool[MAX_DS4_CONTROLLER_COUNT];
         private OutputSlotManager outputslotMan;
 
         private HashSet<string> hidDeviceHidingAffectedDevs = new HashSet<string>();
@@ -1755,6 +1757,144 @@ namespace DS4Windows
             }
         }
 
+        public void ChangeDSXUDPStatus(bool state)
+        {
+            if (state && _dsxUdpServer == null)
+            {
+                _dsxUdpServer = new DSXUdpServer();
+                _dsxUdpServer.OnTriggerUpdate += HandleDSXTriggerUpdate;
+                _dsxUdpServer.OnRGBUpdate += HandleDSXRGBUpdate;
+                _dsxUdpServer.OnMicLEDUpdate += HandleDSXMicLEDUpdate;
+                _dsxUdpServer.OnPlayerLEDUpdate += HandleDSXPlayerLEDUpdate;
+                _dsxUdpServer.OnResetUserSettings += HandleDSXResetUserSettings;
+                _dsxUdpServer.GetStatus += HandleDSXGetStatus;
+
+                int port = Global.GetDSXUDPServerPortNum();
+                string addr = Global.GetDSXUDPServerListenAddress();
+                if (_dsxUdpServer.Start(port, addr))
+                {
+                    LogDebug($"DSX UDP mod compatibility server listening on {addr}:{port}");
+                }
+                else
+                {
+                    LogDebug($"Could not start DSX UDP server on {addr}:{port}");
+                }
+            }
+            else if (!state && _dsxUdpServer != null)
+            {
+                _dsxUdpServer.Stop();
+                _dsxUdpServer.Dispose();
+                _dsxUdpServer = null;
+                LogDebug("Closed DSX UDP mod compatibility server");
+            }
+        }
+
+        private void HandleDSXTriggerUpdate(int controllerIndex, InputDevices.TriggerId trigger, byte[] rawTriggerData)
+        {
+            int idx = (controllerIndex >= 0 && controllerIndex < MAX_DS4_CONTROLLER_COUNT) ? controllerIndex : 0;
+            DS4Device device = DS4Controllers[idx];
+            if (device is InputDevices.DualSenseDevice dualSense && rawTriggerData != null && rawTriggerData.Length >= 10)
+            {
+                dsxTriggerOverrideActive[idx] = true;
+                dualSense.PrepareRawTriggerEffect(trigger, rawTriggerData[0], rawTriggerData[1], rawTriggerData[2],
+                    rawTriggerData[3], rawTriggerData[4], rawTriggerData[5], rawTriggerData[6], rawTriggerData[9]);
+            }
+        }
+
+        private void HandleDSXRGBUpdate(int controllerIndex, byte r, byte g, byte b, byte a)
+        {
+            int idx = (controllerIndex >= 0 && controllerIndex < MAX_DS4_CONTROLLER_COUNT) ? controllerIndex : 0;
+            DS4Device device = DS4Controllers[idx];
+            if (device != null)
+            {
+                device.LightBarColor = new DS4Color(r, g, b);
+            }
+        }
+
+        private void HandleDSXMicLEDUpdate(int controllerIndex, byte mode)
+        {
+            int idx = (controllerIndex >= 0 && controllerIndex < MAX_DS4_CONTROLLER_COUNT) ? controllerIndex : 0;
+            DS4Device device = DS4Controllers[idx];
+            if (device is InputDevices.DualSenseDevice dualSense)
+            {
+                dualSense.SetCustomMicLed(mode == 0 || mode == 1);
+            }
+        }
+
+        private void HandleDSXPlayerLEDUpdate(int controllerIndex, bool[] leds)
+        {
+            int idx = (controllerIndex >= 0 && controllerIndex < MAX_DS4_CONTROLLER_COUNT) ? controllerIndex : 0;
+            DS4Device device = DS4Controllers[idx];
+            if (device is InputDevices.DualSenseDevice dualSense && leds != null)
+            {
+                byte mask = 0;
+                for (int i = 0; i < Math.Min(5, leds.Length); i++)
+                {
+                    if (leds[i]) mask |= (byte)(1 << i);
+                }
+                dualSense.SetCustomPlayerLedMask(mask);
+            }
+        }
+
+        private void HandleDSXResetUserSettings(int controllerIndex)
+        {
+            int idx = (controllerIndex >= 0 && controllerIndex < MAX_DS4_CONTROLLER_COUNT) ? controllerIndex : 0;
+            dsxTriggerOverrideActive[idx] = false;
+            DS4Device device = DS4Controllers[idx];
+            if (device is InputDevices.DualSenseDevice dualSense)
+            {
+                TriggerLabProfileSettings triggerLab = Global.store.triggerLabSettings[idx].Normalize();
+                if (triggerLab.HasActiveOverride)
+                {
+                    TriggerLabEffectEncoder.ApplyToDevice(dualSense, InputDevices.TriggerId.LeftTrigger, triggerLab.Left, triggerLab.LeftActive);
+                    TriggerLabEffectEncoder.ApplyToDevice(dualSense, InputDevices.TriggerId.RightTrigger, triggerLab.Right, triggerLab.RightActive);
+                }
+                else
+                {
+                    dualSense.PrepareTriggerEffect(InputDevices.TriggerId.LeftTrigger, Global.L2OutputSettings[idx].TriggerEffect, Global.L2OutputSettings[idx].TrigEffectSettings);
+                    dualSense.PrepareTriggerEffect(InputDevices.TriggerId.RightTrigger, Global.R2OutputSettings[idx].TriggerEffect, Global.R2OutputSettings[idx].TrigEffectSettings);
+                }
+                dualSense.LightBarColor = Global.getMainColor(idx);
+            }
+        }
+
+        private DSXStatusResponse HandleDSXGetStatus()
+        {
+            var response = new DSXStatusResponse
+            {
+                Status = "DS4Windows DSX UDP Server Running",
+                TimeReceived = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                isControllerConnected = activeControllers > 0,
+                BatteryLevel = 0,
+                Devices = new List<DSXDeviceInfo>()
+            };
+
+            for (int i = 0; i < MAX_DS4_CONTROLLER_COUNT; i++)
+            {
+                DS4Device dev = DS4Controllers[i];
+                if (dev != null)
+                {
+                    bool isDualSense = dev is InputDevices.DualSenseDevice;
+                    if (response.BatteryLevel == 0) response.BatteryLevel = dev.Battery;
+                    response.Devices.Add(new DSXDeviceInfo
+                    {
+                        Index = i,
+                        MacAddress = dev.MacAddress,
+                        DeviceType = isDualSense ? 0 : 1,
+                        ConnectionType = dev.ConnectionType == ConnectionType.BT ? 1 : 0,
+                        BatteryLevel = dev.Battery,
+                        IsSupportAT = isDualSense,
+                        IsSupportLightBar = true,
+                        IsSupportPlayerLED = isDualSense,
+                        IsSupportLegacyPlayerLED = true,
+                        IsSupportMicLED = isDualSense
+                    });
+                }
+            }
+
+            return response;
+        }
+
         public void ChangeOSCListenerStatus(bool state)
         {
             if (state)
@@ -2281,6 +2421,11 @@ namespace DS4Windows
                         AppLogger.LogToTray(errMsg, true, true);
                     }
                 }
+
+                if (Global.IsUsingDSXUDPServer())
+                {
+                    ChangeDSXUDPStatus(true);
+                }
             }
             inServiceTask = false;
             runHotPlug = true;
@@ -2496,6 +2641,11 @@ namespace DS4Windows
                     StartupDiag("ControlService.Stop UDP stop begin");
                     ChangeUDPStatus(false);
                     StartupDiag("ControlService.Stop UDP stop requested");
+                }
+
+                if (_dsxUdpServer != null)
+                {
+                    ChangeDSXUDPStatus(false);
                 }
 
                 if (showlog)
@@ -3022,22 +3172,25 @@ namespace DS4Windows
                 Global.R2OutputSettings[ind].TrigEffectSettings.maxValue = (byte)(Math.Max(Global.R2ModInfo[ind].maxOutput, Global.R2ModInfo[ind].maxZone) / 100.0 * 255);
             }
 
-            TriggerLabProfileSettings triggerLab = Global.store.triggerLabSettings[ind].Normalize();
-            if (device is InputDevices.DualSenseDevice triggerLabDevice && triggerLab.HasActiveOverride)
+            if (!dsxTriggerOverrideActive[ind])
             {
-                TriggerLabEffectEncoder.ApplyToDevice(triggerLabDevice,
-                    InputDevices.TriggerId.LeftTrigger, triggerLab.Left,
-                    triggerLab.LeftActive);
-                TriggerLabEffectEncoder.ApplyToDevice(triggerLabDevice,
-                    InputDevices.TriggerId.RightTrigger, triggerLab.Right,
-                    triggerLab.RightActive);
-            }
-            else
-            {
-                device.PrepareTriggerEffect(InputDevices.TriggerId.LeftTrigger, Global.L2OutputSettings[ind].TriggerEffect,
-                    Global.L2OutputSettings[ind].TrigEffectSettings);
-                device.PrepareTriggerEffect(InputDevices.TriggerId.RightTrigger, Global.R2OutputSettings[ind].TriggerEffect,
-                    Global.R2OutputSettings[ind].TrigEffectSettings);
+                TriggerLabProfileSettings triggerLab = Global.store.triggerLabSettings[ind].Normalize();
+                if (device is InputDevices.DualSenseDevice triggerLabDevice && triggerLab.HasActiveOverride)
+                {
+                    TriggerLabEffectEncoder.ApplyToDevice(triggerLabDevice,
+                        InputDevices.TriggerId.LeftTrigger, triggerLab.Left,
+                        triggerLab.LeftActive);
+                    TriggerLabEffectEncoder.ApplyToDevice(triggerLabDevice,
+                        InputDevices.TriggerId.RightTrigger, triggerLab.Right,
+                        triggerLab.RightActive);
+                }
+                else
+                {
+                    device.PrepareTriggerEffect(InputDevices.TriggerId.LeftTrigger, Global.L2OutputSettings[ind].TriggerEffect,
+                        Global.L2OutputSettings[ind].TrigEffectSettings);
+                    device.PrepareTriggerEffect(InputDevices.TriggerId.RightTrigger, Global.R2OutputSettings[ind].TriggerEffect,
+                        Global.R2OutputSettings[ind].TrigEffectSettings);
+                }
             }
 
             device.RumbleAutostopTime = getRumbleAutostopTime(ind);

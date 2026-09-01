@@ -1,4 +1,4 @@
-﻿<Window x:Name="mainDS4Window" x:Class="DS4WinWPF.DS4Forms.MainWindow"
+<Window x:Name="mainDS4Window" x:Class="DS4WinWPF.DS4Forms.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -659,6 +659,20 @@
                                 </StackPanel>
                             </StackPanel>
 
+                        </GroupBox>
+                        <GroupBox Header="DSX UDP Mod Compatibility Server" Padding="0,10,0,0" Margin="{StaticResource spaceMargin}">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" MinHeight="20">
+                                    <CheckBox x:Name="useDSXUdpServerCk" Content="{lex:Loc MainWin.EnableServer}" IsChecked="{Binding UseDSXUDPServer}" Click="UseDSXUdpServerCk_Click" VerticalAlignment="Center" />
+                                    <TextBox x:Name="dsxUdpServerTxt" IsEnabled="{Binding UseDSXUDPServer,Mode=OneWay}" Text="{Binding DSXUdpIpAddress, UpdateSourceTrigger=LostFocus,FallbackValue='127.0.0.1'}"
+                                  Margin="8,0,0,0" />
+                                    <Label Content="{lex:Loc Port}" Padding="0" Margin="20,0,0,0" VerticalAlignment="Center" />
+                                    <xctk:IntegerUpDown d:IsHidden="True" x:Name="dsxUpdPortNum" IsEnabled="{Binding UseDSXUDPServer}" MinWidth="20" Margin="8,0,0,0"
+                                            Value="{Binding DSXUdpPort, UpdateSourceTrigger=LostFocus,FallbackValue='6969'}" ButtonSpinnerLocation="Right" Increment="1" Maximum="65535" Minimum="0" />
+                                </StackPanel>
+                                <TextBlock Text="Enables PC game mods (Cyberpunk 2077, GTA V, etc.) to trigger adaptive haptics and LEDs over UDP port 6969." 
+                                           Foreground="#888888" Margin="0,6,0,6" TextWrapping="Wrap" />
+                            </StackPanel>
                         </GroupBox>
 
                         <!--<StackPanel Orientation="Horizontal">

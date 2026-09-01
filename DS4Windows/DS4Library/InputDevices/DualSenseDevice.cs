@@ -7912,6 +7912,22 @@ namespace DS4Windows.InputDevices
             }
         }
 
+        public void SetCustomPlayerLedMask(byte mask)
+        {
+            if (physicalOutputStateMailbox.SetActivePlayerLedMask(mask))
+            {
+                QueuePhysicalOutputUpdate();
+            }
+        }
+
+        public void SetCustomMicLed(bool on)
+        {
+            if (physicalOutputStateMailbox.SetMuteLedOverride(true, on))
+            {
+                QueuePhysicalOutputUpdate();
+            }
+        }
+
         private byte DeviceBatteryLinearMask(int deviceBattery)
         {
             byte batteryMask;

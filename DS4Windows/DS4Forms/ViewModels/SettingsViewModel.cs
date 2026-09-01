@@ -1,4 +1,4 @@
-﻿/*
+/*
 DS4Windows
 Copyright (C) 2023  Travis Nickles
 
@@ -319,6 +319,30 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public string UdpIpAddress { get => DS4Windows.Global.getUDPServerListenAddress();
             set => DS4Windows.Global.setUDPServerListenAddress(value); }
         public int UdpPort { get => DS4Windows.Global.getUDPServerPortNum(); set => DS4Windows.Global.setUDPServerPort(value); }
+
+        public bool UseDSXUDPServer
+        {
+            get => DS4Windows.Global.IsUsingDSXUDPServer();
+            set
+            {
+                if (DS4Windows.Global.IsUsingDSXUDPServer() == value) return;
+                DS4Windows.Global.SetUsingDSXUDPServer(value);
+                UseDSXUDPServerChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        public event EventHandler UseDSXUDPServerChanged;
+
+        public string DSXUdpIpAddress
+        {
+            get => DS4Windows.Global.GetDSXUDPServerListenAddress();
+            set => DS4Windows.Global.SetDSXUDPServerListenAddress(value);
+        }
+
+        public int DSXUdpPort
+        {
+            get => DS4Windows.Global.GetDSXUDPServerPortNum();
+            set => DS4Windows.Global.SetDSXUDPServerPort(value);
+        }
 
         public bool UseUdpSmoothing
         {

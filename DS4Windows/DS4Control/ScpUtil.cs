@@ -1,4 +1,4 @@
-﻿/*
+/*
 DS4Windows
 Copyright (C) 2023  Travis Nickles
 
@@ -1912,6 +1912,33 @@ namespace DS4Windows
         public static bool IsUsingUDPServerSmoothing()
         {
             return m_Config.useUdpSmoothing;
+        }
+
+        public static bool IsUsingDSXUDPServer()
+        {
+            return m_Config.useDSXUDPServ;
+        }
+        public static void SetUsingDSXUDPServer(bool state)
+        {
+            m_Config.useDSXUDPServ = state;
+        }
+
+        public static int GetDSXUDPServerPortNum()
+        {
+            return m_Config.dsxUdpServPort;
+        }
+        public static void SetDSXUDPServerPort(int value)
+        {
+            m_Config.dsxUdpServPort = value;
+        }
+
+        public static string GetDSXUDPServerListenAddress()
+        {
+            return m_Config.dsxUdpServListenAddress;
+        }
+        public static void SetDSXUDPServerListenAddress(string value)
+        {
+            m_Config.dsxUdpServListenAddress = value.Trim();
         }
 
         public static double UDPServerSmoothingMincutoff
@@ -4278,6 +4305,12 @@ namespace DS4Windows
         public const string DEFAULT_UDP_SERV_LISTEN_ADDR = "127.0.0.1";
         public string udpServListenAddress = DEFAULT_UDP_SERV_LISTEN_ADDR;
         public bool useUdpSmoothing;
+
+        public bool useDSXUDPServ = true;
+        public const int DEFAULT_DSX_UDP_SERV_PORT = 6969;
+        public int dsxUdpServPort = DEFAULT_DSX_UDP_SERV_PORT;
+        public const string DEFAULT_DSX_UDP_SERV_LISTEN_ADDR = "127.0.0.1";
+        public string dsxUdpServListenAddress = DEFAULT_DSX_UDP_SERV_LISTEN_ADDR;
 
         public double udpSmoothingMincutoff = DEFAULT_UDP_SMOOTH_MINCUTOFF;
         public double udpSmoothingBeta = DEFAULT_UDP_SMOOTH_BETA;

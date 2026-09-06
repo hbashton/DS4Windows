@@ -75,8 +75,25 @@ LED/calibration, cancellation, retirement while a write is in flight, bounded
 trace windows, reconnect baselines, allocation-free sampling, gyro peak
 overflow safety, and diagnostics coalescing without replay.
 
-Portable b84 is staged separately on the Desktop. VIIPER is unchanged.
-Profiles and bonds are copied only after the existing apps exit. Program
-Files, installed drivers, bonds in the original runtime, and startup tasks
-are not modified. Physical acknowledgement and both types of cursor motion
-remain pending until this build is launched and the user tests the Joy-Cons.
+Portable b84 was launched separately on the Desktop at 17:36:39 local, after
+the user closed both previous apps. VIIPER is unchanged. All copied profile
+file hashes matched the saved b83 originals. Program Files, installed drivers,
+bonds in the original runtime, and startup tasks were not modified.
+
+## Physical observations (17:37–17:38 local)
+
+Both real Bluetooth Joy-Con 2 controllers acknowledged the sensor sequence:
+left at 17:37:29 and right at 17:37:36. The left initially activated standalone,
+then both formed the joined controller. The trace recorded optical coordinate
+changes from both sides, including a joined two-second window with 49 left
+and 119 right changes and surface distances of 144/143 with roughness
+3120/3171 (inside the profile's Strict thresholds).
+
+Raw gyro values from both sides and nonzero projected yaw/pitch reached the
+report mapper. Later samples recorded ZL and L held; e.g. 17:38:01 showed
+Mouse mode, mapper run, ZL+L held, and projected yaw -104.06/pitch -7.81.
+This establishes real sensor responses and delivery into the canonical
+profile pipeline. It does not by itself prove OS cursor/game consumption,
+button-release stopping behavior, or complete DJG parity. User confirmation
+of optical and gyro cursor movement is still pending. The trace is bounded
+and does not continue producing per-report logs.

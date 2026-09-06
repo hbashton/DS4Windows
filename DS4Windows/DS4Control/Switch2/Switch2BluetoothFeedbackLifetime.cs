@@ -927,6 +927,9 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
     private readonly ulong secondaryTransportGeneration;
     private readonly bool joinedPair;
     private readonly ISwitch2BluetoothDisconnectedOutputProof disconnectedOutputProof;
+    private ISwitch2BluetoothDisconnectedOutputProof joinedLeftReleaseProof;
+    private ISwitch2BluetoothDisconnectedOutputProof joinedRightReleaseProof;
+    private Switch2JoyConJoinedHdRumblePhysicalWriter joinedPhysicalWriter;
     private Switch2VirtualFeedbackSession activeSession;
     private ulong nextVirtualFeedbackOwnershipEpoch;
     private bool activated;
@@ -1061,6 +1064,9 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
                 leftDeviceGeneration, leftTransportGeneration,
                 rightDeviceGeneration, rightTransportGeneration,
                 rightLease as ISwitch2BluetoothPlayerLedTransportLease);
+            owner.joinedPhysicalWriter = joinedWriter;
+            owner.joinedLeftReleaseProof = leftLease as ISwitch2BluetoothDisconnectedOutputProof;
+            owner.joinedRightReleaseProof = rightLease as ISwitch2BluetoothDisconnectedOutputProof;
             return true;
         }
         catch
@@ -1329,6 +1335,39 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
         session?.RetireDisconnectedTarget();
         if (!pump.TryRetireDisconnectedTarget() || !sink.TryRetireDisconnectedTarget())
             return false;
+        lock (gate)
+        {
+            activeSession = null;
+            retired = true;
+            lastRetirementFailure = Switch2BluetoothFeedbackRetirementFailure.None;
+        }
+        return true;
+    }
+
+    internal bool TryStopJoinedAfterPhysicalLoss(int maxAttempts)
+    {
+        if (!joinedPair || joinedPhysicalWriter == null || maxAttempts <= 0) return false;
+        bool leftReleased = joinedLeftReleaseProof?.IsDisconnectedAndReleased(
+            Switch2ControllerModel.JoyCon2Left, playerLedDeviceGeneration, playerLedTransportGeneration) == true;
+        bool rightReleased = joinedRightReleaseProof?.IsDisconnectedAndReleased(
+            Switch2ControllerModel.JoyCon2Right, secondaryDeviceGeneration, secondaryTransportGeneration) == true;
+        if (!leftReleased && !rightReleased) return false;
+        Switch2VirtualFeedbackSession session;
+        lock (gate)
+        {
+            if (retired) return true;
+            if (stopping || !activated) return false;
+            stopping = true;
+            session = activeSession;
+        }
+        if (!pump.SealPublications()) return false;
+        // Seal delayed producers without claiming a feedback ACK from the
+        // absent target. The joined writer admits only survivor Stops now.
+        session?.RetireDisconnectedTarget();
+        bool stopped = false;
+        for (int attempt = 0; attempt < maxAttempts && !stopped; attempt++)
+            stopped = joinedPhysicalWriter.TryStopSurvivingTargets(leftReleased, rightReleased);
+        if (!stopped || !pump.TryRetireDisconnectedTarget() || !sink.TryRetireDisconnectedTarget()) return false;
         lock (gate)
         {
             activeSession = null;

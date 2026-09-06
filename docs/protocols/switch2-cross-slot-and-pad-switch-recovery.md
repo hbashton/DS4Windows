@@ -72,7 +72,8 @@ credentials and user profiles are not source or release artifacts.
    other controllers; no claim that a USB interval equals end-to-end latency.
 3. Separate first-feedback Xbox One rejection/EOF seen before Joy-Con pairing.
 4. Automatic standalone Joy-Con activation and safe standalone/joined ownership
-   transitions; this patch does not change pairing behavior.
+   transitions were open in b75-b79; implemented in b80. See
+   [the implementation and validation boundaries](switch2-joycon-automatic-activation.md).
 5. Power-off retirement and Game Bar physical-input loss. The Game Bar capture
    found a neutral companion with no canonical reports and a physical HID read
    waiting; it did not establish sender ownership or authorize driver changes.

@@ -32,6 +32,27 @@ internal sealed class Switch2JoyConJoinedHdRumblePhysicalWriter :
     private readonly ulong rightDeviceGeneration;
     private readonly ulong rightTransportGeneration;
     private int writeActive;
+    private int retirementOnly;
+
+    // Cold physical-loss cleanup, not a successful two-actuator delivery.
+    // Caller has exact native release proof for each skipped target. A live
+    // survivor still receives a real framed Stop through its existing writer.
+    internal bool TryStopSurvivingTargets(bool leftReleased, bool rightReleased)
+    {
+        if (!leftReleased && !rightReleased) return false;
+        Volatile.Write(ref retirementOnly, 1);
+        if (Interlocked.CompareExchange(ref writeActive, 1, 0) != 0) return false;
+        try
+        {
+            bool leftStopped = leftReleased || left.TryWrite(Switch2HdRumblePhysicalSubmission.
+                CreateStop(leftDeviceGeneration, leftTransportGeneration, ulong.MaxValue)).Succeeded;
+            bool rightStopped = rightReleased || right.TryWrite(Switch2HdRumblePhysicalSubmission.
+                CreateStop(rightDeviceGeneration, rightTransportGeneration, ulong.MaxValue)).Succeeded;
+            return leftStopped && rightStopped;
+        }
+        catch { return false; }
+        finally { Volatile.Write(ref writeActive, 0); }
+    }
 
     internal Switch2JoyConJoinedHdRumblePhysicalWriter(
         ISwitch2HdRumblePhysicalWriter left,
@@ -89,6 +110,8 @@ internal sealed class Switch2JoyConJoinedHdRumblePhysicalWriter :
 
         try
         {
+            if (Volatile.Read(ref retirementOnly) != 0)
+                return Switch2HdRumblePhysicalWriteResult.Reject(Switch2HdRumblePhysicalWriteFailure.StaleLifetime);
             if (!Authenticates(logicalDeviceGeneration,
                     logicalTransportGeneration) ||
                 !submission.TryRebind(leftDeviceGeneration,

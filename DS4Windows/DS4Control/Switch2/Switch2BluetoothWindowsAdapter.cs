@@ -549,11 +549,29 @@ internal sealed class Switch2BluetoothWindowsAdapter
         in Switch2BluetoothCandidateObservation observation) =>
         registry.TryRejectRememberedConnectionCandidate(observation);
 
+    internal ValueTask<Switch2BluetoothWindowsOpenResult> ReopenReleasedJoyConAsync(
+        Switch2BluetoothWindowsInputLease predecessor, CancellationToken cancellationToken)
+    {
+        if (predecessor?.ReopenCapability is not ReopenCapability capability ||
+            !ReferenceEquals(capability.Adapter, this) || !predecessor.HasReleasedResources ||
+            predecessor.Admission.Model is not (Switch2ControllerModel.JoyCon2Left or Switch2ControllerModel.JoyCon2Right))
+            return ValueTask.FromResult(Switch2BluetoothWindowsOpenResult.Failed(
+                Switch2BluetoothWindowsOpenFailure.InvalidObservation));
+        return OpenRememberedAsync(capability.Observation, true, cancellationToken, predecessor);
+    }
+
+    // Address stays private to this adapter, not in coordinator/UI identity.
+    // The registry and the exact completed release make this one-shot.
+    private sealed record ReopenCapability(Switch2BluetoothWindowsAdapter Adapter,
+        ScanLifetime Lifetime, Switch2BluetoothCandidateObservation Observation,
+        ulong Address, Switch2BluetoothWindowsAddressType AddressType);
+
     private async ValueTask<Switch2BluetoothWindowsOpenResult>
         OpenRememberedAsync(
             Switch2BluetoothCandidateObservation observation,
             bool requireHdRumbleOutput,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            Switch2BluetoothWindowsInputLease predecessor = null)
     {
         Switch2BluetoothConnectionAdmission admission;
         ScanLifetime lifetime;
@@ -568,22 +586,38 @@ internal sealed class Switch2BluetoothWindowsAdapter
                 return Switch2BluetoothWindowsOpenResult.Failed(
                     Switch2BluetoothWindowsOpenFailure.StaleScan);
             }
-            if (observation.Disposition !=
-                    Switch2BluetoothObservationDisposition.RememberedThisHost ||
-                !registry.TryCreateRememberedConnectionAdmission(observation,
-                    out admission))
+            if (predecessor != null)
             {
-                return Switch2BluetoothWindowsOpenResult.Failed(
-                    Switch2BluetoothWindowsOpenFailure.InvalidObservation);
+                if (predecessor.ReopenCapability is not ReopenCapability capability ||
+                    !ReferenceEquals(capability.Adapter, this) ||
+                    !ReferenceEquals(capability.Lifetime, lifetime) ||
+                    !predecessor.HasReleasedResources ||
+                    !registry.TryCreateReplacementAdmission(predecessor.Admission, out admission))
+                    return Switch2BluetoothWindowsOpenResult.Failed(
+                        Switch2BluetoothWindowsOpenFailure.InvalidObservation);
+                bluetoothAddress = capability.Address;
+                addressType = capability.AddressType;
             }
-            if (!lifetime.TryConsumeAddress(observation.PeerToken,
-                    out bluetoothAddress, out addressType))
+            else
             {
-                return Switch2BluetoothWindowsOpenResult.Failed(
-                    Switch2BluetoothWindowsOpenFailure.
-                        AddressCapabilityUnavailable);
+                if (observation.Disposition !=
+                        Switch2BluetoothObservationDisposition.RememberedThisHost ||
+                    !registry.TryCreateRememberedConnectionAdmission(observation,
+                        out admission))
+                {
+                    return Switch2BluetoothWindowsOpenResult.Failed(
+                        Switch2BluetoothWindowsOpenFailure.InvalidObservation);
+                }
+                if (!lifetime.TryConsumeAddress(observation.PeerToken,
+                        out bluetoothAddress, out addressType))
+                {
+                    return Switch2BluetoothWindowsOpenResult.Failed(
+                        Switch2BluetoothWindowsOpenFailure.AddressCapabilityUnavailable);
+                }
             }
         }
+
+        ulong reopenAddress = bluetoothAddress;
 
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken, lifetime.Cancellation.Token);
@@ -632,6 +666,9 @@ internal sealed class Switch2BluetoothWindowsAdapter
                         PersistentPeerIdentityUnavailable,
                     ref device, ref service, ref characteristic);
             }
+            if (predecessor != null && persistentPeerId != predecessor.PersistentPeerId)
+                return FailedAndDispose(Switch2BluetoothWindowsOpenFailure.PersistentPeerIdentityUnavailable,
+                    ref device, ref service, ref characteristic);
             boundedToken.ThrowIfCancellationRequested();
 
             exceptionalFailure = Switch2BluetoothWindowsOpenFailure.
@@ -1084,7 +1121,8 @@ internal sealed class Switch2BluetoothWindowsAdapter
                 device, service, characteristic, outputCharacteristic,
                 commandCharacteristic, responseCharacteristic,
                 persistentPeerId, throughputOptimizedRequested,
-                teardownTimeout);
+                teardownTimeout, identityRequired ?
+                    new ReopenCapability(this, lifetime, observation, reopenAddress, addressType) : null);
             device = null;
             service = null;
             characteristic = null;
@@ -1921,9 +1959,10 @@ internal sealed class Switch2BluetoothWindowsInputLease :
         ISwitch2BluetoothWindowsGattCharacteristic responseCharacteristic,
         Switch2PersistentPeerId persistentPeerId,
         bool throughputOptimizedRequested,
-        TimeSpan teardownTimeout)
+        TimeSpan teardownTimeout, object reopenCapability = null)
     {
         Admission = admission;
+        ReopenCapability = reopenCapability;
         this.candidateRegistry = candidateRegistry ??
             throw new ArgumentNullException(nameof(candidateRegistry));
         this.device = device;
@@ -1962,6 +2001,13 @@ internal sealed class Switch2BluetoothWindowsInputLease :
     }
 
     public Switch2BluetoothConnectionAdmission Admission { get; }
+
+    internal object ReopenCapability { get; }
+    internal bool HasDisconnected => Volatile.Read(ref disconnectObserved);
+    internal bool HasReleasedResources
+    {
+        get { lock (sync) { return resourceRelease?.IsCompletedSuccessfully == true && resourceRelease.Result; } }
+    }
 
     internal Switch2PersistentPeerId PersistentPeerId { get; }
 

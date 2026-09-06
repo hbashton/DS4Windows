@@ -6,7 +6,7 @@ using DS4Windows.Switch2;
 namespace DS4WindowsTests;
 
 [TestClass]
-public sealed class Switch2BluetoothWindowsAdapterTests
+public sealed partial class Switch2BluetoothWindowsAdapterTests
 {
     private static readonly byte[] LocalHost =
         { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66 };

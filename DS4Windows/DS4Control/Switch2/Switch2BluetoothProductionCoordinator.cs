@@ -113,7 +113,7 @@ internal readonly struct Switch2JoyConStandaloneActivationResult
 /// registration/ControlService pipeline. The notification hot path remains in
 /// the fixed-capacity Bluetooth input owner and adds no task or timer cadence.
 /// </summary>
-internal sealed class Switch2BluetoothProductionCoordinator
+internal sealed partial class Switch2BluetoothProductionCoordinator
 {
     private readonly struct ScanStartResult
     {
@@ -276,6 +276,7 @@ internal sealed class Switch2BluetoothProductionCoordinator
             lifetimeCancellation = cancellation;
             scanGeneration = exactScanGeneration;
             running = true;
+            registrationService.RuntimeRemoved += OnJoyConRuntimeRemoved;
             lastStartFailure = Switch2BluetoothWindowsScanStartFailure.None;
             associationCandidates.Clear();
             failedRememberedPeers.Clear();
@@ -283,6 +284,8 @@ internal sealed class Switch2BluetoothProductionCoordinator
             pendingJoyCons.Clear();
             joyConPairCandidates.Clear();
             activePeerRegistrations.Clear();
+            joinedJoyCons.Clear();
+            lastRemovedJoyConSlots.Clear();
             pairRecords = loadedPairs;
         }
 
@@ -618,13 +621,15 @@ internal sealed class Switch2BluetoothProductionCoordinator
                     !pendingJoyCons.TryGetValue(peerId, out pending) ||
                     pending.Model is not (Switch2ControllerModel.JoyCon2Left or
                         Switch2ControllerModel.JoyCon2Right) ||
-                    !RemovePendingNoLock(pending))
+                    !IsExactPendingNoLock(pending))
                 {
                     return Switch2JoyConStandaloneActivationResult.Failed(
                         Switch2JoyConStandaloneActivationFailure.
                             InvalidCandidate);
                 }
             }
+            if (pending.SlotToken.IsValid)
+                return Switch2JoyConStandaloneActivationResult.Success();
             return await ActivateStandaloneAsync(pending, linked.Token).
                 ConfigureAwait(false);
         }
@@ -805,8 +810,9 @@ internal sealed class Switch2BluetoothProductionCoordinator
             var releases = new Task<bool>[abandoned.Length];
             for (int index = 0; index < abandoned.Length; index++)
             {
-                releases[index] = abandoned[index].Lease.
-                    BeginAndWaitForResourceReleaseAsync();
+                releases[index] = abandoned[index].Lease.HasReleasedResources ||
+                    abandoned[index].RuntimeOwnerHoldsLease ?
+                    Task.FromResult(true) : abandoned[index].Lease.BeginAndWaitForResourceReleaseAsync();
             }
             foreach (bool released in await Task.WhenAll(releases).
                          ConfigureAwait(false))
@@ -821,6 +827,8 @@ internal sealed class Switch2BluetoothProductionCoordinator
                     connectionTasks.RemoveAll(static task => task.IsCompleted);
                     pendingJoyCons.Clear();
                     joyConPairCandidates.Clear();
+                    joinedJoyCons.Clear();
+                    registrationService.RuntimeRemoved -= OnJoyConRuntimeRemoved;
                     pairRecords = Array.Empty<Switch2JoyConPairRecord>();
                     lifetimeCancellation = null;
                 }
@@ -1011,11 +1019,14 @@ internal sealed class Switch2BluetoothProductionCoordinator
                             Switch2BluetoothWindowsAssociationFailure.RuntimePreparationRejected);
                     }
                     lease = null;
-                    diagnostic?.Invoke(IsAutomaticPairingEnabled() ?
-                        $"Switch 2 {observation.Model} is waiting for the oldest compatible Joy-Con half." :
-                        $"Switch 2 {observation.Model} is ready for an explicit Joy-Con pair selection.");
-                    connected = true;
-                    return Switch2BluetoothWindowsAssociationResult.Reconnected();
+                    var standalone = await ActivateStandaloneAsync(pendingJoyCon,
+                        cancellationToken).ConfigureAwait(false);
+                    connected = standalone.Succeeded;
+                    if (!connected)
+                        lock (sync) { RemovePendingNoLock(pendingJoyCon); }
+                    return connected ? Switch2BluetoothWindowsAssociationResult.Reconnected() :
+                        Switch2BluetoothWindowsAssociationResult.Failed(
+                            Switch2BluetoothWindowsAssociationFailure.SlotActivationRejected);
                 }
 
                 lease = null;
@@ -1321,7 +1332,8 @@ internal sealed class Switch2BluetoothProductionCoordinator
             }
 
             pending.CandidateId = NextJoyConCandidateIdNoLock();
-            pending.ArrivalOrdinal = NextJoyConArrivalOrdinalNoLock();
+            if (pending.ArrivalOrdinal == 0)
+                pending.ArrivalOrdinal = NextJoyConArrivalOrdinalNoLock();
             pending.IsBuffered = true;
             pendingJoyCons.Add(pending.PeerId, pending);
             joyConPairCandidates.Add(pending.CandidateId, pending.PeerId);
@@ -1422,6 +1434,34 @@ internal sealed class Switch2BluetoothProductionCoordinator
             Switch2JoyConPairRecord record,
             CancellationToken cancellationToken)
     {
+        try { return await ActivateJoinedCoreAsync(left, right, record, cancellationToken).ConfigureAwait(false); }
+        catch (OperationCanceledException)
+        {
+            await DisposePendingPairAsync(left, right).ConfigureAwait(false);
+            return Switch2JoyConPairActivationResult.Failed(Switch2JoyConPairActivationFailure.Cancelled);
+        }
+        catch (Exception exception)
+        {
+            await DisposePendingPairAsync(left, right).ConfigureAwait(false);
+            ReportDiagnostic($"Switch 2 Joy-Con transition failed: {exception.GetType().Name}.");
+            return Switch2JoyConPairActivationResult.Failed(Switch2JoyConPairActivationFailure.RuntimeRejected);
+        }
+    }
+
+    private async ValueTask<Switch2JoyConPairActivationResult>
+        ActivateJoinedCoreAsync(PendingJoyCon left, PendingJoyCon right,
+            Switch2JoyConPairRecord record, CancellationToken cancellationToken)
+    {
+        // Claiming candidates removes them from the UI, not from the host.
+        // Retire exact standalone tokens before issuing fresh pair admissions.
+        if (left == null || right == null ||
+            !await PrepareJoyConForJoinAsync(left, cancellationToken).ConfigureAwait(false) ||
+            !await PrepareJoyConForJoinAsync(right, cancellationToken).ConfigureAwait(false))
+        {
+            await DisposePendingPairAsync(left, right).ConfigureAwait(false);
+            return Switch2JoyConPairActivationResult.Failed(
+                Switch2JoyConPairActivationFailure.RuntimeRejected);
+        }
         if (left == null || right == null || !record.IsValid ||
             !Switch2JoyConPairConnectionAdmission.TryCreate(record,
                 left.PeerId, left.Lease.Admission, right.PeerId,
@@ -1466,6 +1506,7 @@ internal sealed class Switch2BluetoothProductionCoordinator
                 out InputControllerRegistration registration,
                 out Switch2JoyConJoinedRuntimeCreateFailure createFailure))
         {
+            left.RuntimeOwnerHoldsLease = right.RuntimeOwnerHoldsLease = createFailure.RequiresQuarantine;
             if (!createFailure.RequiresQuarantine)
             {
                 await DisposePendingPairAsync(left, right).
@@ -1474,6 +1515,7 @@ internal sealed class Switch2BluetoothProductionCoordinator
             return Switch2JoyConPairActivationResult.Failed(
                 Switch2JoyConPairActivationFailure.RuntimeRejected);
         }
+        left.RuntimeOwnerHoldsLease = right.RuntimeOwnerHoldsLease = true;
         if (magnetometerCalibrationStore != null &&
             !owner.RuntimeDevice.TryBindMagnetometerCalibrationPersistence(
                 magnetometerCalibrationStore, left.PeerId, right.PeerId))
@@ -1530,6 +1572,8 @@ internal sealed class Switch2BluetoothProductionCoordinator
 
         TrackActivePeer(left.PeerToken, token);
         TrackActivePeer(right.PeerToken, token);
+        lock (sync) { joinedJoyCons[token] = (left, right); }
+        ReconcileEarlyJoyConRemoval(token);
         attached?.Invoke(token);
         diagnostic?.Invoke(
             $"Switch 2 Joy-Con pair connected in controller slot {token.Slot + 1}.");
@@ -1559,6 +1603,7 @@ internal sealed class Switch2BluetoothProductionCoordinator
                 out InputControllerRegistration registration,
                 out Switch2BluetoothRuntimeCreateFailure createFailure))
         {
+            pending.RuntimeOwnerHoldsLease = owner != null;
             if (owner == null)
             {
                 await pending.Lease.DisposeAsync().ConfigureAwait(false);
@@ -1568,6 +1613,7 @@ internal sealed class Switch2BluetoothProductionCoordinator
             return Switch2JoyConStandaloneActivationResult.Failed(
                 Switch2JoyConStandaloneActivationFailure.RuntimeRejected);
         }
+        pending.RuntimeOwnerHoldsLease = true;
         if (magnetometerCalibrationStore != null)
         {
             bool left = pending.Model == Switch2ControllerModel.JoyCon2Left;
@@ -1644,6 +1690,8 @@ internal sealed class Switch2BluetoothProductionCoordinator
         }
 
         TrackActivePeer(pending.PeerToken, token);
+        lock (sync) { pending.SlotToken = token; }
+        ReconcileEarlyJoyConRemoval(token);
         attached?.Invoke(token);
         diagnostic?.Invoke(
             $"Switch 2 {pending.Model} connected separately in controller slot {token.Slot + 1}.");
@@ -1653,11 +1701,11 @@ internal sealed class Switch2BluetoothProductionCoordinator
     private static async ValueTask DisposePendingPairAsync(PendingJoyCon left,
         PendingJoyCon right)
     {
-        if (left != null)
+        if (left != null && !left.RuntimeOwnerHoldsLease)
         {
             await left.Lease.DisposeAsync().ConfigureAwait(false);
         }
-        if (right != null && !ReferenceEquals(left, right))
+        if (right != null && !right.RuntimeOwnerHoldsLease && !ReferenceEquals(left, right))
         {
             await right.Lease.DisposeAsync().ConfigureAwait(false);
         }
@@ -1761,14 +1809,16 @@ internal sealed class Switch2BluetoothProductionCoordinator
             Calibration = calibration;
         }
 
-        internal Switch2BluetoothWindowsInputLease Lease { get; }
+        internal Switch2BluetoothWindowsInputLease Lease { get; set; }
         internal Switch2ControllerModel Model { get; }
         internal ushort ProductId { get; }
         internal Switch2BluetoothPeerToken PeerToken { get; }
         internal Switch2PersistentPeerId PeerId { get; }
-        internal ulong DeviceGeneration { get; }
-        internal ulong TransportGeneration { get; }
-        internal Switch2InputCalibrationSnapshot Calibration { get; }
+        internal ulong DeviceGeneration { get; set; }
+        internal ulong TransportGeneration { get; set; }
+        internal Switch2InputCalibrationSnapshot Calibration { get; set; }
+        internal InputControllerSlotToken SlotToken { get; set; }
+        internal bool RuntimeOwnerHoldsLease { get; set; }
         internal int CandidateId { get; set; }
         internal ulong ArrivalOrdinal { get; set; }
         internal bool IsBuffered { get; set; }

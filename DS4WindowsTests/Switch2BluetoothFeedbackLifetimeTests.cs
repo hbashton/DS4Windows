@@ -13,6 +13,34 @@ public class Switch2BluetoothFeedbackLifetimeTests
 
     [DataTestMethod]
     [DataRow(false, false)]
+    [DataRow(true, false)]
+    [DataRow(false, true)]
+    [DataRow(true, true)]
+    public void JoinedPhysicalLossRequiresDeadLeaseProofAndRealSurvivorStop(bool loseLeft, bool rejectSurvivor)
+    {
+        var left = new RecordingLease(Switch2ControllerModel.JoyCon2Left, 31, 37);
+        var right = new RecordingLease(Switch2ControllerModel.JoyCon2Right, 41, 47);
+        Assert.IsTrue(Switch2BluetoothFeedbackLifetime.TryCreateJoined(left, right,
+            DeviceGeneration, TransportGeneration, 31, 37, 41, 47, out var feedback));
+        Assert.IsTrue(feedback.TryActivate());
+        Assert.IsTrue(feedback.TryCreateVirtualFeedbackSession(ControllerFeedbackSource.XboxOneVirtualDevice, out var session));
+        Assert.IsFalse(feedback.TryStopJoinedAfterPhysicalLoss(3), "A write failure is not native release proof.");
+        Assert.AreEqual(0, left.WriteCount + right.WriteCount);
+        var absent = loseLeft ? left : right;
+        var survivor = loseLeft ? right : left;
+        absent.DisconnectedReleased = true;
+        survivor.RejectWrites = rejectSurvivor;
+        Assert.AreEqual(!rejectSurvivor, feedback.TryStopJoinedAfterPhysicalLoss(3));
+        Assert.AreEqual(!rejectSurvivor, feedback.IsRetired);
+        Assert.AreEqual(0, absent.WriteCount, "Never claim a physical Stop on an absent actuator.");
+        Assert.AreEqual(rejectSurvivor ? 0 : 1, survivor.WriteCount);
+        Assert.AreEqual(rejectSurvivor ? 3 : 1, survivor.WriteAttempts);
+        Assert.IsTrue(session.WasRetiredDisconnected);
+        Assert.IsFalse(session.TryPublish(Wire(1, session.OwnershipEpoch, 1000, 1000, 0, 0)));
+    }
+
+    [DataTestMethod]
+    [DataRow(false, false)]
     [DataRow(false, true)]
     [DataRow(true, false)]
     [DataRow(true, true)]
@@ -1466,10 +1494,15 @@ public class Switch2BluetoothFeedbackLifetimeTests
 
     internal sealed class RecordingLease :
         ISwitch2BluetoothHdRumbleBindableTransportLease,
-        ISwitch2BluetoothPlayerLedTransportLease
+        ISwitch2BluetoothPlayerLedTransportLease,
+        ISwitch2BluetoothDisconnectedOutputProof
     {
         internal int WriteCount;
+        internal int WriteAttempts;
         internal volatile bool RejectWrites;
+        internal bool DisconnectedReleased;
+        public bool IsDisconnectedAndReleased(Switch2ControllerModel expectedModel, ulong device, ulong transport) =>
+            DisconnectedReleased && expectedModel == model && device == deviceGeneration && transport == transportGeneration;
         internal byte[] LastPayload = Array.Empty<byte>();
         internal byte LastPlayerLedNumber;
         internal byte LastPlayerLedMask;
@@ -1509,6 +1542,7 @@ public class Switch2BluetoothFeedbackLifetimeTests
             ulong expectedDeviceGeneration,
             ulong expectedTransportGeneration)
         {
+            Interlocked.Increment(ref WriteAttempts);
             if (RejectWrites)
                 return Switch2BluetoothHdRumbleTransportWriteResult.Reject(
                     expectedModel, expectedDeviceGeneration, expectedTransportGeneration,

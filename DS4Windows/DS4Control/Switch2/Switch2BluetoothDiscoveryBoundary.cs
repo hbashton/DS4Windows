@@ -599,6 +599,7 @@ public sealed class Switch2BluetoothCandidateRegistry
 
                 entry.ConnectionAdmissionIssued = false;
                 entry.ConnectionCandidatePublished = false;
+                entry.LastReleasedAdmission = admission;
                 entry.ActiveAdmission = default;
                 return true;
             }
@@ -740,10 +741,40 @@ public sealed class Switch2BluetoothCandidateRegistry
                 entry.ConnectionAdmissionIssued = true;
                 entry.ConnectionCandidatePublished = false;
                 entry.ActiveAdmission = admission;
+                entry.LastReleasedAdmission = default;
                 return true;
             }
 
             admission = default;
+            return false;
+        }
+    }
+
+    // A logical Joy-Con split/join uses a fresh admission only AFTER the exact
+    // former native lease and host slot have retired. It never revives the old
+    // admission, clears quarantine, or authorizes a different scan/peer.
+    internal bool TryCreateReplacementAdmission(
+        in Switch2BluetoothConnectionAdmission released,
+        out Switch2BluetoothConnectionAdmission admission)
+    {
+        admission = default;
+        lock (sync)
+        {
+            if (!scanActive || !released.IsValid || released.ScanGeneration != scanGeneration)
+                return false;
+            for (int index = 0; index < entries.Length; index++)
+            {
+                ref CandidateEntry entry = ref entries[index];
+                if (!entry.InUse || entry.Quarantined || entry.ConnectionAdmissionIssued ||
+                    entry.Host != Switch2AdvertisedHost.ThisHost ||
+                    !entry.LastReleasedAdmission.Equals(released)) continue;
+                admission = new Switch2BluetoothConnectionAdmission(scanGeneration, entry.Model, entry.ProductId);
+                entry.ActiveAdmission = admission;
+                entry.LastReleasedAdmission = default;
+                entry.ConnectionAdmissionIssued = true;
+                entry.ConnectionCandidatePublished = false;
+                return true;
+            }
             return false;
         }
     }
@@ -799,6 +830,7 @@ public sealed class Switch2BluetoothCandidateRegistry
         internal bool ConnectionAdmissionIssued;
         internal bool ConnectionCandidatePublished;
         internal Switch2BluetoothConnectionAdmission ActiveAdmission;
+        internal Switch2BluetoothConnectionAdmission LastReleasedAdmission;
         internal bool AssociationCommitAuthorized;
     }
 }

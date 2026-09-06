@@ -1495,10 +1495,17 @@ internal sealed class Switch2JoyConJoinedRuntimeOwner :
     private bool TryStopCore(long deadline,
         out Switch2JoyConJoinedRuntimeStopFailure failure)
     {
+        bool leftDisconnected = leftInputOwner.EndReason == Switch2BluetoothInputEndReason.Disconnected;
+        bool rightDisconnected = rightInputOwner.EndReason == Switch2BluetoothInputEndReason.Disconnected;
+        // Physical-loss output retirement needs real native release proof for
+        // the absent side, and still sends Stop to the surviving actuator.
+        if (leftDisconnected) _ = WaitForRelease(leftReleaseProof, leftTransportGeneration, deadline);
+        if (rightDisconnected) _ = WaitForRelease(rightReleaseProof, rightTransportGeneration, deadline);
         int remaining = RemainingMilliseconds(deadline);
         if (feedbackLifetime != null &&
-            (remaining <= 0 || !feedbackLifetime.TryStopAndRetire(
-                maxAttempts: Math.Min(3, Math.Max(1, remaining / 100)))))
+            (remaining <= 0 || !(leftDisconnected || rightDisconnected ?
+                feedbackLifetime.TryStopJoinedAfterPhysicalLoss(Math.Min(3, Math.Max(1, remaining / 100))) :
+                feedbackLifetime.TryStopAndRetire(Math.Min(3, Math.Max(1, remaining / 100))))))
         {
             failure = new Switch2JoyConJoinedRuntimeStopFailure(
                 Switch2BluetoothRuntimeStopFailureKind.

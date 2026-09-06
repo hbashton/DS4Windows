@@ -53,6 +53,7 @@ namespace DS4WinWPF.DS4Forms
             DualSense,
             DualSenseEdge,
             Switch2Pro,
+            JoyCon,
         }
 
         private ControllerDiagramKind controllerDiagramKind;
@@ -125,14 +126,14 @@ namespace DS4WinWPF.DS4Forms
                 {
                     InputDeviceType.DualSense => ControllerDiagramKind.DualSense,
                     InputDeviceType.SwitchPro or
+                    InputDeviceType.Switch2Pro => ControllerDiagramKind.Switch2Pro,
                     InputDeviceType.JoyConL or
                     InputDeviceType.JoyConR or
                     InputDeviceType.JoyConGrip or
-                    InputDeviceType.Switch2Pro or
                     InputDeviceType.Switch2JoyConLeft or
                     InputDeviceType.Switch2JoyConRight or
                     InputDeviceType.Switch2JoyConJoined =>
-                        ControllerDiagramKind.Switch2Pro,
+                        ControllerDiagramKind.JoyCon,
                     _ => ControllerDiagramKind.DualShock4,
                 };
             ConfigureControllerDiagram(defaultDiagram, true);
@@ -177,6 +178,8 @@ namespace DS4WinWPF.DS4Forms
             rasterHitGeometryButtons.Clear();
             ClearControllerButtonClips();
             HideControllerHover();
+            foreach (Button button in ControllerDiagramButtons())
+                button.Visibility = Visibility.Visible;
 
             muteConBtn.Visibility = Visibility.Collapsed;
             captureConBtn.Visibility = Visibility.Collapsed;
@@ -211,6 +214,9 @@ namespace DS4WinWPF.DS4Forms
                     break;
                 case ControllerDiagramKind.Switch2Pro:
                     ConfigureSwitch2ProDiagram();
+                    break;
+                case ControllerDiagramKind.JoyCon:
+                    ConfigureJoyConDiagram();
                     break;
                 default:
                     ConfigureDualShock4Diagram();
@@ -420,7 +426,7 @@ namespace DS4WinWPF.DS4Forms
         private void ConfigureSwitch2ProDiagram()
         {
             ConfigureControllerRaster("Switch 2 Pro Controller.png",
-                "Switch 2 Pro layout used for Switch Pro, Switch 2 Pro, and Joy-Con controllers",
+                "Switch 2 Pro layout",
                 1536, 1024);
 
             SetCanvasButtonBounds(crossConBtn, 301, 104, 24, 26);
@@ -469,6 +475,53 @@ namespace DS4WinWPF.DS4Forms
                 includeMute: false, includeTouch: false,
                 includeEdgeControls: true, includeCapture: true);
             PopulateControllerStickAtlas("Switch2Pro-Stick_Highlights.png");
+            ApplyControllerButtonClips();
+        }
+
+        private void ConfigureJoyConDiagram()
+        {
+            controllerCoordinateScale = 1;
+            controllerCoordinateOffsetX = 0;
+            controllerDiagram.Source = JoyConArtwork.Diagram;
+            controllerDiagram.Width = 440;
+            controllerDiagram.Height = 220;
+            controllerDiagram.Stretch = Stretch.Uniform;
+            controllerDiagram.Clip = null;
+            Canvas.SetLeft(controllerDiagram, 0);
+            Canvas.SetTop(controllerDiagram, 0);
+            foreach (Button button in ControllerDiagramButtons())
+                button.Visibility = Visibility.Collapsed;
+            ds4LightbarColorBtn.Visibility = Visibility.Collapsed;
+
+            void Place(Button button, string name)
+            {
+                Rect bounds = JoyConArtwork.Buttons[name];
+                SetCanvasButtonBounds(button, bounds.X, bounds.Y, bounds.Width, bounds.Height);
+                button.Visibility = Visibility.Visible;
+                vectorHoverGeometries[button] = RoundedHighlight(bounds.X,
+                    bounds.Y, bounds.Width, bounds.Height, bounds.Height / 2);
+            }
+            Place(crossConBtn, "B"); Place(circleConBtn, "A");
+            Place(squareConBtn, "Y"); Place(triangleConBtn, "X");
+            Place(upConBtn, "Up"); Place(rightConBtn, "Right");
+            Place(downConBtn, "Down"); Place(leftConBtn, "Left");
+            Place(l1ConBtn, "L"); Place(r1ConBtn, "R");
+            Place(l2ConBtn, "ZL"); Place(r2ConBtn, "ZR");
+            Place(shareConBtn, "Minus"); Place(optionsConBtn, "Plus");
+            Place(captureConBtn, "Capture"); Place(guideConBtn, "Home");
+            void Stick(Button press, Button up, Button right, Button down,
+                Button left, Rect bounds)
+            {
+                foreach (Button button in new[] { press, up, right, down, left })
+                {
+                    SetCanvasButtonBounds(button, bounds.X, bounds.Y, bounds.Width, bounds.Height);
+                    button.Visibility = Visibility.Visible;
+                }
+                AddStickHighlights(press, up, right, down, left,
+                    bounds.X, bounds.Y, bounds.Width, bounds.Height);
+            }
+            Stick(l3ConBtn, lsuConBtn, lsrConBtn, lsdConBtn, lslConBtn, JoyConArtwork.LeftStick);
+            Stick(r3ConBtn, rsuConBtn, rsrConBtn, rsdConBtn, rslConBtn, JoyConArtwork.RightStick);
             ApplyControllerButtonClips();
         }
 

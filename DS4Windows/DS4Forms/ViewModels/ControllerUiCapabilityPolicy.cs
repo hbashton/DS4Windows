@@ -88,6 +88,9 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             DeviceType == null || DeviceType is
                 InputDeviceType.Switch2JoyConLeft or
                 InputDeviceType.Switch2JoyConRight;
+        internal bool ShowSwitch2JoyConControls => DeviceType == null ||
+            DeviceType is InputDeviceType.Switch2JoyConLeft or
+                InputDeviceType.Switch2JoyConRight or InputDeviceType.Switch2JoyConJoined;
         // With no physical controller selected, keep the complete profile
         // surface available so offline profile editing never loses features.
         internal bool SupportsAdaptiveTriggers => DeviceType == null || IsDualSense;

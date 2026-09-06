@@ -1027,9 +1027,9 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         }
         public event EventHandler EditingControllerNameChanged;
 
-        private string editingControllerImageSource;
+        private System.Windows.Media.ImageSource editingControllerImageSource;
 
-        public string EditingControllerImageSource
+        public System.Windows.Media.ImageSource EditingControllerImageSource
         {
             get => editingControllerImageSource;
             private set

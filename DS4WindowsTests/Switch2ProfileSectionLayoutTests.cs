@@ -96,10 +96,10 @@ public sealed class Switch2ProfileSectionLayoutTests
         var cards = borders.Select(node => node.Element(Wpf + "Expander")!).ToArray();
         CollectionAssert.AreEqual(new[]
         {
-            "switch2FeedbackCard", "switch2MotionCard", "switch2JoyConCard",
-            "switch2ConnectionCard", "switch2CalibrationCard",
+            "switch2ConnectionCard", "switch2FeedbackCard", "switch2MotionCard",
+            "switch2JoyConCard", "switch2CalibrationCard",
         }, cards.Select(node => (string)node.Attribute(Xaml + "Name")).ToArray());
-        CollectionAssert.AreEqual(new[] { "True", "False", "False", "False", "False" },
+        CollectionAssert.AreEqual(new[] { "False", "True", "False", "False", "False" },
             cards.Select(node => (string)node.Attribute("IsExpanded")).ToArray());
         foreach (var card in cards)
         {
@@ -156,6 +156,38 @@ public sealed class Switch2ProfileSectionLayoutTests
         // Moving controls into cards must not introduce another namescope/template.
         Assert.IsFalse(calibration.Ancestors().Any(node =>
             node.Name == Wpf + "DataTemplate" || node.Name == Wpf + "ControlTemplate"));
+    }
+
+    [TestMethod]
+    public void Switch2TooltipsAreShortAndDescribeBehaviorWithoutImplementationJargon()
+    {
+        var tab = Load("ProfileEditor.xaml").Descendants(Wpf + "TabItem")
+            .Single(node => (string)node.Attribute(Xaml + "Name") == "switch2ControlsTab");
+        var tooltips = tab.Descendants().Attributes("ToolTip").ToArray();
+        Assert.IsTrue(tooltips.Length >= 20);
+        foreach (var tooltip in tooltips)
+        {
+            Assert.IsTrue(tooltip.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length <= 28, tooltip.Value);
+            foreach (string jargon in new[] { "canonical", "transport", "lifetime", "carrier", "Switch2Connect", "1 kHz", "packet", "opaque" })
+                Assert.IsFalse(tooltip.Value.Contains(jargon, StringComparison.OrdinalIgnoreCase), tooltip.Value);
+        }
+    }
+
+    [TestMethod]
+    public void JoyConCardHasHardwareGuardAndGenericStickSettingsStayInMotion()
+    {
+        var editor = Load("ProfileEditor.xaml");
+        var joyCon = editor.Descendants(Wpf + "Expander").Single(node =>
+            (string)node.Attribute(Xaml + "Name") == "switch2JoyConCard");
+        StringAssert.Contains((string)joyCon.Parent!.Attribute("Visibility"), "ShowSwitch2JoyConControls");
+        foreach (string property in new[] { "Switch2LeftStickMouseSensitivity", "Switch2RightStickScrollActivationModeIndex" })
+        {
+            var binding = editor.Descendants().Attributes().Single(a => a.Value == "{Binding " + property + "}");
+            Assert.IsTrue(binding.Parent!.Ancestors(Wpf + "Expander").Any(e =>
+                (string)e.Attribute(Xaml + "Name") == "switch2MotionCard"));
+        }
+        Assert.IsTrue(editor.Descendants(Wpf + "Image").Any(node =>
+            (string)node.Attribute("Source") == "{x:Static local:JoyConArtwork.Pair}"));
     }
 
     private static XDocument Load(params string[] relative)

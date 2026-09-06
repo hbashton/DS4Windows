@@ -297,9 +297,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public event EventHandler Switch2StandaloneHoldModeTextChanged;
 
         public string Switch2StandaloneHoldModeToolTip =>
-            "Switch this standalone Joy-Con between vertical controller " +
-            "and horizontal mini-pad presentation. The choice applies on " +
-            "the next input report and is remembered for this Joy-Con.";
+            "Switch between holding this Joy-Con upright or sideways. " +
+            "Your choice is remembered for this controller.";
 
         public bool SupportsControllerAudio =>
             UiCapabilities.SupportsControllerAudio;
@@ -372,13 +371,16 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public string MicrophoneDescription =>
             UiCapabilities.MicrophoneDescription;
 
-        public string ControllerImageSource
+        public ImageSource ControllerImageSource
         {
             get
             {
+                if (JoyConArtwork.ForDevice(device.DeviceType) is ImageSource joyCon)
+                    return joyCon;
                 string imageName = UiCapabilities.ImageResourceName;
 
-                return imageName == null ? null : $"{Global.RESOURCES_PREFIX}/{imageName}";
+                return imageName == null ? null : new ImageSourceConverter()
+                    .ConvertFromString($"{Global.RESOURCES_PREFIX}/{imageName}") as ImageSource;
             }
         }
 

@@ -63,6 +63,15 @@ namespace DS4Windows
         [JsonPropertyName("derivePerRegistrationSerial")]
         public bool DerivePerRegistrationSerial { get; set; }
 
+        /// <summary>
+        /// Explicit deployment permission to allocate a fresh primary GIP
+        /// Device ID and its matching USB serial for each registration. A
+        /// serial-only change cannot distinguish devices in Windows' GIP
+        /// Hello lookup. VID/PID, versions and descriptive strings stay exact.
+        /// </summary>
+        [JsonPropertyName("derivePerRegistrationIdentity")]
+        public bool DerivePerRegistrationIdentity { get; set; }
+
         internal static XboxOneAuthorizedPersonaConfiguration LoadExplicit()
         {
             string configuredPath = Environment.GetEnvironmentVariable(
@@ -251,6 +260,8 @@ namespace DS4Windows
     {
         private static readonly XboxOneRetainedImportIdentitySource ImportIdentities =
             new(NextNonZeroUInt64());
+        private static readonly XboxOnePrimaryDeviceIdentitySource GipIdentities =
+            new(NextNonZeroUInt32());
 
         [JsonPropertyName("version")]
         public ushort Version { get; set; }
@@ -321,14 +332,38 @@ namespace DS4Windows
             // device identity and not an authorization capability. Two outputs
             // using one authorized deployment bundle must not claim one import.
             ulong importDeviceId = ImportIdentities.Next();
+            XboxOneAuthorizedIdentity identity = configuration.Identity;
+            if (configuration.DerivePerRegistrationIdentity)
+            {
+                ulong deviceId;
+                do
+                {
+                    deviceId = GipIdentities.Next();
+                }
+                while (deviceId == configuration.Identity.DeviceId);
+                identity = new XboxOneAuthorizedIdentity
+                {
+                    VendorId = configuration.Identity.VendorId,
+                    ProductId = configuration.Identity.ProductId,
+                    DeviceReleaseBcd = configuration.Identity.DeviceReleaseBcd,
+                    DeviceId = deviceId,
+                    FirmwareMajor = configuration.Identity.FirmwareMajor,
+                    FirmwareMinor = configuration.Identity.FirmwareMinor,
+                    FirmwareBuild = configuration.Identity.FirmwareBuild,
+                    FirmwareRevision = configuration.Identity.FirmwareRevision,
+                    HardwareMajor = configuration.Identity.HardwareMajor,
+                    HardwareMinor = configuration.Identity.HardwareMinor,
+                };
+            }
             XboxOneAuthorizedIdentityStrings strings = configuration.Strings;
-            if (configuration.DerivePerRegistrationSerial)
+            if (configuration.DerivePerRegistrationSerial ||
+                configuration.DerivePerRegistrationIdentity)
             {
                 strings = new XboxOneAuthorizedIdentityStrings
                 {
                     Manufacturer = configuration.Strings.Manufacturer,
                     Product = configuration.Strings.Product,
-                    Serial = configuration.Identity.DeviceId.ToString("x16",
+                    Serial = identity.DeviceId.ToString("x16",
                         CultureInfo.InvariantCulture) + importDeviceId.ToString(
                         "x16", CultureInfo.InvariantCulture),
                 };
@@ -337,7 +372,7 @@ namespace DS4Windows
             {
                 Version = 1,
                 IdentityAuthorizationGranted = true,
-                Identity = configuration.Identity,
+                Identity = identity,
                 Usb = configuration.Usb,
                 Strings = strings,
                 Feedback = new XboxOneAuthorizedFeedbackBinding
@@ -370,6 +405,51 @@ namespace DS4Windows
             }
             while (value == 0);
             return value;
+        }
+
+        private static uint NextNonZeroUInt32()
+        {
+            uint value;
+            do
+            {
+                value = (uint)NextNonZeroUInt64();
+            }
+            while (value == 0);
+            return value;
+        }
+    }
+
+    /// <summary>
+    /// Cold-path primary GIP IDs: fixed protocol prefix, process-unique 32-bit
+    /// suffix, no wrap or reuse. The cryptographic seed separates processes
+    /// probabilistically; it is not a global uniqueness or ownership proof.
+    /// </summary>
+    internal sealed class XboxOnePrimaryDeviceIdentitySource
+    {
+        private readonly object gate = new();
+        private uint next;
+        private bool exhausted;
+
+        internal XboxOnePrimaryDeviceIdentitySource(uint first)
+        {
+            if (first == 0)
+                throw new ArgumentOutOfRangeException(nameof(first));
+            next = first;
+        }
+
+        internal ulong Next()
+        {
+            lock (gate)
+            {
+                if (exhausted)
+                    throw new IOException("Xbox One GIP device identity space is exhausted.");
+                ulong result = 0x0000fffb00000000UL | next;
+                if (next == uint.MaxValue)
+                    exhausted = true;
+                else
+                    next++;
+                return result;
+            }
         }
     }
 

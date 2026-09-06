@@ -192,6 +192,73 @@ public sealed class XboxOneAuthorizedPersonaConfigurationTests
     }
 
     [TestMethod]
+    public void PerRegistrationIdentityKeepsGipHelloAndUsbSerialDistinctTogether()
+    {
+        string json = ValidJson().Replace("\"version\":1",
+            "\"version\":1,\"derivePerRegistrationIdentity\":true");
+        var configuration = XboxOneAuthorizedPersonaConfiguration.ParseExplicit(
+            json, "registration-identity-policy");
+        string originalConfiguration = JsonSerializer.Serialize(configuration);
+        var requests = new XboxOneAuthorizedCreateRequestV1[128];
+        Parallel.For(0, requests.Length, index => requests[index] =
+            XboxOneAuthorizedCreateRequestV1.CreateForFeedbackTarget(
+                configuration, (ulong)index + 1, 1, 7));
+
+        Assert.AreEqual(requests.Length,
+            requests.Select(request => request.Identity.DeviceId).Distinct().Count(),
+            "USB serial uniqueness alone does not prevent Windows GIP Hello identity collisions.");
+        Assert.AreEqual(requests.Length,
+            requests.Select(request => request.Strings.Serial).Distinct().Count());
+        foreach (var request in requests)
+        {
+            Assert.AreNotSame(configuration.Identity, request.Identity);
+            Assert.AreEqual(0x0000fffb00000000UL,
+                request.Identity.DeviceId & 0xffffffff00000000UL);
+            Assert.AreEqual(configuration.Identity.VendorId, request.Identity.VendorId);
+            Assert.AreEqual(configuration.Identity.ProductId, request.Identity.ProductId);
+            Assert.AreEqual(configuration.Identity.DeviceReleaseBcd, request.Identity.DeviceReleaseBcd);
+            Assert.AreEqual(configuration.Identity.FirmwareMajor, request.Identity.FirmwareMajor);
+            Assert.AreEqual(configuration.Identity.FirmwareMinor, request.Identity.FirmwareMinor);
+            Assert.AreEqual(configuration.Identity.FirmwareBuild, request.Identity.FirmwareBuild);
+            Assert.AreEqual(configuration.Identity.FirmwareRevision, request.Identity.FirmwareRevision);
+            Assert.AreEqual(configuration.Identity.HardwareMajor, request.Identity.HardwareMajor);
+            Assert.AreEqual(configuration.Identity.HardwareMinor, request.Identity.HardwareMinor);
+            Assert.AreSame(configuration.Usb, request.Usb);
+            Assert.AreEqual(configuration.Strings.Manufacturer, request.Strings.Manufacturer);
+            Assert.AreEqual(configuration.Strings.Product, request.Strings.Product);
+            Assert.AreEqual(request.Identity.DeviceId.ToString("x16") +
+                request.ImportDeviceId.ToString("x16"), request.Strings.Serial);
+            Assert.AreEqual(7UL, request.Feedback.OwnershipEpoch);
+            string wire = ViiperClient.SerializeAuthorizedXboxOneCreateRequest(request);
+            Assert.AreEqual(wire, ViiperClient.SerializeAuthorizedXboxOneCreateRequest(request));
+            using var document = JsonDocument.Parse(wire);
+            Assert.IsFalse(document.RootElement.TryGetProperty("derivePerRegistrationIdentity", out _));
+            Assert.AreEqual(request.Identity.DeviceId,
+                document.RootElement.GetProperty("identity").GetProperty("deviceId").GetUInt64());
+        }
+        Assert.AreEqual(originalConfiguration, JsonSerializer.Serialize(configuration),
+            "Allocating a registration must not rewrite the shared deployment bundle.");
+    }
+
+    [TestMethod]
+    public void PrimaryGipIdentityAllocationIsConcurrentAndNeverWraps()
+    {
+        var source = new XboxOnePrimaryDeviceIdentitySource(100);
+        var identities = new ulong[1024];
+        Parallel.For(0, identities.Length, index => identities[index] = source.Next());
+        CollectionAssert.AreEqual(Enumerable.Range(100, identities.Length)
+            .Select(value => 0x0000fffb00000000UL | (uint)value).ToArray(),
+            identities.OrderBy(value => value).ToArray());
+        var exhausted = new XboxOnePrimaryDeviceIdentitySource(uint.MaxValue - 1);
+        Assert.AreEqual(0x0000fffbfffffffeUL, exhausted.Next());
+        Assert.AreEqual(0x0000fffbffffffffUL, exhausted.Next());
+        Assert.ThrowsException<IOException>(() => exhausted.Next());
+        Assert.ThrowsException<IOException>(() => exhausted.Next());
+        Assert.ThrowsException<ArgumentOutOfRangeException>(() =>
+            new XboxOnePrimaryDeviceIdentitySource(0));
+    }
+
+    [TestMethod]
     public void MissingAuthorizationAndUnknownFieldsFailClosed()
     {
         string denied = ValidJson().Replace(

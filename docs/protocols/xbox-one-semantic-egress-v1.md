@@ -208,8 +208,8 @@ The broker's existing exact owner, registration and lease checks remain
 authoritative. Import identifiers, including ones used in USB serials, are not
 secret capabilities.
 
-An explicit deployment bundle may additionally set
-`"derivePerRegistrationSerial": true` to authorize a distinct USB serial for
+The earlier serial-only deployment option
+`"derivePerRegistrationSerial": true` authorizes a distinct USB serial for
 each virtual registration. The serial becomes the unchanged configured GIP
 Device ID as 16 lowercase hex digits followed by the allocated import ID as
 16 lowercase hex digits. Manufacturer, product, VID/PID, firmware and the GIP
@@ -217,9 +217,22 @@ identity remain unchanged. The strings object is cloned; the shared deployment
 configuration is not modified. This option is local configuration only and is
 not sent as an additional field in VIIPER's closed factory schema.
 
-Omitting the option or setting it to false preserves the configured serial
-exactly. Bundles with a fixed serial must not be assumed safe for concurrent
-Windows USB instances. Opting in also means a recreated registration gets a new
-serial; stable Windows per-device associations across reconnects are not
-promised by this policy. Two live Windows pads and games remain a hardware gate,
-separate from the retained-import and request-identity regression tests.
+This serial-only option is insufficient for multiple or recreated Windows GIP
+devices: Windows also indexes their primary Hello DeviceID. The September 6
+dump investigation found a real collision and blocked native teardown despite
+distinct serials. Use the new explicit deployment permission
+`"derivePerRegistrationIdentity": true` to derive both a fresh primary GIP ID
+and its matching serial. The fixed primary-device prefix is preserved; VID/PID,
+versions, manufacturer/product and USB configuration remain exact. Identity and
+strings are cloned without mutating the deployment bundle. Neither local
+permission is sent as a new field in the closed VIIPER factory request.
+
+When both permissions are omitted/false, the configured identity and serial
+remain exact. The broker now rejects a previously registered primary GIP ID,
+even after USB/IP retirement, because Windows PDO removal remains unproven.
+Fixed-identity bundles therefore require explicit migration for repeated
+creation; the old permission is not silently widened. Derived identities mean
+new Windows per-device associations across recreations, not persistent device
+identity. Process-local issuance never wraps; random process seeds are only
+probabilistic separation, not machine-global uniqueness. Hardware acceptance
+remains separate from the request and retained-transport tests.

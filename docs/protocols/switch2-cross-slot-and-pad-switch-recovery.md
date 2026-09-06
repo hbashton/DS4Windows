@@ -189,3 +189,65 @@ stopped before the adapter operation. A normal, non-forced computer restart is
 the next recovery step under the user's earlier restart authorization. Actual
 post-restart advertisement reception and controller readiness remain open;
 this evidence must not be represented as a Bluetooth fix or hardware acceptance.
+
+## b79: distinct GIP Hello identities, not just USB serials
+
+The authorized normal reboot was requested at 03:17 local on September 6.
+Windows bugchecked during shutdown with DRIVER_POWER_STATE_FAILURE, 0x9F,
+parameter 1 = 4 (PnP synchronization timeout). It was not a clean restart.
+After boot, the same independent 45-second advertisement observer received
+1,361 advertisements, versus zero before reboot. None was a Nintendo candidate;
+this establishes restored scan reception, not Switch 2 reconnect acceptance.
+
+Read-only analysis of the local kernel dump found the PnP lock owner waiting
+inside Microsoft's dc1-controller release-hardware callback for device rundown
+references to drain. Two virtual Xbox USB instances had different USB serials
+but had been configured with the same primary GIP Hello DeviceID. The second
+device had the driver's identity-collision flag set; the first was stuck in
+removal. The collision branch retains a reference to the earlier device without
+the matching release. The first removal began at 02:25:58, before the attempted
+02:57 Bluetooth-adapter restart and before the reboot request. This is direct
+evidence of an Xbox identity collision and a supported explanation for the
+blocked PnP teardown. Attribution of every missing BLE advertisement to that
+PnP wait remains an inference. No filter driver is blamed merely for appearing
+in the device stack, and no kernel code or driver was modified.
+
+The mapper's earlier `derivePerRegistrationSerial` varied only the USB serial;
+the GIP ID remained fixed. The new explicit deployment permission
+`derivePerRegistrationIdentity: true` allocates a fresh primary GIP ID and
+matching serial together. The ID retains the protocol's primary-device prefix.
+VID/PID, release/firmware/hardware versions, manufacturer/product, USB intervals,
+feedback generations and exact ownership binding are unchanged. The shared
+configuration is not mutated. The old serial-only permission is not silently
+expanded to authorize a different GIP identity.
+
+VIIPER additionally rejects reuse of a primary GIP ID before publication,
+including concurrent and provisional registrations and reuse after bus removal.
+USB/IP retirement is not proof that Windows has removed the old native PDO.
+Reservations therefore remain for the broker lifetime, bounded at 65,536;
+exhaustion fails closed without eviction. This is not a cross-process or
+machine-global identity registry. Mapper process seeds reduce cross-process
+collision probability but are not a global uniqueness proof. Fixed-identity
+deployments must explicitly authorize fresh identities for repeated creation.
+
+Verification before portable hardware testing:
+
+- Mapper: 3,774 passed, zero failed, three opt-in live-audio skipped (3,777
+  total), including all eight pinned synthetic Go/C# interoperability cases.
+  Allocation assertions were not weakened.
+- VIIPER: `go test ./... -count=1` passed all packages; race tests passed for
+  USB server, registry, API handlers and Xbox persona.
+- New tests cover parallel primary-ID issuance and exhaustion, immutable
+  identity/serial coherence, actual two-pad Hello identities, duplicate IDs
+  with distinct serials/import leases, unpublished registration collisions,
+  atomic concurrent admission, invalid callbacks, and bounded reservations.
+- Existing multi-pad and lifecycle fixtures that incorrectly shared a primary
+  GIP ID now use distinct IDs and matching serials. Removal-token and stale
+  address assertions remain unchanged.
+
+All new work is on the cold creation path. No report queue, worker, interval,
+allocation budget, authentication opt-out or feedback translation was changed.
+Private dump analysis stays in the Desktop evidence directory; the dump,
+device identifiers, profiles and credentials are not committed or uploaded.
+Hardware reconnect, power-off, joined readiness and automatic standalone
+Joy-Con activation remain separate acceptance items, not implied by these tests.

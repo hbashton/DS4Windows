@@ -49,3 +49,10 @@ or rejected survivor Stop. Existing allocation assertions are unchanged.
 These tests establish source lifecycle behavior, not a claim that sleeping
 physical Joy-Cons were exercised. Physical radio reconnect and game acceptance
 must be reported separately from the synthetic test results.
+
+Final Release/x64 validation: 3,784 passed, zero failed, three opt-in live-audio
+tests skipped (3,787 total), including all eight pinned Go/C# interoperability
+tests. The latest targeted Bluetooth/Joy-Con run passed 589 cases. Portable b80
+also passed five actual Windows virtual-Xbox create/remove cycles with VIIPER's
+new automatic retry cleanup. The physical Joy-Cons were not advertising during
+this run, so their live wake/join/game acceptance was not claimed.

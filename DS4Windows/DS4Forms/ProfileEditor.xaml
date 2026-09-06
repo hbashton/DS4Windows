@@ -127,7 +127,35 @@
                                         <StackPanel Orientation="Horizontal">
                                             <Image Source="{x:Static local:JoyConArtwork.Pair}"
                                                    Width="44" Height="26" Stretch="Uniform" Margin="0,0,9,0" />
-                                            <TextBlock Text="Joy-Con (upright)" VerticalAlignment="Center" />
+                                            <TextBlock Text="Joy-Con pair" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </ComboBoxItem>
+                                    <ComboBoxItem>
+                                        <StackPanel Orientation="Horizontal">
+                                            <Image Source="{x:Static local:JoyConArtwork.Left}"
+                                                   Width="44" Height="26" Stretch="Uniform" Margin="0,0,9,0" />
+                                            <TextBlock Text="Joy-Con L (upright)" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </ComboBoxItem>
+                                    <ComboBoxItem>
+                                        <StackPanel Orientation="Horizontal">
+                                            <Image Source="{x:Static local:JoyConArtwork.Right}"
+                                                   Width="44" Height="26" Stretch="Uniform" Margin="0,0,9,0" />
+                                            <TextBlock Text="Joy-Con R (upright)" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </ComboBoxItem>
+                                    <ComboBoxItem>
+                                        <StackPanel Orientation="Horizontal">
+                                            <Image Source="{x:Static local:JoyConArtwork.SidewaysLeft}"
+                                                   Width="44" Height="26" Stretch="Uniform" Margin="0,0,9,0" />
+                                            <TextBlock Text="Joy-Con L (sideways)" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </ComboBoxItem>
+                                    <ComboBoxItem>
+                                        <StackPanel Orientation="Horizontal">
+                                            <Image Source="{x:Static local:JoyConArtwork.SidewaysRight}"
+                                                   Width="44" Height="26" Stretch="Uniform" Margin="0,0,9,0" />
+                                            <TextBlock Text="Joy-Con R (sideways)" VerticalAlignment="Center" />
                                         </StackPanel>
                                     </ComboBoxItem>
                                 </ComboBox>

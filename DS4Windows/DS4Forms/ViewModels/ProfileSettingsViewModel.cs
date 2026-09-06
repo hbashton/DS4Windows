@@ -3924,22 +3924,32 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public Switch2DualGyroEditorViewModel Switch2DualGyroEditor { get; }
 
+        public event EventHandler JoyConPresentationChanged;
+
         public int Switch2JoyConStandaloneHoldModeIndex
         {
             get => Global.Switch2JoyConStandaloneHoldMode[device] ==
                 Switch2JoyConHoldMode.Horizontal ? 1 : 0;
-            set => Global.Switch2JoyConStandaloneHoldMode[device] =
-                value == 1 ? Switch2JoyConHoldMode.Horizontal :
-                    Switch2JoyConHoldMode.Vertical;
+            set
+            {
+                var mode = value == 1 ? Switch2JoyConHoldMode.Horizontal : Switch2JoyConHoldMode.Vertical;
+                if (Global.Switch2JoyConStandaloneHoldMode[device] == mode) return;
+                Global.Switch2JoyConStandaloneHoldMode[device] = mode;
+                JoyConPresentationChanged?.Invoke(this, EventArgs.Empty);
+            }
         }
 
         public int Switch2FaceButtonLayoutIndex
         {
             get => Global.Switch2FaceButtonLayout[device] ==
                 Switch2FaceButtonLayout.Nintendo ? 1 : 0;
-            set => Global.Switch2FaceButtonLayout[device] = value == 1 ?
-                Switch2FaceButtonLayout.Nintendo :
-                Switch2FaceButtonLayout.Xbox;
+            set
+            {
+                var layout = value == 1 ? Switch2FaceButtonLayout.Nintendo : Switch2FaceButtonLayout.Xbox;
+                if (Global.Switch2FaceButtonLayout[device] == layout) return;
+                Global.Switch2FaceButtonLayout[device] = layout;
+                JoyConPresentationChanged?.Invoke(this, EventArgs.Empty);
+            }
         }
 
         public bool Switch2JoyConIrMouseEnabled

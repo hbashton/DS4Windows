@@ -375,7 +375,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         {
             get
             {
-                if (JoyConArtwork.ForDevice(device.DeviceType) is ImageSource joyCon)
+                if (JoyConArtwork.ForDevice(device.DeviceType,
+                        EffectiveSwitch2StandaloneHoldMode()) is ImageSource joyCon)
                     return joyCon;
                 string imageName = UiCapabilities.ImageResourceName;
 
@@ -395,6 +396,14 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             }
         }
         public event EventHandler SelectedIndexChanged;
+
+        // WPF's property-change convention shares the existing holding-style
+        // notification, including profile reloads and controller overrides.
+        public event EventHandler ControllerImageSourceChanged
+        {
+            add => Switch2StandaloneHoldModeTextChanged += value;
+            remove => Switch2StandaloneHoldModeTextChanged -= value;
+        }
 
         public bool TryToggleSwitch2StandaloneHoldMode(out bool persisted)
         {

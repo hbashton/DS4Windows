@@ -54,9 +54,15 @@ namespace DS4WinWPF.DS4Forms
             DualSenseEdge,
             Switch2Pro,
             JoyCon,
+            JoyConLeft,
+            JoyConRight,
+            JoyConSidewaysLeft,
+            JoyConSidewaysRight,
         }
 
         private ControllerDiagramKind controllerDiagramKind;
+        private readonly DS4Device diagramPhysicalController;
+        private readonly Dictionary<Button, DS4Controls> joyConDiagramButtons = new();
         private bool controllerDiagramSelectorReady;
         private double controllerCoordinateScale = 1.0;
         private double controllerCoordinateOffsetX;
@@ -110,6 +116,7 @@ namespace DS4WinWPF.DS4Forms
             emptyColorGB.Visibility = Visibility.Collapsed;
             DS4Device physicalController = ResolveControllerContext(
                 device, controllerContextDevice);
+            diagramPhysicalController = physicalController;
             profileSettingsVM = new ProfileSettingsViewModel(device,
                 physicalController?.DeviceType,
                 physicalController?.ConnectionType,
@@ -153,6 +160,7 @@ namespace DS4WinWPF.DS4Forms
             PopulateHoverLocations();
             PopulateHoverIndexes();
             PopulateReverseHoverIndexes();
+            RefreshJoyConDiagram();
             PopulateGyroActionsTriggersMenu();
 
             AssignTiltAssociation();
@@ -178,6 +186,9 @@ namespace DS4WinWPF.DS4Forms
             rasterHitGeometryButtons.Clear();
             ClearControllerButtonClips();
             HideControllerHover();
+            foreach (Button button in joyConDiagramButtons.Keys)
+                conCanvas.Children.Remove(button);
+            joyConDiagramButtons.Clear();
             foreach (Button button in ControllerDiagramButtons())
                 button.Visibility = Visibility.Visible;
 
@@ -200,6 +211,7 @@ namespace DS4WinWPF.DS4Forms
 
             if (updateSelector)
             {
+                controllerDiagramSelectorReady = false;
                 controllerDiagramSelector.SelectedIndex = (int)diagramKind;
                 controllerDiagramSelectorReady = true;
             }
@@ -216,11 +228,20 @@ namespace DS4WinWPF.DS4Forms
                     ConfigureSwitch2ProDiagram();
                     break;
                 case ControllerDiagramKind.JoyCon:
-                    ConfigureJoyConDiagram();
+                case ControllerDiagramKind.JoyConLeft:
+                case ControllerDiagramKind.JoyConRight:
+                case ControllerDiagramKind.JoyConSidewaysLeft:
+                case ControllerDiagramKind.JoyConSidewaysRight:
+                    ConfigureJoyConDiagram((JoyConView)((int)diagramKind - (int)ControllerDiagramKind.JoyCon));
                     break;
                 default:
                     ConfigureDualShock4Diagram();
                     break;
+            }
+            if (mappingListVM != null)
+            {
+                PopulateHoverIndexes();
+                PopulateReverseHoverIndexes();
             }
         }
 
@@ -478,11 +499,33 @@ namespace DS4WinWPF.DS4Forms
             ApplyControllerButtonClips();
         }
 
-        private void ConfigureJoyConDiagram()
+        private void JoyConPresentationChanged(object sender, EventArgs e) => RefreshJoyConDiagram();
+
+        private void RefreshJoyConDiagram()
+        {
+            bool automatic = diagramPhysicalController is Switch2RuntimeInputDevice &&
+                diagramPhysicalController.DeviceType is InputDeviceType.Switch2JoyConLeft or
+                    InputDeviceType.Switch2JoyConRight or InputDeviceType.Switch2JoyConJoined;
+            controllerDiagramSelector.IsEnabled = !automatic;
+            controllerDiagramSelector.ToolTip = automatic ? "Follows this Joy-Con's holding style." : null;
+            if (automatic)
+            {
+                var runtime = (Switch2RuntimeInputDevice)diagramPhysicalController;
+                JoyConView view = JoyConArtwork.ResolveView(runtime.DeviceType,
+                    runtime.ResolveStandaloneJoyConHoldMode(Global.Switch2JoyConStandaloneHoldMode[deviceNum]));
+                ConfigureControllerDiagram((ControllerDiagramKind)((int)ControllerDiagramKind.JoyCon + (int)view), true);
+            }
+            else if (controllerDiagramKind >= ControllerDiagramKind.JoyCon)
+            {
+                ConfigureControllerDiagram(controllerDiagramKind);
+            }
+        }
+
+        private void ConfigureJoyConDiagram(JoyConView view)
         {
             controllerCoordinateScale = 1;
             controllerCoordinateOffsetX = 0;
-            controllerDiagram.Source = JoyConArtwork.Diagram;
+            controllerDiagram.Source = JoyConArtwork.ForView(view);
             controllerDiagram.Width = 440;
             controllerDiagram.Height = 220;
             controllerDiagram.Stretch = Stretch.Uniform;
@@ -493,35 +536,41 @@ namespace DS4WinWPF.DS4Forms
                 button.Visibility = Visibility.Collapsed;
             ds4LightbarColorBtn.Visibility = Visibility.Collapsed;
 
-            void Place(Button button, string name)
+            void Target(DS4Controls control, Rect bounds, Geometry geometry)
             {
-                Rect bounds = JoyConArtwork.Buttons[name];
+                var button = new Button { Content = string.Empty, Style = crossConBtn.Style };
+                button.Click += HoverConBtn_Click;
+                button.MouseEnter += ContBtn_MouseEnter;
+                button.MouseLeave += ContBtn_MouseLeave;
+                button.MouseRightButtonUp += ConBtn_MouseRightButtonUp;
+                System.Windows.Automation.AutomationProperties.SetName(button, control.ToString());
                 SetCanvasButtonBounds(button, bounds.X, bounds.Y, bounds.Width, bounds.Height);
-                button.Visibility = Visibility.Visible;
-                vectorHoverGeometries[button] = RoundedHighlight(bounds.X,
-                    bounds.Y, bounds.Width, bounds.Height, bounds.Height / 2);
+                joyConDiagramButtons.Add(button, control);
+                vectorHoverGeometries[button] = geometry;
+                conCanvas.Children.Add(button);
             }
-            Place(crossConBtn, "B"); Place(circleConBtn, "A");
-            Place(squareConBtn, "Y"); Place(triangleConBtn, "X");
-            Place(upConBtn, "Up"); Place(rightConBtn, "Right");
-            Place(downConBtn, "Down"); Place(leftConBtn, "Left");
-            Place(l1ConBtn, "L"); Place(r1ConBtn, "R");
-            Place(l2ConBtn, "ZL"); Place(r2ConBtn, "ZR");
-            Place(shareConBtn, "Minus"); Place(optionsConBtn, "Plus");
-            Place(captureConBtn, "Capture"); Place(guideConBtn, "Home");
-            void Stick(Button press, Button up, Button right, Button down,
-                Button left, Rect bounds)
+            foreach (var target in JoyConArtwork.Targets(view, Global.Switch2FaceButtonLayout[deviceNum]))
             {
-                foreach (Button button in new[] { press, up, right, down, left })
-                {
-                    SetCanvasButtonBounds(button, bounds.X, bounds.Y, bounds.Width, bounds.Height);
-                    button.Visibility = Visibility.Visible;
-                }
-                AddStickHighlights(press, up, right, down, left,
-                    bounds.X, bounds.Y, bounds.Width, bounds.Height);
+                Rect bounds = target.Bounds;
+                Target(target.Control, bounds, RoundedHighlight(bounds.X, bounds.Y,
+                    bounds.Width, bounds.Height, bounds.Height / 2));
             }
-            Stick(l3ConBtn, lsuConBtn, lsrConBtn, lsdConBtn, lslConBtn, JoyConArtwork.LeftStick);
-            Stick(r3ConBtn, rsuConBtn, rsrConBtn, rsdConBtn, rslConBtn, JoyConArtwork.RightStick);
+            void Stick(bool physicalLeft, bool logicalLeft)
+            {
+                Rect bounds = JoyConArtwork.StickBounds(view, physicalLeft);
+                Target(logicalLeft ? DS4Controls.L3 : DS4Controls.R3, bounds,
+                    StickPressHighlight(bounds.X, bounds.Y, bounds.Width, bounds.Height));
+                var directions = logicalLeft
+                    ? new[] { DS4Controls.LYNeg, DS4Controls.LXPos, DS4Controls.LYPos, DS4Controls.LXNeg }
+                    : new[] { DS4Controls.RYNeg, DS4Controls.RXPos, DS4Controls.RYPos, DS4Controls.RXNeg };
+                for (int direction = 0; direction < directions.Length; direction++)
+                    Target(directions[direction], bounds, StickDirectionHighlight(
+                        bounds.X, bounds.Y, bounds.Width, bounds.Height, direction));
+            }
+            if (view is JoyConView.Pair or JoyConView.UprightLeft or JoyConView.SidewaysLeft)
+                Stick(physicalLeft: true, logicalLeft: true);
+            if (view is JoyConView.Pair or JoyConView.UprightRight or JoyConView.SidewaysRight)
+                Stick(physicalLeft: false, logicalLeft: JoyConArtwork.IsSideways(view));
             ApplyControllerButtonClips();
         }
 
@@ -1118,6 +1167,7 @@ namespace DS4WinWPF.DS4Forms
             outConTypeCombo.SelectionChanged += OutConTypeCombo_SelectionChanged;
             mappingListBox.SelectionChanged += MappingListBox_SelectionChanged;
             Closed += ProfileEditor_Closed;
+            profileSettingsVM.JoyConPresentationChanged += JoyConPresentationChanged;
 
             profileSettingsVM.LSDeadZoneChanged += UpdateReadingsLsDeadZone;
             profileSettingsVM.RSDeadZoneChanged += UpdateReadingsRsDeadZone;
@@ -1139,6 +1189,7 @@ namespace DS4WinWPF.DS4Forms
             outConTypeCombo.SelectionChanged -= OutConTypeCombo_SelectionChanged;
             mappingListBox.SelectionChanged -= MappingListBox_SelectionChanged;
             Closed -= ProfileEditor_Closed;
+            profileSettingsVM.JoyConPresentationChanged -= JoyConPresentationChanged;
 
             profileSettingsVM.LSDeadZoneChanged -= UpdateReadingsLsDeadZone;
             profileSettingsVM.RSDeadZoneChanged -= UpdateReadingsRsDeadZone;
@@ -1324,14 +1375,25 @@ namespace DS4WinWPF.DS4Forms
 
         private void PopulateReverseHoverIndexes()
         {
+            reverseHoverIndexes.Clear();
             foreach (KeyValuePair<Button, int> pair in hoverIndexes)
             {
-                reverseHoverIndexes.Add(pair.Value, pair.Key);
+                // Dynamic Joy-Con targets replace the hidden generic targets.
+                if (pair.Key.Visibility == Visibility.Visible)
+                    reverseHoverIndexes[pair.Value] = pair.Key;
+            }
+            foreach (MappedControl mapped in mappingListVM.Mappings)
+            {
+                if (mapped.Control < DS4Controls.Switch2C ||
+                    mapped.Control > DS4Controls.Switch2JoyConRightSR) continue;
+                mapped.SetControllerMapTargetPresence(reverseHoverIndexes.ContainsKey(
+                    mappingListVM.ControlIndexMap[mapped.Control]));
             }
         }
 
         private void PopulateHoverIndexes()
         {
+            hoverIndexes.Clear();
             hoverIndexes[crossConBtn] = 0;
             hoverIndexes[circleConBtn] = 1;
             hoverIndexes[squareConBtn] = 2;
@@ -1382,6 +1444,8 @@ namespace DS4WinWPF.DS4Forms
             hoverIndexes[fnrConBtn] = 42;
             hoverIndexes[brpConBtn] = 43;
             hoverIndexes[blpConBtn] = 44;
+            foreach (var entry in joyConDiagramButtons)
+                hoverIndexes[entry.Key] = mappingListVM.ControlIndexMap[entry.Value];
         }
 
         private void PopulateHoverLocations()
@@ -1887,6 +1951,7 @@ namespace DS4WinWPF.DS4Forms
             specialActionsVM.LoadActions(currentProfile == null);
             mappingListVM.UpdateMappings();
             profileSettingsVM.UpdateLateProperties();
+            RefreshJoyConDiagram();
             profileSettingsVM.PopulateTouchDisInver(touchDisInvertBtn.ContextMenu);
             profileSettingsVM.PopulateGyroMouseTrig(gyroMouseTrigBtn.ContextMenu);
             profileSettingsVM.PopulateGyroMouseStickTrig(gyroMouseStickTrigBtn.ContextMenu);

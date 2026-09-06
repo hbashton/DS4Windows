@@ -136,10 +136,9 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             mappings.Add(new MappedControl(devIndex, DS4Controls.BRP,
                 switch2Pro ? "GR (Rear Right)" : "Bottom Right Paddle", devType));
 
-            // These source-only controls intentionally have no controller-
-            // diagram hit target and no default virtual output. They remain in
-            // the ordinary mapping list so profiles can bind them without a
-            // Switch 2-specific mapping stack.
+            // Source-only controls have no default virtual output. The editor
+            // supplies diagram targets when its current view represents them;
+            // all remain part of the ordinary mapping list.
             mappings.Add(new MappedControl(devIndex, DS4Controls.Switch2C,
                 "Switch 2 C", devType));
             mappings.Add(new MappedControl(devIndex,
@@ -262,7 +261,9 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public string MappingName { get => mappingName; }
         public bool IsAvailableOnPhysicalController { get; private set; } = true;
         public bool IsControllerMapListOnly { get; private set; }
+        public event EventHandler IsControllerMapListOnlyChanged;
         public string PhysicalControllerAvailabilityHint { get; private set; }
+        public event EventHandler PhysicalControllerAvailabilityHintChanged;
         public OutContType DevType
         {
             get => devType;
@@ -308,8 +309,17 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             PhysicalControllerAvailabilityHint = !available
                 ? $"{ControlName} is not available on {physicalControllerName}. The saved backend mapping is preserved."
                 : IsControllerMapListOnly
-                    ? $"{ControlName} is fully remappable from this list. The current controller diagram has no accurate target for this Edge-only control."
+                    ? $"{ControlName} is fully remappable from this list."
                     : null;
+        }
+
+        internal void SetControllerMapTargetPresence(bool present)
+        {
+            if (!IsAvailableOnPhysicalController || IsControllerMapListOnly == !present) return;
+            IsControllerMapListOnly = !present;
+            PhysicalControllerAvailabilityHint = present ? null : $"{ControlName} is fully remappable from this list.";
+            IsControllerMapListOnlyChanged?.Invoke(this, EventArgs.Empty);
+            PhysicalControllerAvailabilityHintChanged?.Invoke(this, EventArgs.Empty);
         }
 
         private void MappedControl_DevTypeChanged(object sender, EventArgs e)

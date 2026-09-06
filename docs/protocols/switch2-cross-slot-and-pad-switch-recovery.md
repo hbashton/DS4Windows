@@ -153,5 +153,8 @@ settings changes are part of the fix.
   zero failed or skipped.
 - Full b78 suite: 3,772 passed, zero failed, three opt-in audio skipped;
   3,775 total, including the eight pinned Go/C# interoperability cases.
-- Release x64 framework-dependent b78 publish succeeded. Portable hardware
-  acceptance remains pending at this checkpoint.
+- Release x64 framework-dependent b78 publish succeeded. Its portable restart
+  found only the physical Bluetooth DualSense as input, then created one
+  virtual DualSense output. The false USB input and its extra Xbox 360 output
+  did not recur in this startup. Joined readiness and repeated output changes
+  still require separate hardware acceptance.

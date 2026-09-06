@@ -531,7 +531,8 @@ namespace DS4Windows
         /// downstream profile renderer changes. This uses the same pump fence
         /// as physical delivery and does not affect controller input cadence.
         /// </summary>
-        internal bool TryRefreshCurrentPresentation(ulong nowMicroseconds)
+        internal bool TryRefreshCurrentPresentation(ulong nowMicroseconds,
+            bool allowNoFrame = false)
         {
             if (IsStopping || IsRetired ||
                 Interlocked.CompareExchange(ref pumpActive, 1, 0) != 0)
@@ -543,7 +544,7 @@ namespace DS4Windows
             {
                 return !IsStopping && !IsRetired &&
                     runtime.TryRefreshCurrentPresentation(writer,
-                        nowMicroseconds);
+                        nowMicroseconds, allowNoFrame);
             }
             finally
             {

@@ -524,6 +524,74 @@ public sealed class Switch2ControlServiceReversibleProfileStagingTests
         Assert.IsTrue(fixture.Host.TryAbort(fixture.Lease).Succeeded);
     }
 
+    [DataTestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void OtherSlotColdProfileWorkDoesNotBlockActiveReportDispatch(bool cleanup)
+    {
+        using var coldEntered = new ManualResetEventSlim();
+        using var releaseCold = new ManualResetEventSlim();
+        using var reportsEntered = new ManualResetEventSlim();
+        var probe = new PipelineProbe();
+        Fixture fixture = CreateFixture(71, 81, 91,
+            pipeline: probe.Invoke, slotCount: 2);
+        Assert.IsTrue(fixture.Host.TryPrepare(fixture.Lease).Succeeded);
+        Assert.IsTrue(fixture.Table.TryActivate(fixture.Token, out _));
+        Assert.IsTrue(fixture.PublishRegular().Succeeded);
+        Registration other = CreateRegistration(82, 92);
+        Assert.IsTrue(fixture.Table.TryReserveAndBind(other.Value,
+            out InputControllerSlotToken otherToken, out _, out _));
+        Assert.AreEqual(1, otherToken.Slot);
+        var otherLease = new Switch2ControlServiceSlotLease(new object(), otherToken);
+        if (cleanup)
+            Assert.IsTrue(fixture.Host.TryPrepare(otherLease).Succeeded);
+
+        Action blockCold = () =>
+        {
+            coldEntered.Set();
+            if (!releaseCold.Wait(10_000))
+                throw new TimeoutException("Test did not release the cold profile operation.");
+        };
+        if (cleanup) fixture.Profile.OnUndo = blockCold;
+        else fixture.Profile.OnPrepare = blockCold;
+
+        Task<Switch2ControlServiceSlotHostResult> cold = Task.Factory.StartNew(
+            () => cleanup ? fixture.Host.TryAbort(otherLease) : fixture.Host.TryPrepare(otherLease),
+            CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        Task reports = null;
+        bool completedWhileColdBlocked = false;
+        try
+        {
+            Assert.IsTrue(coldEntered.Wait(2_000));
+            reports = Task.Factory.StartNew(() =>
+            {
+                reportsEntered.Set();
+                for (int index = 0; index < 256; index++)
+                    Assert.IsTrue(fixture.PublishRegular().Succeeded);
+            }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+            Assert.IsTrue(reportsEntered.Wait(2_000));
+            completedWhileColdBlocked = reports.Wait(1_000);
+        }
+        finally
+        {
+            releaseCold.Set();
+            Assert.IsTrue(cold.GetAwaiter().GetResult().Succeeded);
+            reports?.GetAwaiter().GetResult();
+            fixture.Profile.OnPrepare = null;
+            fixture.Profile.OnUndo = null;
+            if (!cleanup) Assert.IsTrue(fixture.Host.TryAbort(otherLease).Succeeded);
+        }
+
+        Assert.IsTrue(completedWhileColdBlocked,
+            "Another slot's profile/output setup or cleanup must not park this controller's input worker.");
+        Assert.AreEqual(257, probe.CallCount);
+        Assert.AreSame(fixture.Device, fixture.Controllers[0]);
+        Assert.IsTrue(fixture.Table.TryBeginRetire(fixture.Token, out var claim, out _));
+        Assert.IsTrue(fixture.PublishTerminal().Succeeded);
+        AcknowledgeAndQuiesce(fixture, claim);
+        Assert.IsTrue(fixture.Host.TryRemove(fixture.Lease).Succeeded);
+    }
+
     [TestMethod]
     public void ProfilePrepareReentrancyCannotConsumePendingExactInverse()
     {
@@ -666,17 +734,18 @@ public sealed class Switch2ControlServiceReversibleProfileStagingTests
             FakeProfileStage.PrepareMode.Success,
         Switch2ControlServiceExistingReportPipeline pipeline = null,
         ReportDiagnosticsWorker diagnostics = null,
-        Switch2ControlServiceObservedReportPipeline observedPipeline = null)
+        Switch2ControlServiceObservedReportPipeline observedPipeline = null,
+        int slotCount = 1)
     {
         Registration registration = CreateRegistration(deviceGeneration,
             transportGeneration);
-        var table = new InputControllerRegistrationTable(1);
+        var table = new InputControllerRegistrationTable(slotCount);
         Assert.IsTrue(table.TryOpen(serviceGeneration, out _));
         Assert.IsTrue(table.TryReserveAndBind(registration.Value,
             out InputControllerSlotToken token,
             out InputControllerSetupRollbackClaim rollbackClaim, out _));
-        var controllers = new DS4Device[1];
-        var touchPads = new Mouse[1];
+        var controllers = new DS4Device[slotCount];
+        var touchPads = new Mouse[slotCount];
         var manager = new ControllerSlotManager();
         var profile = new FakeProfileStage(mode);
         pipeline ??= static (_, _, _) => { };
@@ -846,6 +915,7 @@ public sealed class Switch2ControlServiceReversibleProfileStagingTests
         internal int UndoCount { get; private set; }
         internal int CleanupFailuresRemaining { get; set; }
         internal Action OnPrepare { get; set; }
+        internal Action OnUndo { get; set; }
 
         public Switch2ControlServiceReversibleStageResult TryPrepare(
             in Switch2ControlServiceProfileStageRequest request,
@@ -900,6 +970,7 @@ public sealed class Switch2ControlServiceReversibleProfileStagingTests
                 in Switch2ControlServiceProfileStageRequest request)
             {
                 owner.UndoCount++;
+                owner.OnUndo?.Invoke();
                 if (!Authenticates(request))
                 {
                     return Switch2ControlServiceReversibleStageResult.Reject(

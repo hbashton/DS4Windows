@@ -33,6 +33,9 @@ internal enum Switch2BluetoothFeedbackRetirementFailure : byte
 /// </summary>
 internal interface ISwitch2VirtualFeedbackSessionOwner
 {
+    // Failure-only diagnostics. Never consulted for admission or ACK decisions.
+    string DescribeWirePublication() => "owner diagnostics unavailable";
+
     bool TryPublishAndPump(Switch2VirtualFeedbackSession session,
         ControllerFeedbackIngress ingress, ReadOnlySpan<byte> wire,
         Switch2HdRumbleFeedbackPolicy policy,
@@ -120,6 +123,17 @@ internal sealed class Switch2VirtualFeedbackSession
     internal ulong OwnershipEpoch { get; }
 
     internal bool WasRetiredDisconnected => Volatile.Read(ref disconnectedRetired);
+
+    internal string DescribeWirePublication()
+    {
+        lock (gate)
+        {
+            bool hasPublished = ingress.TryReadPublishedFrame(out var published);
+            return $"sessionActive={active}, terminal={terminalBrokerStop}, " +
+                $"publishedSequence={(hasPublished ? published.Sequence : 0)}, " +
+                owner.DescribeWirePublication();
+        }
+    }
 
     internal bool TryCaptureXboxPolicyRevision(out ulong revision)
     {
@@ -919,6 +933,15 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
     private bool stopping;
     private bool retired;
     private Switch2BluetoothFeedbackRetirementFailure lastRetirementFailure;
+    private string wirePublicationStage = "NotEntered";
+    private ControllerFeedbackPumpDisposition wirePublicationDisposition;
+
+    public string DescribeWirePublication()
+    {
+        lock (gate)
+            return $"stage={wirePublicationStage}, activated={activated}, stopping={stopping}, " +
+                $"retired={retired}, pump={wirePublicationDisposition}, physical={sink.LastFailure}";
+    }
 
     private Switch2BluetoothFeedbackLifetime(Switch2ControllerModel model,
         ulong deviceGeneration, ulong transportGeneration,
@@ -1391,6 +1414,7 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
         in Switch2HdRumbleImpulseTuning impulseTuning,
         in Switch2HdRumbleBodyTuning bodyTuning)
     {
+        wirePublicationStage = "OwnerLifetime";
         lock (gate)
         {
             if (stopping || retired ||
@@ -1403,22 +1427,28 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
 
         // Reject stale/foreign broker frames before they can change the
         // presentation configuration of the current accepted effect.
-        if (!ingress.TryPublish(wire) ||
-            !sink.TrySelectConfiguration(policy, impulseTuning, bodyTuning,
+        wirePublicationStage = "CanonicalIngress";
+        if (!ingress.TryPublish(wire)) return false;
+        wirePublicationStage = "SinkConfiguration";
+        if (!sink.TrySelectConfiguration(policy, impulseTuning, bodyTuning,
                 out bool presentationRefreshRequired))
         {
             return false;
         }
+        wirePublicationStage = "PresentationRefresh";
         ulong nowMicroseconds = CurrentMicroseconds();
-        // Terminal Stop already replaced the Frame event. A tuning refresh
-        // cannot require a live Frame before pumping its queued Stop event.
-        if (presentationRefreshRequired && !ingress.HasPublishedTerminalStop &&
-            !pump.TryRefreshCurrentPresentation(nowMicroseconds))
+        // A valid expired watermark can leave no live Frame, or queue Stop
+        // for the old effect. Refresh only if there is a frame; still pump the
+        // canonical event before ACK. Writer/claim contention is not a no-op.
+        if (presentationRefreshRequired &&
+            !pump.TryRefreshCurrentPresentation(nowMicroseconds, allowNoFrame: true))
         {
             return false;
         }
+        wirePublicationStage = "PhysicalPump";
         ControllerFeedbackPumpDisposition result = pump.PumpOnce(
             nowMicroseconds, sink, out _);
+        wirePublicationDisposition = result;
         return result is ControllerFeedbackPumpDisposition.Delivered or
             ControllerFeedbackPumpDisposition.None;
     }

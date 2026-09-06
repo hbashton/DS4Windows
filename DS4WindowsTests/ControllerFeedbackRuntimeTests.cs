@@ -384,6 +384,24 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void OptionalPresentationRefreshCannotBypassWriterOrClaimFences()
+        {
+            ControllerFeedbackRuntime runtime = new(), foreign = new();
+            Assert.IsTrue(runtime.TryAcquireWriter(1, 1, out var writer));
+            Assert.IsTrue(foreign.TryAcquireWriter(1, 1, out var foreignWriter));
+            Assert.IsFalse(runtime.TryRefreshCurrentPresentation(null, 1_000, allowNoFrame: true));
+            Assert.IsFalse(runtime.TryRefreshCurrentPresentation(foreignWriter, 1_000, allowNoFrame: true));
+            Assert.IsFalse(runtime.TryRefreshCurrentPresentation(writer, 1_000));
+            Assert.IsTrue(runtime.TryRefreshCurrentPresentation(writer, 1_000, allowNoFrame: true));
+            Assert.IsTrue(runtime.TryPublish(Publication(ControllerFeedbackPublicationOrigin.NativeGame,
+                Frame(sequence: 1, timestampMicroseconds: 1_000, bodyLow: 55))));
+            Assert.AreEqual(ControllerFeedbackDeliveryDisposition.Frame,
+                runtime.Claim(1_000, writer, out _, out ulong claim));
+            Assert.IsFalse(runtime.TryRefreshCurrentPresentation(writer, 1_000, allowNoFrame: true));
+            Assert.IsTrue(runtime.Complete(writer, claim, delivered: false, 1_000));
+        }
+
+        [TestMethod]
         public void RenewalReplacesExpiredUnadmittedFrameThenBecomesQuiet()
         {
             ControllerFeedbackRuntime runtime = new();

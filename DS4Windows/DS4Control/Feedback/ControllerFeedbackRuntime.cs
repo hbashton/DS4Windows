@@ -529,11 +529,12 @@ namespace DS4Windows
         /// policy transition. It never fabricates a frame, owner, or epoch.
         /// </summary>
         internal bool TryRefreshCurrentPresentation(
-            ControllerFeedbackWriterLease writer, ulong nowMicroseconds)
+            ControllerFeedbackWriterLease writer, ulong nowMicroseconds,
+            bool allowNoFrame = false)
         {
             lock (syncRoot)
             {
-                if (!IsCurrentWriter(writer) || stopping ||
+                if (!IsCurrentWriter(writer) || (stopping && !allowNoFrame) ||
                     writer.InFlightClaimToken != 0)
                 {
                     return false;
@@ -544,7 +545,12 @@ namespace DS4Windows
                     currentEvent.Disposition !=
                         ControllerFeedbackDeliveryDisposition.Frame)
                 {
-                    return false;
+                    // A newly admitted expired watermark can leave no event,
+                    // or a pending Stop for an older effect. There is nothing
+                    // to re-render, but the caller must still pump that Stop.
+                    // Do not treat writer/claim contention as this no-op case.
+                    return allowNoFrame && (!hasEvent || currentEvent.Disposition ==
+                        ControllerFeedbackDeliveryDisposition.Stop);
                 }
 
                 if (writer.CompletedEventRevision == currentEventRevision)

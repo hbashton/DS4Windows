@@ -403,6 +403,19 @@ namespace DS4Windows
                 return false;
             }
 
+            // A previous process's USB/IP HID can outlive its imported-port
+            // listing. The new process has no active-port/path registration
+            // for it yet. Do not let Moonlight admission turn that orphan (or
+            // any output from our local broker) into another physical input.
+            // This is read-only admission, not authority to detach a port.
+            if (Global.TryResolveUsbIpWin2Device(hDevice.DevicePath,
+                    out bool usbipAncestor, out int usbipPort) &&
+                usbipAncestor &&
+                !ViiperUsbipPortManager.CanUseUsbipPortAsInput(usbipPort))
+            {
+                return false;
+            }
+
             bool isVirtualDevice = Global.CheckIfVirtualDevice(hDevice.DevicePath);
 
             if (hDevice.Attributes.VendorId == SONY_VID &&

@@ -98,6 +98,15 @@ internal sealed class Switch2ProUsbOwnedFeedbackActivationLifetime :
     private ulong nextVirtualFeedbackOwnershipEpoch;
     private ulong nextPlayerLedCommandSequence;
     private int operationActive;
+    private string wirePublicationStage = "NotEntered";
+    private ControllerFeedbackPumpDisposition wirePublicationDisposition;
+
+    public string DescribeWirePublication()
+    {
+        lock (gate)
+            return $"stage={wirePublicationStage}, ownerState={state}, " +
+                $"pump={wirePublicationDisposition}, physical={sink.LastFailure}";
+    }
 
     private Switch2ProUsbOwnedFeedbackActivationLifetime(
         Switch2ProUsbOwnedCompositeLeaseBundle bundle,
@@ -316,6 +325,7 @@ internal sealed class Switch2ProUsbOwnedFeedbackActivationLifetime :
         in Switch2HdRumbleImpulseTuning impulseTuning,
         in Switch2HdRumbleBodyTuning bodyTuning)
     {
+        wirePublicationStage = "OwnerLifetime";
         lock (gate)
         {
             if (state !=
@@ -327,21 +337,28 @@ internal sealed class Switch2ProUsbOwnedFeedbackActivationLifetime :
         }
 
         // Rejected broker frames do not own the current effect's tuning.
-        if (!ingress.TryPublish(wire) ||
-            !sink.TrySelectConfiguration(policy, impulseTuning, bodyTuning,
+        wirePublicationStage = "CanonicalIngress";
+        if (!ingress.TryPublish(wire)) return false;
+        wirePublicationStage = "SinkConfiguration";
+        if (!sink.TrySelectConfiguration(policy, impulseTuning, bodyTuning,
                 out bool presentationRefreshRequired))
         {
             return false;
         }
+        wirePublicationStage = "PresentationRefresh";
         ulong nowMicroseconds = CurrentMicroseconds();
-        // Stop is its own canonical event, not a frame to re-present.
-        if (presentationRefreshRequired && !ingress.HasPublishedTerminalStop &&
-            !pump.TryRefreshCurrentPresentation(nowMicroseconds))
+        // Expired ordering watermarks and terminal Stop need no live Frame
+        // to re-render. Their canonical Stop/no-op must still be pumped;
+        // writer/claim contention remains a failure, not permission to ACK.
+        if (presentationRefreshRequired &&
+            !pump.TryRefreshCurrentPresentation(nowMicroseconds, allowNoFrame: true))
         {
             return false;
         }
+        wirePublicationStage = "PhysicalPump";
         ControllerFeedbackPumpDisposition result = TryPumpOnce(
             nowMicroseconds, out _);
+        wirePublicationDisposition = result;
         return result is ControllerFeedbackPumpDisposition.Delivered or
             ControllerFeedbackPumpDisposition.None or
             ControllerFeedbackPumpDisposition.RetryPending;

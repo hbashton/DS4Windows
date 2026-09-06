@@ -7,6 +7,146 @@ namespace DS4WindowsTests
     [TestClass]
     public class ViiperUsbipPortManagerTests
     {
+        [DataTestMethod]
+        [DataRow("localhost:3241/1-1", false)]
+        [DataRow("127.0.0.1:3241/1-1", false)]
+        [DataRow("[::1]:3241/1-1", false)]
+        [DataRow("localhost:3241/x1-protected", false)]
+        [DataRow("remote.example:3241/1-1", true)]
+        [DataRow("localhost:3240/1-1", true)]
+        public void UsbipInputAdmissionSeparatesLocalBrokerFromExternalSources(
+            string location, bool expected)
+        {
+            Assert.AreEqual(expected, ViiperUsbipPortManager.CanUseUsbipPortAsInput(
+                63, Query));
+            bool Query(string[] arguments, out string output, out string error)
+            {
+                CollectionAssert.AreEqual(new[] { "port" }, arguments);
+                output = $"Port 63: device in use\n -> usbip://{location}\n -> serial 'foreign'\n";
+                error = string.Empty;
+                return true;
+            }
+        }
+
+        [DataTestMethod]
+        [DataRow("")]
+        [DataRow("Port 62: device in use\n -> usbip://remote.example:3241/1-1")]
+        [DataRow("Port 63: device in use\n -> usbip://not a valid location")]
+        [DataRow("Port 63: device in use\n -> usbip://remote.example:3241/1-1\nPort 63: device in use\n -> usbip://remote.example:3241/2-1")]
+        public void UsbipOrphanOrAmbiguousInputWaitsForResolvedDiscovery(string listing)
+        {
+            Assert.IsFalse(ViiperUsbipPortManager.CanUseUsbipPortAsInput(63, Query));
+            bool Query(string[] arguments, out string output, out string error)
+            {
+                output = listing;
+                error = string.Empty;
+                return true;
+            }
+        }
+
+        [TestMethod]
+        public void FailedUsbipInputQueryDoesNotAdmitAnOrphanAsPhysical()
+        {
+            Assert.IsFalse(ViiperUsbipPortManager.CanUseUsbipPortAsInput(63, FailingPortQuery));
+        }
+
+        [TestMethod]
+        public void KnownOutputCannotBeReadmittedFromAChangedPortListing()
+        {
+            ViiperUsbipPortManager.RegisterActivePort(63, "1-1");
+            try
+            {
+                Assert.IsFalse(ViiperUsbipPortManager.CanUseUsbipPortAsInput(63, Query));
+            }
+            finally { ViiperUsbipPortManager.UnregisterActivePort(63); }
+            static bool Query(string[] arguments, out string output, out string error)
+            {
+                output = error = string.Empty;
+                Assert.Fail("An active output must not need a fallible external query.");
+                return false;
+            }
+        }
+
+        [DataTestMethod]
+        [DataRow(false, 0, 0, 10)]
+        [DataRow(true, 0, 0, 1)]
+        [DataRow(false, 1, 0, 1)]
+        [DataRow(false, 0, 1, 1)]
+        [DataRow(true, 1, 1, 1)]
+        public void PadReplacementDoesNotRepeatProvenStartupRecovery(
+            bool recoveryCompleted, int legacyPorts, int xboxOnePorts, int expected)
+        {
+            Assert.AreEqual(expected, ViiperUsbipPortManager.RequiredStalePortCleanSnapshots(
+                recoveryCompleted, legacyPorts, xboxOnePorts));
+        }
+
+        [DataTestMethod]
+        [DataRow(1)]
+        [DataRow(10)]
+        public void RecoveryWaitsOnlyForRequiredCleanSnapshots(int required)
+        {
+            int queries = 0, waits = 0;
+            ViiperUsbipPortManager.ReconcileStaleLocalViiperPorts(required,
+                new HashSet<int>(), () =>
+                {
+                    queries++;
+                    return Array.Empty<ViiperUsbipPortManager.UsbipPortBlock>();
+                }, _ => Assert.Fail("No stale port was observed."), milliseconds =>
+                {
+                    Assert.AreEqual(100, milliseconds);
+                    waits++;
+                });
+            Assert.AreEqual(required, queries);
+            Assert.AreEqual(required - 1, waits);
+        }
+
+        [DataTestMethod]
+        [DataRow(1)]
+        [DataRow(10)]
+        public void RecoveryRechecksAfterDetachAndNeverDetachesProtectedImports(int required)
+        {
+            int queries = 0, waits = 0, detaches = 0;
+            var active = new ViiperUsbipPortManager.UsbipPortBlock(2,
+                " -> usbip://localhost:3241/1-2");
+            var xbox = new ViiperUsbipPortManager.UsbipPortBlock(3,
+                " -> usbip://localhost:3241/x1-0000000000000001");
+            var foreign = new ViiperUsbipPortManager.UsbipPortBlock(4,
+                " -> usbip://remote.example:3241/1-4");
+            var stale = new ViiperUsbipPortManager.UsbipPortBlock(5,
+                " -> usbip://localhost:3241/1-5");
+            ViiperUsbipPortManager.ReconcileStaleLocalViiperPorts(required,
+                new HashSet<int> { 2 }, () => ++queries == 1 ?
+                    new[] { active, xbox, foreign, stale } : new[] { active, xbox, foreign },
+                port => { Assert.AreEqual(5, port); detaches++; }, _ => waits++);
+            Assert.AreEqual(1, detaches);
+            Assert.AreEqual(required + 1, queries);
+            Assert.AreEqual(required, waits);
+        }
+
+        [TestMethod]
+        public void RecoveryCannotCertifyAStalePortThatNeverDisappears()
+        {
+            int queries = 0, waits = 0;
+            var stale = new ViiperUsbipPortManager.UsbipPortBlock(5,
+                " -> usbip://localhost:3241/1-5");
+            Assert.ThrowsException<IOException>(() =>
+                ViiperUsbipPortManager.ReconcileStaleLocalViiperPorts(1,
+                    new HashSet<int>(), () => { queries++; return new[] { stale }; },
+                    _ => { }, _ => waits++));
+            Assert.AreEqual(32, queries);
+            Assert.AreEqual(31, waits);
+        }
+
+        [TestMethod]
+        public void RecoveryDoesNotTreatAFailedQueryAsAnEmptySnapshot()
+        {
+            Assert.ThrowsException<IOException>(() =>
+                ViiperUsbipPortManager.ReconcileStaleLocalViiperPorts(1,
+                    new HashSet<int>(), () => throw new IOException("Synthetic query failure"),
+                    _ => Assert.Fail("No snapshot authorized a detach."),
+                    _ => Assert.Fail("Query failure must propagate immediately.")));
+        }
+
         [TestMethod]
         public void CanonicalUsbipInstallWinsOverPathCopy()
         {

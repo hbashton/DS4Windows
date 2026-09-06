@@ -176,7 +176,7 @@ namespace DS4Windows
             return result;
         }
 
-        public void DeferredPlugin(OutputDevice outputDevice, int inIdx, string inDisplayString,
+        public OutSlotDevice DeferredPlugin(OutputDevice outputDevice, int inIdx, string inDisplayString,
             OutputDevice[] outdevs, OutContType contType)
         {
             contType = contType.Normalize();
@@ -230,7 +230,7 @@ namespace DS4Windows
                             DS4Devices.EndOwnVirtualSonyConnect();
                         }
 
-                        return;
+                        return null;
                     }
                     catch (Exception e)
                     {
@@ -240,7 +240,7 @@ namespace DS4Windows
                             DS4Devices.EndOwnVirtualSonyConnect();
                         }
 
-                        return;
+                        return null;
                     }
 
                     if (beforeVirtualSony != null)
@@ -265,6 +265,9 @@ namespace DS4Windows
                     }
                     SlotAssigned?.Invoke(this, slot, outputSlots[slot]);
                     ControlService.StartupDiag($"OutputSlotManager.DeferredPlugin assigned slot={slot + 1} inIdx={inIdx} type={contType}");
+                    // A pre-Connect FindOpenSlot result is only a hint. Return
+                    // the exact slot committed while this write lock is held.
+                    return outputSlots[slot];
                 }
                 else
                 {
@@ -273,6 +276,7 @@ namespace DS4Windows
             };
 
             //queuedTasks--;
+            return null;
         }
 
         public void DeferredRemoval(OutputDevice outputDevice, int inIdx,

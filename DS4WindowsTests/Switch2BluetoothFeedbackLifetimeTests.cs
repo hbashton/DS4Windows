@@ -11,6 +11,43 @@ public class Switch2BluetoothFeedbackLifetimeTests
     private const ulong DeviceGeneration = 17;
     private const ulong TransportGeneration = 23;
 
+    [DataTestMethod]
+    [DataRow(false, false)]
+    [DataRow(false, true)]
+    [DataRow(true, false)]
+    [DataRow(true, true)]
+    public void XboxFeedbackTuningChangePreservesFreshNeutralAndExpiredOrdering(
+        bool expired, bool previouslyActuated)
+    {
+        RecordingLease lease = new();
+        Assert.IsTrue(Switch2BluetoothFeedbackLifetime.TryCreate(lease,
+            Switch2ControllerModel.ProController2, DeviceGeneration, TransportGeneration, out var feedback));
+        Assert.IsTrue(feedback.TryActivate());
+        Assert.IsTrue(feedback.TryCreateVirtualFeedbackSession(
+            ControllerFeedbackSource.XboxOneVirtualDevice, out var session));
+        try
+        {
+            if (previouslyActuated)
+                Assert.IsTrue(session.TryPublish(Wire(1, session.OwnershipEpoch, 20_000, 0, 0, 0)));
+            Assert.IsTrue(ControllerFeedbackClock.TryGetTimestampMicroseconds(out ulong now));
+            Assert.IsTrue(ControllerFeedbackFrame.TryCreate(
+                ControllerFeedbackSource.XboxOneVirtualDevice, ControllerFeedbackCommand.Neutral,
+                ControllerFeedbackActuators.All, 0, 0, 0, 0, 2,
+                DeviceGeneration, TransportGeneration, session.OwnershipEpoch,
+                expired ? now - 500_000 : now, 250_000, out var frame));
+            byte[] wire = new byte[ControllerFeedbackFrame.SerializedLength];
+            Assert.IsTrue(frame.TryWriteTo(wire));
+            Assert.IsTrue(session.TryPublish(wire, mapImpulseTriggersToHdRumble: true),
+                "An expired newer ordering watermark is valid even when there is no live effect to re-present.");
+            if (previouslyActuated || !expired) AssertNeutral(lease.LastPayload);
+            else Assert.AreEqual(0, lease.PayloadCount, "An expired first frame must never actuate.");
+            Assert.IsFalse(session.TryPublish(wire), "The exact sequence remains consumed.");
+            Assert.IsTrue(session.TryPublish(Wire(3, session.OwnershipEpoch, 20_000, 0, 0, 0),
+                mapImpulseTriggersToHdRumble: true));
+        }
+        finally { _ = session.TryRetire(); _ = feedback.TryStopAndRetire(3); }
+    }
+
     [TestMethod]
     [DoNotParallelize]
     public void ProductionProfileSettersWakeXboxWorkerWithoutNewGamePacket()

@@ -11895,6 +11895,10 @@ namespace DS4Windows
                             {
                                 AppLogger.LogToGui($"Profile output transition unplug failed for controller {device + 1}: {ex.Message}", true);
                                 ControlService.StartupDiag($"Profile output transition unplug exception index={device} oldType={oldContType} newType={outputDevType[device]} error={ex}");
+                                // Failed retirement did not release the exact
+                                // prior output. Never label it input-only and
+                                // attempt to create a competing replacement.
+                                return;
                             }
 
                             try

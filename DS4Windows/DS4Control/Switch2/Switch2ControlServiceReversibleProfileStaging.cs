@@ -720,6 +720,13 @@ internal sealed class Switch2ControlServiceReversibleProfileSlotHost :
     private readonly Switch2ControlServiceExactSlotCollectionsStage exactStage;
     private readonly Switch2ControlServiceExactMouseSlotStage mouseStage;
     private readonly StageRecord[] records;
+    // Cold profile/output work still owns the shared lifecycle gate required
+    // by the reversible stages. Report admission and completion must not take
+    // that gate: another slot's USB enumeration can last seconds, overflowing
+    // an otherwise healthy Bluetooth controller's ordered input queue.
+    // Cold lock order is lifecycleGate -> slot gate; reports take only their
+    // slot gate, and DispatchActive protects the borrowed stage outside it.
+    private readonly object[] reportSlotGates;
     private readonly Switch2UdpMotionObserver udpObserver;
     private readonly ReportDiagnosticsWorker diagnosticsWorker;
     private readonly Switch2ControlServiceObservedReportPipeline observedPipeline;
@@ -766,6 +773,9 @@ internal sealed class Switch2ControlServiceReversibleProfileSlotHost :
         }
 
         records = new StageRecord[controllers.Length];
+        reportSlotGates = new object[controllers.Length];
+        for (int index = 0; index < reportSlotGates.Length; index++)
+            reportSlotGates[index] = new object();
         exactStage = new Switch2ControlServiceExactSlotCollectionsStage(
             stageIssuer, lifecycleGate, controllers, slotManager);
         mouseStage = new Switch2ControlServiceExactMouseSlotStage(table,
@@ -786,6 +796,7 @@ internal sealed class Switch2ControlServiceReversibleProfileSlotHost :
         }
 
         lock (lifecycleGate)
+        lock (reportSlotGates[token.Slot])
         {
             if (!table.TryAuthenticateBoundExternalStage(token,
                     out InputControllerSlotTableFailure tableFailure))
@@ -1048,7 +1059,7 @@ internal sealed class Switch2ControlServiceReversibleProfileSlotHost :
         }
 
         StageRecord record;
-        lock (lifecycleGate)
+        lock (reportSlotGates[token.Slot])
         {
             record = records[token.Slot];
             if (report.Kind == Switch2RuntimeReportKind.TerminalNeutral &&
@@ -1132,7 +1143,7 @@ internal sealed class Switch2ControlServiceReversibleProfileSlotHost :
         }
         finally
         {
-            lock (lifecycleGate)
+            lock (reportSlotGates[token.Slot])
             {
                 record.DispatchActive = false;
                 if (succeeded && report.Kind ==
@@ -1169,6 +1180,7 @@ internal sealed class Switch2ControlServiceReversibleProfileSlotHost :
         }
 
         lock (lifecycleGate)
+        lock (reportSlotGates[token.Slot])
         {
             if (!table.TryAuthenticateExactExternalCleanup(token,
                     expectedTableState,

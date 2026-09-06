@@ -2231,9 +2231,9 @@ namespace DS4Windows
                         {
                             OutputDevice tempViiper = EstablishOutDevice(index, contType);
                             produced = tempViiper;
-                            outputslotMan.DeferredPlugin(tempViiper, index,
+                            slotDevice = outputslotMan.DeferredPlugin(tempViiper, index,
                                 $"{device.DisplayName} [{device.MacAddress}]", outputDevices, contType);
-                            success = true;
+                            success = slotDevice != null;
                         }
                         else
                         {
@@ -2242,7 +2242,9 @@ namespace DS4Windows
                     }
                 }
 
-                if (success && slotDevice.OutputDevice != null)
+                if (success && ReferenceEquals(slotDevice?.OutputDevice, produced) &&
+                    ReferenceEquals(outputDevices[index], produced) &&
+                    outputslotMan.IsExactBoundOutput(produced, index))
                 {
                     LogDebug($"Associated input controller #{index + 1} ({device.DisplayName}) to virtual {slotDevice.CurrentType.ToDisplayName()} Controller in{(slotDevice.PermanentType != OutContType.None ? " permanent" : "")} output slot #{slotDevice.Index + 1}");
                     useDInputOnly[index] = false;
@@ -2645,7 +2647,7 @@ namespace DS4Windows
                     // USB/IP output imported. Remove those ports before HID
                     // discovery or DS4Windows will ingest its own VIIPER DS4,
                     // create a second output/UAC endpoint, and recurse.
-                    ViiperUsbipPortManager.DetachStaleLocalViiperPorts();
+                    ViiperUsbipPortManager.RecoverStaleLocalViiperPortsAtStartup();
                     // Let usbccgp/HID finish publishing removal before the
                     // first input snapshot; otherwise a detached interface can
                     // remain enumerable for one final discovery pass.

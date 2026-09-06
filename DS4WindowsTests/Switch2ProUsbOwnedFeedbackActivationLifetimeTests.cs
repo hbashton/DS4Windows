@@ -15,6 +15,36 @@ public sealed class Switch2ProUsbOwnedFeedbackActivationLifetimeTests
     private const ulong TransportGeneration = 409;
 
     [DataTestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void ExpiredXboxFeedbackWithNewTuningConsumesOrderingWithoutActuation(bool previouslyActuated)
+    {
+        var composition = CreateCommitted(ContainerA);
+        Assert.IsTrue(composition.Feedback.TryCreateVirtualFeedbackSession(
+            ControllerFeedbackSource.XboxOneVirtualDevice, out var session));
+        try
+        {
+            if (previouslyActuated)
+                Assert.IsTrue(session.TryPublish(XboxWire(1, session.OwnershipEpoch, 20_000, 0, 0, 0)));
+            Assert.IsTrue(ControllerFeedbackClock.TryGetTimestampMicroseconds(out ulong now));
+            Assert.IsTrue(ControllerFeedbackFrame.TryCreate(
+                ControllerFeedbackSource.XboxOneVirtualDevice, ControllerFeedbackCommand.Neutral,
+                ControllerFeedbackActuators.All, 0, 0, 0, 0, 2,
+                DeviceGeneration, TransportGeneration, session.OwnershipEpoch,
+                now - 500_000, 250_000, out var frame));
+            byte[] wire = new byte[ControllerFeedbackFrame.SerializedLength];
+            Assert.IsTrue(frame.TryWriteTo(wire));
+            Assert.IsTrue(session.TryPublish(wire, mapImpulseTriggersToHdRumble: true));
+            Assert.AreEqual(previouslyActuated ? 2 : 0, composition.Lease.ReportCount);
+            if (previouslyActuated) AssertReport(composition.Lease.ReportAt(1), 1, true);
+            Assert.IsFalse(session.TryPublish(wire));
+            Assert.IsTrue(session.TryPublish(XboxWire(3, session.OwnershipEpoch, 20_000, 0, 0, 0),
+                mapImpulseTriggersToHdRumble: true));
+        }
+        finally { _ = session.TryRetire(); }
+    }
+
+    [DataTestMethod]
     [DataRow(true, 0)]
     [DataRow(true, 150)]
     [DataRow(false, 0)]

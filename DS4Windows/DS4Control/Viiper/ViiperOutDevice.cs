@@ -540,6 +540,7 @@ namespace DS4Windows
         private int switch2DualSensePolicyRefreshRequested;
         private Switch2XboxFeedbackPolicyRequest switch2XboxPolicyRefreshRequested;
         private readonly Func<Switch2XboxFeedbackPolicy> readSwitch2XboxLivePolicy;
+        private string xboxOneFeedbackRejectionDetail;
         private readonly Predicate<Switch2XboxFeedbackPolicyRequest> isCurrentSwitch2XboxPolicyRequest;
         private XboxOnePhysicalOutputSuppressionRequest xboxOnePhysicalOutputSuppressionRequested;
         private XboxOnePhysicalFeedbackSession xboxOnePhysicalFeedbackSession;
@@ -6291,7 +6292,24 @@ namespace DS4Windows
 
             try
             {
-                return TryApplyXboxOneFeedback(feedback, feedbackLength);
+                bool accepted = TryApplyXboxOneFeedback(feedback, feedbackLength);
+                if (!accepted)
+                {
+                    // Capture while the exact physical session still exists;
+                    // emit only after ACK so diagnostics cannot delay that ACK.
+                    string frameDetail = "invalid canonical frame";
+                    if (feedbackLength == ControllerFeedbackFrame.SerializedLength &&
+                        ControllerFeedbackFrame.TryReadFrom(feedback.AsSpan(0, feedbackLength), out var frame) &&
+                        ControllerFeedbackClock.TryGetTimestampMicroseconds(out ulong now))
+                        frameDetail = $"command={frame.Command}, sequence={frame.Sequence}, " +
+                            $"ageUs={(now >= frame.TimestampMicroseconds ? now - frame.TimestampMicroseconds : 0)}, " +
+                            $"ttlUs={frame.TimeToLiveMicroseconds}, fresh={frame.IsFreshAt(now)}";
+                    Volatile.Write(ref xboxOneFeedbackRejectionDetail,
+                        $"{frameDetail}; inputSlot={Volatile.Read(ref lastInputDeviceIndex) + 1}; " +
+                        (Volatile.Read(ref switch2FeedbackSession)?.DescribeWirePublication() ??
+                            "no Switch 2 feedback session"));
+                }
+                return accepted;
             }
             catch (Exception ex)
             {
@@ -6311,6 +6329,12 @@ namespace DS4Windows
             int payloadLength, ulong correlation, bool delivered,
             bool acknowledged)
         {
+            if (!delivered)
+            {
+                string detail = Interlocked.Exchange(ref xboxOneFeedbackRejectionDetail, null);
+                if (detail != null)
+                    AppLogger.LogToGui($"VIIPER Xbox One canonical feedback rejected: {detail}", true);
+            }
             if (IsAcknowledgedXboxOneTerminalFeedback(payload,
                     payloadLength, correlation, delivered, acknowledged))
             {
@@ -10807,6 +10831,10 @@ namespace DS4Windows
         private static readonly Dictionary<int, string> ActivePorts =
             new Dictionary<int, string>();
         private static readonly Dictionary<int, ViiperXboxOnePortLease> XboxOnePorts = new();
+        // Owned by NativePortMutationGate. Empty live output collections during
+        // an ordinary type switch do not mean this process just crashed. Each
+        // ControlService start explicitly invalidates and re-proves recovery.
+        private static bool startupPortRecoveryCompleted;
 
         internal static T WithNativePortMutationLock<T>(Func<T> operation,
             CancellationToken cancellationToken = default)
@@ -10845,38 +10873,86 @@ namespace DS4Windows
         internal delegate bool UsbipCommandRunner(string[] arguments,
             out string output, out string error);
 
-        public static void DetachStaleLocalViiperPorts()
+        public static void DetachStaleLocalViiperPorts() =>
+            DetachStaleLocalViiperPorts(startServiceRecovery: false);
+
+        internal static void RecoverStaleLocalViiperPortsAtStartup() =>
+            DetachStaleLocalViiperPorts(startServiceRecovery: true);
+
+        private static void DetachStaleLocalViiperPorts(bool startServiceRecovery)
         {
             using (NativePortMutationGate.Enter())
-                DetachStaleLocalViiperPortsCore();
+            {
+                if (startServiceRecovery)
+                    startupPortRecoveryCompleted = false;
+                try
+                {
+                    DetachStaleLocalViiperPortsCore();
+                }
+                catch
+                {
+                    // A failed query or unresolved detach cannot certify the
+                    // next transition's fast reconciliation path.
+                    startupPortRecoveryCompleted = false;
+                    throw;
+                }
+            }
         }
+
+        internal static int RequiredStalePortCleanSnapshots(bool recoveryCompleted,
+            int legacyPortCount, int xboxOnePortCount) =>
+            recoveryCompleted || legacyPortCount > 0 || xboxOnePortCount > 0 ? 1 : 10;
 
         private static void DetachStaleLocalViiperPortsCore()
         {
             HashSet<int> activePorts;
+            int xboxOnePortCount;
             lock (ActivePortsLock)
             {
                 activePorts = new HashSet<int>(ActivePorts.Keys);
+                xboxOnePortCount = XboxOnePorts.Count;
             }
 
             // USB/IP and PnP update asynchronously. A second stale import can
             // become visible more than half a second after the first detach, so
             // require a sustained clean window before input enumeration starts.
+            // Require the sustained window for unproven startup/crash
+            // recovery. A verified live output or a completed recovery also
+            // permits one fresh snapshot while the last output is replaced.
+            // Never skip ownership filtering or the post-detach clean check.
+            int requiredCleanSnapshots = RequiredStalePortCleanSnapshots(
+                startupPortRecoveryCompleted, activePorts.Count, xboxOnePortCount);
+            ReconcileStaleLocalViiperPorts(requiredCleanSnapshots, activePorts,
+                () =>
+                {
+                    if (!TryGetImportedPorts(out IReadOnlyList<UsbipPortBlock> ports,
+                            out string queryError))
+                        throw CreatePortQueryException("clean stale VIIPER imports", queryError);
+                    return ports;
+                },
+                port => DetachPort(port, "stale local VIIPER controller import"),
+                Thread.Sleep);
+            startupPortRecoveryCompleted = true;
+        }
+
+        // The same bounded orchestration is exercised with synthetic port
+        // snapshots in tests; neither the fast path nor a failed query may
+        // invent a clean snapshot or detach a protected/foreign import.
+        internal static void ReconcileStaleLocalViiperPorts(int requiredCleanSnapshots,
+            ISet<int> activePorts, Func<IReadOnlyList<UsbipPortBlock>> readPorts,
+            Action<int> detach, Action<int> delay)
+        {
+            if (requiredCleanSnapshots is < 1 or > 32)
+                throw new ArgumentOutOfRangeException(nameof(requiredCleanSnapshots));
+            ArgumentNullException.ThrowIfNull(activePorts);
+            ArgumentNullException.ThrowIfNull(readPorts);
+            ArgumentNullException.ThrowIfNull(detach);
+            ArgumentNullException.ThrowIfNull(delay);
             int cleanSnapshots = 0;
-            // A sustained clean window is required only when no device from
-            // this process owns a port (startup/crash recovery). Creating or
-            // removing a temporary companion while a native output is active
-            // can use one clean snapshot; registered ports protect the native
-            // device and PnP is already established.
-            int requiredCleanSnapshots = activePorts.Count > 0 ? 1 : 10;
             for (int attempt = 0; attempt < 32 && cleanSnapshots < requiredCleanSnapshots; attempt++)
             {
-                if (!TryGetImportedPorts(out IReadOnlyList<UsbipPortBlock> ports,
-                    out string queryError))
-                {
-                    throw CreatePortQueryException("clean stale VIIPER imports",
-                        queryError);
-                }
+                IReadOnlyList<UsbipPortBlock> ports = readPorts() ??
+                    throw new IOException("The VIIPER port query did not return a snapshot.");
 
                 bool detachedAny = false;
                 foreach (UsbipPortBlock port in ports)
@@ -10884,18 +10960,20 @@ namespace DS4Windows
                     if (!activePorts.Contains(port.Port) &&
                         IsDs4WindowsOwnedLocalPort(port, null))
                     {
-                        DetachPort(port.Port,
-                            "stale local VIIPER controller import");
+                        detach(port.Port);
                         detachedAny = true;
                     }
                 }
 
                 cleanSnapshots = detachedAny ? 0 : cleanSnapshots + 1;
-                if (cleanSnapshots < requiredCleanSnapshots)
+                if (cleanSnapshots < requiredCleanSnapshots && attempt < 31)
                 {
-                    Thread.Sleep(100);
+                    delay(100);
                 }
             }
+            if (cleanSnapshots < requiredCleanSnapshots)
+                throw CreatePortQueryException("clean stale VIIPER imports",
+                    "The bounded recovery scan did not reach a stable clean snapshot.");
         }
 
         public static void DetachDuplicateLocalViiperPorts(uint busId, string devId, int keepPort)
@@ -10977,6 +11055,33 @@ namespace DS4Windows
             {
                 return ActivePorts.ContainsKey(port) || XboxOnePorts.ContainsKey(port);
             }
+        }
+
+        // Input exclusion is deliberately broader than destructive stale-port
+        // cleanup. Even protected Xbox aliases and foreign serials on our
+        // local broker are outputs, never upstream controllers. An orphan HID
+        // with no current import must wait for a later discovery pass.
+        internal static bool CanUseUsbipPortAsInput(int port) =>
+            CanUseUsbipPortAsInput(port, TryRunUsbip);
+
+        internal static bool CanUseUsbipPortAsInput(int port,
+            UsbipCommandRunner query)
+        {
+            if (port < 0 || IsActivePort(port) ||
+                !TryGetImportedPorts(query, out var ports, out _))
+                return false;
+
+            int matches = 0;
+            bool externalSource = false;
+            foreach (UsbipPortBlock candidate in ports)
+            {
+                if (candidate.Port != port) continue;
+                matches++;
+                externalSource = TryParseRemoteLocation(candidate.Block,
+                    out string host, out int serverPort, out _) &&
+                    !(IsLocalHost(host) && serverPort == ViiperUsbipServerPort);
+            }
+            return matches == 1 && externalSource;
         }
 
         internal static void DetachRegisteredPort(int port, string reason)

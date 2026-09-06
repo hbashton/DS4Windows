@@ -8,6 +8,44 @@ namespace DS4WindowsTests;
 public sealed class OutputSlotAtomicBindingTests
 {
     [TestMethod]
+    public void NewPluginReturnsCommittedSlotAfterAnotherInputConsumesOpenHint()
+    {
+        var manager = new OutputSlotManager();
+        var bound = new OutputDevice[2];
+        var first = new FakeOutput();
+        var second = new FakeOutput();
+        OutSlotDevice hint = manager.FindOpenSlot();
+        try
+        {
+            OutSlotDevice firstSlot = manager.DeferredPlugin(first, 0, "First", bound, OutContType.ViiperX360);
+            OutSlotDevice secondSlot = manager.DeferredPlugin(second, 1, "Second", bound, OutContType.ViiperX360);
+            Assert.AreSame(hint, firstSlot);
+            Assert.AreNotSame(hint, secondSlot, "The earlier open-slot hint was consumed by another input.");
+            Assert.AreSame(second, secondSlot.OutputDevice);
+            Assert.AreEqual(1, secondSlot.InputIndex);
+            Assert.AreSame(second, bound[1]);
+            Assert.IsTrue(manager.IsExactBoundOutput(second, 1));
+        }
+        finally
+        {
+            manager.DeferredRemoval(first, 0, bound, true);
+            manager.DeferredRemoval(second, 1, bound, true);
+        }
+    }
+
+    [TestMethod]
+    public void FailedNewPluginDoesNotReturnAnUncommittedSlot()
+    {
+        var manager = new OutputSlotManager();
+        var bound = new OutputDevice[1];
+        var output = new FakeOutput { OnConnect = () => throw new IOException("Synthetic connect failure") };
+        Assert.IsNull(manager.DeferredPlugin(output, 0, "First", bound, OutContType.ViiperX360));
+        Assert.IsNull(bound[0]);
+        Assert.IsNull(manager.GetOutSlotDevice(output));
+        Assert.IsFalse(manager.IsExactBoundOutput(output, 0));
+    }
+
+    [TestMethod]
     public void CompetingInputSlotsCannotAdoptTheSameUnboundOutput()
     {
         using var fixture = new Fixture();
@@ -237,7 +275,8 @@ public sealed class OutputSlotAtomicBindingTests
         internal int FeedbackClearCount { get; private set; }
         internal Action OnReset { get; set; }
         internal Action OnFeedbackClear { get; set; }
-        public override void Connect() { ConnectCount++; connected = true; }
+        internal Action OnConnect { get; set; }
+        public override void Connect() { ConnectCount++; OnConnect?.Invoke(); connected = true; }
         public override void Disconnect() { DisconnectCount++; connected = false; }
         public override string GetDeviceType() => OutContType.ViiperX360.ToString();
         public override void ConvertandSendReport(DS4State state, int device) { }

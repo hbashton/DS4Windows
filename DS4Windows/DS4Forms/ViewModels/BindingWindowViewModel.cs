@@ -38,6 +38,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         private OutBinding currentOutBind;
         private OutBinding shiftOutBind;
         private bool showShift;
+        private bool preparedUnassignedSecondAction;
         private bool rumbleActive;
         private readonly Switch2ModeShiftScope modeShiftScope;
 
@@ -172,6 +173,17 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             if (settings.LightbarMacro is not null) currentOutBind.LightbarMacro = settings.LightbarMacro;
         }
 
+        internal void PrepareSecondAction()
+        {
+            if (shiftOutBind.ShiftTrigger == 0)
+            {
+                preparedUnassignedSecondAction = true;
+                shiftOutBind.ShiftTrigger = Mapping.SWITCH2_MODE_SHIFT_TRIGGER;
+            }
+            ActionBinding = shiftOutBind;
+            ShowShift = true;
+        }
+
         public void PrepareSaveMacro(OutBinding bind, bool shiftBind=false)
         {
             DS4ControlSettings setting = settings;
@@ -204,7 +216,14 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public void WriteBinds()
         {
             currentOutBind.WriteBind(settings);
-            shiftOutBind.WriteBind(settings);
+            // The dialog normally commits on close. A shortcut that merely
+            // preselected an empty second action must remain a no-op until the
+            // user actually chooses an action, extras, or another trigger.
+            if (!(preparedUnassignedSecondAction &&
+                  shiftOutBind.ShiftTrigger == Mapping.SWITCH2_MODE_SHIFT_TRIGGER &&
+                  shiftOutBind.outputType == OutBinding.OutType.Default &&
+                  !shiftOutBind.IsUsingExtras()))
+                shiftOutBind.WriteBind(settings);
         }
 
         public void StartForcedColor(Color color)

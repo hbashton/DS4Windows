@@ -30,6 +30,16 @@ public sealed class Switch2DualGyroEditorViewModel : INotifyPropertyChanged
         }
     }
 
+    public bool CanCombineBoth => Global.Switch2DualJoyConGyroMode[device] ==
+        Switch2DualGyroMode.SingleSideToggle;
+
+    public string ModeDescription => ModeIndex switch
+    {
+        1 => "Only one hand aims at a time. Your chosen buttons switch the active hand.",
+        2 => "Both hands start active. Each side's chosen buttons pause or resume that side.",
+        _ => "Your preferred hand leads. The other helps when moving the same way. Your chosen buttons swap the lead hand.",
+    };
+
     public int ModeIndex
     {
         get => Global.Switch2DualJoyConGyroMode[device] switch
@@ -56,6 +66,8 @@ public sealed class Switch2DualGyroEditorViewModel : INotifyPropertyChanged
                 Raise(nameof(DominantSideIndex));
             }
             Raise(nameof(ModeIndex));
+            Raise(nameof(ModeDescription));
+            Raise(nameof(CanCombineBoth));
         }
     }
 
@@ -109,6 +121,8 @@ public sealed class Switch2DualGyroEditorViewModel : INotifyPropertyChanged
         Raise(nameof(RightActivationChoices));
         Raise(nameof(Enabled));
         Raise(nameof(ModeIndex));
+        Raise(nameof(ModeDescription));
+        Raise(nameof(CanCombineBoth));
         Raise(nameof(DominantSideIndex));
         Raise(nameof(ActivationModeIndex));
     }

@@ -5195,6 +5195,11 @@ namespace DS4Windows
                 customAct = customAct || sASteeringWheelEmulationAxis[device] >= SASteeringWheelEmulationAxisType.VJoy1X;
                 customAct = customAct || lsOutputSettings[device].mode != StickMode.Controls;
                 customAct = customAct || rsOutputSettings[device].mode != StickMode.Controls;
+                // These lanes run inside MapCustom even with no button remaps
+                // or special actions. Enabling them must admit the mapper.
+                customAct = customAct || switch2JoyConIrMouseEnabled[device];
+                customAct = customAct || (gyroOutMode[device] == GyroOutMode.Mouse &&
+                    switch2GyroMouseStickAssistSensitivity[device] > 0);
                 containsCustomAction[device] = customAct;
             }
         }

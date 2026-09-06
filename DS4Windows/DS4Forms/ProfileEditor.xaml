@@ -1768,7 +1768,7 @@
                 
             </TabItem>
 
-            <TabItem Header="{lex:Loc Gyro}" Tag="Motion controls, mouse, steering, and directional swipes">
+            <TabItem x:Name="gyroSettingsTab" Header="{lex:Loc Gyro}" Tag="Motion controls, mouse, steering, and directional swipes">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
@@ -2258,8 +2258,7 @@
                                            Text="Select a Switch 2 Pro or Joy-Con 2, or open a profile without a controller to edit these settings." />
                             </StackPanel>
                         </Border>
-                        <StackPanel x:Name="switch2SettingsPanel" Margin="8,8,8,0" HorizontalAlignment="Stretch"
-                                    Visibility="{Binding ShowSwitch2Controls, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <StackPanel x:Name="switch2SettingsPanel" Margin="8,8,8,0" HorizontalAlignment="Stretch" Visibility="{Binding ShowSwitch2Controls, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <StackPanel.Resources>
                                 <Style x:Key="Switch2SettingsCardStyle" TargetType="Border">
                                     <Setter Property="Background" Value="{DynamicResource CardBackgroundColor}" />
@@ -2273,392 +2272,585 @@
                                     <Setter Property="Margin" Value="0,6,0,6" />
                                     <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                                     <Setter Property="ContentTemplate">
-                                        <Setter.Value><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" /></DataTemplate></Setter.Value>
+                                        <Setter.Value>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding}" TextWrapping="Wrap" />
+                                            </DataTemplate>
+                                        </Setter.Value>
                                     </Setter>
                                 </Style>
                                 <Style TargetType="ToolTip">
                                     <Setter Property="MaxWidth" Value="320" />
                                     <Setter Property="ContentTemplate">
-                                        <Setter.Value><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" /></DataTemplate></Setter.Value>
+                                        <Setter.Value>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding}" TextWrapping="Wrap" />
+                                            </DataTemplate>
+                                        </Setter.Value>
                                     </Setter>
                                 </Style>
                             </StackPanel.Resources>
-                                <TextBlock Text="Make it feel right"
-                                           FontSize="20" FontWeight="SemiBold" />
-                                <TextBlock Margin="0,2,0,7" TextWrapping="Wrap" Opacity="0.78"
-                                           Text="Rumble, aiming and controls for your Switch 2 controller. Changes are saved with this profile." />
-                            <Border Style="{StaticResource Switch2SettingsCardStyle}">
-                                <Expander x:Name="switch2ConnectionCard" IsExpanded="False"
-                                          HorizontalContentAlignment="Stretch"
-                                          AutomationProperties.Name="Layout &amp; connection">
+                            <TextBlock Text="How do you want to play?" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,4" />
+                            <TextBlock Text="Point at menus. Aim by tilting. Feel the game. Start with what you want to do; fine-tuning is tucked inside each section." TextWrapping="Wrap" Opacity="0.78" Margin="0,0,0,8" />
+                            <TextBlock Text="Saved with this profile. Desk mouse and motion aiming are separate features." TextWrapping="Wrap" Margin="0,0,0,18" />
+                            <Border Style="{StaticResource Switch2SettingsCardStyle}" Visibility="{Binding ShowSwitch2JoyConControls, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <Expander x:Name="switch2JoyConCard" IsExpanded="true" HorizontalContentAlignment="Stretch" AutomationProperties.Name="Mouse on a desk">
                                     <Expander.Header>
-                                        <StackPanel Margin="4,0,0,0">
-                                            <TextBlock Text="Layout &amp; connection" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                            <TextBlock Text="Set button labels, holding style and battery-saving options." Margin="0,3,0,0"
-                                                       Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap" />
-                                        </StackPanel>
+                                        <DockPanel LastChildFill="True" Margin="4,0,0,0" MaxWidth="760">
+                                            <Image Source="{x:Static local:Switch2FeatureArtwork.DeskMouse}" Width="104" Height="64" Stretch="Uniform" Margin="0,0,18,0" DockPanel.Dock="Left" />
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="Mouse on a desk" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                <TextBlock Text="Slide a Joy-Con to point or aim. Use its stick to scroll." Margin="0,4,0,0" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </DockPanel>
                                     </Expander.Header>
                                     <StackPanel Margin="26,18,4,4">
-                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,7"
-                                                    ToolTip="Xbox follows button positions. Nintendo follows the printed A, B, X and Y labels.">
-                                            <TextBlock Text="Face-button layout:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
-                                            <ComboBox MinHeight="28" MinWidth="120"
-                                                      SelectedIndex="{Binding Switch2FaceButtonLayoutIndex}">
-                                                <ComboBoxItem Content="Xbox" />
-                                                <ComboBoxItem Content="Nintendo" />
-                                            </ComboBox>
-                                        </StackPanel>
-                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,7"
-                                                    Visibility="{Binding ShowSwitch2StandaloneJoyConControls, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                            <TextBlock Text="Joy-Con holding style:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
-                                            <ComboBox MinHeight="28" MinWidth="120"
-                                                      SelectedIndex="{Binding Switch2JoyConStandaloneHoldModeIndex}"
-                                                      ToolTip="Choose the starting orientation. A choice made on the Controllers tab takes priority for that Joy-Con.">
-                                                <ComboBoxItem Content="Vertical" />
-                                                <ComboBoxItem Content="Horizontal" />
-                                            </ComboBox>
-                                        </StackPanel>
-                                        <GroupBox Header="Automatic Bluetooth disconnect"
-                                                  Padding="7,5" Margin="0,0,0,8">
-                                            <StackPanel>
-                                                <TextBlock TextWrapping="Wrap" Opacity="0.78" Margin="0,0,0,5"
-                                                           Text="Disconnect after inactivity to save battery, or after a set time even while playing." />
-                                                <WrapPanel>
-                                                    <TextBlock Text="Mode:" VerticalAlignment="Center" Margin="0,0,6,0" />
-                                                    <ComboBox MinHeight="28" Width="150"
-                                                              SelectedIndex="{Binding Switch2AutoDisconnectModeIndex}">
-                                                        <ComboBoxItem Content="Off" />
-                                                        <ComboBoxItem Content="When idle" />
-                                                        <ComboBoxItem Content="After a set time" />
-                                                    </ComboBox>
-                                                    <TextBlock Text="Disconnect after:" VerticalAlignment="Center" Margin="14,0,6,0" />
-                                                    <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2AutoDisconnectDays}"
-                                                                        Minimum="0" Maximum="2147483647" Width="68" />
-                                                    <TextBlock Text="day" VerticalAlignment="Center" Margin="3,0,8,0" />
-                                                    <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2AutoDisconnectHours}"
-                                                                        Minimum="0" Maximum="23" Width="55" />
-                                                    <TextBlock Text="hour" VerticalAlignment="Center" Margin="3,0,8,0" />
-                                                    <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2AutoDisconnectMinutes}"
-                                                                        Minimum="0" Maximum="59" Width="55" />
-                                                    <TextBlock Text="minute" VerticalAlignment="Center" Margin="3,0,0,0" />
-                                                </WrapPanel>
-                                                <TextBlock TextWrapping="Wrap" Opacity="0.70" Margin="0,4,0,0"
-                                                           Text="Set the duration to zero to disable the timer. Until changed here, existing profiles keep their Idle Disconnect setting." />
+                                        <CheckBox x:Name="Switch2JoyConIrMouseEnabledCheckBox" IsChecked="{Binding Switch2JoyConIrMouseEnabled}" Margin="0,9,0,0" Content="Slide a Joy-Con to move the mouse" ToolTip="Move a Joy-Con across a surface to control the mouse pointer." />
+                                        <StackPanel Margin="20,4,0,0">
+                                            <TextBlock Margin="0,0,0,4" TextWrapping="Wrap" Opacity="0.78" Text="Place the sensor edge against a desk or mouse mat, then slide the Joy-Con. Lifting it lets you reposition without moving the pointer." />
+                                            <TextBlock Margin="0,0,0,4" TextWrapping="Wrap" Opacity="0.78" Text="Slide to aim or point at menus. Use the stick to scroll while the sensor touches the surface." />
+                                            <TextBlock Margin="0,0,0,4" TextWrapping="Wrap" Opacity="0.78" Text="Assign mouse clicks in Button Mapping. For different actions only while on the desk, use the matching IR Sensor as the Shift Modifier." />
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="Which Joy-Con:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
+                                                <ComboBox MinHeight="28" MinWidth="120" IsEnabled="{Binding IsChecked, ElementName=Switch2JoyConIrMouseEnabledCheckBox}" SelectedIndex="{Binding Switch2JoyConIrMouseSourceIndex}">
+                                                    <ComboBoxItem Content="Automatic" />
+                                                    <ComboBoxItem Content="Left" />
+                                                    <ComboBoxItem Content="Right" />
+                                                    <ComboBoxItem Content="Both" />
+                                                </ComboBox>
                                             </StackPanel>
-                                        </GroupBox>
-                                        <CheckBox IsChecked="{Binding Switch2ConnectionHapticEnabled}"
-                                                  Margin="0,7,0,0"
-                                                  Content="Vibrate when connected"
-                                                  ToolTip="Play a short vibration when the controller is ready." />
-                                        <Expander Header="Alternate button actions"
-                                                  Margin="0,9,0,0"
-                                                  ToolTip="Give buttons a second action that you can hold or toggle on.">
-                                            <StackPanel Margin="8,5,0,2">
-                                                <TextBlock TextWrapping="Wrap" Opacity="0.78" Margin="0,0,0,6"
-                                                           Text="In Button Mapping, add an alternative action under Shift Modifier and choose Switch 2 Mode Shift." />
-                                                <WrapPanel Margin="0,0,0,7">
-                                                    <TextBlock Text="Edit mapping layer:" VerticalAlignment="Center" Margin="0,0,5,0" />
-                                                    <ComboBox MinHeight="28" Width="180"
-                                                              ItemsSource="{Binding Switch2ModeShiftEditor.MappingScopeChoices}"
-                                                              SelectedIndex="{Binding Switch2ModeShiftEditor.SelectedMappingScopeIndex}" />
-                                                </WrapPanel>
-                                                <TextBlock Text="Hold-to-shift buttons:" FontWeight="SemiBold" />
-                                                <ItemsControl ItemsSource="{Binding Switch2ModeShiftEditor.HoldButtonChoices}" Margin="0,3,0,0">
-                                                    <ItemsControl.ItemsPanel>
-                                                        <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
-                                                    </ItemsControl.ItemsPanel>
-                                                    <ItemsControl.ItemTemplate>
-                                                        <DataTemplate>
-                                                            <CheckBox Content="{Binding Label}" IsChecked="{Binding IsSelected}"
-                                                                      Margin="0,1,12,1" />
-                                                        </DataTemplate>
-                                                    </ItemsControl.ItemTemplate>
-                                                </ItemsControl>
-                                                <TextBlock Text="Press-to-toggle shift buttons:" FontWeight="SemiBold" Margin="0,7,0,0" />
-                                                <ItemsControl ItemsSource="{Binding Switch2ModeShiftEditor.ToggleButtonChoices}" Margin="0,3,0,0">
-                                                    <ItemsControl.ItemsPanel>
-                                                        <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
-                                                    </ItemsControl.ItemsPanel>
-                                                    <ItemsControl.ItemTemplate>
-                                                        <DataTemplate>
-                                                            <CheckBox Content="{Binding Label}" IsChecked="{Binding IsSelected}"
-                                                                      Margin="0,1,12,1" />
-                                                        </DataTemplate>
-                                                    </ItemsControl.ItemTemplate>
-                                                </ItemsControl>
-                                                <TextBlock Text="Automatically apply while active:" FontWeight="SemiBold" Margin="0,7,0,1" />
-                                                <WrapPanel>
-                                                    <CheckBox Content="Gyro Mouse"
-                                                              IsChecked="{Binding Switch2ModeShiftEditor.AutoApplyGyroMouse}"
-                                                              Margin="0,1,12,1" />
-                                                    <CheckBox Content="Gyro Mouse Joystick"
-                                                              IsChecked="{Binding Switch2ModeShiftEditor.AutoApplyGyroMouseJoystick}"
-                                                              Margin="0,1,12,1" />
-                                                    <CheckBox Content="Motion steering"
-                                                              IsChecked="{Binding Switch2ModeShiftEditor.AutoApplySteering}"
-                                                              Margin="0,1,12,1" />
-                                                </WrapPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                                <TextBlock Text="Stick scroll:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
+                                                <ComboBox MinHeight="28" MinWidth="145" IsEnabled="{Binding IsChecked, ElementName=Switch2JoyConIrMouseEnabledCheckBox}" SelectedIndex="{Binding Switch2JoyConIrMouseScrollModeIndex}" ToolTip="Choose whether the stick scrolls vertically only or in all four directions.">
+                                                    <ComboBoxItem Content="Up / Down" />
+                                                    <ComboBoxItem Content="Four-way" />
+                                                </ComboBox>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                                <TextBlock Text="Left sensitivity:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
+                                                <xctk:DoubleUpDown MinHeight="28" MinWidth="72" FormatString="F1" IsEnabled="{Binding IsChecked, ElementName=Switch2JoyConIrMouseEnabledCheckBox}" Minimum="1.0" Maximum="10.0" Increment="0.2" Value="{Binding Switch2JoyConLeftIrMouseSensitivity}" />
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                                <TextBlock Text="Right sensitivity:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
+                                                <xctk:DoubleUpDown MinHeight="28" MinWidth="72" FormatString="F1" IsEnabled="{Binding IsChecked, ElementName=Switch2JoyConIrMouseEnabledCheckBox}" Minimum="1.0" Maximum="10.0" Increment="0.2" Value="{Binding Switch2JoyConRightIrMouseSensitivity}" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                        <Expander Header="Surface detection" Margin="0,14,0,0">
+                                            <StackPanel Margin="8,10,0,0">
+                                                <TextBlock Text="Try Relaxed if your surface is not detected. These settings also affect surface-triggered button actions and aiming." TextWrapping="Wrap" Margin="0,0,0,8" />
+                                                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                                    <TextBlock Text="Left surface detection:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
+                                                    <ComboBox MinHeight="28" MinWidth="120" SelectedIndex="{Binding Switch2JoyConLeftIrMouseActivationThresholdIndex}">
+                                                        <ComboBoxItem Content="Strict" />
+                                                        <ComboBoxItem Content="Balanced" />
+                                                        <ComboBoxItem Content="Relaxed" />
+                                                    </ComboBox>
+                                                </StackPanel>
+                                                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                                    <TextBlock Text="Right surface detection:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
+                                                    <ComboBox MinHeight="28" MinWidth="120" SelectedIndex="{Binding Switch2JoyConRightIrMouseActivationThresholdIndex}">
+                                                        <ComboBoxItem Content="Strict" />
+                                                        <ComboBoxItem Content="Balanced" />
+                                                        <ComboBoxItem Content="Relaxed" />
+                                                    </ComboBox>
+                                                </StackPanel>
                                             </StackPanel>
                                         </Expander>
                                     </StackPanel>
                                 </Expander>
                             </Border>
                             <Border Style="{StaticResource Switch2SettingsCardStyle}">
-                                <Expander x:Name="switch2FeedbackCard" IsExpanded="True"
-                                          HorizontalContentAlignment="Stretch"
-                                          AutomationProperties.Name="HD rumble &amp; feedback">
+                                <Expander x:Name="switch2MotionCard" IsExpanded="true" HorizontalContentAlignment="Stretch" AutomationProperties.Name="Aim by tilting">
                                     <Expander.Header>
-                                        <StackPanel Margin="4,0,0,0">
-                                            <TextBlock Text="HD rumble &amp; feedback" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                            <TextBlock Text="Adjust vibration strength and feedback from Xbox and PlayStation games." Margin="0,3,0,0"
-                                                       Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap" />
-                                        </StackPanel>
+                                        <DockPanel LastChildFill="True" Margin="4,0,0,0" MaxWidth="760">
+                                            <Image Source="{x:Static local:Switch2FeatureArtwork.Aim}" Width="104" Height="64" Stretch="Uniform" Margin="0,0,18,0" DockPanel.Dock="Left" />
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="Aim by tilting" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                <TextBlock Text="Fine aim with your hands, with or without a mouse pointer." Margin="0,4,0,0" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </DockPanel>
                                     </Expander.Header>
                                     <StackPanel Margin="26,18,4,4">
-                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,7"
-                                                    ToolTip="Adjust overall rumble strength. 100% is the normal level; 0% turns body rumble off.">
+                                        <TextBlock Text="Choose what tilting does" FontWeight="SemiBold" Margin="0,0,0,6" />
+                                        <ComboBox SelectedIndex="{Binding Switch2AimSetup.OutputIndex}" MinHeight="34" MaxWidth="340" HorizontalAlignment="Left" MinWidth="260" AutomationProperties.Name="Motion aiming output">
+                                            <ComboBoxItem Content="Mapped tilt buttons (no mouse)" />
+                                            <ComboBoxItem Content="Mouse pointer" />
+                                            <ComboBoxItem Content="Virtual aiming stick" />
+                                            <ComboBoxItem Content="Quick-tilt actions" />
+                                            <ComboBoxItem Content="Game's own motion controls" />
+                                        </ComboBox>
+                                        <TextBlock Text="{Binding Switch2AimSetup.Description}" TextWrapping="Wrap" Margin="0,8,0,12" />
+                                        <StackPanel Visibility="{Binding Switch2AimSetup.CanChooseActivation, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <WrapPanel>
+                                                <TextBlock Text="When to aim:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
+                                                <ComboBox SelectedIndex="{Binding Switch2AimSetup.ActivationIndex}" MinHeight="32" MinWidth="200" AutomationProperties.Name="Motion aiming activation">
+                                                    <ComboBoxItem Content="Always" />
+                                                    <ComboBoxItem Content="Hold ZL / L2" />
+                                                    <ComboBoxItem Content="Hold ZR / R2" />
+                                                    <ComboBoxItem Content="Custom — see Gyro settings" IsEnabled="False" />
+                                                </ComboBox>
+                                            </WrapPanel>
+                                            <TextBlock Text="Trigger choices follow your button layout. Custom combinations and toggle-to-aim are available in Gyro settings." TextWrapping="Wrap" Margin="0,6,0,10" Opacity="0.78" />
+                                        </StackPanel>
+                                        <WrapPanel Visibility="{Binding Switch2AimSetup.IsMouse, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <TextBlock Text="Mouse aiming speed:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
+                                            <xctk:IntegerUpDown Value="{Binding GyroSensitivity}" Minimum="0" Maximum="500" Increment="5" Width="80" MinHeight="30" />
+                                            <TextBlock Text="%" VerticalAlignment="Center" Margin="5,0,0,0" />
+                                        </WrapPanel>
+                                        <Button Content="Open full Gyro settings…" Click="Switch2OpenGyroSettings_Click" HorizontalAlignment="Left" Margin="0,12,0,8" Padding="12,6" ToolTip="Choose aim buttons, stick output, sensitivity and smoothing." />
+                                        <Expander Header="Fine-tune aiming" Margin="0,10,0,0">
+                                            <StackPanel Margin="8,10,0,0">
+                                                <CheckBox IsChecked="{Binding Switch2MagnetometerYawAssistEnabled}" Margin="0,7,0,0" Content="Reduce sideways gyro drift" ToolTip="Help reduce sideways gyro drift. Turn this off if nearby electronics affect aiming." />
+                                                <StackPanel Orientation="Horizontal" Margin="0,7,0,0" ToolTip="Ignore tiny gyro movements to steady aim. Set to 0 for maximum sensitivity.">
+                                                    <TextBlock Text="Ignore small movements:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
+                                                    <xctk:DoubleUpDown MinHeight="28" Value="{Binding Switch2VirtualGyroSoftDeadzone}" Minimum="0" Maximum="100" Increment="0.5" FormatString="F1" Width="75" />
+                                                </StackPanel>
+                                                <StackPanel Orientation="Horizontal" Margin="0,7,0,0" ToolTip="Use the stick alongside gyro aiming to turn further. Set to 0 to turn this off.">
+                                                    <TextBlock Text="Stick-assisted aiming:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
+                                                    <xctk:DoubleUpDown MinHeight="28" Value="{Binding Switch2GyroMouseStickAssistSensitivity}" Minimum="0" Maximum="10" Increment="0.2" FormatString="F1" Width="75" />
+                                                </StackPanel>
+                                                <CheckBox IsChecked="{Binding Switch2HighRateMousePresentation}" Margin="0,7,0,0" Content="Smoother mouse movement" ToolTip="Make mouse movement smoother between controller updates. This does not speed up the controller itself." />
+                                                <StackPanel Orientation="Horizontal" Margin="0,7,0,0" ToolTip="Adjust sideways motion sensitivity in compatible emulators. 1 is the normal level.">
+                                                    <TextBlock Text="Emulator turn sensitivity:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
+                                                    <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2CemuhookYawSensitivity}" Minimum="1" Maximum="5" Increment="1" Width="60" />
+                                                </StackPanel>
+                                                <CheckBox IsChecked="{Binding Switch2HorizonStabilizationEnabled}" Margin="0,7,0,0" Content="Keep motion aiming level" ToolTip="Keep motion aiming level when you tilt the controller." />
+                                                <Expander Header="Pause aiming with a button" Margin="0,9,0,0" ToolTip="Pause motion aiming with a button so you can reposition the controller.">
+                                                    <StackPanel Margin="8,5,0,2">
+                                                        <TextBlock TextWrapping="Wrap" Opacity="0.78" Margin="0,0,0,6" Text="Hold to pause aiming, or press to toggle the pause. The pause clears when you stop using gyro." />
+                                                        <WrapPanel Margin="0,0,0,7">
+                                                            <TextBlock Text="Aiming settings to edit:" VerticalAlignment="Center" Margin="0,0,5,0" />
+                                                            <ComboBox MinHeight="28" Width="160" ItemsSource="{Binding Switch2GyroLockEditor.ModeChoices}" SelectedIndex="{Binding Switch2GyroLockEditor.SelectedModeIndex}" />
+                                                        </WrapPanel>
+                                                        <TextBlock Text="Hold-to-lock buttons:" FontWeight="SemiBold" />
+                                                        <ItemsControl ItemsSource="{Binding Switch2GyroLockEditor.HoldButtonChoices}" Margin="0,3,0,0">
+                                                            <ItemsControl.ItemsPanel>
+                                                                <ItemsPanelTemplate>
+                                                                    <WrapPanel />
+                                                                </ItemsPanelTemplate>
+                                                            </ItemsControl.ItemsPanel>
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate>
+                                                                    <CheckBox Content="{Binding Label}" IsChecked="{Binding IsSelected}" Margin="0,1,12,1" />
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                        <TextBlock Text="Press-to-toggle lock buttons:" FontWeight="SemiBold" Margin="0,7,0,0" />
+                                                        <ItemsControl ItemsSource="{Binding Switch2GyroLockEditor.ToggleButtonChoices}" Margin="0,3,0,0">
+                                                            <ItemsControl.ItemsPanel>
+                                                                <ItemsPanelTemplate>
+                                                                    <WrapPanel />
+                                                                </ItemsPanelTemplate>
+                                                            </ItemsControl.ItemsPanel>
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate>
+                                                                    <CheckBox Content="{Binding Label}" IsChecked="{Binding IsSelected}" Margin="0,1,12,1" />
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                    </StackPanel>
+                                                </Expander>
+                                                <Expander Header="Steady aim around button presses" Margin="0,9,0,0" ToolTip="Reduce aim movement caused by pressing or releasing buttons.">
+                                                    <StackPanel Margin="8,5,0,2">
+                                                        <TextBlock TextWrapping="Wrap" Opacity="0.78" Margin="0,0,0,6" Text="Fine-tune a mode you have already enabled above. These choices do not switch your aiming output." />
+                                                        <WrapPanel Margin="0,0,0,7">
+                                                            <TextBlock Text="Aiming settings to edit:" VerticalAlignment="Center" Margin="0,0,5,0" />
+                                                            <ComboBox MinHeight="28" Width="160" ItemsSource="{Binding Switch2GyroTriggerEditor.ModeChoices}" SelectedIndex="{Binding Switch2GyroTriggerEditor.SelectedModeIndex}" />
+                                                            <TextBlock Text="activation source:" VerticalAlignment="Center" Margin="12,0,5,0" />
+                                                            <ComboBox MinHeight="28" Width="220" ItemsSource="{Binding Switch2GyroTriggerEditor.TriggerChoices}" SelectedIndex="{Binding Switch2GyroTriggerEditor.SelectedTriggerIndex}" />
+                                                        </WrapPanel>
+                                                        <TextBlock Text="Buttons that steady aim:" FontWeight="SemiBold" />
+                                                        <ItemsControl ItemsSource="{Binding Switch2GyroTriggerEditor.DeadzoneButtonChoices}" Margin="0,3,0,0">
+                                                            <ItemsControl.ItemsPanel>
+                                                                <ItemsPanelTemplate>
+                                                                    <WrapPanel />
+                                                                </ItemsPanelTemplate>
+                                                            </ItemsControl.ItemsPanel>
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate>
+                                                                    <CheckBox Content="{Binding Label}" IsChecked="{Binding IsSelected}" Margin="0,1,12,1" />
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                        <WrapPanel Margin="0,5,0,0">
+                                                            <TextBlock Text="Deadzone:" VerticalAlignment="Center" Margin="0,0,5,0" />
+                                                            <xctk:DoubleUpDown MinHeight="28" Value="{Binding Switch2GyroTriggerEditor.DeadzoneAmount}" Minimum="0" Maximum="100" Increment="0.5" FormatString="F1" Width="68" />
+                                                            <TextBlock Text="press pause:" VerticalAlignment="Center" Margin="12,0,5,0" />
+                                                            <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2GyroTriggerEditor.PauseAfterPressedMilliseconds}" Minimum="0" Maximum="60000" Width="72" />
+                                                            <TextBlock Text="ms" VerticalAlignment="Center" Margin="3,0,0,0" />
+                                                        </WrapPanel>
+                                                        <WrapPanel Margin="0,4,0,0">
+                                                            <TextBlock Text="Release pause:" VerticalAlignment="Center" Margin="0,0,5,0" />
+                                                            <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2GyroTriggerEditor.PauseAfterReleasedMilliseconds}" Minimum="0" Maximum="60000" Width="72" />
+                                                            <TextBlock Text="ms" VerticalAlignment="Center" Margin="3,0,0,0" />
+                                                            <TextBlock Text="deadzone after release:" VerticalAlignment="Center" Margin="12,0,5,0" />
+                                                            <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2GyroTriggerEditor.DeadzoneEffectAfterReleasedMilliseconds}" Minimum="0" Maximum="60000" Width="72" />
+                                                            <TextBlock Text="ms" VerticalAlignment="Center" Margin="3,0,0,0" />
+                                                        </WrapPanel>
+                                                        <TextBlock Text="Buttons that slow aim:" FontWeight="SemiBold" Margin="0,7,0,0" />
+                                                        <ItemsControl ItemsSource="{Binding Switch2GyroTriggerEditor.DampeningButtonChoices}" Margin="0,3,0,0">
+                                                            <ItemsControl.ItemsPanel>
+                                                                <ItemsPanelTemplate>
+                                                                    <WrapPanel />
+                                                                </ItemsPanelTemplate>
+                                                            </ItemsControl.ItemsPanel>
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate>
+                                                                    <CheckBox Content="{Binding Label}" IsChecked="{Binding IsSelected}" Margin="0,1,12,1" />
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                        <WrapPanel Margin="0,5,0,0">
+                                                            <TextBlock Text="Dampening:" VerticalAlignment="Center" Margin="0,0,5,0" />
+                                                            <xctk:DoubleUpDown MinHeight="28" Value="{Binding Switch2GyroTriggerEditor.DampeningAmountPercent}" Minimum="0" Maximum="100" Increment="1" FormatString="F0" Width="68" />
+                                                            <TextBlock Text="%" VerticalAlignment="Center" Margin="3,0,0,0" />
+                                                            <TextBlock Text="after release:" VerticalAlignment="Center" Margin="12,0,5,0" />
+                                                            <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2GyroTriggerEditor.DampeningEffectAfterReleasedMilliseconds}" Minimum="0" Maximum="60000" Width="72" />
+                                                            <TextBlock Text="ms" VerticalAlignment="Center" Margin="3,0,0,0" />
+                                                        </WrapPanel>
+                                                    </StackPanel>
+                                                </Expander>
+                                                <Expander Header="Steady aiming when touching a desk" Margin="0,12,0,0" Visibility="{Binding ShowSwitch2JoyConControls, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                    <StackPanel Margin="8,5,0,2">
+                                                        <TextBlock TextWrapping="Wrap" Opacity="0.78" Margin="0,0,0,6" Text="Choose the left or right IR Sensor in the Gyro trigger menu to aim while touching a surface." />
+                                                        <TextBlock TextWrapping="Wrap" Opacity="0.78" Margin="0,0,0,6" Text="Pause aiming around button presses, ignore small movements, or reduce sensitivity while a button is held." />
+                                                        <GroupBox Header="Left optical sensor" Padding="7,5" Margin="0,2,0,0">
+                                                            <StackPanel>
+                                                                <TextBlock Text="Deadzone / click-stabilization buttons:" FontWeight="SemiBold" />
+                                                                <ItemsControl ItemsSource="{Binding Switch2JoyConLeftIrGyroDeadzoneButtonChoices}" Margin="0,3,0,0">
+                                                                    <ItemsControl.ItemsPanel>
+                                                                        <ItemsPanelTemplate>
+                                                                            <WrapPanel />
+                                                                        </ItemsPanelTemplate>
+                                                                    </ItemsControl.ItemsPanel>
+                                                                    <ItemsControl.ItemTemplate>
+                                                                        <DataTemplate>
+                                                                            <CheckBox Content="{Binding Label}" IsChecked="{Binding IsSelected}" Margin="0,1,12,1" />
+                                                                        </DataTemplate>
+                                                                    </ItemsControl.ItemTemplate>
+                                                                </ItemsControl>
+                                                                <WrapPanel Margin="0,5,0,0">
+                                                                    <TextBlock Text="Deadzone:" VerticalAlignment="Center" Margin="0,0,5,0" />
+                                                                    <xctk:DoubleUpDown MinHeight="28" Value="{Binding Switch2JoyConLeftIrGyroDeadzoneAmount}" Minimum="0" Maximum="100" Increment="0.5" FormatString="F1" Width="68" />
+                                                                    <TextBlock Text="press pause:" VerticalAlignment="Center" Margin="12,0,5,0" />
+                                                                    <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2JoyConLeftIrGyroPauseAfterPressedMilliseconds}" Minimum="0" Maximum="60000" Width="72" />
+                                                                    <TextBlock Text="ms" VerticalAlignment="Center" Margin="3,0,0,0" />
+                                                                </WrapPanel>
+                                                                <WrapPanel Margin="0,4,0,0">
+                                                                    <TextBlock Text="Release pause:" VerticalAlignment="Center" Margin="0,0,5,0" />
+                                                                    <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2JoyConLeftIrGyroPauseAfterReleasedMilliseconds}" Minimum="0" Maximum="60000" Width="72" />
+                                                                    <TextBlock Text="ms" VerticalAlignment="Center" Margin="3,0,0,0" />
+                                                                    <TextBlock Text="deadzone after release:" VerticalAlignment="Center" Margin="12,0,5,0" />
+                                                                    <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2JoyConLeftIrGyroDeadzoneEffectAfterReleasedMilliseconds}" Minimum="0" Maximum="60000" Width="72" />
+                                                                    <TextBlock Text="ms" VerticalAlignment="Center" Margin="3,0,0,0" />
+                                                                </WrapPanel>
+                                                                <TextBlock Text="Dampening buttons:" FontWeight="SemiBold" Margin="0,7,0,0" />
+                                                                <ItemsControl ItemsSource="{Binding Switch2JoyConLeftIrGyroDampeningButtonChoices}" Margin="0,3,0,0">
+                                                                    <ItemsControl.ItemsPanel>
+                                                                        <ItemsPanelTemplate>
+                                                                            <WrapPanel />
+                                                                        </ItemsPanelTemplate>
+                                                                    </ItemsControl.ItemsPanel>
+                                                                    <ItemsControl.ItemTemplate>
+                                                                        <DataTemplate>
+                                                                            <CheckBox Content="{Binding Label}" IsChecked="{Binding IsSelected}" Margin="0,1,12,1" />
+                                                                        </DataTemplate>
+                                                                    </ItemsControl.ItemTemplate>
+                                                                </ItemsControl>
+                                                                <WrapPanel Margin="0,5,0,0">
+                                                                    <TextBlock Text="Dampening:" VerticalAlignment="Center" Margin="0,0,5,0" />
+                                                                    <xctk:DoubleUpDown MinHeight="28" Value="{Binding Switch2JoyConLeftIrGyroDampeningAmountPercent}" Minimum="0" Maximum="100" Increment="1" FormatString="F0" Width="68" />
+                                                                    <TextBlock Text="%" VerticalAlignment="Center" Margin="3,0,0,0" />
+                                                                    <TextBlock Text="after release:" VerticalAlignment="Center" Margin="12,0,5,0" />
+                                                                    <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2JoyConLeftIrGyroDampeningEffectAfterReleasedMilliseconds}" Minimum="0" Maximum="60000" Width="72" />
+                                                                    <TextBlock Text="ms" VerticalAlignment="Center" Margin="3,0,0,0" />
+                                                                </WrapPanel>
+                                                            </StackPanel>
+                                                        </GroupBox>
+                                                        <GroupBox Header="Right optical sensor" Padding="7,5" Margin="0,7,0,0">
+                                                            <StackPanel>
+                                                                <TextBlock Text="Deadzone / click-stabilization buttons:" FontWeight="SemiBold" />
+                                                                <ItemsControl ItemsSource="{Binding Switch2JoyConRightIrGyroDeadzoneButtonChoices}" Margin="0,3,0,0">
+                                                                    <ItemsControl.ItemsPanel>
+                                                                        <ItemsPanelTemplate>
+                                                                            <WrapPanel />
+                                                                        </ItemsPanelTemplate>
+                                                                    </ItemsControl.ItemsPanel>
+                                                                    <ItemsControl.ItemTemplate>
+                                                                        <DataTemplate>
+                                                                            <CheckBox Content="{Binding Label}" IsChecked="{Binding IsSelected}" Margin="0,1,12,1" />
+                                                                        </DataTemplate>
+                                                                    </ItemsControl.ItemTemplate>
+                                                                </ItemsControl>
+                                                                <WrapPanel Margin="0,5,0,0">
+                                                                    <TextBlock Text="Deadzone:" VerticalAlignment="Center" Margin="0,0,5,0" />
+                                                                    <xctk:DoubleUpDown MinHeight="28" Value="{Binding Switch2JoyConRightIrGyroDeadzoneAmount}" Minimum="0" Maximum="100" Increment="0.5" FormatString="F1" Width="68" />
+                                                                    <TextBlock Text="press pause:" VerticalAlignment="Center" Margin="12,0,5,0" />
+                                                                    <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2JoyConRightIrGyroPauseAfterPressedMilliseconds}" Minimum="0" Maximum="60000" Width="72" />
+                                                                    <TextBlock Text="ms" VerticalAlignment="Center" Margin="3,0,0,0" />
+                                                                </WrapPanel>
+                                                                <WrapPanel Margin="0,4,0,0">
+                                                                    <TextBlock Text="Release pause:" VerticalAlignment="Center" Margin="0,0,5,0" />
+                                                                    <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2JoyConRightIrGyroPauseAfterReleasedMilliseconds}" Minimum="0" Maximum="60000" Width="72" />
+                                                                    <TextBlock Text="ms" VerticalAlignment="Center" Margin="3,0,0,0" />
+                                                                    <TextBlock Text="deadzone after release:" VerticalAlignment="Center" Margin="12,0,5,0" />
+                                                                    <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2JoyConRightIrGyroDeadzoneEffectAfterReleasedMilliseconds}" Minimum="0" Maximum="60000" Width="72" />
+                                                                    <TextBlock Text="ms" VerticalAlignment="Center" Margin="3,0,0,0" />
+                                                                </WrapPanel>
+                                                                <TextBlock Text="Dampening buttons:" FontWeight="SemiBold" Margin="0,7,0,0" />
+                                                                <ItemsControl ItemsSource="{Binding Switch2JoyConRightIrGyroDampeningButtonChoices}" Margin="0,3,0,0">
+                                                                    <ItemsControl.ItemsPanel>
+                                                                        <ItemsPanelTemplate>
+                                                                            <WrapPanel />
+                                                                        </ItemsPanelTemplate>
+                                                                    </ItemsControl.ItemsPanel>
+                                                                    <ItemsControl.ItemTemplate>
+                                                                        <DataTemplate>
+                                                                            <CheckBox Content="{Binding Label}" IsChecked="{Binding IsSelected}" Margin="0,1,12,1" />
+                                                                        </DataTemplate>
+                                                                    </ItemsControl.ItemTemplate>
+                                                                </ItemsControl>
+                                                                <WrapPanel Margin="0,5,0,0">
+                                                                    <TextBlock Text="Dampening:" VerticalAlignment="Center" Margin="0,0,5,0" />
+                                                                    <xctk:DoubleUpDown MinHeight="28" Value="{Binding Switch2JoyConRightIrGyroDampeningAmountPercent}" Minimum="0" Maximum="100" Increment="1" FormatString="F0" Width="68" />
+                                                                    <TextBlock Text="%" VerticalAlignment="Center" Margin="3,0,0,0" />
+                                                                    <TextBlock Text="after release:" VerticalAlignment="Center" Margin="12,0,5,0" />
+                                                                    <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2JoyConRightIrGyroDampeningEffectAfterReleasedMilliseconds}" Minimum="0" Maximum="60000" Width="72" />
+                                                                    <TextBlock Text="ms" VerticalAlignment="Center" Margin="3,0,0,0" />
+                                                                </WrapPanel>
+                                                            </StackPanel>
+                                                        </GroupBox>
+                                                    </StackPanel>
+                                                </Expander>
+                                            </StackPanel>
+                                        </Expander>
+                                    </StackPanel>
+                                </Expander>
+                            </Border>
+                            <Border Style="{StaticResource Switch2SettingsCardStyle}" Visibility="{Binding ShowSwitch2JoyConControls, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <StackPanel>
+                                    <DockPanel LastChildFill="True" Margin="4,0,0,0" MaxWidth="760">
+                                        <Image Source="{x:Static local:Switch2FeatureArtwork.Pair}" Width="104" Height="64" Stretch="Uniform" Margin="0,0,18,0" DockPanel.Dock="Left" />
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="Dual Joy-Con aiming" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                            <TextBlock Text="Let your two hands share the aim, or switch between them." Margin="0,4,0,0" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </DockPanel>
+                                    <CheckBox x:Name="Switch2DualJoyConGyroEnabledCheckBox" IsChecked="{Binding Switch2DualGyroEditor.Enabled}" Content="Aim with both Joy-Cons (DJG)" FontSize="15" FontWeight="SemiBold" Margin="26,14,0,6" ToolTip="Let a joined pair share motion aiming. Turn off to use the normal single motion source." />
+                                    <TextBlock Text="On: use your chosen two-hand behavior below. Off: use the normal motion source. This does not pair the controllers or turn on mouse aiming." TextWrapping="Wrap" Margin="26,0,4,10" Opacity="0.78" />
+                                    <Button Content="Set up motion aiming…" Click="Switch2OpenAimSetup_Click" HorizontalAlignment="Left" Margin="26,0,0,12" Padding="10,5" />
+                                    <Expander x:Name="switch2PairCard" IsExpanded="false" HorizontalContentAlignment="Stretch" AutomationProperties.Name="Which Joy-Con aims?">
+                                        <Expander.Header>
+                                            <StackPanel>
+                                                <TextBlock Text="Choose how the two hands work together" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                <TextBlock Text="Lead hand, side switching and pause buttons." TextWrapping="Wrap" Opacity="0.78" />
+                                            </StackPanel>
+                                        </Expander.Header>
+                                        <StackPanel Margin="26,18,4,4">
+                                            <TextBlock Text="{Binding Switch2DualGyroEditor.ModeDescription}" TextWrapping="Wrap" Margin="0,0,0,10" />
+                                            <StackPanel Margin="8,10,0,0">
+                                                <StackPanel Margin="20,4,0,0" IsEnabled="{Binding IsChecked, ElementName=Switch2DualJoyConGyroEnabledCheckBox}">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <TextBlock Text="Mode:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
+                                                        <ComboBox MinHeight="28" MinWidth="165" SelectedIndex="{Binding Switch2DualGyroEditor.ModeIndex}">
+                                                            <ComboBoxItem Content="Both hands — switch lead hand" />
+                                                            <ComboBoxItem Content="One hand at a time" />
+                                                            <ComboBoxItem Content="Both hands — pause each side" />
+                                                        </ComboBox>
+                                                    </StackPanel>
+                                                    <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                                        <TextBlock Text="Preferred aiming hand:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
+                                                        <ComboBox MinHeight="28" MinWidth="120" SelectedIndex="{Binding Switch2DualGyroEditor.DominantSideIndex}" ToolTip="Choose the hand that leads your aim, or combine both when pausing each side separately.">
+                                                            <ComboBoxItem Content="Left" />
+                                                            <ComboBoxItem Content="Right" />
+                                                            <ComboBoxItem Content="Combine both" IsEnabled="{Binding Switch2DualGyroEditor.CanCombineBoth}" />
+                                                        </ComboBox>
+                                                    </StackPanel>
+                                                    <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                                        <TextBlock Text="Activation:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
+                                                        <ComboBox MinHeight="28" MinWidth="120" SelectedIndex="{Binding Switch2DualGyroEditor.ActivationModeIndex}">
+                                                            <ComboBoxItem Content="Hold" />
+                                                            <ComboBoxItem Content="Toggle" />
+                                                        </ComboBox>
+                                                    </StackPanel>
+                                                    <TextBlock Margin="0,7,0,4" TextWrapping="Wrap" Opacity="0.78" Text="Choose buttons for each Joy-Con. Any selected button activates that side; you do not need to press them together." />
+                                                    <Expander Header="Buttons that activate the left side" Margin="0,4,0,0">
+                                                        <ItemsControl ItemsSource="{Binding Switch2DualGyroEditor.LeftActivationChoices}" Margin="0,3,0,0">
+                                                            <ItemsControl.ItemsPanel>
+                                                                <ItemsPanelTemplate>
+                                                                    <WrapPanel />
+                                                                </ItemsPanelTemplate>
+                                                            </ItemsControl.ItemsPanel>
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate>
+                                                                    <CheckBox Content="{Binding Label}" IsChecked="{Binding IsSelected}" Margin="0,1,12,1" />
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                    </Expander>
+                                                    <Expander Header="Buttons that activate the right side" Margin="0,4,0,0">
+                                                        <ItemsControl ItemsSource="{Binding Switch2DualGyroEditor.RightActivationChoices}" Margin="0,3,0,0">
+                                                            <ItemsControl.ItemsPanel>
+                                                                <ItemsPanelTemplate>
+                                                                    <WrapPanel />
+                                                                </ItemsPanelTemplate>
+                                                            </ItemsControl.ItemsPanel>
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate>
+                                                                    <CheckBox Content="{Binding Label}" IsChecked="{Binding IsSelected}" Margin="0,1,12,1" />
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                    </Expander>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Expander>
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource Switch2SettingsCardStyle}">
+                                <Expander x:Name="switch2FeedbackCard" IsExpanded="false" HorizontalContentAlignment="Stretch" AutomationProperties.Name="Feel game feedback">
+                                    <Expander.Header>
+                                        <DockPanel LastChildFill="True" Margin="4,0,0,0" MaxWidth="760">
+                                            <Image Source="{x:Static local:Switch2FeatureArtwork.Rumble}" Width="104" Height="64" Stretch="Uniform" Margin="0,0,18,0" DockPanel.Dock="Left" />
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="Feel game feedback" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                <TextBlock Text="Feel impacts, textures and trigger effects as HD rumble." Margin="0,4,0,0" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </Expander.Header>
+                                    <StackPanel Margin="26,18,4,4">
+                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,7" ToolTip="Adjust overall rumble strength. 100% is the normal level; 0% turns body rumble off.">
                                             <TextBlock Text="Body rumble strength:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
-                                            <xctk:IntegerUpDown MinHeight="28" Value="{Binding RumbleBoost}"
-                                                                Minimum="0" Maximum="200" Increment="10" Width="70" />
+                                            <xctk:IntegerUpDown MinHeight="28" Value="{Binding RumbleBoost}" Minimum="0" Maximum="200" Increment="10" Width="70" />
                                             <TextBlock Text="%" VerticalAlignment="Center" Margin="4,0,0,0" />
                                         </StackPanel>
-                                        <CheckBox x:Name="Switch2XboxImpulseEnabledCheckBox"
-                                                  IsChecked="{Binding Switch2MapXboxImpulseTriggersToHdRumble}"
-                                                  Content="Include Xbox trigger rumble"
-                                                  ToolTip="Feel Xbox trigger vibrations on the matching side of your controller." />
-                                        <StackPanel Margin="20,4,0,0"
-                                                    IsEnabled="{Binding IsChecked, ElementName=Switch2XboxImpulseEnabledCheckBox}">
-                                            <CheckBox x:Name="Switch2XboxImpulseDynamicFrequencyCheckBox"
-                                                      IsChecked="{Binding Switch2XboxImpulseDynamicFrequency}"
-                                                      Content="Vary trigger rumble feel"
-                                                      ToolTip="Change the feel of trigger rumble as its strength changes." />
+                                        <CheckBox x:Name="Switch2XboxImpulseEnabledCheckBox" IsChecked="{Binding Switch2MapXboxImpulseTriggersToHdRumble}" Content="Include Xbox trigger rumble" ToolTip="Feel Xbox trigger vibrations on the matching side of your controller." />
+                                        <StackPanel Margin="20,4,0,0" IsEnabled="{Binding IsChecked, ElementName=Switch2XboxImpulseEnabledCheckBox}">
+                                            <CheckBox x:Name="Switch2XboxImpulseDynamicFrequencyCheckBox" IsChecked="{Binding Switch2XboxImpulseDynamicFrequency}" Content="Vary trigger rumble feel" ToolTip="Change the feel of trigger rumble as its strength changes." />
                                             <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
                                                 <TextBlock Text="Trigger rumble strength:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
-                                                <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2XboxImpulseStrength}"
-                                                                    Minimum="1" Maximum="10" Increment="1" Width="60" />
+                                                <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2XboxImpulseStrength}" Minimum="1" Maximum="10" Increment="1" Width="60" />
                                             </StackPanel>
-                                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0"
-                                                        Visibility="{Binding IsChecked, ElementName=Switch2XboxImpulseDynamicFrequencyCheckBox, Converter={StaticResource InvertBoolToVisibilityConverter}}">
+                                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0" Visibility="{Binding IsChecked, ElementName=Switch2XboxImpulseDynamicFrequencyCheckBox, Converter={StaticResource InvertBoolToVisibilityConverter}}">
                                                 <TextBlock Text="Fixed rumble feel:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
-                                                <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2XboxImpulseFrequency}"
-                                                                    Minimum="1" Maximum="10" Increment="1" Width="60" />
+                                                <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2XboxImpulseFrequency}" Minimum="1" Maximum="10" Increment="1" Width="60" />
                                             </StackPanel>
                                         </StackPanel>
-                                        <CheckBox IsChecked="{Binding Switch2DualSenseAudioHapticsEnabled}"
-                                                  Content="Include detailed DualSense vibrations"
-                                                  Margin="0,7,0,0"
-                                                  ToolTip="Turn detailed DualSense vibrations into left and right HD rumble." />
-                                        <CheckBox IsChecked="{Binding Switch2DualSenseAdaptiveTriggersEnabled}"
-                                                  Content="Include DualSense trigger effects"
-                                                  Margin="0,5,0,0"
-                                                  ToolTip="Turn DualSense trigger effects into vibrations. Switch 2 triggers cannot add physical resistance." />
-                                        <CheckBox x:Name="Switch2XboxBodyRumbleModeCheckBox"
-                                                  IsChecked="{Binding Switch2XboxBodyRumbleMode}"
-                                                  Content="Use Xbox-style body rumble"
-                                                  ToolTip="Give body rumble a consistent Xbox-style feel instead of following each game's vibration detail." />
-                                        <StackPanel Orientation="Horizontal" Margin="20,4,0,7"
-                                                    IsEnabled="{Binding IsChecked, ElementName=Switch2XboxBodyRumbleModeCheckBox}">
+                                        <CheckBox IsChecked="{Binding Switch2DualSenseAudioHapticsEnabled}" Content="Include detailed DualSense vibrations" Margin="0,7,0,0" ToolTip="Turn detailed DualSense vibrations into left and right HD rumble." />
+                                        <CheckBox IsChecked="{Binding Switch2DualSenseAdaptiveTriggersEnabled}" Content="Include DualSense trigger effects" Margin="0,5,0,0" ToolTip="Turn DualSense trigger effects into vibrations. Switch 2 triggers cannot add physical resistance." />
+                                        <CheckBox x:Name="Switch2XboxBodyRumbleModeCheckBox" IsChecked="{Binding Switch2XboxBodyRumbleMode}" Content="Use Xbox-style body rumble" ToolTip="Give body rumble a consistent Xbox-style feel instead of following each game's vibration detail." />
+                                        <StackPanel Orientation="Horizontal" Margin="20,4,0,7" IsEnabled="{Binding IsChecked, ElementName=Switch2XboxBodyRumbleModeCheckBox}">
                                             <TextBlock Text="Body rumble feel:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
-                                            <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2XboxBodyRumbleFrequency}"
-                                                                Minimum="1" Maximum="10" Increment="1" Width="60" />
+                                            <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2XboxBodyRumbleFrequency}" Minimum="1" Maximum="10" Increment="1" Width="60" />
                                         </StackPanel>
-                                        <StackPanel Orientation="Horizontal" Margin="0,7,0,0"
-                                                    ToolTip="Delay rumble to match delayed game audio. Leave at 0 for the quickest response.">
-                                            <TextBlock Text="Game rumble delay:"
-                                                       VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
-                                            <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2RumbleDelayMilliseconds}"
-                                                                Minimum="0" Maximum="9999"
-                                                                Increment="1" Width="80" />
-                                            <TextBlock Text="ms" VerticalAlignment="Center"
-                                                       Margin="6,0,0,0" />
+                                        <StackPanel Orientation="Horizontal" Margin="0,7,0,0" ToolTip="Delay rumble to match delayed game audio. Leave at 0 for the quickest response.">
+                                            <TextBlock Text="Game rumble delay:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
+                                            <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2RumbleDelayMilliseconds}" Minimum="0" Maximum="9999" Increment="1" Width="80" />
+                                            <TextBlock Text="ms" VerticalAlignment="Center" Margin="6,0,0,0" />
                                         </StackPanel>
                                     </StackPanel>
                                 </Expander>
                             </Border>
                             <Border Style="{StaticResource Switch2SettingsCardStyle}">
-                                <Expander x:Name="switch2MotionCard" IsExpanded="False"
-                                          HorizontalContentAlignment="Stretch"
-                                          AutomationProperties.Name="Motion &amp; aiming">
+                                <Expander x:Name="switch2ButtonLayerCard" IsExpanded="false" HorizontalContentAlignment="Stretch" AutomationProperties.Name="Give buttons a second job">
                                     <Expander.Header>
-                                        <StackPanel Margin="4,0,0,0">
-                                            <TextBlock Text="Motion &amp; aiming" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                            <TextBlock Text="Steady your aim and fine-tune motion controls." Margin="0,3,0,0"
-                                                       Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap" />
-                                        </StackPanel>
+                                        <DockPanel LastChildFill="True" Margin="4,0,0,0" MaxWidth="760">
+                                            <Image Source="{x:Static local:Switch2FeatureArtwork.Layers}" Width="104" Height="64" Stretch="Uniform" Margin="0,0,18,0" DockPanel.Dock="Left" />
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="Give buttons a second job" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                <TextBlock Text="Hold or toggle a button to access another set of actions." Margin="0,4,0,0" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </DockPanel>
                                     </Expander.Header>
                                     <StackPanel Margin="26,18,4,4">
-                                        <CheckBox IsChecked="{Binding Switch2MagnetometerYawAssistEnabled}"
-                                                  Margin="0,7,0,0"
-                                                  Content="Reduce sideways gyro drift"
-                                                  ToolTip="Help reduce sideways gyro drift. Turn this off if nearby electronics affect aiming." />
-                                        <StackPanel Orientation="Horizontal" Margin="0,7,0,0"
-                                                    ToolTip="Ignore tiny gyro movements to steady aim. Set to 0 for maximum sensitivity.">
-                                            <TextBlock Text="Ignore small movements:"
-                                                       VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
-                                            <xctk:DoubleUpDown MinHeight="28" Value="{Binding Switch2VirtualGyroSoftDeadzone}"
-                                                               Minimum="0" Maximum="100"
-                                                               Increment="0.5" FormatString="F1"
-                                                               Width="75" />
+                                        <StackPanel Margin="8,5,0,2">
+                                            <TextBlock TextWrapping="Wrap" Opacity="0.78" Margin="0,0,0,6" Text="Example: keep a button’s usual action, then give it a different job while you hold another button." />
+                                            <TextBlock Text="1. Choose the action set. Standard is used unless stick aiming or motion steering is active." TextWrapping="Wrap" Margin="0,0,0,10" />
+                                            <WrapPanel Margin="0,0,0,7">
+                                                <TextBlock Text="Action set to edit:" VerticalAlignment="Center" Margin="0,0,5,0" />
+                                                <ComboBox MinHeight="28" Width="180" ItemsSource="{Binding Switch2ModeShiftEditor.MappingScopeChoices}" SelectedIndex="{Binding Switch2ModeShiftEditor.SelectedMappingScopeIndex}" />
+                                            </WrapPanel>
+                                            <TextBlock Text="2. Hold one of these buttons for second actions:" FontWeight="SemiBold" />
+                                            <ItemsControl ItemsSource="{Binding Switch2ModeShiftEditor.HoldButtonChoices}" Margin="0,3,0,0">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate>
+                                                        <WrapPanel />
+                                                    </ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <CheckBox Content="{Binding Label}" IsChecked="{Binding IsSelected}" Margin="0,1,12,1" />
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                            <TextBlock Text="Press a button to switch actions:" FontWeight="SemiBold" Margin="0,7,0,0" />
+                                            <ItemsControl ItemsSource="{Binding Switch2ModeShiftEditor.ToggleButtonChoices}" Margin="0,3,0,0">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate>
+                                                        <WrapPanel />
+                                                    </ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <CheckBox Content="{Binding Label}" IsChecked="{Binding IsSelected}" Margin="0,1,12,1" />
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                            <TextBlock Text="3. Choose a control and assign its second action" FontWeight="SemiBold" Margin="0,16,0,7" />
+                                            <TextBlock Text="The shortcut opens Shift Modifier for you. For a new second action, Switch 2 Mode Shift is already selected. Existing shift triggers are kept." TextWrapping="Wrap" Margin="0,0,0,8" Opacity="0.78" />
+                                            <WrapPanel>
+                                                <ComboBox x:Name="Switch2SecondActionControlCombo" DisplayMemberPath="ControlName" MinWidth="180" MinHeight="32" Margin="0,0,8,6" AutomationProperties.Name="Control to give a second action" />
+                                                <Button Content="Edit second action…" Click="Switch2EditSecondAction_Click" Padding="12,6" Margin="0,0,8,6" />
+                                                <Button Content="Open Button Mapping" Click="Switch2OpenButtonMapping_Click" Padding="12,6" Margin="0,0,0,6" />
+                                            </WrapPanel>
+                                            <TextBlock Text="Choose the action in the window, then save this profile. A shift button is reserved for switching actions, so its normal game action is not sent." TextWrapping="Wrap" Margin="0,4,0,10" />
+                                            <Expander Header="Automatic second actions (optional)" Margin="0,10,0,0">
+                                                <StackPanel Margin="8,10,0,0">
+                                                    <TextBlock Text="When enabled below, aiming starts in second actions. Your hold or toggle buttons switch back to normal actions instead. These options do not enable aiming." TextWrapping="Wrap" Margin="0,0,0,8" />
+                                                    <TextBlock Text="Automatically start in second actions while:" FontWeight="SemiBold" Margin="0,7,0,1" />
+                                                    <WrapPanel>
+                                                        <CheckBox Content="Mouse aiming is active" IsChecked="{Binding Switch2ModeShiftEditor.AutoApplyGyroMouse}" Margin="0,1,12,1" />
+                                                        <CheckBox Content="Stick aiming is active" IsChecked="{Binding Switch2ModeShiftEditor.AutoApplyGyroMouseJoystick}" Margin="0,1,12,1" />
+                                                        <CheckBox Content="Motion steering" IsChecked="{Binding Switch2ModeShiftEditor.AutoApplySteering}" Margin="0,1,12,1" />
+                                                    </WrapPanel>
+                                                </StackPanel>
+                                            </Expander>
                                         </StackPanel>
-                                        <StackPanel Orientation="Horizontal" Margin="0,7,0,0"
-                                                    ToolTip="Use the stick alongside gyro aiming to turn further. Set to 0 to turn this off.">
-                                            <TextBlock Text="Stick-assisted aiming:"
-                                                       VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
-                                            <xctk:DoubleUpDown MinHeight="28" Value="{Binding Switch2GyroMouseStickAssistSensitivity}"
-                                                               Minimum="0" Maximum="10"
-                                                               Increment="0.2" FormatString="F1"
-                                                               Width="75" />
-                                        </StackPanel>
-                                        <CheckBox IsChecked="{Binding Switch2HighRateMousePresentation}"
-                                                  Margin="0,7,0,0"
-                                                  Content="Smoother mouse movement"
-                                                  ToolTip="Make mouse movement smoother between controller updates. This does not speed up the controller itself." />
-                                        <StackPanel Orientation="Horizontal" Margin="0,7,0,0"
-                                                    ToolTip="Adjust sideways motion sensitivity in compatible emulators. 1 is the normal level.">
-                                            <TextBlock Text="Emulator turn sensitivity:"
-                                                       VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
-                                            <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2CemuhookYawSensitivity}"
-                                                                Minimum="1" Maximum="5"
-                                                                Increment="1" Width="60" />
-                                        </StackPanel>
-                                        <CheckBox IsChecked="{Binding Switch2HorizonStabilizationEnabled}"
-                                                  Margin="0,7,0,0"
-                                                  Content="Keep motion aiming level"
-                                                  ToolTip="Keep motion aiming level when you tilt the controller." />
-                                        <Expander Header="Pause aiming with a button"
-                                                  Margin="0,9,0,0"
-                                                  ToolTip="Pause motion aiming with a button so you can reposition the controller.">
-                                            <StackPanel Margin="8,5,0,2">
-                                                <TextBlock TextWrapping="Wrap" Opacity="0.78" Margin="0,0,0,6"
-                                                           Text="Hold to pause aiming, or press to toggle the pause. The pause clears when you stop using gyro." />
-                                                <WrapPanel Margin="0,0,0,7">
-                                                    <TextBlock Text="Gyro mode:" VerticalAlignment="Center" Margin="0,0,5,0" />
-                                                    <ComboBox MinHeight="28" Width="160"
-                                                              ItemsSource="{Binding Switch2GyroLockEditor.ModeChoices}"
-                                                              SelectedIndex="{Binding Switch2GyroLockEditor.SelectedModeIndex}" />
-                                                </WrapPanel>
-                                                <TextBlock Text="Hold-to-lock buttons:" FontWeight="SemiBold" />
-                                                <ItemsControl ItemsSource="{Binding Switch2GyroLockEditor.HoldButtonChoices}" Margin="0,3,0,0">
-                                                    <ItemsControl.ItemsPanel>
-                                                        <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
-                                                    </ItemsControl.ItemsPanel>
-                                                    <ItemsControl.ItemTemplate>
-                                                        <DataTemplate>
-                                                            <CheckBox Content="{Binding Label}" IsChecked="{Binding IsSelected}"
-                                                                      Margin="0,1,12,1" />
-                                                        </DataTemplate>
-                                                    </ItemsControl.ItemTemplate>
-                                                </ItemsControl>
-                                                <TextBlock Text="Press-to-toggle lock buttons:" FontWeight="SemiBold" Margin="0,7,0,0" />
-                                                <ItemsControl ItemsSource="{Binding Switch2GyroLockEditor.ToggleButtonChoices}" Margin="0,3,0,0">
-                                                    <ItemsControl.ItemsPanel>
-                                                        <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
-                                                    </ItemsControl.ItemsPanel>
-                                                    <ItemsControl.ItemTemplate>
-                                                        <DataTemplate>
-                                                            <CheckBox Content="{Binding Label}" IsChecked="{Binding IsSelected}"
-                                                                      Margin="0,1,12,1" />
-                                                        </DataTemplate>
-                                                    </ItemsControl.ItemTemplate>
-                                                </ItemsControl>
+                                    </StackPanel>
+                                </Expander>
+                            </Border>
+                            <Border Style="{StaticResource Switch2SettingsCardStyle}">
+                                <Expander x:Name="switch2StickCard" IsExpanded="false" HorizontalContentAlignment="Stretch" AutomationProperties.Name="Point, scroll or tap with a stick">
+                                    <Expander.Header>
+                                        <DockPanel LastChildFill="True" Margin="4,0,0,0" MaxWidth="760">
+                                            <Image Source="{x:Static local:Switch2FeatureArtwork.Sticks}" Width="104" Height="64" Stretch="Uniform" Margin="0,0,18,0" DockPanel.Dock="Left" />
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="Point, scroll or tap with a stick" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                <TextBlock Text="Fine-tune sticks you have assigned to mouse or button actions." Margin="0,4,0,0" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap" />
                                             </StackPanel>
-                                        </Expander>
-                                        <Expander Header="Steady aim around button presses"
-                                                  Margin="0,9,0,0"
-                                                  ToolTip="Reduce aim movement caused by pressing or releasing buttons.">
-                                            <StackPanel Margin="8,5,0,2">
-                                                <TextBlock TextWrapping="Wrap" Opacity="0.78" Margin="0,0,0,6"
-                                                           Text="Choose the aiming mode and activation button you want to steady." />
-                                                <WrapPanel Margin="0,0,0,7">
-                                                    <TextBlock Text="Gyro mode:" VerticalAlignment="Center" Margin="0,0,5,0" />
-                                                    <ComboBox MinHeight="28" Width="160"
-                                                              ItemsSource="{Binding Switch2GyroTriggerEditor.ModeChoices}"
-                                                              SelectedIndex="{Binding Switch2GyroTriggerEditor.SelectedModeIndex}" />
-                                                    <TextBlock Text="activation source:" VerticalAlignment="Center" Margin="12,0,5,0" />
-                                                    <ComboBox MinHeight="28" Width="220"
-                                                              ItemsSource="{Binding Switch2GyroTriggerEditor.TriggerChoices}"
-                                                              SelectedIndex="{Binding Switch2GyroTriggerEditor.SelectedTriggerIndex}" />
-                                                </WrapPanel>
-                                                <TextBlock Text="Deadzone / click-stabilization buttons:" FontWeight="SemiBold" />
-                                                <ItemsControl ItemsSource="{Binding Switch2GyroTriggerEditor.DeadzoneButtonChoices}" Margin="0,3,0,0">
-                                                    <ItemsControl.ItemsPanel>
-                                                        <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
-                                                    </ItemsControl.ItemsPanel>
-                                                    <ItemsControl.ItemTemplate>
-                                                        <DataTemplate>
-                                                            <CheckBox Content="{Binding Label}" IsChecked="{Binding IsSelected}"
-                                                                      Margin="0,1,12,1" />
-                                                        </DataTemplate>
-                                                    </ItemsControl.ItemTemplate>
-                                                </ItemsControl>
-                                                <WrapPanel Margin="0,5,0,0">
-                                                    <TextBlock Text="Deadzone:" VerticalAlignment="Center" Margin="0,0,5,0" />
-                                                    <xctk:DoubleUpDown MinHeight="28" Value="{Binding Switch2GyroTriggerEditor.DeadzoneAmount}"
-                                                                       Minimum="0" Maximum="100" Increment="0.5" FormatString="F1" Width="68" />
-                                                    <TextBlock Text="press pause:" VerticalAlignment="Center" Margin="12,0,5,0" />
-                                                    <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2GyroTriggerEditor.PauseAfterPressedMilliseconds}"
-                                                                        Minimum="0" Maximum="60000" Width="72" />
-                                                    <TextBlock Text="ms" VerticalAlignment="Center" Margin="3,0,0,0" />
-                                                </WrapPanel>
-                                                <WrapPanel Margin="0,4,0,0">
-                                                    <TextBlock Text="Release pause:" VerticalAlignment="Center" Margin="0,0,5,0" />
-                                                    <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2GyroTriggerEditor.PauseAfterReleasedMilliseconds}"
-                                                                        Minimum="0" Maximum="60000" Width="72" />
-                                                    <TextBlock Text="ms" VerticalAlignment="Center" Margin="3,0,0,0" />
-                                                    <TextBlock Text="deadzone after release:" VerticalAlignment="Center" Margin="12,0,5,0" />
-                                                    <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2GyroTriggerEditor.DeadzoneEffectAfterReleasedMilliseconds}"
-                                                                        Minimum="0" Maximum="60000" Width="72" />
-                                                    <TextBlock Text="ms" VerticalAlignment="Center" Margin="3,0,0,0" />
-                                                </WrapPanel>
-                                                <TextBlock Text="Dampening buttons:" FontWeight="SemiBold" Margin="0,7,0,0" />
-                                                <ItemsControl ItemsSource="{Binding Switch2GyroTriggerEditor.DampeningButtonChoices}" Margin="0,3,0,0">
-                                                    <ItemsControl.ItemsPanel>
-                                                        <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
-                                                    </ItemsControl.ItemsPanel>
-                                                    <ItemsControl.ItemTemplate>
-                                                        <DataTemplate>
-                                                            <CheckBox Content="{Binding Label}" IsChecked="{Binding IsSelected}"
-                                                                      Margin="0,1,12,1" />
-                                                        </DataTemplate>
-                                                    </ItemsControl.ItemTemplate>
-                                                </ItemsControl>
-                                                <WrapPanel Margin="0,5,0,0">
-                                                    <TextBlock Text="Dampening:" VerticalAlignment="Center" Margin="0,0,5,0" />
-                                                    <xctk:DoubleUpDown MinHeight="28" Value="{Binding Switch2GyroTriggerEditor.DampeningAmountPercent}"
-                                                                       Minimum="0" Maximum="100" Increment="1" FormatString="F0" Width="68" />
-                                                    <TextBlock Text="%" VerticalAlignment="Center" Margin="3,0,0,0" />
-                                                    <TextBlock Text="after release:" VerticalAlignment="Center" Margin="12,0,5,0" />
-                                                    <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2GyroTriggerEditor.DampeningEffectAfterReleasedMilliseconds}"
-                                                                        Minimum="0" Maximum="60000" Width="72" />
-                                                    <TextBlock Text="ms" VerticalAlignment="Center" Margin="3,0,0,0" />
-                                                </WrapPanel>
-                                            </StackPanel>
-                                        </Expander>
-                                    <Expander Header="Stick mouse &amp; button actions" IsExpanded="False" Margin="0,12,0,0"><StackPanel Margin="8,10,0,0">
-<TextBlock Margin="0,7,0,3" FontWeight="SemiBold"
-                                                       Text="Stick scrolling" />
-                                            <TextBlock Margin="0,0,0,4" TextWrapping="Wrap" Opacity="0.78"
-                                                       Text="For sticks mapped to scrolling: Tap scrolls once; Hold keeps scrolling." />
+                                        </DockPanel>
+                                    </Expander.Header>
+                                    <StackPanel Margin="26,18,4,4">
+                                        <StackPanel Margin="8,10,0,0">
+                                            <TextBlock Margin="0,7,0,3" FontWeight="SemiBold" Text="Stick scrolling" />
+                                            <TextBlock Margin="0,0,0,4" TextWrapping="Wrap" Opacity="0.78" Text="Assign scroll actions in Button Mapping first. Tap scrolls once; Hold keeps scrolling." />
                                             <StackPanel Orientation="Horizontal">
                                                 <TextBlock Text="Left stick:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
-                                                <ComboBox MinHeight="28" MinWidth="100"
-                                                          SelectedIndex="{Binding Switch2LeftStickScrollActivationModeIndex}">
+                                                <ComboBox MinHeight="28" MinWidth="100" SelectedIndex="{Binding Switch2LeftStickScrollActivationModeIndex}">
                                                     <ComboBoxItem Content="Hold" />
                                                     <ComboBoxItem Content="Tap" />
                                                 </ComboBox>
                                             </StackPanel>
                                             <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
                                                 <TextBlock Text="Right stick:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
-                                                <ComboBox MinHeight="28" MinWidth="100"
-                                                          SelectedIndex="{Binding Switch2RightStickScrollActivationModeIndex}">
+                                                <ComboBox MinHeight="28" MinWidth="100" SelectedIndex="{Binding Switch2RightStickScrollActivationModeIndex}">
                                                     <ComboBoxItem Content="Hold" />
                                                     <ComboBoxItem Content="Tap" />
                                                 </ComboBox>
                                             </StackPanel>
-                                            <TextBlock Margin="0,7,0,3" FontWeight="SemiBold"
-                                                       Text="Stick button actions" />
-                                            <TextBlock Margin="0,0,0,4" TextWrapping="Wrap" Opacity="0.78"
-                                                       Text="Hold keeps an action pressed. Tap triggers it once each time you move the stick into that direction." />
+                                            <TextBlock Margin="0,7,0,3" FontWeight="SemiBold" Text="Stick button actions" />
+                                            <TextBlock Margin="0,0,0,4" TextWrapping="Wrap" Opacity="0.78" Text="Hold keeps an action pressed. Tap triggers it once each time you move the stick into that direction." />
                                             <Grid>
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="54" />
@@ -2679,381 +2871,136 @@
                                                 <TextBlock Grid.Row="3" Grid.Column="0" Text="Left" VerticalAlignment="Center" />
                                                 <TextBlock Grid.Row="4" Grid.Column="0" Text="Right" VerticalAlignment="Center" />
                                                 <ComboBox MinHeight="28" Grid.Row="1" Grid.Column="1" MinWidth="86" Margin="0,0,14,3" SelectedIndex="{Binding Switch2LeftStickUpActivationModeIndex}">
-                                                    <ComboBoxItem Content="Hold" /><ComboBoxItem Content="Tap" />
+                                                    <ComboBoxItem Content="Hold" />
+                                                    <ComboBoxItem Content="Tap" />
                                                 </ComboBox>
                                                 <ComboBox MinHeight="28" Grid.Row="2" Grid.Column="1" MinWidth="86" Margin="0,0,14,3" SelectedIndex="{Binding Switch2LeftStickDownActivationModeIndex}">
-                                                    <ComboBoxItem Content="Hold" /><ComboBoxItem Content="Tap" />
+                                                    <ComboBoxItem Content="Hold" />
+                                                    <ComboBoxItem Content="Tap" />
                                                 </ComboBox>
                                                 <ComboBox MinHeight="28" Grid.Row="3" Grid.Column="1" MinWidth="86" Margin="0,0,14,3" SelectedIndex="{Binding Switch2LeftStickLeftActivationModeIndex}">
-                                                    <ComboBoxItem Content="Hold" /><ComboBoxItem Content="Tap" />
+                                                    <ComboBoxItem Content="Hold" />
+                                                    <ComboBoxItem Content="Tap" />
                                                 </ComboBox>
                                                 <ComboBox MinHeight="28" Grid.Row="4" Grid.Column="1" MinWidth="86" Margin="0,0,14,0" SelectedIndex="{Binding Switch2LeftStickRightActivationModeIndex}">
-                                                    <ComboBoxItem Content="Hold" /><ComboBoxItem Content="Tap" />
+                                                    <ComboBoxItem Content="Hold" />
+                                                    <ComboBoxItem Content="Tap" />
                                                 </ComboBox>
                                                 <ComboBox MinHeight="28" Grid.Row="1" Grid.Column="2" MinWidth="86" Margin="0,0,0,3" SelectedIndex="{Binding Switch2RightStickUpActivationModeIndex}">
-                                                    <ComboBoxItem Content="Hold" /><ComboBoxItem Content="Tap" />
+                                                    <ComboBoxItem Content="Hold" />
+                                                    <ComboBoxItem Content="Tap" />
                                                 </ComboBox>
                                                 <ComboBox MinHeight="28" Grid.Row="2" Grid.Column="2" MinWidth="86" Margin="0,0,0,3" SelectedIndex="{Binding Switch2RightStickDownActivationModeIndex}">
-                                                    <ComboBoxItem Content="Hold" /><ComboBoxItem Content="Tap" />
+                                                    <ComboBoxItem Content="Hold" />
+                                                    <ComboBoxItem Content="Tap" />
                                                 </ComboBox>
                                                 <ComboBox MinHeight="28" Grid.Row="3" Grid.Column="2" MinWidth="86" Margin="0,0,0,3" SelectedIndex="{Binding Switch2RightStickLeftActivationModeIndex}">
-                                                    <ComboBoxItem Content="Hold" /><ComboBoxItem Content="Tap" />
+                                                    <ComboBoxItem Content="Hold" />
+                                                    <ComboBoxItem Content="Tap" />
                                                 </ComboBox>
                                                 <ComboBox MinHeight="28" Grid.Row="4" Grid.Column="2" MinWidth="86" SelectedIndex="{Binding Switch2RightStickRightActivationModeIndex}">
-                                                    <ComboBoxItem Content="Hold" /><ComboBoxItem Content="Tap" />
+                                                    <ComboBoxItem Content="Hold" />
+                                                    <ComboBoxItem Content="Tap" />
                                                 </ComboBox>
                                             </Grid>
-                                            <TextBlock Margin="0,7,0,3" FontWeight="SemiBold"
-                                                       Text="Stick mouse speed" />
-                                            <TextBlock Margin="0,0,0,4" TextWrapping="Wrap" Opacity="0.78"
-                                                       Text="Adjust speed for sticks mapped to mouse movement. 5 is the normal speed; 0 stops movement." />
+                                            <TextBlock Margin="0,7,0,3" FontWeight="SemiBold" Text="Stick mouse speed" />
+                                            <TextBlock Margin="0,0,0,4" TextWrapping="Wrap" Opacity="0.78" Text="Adjust speed for sticks mapped to mouse movement. 5 is the normal speed; 0 stops movement." />
                                             <StackPanel Orientation="Horizontal">
                                                 <TextBlock Text="Left stick:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
-                                                <xctk:DoubleUpDown MinHeight="28" MinWidth="72" FormatString="F1"
-                                                                   Minimum="0.0" Maximum="10.0" Increment="0.2"
-                                                                   Value="{Binding Switch2LeftStickMouseSensitivity}" />
+                                                <xctk:DoubleUpDown MinHeight="28" MinWidth="72" FormatString="F1" Minimum="0.0" Maximum="10.0" Increment="0.2" Value="{Binding Switch2LeftStickMouseSensitivity}" />
                                             </StackPanel>
                                             <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
                                                 <TextBlock Text="Right stick:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
-                                                <xctk:DoubleUpDown MinHeight="28" MinWidth="72" FormatString="F1"
-                                                                   Minimum="0.0" Maximum="10.0" Increment="0.2"
-                                                                   Value="{Binding Switch2RightStickMouseSensitivity}" />
-                                            </StackPanel>
-                                            </StackPanel></Expander>
-</StackPanel>
-                                </Expander>
-                            </Border>
-                            <Border Style="{StaticResource Switch2SettingsCardStyle}" Visibility="{Binding ShowSwitch2JoyConControls, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                <Expander x:Name="switch2JoyConCard" IsExpanded="False"
-                                          HorizontalContentAlignment="Stretch"
-                                          AutomationProperties.Name="Joy-Con mouse &amp; aiming">
-                                    <Expander.Header>
-                                        <StackPanel Margin="4,0,0,0">
-                                            <TextBlock Text="Joy-Con mouse &amp; aiming" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                            <TextBlock Text="Use a Joy-Con as a mouse, or choose how a pair handles motion aiming." Margin="0,3,0,0"
-                                                       Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap" />
-                                        </StackPanel>
-                                    </Expander.Header>
-                                    <StackPanel Margin="26,18,4,4">
-                                        <Expander Header="Two-controller motion aiming" IsExpanded="False" Margin="0,0,0,12"><StackPanel Margin="8,10,0,0">
-<CheckBox x:Name="Switch2DualJoyConGyroEnabledCheckBox"
-                                                  IsChecked="{Binding Switch2DualGyroEditor.Enabled}"
-                                                  Margin="0,7,0,0"
-                                                  Content="Use both Joy-Cons for motion aiming"
-                                                  ToolTip="Choose which Joy-Con controls motion aiming when using a pair." />
-                                        <StackPanel Margin="20,4,0,0"
-                                                    IsEnabled="{Binding IsChecked, ElementName=Switch2DualJoyConGyroEnabledCheckBox}">
-                                            <StackPanel Orientation="Horizontal">
-                                                <TextBlock Text="Mode:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
-                                                <ComboBox MinHeight="28" MinWidth="165"
-                                                          SelectedIndex="{Binding Switch2DualGyroEditor.ModeIndex}">
-                                                    <ComboBoxItem Content="Switch dominant side" />
-                                                    <ComboBoxItem Content="Switch gyro side" />
-                                                    <ComboBoxItem Content="Single-side toggle" />
-                                                </ComboBox>
-                                            </StackPanel>
-                                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                                                <TextBlock Text="Dominant gyro:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
-                                                <ComboBox MinHeight="28" MinWidth="120"
-                                                          SelectedIndex="{Binding Switch2DualGyroEditor.DominantSideIndex}"
-                                                          ToolTip="Combine both Joy-Cons in Single-side toggle mode. Other modes use the right side instead.">
-                                                    <ComboBoxItem Content="Left" />
-                                                    <ComboBoxItem Content="Right" />
-                                                    <ComboBoxItem Content="Combine both" />
-                                                </ComboBox>
-                                            </StackPanel>
-                                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                                                <TextBlock Text="Activation:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
-                                                <ComboBox MinHeight="28" MinWidth="120"
-                                                          SelectedIndex="{Binding Switch2DualGyroEditor.ActivationModeIndex}">
-                                                    <ComboBoxItem Content="Hold" />
-                                                    <ComboBoxItem Content="Toggle" />
-                                                </ComboBox>
-                                            </StackPanel>
-                                            <TextBlock Margin="0,7,0,4" TextWrapping="Wrap" Opacity="0.78"
-                                                       Text="Choose buttons for each Joy-Con. Any selected button activates that side; you do not need to press them together." />
-                                            <Expander Header="Left activation inputs" Margin="0,4,0,0">
-                                                <ItemsControl ItemsSource="{Binding Switch2DualGyroEditor.LeftActivationChoices}" Margin="0,3,0,0">
-                                                    <ItemsControl.ItemsPanel>
-                                                        <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
-                                                    </ItemsControl.ItemsPanel>
-                                                    <ItemsControl.ItemTemplate>
-                                                        <DataTemplate>
-                                                            <CheckBox Content="{Binding Label}" IsChecked="{Binding IsSelected}"
-                                                                      Margin="0,1,12,1" />
-                                                        </DataTemplate>
-                                                    </ItemsControl.ItemTemplate>
-                                                </ItemsControl>
-                                            </Expander>
-                                            <Expander Header="Right activation inputs" Margin="0,4,0,0">
-                                                <ItemsControl ItemsSource="{Binding Switch2DualGyroEditor.RightActivationChoices}" Margin="0,3,0,0">
-                                                    <ItemsControl.ItemsPanel>
-                                                        <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
-                                                    </ItemsControl.ItemsPanel>
-                                                    <ItemsControl.ItemTemplate>
-                                                        <DataTemplate>
-                                                            <CheckBox Content="{Binding Label}" IsChecked="{Binding IsSelected}"
-                                                                      Margin="0,1,12,1" />
-                                                        </DataTemplate>
-                                                    </ItemsControl.ItemTemplate>
-                                                </ItemsControl>
-                                            </Expander>
-                                        </StackPanel>
-                                        </StackPanel></Expander>
-<CheckBox x:Name="Switch2JoyConIrMouseEnabledCheckBox"
-                                                  IsChecked="{Binding Switch2JoyConIrMouseEnabled}"
-                                                  Margin="0,9,0,0"
-                                                  Content="Use Joy-Con as a mouse"
-                                                  ToolTip="Move a Joy-Con across a surface to control the mouse pointer." />
-                                        <StackPanel Margin="20,4,0,0">
-                                            <TextBlock Margin="0,0,0,4" TextWrapping="Wrap" Opacity="0.78"
-                                                       Text="Surface detection also controls sensor-based button actions and motion aiming, even when mouse movement is off." />
-                                            <TextBlock Margin="0,0,0,4" TextWrapping="Wrap" Opacity="0.78"
-                                                       Text="While using the mouse sensor, use the stick to scroll." />
-                                            <TextBlock Margin="0,0,0,4" TextWrapping="Wrap" Opacity="0.78"
-                                                       Text="For mouse-only button actions, choose the left or right IR Sensor under Shift Modifier in Button Mapping." />
-                                            <StackPanel Orientation="Horizontal">
-                                                <TextBlock Text="Sensor:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
-                                                <ComboBox MinHeight="28" MinWidth="120"
-                                                          IsEnabled="{Binding IsChecked, ElementName=Switch2JoyConIrMouseEnabledCheckBox}"
-                                                          SelectedIndex="{Binding Switch2JoyConIrMouseSourceIndex}">
-                                                    <ComboBoxItem Content="Auto" />
-                                                    <ComboBoxItem Content="Left" />
-                                                    <ComboBoxItem Content="Right" />
-                                                    <ComboBoxItem Content="Both" />
-                                                </ComboBox>
-                                            </StackPanel>
-                                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                                                <TextBlock Text="Stick scroll:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
-                                                <ComboBox MinHeight="28" MinWidth="145"
-                                                          IsEnabled="{Binding IsChecked, ElementName=Switch2JoyConIrMouseEnabledCheckBox}"
-                                                          SelectedIndex="{Binding Switch2JoyConIrMouseScrollModeIndex}"
-                                                          ToolTip="Choose whether the stick scrolls vertically only or in all four directions.">
-                                                    <ComboBoxItem Content="Up / Down" />
-                                                    <ComboBoxItem Content="Four-way" />
-                                                </ComboBox>
-                                            </StackPanel>
-                                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                                                <TextBlock Text="Left surface detection:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
-                                                <ComboBox MinHeight="28" MinWidth="120"
-                                                          SelectedIndex="{Binding Switch2JoyConLeftIrMouseActivationThresholdIndex}">
-                                                    <ComboBoxItem Content="Strict" />
-                                                    <ComboBoxItem Content="Balanced" />
-                                                    <ComboBoxItem Content="Relaxed" />
-                                                </ComboBox>
-                                            </StackPanel>
-                                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                                                <TextBlock Text="Left sensitivity:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
-                                                <xctk:DoubleUpDown MinHeight="28" MinWidth="72" FormatString="F1"
-                                                                   IsEnabled="{Binding IsChecked, ElementName=Switch2JoyConIrMouseEnabledCheckBox}"
-                                                                   Minimum="1.0" Maximum="10.0" Increment="0.2"
-                                                                   Value="{Binding Switch2JoyConLeftIrMouseSensitivity}" />
-                                            </StackPanel>
-                                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                                                <TextBlock Text="Right surface detection:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
-                                                <ComboBox MinHeight="28" MinWidth="120"
-                                                          SelectedIndex="{Binding Switch2JoyConRightIrMouseActivationThresholdIndex}">
-                                                    <ComboBoxItem Content="Strict" />
-                                                    <ComboBoxItem Content="Balanced" />
-                                                    <ComboBoxItem Content="Relaxed" />
-                                                </ComboBox>
-                                            </StackPanel>
-                                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                                                <TextBlock Text="Right sensitivity:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
-                                                <xctk:DoubleUpDown MinHeight="28" MinWidth="72" FormatString="F1"
-                                                                   IsEnabled="{Binding IsChecked, ElementName=Switch2JoyConIrMouseEnabledCheckBox}"
-                                                                   Minimum="1.0" Maximum="10.0" Increment="0.2"
-                                                                   Value="{Binding Switch2JoyConRightIrMouseSensitivity}" />
+                                                <xctk:DoubleUpDown MinHeight="28" MinWidth="72" FormatString="F1" Minimum="0.0" Maximum="10.0" Increment="0.2" Value="{Binding Switch2RightStickMouseSensitivity}" />
                                             </StackPanel>
                                         </StackPanel>
-                                        <Expander Header="Optical-sensor gyro aiming"
-                                                  Margin="0,9,0,0"
-                                                  ToolTip="Steady your aim when the mouse sensor touches or leaves a surface.">
-                                            <StackPanel Margin="8,5,0,2">
-                                                <TextBlock TextWrapping="Wrap" Opacity="0.78" Margin="0,0,0,6"
-                                                           Text="Choose the left or right IR Sensor in the Gyro trigger menu to aim while touching a surface." />
-                                                <TextBlock TextWrapping="Wrap" Opacity="0.78" Margin="0,0,0,6"
-                                                           Text="Pause aiming around button presses, ignore small movements, or reduce sensitivity while a button is held." />
-
-                                                <GroupBox Header="Left optical sensor" Padding="7,5" Margin="0,2,0,0">
-                                                    <StackPanel>
-                                                        <TextBlock Text="Deadzone / click-stabilization buttons:" FontWeight="SemiBold" />
-                                                        <ItemsControl ItemsSource="{Binding Switch2JoyConLeftIrGyroDeadzoneButtonChoices}" Margin="0,3,0,0">
-                                                            <ItemsControl.ItemsPanel>
-                                                                <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
-                                                            </ItemsControl.ItemsPanel>
-                                                            <ItemsControl.ItemTemplate>
-                                                                <DataTemplate>
-                                                                    <CheckBox Content="{Binding Label}" IsChecked="{Binding IsSelected}"
-                                                                              Margin="0,1,12,1" />
-                                                                </DataTemplate>
-                                                            </ItemsControl.ItemTemplate>
-                                                        </ItemsControl>
-                                                        <WrapPanel Margin="0,5,0,0">
-                                                            <TextBlock Text="Deadzone:" VerticalAlignment="Center" Margin="0,0,5,0" />
-                                                            <xctk:DoubleUpDown MinHeight="28" Value="{Binding Switch2JoyConLeftIrGyroDeadzoneAmount}"
-                                                                               Minimum="0" Maximum="100" Increment="0.5" FormatString="F1" Width="68" />
-                                                            <TextBlock Text="press pause:" VerticalAlignment="Center" Margin="12,0,5,0" />
-                                                            <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2JoyConLeftIrGyroPauseAfterPressedMilliseconds}"
-                                                                                Minimum="0" Maximum="60000" Width="72" />
-                                                            <TextBlock Text="ms" VerticalAlignment="Center" Margin="3,0,0,0" />
-                                                        </WrapPanel>
-                                                        <WrapPanel Margin="0,4,0,0">
-                                                            <TextBlock Text="Release pause:" VerticalAlignment="Center" Margin="0,0,5,0" />
-                                                            <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2JoyConLeftIrGyroPauseAfterReleasedMilliseconds}"
-                                                                                Minimum="0" Maximum="60000" Width="72" />
-                                                            <TextBlock Text="ms" VerticalAlignment="Center" Margin="3,0,0,0" />
-                                                            <TextBlock Text="deadzone after release:" VerticalAlignment="Center" Margin="12,0,5,0" />
-                                                            <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2JoyConLeftIrGyroDeadzoneEffectAfterReleasedMilliseconds}"
-                                                                                Minimum="0" Maximum="60000" Width="72" />
-                                                            <TextBlock Text="ms" VerticalAlignment="Center" Margin="3,0,0,0" />
-                                                        </WrapPanel>
-                                                        <TextBlock Text="Dampening buttons:" FontWeight="SemiBold" Margin="0,7,0,0" />
-                                                        <ItemsControl ItemsSource="{Binding Switch2JoyConLeftIrGyroDampeningButtonChoices}" Margin="0,3,0,0">
-                                                            <ItemsControl.ItemsPanel>
-                                                                <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
-                                                            </ItemsControl.ItemsPanel>
-                                                            <ItemsControl.ItemTemplate>
-                                                                <DataTemplate>
-                                                                    <CheckBox Content="{Binding Label}" IsChecked="{Binding IsSelected}"
-                                                                              Margin="0,1,12,1" />
-                                                                </DataTemplate>
-                                                            </ItemsControl.ItemTemplate>
-                                                        </ItemsControl>
-                                                        <WrapPanel Margin="0,5,0,0">
-                                                            <TextBlock Text="Dampening:" VerticalAlignment="Center" Margin="0,0,5,0" />
-                                                            <xctk:DoubleUpDown MinHeight="28" Value="{Binding Switch2JoyConLeftIrGyroDampeningAmountPercent}"
-                                                                               Minimum="0" Maximum="100" Increment="1" FormatString="F0" Width="68" />
-                                                            <TextBlock Text="%" VerticalAlignment="Center" Margin="3,0,0,0" />
-                                                            <TextBlock Text="after release:" VerticalAlignment="Center" Margin="12,0,5,0" />
-                                                            <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2JoyConLeftIrGyroDampeningEffectAfterReleasedMilliseconds}"
-                                                                                Minimum="0" Maximum="60000" Width="72" />
-                                                            <TextBlock Text="ms" VerticalAlignment="Center" Margin="3,0,0,0" />
-                                                        </WrapPanel>
-                                                    </StackPanel>
-                                                </GroupBox>
-
-                                                <GroupBox Header="Right optical sensor" Padding="7,5" Margin="0,7,0,0">
-                                                    <StackPanel>
-                                                        <TextBlock Text="Deadzone / click-stabilization buttons:" FontWeight="SemiBold" />
-                                                        <ItemsControl ItemsSource="{Binding Switch2JoyConRightIrGyroDeadzoneButtonChoices}" Margin="0,3,0,0">
-                                                            <ItemsControl.ItemsPanel>
-                                                                <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
-                                                            </ItemsControl.ItemsPanel>
-                                                            <ItemsControl.ItemTemplate>
-                                                                <DataTemplate>
-                                                                    <CheckBox Content="{Binding Label}" IsChecked="{Binding IsSelected}"
-                                                                              Margin="0,1,12,1" />
-                                                                </DataTemplate>
-                                                            </ItemsControl.ItemTemplate>
-                                                        </ItemsControl>
-                                                        <WrapPanel Margin="0,5,0,0">
-                                                            <TextBlock Text="Deadzone:" VerticalAlignment="Center" Margin="0,0,5,0" />
-                                                            <xctk:DoubleUpDown MinHeight="28" Value="{Binding Switch2JoyConRightIrGyroDeadzoneAmount}"
-                                                                               Minimum="0" Maximum="100" Increment="0.5" FormatString="F1" Width="68" />
-                                                            <TextBlock Text="press pause:" VerticalAlignment="Center" Margin="12,0,5,0" />
-                                                            <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2JoyConRightIrGyroPauseAfterPressedMilliseconds}"
-                                                                                Minimum="0" Maximum="60000" Width="72" />
-                                                            <TextBlock Text="ms" VerticalAlignment="Center" Margin="3,0,0,0" />
-                                                        </WrapPanel>
-                                                        <WrapPanel Margin="0,4,0,0">
-                                                            <TextBlock Text="Release pause:" VerticalAlignment="Center" Margin="0,0,5,0" />
-                                                            <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2JoyConRightIrGyroPauseAfterReleasedMilliseconds}"
-                                                                                Minimum="0" Maximum="60000" Width="72" />
-                                                            <TextBlock Text="ms" VerticalAlignment="Center" Margin="3,0,0,0" />
-                                                            <TextBlock Text="deadzone after release:" VerticalAlignment="Center" Margin="12,0,5,0" />
-                                                            <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2JoyConRightIrGyroDeadzoneEffectAfterReleasedMilliseconds}"
-                                                                                Minimum="0" Maximum="60000" Width="72" />
-                                                            <TextBlock Text="ms" VerticalAlignment="Center" Margin="3,0,0,0" />
-                                                        </WrapPanel>
-                                                        <TextBlock Text="Dampening buttons:" FontWeight="SemiBold" Margin="0,7,0,0" />
-                                                        <ItemsControl ItemsSource="{Binding Switch2JoyConRightIrGyroDampeningButtonChoices}" Margin="0,3,0,0">
-                                                            <ItemsControl.ItemsPanel>
-                                                                <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
-                                                            </ItemsControl.ItemsPanel>
-                                                            <ItemsControl.ItemTemplate>
-                                                                <DataTemplate>
-                                                                    <CheckBox Content="{Binding Label}" IsChecked="{Binding IsSelected}"
-                                                                              Margin="0,1,12,1" />
-                                                                </DataTemplate>
-                                                            </ItemsControl.ItemTemplate>
-                                                        </ItemsControl>
-                                                        <WrapPanel Margin="0,5,0,0">
-                                                            <TextBlock Text="Dampening:" VerticalAlignment="Center" Margin="0,0,5,0" />
-                                                            <xctk:DoubleUpDown MinHeight="28" Value="{Binding Switch2JoyConRightIrGyroDampeningAmountPercent}"
-                                                                               Minimum="0" Maximum="100" Increment="1" FormatString="F0" Width="68" />
-                                                            <TextBlock Text="%" VerticalAlignment="Center" Margin="3,0,0,0" />
-                                                            <TextBlock Text="after release:" VerticalAlignment="Center" Margin="12,0,5,0" />
-                                                            <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2JoyConRightIrGyroDampeningEffectAfterReleasedMilliseconds}"
-                                                                                Minimum="0" Maximum="60000" Width="72" />
-                                                            <TextBlock Text="ms" VerticalAlignment="Center" Margin="3,0,0,0" />
-                                                        </WrapPanel>
-                                                    </StackPanel>
-                                                </GroupBox>
-                                            </StackPanel>
-                                        </Expander>
                                     </StackPanel>
                                 </Expander>
                             </Border>
                             <Border Style="{StaticResource Switch2SettingsCardStyle}">
-                                <Expander x:Name="switch2CalibrationCard" IsExpanded="False"
-                                          HorizontalContentAlignment="Stretch"
-                                          AutomationProperties.Name="Calibration">
+                                <Expander x:Name="switch2ConnectionCard" IsExpanded="false" HorizontalContentAlignment="Stretch" AutomationProperties.Name="Layout &amp; battery">
                                     <Expander.Header>
-                                        <StackPanel Margin="4,0,0,0">
-                                            <TextBlock Text="Calibration" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                            <TextBlock Text="Correct stick range or motion drift when something feels off." Margin="0,3,0,0"
-                                                       Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap" />
+                                        <DockPanel LastChildFill="True" Margin="4,0,0,0" MaxWidth="760">
+                                            <Image Source="{x:Static local:Switch2FeatureArtwork.Layout}" Width="104" Height="64" Stretch="Uniform" Margin="0,0,18,0" DockPanel.Dock="Left" />
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="Layout &amp; battery" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                <TextBlock Text="Match your button labels, hold a single Joy-Con sideways, or save battery." Margin="0,4,0,0" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </Expander.Header>
+                                    <StackPanel Margin="26,18,4,4">
+                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,7" ToolTip="Xbox follows button positions. Nintendo follows the printed A, B, X and Y labels.">
+                                            <TextBlock Text="Face-button layout:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
+                                            <ComboBox MinHeight="28" MinWidth="120" SelectedIndex="{Binding Switch2FaceButtonLayoutIndex}">
+                                                <ComboBoxItem Content="Xbox" />
+                                                <ComboBoxItem Content="Nintendo" />
+                                            </ComboBox>
                                         </StackPanel>
+                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,7" Visibility="{Binding ShowSwitch2StandaloneJoyConControls, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <TextBlock Text="Joy-Con holding style:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
+                                            <ComboBox MinHeight="28" MinWidth="120" SelectedIndex="{Binding Switch2JoyConStandaloneHoldModeIndex}" ToolTip="Choose the starting orientation. A choice made on the Controllers tab takes priority for that Joy-Con.">
+                                                <ComboBoxItem Content="Upright" />
+                                                <ComboBoxItem Content="Sideways" />
+                                            </ComboBox>
+                                        </StackPanel>
+                                        <GroupBox Header="Automatic Bluetooth disconnect" Padding="7,5" Margin="0,0,0,8">
+                                            <StackPanel>
+                                                <TextBlock TextWrapping="Wrap" Opacity="0.78" Margin="0,0,0,5" Text="Disconnect after inactivity to save battery, or after a set time even while playing." />
+                                                <WrapPanel>
+                                                    <TextBlock Text="Mode:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                                    <ComboBox MinHeight="28" Width="150" SelectedIndex="{Binding Switch2AutoDisconnectModeIndex}">
+                                                        <ComboBoxItem Content="Off" />
+                                                        <ComboBoxItem Content="When idle" />
+                                                        <ComboBoxItem Content="After a set time" />
+                                                    </ComboBox>
+                                                    <TextBlock Text="Disconnect after:" VerticalAlignment="Center" Margin="14,0,6,0" />
+                                                    <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2AutoDisconnectDays}" Minimum="0" Maximum="2147483647" Width="68" />
+                                                    <TextBlock Text="day" VerticalAlignment="Center" Margin="3,0,8,0" />
+                                                    <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2AutoDisconnectHours}" Minimum="0" Maximum="23" Width="55" />
+                                                    <TextBlock Text="hour" VerticalAlignment="Center" Margin="3,0,8,0" />
+                                                    <xctk:IntegerUpDown MinHeight="28" Value="{Binding Switch2AutoDisconnectMinutes}" Minimum="0" Maximum="59" Width="55" />
+                                                    <TextBlock Text="minute" VerticalAlignment="Center" Margin="3,0,0,0" />
+                                                </WrapPanel>
+                                                <TextBlock TextWrapping="Wrap" Opacity="0.70" Margin="0,4,0,0" Text="Set the duration to zero to disable the timer. Until changed here, existing profiles keep their Idle Disconnect setting." />
+                                            </StackPanel>
+                                        </GroupBox>
+                                        <CheckBox IsChecked="{Binding Switch2ConnectionHapticEnabled}" Margin="0,7,0,0" Content="Vibrate when connected" ToolTip="Play a short vibration when the controller is ready." />
+                                    </StackPanel>
+                                </Expander>
+                            </Border>
+                            <Border Style="{StaticResource Switch2SettingsCardStyle}">
+                                <Expander x:Name="switch2CalibrationCard" IsExpanded="false" HorizontalContentAlignment="Stretch" AutomationProperties.Name="Correct drift &amp; stick range">
+                                    <Expander.Header>
+                                        <DockPanel LastChildFill="True" Margin="4,0,0,0" MaxWidth="760">
+                                            <Image Source="{x:Static local:Switch2FeatureArtwork.Calibration}" Width="104" Height="64" Stretch="Uniform" Margin="0,0,18,0" DockPanel.Dock="Left" />
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="Correct drift &amp; stick range" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                <TextBlock Text="Use guided calibration if a stick feels off or the aim drifts." Margin="0,4,0,0" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </DockPanel>
                                     </Expander.Header>
                                     <StackPanel Margin="26,18,4,4">
                                         <GroupBox Header="Stick calibration" Padding="8,6" Margin="0,0,0,8">
                                             <StackPanel>
-                                                <TextBlock TextWrapping="Wrap" Opacity="0.78"
-                                                           Text="Follow the guided steps to correct stick centers and range. Factory settings stay unchanged." />
-                                                <Button Content="Calibrate sticks…" Click="Switch2StickCalibration_Click"
-                                                        HorizontalAlignment="Left" Margin="0,7,0,0" Padding="10,4" />
+                                                <TextBlock TextWrapping="Wrap" Opacity="0.78" Text="Follow the guided steps to correct stick centers and range. Factory settings stay unchanged." />
+                                                <Button Content="Calibrate sticks…" Click="Switch2StickCalibration_Click" HorizontalAlignment="Left" Margin="0,7,0,0" Padding="10,4" />
                                             </StackPanel>
                                         </GroupBox>
                                         <StackPanel Margin="20,5,0,2">
-                                            <TextBlock TextWrapping="Wrap" Opacity="0.78"
-                                                       Text="Place the controller on a stable surface and leave it still for at least five seconds after starting." />
-                                            <Button Content="Restart gyro calibration"
-                                                    Click="GyroCalibration_Click"
-                                                    HorizontalAlignment="Left"
-                                                    Margin="0,5,0,0" Padding="8,3"
-                                                    ToolTip="Correct gyro drift. Keep the controller still for at least five seconds." />
+                                            <TextBlock TextWrapping="Wrap" Opacity="0.78" Text="Place the controller on a stable surface and leave it still for at least five seconds after starting." />
+                                            <Button Content="Restart gyro calibration" Click="GyroCalibration_Click" HorizontalAlignment="Left" Margin="0,5,0,0" Padding="8,3" ToolTip="Correct gyro drift. Keep the controller still for at least five seconds." />
                                         </StackPanel>
                                         <StackPanel Margin="20,5,0,2">
-                                            <TextBlock TextWrapping="Wrap" Opacity="0.78"
-                                                       Text="Slowly rotate the controller in a figure-eight. Game input pauses during calibration." />
+                                            <TextBlock TextWrapping="Wrap" Opacity="0.78" Text="Slowly rotate the controller in a figure-eight. Game input pauses during calibration." />
                                             <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
-                                                <Button x:Name="Switch2MagnetometerCalibrationButton"
-                                                        Content="Calibrate drift correction"
-                                                        Click="Switch2MagnetometerCalibration_Click"
-                                                        Padding="8,3" />
-                                                <Button x:Name="Switch2MagnetometerCalibrationCancelButton"
-                                                        Content="Cancel"
-                                                        Click="Switch2MagnetometerCalibrationCancel_Click"
-                                                        Visibility="Collapsed"
-                                                        Margin="6,0,0,0" Padding="8,3" />
+                                                <Button x:Name="Switch2MagnetometerCalibrationButton" Content="Calibrate drift correction" Click="Switch2MagnetometerCalibration_Click" Padding="8,3" />
+                                                <Button x:Name="Switch2MagnetometerCalibrationCancelButton" Content="Cancel" Click="Switch2MagnetometerCalibrationCancel_Click" Visibility="Collapsed" Margin="6,0,0,0" Padding="8,3" />
                                             </StackPanel>
-                                            <TextBlock x:Name="Switch2MagnetometerCalibrationStatus"
-                                                       Margin="0,4,0,0" TextWrapping="Wrap"
-                                                       Opacity="0.78"
-                                                       Text="Use this if sideways drift correction feels inaccurate." />
+                                            <TextBlock x:Name="Switch2MagnetometerCalibrationStatus" Margin="0,4,0,0" TextWrapping="Wrap" Opacity="0.78" Text="Use this if sideways drift correction feels inaccurate." />
                                         </StackPanel>
                                     </StackPanel>
                                 </Expander>
                             </Border>
-                            <Expander Header="More about button mapping" Margin="0,4,0,10">
-                                <StackPanel Margin="26,8,0,0">
-                                <TextBlock Margin="0,0,0,7" TextWrapping="Wrap" Opacity="0.78"
-                                           Text="Map C / Chat and SL/SR in Button Mapping. In sideways mode, SL/SR also act as shoulder buttons unless you unbind them." />
-                                <TextBlock Margin="0,0,0,7" TextWrapping="Wrap" Opacity="0.78"
-                                           Text="Game rumble becomes HD rumble. Games that already send HD rumble keep their original vibration detail." />
-                                </StackPanel>
-                            </Expander>
                         </StackPanel>
                     </StackPanel>
                 </ScrollViewer>

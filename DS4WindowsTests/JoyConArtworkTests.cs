@@ -15,6 +15,24 @@ public sealed class JoyConArtworkTests
 {
     public TestContext TestContext { get; set; }
 
+    [TestMethod]
+    public void ProControllerImageLoadsWhenProfileContextReadsGetterDirectly()
+    {
+        RunSta(() =>
+        {
+            // Initialize WPF's pack-URI support without creating App or hardware.
+            _ = new System.Windows.Controls.ContextMenu();
+            Assert.IsTrue(Switch2RuntimeInputDevice.TryCreatePro(1, 2, Switch2Transport.BluetoothLe, out var runtime, out _));
+            var model = new CompositeDeviceModel(runtime, Global.TEST_PROFILE_INDEX, null, null);
+            var image = (BitmapSource)model.ControllerImageSource;
+            Assert.IsTrue(image.PixelWidth > 0);
+            Assert.IsTrue(image.PixelHeight > 0);
+            Assert.IsTrue(image.IsFrozen);
+            Assert.AreSame(image, model.ControllerImageSource);
+            Assert.AreSame(image, ControllerArtwork.LoadResource("Switch 2 Pro Controller.png"));
+        });
+    }
+
     [DataTestMethod]
     [DataRow(InputDeviceType.Switch2JoyConLeft, false, 1)]
     [DataRow(InputDeviceType.Switch2JoyConLeft, true, 3)]

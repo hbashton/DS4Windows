@@ -380,8 +380,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     return joyCon;
                 string imageName = UiCapabilities.ImageResourceName;
 
-                return imageName == null ? null : new ImageSourceConverter()
-                    .ConvertFromString($"{Global.RESOURCES_PREFIX}/{imageName}") as ImageSource;
+                return ControllerArtwork.LoadResource(imageName);
             }
         }
 

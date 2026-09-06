@@ -148,6 +148,9 @@ namespace DS4WinWPF.DS4Forms
             mappingListVM = new MappingListViewModel(deviceNum,
                 profileSettingsVM.ContType, physicalController?.DeviceType,
                 physicalControllerIsDualSenseEdge);
+            Switch2SecondActionControlCombo.ItemsSource = mappingListVM.Mappings
+                .Where(control => control.IsAvailableOnPhysicalController).ToArray();
+            Switch2SecondActionControlCombo.SelectedIndex = 0;
             profileSettingsVM.Switch2ModeShiftEditor.MappingScopeChanged +=
                 (_, _) => mappingListVM.UpdateMappings();
             specialActionsVM = new SpecialActionsListViewModel(device);
@@ -1141,9 +1144,7 @@ namespace DS4WinWPF.DS4Forms
 
         private static ImageSource LoadResourceImage(string fileName)
         {
-            ImageSourceConverter sourceConverter = new ImageSourceConverter();
-            return sourceConverter.ConvertFromString(
-                $"{Global.ASSEMBLY_RESOURCE_PREFIX}component/Resources/{fileName}") as ImageSource;
+            return ControllerArtwork.LoadResource(fileName);
         }
 
         private void PopulateGyroActionsTriggersMenu()
@@ -2650,6 +2651,48 @@ namespace DS4WinWPF.DS4Forms
             MenuItem alwaysOnItem = menu.Items[itemCount - 1] as MenuItem;
 
             profileSettingsVM.UpdateGyroMouseStickTrig(menu, e.OriginalSource == alwaysOnItem);
+        }
+
+        private void Switch2OpenGyroSettings_Click(object sender, RoutedEventArgs e)
+        {
+            // Reuse the canonical editor, including its trigger combinations.
+            profileSettingsVM.PopulateGyroMouseTrig(gyroMouseTrigBtn.ContextMenu);
+            profileSettingsVM.PopulateGyroMouseStickTrig(gyroMouseStickTrigBtn.ContextMenu);
+            if (Window.GetWindow(this)?.DataContext is MainWindowsViewModel shell)
+                shell.ProfileEditorNavigationIndex = 7;
+            else
+                gyroSettingsTab.IsSelected = true;
+        }
+
+        private void Switch2OpenAimSetup_Click(object sender, RoutedEventArgs e)
+        {
+            switch2MotionCard.IsExpanded = true;
+            switch2MotionCard.BringIntoView();
+        }
+
+        private void Switch2EditSecondAction_Click(object sender, RoutedEventArgs e)
+        {
+            if (Switch2SecondActionControlCombo.SelectedItem is not MappedControl control ||
+                !control.IsAvailableOnPhysicalController)
+                return;
+            var window = new BindingWindow(deviceNum, control.Setting)
+            {
+                Owner = Window.GetWindow(this),
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            };
+            window.SelectSecondAction();
+            window.ShowDialog();
+            control.UpdateMappingName();
+            UpdateHighlightLabel(control);
+            Global.CacheProfileCustomsFlags(profileSettingsVM.Device);
+        }
+
+        private void Switch2OpenButtonMapping_Click(object sender, RoutedEventArgs e)
+        {
+            if (Window.GetWindow(this)?.DataContext is MainWindowsViewModel shell)
+                shell.ProfileEditorNavigationIndex = 1;
+            else
+                SelectWorkspaceSection(0);
         }
 
         private void GyroMouseTrigBtn_Click(object sender, RoutedEventArgs e)

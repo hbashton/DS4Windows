@@ -2749,7 +2749,11 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public bool GyroMouseTurns
         {
             get => Global.GyroTriggerTurns[device];
-            set => Global.GyroTriggerTurns[device] = value;
+            set
+            {
+                Global.GyroTriggerTurns[device] = value;
+                Switch2AimSetup?.Refresh();
+            }
         }
 
         public int GyroSensitivity
@@ -3032,6 +3036,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             set
             {
                 Global.SetGyroMouseToggle(device, value, App.rootHub);
+                Switch2AimSetup?.Refresh();
             }
         }
 
@@ -3047,6 +3052,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             set
             {
                 Global.GyroMouseStickTriggerTurns[device] = value;
+                Switch2AimSetup?.Refresh();
             }
         }
 
@@ -3056,6 +3062,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             set
             {
                 Global.SetGyroMouseStickToggle(device, value, App.rootHub);
+                Switch2AimSetup?.Refresh();
             }
         }
 
@@ -4315,6 +4322,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     Switch2IrMouseProjection.MaximumProfileSensitivity) :
                 Switch2IrMouseProjection.DefaultSensitivity;
 
+        public Switch2AimSetupViewModel Switch2AimSetup { get; }
+
         public ProfileSettingsViewModel(int device,
             InputDeviceType? physicalControllerType = null,
             ConnectionType? physicalControllerConnection = null,
@@ -4322,6 +4331,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             int? physicalControllerProductId = null)
         {
             this.device = device;
+            Switch2AimSetup = new(this, device);
             Switch2DualGyroEditor = new(device, switch2ModeShiftButtonChoices);
             Switch2GyroTriggerEditor = new(
                 device, gyroTriggerItems, switch2IrGyroButtonChoices);
@@ -4915,6 +4925,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public void UpdateLateProperties()
         {
+            Switch2AimSetup.Refresh();
             // Reload and preset application retain this VM while DataContext
             // is detached. Refresh cached choices from the newly loaded fields
             // without replaying checkbox setters into the profile.

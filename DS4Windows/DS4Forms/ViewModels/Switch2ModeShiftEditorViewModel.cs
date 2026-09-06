@@ -21,7 +21,7 @@ public sealed class Switch2ModeShiftEditorViewModel :
             Switch2JoyConProfileButton Button, string Label)>();
         MappingScopeChoices = new[]
         {
-            "Gyro Mouse", "Gyro Mouse Joystick", "Motion steering",
+            "Standard / mouse aiming", "Stick aiming", "Motion steering",
         };
         RefreshButtonChoices();
     }

@@ -84,29 +84,33 @@ public sealed class Switch2ProfileSectionLayoutTests
     }
 
     [TestMethod]
-    public void PageHasFiveThemedCardsWithOnlyFeedbackInitiallyExpanded()
+    public void PageHasIllustratedTaskCardsWithMouseAndAimingInitiallyExpanded()
     {
         var editor = Load("ProfileEditor.xaml");
         var panel = editor.Descendants(Wpf + "StackPanel").Single(node =>
             (string)node.Attribute(Xaml + "Name") == "switch2SettingsPanel");
         var borders = panel.Elements(Wpf + "Border").ToArray();
-        Assert.AreEqual(5, borders.Length);
+        Assert.AreEqual(8, borders.Length);
         Assert.IsTrue(borders.All(node => (string)node.Attribute("Style") ==
             "{StaticResource Switch2SettingsCardStyle}"));
-        var cards = borders.Select(node => node.Element(Wpf + "Expander")!).ToArray();
+        var cards = borders.Select(node => node.Descendants(Wpf + "Expander").First()).ToArray();
         CollectionAssert.AreEqual(new[]
         {
-            "switch2ConnectionCard", "switch2FeedbackCard", "switch2MotionCard",
-            "switch2JoyConCard", "switch2CalibrationCard",
+            "switch2JoyConCard", "switch2MotionCard", "switch2PairCard",
+            "switch2FeedbackCard", "switch2ButtonLayerCard", "switch2StickCard",
+            "switch2ConnectionCard", "switch2CalibrationCard",
         }, cards.Select(node => (string)node.Attribute(Xaml + "Name")).ToArray());
-        CollectionAssert.AreEqual(new[] { "False", "True", "False", "False", "False" },
-            cards.Select(node => (string)node.Attribute("IsExpanded")).ToArray());
+        CollectionAssert.AreEqual(new[] { true, true, false, false, false, false, false, false },
+            cards.Select(node => bool.Parse((string)node.Attribute("IsExpanded"))).ToArray());
         foreach (var card in cards)
         {
             Assert.IsFalse(string.IsNullOrWhiteSpace(
                 (string)card.Attribute("AutomationProperties.Name")));
             var heading = card.Element(Wpf + "Expander.Header")!;
             Assert.AreEqual(2, heading.Descendants(Wpf + "TextBlock").Count());
+            var picture = card.Ancestors(Wpf + "Border").First().Descendants(Wpf + "Image").Single();
+            StringAssert.Contains((string)picture
+                .Attribute("Source"), "Switch2FeatureArtwork.");
             Assert.IsTrue(heading.Descendants(Wpf + "TextBlock").All(node =>
                 (string)node.Attribute("TextWrapping") == "Wrap"));
         }
@@ -118,7 +122,9 @@ public sealed class Switch2ProfileSectionLayoutTests
     [DataRow("Switch2RumbleDelayMilliseconds", "switch2FeedbackCard")]
     [DataRow("Switch2HighRateMousePresentation", "switch2MotionCard")]
     [DataRow("Switch2VirtualGyroSoftDeadzone", "switch2MotionCard")]
-    [DataRow("Switch2DualGyroEditor.Enabled", "switch2JoyConCard")]
+    [DataRow("Switch2AimSetup.OutputIndex", "switch2MotionCard")]
+    [DataRow("Switch2AimSetup.ActivationIndex", "switch2MotionCard")]
+    [DataRow("Switch2ModeShiftEditor.AutoApplyGyroMouse", "switch2ButtonLayerCard")]
     [DataRow("Switch2JoyConIrMouseEnabled", "switch2JoyConCard")]
     [DataRow("Switch2FaceButtonLayoutIndex", "switch2ConnectionCard")]
     [DataRow("Switch2AutoDisconnectModeIndex", "switch2ConnectionCard")]
@@ -130,6 +136,23 @@ public sealed class Switch2ProfileSectionLayoutTests
             .Single(attribute => attribute.Value == "{Binding " + property + "}");
         Assert.IsTrue(binding.Parent!.Ancestors(Wpf + "Expander").Any(node =>
             (string)node.Attribute(Xaml + "Name") == cardName), property);
+    }
+
+    [TestMethod]
+    public void AimingOutputIsNotAnAlternateSettingsCheckbox()
+    {
+        var tab = Load("ProfileEditor.xaml").Descendants(Wpf + "TabItem")
+            .Single(node => (string)node.Attribute(Xaml + "Name") == "switch2ControlsTab");
+        var output = tab.Descendants(Wpf + "ComboBox").Single(node =>
+            (string)node.Attribute("SelectedIndex") == "{Binding Switch2AimSetup.OutputIndex}");
+        Assert.AreEqual(5, output.Elements(Wpf + "ComboBoxItem").Count());
+        var alternate = tab.Descendants(Wpf + "CheckBox").Single(node =>
+            (string)node.Attribute("IsChecked") == "{Binding Switch2ModeShiftEditor.AutoApplyGyroMouse}");
+        Assert.AreEqual("Mouse aiming is active", (string)alternate.Attribute("Content"));
+        Assert.IsFalse(output.Ancestors(Wpf + "Expander").Any(node =>
+            (string)node.Attribute(Xaml + "Name") == "switch2ButtonLayerCard"));
+        Assert.AreEqual(1, tab.Descendants(Wpf + "Button").Count(node =>
+            (string)node.Attribute("Click") == "Switch2OpenGyroSettings_Click"));
     }
 
     [TestMethod]
@@ -174,7 +197,7 @@ public sealed class Switch2ProfileSectionLayoutTests
     }
 
     [TestMethod]
-    public void JoyConCardHasHardwareGuardAndGenericStickSettingsStayInMotion()
+    public void JoyConCardHasHardwareGuardAndStickSettingsHaveTheirOwnHome()
     {
         var editor = Load("ProfileEditor.xaml");
         var joyCon = editor.Descendants(Wpf + "Expander").Single(node =>
@@ -184,10 +207,28 @@ public sealed class Switch2ProfileSectionLayoutTests
         {
             var binding = editor.Descendants().Attributes().Single(a => a.Value == "{Binding " + property + "}");
             Assert.IsTrue(binding.Parent!.Ancestors(Wpf + "Expander").Any(e =>
-                (string)e.Attribute(Xaml + "Name") == "switch2MotionCard"));
+                (string)e.Attribute(Xaml + "Name") == "switch2StickCard"));
         }
-        Assert.IsTrue(editor.Descendants(Wpf + "Image").Any(node =>
-            (string)node.Attribute("Source") == "{x:Static local:JoyConArtwork.Pair}"));
+        var pair = editor.Descendants(Wpf + "Expander").Single(node =>
+            (string)node.Attribute(Xaml + "Name") == "switch2PairCard");
+        StringAssert.Contains((string)pair.Ancestors(Wpf + "Border").First().Attribute("Visibility"), "ShowSwitch2JoyConControls");
+    }
+
+    [TestMethod]
+    public void DjgToggleIsVisibleOutsideCollapsedDetailsAndSecondActionsHaveShortcuts()
+    {
+        var tab = Load("ProfileEditor.xaml").Descendants(Wpf + "TabItem")
+            .Single(node => (string)node.Attribute(Xaml + "Name") == "switch2ControlsTab");
+        var toggle = tab.Descendants(Wpf + "CheckBox").Single(node =>
+            (string)node.Attribute("IsChecked") == "{Binding Switch2DualGyroEditor.Enabled}");
+        Assert.AreEqual("Aim with both Joy-Cons (DJG)", (string)toggle.Attribute("Content"));
+        Assert.IsFalse(toggle.Ancestors(Wpf + "Expander").Any());
+        Assert.IsTrue(toggle.Ancestors(Wpf + "Border").First().Descendants(Wpf + "Expander")
+            .Any(node => (string)node.Attribute(Xaml + "Name") == "switch2PairCard"));
+        var layer = tab.Descendants(Wpf + "Expander").Single(node =>
+            (string)node.Attribute(Xaml + "Name") == "switch2ButtonLayerCard");
+        CollectionAssert.AreEquivalent(new[] { "Switch2EditSecondAction_Click", "Switch2OpenButtonMapping_Click" },
+            layer.Descendants(Wpf + "Button").Select(node => (string)node.Attribute("Click")).ToArray());
     }
 
     private static XDocument Load(params string[] relative)

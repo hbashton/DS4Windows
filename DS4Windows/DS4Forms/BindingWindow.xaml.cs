@@ -118,6 +118,17 @@ namespace DS4WinWPF.DS4Forms
             ChangeForCurrentAction();
         }
 
+        internal void SelectSecondAction()
+        {
+            // Only edit the dialog's working binding. Merely opening this
+            // shortcut must not change the profile or replace an existing
+            // non-Mode-Shift trigger.
+            bindingVM.PrepareSecondAction();
+            regBindRadio.IsChecked = false;
+            shiftBindRadio.IsChecked = true;
+            ChangeForCurrentAction();
+        }
+
         private void OutConBtn_MouseEnter(object sender, MouseEventArgs e)
         {
             Button button = sender as Button;

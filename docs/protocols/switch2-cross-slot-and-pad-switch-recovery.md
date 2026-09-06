@@ -251,3 +251,58 @@ Private dump analysis stays in the Desktop evidence directory; the dump,
 device identifiers, profiles and credentials are not committed or uploaded.
 Hardware reconnect, power-off, joined readiness and automatic standalone
 Joy-Con activation remain separate acceptance items, not implied by these tests.
+
+### b79 Windows virtual-pad acceptance
+
+The personal portable b79 mapper and broker were built from `85aa60e` and
+`f39b732`, respectively. An opt-in neutral-only local harness used the actual
+published mapper's request factory, authenticated VIIPER client, input ACK
+reader and exact retirement capabilities. It did not open physical HID/GATT,
+issue vibration or non-neutral input, alter pairing, or detach bare ports.
+
+Windows.Gaming.Input exposed two distinct lab gamepads concurrently. Both
+acknowledged 50 neutral input updates. Removing the second left the first
+visible and able to acknowledge another 50 updates. Three further one-at-a-time
+successors also appeared, accepted neutral inputs and disappeared. Each of the
+five instances had a distinct primary GIP ID and serial. The Windows Config
+Manager API observed each exact USB instance started with problem zero, then
+absent using CM_LOCATE_DEVNODE_NORMAL after exact removal; this did not rely
+only on the broker's removal response or an empty USB/IP port.
+
+The five removal-plus-observation samples were 120.8–124.9 ms, using 100 ms
+polling. Exact activation acknowledgements were 2,090–2,144 ms; WGI visibility
+arrived later. These are isolated lifecycle samples, not controller input
+latency, a full profile-switch distribution, or a guarantee of future removal.
+The first harness launch failed to resolve its assembly before any controller
+creation; the corrected launch used the published mapper's dependency manifest.
+The completed Windows run passed. Physical Switch 2 reconnection, its power-off
+handling and the standalone/joined transition remain open.
+
+Protocol reference: Microsoft's [Device Hello Enumeration](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-gipusb/09351525-aa34-4a00-ac36-510fcf2fb106)
+identifies DeviceID as unique-instance information, not merely a model number.
+The read-only presence check follows [CM_Locate_DevNodeW](https://learn.microsoft.com/en-us/windows/win32/api/cfgmgr32/nf-cfgmgr32-cm_locate_devnodew);
+it never uses CANCELREMOVE or treats an arbitrary lookup error as absence.
+
+### Residual USB/IP reconnect timers
+
+After those successful removals, the broker log recorded retries of the five
+retired test aliases. The pinned usbip-win2 0.9.7.7 source explains why: its
+PLUGIN_HARDWARE_ONCE option suppresses retries when the initial attach fails;
+it does not suppress the separate delayed reconnect started by device detach
+after a transport disconnect (`device.cpp`, `persistent.cpp`). The retired
+aliases were rejected and could not select successors, but the retry workers
+are unnecessary background work and log noise.
+
+The five test-owned addresses were cleaned with the driver's supported
+per-location `attach --stop` command, specifying localhost, the exact USB/IP
+service and each captured retired alias. All commands succeeded. No bare port
+detach, stop-all operation, stashed configuration, pairing record or driver was
+changed. Production automatic cleanup of these delayed retry workers is still
+open: an early zero-cancellation result is not proof that asynchronous native
+teardown cannot enqueue a later retry. This limitation must not be hidden by
+claiming that ONCE disables all reconnection or by weakening ownership checks.
+
+The b79 mapper was then running portably with Bluetooth discovery active. A
+fresh independent brief advertisement scan still received ambient BLE packets
+with zero callback errors and no Nintendo candidates. Physical reconnection
+cannot be certified while the controllers are not observed advertising.

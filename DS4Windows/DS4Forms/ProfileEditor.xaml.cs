@@ -555,8 +555,7 @@ namespace DS4WinWPF.DS4Forms
             foreach (var target in JoyConArtwork.Targets(view, Global.Switch2FaceButtonLayout[deviceNum]))
             {
                 Rect bounds = target.Bounds;
-                Target(target.Control, bounds, RoundedHighlight(bounds.X, bounds.Y,
-                    bounds.Width, bounds.Height, bounds.Height / 2));
+                Target(target.Control, bounds, target.Highlight);
             }
             void Stick(bool physicalLeft, bool logicalLeft)
             {

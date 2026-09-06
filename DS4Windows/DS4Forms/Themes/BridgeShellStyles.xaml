@@ -481,9 +481,11 @@
                                                                 <ColumnDefinition Width="*" />
                                                                 <ColumnDefinition Width="Auto" />
                                                             </Grid.ColumnDefinitions>
-                                                            <Image Source="{Binding ControllerImageSource}" Width="42" Height="32"
-                                                                   Stretch="Uniform" VerticalAlignment="Center"
-                                                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                                                            <Border Width="44" Height="36" Padding="2" VerticalAlignment="Center">
+                                                                <Image Source="{Binding ControllerImageSource}" Stretch="Uniform"
+                                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                                       RenderOptions.BitmapScalingMode="HighQuality" />
+                                                            </Border>
                                                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="3,0,6,0">
                                                                 <TextBlock Text="{Binding ControllerDisplayName}" TextTrimming="CharacterEllipsis"
                                                                            FontSize="11" FontWeight="SemiBold"
@@ -590,10 +592,11 @@
                                                 <ColumnDefinition Width="48" />
                                                 <ColumnDefinition Width="*" />
                                             </Grid.ColumnDefinitions>
-                                            <Image Source="{Binding EditingControllerImageSource}"
-                                                   Width="42" Height="34" Margin="0,0,6,0"
-                                                   Stretch="Uniform" VerticalAlignment="Center"
-                                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                                            <Border Width="42" Height="38" Margin="0,0,6,0" Padding="2" VerticalAlignment="Center">
+                                                <Image Source="{Binding EditingControllerImageSource}" Stretch="Uniform"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                       RenderOptions.BitmapScalingMode="HighQuality" />
+                                            </Border>
                                             <StackPanel Grid.Column="1">
                                                 <TextBlock Text="EDITING PROFILE" FontSize="9" FontWeight="Bold"
                                                            Foreground="{DynamicResource AccentColor}" />

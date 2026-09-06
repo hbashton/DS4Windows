@@ -158,3 +158,34 @@ settings changes are part of the fix.
   virtual DualSense output. The false USB input and its extra Xbox 360 output
   did not recur in this startup. Joined readiness and repeated output changes
   still require separate hardware acceptance.
+
+## b78 follow-up: Bluetooth discovery silence, not accepted as repaired
+
+After the b78 restart the user reported that the Pro and Joy-Con 2 player LEDs
+flashed while attempting to connect. The mapper logged discovery startup but
+no Switch 2 candidates, opens or admission failures. The coordinator, Windows
+adapter, WinRT platform and discovery-boundary code were unchanged from the
+earlier checkpoint where the controllers connected.
+
+A separate unfiltered Windows advertisement observer counted every Received
+event before Nintendo decoding. Two 45-second runs (extended advertisements
+enabled and disabled) received zero events, with Started status and no callback
+errors. A further 10-second observation with DS4Windows and VIIPER closed also
+received zero events. These observations locate the missing evidence before
+mapper candidate admission; they do not prove a particular driver or firmware
+caused the failure, and silence after controllers sleep is not a recovery test.
+
+An explicitly scoped restart of the RZ616 Bluetooth adapter remained pending
+for more than 15 minutes. A non-invasive native stack inspection found the
+PnPUtil main thread in DeviceIoControl beneath
+CM_Query_And_Remove_SubTreeW. The adapter still reported ProblemCode zero.
+An exact-thread CancelSynchronousIo attempt returned ERROR_NOT_FOUND; the
+restart process did not exit during the following bounded wait. Neither a
+successful restart nor a completed cancellation is claimed.
+
+No Windows bonds, controller association records, drivers or Program Files
+installations were removed or changed. Portable mapper/broker processes were
+stopped before the adapter operation. A normal, non-forced computer restart is
+the next recovery step under the user's earlier restart authorization. Actual
+post-restart advertisement reception and controller readiness remain open;
+this evidence must not be represented as a Bluetooth fix or hardware acceptance.
